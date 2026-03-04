@@ -164,7 +164,7 @@ export function BudgetPrintTemplate({
                         const categoryKey = resolveBudgetCategoryKey(expense.category)
                         const categoryLabel = t(`budget.cat.${categoryKey}`) || categoryKey
                         const composedCategoryLabel = expense.subcategory?.trim()
-                            ? `${categoryLabel} / ${expense.subcategory.trim()}`
+                            ? `${categoryLabel} / ${String(t(`budget.subcat.${expense.subcategory.trim()}`, { defaultValue: expense.subcategory.trim() }))}`
                             : categoryLabel
                         const status = resolveStatus(expense.status)
                         return (

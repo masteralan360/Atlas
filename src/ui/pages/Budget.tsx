@@ -65,6 +65,14 @@ import { DividendDistributionPanel } from '@/ui/components/budget/DividendDistri
 
 const normalizeExpenseField = (value?: string | null) => (value || '').trim().toLowerCase()
 
+const PRESET_SUBCATEGORIES: Record<string, string[]> = {
+    utility: ['Internet', 'Electricity', 'Water', 'Fuel', 'Gas', 'Phone', 'Maintenance'],
+    marketing: ['Ads', 'Sponsorship', 'Events', 'Print', 'Social Media', 'Consulting'],
+    payroll: ['Salary', 'Bonus', 'Commission', 'Allowance', 'Overtime'],
+    rent: ['Office', 'Warehouse', 'Equipment', 'Vehicle', 'Server'],
+    other: ['Office Supplies', 'Software', 'Hardware', 'Travel', 'Meals', 'Legal', 'Insurance', 'Taxes', 'Miscellaneous']
+}
+
 const isRecurringOccurrenceMatch = (
     recurringTemplate: any,
     expenseRecord: any,
@@ -128,6 +136,7 @@ export default function Budget() {
     const [allocType, setAllocType] = useState<'fixed' | 'percentage'>('fixed')
     const [allocCurrency, setAllocCurrency] = useState<CurrencyCode>(baseCurrency as any || 'usd')
     const [activeBudgetTab, setActiveBudgetTab] = useState<'expenses' | 'dividends'>('expenses')
+    const [selectedCategory, setSelectedCategory] = useState<string>('utility')
     const printRef = useRef<HTMLDivElement>(null)
     const dividendsPrintRef = useRef<HTMLDivElement>(null)
     const workspaceUsers = useWorkspaceUsers(workspaceId)
@@ -145,7 +154,7 @@ export default function Budget() {
     const [snoozedItems, setSnoozedItems] = useState<BudgetReminderItem[]>([])
     const [reminderIndex, setReminderIndex] = useState(0)
     const [reminderStep, setReminderStep] = useState<'idle' | 'reminder' | 'lock' | 'snooze'>('idle')
-    const [reminderScanned, setReminderScanned] = useState(false)
+
     const [isProcessing, setIsProcessing] = useState(false)
     const [dividendPaidMap, setDividendPaidMap] = useState<Map<string, boolean>>(new Map())
     const [dividendSnoozeMap, setDividendSnoozeMap] = useState<Map<string, { until: string | null; count: number }>>(new Map())
@@ -274,7 +283,7 @@ export default function Budget() {
             } else {
                 setReminderStep('idle')
             }
-            setReminderScanned(true)
+
         } catch (err) {
             console.error('[Budget] Reminder scan failed:', err)
         } finally {
@@ -283,16 +292,16 @@ export default function Budget() {
     }, [expenses, employees, workspaceId, monthStr, loadVirtualReminderMaps])
 
     useEffect(() => {
-        if (reminderScanned || !workspaceId) return
+        if (!workspaceId) return
         // Allow scan if there are expenses OR employees (for virtual salary reminders)
         if (expenses.length === 0 && employees.length === 0) return
 
         runScan()
-    }, [expenses, employees, workspaceId, monthStr, reminderScanned, runScan])
+    }, [expenses, employees, workspaceId, monthStr, runScan])
 
     // Reset scan when month changes
     useEffect(() => {
-        setReminderScanned(false)
+
         setReminderQueue([])
         setSnoozedItems([])
         setDividendSnoozeMap(new Map())
@@ -533,7 +542,7 @@ export default function Budget() {
             toast({ description: t('budget.unsnoozed', 'Reminder un-snoozed') })
 
             // Reactive Refresh: Reset scanned state to trigger the main useEffect.
-            setReminderScanned(false)
+
         } catch (error) {
             console.error('[Budget] Failed to un-snooze:', error)
             toast({ variant: 'destructive', description: t('common.error', 'Failed to un-snooze reminder') })
@@ -830,7 +839,7 @@ export default function Budget() {
             await setVirtualPaid('dividend', row.employeeId, monthStr, true)
             await setVirtualSnooze('dividend', row.employeeId, monthStr, '', 0)
             toast({ description: t('budget.dividend.paidPersisted', 'Dividend payment status saved') })
-            setReminderScanned(false)
+
         } catch (error) {
             console.error('[Budget] Failed to mark dividend paid:', error)
             toast({ variant: 'destructive', description: t('common.error', 'Failed to update status') })
@@ -845,7 +854,7 @@ export default function Budget() {
         try {
             await setVirtualPaid('dividend', row.employeeId, monthStr, false)
             toast({ description: t('budget.statusUpdated', 'Status updated') })
-            setReminderScanned(false)
+
         } catch (error) {
             console.error('[Budget] Failed to mark dividend unpaid:', error)
             toast({ variant: 'destructive', description: t('common.error', 'Failed to update status') })
@@ -860,7 +869,7 @@ export default function Budget() {
         try {
             await setVirtualSnooze('dividend', row.employeeId, monthStr, '', 0)
             toast({ description: t('budget.unsnoozed', 'Reminder un-snoozed') })
-            setReminderScanned(false)
+
         } catch (error) {
             console.error('[Budget] Failed to un-snooze dividend:', error)
             toast({ variant: 'destructive', description: t('common.error', 'Failed to un-snooze reminder') })
@@ -880,7 +889,7 @@ export default function Budget() {
 
         try {
             await setVirtualSnooze('dividend', dividendSnoozeItem.employeeId, monthStr, snoozeUntil, newCount)
-            setReminderScanned(false)
+
         } catch (error) {
             console.error('[Budget] Failed to snooze dividend:', error)
             toast({ variant: 'destructive', description: t('common.error', 'Failed to update') })
@@ -1351,7 +1360,7 @@ export default function Budget() {
                                         <div className="text-xs text-muted-foreground flex items-center gap-2 mt-0.5">
                                             <span>
                                                 {expense.subcategory?.trim()
-                                                    ? `${String(t(`budget.cat.${expense.category}`, { defaultValue: expense.category }))} / ${expense.subcategory.trim()}`
+                                                    ? `${String(t(`budget.cat.${expense.category}`, { defaultValue: expense.category }))} / ${String(t(`budget.subcat.${expense.subcategory.trim()}`, { defaultValue: expense.subcategory.trim() }))}`
                                                     : String(t(`budget.cat.${expense.category}`, { defaultValue: expense.category }))}
                                             </span>
                                             <span>/</span>
@@ -1643,7 +1652,7 @@ export default function Budget() {
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="category">{t('budget.form.category', 'Category')}</Label>
-                                    <Select name="category" defaultValue="utility">
+                                    <Select name="category" value={selectedCategory} onValueChange={setSelectedCategory}>
                                         <SelectTrigger>
                                             <SelectValue />
                                         </SelectTrigger>
@@ -1658,11 +1667,16 @@ export default function Budget() {
                                 </div>
                                 <div className="space-y-2 col-span-2">
                                     <Label htmlFor="subcategory">{t('budget.form.subcategory', 'Subcategory')}</Label>
-                                    <Input
-                                        id="subcategory"
-                                        name="subcategory"
-                                        placeholder={t('budget.form.subcategoryPlaceholder', 'e.g. Internet / Ads / Fuel')}
-                                    />
+                                    <Select name="subcategory" defaultValue={PRESET_SUBCATEGORIES[selectedCategory]?.[0] || ''} key={selectedCategory}>
+                                        <SelectTrigger id="subcategory">
+                                            <SelectValue placeholder={t('common.select', 'Select...')} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {PRESET_SUBCATEGORIES[selectedCategory]?.map((sub) => (
+                                                <SelectItem key={sub} value={sub}>{t(`budget.subcat.${sub}`, { defaultValue: sub })}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="type">{t('budget.form.type', 'Type')}</Label>
