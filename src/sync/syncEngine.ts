@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from '@/auth/supabase'
 import { db } from '@/local-db'
+import { runSupabaseAction } from '@/lib/supabaseRequest'
 // import { getPendingItems, removeFromQueue, incrementRetry } from './syncQueue'
 
 export type SyncState = 'idle' | 'syncing' | 'error' | 'offline'
@@ -38,26 +39,7 @@ function getTableName(entityType: string): string {
 
 // Timeout helper
 async function withTimeout<T>(promise: Promise<T>, ms: number = 15000): Promise<T> {
-    return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-            console.warn(`[Sync] Request timed out after ${ms}ms`)
-            reject(new Error('Request timed out'))
-        }, ms)
-
-        promise.then(
-            (value) => {
-                clearTimeout(timer)
-                resolve(value)
-            },
-            (err: any) => {
-                clearTimeout(timer)
-                reject(err)
-            }
-        ).catch((err: any) => {
-            clearTimeout(timer)
-            reject(err)
-        })
-    })
+    return runSupabaseAction('sync.request', () => promise, { timeoutMs: ms, platform: 'all' })
 }
 
 

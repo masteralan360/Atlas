@@ -4,6 +4,7 @@ import type { User, Session } from '@supabase/supabase-js'
 import type { UserRole } from '@/local-db/models'
 import { connectionManager } from '@/lib/connectionManager'
 import { clearWorkspaceCache } from '@/workspace/workspaceCache'
+import { runSupabaseAction } from '@/lib/supabaseRequest'
 
 interface AuthUser {
     id: string
@@ -192,12 +193,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const fetchInitialSession = async () => {
             try {
-                const sessionPromise = supabase.auth.getSession();
-                const timeoutPromise = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Session fetch timed out')), 8000)
-                );
-
-                const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]) as any;
+                const { data: { session } } = await runSupabaseAction(
+                    'auth.initialSession',
+                    () => supabase.auth.getSession(),
+                    { timeoutMs: 8000, platform: 'all' }
+                ) as any
 
                 if (session) {
                     setSession(session)
@@ -234,11 +234,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 // Second chance: try refreshSession directly (different code path)
                 try {
                     console.log('[Auth] Attempting refreshSession as fallback...')
-                    const refreshPromise = supabase.auth.refreshSession();
-                    const refreshTimeout = new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error('Refresh timed out')), 5000)
-                    );
-                    const { data, error } = await Promise.race([refreshPromise, refreshTimeout]) as any;
+                    const { data, error } = await runSupabaseAction(
+                        'auth.refreshFallback',
+                        () => supabase.auth.refreshSession(),
+                        { timeoutMs: 5000, platform: 'all' }
+                    ) as any
 
                     if (!error && data?.session) {
                         console.log('[Auth] refreshSession succeeded ✓')
@@ -361,15 +361,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         try {
-            const signInPromise = supabase.auth.signInWithPassword({
-                email,
-                password
-            })
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Connection timed out. Please check your network.')), 15000)
-            )
-
-            const { error } = await Promise.race([signInPromise, timeoutPromise]) as any
+            const { error } = await runSupabaseAction(
+                'auth.signIn',
+                () => supabase.auth.signInWithPassword({
+                    email,
+                    password
+                }),
+                { timeoutMs: 15000, platform: 'all' }
+            ) as any
             return { error: error as Error | null }
         } catch (err: any) {
             console.error('[Auth] Sign in failed/timeout:', err)

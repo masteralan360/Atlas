@@ -6,6 +6,7 @@ import { supabase } from '@/auth/supabase'
 import { Sale } from '@/types'
 import { mapSaleToUniversal } from '@/lib/mappings'
 import { formatCurrency, formatDateTime, formatCompactDateTime, formatDate, cn } from '@/lib/utils'
+import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
 import { db, useLoans, useSales, toUISale, type Loan } from '@/local-db'
 import { useWorkspace } from '@/workspace'
@@ -339,8 +340,10 @@ export function Sales() {
     const confirmDeleteSale = async () => {
         if (!saleToDelete) return
         try {
-            const { error } = await supabase.rpc('delete_sale', { p_sale_id: saleToDelete.id })
-            if (error) throw error
+            const { error } = await runSupabaseAction('sales.delete', () =>
+                supabase.rpc('delete_sale', { p_sale_id: saleToDelete.id })
+            )
+            if (error) throw normalizeSupabaseActionError(error)
 
             // Update local-db immediately for instant UI feedback
             await db.sales.delete(saleToDelete.id)
@@ -351,7 +354,21 @@ export function Sales() {
             setSaleToDelete(null)
         } catch (err: any) {
             console.error('Error deleting sale:', err)
-            alert('Failed to delete sale: ' + (err.message || 'Unknown error'))
+            const normalized = normalizeSupabaseActionError(err)
+            if (isRetriableWebRequestError(normalized)) {
+                const message = getRetriableActionToast(normalized)
+                toast({
+                    title: message.title,
+                    description: message.description,
+                    variant: 'destructive'
+                })
+            } else {
+                toast({
+                    title: t('common.error') || 'Error',
+                    description: `Failed to delete sale: ${normalized.message || 'Unknown error'}`,
+                    variant: 'destructive'
+                })
+            }
         }
     }
 
@@ -460,11 +477,13 @@ export function Sales() {
                     quantity && itemsToReturn.length === 1 ? quantity : (i.quantity - (i.returned_quantity || 0))
                 )
 
-                const { data, error: itemError } = await supabase.rpc('return_sale_items', {
-                    p_sale_item_ids: itemIds,
-                    p_return_quantities: quantities,
-                    p_return_reason: reason
-                })
+                const { data, error: itemError } = await runSupabaseAction('sales.returnItems', () =>
+                    supabase.rpc('return_sale_items', {
+                        p_sale_item_ids: itemIds,
+                        p_return_quantities: quantities,
+                        p_return_reason: reason
+                    })
+                )
                 error = itemError
 
                 if (!error && data?.success) {
@@ -510,10 +529,12 @@ export function Sales() {
                 }
             } else {
                 // Whole Sale Return
-                const { data, error: saleError } = await supabase.rpc('return_whole_sale', {
-                    p_sale_id: saleToReturn.id,
-                    p_return_reason: reason
-                })
+                const { data, error: saleError } = await runSupabaseAction('sales.returnWhole', () =>
+                    supabase.rpc('return_whole_sale', {
+                        p_sale_id: saleToReturn.id,
+                        p_return_reason: reason
+                    })
+                )
                 error = saleError
 
                 if (!error && data?.success) {
@@ -558,14 +579,28 @@ export function Sales() {
                 }
             }
 
-            if (error) throw error
+            if (error) throw normalizeSupabaseActionError(error)
 
             // Close modal and refresh — local-db handles reactivity via useLiveQuery
             setReturnModalOpen(false)
             setSaleToReturn(null)
         } catch (err: any) {
             console.error('Error returning sale:', err)
-            alert('Failed to return sale: ' + (err.message || 'Unknown error'))
+            const normalized = normalizeSupabaseActionError(err)
+            if (isRetriableWebRequestError(normalized)) {
+                const message = getRetriableActionToast(normalized)
+                toast({
+                    title: message.title,
+                    description: message.description,
+                    variant: 'destructive'
+                })
+            } else {
+                toast({
+                    title: t('common.error') || 'Error',
+                    description: `Failed to return sale: ${normalized.message || 'Unknown error'}`,
+                    variant: 'destructive'
+                })
+            }
         }
     }
 
@@ -574,6 +609,7 @@ export function Sales() {
 
         const now = new Date().toISOString()
         const isCurrentlyOnline = navigator.onLine
+        const existingLocal = await db.sales.get(selectedSaleForNote.id)
 
         try {
             // Update local-db for instant UI reactivity (useLiveQuery will pick it up)
@@ -585,18 +621,22 @@ export function Sales() {
 
             if (isCurrentlyOnline) {
                 // 2. ONLINE: Write to Supabase first
-                const { error } = await supabase
-                    .from('sales')
-                    .update({
-                        notes: note,
-                        updated_at: now
-                    })
-                    .eq('id', selectedSaleForNote.id)
+                const { error } = await runSupabaseAction('sales.saveNote', () =>
+                    supabase
+                        .from('sales')
+                        .update({
+                            notes: note,
+                            updated_at: now
+                        })
+                        .eq('id', selectedSaleForNote.id)
+                )
 
                 if (error) {
-                    console.error('Supabase update failed, falling back to offline sync:', error)
-                    // Fallback to offline mutation if online request fails
-                    await db.offline_mutations.add({
+                    const normalized = normalizeSupabaseActionError(error)
+
+                    if (!navigator.onLine) {
+                        console.error('Supabase update failed, falling back to offline sync:', normalized)
+                        await db.offline_mutations.add({
                         id: crypto.randomUUID(),
                         workspaceId: activeWorkspace?.id || selectedSaleForNote.workspace_id,
                         entityType: 'sales',
@@ -607,16 +647,22 @@ export function Sales() {
                         createdAt: now
                     })
 
-                    await db.sales.update(selectedSaleForNote.id, {
-                        notes: note,
-                        updatedAt: now,
-                        syncStatus: 'pending'
-                    })
+                        await db.sales.update(selectedSaleForNote.id, {
+                            notes: note,
+                            updatedAt: now,
+                            syncStatus: 'pending'
+                        })
 
-                    toast({
-                        title: t('sales.notes.saved') || 'Note Saved',
-                        description: t('sales.notes.savedOffline') || 'Note saved locally and will sync when online.',
-                    })
+                        toast({
+                            title: t('sales.notes.saved') || 'Note Saved',
+                            description: t('sales.notes.savedOffline') || 'Note saved locally and will sync when online.',
+                        })
+                    } else {
+                        if (existingLocal) {
+                            await db.sales.put(existingLocal)
+                        }
+                        throw normalized
+                    }
                 } else {
                     // Success: Update Dexie as synced
                     await db.sales.update(selectedSaleForNote.id, {
@@ -657,9 +703,14 @@ export function Sales() {
             }
         } catch (error) {
             console.error('Error saving note:', error)
+            const normalized = normalizeSupabaseActionError(error)
             toast({
-                title: t('common.error') || 'Error',
-                description: t('sales.notes.error') || 'Failed to save note.',
+                title: isRetriableWebRequestError(normalized)
+                    ? getRetriableActionToast(normalized).title
+                    : (t('common.error') || 'Error'),
+                description: isRetriableWebRequestError(normalized)
+                    ? getRetriableActionToast(normalized).description
+                    : (t('sales.notes.error') || 'Failed to save note.'),
                 variant: 'destructive',
             })
         }

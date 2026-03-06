@@ -5,6 +5,7 @@ import { supabase } from '@/auth/supabase'
 import { Button, Input, Label, Card, CardContent, CardHeader, CardTitle, CardDescription, LanguageSwitcher, ThemeToggle } from '@/ui/components'
 import { Boxes, Key, Loader2, LogOut } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
 export function WorkspaceRegistration() {
     const [, setLocation] = useLocation()
@@ -20,15 +21,18 @@ export function WorkspaceRegistration() {
         setIsLoading(true)
 
         try {
-            const { data, error: rpcError } = await supabase.rpc('join_workspace', {
-                workspace_code_input: workspaceCode.toUpperCase()
-            })
+            const { data, error: rpcError } = await runSupabaseAction('workspace.join', () =>
+                supabase.rpc('join_workspace', {
+                    workspace_code_input: workspaceCode.toUpperCase()
+                })
+            )
 
             if (rpcError) {
-                if (rpcError.message.includes('Invalid workspace code')) {
+                const normalizedRpcError = normalizeSupabaseActionError(rpcError)
+                if (normalizedRpcError.message.includes('Invalid workspace code')) {
                     setError(t('workspaceRegistration.invalidCode'))
                 } else {
-                    setError(rpcError.message)
+                    setError(normalizedRpcError.message)
                 }
                 return
             }
@@ -50,7 +54,12 @@ export function WorkspaceRegistration() {
                 setLocation('/')
             }, 100)
         } catch (err: any) {
-            setError(err.message || t('common.error'))
+            const normalized = normalizeSupabaseActionError(err)
+            if (isRetriableWebRequestError(normalized)) {
+                setError(getRetriableActionToast(normalized).description)
+            } else {
+                setError(normalized.message || t('common.error'))
+            }
         } finally {
             setIsLoading(false)
         }

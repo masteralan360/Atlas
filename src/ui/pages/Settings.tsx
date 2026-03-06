@@ -21,6 +21,7 @@ import { r2Service } from '@/services/r2Service'
 import { Image as ImageIcon } from 'lucide-react'
 import { assetManager } from '@/lib/assetManager'
 import { useWorkspaceContacts } from '@/local-db/hooks'
+import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
 export function Settings() {
     const { user, signOut, isSupabaseConfigured, updateUser } = useAuth()
@@ -71,6 +72,25 @@ export function Settings() {
     const workspaceContacts = useWorkspaceContacts(user?.workspaceId)
 
     const [version, setVersion] = useState('')
+
+    const showActionError = (error: unknown, fallbackDescription: string) => {
+        const normalized = normalizeSupabaseActionError(error)
+        if (isRetriableWebRequestError(normalized)) {
+            const message = getRetriableActionToast(normalized)
+            toast({
+                title: message.title,
+                description: message.description,
+                variant: 'destructive'
+            })
+            return
+        }
+
+        toast({
+            title: t('common.error') || 'Error',
+            description: fallbackDescription || normalized.message,
+            variant: 'destructive'
+        })
+    }
 
     useEffect(() => {
         // @ts-ignore
@@ -467,23 +487,27 @@ export function Settings() {
             // 4. Update Supabase profile
             if (isSupabaseConfigured) {
                 // Update the profiles table
-                const { error: profileError } = await supabase
-                    .from('profiles')
-                    .update({ profile_url: resizedPath })
-                    .eq('id', user.id)
+                const { error: profileError } = await runSupabaseAction('settings.updateProfileImage', () =>
+                    supabase
+                        .from('profiles')
+                        .update({ profile_url: resizedPath })
+                        .eq('id', user.id)
+                )
 
                 if (profileError) {
                     console.error('[Settings] Error updating Supabase profile:', profileError)
-                    alert('Error updating cloud profile: ' + profileError.message)
+                    throw normalizeSupabaseActionError(profileError)
                 }
 
                 // Update Auth metadata so it persists across refreshes
-                const { error: authError } = await supabase.auth.updateUser({
-                    data: { profile_url: resizedPath }
-                })
+                const { error: authError } = await runSupabaseAction('settings.updateProfileMetadata', () =>
+                    supabase.auth.updateUser({
+                        data: { profile_url: resizedPath }
+                    })
+                )
 
                 if (authError) {
-                    console.error('[Settings] Error updating Auth metadata:', authError)
+                    throw normalizeSupabaseActionError(authError)
                 }
             }
 
@@ -496,7 +520,7 @@ export function Settings() {
             console.log('[Settings] Profile picture updated successfully:', resizedPath)
         } catch (error) {
             console.error('[Settings] Profile picture upload failed:', error)
-            alert('Upload failed: ' + error)
+            showActionError(error, 'Upload failed.')
         }
     }
 
@@ -509,8 +533,15 @@ export function Settings() {
 
             // Update cloud profile (Supabase)
             if (isSupabaseConfigured) {
-                await supabase.from('profiles').update({ profile_url: null }).eq('id', user.id);
-                await supabase.auth.updateUser({ data: { profile_url: null } });
+                const { error: profileError } = await runSupabaseAction('settings.removeProfileImage', () =>
+                    supabase.from('profiles').update({ profile_url: null }).eq('id', user.id)
+                )
+                if (profileError) throw normalizeSupabaseActionError(profileError)
+
+                const { error: authError } = await runSupabaseAction('settings.removeProfileMetadata', () =>
+                    supabase.auth.updateUser({ data: { profile_url: null } })
+                )
+                if (authError) throw normalizeSupabaseActionError(authError)
             }
 
             // Update local state
@@ -520,6 +551,7 @@ export function Settings() {
             console.log('[Settings] Profile picture removed and cleaned up');
         } catch (error) {
             console.error('[Settings] Profile picture removal failed:', error);
+            showActionError(error, 'Profile picture removal failed.')
         }
     }
 
@@ -1080,35 +1112,53 @@ export function Settings() {
                             contacts={workspaceContacts.map(p => ({ type: p.type, value: p.value, label: p.label || '', isPrimary: p.isPrimary }))}
                             onContactsChange={async (newContacts) => {
                                 if (!user?.workspaceId) return
-                                await supabase.from('workspace_contacts').delete().eq('workspace_id', user.workspaceId)
-                                if (newContacts.length > 0) {
-                                    const payload = newContacts.map(p => ({
-                                        workspace_id: user.workspaceId,
-                                        type: p.type,
-                                        value: p.value,
-                                        label: p.label || null,
-                                        is_primary: p.isPrimary
-                                    }))
-                                    await supabase.from('workspace_contacts').insert(payload)
-                                }
-                                // Re-fetch from Supabase and write to local DB for instant UI update
-                                const { data } = await supabase.from('workspace_contacts').select('*').eq('workspace_id', user.workspaceId)
-                                await db.workspace_contacts.where('workspaceId').equals(user.workspaceId).delete()
-                                if (data && data.length > 0) {
-                                    const localRecords = data.map((r: any) => ({
-                                        id: r.id,
-                                        workspaceId: r.workspace_id,
-                                        type: r.type,
-                                        value: r.value,
-                                        label: r.label,
-                                        isPrimary: r.is_primary,
-                                        syncStatus: 'synced' as const,
-                                        lastSyncedAt: new Date().toISOString(),
-                                        version: r.version || 1,
-                                        createdAt: r.created_at,
-                                        updatedAt: r.updated_at
-                                    }))
-                                    await db.workspace_contacts.bulkPut(localRecords)
+                                try {
+                                    const { error: deleteError } = await runSupabaseAction('settings.replaceWorkspaceContacts.delete', () =>
+                                        supabase.from('workspace_contacts').delete().eq('workspace_id', user.workspaceId)
+                                    )
+                                    if (deleteError) throw normalizeSupabaseActionError(deleteError)
+
+                                    if (newContacts.length > 0) {
+                                        const payload = newContacts.map(p => ({
+                                            workspace_id: user.workspaceId,
+                                            type: p.type,
+                                            value: p.value,
+                                            label: p.label || null,
+                                            is_primary: p.isPrimary
+                                        }))
+                                        const { error: insertError } = await runSupabaseAction('settings.replaceWorkspaceContacts.insert', () =>
+                                            supabase.from('workspace_contacts').insert(payload)
+                                        )
+                                        if (insertError) throw normalizeSupabaseActionError(insertError)
+                                    }
+
+                                    // Re-fetch from Supabase and write to local DB for instant UI update
+                                    const { data, error: fetchError } = await runSupabaseAction('settings.replaceWorkspaceContacts.fetch', () =>
+                                        supabase.from('workspace_contacts').select('*').eq('workspace_id', user.workspaceId)
+                                    )
+                                    if (fetchError) throw normalizeSupabaseActionError(fetchError)
+
+                                    await db.workspace_contacts.where('workspaceId').equals(user.workspaceId).delete()
+                                    if (data && data.length > 0) {
+                                        const localRecords = data.map((r: any) => ({
+                                            id: r.id,
+                                            workspaceId: r.workspace_id,
+                                            type: r.type,
+                                            value: r.value,
+                                            label: r.label,
+                                            isPrimary: r.is_primary,
+                                            syncStatus: 'synced' as const,
+                                            lastSyncedAt: new Date().toISOString(),
+                                            version: r.version || 1,
+                                            createdAt: r.created_at,
+                                            updatedAt: r.updated_at
+                                        }))
+                                        await db.workspace_contacts.bulkPut(localRecords)
+                                    }
+                                } catch (error) {
+                                    console.error('[Settings] Failed to update workspace contacts:', error)
+                                    showActionError(error, 'Failed to update workspace contacts.')
+                                    throw error
                                 }
                             }}
                         />

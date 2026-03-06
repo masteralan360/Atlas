@@ -32,10 +32,28 @@ import { convertToStoreBase } from '@/lib/currency'
 import { supabase } from '@/auth/supabase'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { isOnline } from '@/lib/network'
+import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
 // ===================
 // CATEGORIES HOOKS
 // ===================
+
+async function runMutation<T>(label: string, promiseFactory: () => Promise<T>): Promise<T> {
+    return runSupabaseAction(label, promiseFactory)
+}
+
+async function getMutationSession(label: string) {
+    const { data: { session } } = await runSupabaseAction(`${label}.session`, () => supabase.auth.getSession())
+    return session
+}
+
+function shouldUseOfflineMutationFallback(error: unknown): boolean {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        return true
+    }
+
+    return !isOnline()
+}
 
 // ===================
 // CATEGORIES HOOKS
@@ -105,7 +123,7 @@ export async function createCategory(workspaceId: string, data: Omit<Category, '
     }
 
     if (isOnline()) {
-        const { data: { session } } = await supabase.auth.getSession()
+        const session = await getMutationSession('categories.create')
         const currentUserId = session?.user?.id
 
         // ONLINE: Write directly to Supabase
@@ -115,11 +133,11 @@ export async function createCategory(workspaceId: string, data: Omit<Category, '
             syncStatus: undefined,
             lastSyncedAt: undefined
         })
-        const { error } = await supabase.from('categories').upsert(payload)
+        const { error } = await runMutation('categories.create', () => supabase.from('categories').upsert(payload))
 
         if (error) {
             console.error('Supabase write failed:', error)
-            throw error // Fail loudly if online
+            throw normalizeSupabaseActionError(error) // Fail loudly if online
         }
 
         // Update local cache as synced
@@ -150,9 +168,9 @@ export async function updateCategory(id: string, data: Partial<Category>): Promi
     if (isOnline()) {
         // ONLINE: Update Supabase directly
         const payload = toSnakeCase({ ...data, updatedAt: now })
-        const { error } = await supabase.from('categories').update(payload).eq('id', id)
+        const { error } = await runMutation('categories.update', () => supabase.from('categories').update(payload).eq('id', id))
 
-        if (error) throw error
+        if (error) throw normalizeSupabaseActionError(error)
 
         await db.categories.put(updated)
     } else {
@@ -177,8 +195,8 @@ export async function deleteCategory(id: string): Promise<void> {
 
     if (isOnline()) {
         // ONLINE: Delete in Supabase (Soft Delete)
-        const { error } = await supabase.from('categories').update({ is_deleted: true, updated_at: now }).eq('id', id)
-        if (error) throw error
+        const { error } = await runMutation('categories.delete', () => supabase.from('categories').update({ is_deleted: true, updated_at: now }).eq('id', id))
+        if (error) throw normalizeSupabaseActionError(error)
 
         await db.categories.put(updated)
     } else {
@@ -269,11 +287,11 @@ export async function createProduct(workspaceId: string, data: Omit<Product, 'id
     if (isOnline()) {
         // ONLINE
         const payload = toSnakeCase({ ...product, syncStatus: undefined, lastSyncedAt: undefined, storageName: undefined })
-        const { error } = await supabase.from('products').insert(payload)
+        const { error } = await runMutation('products.create', () => supabase.from('products').insert(payload))
 
         if (error) {
             console.error('Supabase write failed:', error)
-            throw error
+            throw normalizeSupabaseActionError(error)
         }
 
         await db.products.add(product)
@@ -303,9 +321,9 @@ export async function updateProduct(id: string, data: Partial<Product>): Promise
     if (isOnline()) {
         // ONLINE
         const payload = toSnakeCase({ ...data, updatedAt: now, storageName: undefined })
-        const { error } = await supabase.from('products').update(payload).eq('id', id)
+        const { error } = await runMutation('products.update', () => supabase.from('products').update(payload).eq('id', id))
 
-        if (error) throw error
+        if (error) throw normalizeSupabaseActionError(error)
 
         await db.products.put(updated)
     } else {
@@ -330,8 +348,8 @@ export async function deleteProduct(id: string): Promise<void> {
 
     if (isOnline()) {
         // ONLINE
-        const { error } = await supabase.from('products').update({ is_deleted: true, updated_at: now }).eq('id', id)
-        if (error) throw error
+        const { error } = await runMutation('products.delete', () => supabase.from('products').update({ is_deleted: true, updated_at: now }).eq('id', id))
+        if (error) throw normalizeSupabaseActionError(error)
 
         await db.products.put(updated)
     } else {
@@ -412,8 +430,8 @@ export async function createSupplier(workspaceId: string, data: Omit<Supplier, '
 
     if (isOnline()) {
         const payload = toSnakeCase({ ...supplier, syncStatus: undefined, lastSyncedAt: undefined })
-        const { error } = await supabase.from('suppliers').insert(payload)
-        if (error) throw error
+        const { error } = await runMutation('suppliers.create', () => supabase.from('suppliers').insert(payload))
+        if (error) throw normalizeSupabaseActionError(error)
         await db.suppliers.add(supplier)
     } else {
         await db.suppliers.add(supplier)
@@ -439,8 +457,8 @@ export async function updateSupplier(id: string, data: Partial<Supplier>): Promi
 
     if (isOnline()) {
         const payload = toSnakeCase({ ...data, updatedAt: now })
-        const { error } = await supabase.from('suppliers').update(payload).eq('id', id)
-        if (error) throw error
+        const { error } = await runMutation('suppliers.update', () => supabase.from('suppliers').update(payload).eq('id', id))
+        if (error) throw normalizeSupabaseActionError(error)
         await db.suppliers.put(updated)
     } else {
         await db.suppliers.put(updated)
@@ -462,8 +480,8 @@ export async function deleteSupplier(id: string): Promise<void> {
     } as Supplier
 
     if (isOnline()) {
-        const { error } = await supabase.from('suppliers').update({ is_deleted: true, updated_at: now }).eq('id', id)
-        if (error) throw error
+        const { error } = await runMutation('suppliers.delete', () => supabase.from('suppliers').update({ is_deleted: true, updated_at: now }).eq('id', id))
+        if (error) throw normalizeSupabaseActionError(error)
         await db.suppliers.put(updated)
     } else {
         await db.suppliers.put(updated)
@@ -551,11 +569,11 @@ export async function createCustomer(workspaceId: string, data: Omit<Customer, '
     if (isOnline()) {
         // ONLINE
         const payload = toSnakeCase({ ...customer, syncStatus: undefined, lastSyncedAt: undefined })
-        const { error } = await supabase.from('customers').insert(payload)
+        const { error } = await runMutation('customers.create', () => supabase.from('customers').insert(payload))
 
         if (error) {
             console.error('Supabase write failed:', error)
-            throw error
+            throw normalizeSupabaseActionError(error)
         }
 
         await db.customers.add(customer)
@@ -585,9 +603,9 @@ export async function updateCustomer(id: string, data: Partial<Customer>): Promi
     if (isOnline()) {
         // ONLINE
         const payload = toSnakeCase({ ...data, updatedAt: now })
-        const { error } = await supabase.from('customers').update(payload).eq('id', id)
+        const { error } = await runMutation('customers.update', () => supabase.from('customers').update(payload).eq('id', id))
 
-        if (error) throw error
+        if (error) throw normalizeSupabaseActionError(error)
 
         await db.customers.put(updated)
     } else {
@@ -612,8 +630,8 @@ export async function deleteCustomer(id: string): Promise<void> {
 
     if (isOnline()) {
         // ONLINE
-        const { error } = await supabase.from('customers').update({ is_deleted: true, updated_at: now }).eq('id', id)
-        if (error) throw error
+        const { error } = await runMutation('customers.delete', () => supabase.from('customers').update({ is_deleted: true, updated_at: now }).eq('id', id))
+        if (error) throw normalizeSupabaseActionError(error)
 
         await db.customers.put(updated)
     } else {
@@ -787,10 +805,10 @@ export async function fetchTableFromSupabase<T extends { id: string, syncStatus:
 async function saveEntity<T extends { id: string }>(tableName: string, table: any, entity: T, workspaceId: string) {
     if (isOnline()) {
         const payload = toSnakeCase({ ...entity, syncStatus: undefined, lastSyncedAt: undefined })
-        const { error } = await supabase.from(tableName).insert(payload)
+        const { error } = await runMutation(`${tableName}.create`, () => supabase.from(tableName).insert(payload))
         if (error) {
             console.error('Supabase write failed:', error)
-            throw error
+            throw normalizeSupabaseActionError(error)
         }
         await table.add(entity)
     } else {
@@ -815,8 +833,8 @@ async function updateEntity<T extends { id: string, workspaceId: string, version
 
     if (isOnline()) {
         const payload = toSnakeCase({ ...data, updatedAt: now })
-        const { error } = await supabase.from(tableName).update(payload).eq('id', id)
-        if (error) throw error
+        const { error } = await runMutation(`${tableName}.update`, () => supabase.from(tableName).update(payload).eq('id', id))
+        if (error) throw normalizeSupabaseActionError(error)
         await table.put(updated)
     } else {
         await table.put(updated)
@@ -921,7 +939,7 @@ export async function createInvoice(workspaceId: string, data: Omit<Invoice, 'id
         const { isSnapshot, ...finalRest } = rest
 
         // Get current auth user to satisfy RLS 'user_id' check
-        const { data: { session } } = await supabase.auth.getSession()
+        const session = await getMutationSession('invoices.create')
         const currentUserId = session?.user?.id
 
         const payload = toSnakeCase({
@@ -932,11 +950,11 @@ export async function createInvoice(workspaceId: string, data: Omit<Invoice, 'id
         })
 
         // Use upsert instead of insert to handle network retries/collisions gracefully
-        const { error } = await supabase.from('invoices').upsert(payload)
+        const { error } = await runMutation('invoices.create', () => supabase.from('invoices').upsert(payload))
 
         if (error) {
             console.error('Supabase write failed:', error)
-            throw error
+            throw normalizeSupabaseActionError(error)
         }
 
         // Use put instead of add for local idempotency
@@ -993,9 +1011,9 @@ export async function updateInvoice(id: string, data: Partial<Invoice>): Promise
         // Filter out legacy fields from update payload
         const { items, currency, subtotal, discount, printMetadata, pdfBlobA4, pdfBlobReceipt, ...restData } = data as any
         const payload = toSnakeCase({ ...restData, updatedAt: now })
-        const { error } = await supabase.from('invoices').update(payload).eq('id', id)
+        const { error } = await runMutation('invoices.update', () => supabase.from('invoices').update(payload).eq('id', id))
 
-        if (error) throw error
+        if (error) throw normalizeSupabaseActionError(error)
 
         await db.invoices.put(updated)
     } else {
@@ -1020,8 +1038,8 @@ export async function deleteInvoice(id: string): Promise<void> {
 
     if (isOnline()) {
         // ONLINE
-        const { error } = await supabase.from('invoices').update({ is_deleted: true, updated_at: now }).eq('id', id)
-        if (error) throw error
+        const { error } = await runMutation('invoices.delete', () => supabase.from('invoices').update({ is_deleted: true, updated_at: now }).eq('id', id))
+        if (error) throw normalizeSupabaseActionError(error)
 
         await db.invoices.put(updated)
     } else {
@@ -1440,14 +1458,23 @@ export async function createStorage(workspaceId: string, data: { name: string })
             version: undefined
         })
 
-        const { error } = await supabase
-            .from('storages')
-            .insert(payload as any)
+        try {
+            const { error } = await runMutation('storages.create', () =>
+                supabase.from('storages').insert(payload as any)
+            )
 
-        if (error) {
+            if (error) {
+                throw normalizeSupabaseActionError(error)
+            }
+        } catch (error) {
             console.error('[Storage] Create sync failed:', error)
-            await db.storages.update(id, { syncStatus: 'pending' })
-            await addToOfflineMutations('storages', id, 'create', payload as any, workspaceId)
+            if (shouldUseOfflineMutationFallback(error)) {
+                await db.storages.update(id, { syncStatus: 'pending' })
+                await addToOfflineMutations('storages', id, 'create', payload as any, workspaceId)
+            } else {
+                await db.storages.delete(id)
+                throw normalizeSupabaseActionError(error)
+            }
         }
     } else {
         const payload = toSnakeCase({
@@ -1476,15 +1503,26 @@ export async function updateStorage(id: string, data: Partial<Pick<Storage, 'nam
     await db.storages.update(id, { ...data, updatedAt: now, syncStatus: 'pending' })
 
     if (isOnline()) {
-        const { error } = await supabase
-            .from('storages')
-            .update({ ...toSnakeCase(data), updated_at: now })
-            .eq('id', id)
+        try {
+            const { error } = await runMutation('storages.update', () =>
+                supabase
+                    .from('storages')
+                    .update({ ...toSnakeCase(data), updated_at: now })
+                    .eq('id', id)
+            )
 
-        if (!error) {
+            if (error) {
+                throw normalizeSupabaseActionError(error)
+            }
+
             await db.storages.update(id, { syncStatus: 'synced', lastSyncedAt: now })
-        } else {
-            await addToOfflineMutations('storages', id, 'update', toSnakeCase(data) as any, existing.workspaceId)
+        } catch (error) {
+            if (shouldUseOfflineMutationFallback(error)) {
+                await addToOfflineMutations('storages', id, 'update', toSnakeCase(data) as any, existing.workspaceId)
+            } else {
+                await db.storages.put(existing)
+                throw normalizeSupabaseActionError(error)
+            }
         }
     } else {
         await addToOfflineMutations('storages', id, 'update', toSnakeCase(data) as any, existing.workspaceId)
@@ -1509,15 +1547,32 @@ export async function deleteStorage(id: string, moveProductsToStorageId: string)
         await db.products.update(product.id, { storageId: moveProductsToStorageId, updatedAt: now, syncStatus: 'pending' })
 
         if (isOnline()) {
-            const { error } = await supabase
-                .from('products')
-                .update({ storage_id: moveProductsToStorageId, updated_at: now })
-                .eq('id', product.id)
+            try {
+                const { error } = await runMutation('storages.moveProduct', () =>
+                    supabase
+                        .from('products')
+                        .update({ storage_id: moveProductsToStorageId, updated_at: now })
+                        .eq('id', product.id)
+                )
 
-            if (!error) {
+                if (error) {
+                    throw normalizeSupabaseActionError(error)
+                }
+
                 await db.products.update(product.id, { syncStatus: 'synced', lastSyncedAt: now })
-            } else {
-                await addToOfflineMutations('products', product.id, 'update', { storage_id: moveProductsToStorageId }, existing.workspaceId)
+            } catch (error) {
+                if (shouldUseOfflineMutationFallback(error)) {
+                    await addToOfflineMutations('products', product.id, 'update', { storage_id: moveProductsToStorageId }, existing.workspaceId)
+                } else {
+                    await db.products.update(product.id, {
+                        storageId: product.storageId,
+                        updatedAt: product.updatedAt,
+                        syncStatus: product.syncStatus,
+                        lastSyncedAt: product.lastSyncedAt,
+                        version: product.version
+                    })
+                    throw normalizeSupabaseActionError(error)
+                }
             }
         } else {
             await addToOfflineMutations('products', product.id, 'update', { storage_id: moveProductsToStorageId }, existing.workspaceId)
@@ -1528,15 +1583,35 @@ export async function deleteStorage(id: string, moveProductsToStorageId: string)
     await db.storages.update(id, { isDeleted: true, updatedAt: now, syncStatus: 'pending' })
 
     if (isOnline()) {
-        const { error } = await supabase
-            .from('storages')
-            .update({ is_deleted: true, updated_at: now })
-            .eq('id', id)
+        try {
+            const { error } = await runMutation('storages.delete', () =>
+                supabase
+                    .from('storages')
+                    .update({ is_deleted: true, updated_at: now })
+                    .eq('id', id)
+            )
 
-        if (!error) {
+            if (error) {
+                throw normalizeSupabaseActionError(error)
+            }
+
             await db.storages.update(id, { syncStatus: 'synced', lastSyncedAt: now })
-        } else {
-            await addToOfflineMutations('storages', id, 'update', { is_deleted: true } as any, existing.workspaceId)
+        } catch (error) {
+            if (shouldUseOfflineMutationFallback(error)) {
+                await addToOfflineMutations('storages', id, 'update', { is_deleted: true } as any, existing.workspaceId)
+            } else {
+                await db.storages.put(existing)
+                for (const product of productsToMove) {
+                    await db.products.update(product.id, {
+                        storageId: product.storageId,
+                        updatedAt: product.updatedAt,
+                        syncStatus: product.syncStatus,
+                        lastSyncedAt: product.lastSyncedAt,
+                        version: product.version
+                    })
+                }
+                throw normalizeSupabaseActionError(error)
+            }
         }
     } else {
         await addToOfflineMutations('storages', id, 'update', { is_deleted: true } as any, existing.workspaceId)
@@ -1607,8 +1682,8 @@ export async function deleteEmployee(id: string): Promise<void> {
     } as Employee
 
     if (isOnline()) {
-        const { error } = await supabase.from('employees').update({ is_deleted: true, updated_at: now }).eq('id', id)
-        if (error) throw error
+        const { error } = await runMutation('employees.delete', () => supabase.from('employees').update({ is_deleted: true, updated_at: now }).eq('id', id))
+        if (error) throw normalizeSupabaseActionError(error)
         await db.employees.put(updated)
     } else {
         await db.employees.put(updated)
@@ -1704,8 +1779,8 @@ export async function updateExpense(id: string, data: Partial<Expense>): Promise
 
     if (isOnline()) {
         const payload = toSnakeCase({ ...data, updatedAt: now })
-        const { error } = await supabase.from('expenses').update(payload).eq('id', id)
-        if (error) throw error
+        const { error } = await runMutation('expenses.update', () => supabase.from('expenses').update(payload).eq('id', id))
+        if (error) throw normalizeSupabaseActionError(error)
         await db.expenses.put(updated)
     } else {
         await db.expenses.put(updated)
@@ -1718,8 +1793,8 @@ export async function deleteExpense(id: string): Promise<void> {
     if (!existing) return
 
     if (isOnline()) {
-        const { error } = await supabase.from('expenses').delete().eq('id', id)
-        if (error) throw error
+        const { error } = await runMutation('expenses.delete', () => supabase.from('expenses').delete().eq('id', id))
+        if (error) throw normalizeSupabaseActionError(error)
         await db.expenses.delete(id)
     } else {
         await db.expenses.delete(id)
@@ -1931,8 +2006,8 @@ export async function createWorkspaceContact(workspaceId: string, data: Omit<Wor
 
     if (isOnline()) {
         const payload = toSnakeCase(contact as any)
-        const { error } = await supabase.from('workspace_contacts').insert(payload)
-        if (error) throw error
+        const { error } = await runMutation('workspace_contacts.create', () => supabase.from('workspace_contacts').insert(payload))
+        if (error) throw normalizeSupabaseActionError(error)
         await db.workspace_contacts.put(contact)
     } else {
         await db.workspace_contacts.put(contact)
@@ -1958,8 +2033,8 @@ export async function updateWorkspaceContact(id: string, data: Partial<Workspace
 
     if (isOnline()) {
         const payload = toSnakeCase({ ...data, updatedAt: now })
-        const { error } = await supabase.from('workspace_contacts').update(payload).eq('id', id)
-        if (error) throw error
+        const { error } = await runMutation('workspace_contacts.update', () => supabase.from('workspace_contacts').update(payload).eq('id', id))
+        if (error) throw normalizeSupabaseActionError(error)
         await db.workspace_contacts.put(updated)
     } else {
         await db.workspace_contacts.put(updated)
@@ -1972,8 +2047,8 @@ export async function deleteWorkspaceContact(id: string): Promise<void> {
     if (!existing) return
 
     if (isOnline()) {
-        const { error } = await supabase.from('workspace_contacts').delete().eq('id', id)
-        if (error) throw error
+        const { error } = await runMutation('workspace_contacts.delete', () => supabase.from('workspace_contacts').delete().eq('id', id))
+        if (error) throw normalizeSupabaseActionError(error)
         await db.workspace_contacts.delete(id)
     } else {
         // OFFLINE: Local Hard Delete + Mutation Record
@@ -2347,10 +2422,10 @@ async function createLoanAggregate(workspaceId: string, input: LoanCreateInput):
             toSupabaseLoanPayload(installment as unknown as Record<string, unknown>)
         )
 
-        const { error: loanError } = await supabase.from('loans').upsert(loanPayload)
+        const { error: loanError } = await runMutation('loans.create', () => supabase.from('loans').upsert(loanPayload))
         if (loanError) throw loanError
 
-        const { error: installmentError } = await supabase.from('loan_installments').upsert(installmentPayload)
+        const { error: installmentError } = await runMutation('loan_installments.create', () => supabase.from('loan_installments').upsert(installmentPayload))
         if (installmentError) throw installmentError
 
         const syncedAt = new Date().toISOString()
@@ -2366,9 +2441,20 @@ async function createLoanAggregate(workspaceId: string, input: LoanCreateInput):
             installments: installments.map(item => ({ ...item, syncStatus: 'synced', lastSyncedAt: syncedAt }))
         }
     } catch (error) {
-        console.error('[Loans] Online create failed, queued offline mutation:', error)
-        await enqueueLoanCreateMutations(workspaceId, loan, installments)
-        return { loan, installments }
+        if (shouldUseOfflineMutationFallback(error)) {
+            console.error('[Loans] Online create failed, queued offline mutation:', error)
+            await enqueueLoanCreateMutations(workspaceId, loan, installments)
+            return { loan, installments }
+        }
+
+        await db.transaction('rw', [db.loans, db.loan_installments], async () => {
+            await db.loans.delete(loan.id)
+            for (const installment of installments) {
+                await db.loan_installments.delete(installment.id)
+            }
+        })
+
+        throw normalizeSupabaseActionError(error)
     }
 }
 
@@ -2605,29 +2691,35 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
     }
 
     try {
-        const { error: loanError } = await supabase
-            .from('loans')
-            .update(toSnakeCase({
-                totalPaidAmount: updatedLoan.totalPaidAmount,
-                balanceAmount: updatedLoan.balanceAmount,
-                nextDueDate: updatedLoan.nextDueDate,
-                status: updatedLoan.status,
-                updatedAt: updatedLoan.updatedAt,
-                version: updatedLoan.version
-            }))
-            .eq('id', updatedLoan.id)
+        const { error: loanError } = await runMutation('loans.recordPayment.loan', () =>
+            supabase
+                .from('loans')
+                .update(toSnakeCase({
+                    totalPaidAmount: updatedLoan.totalPaidAmount,
+                    balanceAmount: updatedLoan.balanceAmount,
+                    nextDueDate: updatedLoan.nextDueDate,
+                    status: updatedLoan.status,
+                    updatedAt: updatedLoan.updatedAt,
+                    version: updatedLoan.version
+                }))
+                .eq('id', updatedLoan.id)
+        )
         if (loanError) throw loanError
 
-        const { error: installmentsError } = await supabase.from('loan_installments').upsert(
-            updatedInstallments.map(installment =>
-                toSupabaseLoanPayload(installment as unknown as Record<string, unknown>)
+        const { error: installmentsError } = await runMutation('loans.recordPayment.installments', () =>
+            supabase.from('loan_installments').upsert(
+                updatedInstallments.map(installment =>
+                    toSupabaseLoanPayload(installment as unknown as Record<string, unknown>)
+                )
             )
         )
         if (installmentsError) throw installmentsError
 
-        const { error: paymentError } = await supabase
-            .from('loan_payments')
-            .insert(toSupabaseLoanPayload(payment as unknown as Record<string, unknown>))
+        const { error: paymentError } = await runMutation('loans.recordPayment.payment', () =>
+            supabase
+                .from('loan_payments')
+                .insert(toSupabaseLoanPayload(payment as unknown as Record<string, unknown>))
+        )
         if (paymentError) throw paymentError
 
         const syncedAt = new Date().toISOString()
@@ -2645,9 +2737,21 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
             installments: updatedInstallments.map(item => ({ ...item, syncStatus: 'synced', lastSyncedAt: syncedAt }))
         }
     } catch (error) {
-        console.error('[Loans] Payment sync failed, queued offline mutation:', error)
-        await enqueueMutations()
-        return { loan: updatedLoan, payment, installments: updatedInstallments }
+        if (shouldUseOfflineMutationFallback(error)) {
+            console.error('[Loans] Payment sync failed, queued offline mutation:', error)
+            await enqueueMutations()
+            return { loan: updatedLoan, payment, installments: updatedInstallments }
+        }
+
+        await db.transaction('rw', [db.loans, db.loan_installments, db.loan_payments], async () => {
+            await db.loans.put(loan)
+            for (const installment of installmentRows) {
+                await db.loan_installments.put(installment)
+            }
+            await db.loan_payments.delete(payment.id)
+        })
+
+        throw normalizeSupabaseActionError(error)
     }
 }
 

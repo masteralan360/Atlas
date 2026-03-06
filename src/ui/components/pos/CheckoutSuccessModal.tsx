@@ -18,6 +18,7 @@ import { Textarea } from '@/ui/components/textarea'
 import { supabase } from '@/auth/supabase'
 import { db } from '@/local-db'
 import { useDebounce } from '@/lib/hooks'
+import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
 interface CheckoutSuccessModalProps {
     isOpen: boolean
@@ -83,12 +84,14 @@ export function CheckoutSuccessModal({
                 await db.sales.update(saleData.id, { notes: debouncedNote })
 
                 // Update Supabase
-                const { error } = await supabase
-                    .from('sales')
-                    .update({ notes: debouncedNote })
-                    .eq('id', saleData.id)
+                const { error } = await runSupabaseAction('checkoutSuccess.saveNote', () =>
+                    supabase
+                        .from('sales')
+                        .update({ notes: debouncedNote })
+                        .eq('id', saleData.id)
+                )
 
-                if (error) throw error
+                if (error) throw normalizeSupabaseActionError(error)
 
                 console.log('[CheckoutSuccessModal] Note auto-saved:', debouncedNote)
             } catch (err) {

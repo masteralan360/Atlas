@@ -54,6 +54,7 @@ import { ExchangeRateList } from '@/ui/components' // Import ExchangeRateList
 import { CheckoutSuccessModal, HeldSalesModal, type HeldSale, StorageSelector, CrossStorageWarningModal } from '@/ui/components'
 import { mapSaleToUniversal } from '@/lib/mappings'
 import { LoanRegistrationModal, type LoanRegistrationData } from '@/ui/components/pos/LoanRegistrationModal'
+import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
 function isLoanRegistrationData(value: unknown): value is LoanRegistrationData {
     if (!value || typeof value !== 'object') return false
@@ -1091,15 +1092,14 @@ export function POS() {
 
         try {
             // Attempt online checkout
-            const { data, error } = await supabase.rpc('complete_sale', {
-                payload: checkoutPayload
-            })
+            const { data, error } = await runSupabaseAction('pos.completeSale', () =>
+                supabase.rpc('complete_sale', {
+                    payload: checkoutPayload
+                })
+            )
 
             if (error) {
-                if (error.message?.includes('Failed to fetch') || (error as any).status === 0) {
-                    throw new Error('OFFLINE_FETCH_ERROR')
-                }
-                throw error
+                throw normalizeSupabaseActionError(error)
             }
 
             // Capture sequence_id and result from server
@@ -1182,8 +1182,9 @@ export function POS() {
             refreshExchangeRate()
         } catch (err: any) {
             console.error('Checkout failed, attempting offline save:', err)
+            const normalizedError = normalizeSupabaseActionError(err)
 
-            if (err.message === 'OFFLINE_FETCH_ERROR' || !navigator.onLine) {
+            if (!navigator.onLine) {
                 try {
                     // Run local verification FIRST (before save, but using the data we're about to save)
                     const verificationSale = createVerificationSale(
@@ -1325,10 +1326,20 @@ export function POS() {
                 }
             }
 
+            if (isRetriableWebRequestError(normalizedError)) {
+                const message = getRetriableActionToast(normalizedError)
+                toast({
+                    variant: 'destructive',
+                    title: message.title,
+                    description: message.description,
+                })
+                return
+            }
+
             toast({
                 variant: 'destructive',
                 title: t('messages.error'),
-                description: t('messages.checkoutFailed') + ': ' + err.message,
+                description: t('messages.checkoutFailed') + ': ' + normalizedError.message,
             })
         } finally {
             setIsLoading(false)

@@ -32,6 +32,7 @@ import { supabase, isSupabaseConfigured } from '@/auth/supabase'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 import { formatDate } from '@/lib/utils'
+import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
 const SESSION_DURATION = 60 // seconds
 
@@ -83,6 +84,26 @@ export function Admin() {
     const [searchTerm, setSearchTerm] = useState('')
     const [customExpiries, setCustomExpiries] = useState<Record<string, string>>({})
 
+    const showActionError = (err: unknown, fallbackTitle: string) => {
+        const normalized = normalizeSupabaseActionError(err)
+        if (isRetriableWebRequestError(normalized)) {
+            const message = getRetriableActionToast(normalized)
+            toast({
+                variant: 'destructive',
+                title: message.title,
+                description: message.description
+            })
+            return normalized.message
+        }
+
+        toast({
+            variant: 'destructive',
+            title: fallbackTitle,
+            description: normalized.message
+        })
+        return normalized.message
+    }
+
     // Handle session timeout
     useEffect(() => {
         if (!isAuthenticated) return
@@ -104,9 +125,12 @@ export function Admin() {
         setIsLoading(true)
         setError('')
         try {
-            const { data: isValid, error: rpcError } = await supabase.rpc('verify_admin_passkey', { provided_key: passkey })
+            const { data: isValid, error: rpcError } = await runSupabaseAction(
+                'admin.verifyPasskey',
+                () => supabase.rpc('verify_admin_passkey', { provided_key: passkey })
+            )
 
-            if (rpcError) throw rpcError
+            if (rpcError) throw normalizeSupabaseActionError(rpcError)
 
             if (isValid) {
                 setIsAuthenticated(true)
@@ -116,7 +140,8 @@ export function Admin() {
                 setError('Invalid passkey. Access denied.')
             }
         } catch (err: any) {
-            setError('Verification failed: ' + err.message)
+            const description = showActionError(err, 'Verification failed')
+            setError('Verification failed: ' + description)
         } finally {
             setIsLoading(false)
         }
@@ -142,23 +167,25 @@ export function Admin() {
         // Fetch both users and workspaces
         try {
             // 1. Fetch Users
-            const { data: userData, error: userError } = await supabase.rpc('get_all_users', { provided_key: passkey })
-            if (userError) throw userError
+            const { data: userData, error: userError } = await runSupabaseAction(
+                'admin.getUsers',
+                () => supabase.rpc('get_all_users', { provided_key: passkey })
+            )
+            if (userError) throw normalizeSupabaseActionError(userError)
             setUsers(userData as AdminUser[])
 
             // 2. Fetch Workspaces
-            const { data: wsData, error: wsError } = await supabase.rpc('get_all_workspaces', { provided_key: passkey })
-            if (wsError) throw wsError
+            const { data: wsData, error: wsError } = await runSupabaseAction(
+                'admin.getWorkspaces',
+                () => supabase.rpc('get_all_workspaces', { provided_key: passkey })
+            )
+            if (wsError) throw normalizeSupabaseActionError(wsError)
             setWorkspaces(wsData as AdminWorkspace[])
 
         } catch (err: any) {
             console.error('[Admin] fetchData FAILED:', err)
-            setError('Failed to fetch data: ' + (err.message || JSON.stringify(err)))
-            toast({
-                variant: "destructive",
-                title: "Error fetching data",
-                description: err.message
-            })
+            const description = showActionError(err, 'Error fetching data')
+            setError('Failed to fetch data: ' + description)
         } finally {
             setIsLoading(false)
         }
@@ -173,8 +200,11 @@ export function Admin() {
         if (!userToDelete) return
         setIsLoading(true)
         try {
-            const { error } = await supabase.rpc('delete_user_account', { target_user_id: userToDelete.id })
-            if (error) throw error
+            const { error } = await runSupabaseAction(
+                'admin.deleteUser',
+                () => supabase.rpc('delete_user_account', { target_user_id: userToDelete.id })
+            )
+            if (error) throw normalizeSupabaseActionError(error)
 
             setUsers(users.filter(u => u.id !== userToDelete.id))
             fetchData()
@@ -182,7 +212,7 @@ export function Admin() {
             setUserToDelete(null)
             toast({ title: "User deleted successfully" })
         } catch (err: any) {
-            alert('Failed to delete user: ' + err.message)
+            showActionError(err, 'Failed to delete user')
         } finally {
             setIsLoading(false)
         }
@@ -207,17 +237,19 @@ export function Admin() {
         }
 
         try {
-            const { error } = await supabase.rpc('admin_update_workspace_features', {
-                provided_key: passkey,
-                target_workspace_id: workspaceId,
-                new_allow_pos: newValues.allow_pos,
-                new_allow_customers: newValues.allow_customers,
-                new_allow_orders: newValues.allow_orders,
-                new_allow_invoices: newValues.allow_invoices,
-                new_locked_workspace: newValues.locked_workspace
-            })
+            const { error } = await runSupabaseAction('admin.updateWorkspaceFeatures', () =>
+                supabase.rpc('admin_update_workspace_features', {
+                    provided_key: passkey,
+                    target_workspace_id: workspaceId,
+                    new_allow_pos: newValues.allow_pos,
+                    new_allow_customers: newValues.allow_customers,
+                    new_allow_orders: newValues.allow_orders,
+                    new_allow_invoices: newValues.allow_invoices,
+                    new_locked_workspace: newValues.locked_workspace
+                })
+            )
 
-            if (error) throw error
+            if (error) throw normalizeSupabaseActionError(error)
 
             // Success toast optional to avoid spamming, but good for confirmation
             // toast({ title: "Workspace updated" })
@@ -227,11 +259,7 @@ export function Admin() {
             setWorkspaces(prev => prev.map(ws =>
                 ws.id === workspaceId ? { ...ws, [feature]: currentValue } : ws
             ))
-            toast({
-                variant: "destructive",
-                title: "Update failed",
-                description: err.message
-            })
+            showActionError(err, 'Update failed')
         }
     }
 
@@ -255,13 +283,15 @@ export function Admin() {
                 newExpiry.setMonth(newExpiry.getMonth() + 1)
             }
 
-            const { error } = await supabase.rpc('admin_update_workspace_subscription', {
-                provided_key: passkey,
-                target_workspace_id: workspaceId,
-                new_expiry: newExpiry.toISOString()
-            })
+            const { error } = await runSupabaseAction('admin.updateWorkspaceSubscription', () =>
+                supabase.rpc('admin_update_workspace_subscription', {
+                    provided_key: passkey,
+                    target_workspace_id: workspaceId,
+                    new_expiry: newExpiry.toISOString()
+                })
+            )
 
-            if (error) throw error
+            if (error) throw normalizeSupabaseActionError(error)
 
             toast({
                 title: t('common.success') || "Subscription Updated",
@@ -269,11 +299,7 @@ export function Admin() {
             })
             fetchData()
         } catch (err: any) {
-            toast({
-                variant: "destructive",
-                title: t('common.error') || "Update Failed",
-                description: err.message
-            })
+            showActionError(err, t('common.error') || 'Update Failed')
         } finally {
             setIsLoading(false)
         }

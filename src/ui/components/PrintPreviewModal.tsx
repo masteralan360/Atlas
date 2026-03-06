@@ -26,6 +26,7 @@ import { assetManager } from '@/lib/assetManager'
 import { isOnline } from '@/lib/network'
 import { type WorkspaceFeatures } from '@/workspace'
 import { supabase } from '@/auth/supabase'
+import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
 interface PrintPreviewModalProps {
     isOpen: boolean
@@ -379,9 +380,11 @@ export function PrintPreviewModal({
                         upsertData.r2_path_receipt = path
                     }
 
-                    const { error: upsertError } = await supabase.from('invoices').upsert(upsertData)
+                    const { error: upsertError } = await runSupabaseAction('printPreview.upsertInvoiceR2Path', () =>
+                        supabase.from('invoices').upsert(upsertData)
+                    )
 
-                    if (upsertError) throw upsertError
+                    if (upsertError) throw normalizeSupabaseActionError(upsertError)
 
                     const dbUpdate: any = {
                         syncStatus: 'synced',
@@ -399,15 +402,19 @@ export function PrintPreviewModal({
                     await db.invoices.update(savedInvoice.id, dbUpdate)
                 } catch (uploadError) {
                     console.error('PDF upload failed, marking invoice as pending:', uploadError)
-                    await db.invoices.update(savedInvoice.id, {
-                        syncStatus: 'pending',
-                        lastSyncedAt: null
-                    })
-                    toast({
-                        title: t('print.saveError') || 'Save Failed',
-                        description: 'PDF upload failed. It will retry when online.',
-                        variant: 'destructive'
-                    })
+                    if (!navigator.onLine) {
+                        await db.invoices.update(savedInvoice.id, {
+                            syncStatus: 'pending',
+                            lastSyncedAt: null
+                        })
+                        toast({
+                            title: t('print.saveError') || 'Save Failed',
+                            description: 'PDF upload failed. It will retry when online.',
+                            variant: 'destructive'
+                        })
+                    } else {
+                        throw normalizeSupabaseActionError(uploadError)
+                    }
                 }
             }
 
@@ -438,9 +445,14 @@ export function PrintPreviewModal({
             if (onConfirm) onConfirm()
         } catch (error) {
             console.error('Error saving invoice snapshot:', error)
+            const normalized = normalizeSupabaseActionError(error)
             toast({
-                title: t('print.saveError') || 'Save Failed',
-                description: t('print.saveErrorDesc') || 'Could not save invoice record.',
+                title: isRetriableWebRequestError(normalized)
+                    ? getRetriableActionToast(normalized).title
+                    : (t('print.saveError') || 'Save Failed'),
+                description: isRetriableWebRequestError(normalized)
+                    ? getRetriableActionToast(normalized).description
+                    : (t('print.saveErrorDesc') || 'Could not save invoice record.'),
                 variant: 'destructive'
             })
         } finally {

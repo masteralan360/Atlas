@@ -11,6 +11,7 @@ import {
     writeWorkspaceCache,
     type WorkspaceCacheSnapshot
 } from './workspaceCache'
+import { runSupabaseAction } from '@/lib/supabaseRequest'
 
 export interface WorkspaceFeatures {
     allow_pos: boolean
@@ -291,12 +292,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
 
         try {
-            const rpcPromise = supabase.rpc('get_workspace_features').single()
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Workspace features fetch timed out')), 12000)
-            )
-
-            const { data, error } = await Promise.race([rpcPromise, timeoutPromise]) as any
+            const { data, error } = await runSupabaseAction(
+                'workspace.getFeatures',
+                () => supabase.rpc('get_workspace_features').single(),
+                { timeoutMs: 12000, platform: 'all' }
+            ) as any
 
             if (error || !data || data.error) {
                 throw error ?? new Error(data?.error || 'Workspace features fetch returned no data')

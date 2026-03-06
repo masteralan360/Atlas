@@ -10,7 +10,8 @@ import {
     CardHeader,
     CardTitle,
     CardDescription,
-    Button
+    Button,
+    useToast
 } from '@/ui/components'
 import {
     CreditCard,
@@ -26,6 +27,7 @@ import {
 import { isTauri as isTauriCheck } from '@/lib/platform'
 import { platformService } from '@/services/platformService'
 import { assetManager } from '@/lib/assetManager'
+import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
 interface FeatureToggle {
     key: 'allow_pos' | 'allow_customers' | 'allow_orders' | 'allow_invoices'
@@ -39,6 +41,7 @@ export function WorkspaceConfiguration() {
     const { refreshFeatures, features: currentFeatures, isLoading: isWorkspaceLoading } = useWorkspace()
     const [, navigate] = useLocation()
     const { t } = useTranslation()
+    const { toast } = useToast()
 
     const [isLoading, setIsLoading] = useState(false)
     const [logoUrl, setLogoUrl] = useState(currentFeatures.logo_url || '')
@@ -112,15 +115,17 @@ export function WorkspaceConfiguration() {
     const handleSave = async () => {
         setIsLoading(true)
         try {
-            const { error } = await supabase.rpc('configure_workspace', {
-                p_allow_pos: features.allow_pos,
-                p_allow_customers: features.allow_customers,
-                p_allow_orders: features.allow_orders,
-                p_allow_invoices: features.allow_invoices,
-                p_logo_url: logoUrl || null
-            })
+            const { error } = await runSupabaseAction('workspace.configure', () =>
+                supabase.rpc('configure_workspace', {
+                    p_allow_pos: features.allow_pos,
+                    p_allow_customers: features.allow_customers,
+                    p_allow_orders: features.allow_orders,
+                    p_allow_invoices: features.allow_invoices,
+                    p_logo_url: logoUrl || null
+                })
+            )
 
-            if (error) throw error
+            if (error) throw normalizeSupabaseActionError(error)
 
             // Refresh workspace features in context
             await refreshFeatures()
@@ -129,7 +134,21 @@ export function WorkspaceConfiguration() {
             navigate('/')
         } catch (err: any) {
             console.error('Error configuring workspace:', err)
-            alert('Failed to save configuration: ' + (err.message || 'Unknown error'))
+            const normalized = normalizeSupabaseActionError(err)
+            if (isRetriableWebRequestError(normalized)) {
+                const message = getRetriableActionToast(normalized)
+                toast({
+                    title: message.title,
+                    description: message.description,
+                    variant: 'destructive'
+                })
+            } else {
+                toast({
+                    title: t('common.error') || 'Error',
+                    description: `Failed to save configuration: ${normalized.message || 'Unknown error'}`,
+                    variant: 'destructive'
+                })
+            }
         } finally {
             setIsLoading(false)
         }

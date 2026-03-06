@@ -24,6 +24,7 @@ import { UsersRound, UserMinus, Loader2, Shield, Eye, Briefcase } from 'lucide-r
 import { useTranslation } from 'react-i18next'
 import { formatDate } from '@/lib/utils'
 import { platformService } from '@/services/platformService'
+import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
 interface Member {
     id: string
@@ -54,22 +55,32 @@ export function Members() {
     const [memberToKick, setMemberToKick] = useState<Member | null>(null)
     const [error, setError] = useState<string | null>(null)
 
+    const getErrorMessage = (err: unknown) => {
+        const normalized = normalizeSupabaseActionError(err)
+        if (isRetriableWebRequestError(normalized)) {
+            return getRetriableActionToast(normalized).description
+        }
+        return normalized.message || t('common.error')
+    }
+
     const fetchMembers = async () => {
         if (!user?.workspaceId) return
 
         setIsLoading(true)
         try {
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('id, name, role, created_at, profile_url')
-                .eq('workspace_id', user.workspaceId)
-                .order('created_at', { ascending: true })
+            const { data, error } = await runSupabaseAction('members.fetch', () =>
+                supabase
+                    .from('profiles')
+                    .select('id, name, role, created_at, profile_url')
+                    .eq('workspace_id', user.workspaceId)
+                    .order('created_at', { ascending: true })
+            )
 
-            if (error) throw error
+            if (error) throw normalizeSupabaseActionError(error)
             setMembers(data || [])
         } catch (err) {
             console.error('Error fetching members:', err)
-            setError(t('common.error'))
+            setError(getErrorMessage(err))
         } finally {
             setIsLoading(false)
         }
@@ -86,18 +97,20 @@ export function Members() {
         setError(null)
 
         try {
-            const { error } = await supabase.rpc('kick_member', {
-                target_user_id: memberToKick.id
-            })
+            const { error } = await runSupabaseAction('members.kick', () =>
+                supabase.rpc('kick_member', {
+                    target_user_id: memberToKick.id
+                })
+            )
 
-            if (error) throw error
+            if (error) throw normalizeSupabaseActionError(error)
 
             // Remove member from local state
             setMembers(prev => prev.filter(m => m.id !== memberToKick.id))
             setMemberToKick(null)
         } catch (err: any) {
             console.error('Error kicking member:', err)
-            setError(err.message || t('common.error'))
+            setError(getErrorMessage(err))
         } finally {
             setKickingMemberId(null)
         }
