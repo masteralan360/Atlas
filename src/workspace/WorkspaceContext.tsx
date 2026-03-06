@@ -1,11 +1,16 @@
-import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { supabase, isSupabaseConfigured } from '@/auth/supabase'
 import { useAuth } from '@/auth/AuthContext'
-import type { CurrencyCode, IQDDisplayPreference } from '@/local-db/models'
+import type { CurrencyCode, IQDDisplayPreference, Workspace } from '@/local-db/models'
 import { db } from '@/local-db/database'
 import { addToOfflineMutations } from '@/local-db/hooks'
 import { isMobile } from '@/lib/platform'
 import { connectionManager } from '@/lib/connectionManager'
+import {
+    readWorkspaceCache,
+    writeWorkspaceCache,
+    type WorkspaceCacheSnapshot
+} from './workspaceCache'
 
 export interface WorkspaceFeatures {
     allow_pos: boolean
@@ -20,7 +25,6 @@ export interface WorkspaceFeatures {
     try_conversion_enabled: boolean
     locked_workspace: boolean
     logo_url: string | null
-    // Negotiated price limit (0-100 percentage, default 100 = no limit)
     max_discount_percent: number
     allow_whatsapp: boolean
     print_lang: 'auto' | 'en' | 'ar' | 'ku'
@@ -74,55 +78,67 @@ const defaultFeatures: WorkspaceFeatures = {
     subscription_expires_at: null
 }
 
-const WORKSPACE_CACHE_KEY = 'asaas_workspace_cache'
+function mergeWorkspaceFeatures(features?: Partial<WorkspaceFeatures> | null): WorkspaceFeatures {
+    return { ...defaultFeatures, ...(features ?? {}) }
+}
+
+function getFeaturesFromLocalWorkspace(localWorkspace: Workspace): WorkspaceFeatures | null {
+    if (typeof localWorkspace.is_configured !== 'boolean') {
+        return null
+    }
+
+    return mergeWorkspaceFeatures({
+        allow_pos: localWorkspace.allow_pos ?? true,
+        allow_customers: localWorkspace.allow_customers ?? true,
+        allow_suppliers: localWorkspace.allow_suppliers ?? true,
+        allow_orders: localWorkspace.allow_orders ?? true,
+        allow_invoices: localWorkspace.allow_invoices ?? true,
+        is_configured: localWorkspace.is_configured,
+        default_currency: localWorkspace.default_currency,
+        iqd_display_preference: localWorkspace.iqd_display_preference,
+        eur_conversion_enabled: localWorkspace.eur_conversion_enabled ?? false,
+        try_conversion_enabled: localWorkspace.try_conversion_enabled ?? false,
+        locked_workspace: localWorkspace.locked_workspace ?? false,
+        logo_url: localWorkspace.logo_url ?? null,
+        max_discount_percent: localWorkspace.max_discount_percent ?? 100,
+        allow_whatsapp: localWorkspace.allow_whatsapp ?? false,
+        print_lang: localWorkspace.print_lang ?? 'auto',
+        print_qr: localWorkspace.print_qr ?? false,
+        receipt_template: localWorkspace.receipt_template ?? 'primary',
+        a4_template: localWorkspace.a4_template ?? 'primary',
+        print_quality: localWorkspace.print_quality ?? 'low',
+        subscription_expires_at: localWorkspace.subscription_expires_at ?? null
+    })
+}
+
+function isOffline() {
+    return typeof navigator !== 'undefined' && navigator.onLine === false
+}
 
 const WorkspaceContext = createContext<WorkspaceContextType | undefined>(undefined)
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const { user, isAuthenticated, isLoading: authLoading, updateUser } = useAuth()
 
-    // Initialize state from LocalStorage for instant hydration
-    const [features, setFeatures] = useState<WorkspaceFeatures>(() => {
-        if (typeof window !== 'undefined') {
-            const cached = localStorage.getItem(WORKSPACE_CACHE_KEY)
-            if (cached) {
-                try {
-                    const parsed = JSON.parse(cached)
-                    return { ...defaultFeatures, ...parsed.features }
-                } catch (e) {
-                    return defaultFeatures
-                }
-            }
-        }
-        return defaultFeatures
-    })
-
-    const [workspaceName, setWorkspaceName] = useState<string | null>(() => {
-        if (typeof window !== 'undefined') {
-            const cached = localStorage.getItem(WORKSPACE_CACHE_KEY)
-            if (cached) {
-                try {
-                    return JSON.parse(cached).workspaceName || null
-                } catch (e) {
-                    return null
-                }
-            }
-        }
-        return null
-    })
-
-    // If cache exists, we start as "not loading" to avoid flashes
-    const [isLoading, setIsLoading] = useState(() => {
-        if (typeof window !== 'undefined') {
-            return !localStorage.getItem(WORKSPACE_CACHE_KEY)
-        }
-        return true
-    })
+    const [features, setFeatures] = useState<WorkspaceFeatures>(defaultFeatures)
+    const [workspaceName, setWorkspaceName] = useState<string | null>(null)
+    const [isLoading, setIsLoading] = useState(true)
     const [pendingUpdate, setPendingUpdate] = useState<UpdateInfo | null>(null)
     const [isFullscreen, setIsFullscreen] = useState(false)
     const realtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+    const currentWorkspaceIdRef = useRef<string | null>(null)
+    const fetchRequestRef = useRef(0)
+    const featuresRef = useRef(defaultFeatures)
+    const workspaceNameRef = useRef<string | null>(null)
 
-    // Tauri-only: Track Fullscreen State
+    useEffect(() => {
+        featuresRef.current = features
+    }, [features])
+
+    useEffect(() => {
+        workspaceNameRef.current = workspaceName
+    }, [workspaceName])
+
     useEffect(() => {
         // @ts-ignore
         const isTauri = !!window.__TAURI_INTERNALS__
@@ -147,20 +163,130 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
         updateFSState()
 
-        let unlisten: () => void
+        let unlisten: (() => void) | undefined
         const setup = async () => {
             const { getCurrentWindow } = await import('@tauri-apps/api/window')
             unlisten = await getCurrentWindow().onResized(updateFSState)
         }
-        setup()
+
+        void setup()
 
         return () => unlisten?.()
     }, [])
 
-    const fetchFeatures = async (silent = false) => {
-        if (!isSupabaseConfigured || !isAuthenticated || !user?.workspaceId) {
+    const isCurrentWorkspaceRequest = (workspaceId: string, requestId: number) => {
+        return currentWorkspaceIdRef.current === workspaceId && fetchRequestRef.current === requestId
+    }
+
+    const persistWorkspaceState = async (
+        workspaceId: string,
+        nextFeatures: WorkspaceFeatures,
+        nextWorkspaceName: string | null
+    ) => {
+        const existing = await db.workspaces.get(workspaceId)
+        const timestamp = new Date().toISOString()
+
+        await db.workspaces.put({
+            id: workspaceId,
+            workspaceId,
+            name: nextWorkspaceName || existing?.name || user?.workspaceName || 'My Workspace',
+            code: existing?.code || user?.workspaceCode || 'LOADED',
+            is_configured: nextFeatures.is_configured,
+            default_currency: nextFeatures.default_currency,
+            iqd_display_preference: nextFeatures.iqd_display_preference,
+            eur_conversion_enabled: nextFeatures.eur_conversion_enabled,
+            try_conversion_enabled: nextFeatures.try_conversion_enabled,
+            locked_workspace: nextFeatures.locked_workspace,
+            allow_pos: nextFeatures.allow_pos,
+            allow_customers: nextFeatures.allow_customers,
+            allow_suppliers: nextFeatures.allow_suppliers,
+            allow_orders: nextFeatures.allow_orders,
+            allow_invoices: nextFeatures.allow_invoices,
+            allow_whatsapp: nextFeatures.allow_whatsapp,
+            logo_url: nextFeatures.logo_url,
+            max_discount_percent: nextFeatures.max_discount_percent,
+            print_lang: nextFeatures.print_lang,
+            print_qr: nextFeatures.print_qr,
+            receipt_template: nextFeatures.receipt_template,
+            a4_template: nextFeatures.a4_template,
+            print_quality: nextFeatures.print_quality,
+            subscription_expires_at: nextFeatures.subscription_expires_at,
+            syncStatus: 'synced',
+            lastSyncedAt: timestamp,
+            version: existing?.version ?? 1,
+            isDeleted: existing?.isDeleted ?? false,
+            createdAt: existing?.createdAt ?? timestamp,
+            updatedAt: timestamp
+        })
+    }
+
+    const resolveTrustedFallback = async (
+        workspaceId: string,
+        cachedSnapshot?: WorkspaceCacheSnapshot<WorkspaceFeatures> | null
+    ) => {
+        if (cachedSnapshot) {
+            return {
+                features: mergeWorkspaceFeatures(cachedSnapshot.features),
+                workspaceName: cachedSnapshot.workspaceName
+            }
+        }
+
+        const localWorkspace = await db.workspaces.get(workspaceId)
+        if (!localWorkspace) {
+            return null
+        }
+
+        const localFeatures = getFeaturesFromLocalWorkspace(localWorkspace)
+        if (!localFeatures) {
+            return null
+        }
+
+        return {
+            features: localFeatures,
+            workspaceName: localWorkspace.name || null
+        }
+    }
+
+    const fetchFeatures = async (
+        silent = false,
+        options?: {
+            workspaceId?: string
+            cachedSnapshot?: WorkspaceCacheSnapshot<WorkspaceFeatures> | null
+        }
+    ) => {
+        const workspaceId = options?.workspaceId ?? user?.workspaceId
+
+        if (!isSupabaseConfigured || !isAuthenticated || !workspaceId) {
             setFeatures(defaultFeatures)
+            setWorkspaceName(null)
             if (!silent) setIsLoading(false)
+            return
+        }
+
+        const requestId = ++fetchRequestRef.current
+        const cachedSnapshot = options?.cachedSnapshot ?? readWorkspaceCache<WorkspaceFeatures>(workspaceId)
+
+        const applyFallback = async () => {
+            const fallback = await resolveTrustedFallback(workspaceId, cachedSnapshot)
+
+            if (!isCurrentWorkspaceRequest(workspaceId, requestId)) {
+                return
+            }
+
+            if (fallback) {
+                setFeatures(fallback.features)
+                setWorkspaceName(fallback.workspaceName)
+            } else if (!silent) {
+                setFeatures(defaultFeatures)
+                setWorkspaceName(user?.workspaceName ?? null)
+            }
+        }
+
+        if (isOffline()) {
+            await applyFallback()
+            if (!silent && isCurrentWorkspaceRequest(workspaceId, requestId)) {
+                setIsLoading(false)
+            }
             return
         }
 
@@ -172,161 +298,84 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
             const { data, error } = await Promise.race([rpcPromise, timeoutPromise]) as any
 
-            if (error) {
-                console.error('Error fetching workspace features from Supabase:', error)
-                // Try to load from local DB if Supabase fails
-                const localWorkspace = await db.workspaces.get(user.workspaceId)
-                if (localWorkspace) {
-                    setFeatures({
-                        allow_pos: localWorkspace.allow_pos ?? true,
-                        allow_customers: localWorkspace.allow_customers ?? true,
-                        allow_suppliers: localWorkspace.allow_suppliers ?? true,
-                        allow_orders: localWorkspace.allow_orders ?? true,
-                        allow_invoices: localWorkspace.allow_invoices ?? true,
-                        is_configured: true,
-                        default_currency: localWorkspace.default_currency,
-                        iqd_display_preference: localWorkspace.iqd_display_preference,
-                        eur_conversion_enabled: (localWorkspace as any).eur_conversion_enabled ?? false,
-                        try_conversion_enabled: (localWorkspace as any).try_conversion_enabled ?? false,
-                        locked_workspace: (localWorkspace as any).locked_workspace ?? false,
-                        logo_url: (localWorkspace as any).logo_url ?? null,
-                        max_discount_percent: (localWorkspace as any).max_discount_percent ?? 100,
-                        allow_whatsapp: (localWorkspace as any).allow_whatsapp ?? false,
-                        print_lang: (localWorkspace as any).print_lang ?? 'auto',
-                        print_qr: (localWorkspace as any).print_qr ?? false,
-                        receipt_template: (localWorkspace as any).receipt_template ?? 'primary',
-                        a4_template: (localWorkspace as any).a4_template ?? 'primary',
-                        print_quality: (localWorkspace as any).print_quality ?? 'low',
-                        subscription_expires_at: (localWorkspace as any).subscription_expires_at ?? null
-                    })
-                } else {
-                    setFeatures(defaultFeatures)
-                }
-            } else if (data) {
-                const featureData = data as any
-                const fetchedFeatures: WorkspaceFeatures = {
-                    allow_pos: featureData.allow_pos ?? true,
-                    allow_customers: featureData.allow_customers ?? true,
-                    allow_suppliers: featureData.allow_suppliers ?? true,
-                    allow_orders: featureData.allow_orders ?? true,
-                    allow_invoices: featureData.allow_invoices ?? true,
-                    is_configured: featureData.is_configured ?? true,
-                    default_currency: featureData.default_currency || 'usd',
-                    iqd_display_preference: featureData.iqd_display_preference || 'IQD',
-                    eur_conversion_enabled: featureData.eur_conversion_enabled ?? false,
-                    try_conversion_enabled: featureData.try_conversion_enabled ?? false,
-                    locked_workspace: featureData.locked_workspace ?? false,
-                    logo_url: featureData.logo_url ?? null,
-                    max_discount_percent: featureData.max_discount_percent ?? 100,
-                    allow_whatsapp: featureData.allow_whatsapp ?? false,
-                    print_lang: featureData.print_lang ?? 'auto',
-                    print_qr: featureData.print_qr ?? false,
-                    receipt_template: featureData.receipt_template ?? 'primary',
-                    a4_template: featureData.a4_template ?? 'primary',
-                    print_quality: featureData.print_quality ?? 'low',
-                    subscription_expires_at: featureData.subscription_expires_at ?? null
-                }
-                setFeatures(fetchedFeatures)
-                setWorkspaceName(featureData.workspace_name || 'My Workspace')
-
-                // Update Local Cache for next refresh
-                localStorage.setItem(WORKSPACE_CACHE_KEY, JSON.stringify({
-                    features: fetchedFeatures,
-                    workspaceName: featureData.workspace_name || 'My Workspace'
-                }))
-
-                // Cache in local DB for offline access
-                await db.workspaces.put({
-                    id: user.workspaceId,
-                    workspaceId: user.workspaceId,
-                    name: featureData.workspace_name || 'My Workspace',
-                    code: 'LOADED',
-                    default_currency: fetchedFeatures.default_currency,
-                    iqd_display_preference: fetchedFeatures.iqd_display_preference,
-                    eur_conversion_enabled: fetchedFeatures.eur_conversion_enabled,
-                    try_conversion_enabled: fetchedFeatures.try_conversion_enabled,
-                    locked_workspace: fetchedFeatures.locked_workspace,
-                    allow_pos: fetchedFeatures.allow_pos,
-                    allow_customers: fetchedFeatures.allow_customers,
-                    allow_suppliers: fetchedFeatures.allow_suppliers,
-                    allow_orders: fetchedFeatures.allow_orders,
-                    allow_invoices: fetchedFeatures.allow_invoices,
-                    allow_whatsapp: fetchedFeatures.allow_whatsapp,
-                    print_lang: fetchedFeatures.print_lang,
-                    print_qr: fetchedFeatures.print_qr,
-                    receipt_template: fetchedFeatures.receipt_template,
-                    a4_template: fetchedFeatures.a4_template,
-                    print_quality: fetchedFeatures.print_quality,
-                    subscription_expires_at: fetchedFeatures.subscription_expires_at,
-                    logo_url: fetchedFeatures.logo_url,
-                    syncStatus: 'synced',
-                    lastSyncedAt: new Date().toISOString(),
-                    version: 1,
-                    isDeleted: false,
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString()
-                })
+            if (error || !data || data.error) {
+                throw error ?? new Error(data?.error || 'Workspace features fetch returned no data')
             }
-        } catch (err: any) {
-            console.error('Error fetching workspace features:', err)
 
-            // Auto-refresh on timeout as requested by user
-            if (err?.message === 'Workspace features fetch timed out') {
-                console.log('[Workspace] Timeout detected — auto-refreshing app...')
-                window.location.reload()
+            const featureData = data as any
+            const fetchedFeatures = mergeWorkspaceFeatures({
+                allow_pos: featureData.allow_pos ?? true,
+                allow_customers: featureData.allow_customers ?? true,
+                allow_suppliers: featureData.allow_suppliers ?? true,
+                allow_orders: featureData.allow_orders ?? true,
+                allow_invoices: featureData.allow_invoices ?? true,
+                is_configured: featureData.is_configured ?? true,
+                default_currency: featureData.default_currency || 'usd',
+                iqd_display_preference: featureData.iqd_display_preference || 'IQD',
+                eur_conversion_enabled: featureData.eur_conversion_enabled ?? false,
+                try_conversion_enabled: featureData.try_conversion_enabled ?? false,
+                locked_workspace: featureData.locked_workspace ?? false,
+                logo_url: featureData.logo_url ?? null,
+                max_discount_percent: featureData.max_discount_percent ?? 100,
+                allow_whatsapp: featureData.allow_whatsapp ?? false,
+                print_lang: featureData.print_lang ?? 'auto',
+                print_qr: featureData.print_qr ?? false,
+                receipt_template: featureData.receipt_template ?? 'primary',
+                a4_template: featureData.a4_template ?? 'primary',
+                print_quality: featureData.print_quality ?? 'low',
+                subscription_expires_at: featureData.subscription_expires_at ?? null
+            })
+            const nextWorkspaceName = featureData.workspace_name || user?.workspaceName || 'My Workspace'
+
+            if (!isCurrentWorkspaceRequest(workspaceId, requestId)) {
                 return
             }
 
-            // Try fallback to local DB on any error (including timeout) if we don't already have valid features
-            if (user?.workspaceId) {
-                const localWorkspace = await db.workspaces.get(user.workspaceId)
-                if (localWorkspace) {
-                    setFeatures({
-                        allow_pos: localWorkspace.allow_pos ?? true,
-                        allow_customers: localWorkspace.allow_customers ?? true,
-                        allow_suppliers: localWorkspace.allow_suppliers ?? true,
-                        allow_orders: localWorkspace.allow_orders ?? true,
-                        allow_invoices: localWorkspace.allow_invoices ?? true,
-                        is_configured: true,
-                        default_currency: localWorkspace.default_currency,
-                        iqd_display_preference: localWorkspace.iqd_display_preference,
-                        eur_conversion_enabled: (localWorkspace as any).eur_conversion_enabled ?? false,
-                        try_conversion_enabled: (localWorkspace as any).try_conversion_enabled ?? false,
-                        locked_workspace: (localWorkspace as any).locked_workspace ?? false,
-                        logo_url: (localWorkspace as any).logo_url ?? null,
-                        max_discount_percent: (localWorkspace as any).max_discount_percent ?? 100,
-                        allow_whatsapp: (localWorkspace as any).allow_whatsapp ?? false,
-                        print_lang: (localWorkspace as any).print_lang ?? 'auto',
-                        print_qr: (localWorkspace as any).print_qr ?? false,
-                        receipt_template: (localWorkspace as any).receipt_template ?? 'primary',
-                        a4_template: (localWorkspace as any).a4_template ?? 'primary',
-                        print_quality: (localWorkspace as any).print_quality ?? 'low',
-                        subscription_expires_at: (localWorkspace as any).subscription_expires_at ?? null
-                    })
-                }
-            }
-
-            // Note: We avoid setFeatures(defaultFeatures) here to preserve 
-            // the state hydrated from LocalStorage during initialization.
+            setFeatures(fetchedFeatures)
+            setWorkspaceName(nextWorkspaceName)
+            writeWorkspaceCache({
+                workspaceId,
+                features: fetchedFeatures,
+                workspaceName: nextWorkspaceName
+            })
+            await persistWorkspaceState(workspaceId, fetchedFeatures, nextWorkspaceName)
+        } catch (err) {
+            console.error('Error fetching workspace features:', err)
+            await applyFallback()
         } finally {
-            if (!silent) setIsLoading(false)
+            if (!silent && isCurrentWorkspaceRequest(workspaceId, requestId)) {
+                setIsLoading(false)
+            }
         }
     }
 
     useEffect(() => {
         if (authLoading) return
 
-        if (isAuthenticated && user?.workspaceId) {
-            fetchFeatures()
-        } else {
-            setFeatures(defaultFeatures)
-            setIsLoading(false)
-        }
-    }, [isAuthenticated, user?.workspaceId, authLoading])
+        const workspaceId = isAuthenticated ? user?.workspaceId ?? null : null
+        currentWorkspaceIdRef.current = workspaceId
+        fetchRequestRef.current += 1
 
-    // ───────────────────────────────────────────────────────
-    // RESILIENCE: Supabase Realtime subscription for live workspace changes
-    // ───────────────────────────────────────────────────────
+        if (!workspaceId) {
+            setFeatures(defaultFeatures)
+            setWorkspaceName(null)
+            setIsLoading(false)
+            return
+        }
+
+        setIsLoading(true)
+        setFeatures(defaultFeatures)
+        setWorkspaceName(null)
+
+        const cachedSnapshot = readWorkspaceCache<WorkspaceFeatures>(workspaceId)
+        if (cachedSnapshot) {
+            setFeatures(mergeWorkspaceFeatures(cachedSnapshot.features))
+            setWorkspaceName(cachedSnapshot.workspaceName)
+        }
+
+        void fetchFeatures(false, { workspaceId, cachedSnapshot })
+    }, [authLoading, isAuthenticated, user?.workspaceId])
+
     useEffect(() => {
         if (!isSupabaseConfigured || !isAuthenticated || !user?.workspaceId) return
 
@@ -340,41 +389,46 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                     table: 'workspaces',
                     filter: `id=eq.${user.workspaceId}`
                 },
-                (payload) => {
-                    console.log('[Workspace] Realtime update received:', payload.new)
-                    const data = payload.new as any
+                async (payload) => {
+                    try {
+                        const data = payload.new as any
+                        const currentFeatures = featuresRef.current
+                        const updatedFeatures = mergeWorkspaceFeatures({
+                            ...currentFeatures,
+                            allow_pos: data.allow_pos ?? currentFeatures.allow_pos,
+                            allow_customers: data.allow_customers ?? currentFeatures.allow_customers,
+                            allow_suppliers: data.allow_suppliers ?? currentFeatures.allow_suppliers,
+                            allow_orders: data.allow_orders ?? currentFeatures.allow_orders,
+                            allow_invoices: data.allow_invoices ?? currentFeatures.allow_invoices,
+                            is_configured: data.is_configured ?? currentFeatures.is_configured,
+                            default_currency: data.default_currency || currentFeatures.default_currency,
+                            iqd_display_preference: data.iqd_display_preference || currentFeatures.iqd_display_preference,
+                            eur_conversion_enabled: data.eur_conversion_enabled ?? currentFeatures.eur_conversion_enabled,
+                            try_conversion_enabled: data.try_conversion_enabled ?? currentFeatures.try_conversion_enabled,
+                            locked_workspace: data.locked_workspace ?? currentFeatures.locked_workspace,
+                            logo_url: data.logo_url ?? currentFeatures.logo_url,
+                            max_discount_percent: data.max_discount_percent ?? currentFeatures.max_discount_percent,
+                            allow_whatsapp: data.allow_whatsapp ?? currentFeatures.allow_whatsapp,
+                            print_lang: data.print_lang ?? currentFeatures.print_lang,
+                            print_qr: data.print_qr ?? currentFeatures.print_qr,
+                            receipt_template: data.receipt_template ?? currentFeatures.receipt_template,
+                            a4_template: data.a4_template ?? currentFeatures.a4_template,
+                            print_quality: data.print_quality ?? currentFeatures.print_quality,
+                            subscription_expires_at: data.subscription_expires_at ?? currentFeatures.subscription_expires_at
+                        })
+                        const nextWorkspaceName = data.name || workspaceNameRef.current || user.workspaceName || 'My Workspace'
 
-                    const updatedFeatures: WorkspaceFeatures = {
-                        allow_pos: data.allow_pos ?? features.allow_pos,
-                        allow_customers: data.allow_customers ?? features.allow_customers,
-                        allow_suppliers: data.allow_suppliers ?? features.allow_suppliers,
-                        allow_orders: data.allow_orders ?? features.allow_orders,
-                        allow_invoices: data.allow_invoices ?? features.allow_invoices,
-                        is_configured: data.is_configured ?? features.is_configured,
-                        default_currency: data.default_currency || features.default_currency,
-                        iqd_display_preference: data.iqd_display_preference || features.iqd_display_preference,
-                        eur_conversion_enabled: data.eur_conversion_enabled ?? features.eur_conversion_enabled,
-                        try_conversion_enabled: data.try_conversion_enabled ?? features.try_conversion_enabled,
-                        locked_workspace: data.locked_workspace ?? features.locked_workspace,
-                        logo_url: data.logo_url ?? features.logo_url,
-                        max_discount_percent: data.max_discount_percent ?? features.max_discount_percent,
-                        allow_whatsapp: data.allow_whatsapp ?? features.allow_whatsapp,
-                        print_lang: data.print_lang ?? features.print_lang,
-                        print_qr: data.print_qr ?? features.print_qr,
-                        receipt_template: data.receipt_template ?? features.receipt_template,
-                        a4_template: data.a4_template ?? features.a4_template,
-                        print_quality: data.print_quality ?? features.print_quality,
-                        subscription_expires_at: data.subscription_expires_at ?? features.subscription_expires_at
+                        setFeatures(updatedFeatures)
+                        setWorkspaceName(nextWorkspaceName)
+                        writeWorkspaceCache({
+                            workspaceId: user.workspaceId,
+                            features: updatedFeatures,
+                            workspaceName: nextWorkspaceName
+                        })
+                        await persistWorkspaceState(user.workspaceId, updatedFeatures, nextWorkspaceName)
+                    } catch (error) {
+                        console.error('[Workspace] Failed to apply realtime update:', error)
                     }
-
-                    setFeatures(updatedFeatures)
-                    setWorkspaceName(data.name || workspaceName)
-
-                    // Update cache
-                    localStorage.setItem(WORKSPACE_CACHE_KEY, JSON.stringify({
-                        features: updatedFeatures,
-                        workspaceName: data.name || workspaceName
-                    }))
                 }
             )
             .subscribe((status) => {
@@ -387,18 +441,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             supabase.removeChannel(channel)
             realtimeChannelRef.current = null
         }
-    }, [isAuthenticated, user?.workspaceId])
+    }, [isAuthenticated, user?.workspaceId, user?.workspaceName])
 
-    // ───────────────────────────────────────────────────────
-    // RESILIENCE: Re-fetch on wake (backup for Realtime failures)
-    // ───────────────────────────────────────────────────────
     useEffect(() => {
         if (!isSupabaseConfigured || !isAuthenticated || !user?.workspaceId) return
 
         const unsubscribe = connectionManager.subscribe((event) => {
             if (event === 'wake') {
-                console.log('[Workspace] Wake event — re-fetching features silently')
-                fetchFeatures(true) // silent = true, no loading state change
+                console.log('[Workspace] Wake event - re-fetching features silently')
+                void fetchFeatures(true, { workspaceId: user.workspaceId })
             }
         })
 
@@ -410,38 +461,44 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
 
     const refreshFeatures = async () => {
+        const workspaceId = user?.workspaceId
+        if (!workspaceId) return
+
         setIsLoading(true)
-        await fetchFeatures()
+        await fetchFeatures(false, { workspaceId })
     }
 
-    const updateSettings = async (settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'iqd_display_preference' | 'eur_conversion_enabled' | 'try_conversion_enabled' | 'allow_whatsapp' | 'logo_url' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'print_quality'>> & { name?: string }) => {
+    const updateSettings = async (
+        settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'iqd_display_preference' | 'eur_conversion_enabled' | 'try_conversion_enabled' | 'allow_whatsapp' | 'logo_url' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'print_quality'>> & { name?: string }
+    ) => {
         const workspaceId = user?.workspaceId
         if (!workspaceId) return
 
         const { name, ...featureSettings } = settings
+        const currentFeatures = featuresRef.current
+        const nextWorkspaceName = name ?? workspaceNameRef.current ?? user?.workspaceName ?? 'My Workspace'
+        const newFeatures = { ...currentFeatures, ...featureSettings }
+        const now = new Date().toISOString()
 
-        // Optimistically update local state
         if (name) {
             setWorkspaceName(name)
-            // Sync with AuthContext user metadata for consistency
             updateUser({ workspaceName: name })
         }
 
-        const newFeatures = { ...features, ...featureSettings }
         setFeatures(newFeatures)
-
-        // Update Local Cache
-        localStorage.setItem(WORKSPACE_CACHE_KEY, JSON.stringify({
+        writeWorkspaceCache({
+            workspaceId,
             features: newFeatures,
-            workspaceName: name || workspaceName
-        }))
+            workspaceName: nextWorkspaceName
+        })
 
-        // Update local DB cache
         const existing = await db.workspaces.get(workspaceId)
         const localUpdateData = {
             ...featureSettings,
             ...(name !== undefined && { name }),
-            updatedAt: new Date().toISOString()
+            is_configured: newFeatures.is_configured,
+            updatedAt: now,
+            syncStatus: 'pending' as const
         }
 
         if (existing) {
@@ -450,32 +507,43 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             await db.workspaces.put({
                 id: workspaceId,
                 workspaceId,
-                name: name || 'My Workspace',
-                code: 'LOCAL',
-                default_currency: featureSettings.default_currency || 'usd',
-                iqd_display_preference: featureSettings.iqd_display_preference || 'IQD',
-                locked_workspace: false,
-                allow_pos: true,
-                allow_customers: true,
-                allow_suppliers: true,
-                allow_orders: true,
-                allow_invoices: true,
+                name: nextWorkspaceName,
+                code: user?.workspaceCode || 'LOCAL',
+                is_configured: newFeatures.is_configured,
+                default_currency: newFeatures.default_currency,
+                iqd_display_preference: newFeatures.iqd_display_preference,
+                eur_conversion_enabled: newFeatures.eur_conversion_enabled,
+                try_conversion_enabled: newFeatures.try_conversion_enabled,
+                locked_workspace: newFeatures.locked_workspace,
+                allow_pos: newFeatures.allow_pos,
+                allow_customers: newFeatures.allow_customers,
+                allow_suppliers: newFeatures.allow_suppliers,
+                allow_orders: newFeatures.allow_orders,
+                allow_invoices: newFeatures.allow_invoices,
+                allow_whatsapp: newFeatures.allow_whatsapp,
+                logo_url: newFeatures.logo_url,
+                max_discount_percent: newFeatures.max_discount_percent,
+                print_lang: newFeatures.print_lang,
+                print_qr: newFeatures.print_qr,
+                receipt_template: newFeatures.receipt_template,
+                a4_template: newFeatures.a4_template,
+                print_quality: newFeatures.print_quality,
+                subscription_expires_at: newFeatures.subscription_expires_at,
                 syncStatus: 'pending',
                 lastSyncedAt: null,
                 version: 1,
                 isDeleted: false,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString()
+                createdAt: now,
+                updatedAt: now
             })
         }
 
-        if (navigator.onLine) {
-            // Map settings to Supabase column names
-            const supabaseUpdate: any = { ...featureSettings }
-            if (name !== undefined) {
-                supabaseUpdate.name = name
-            }
+        const supabaseUpdate: Record<string, unknown> = { ...featureSettings }
+        if (name !== undefined) {
+            supabaseUpdate.name = name
+        }
 
+        if (navigator.onLine) {
             const { error } = await supabase
                 .from('workspaces')
                 .update(supabaseUpdate)
@@ -484,12 +552,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             if (error) {
                 console.error('Error updating workspace settings on Supabase:', error)
                 await addToOfflineMutations('workspaces', workspaceId, 'update', supabaseUpdate, workspaceId)
+            } else {
+                await db.workspaces.update(workspaceId, {
+                    syncStatus: 'synced',
+                    lastSyncedAt: new Date().toISOString()
+                })
             }
         } else {
-            const supabaseUpdate: any = { ...featureSettings }
-            if (name !== undefined) {
-                supabaseUpdate.name = name
-            }
             await addToOfflineMutations('workspaces', workspaceId, 'update', supabaseUpdate, workspaceId)
         }
     }

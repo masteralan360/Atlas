@@ -43,16 +43,12 @@ export function ProtectedRoute({
         return <Redirect to="/workspace-registration" />
     }
 
-    // Redirect admins to workspace configuration if not configured
-    // Redirect admins to workspace configuration if not configured
-    // Note: features.is_configured defaults to true (in WorkspaceContext) until fetched.
-    // However, fetch happens fast. If isLoading/featuresLoading is false, we trust the value.
-    // Redirect admins to workspace configuration if not configured
+    // Redirect admins to workspace configuration only after workspace state resolves.
     if (user?.role === 'admin' && !features.is_configured && location !== '/workspace-configuration') {
         return <Redirect to="/workspace-configuration" />
     }
 
-    // Redirect admins away from workspace configuration if already configured
+    // Redirect admins away from workspace configuration once the workspace is configured.
     if (user?.role === 'admin' && features.is_configured && location === '/workspace-configuration') {
         return <Redirect to="/" />
     }

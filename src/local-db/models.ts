@@ -377,6 +377,7 @@ export type MutationStatus = 'pending' | 'syncing' | 'failed' | 'synced'
 export interface Workspace extends BaseEntity {
     name: string
     code: string
+    is_configured?: boolean
     default_currency: CurrencyCode
     iqd_display_preference: IQDDisplayPreference
     eur_conversion_enabled?: boolean

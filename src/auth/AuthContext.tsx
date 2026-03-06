@@ -3,6 +3,7 @@ import { supabase, isSupabaseConfigured } from './supabase'
 import type { User, Session } from '@supabase/supabase-js'
 import type { UserRole } from '@/local-db/models'
 import { connectionManager } from '@/lib/connectionManager'
+import { clearWorkspaceCache } from '@/workspace/workspaceCache'
 
 interface AuthUser {
     id: string
@@ -116,6 +117,31 @@ function clearRecovery() {
     localStorage.removeItem('asaas_session_recovery')
 }
 
+function isRecoveryEligibleError(error: unknown) {
+    if (!error) return false
+
+    const message = error instanceof Error
+        ? error.message.toLowerCase()
+        : String(error).toLowerCase()
+
+    return (
+        message.includes('timed out') ||
+        message.includes('timeout') ||
+        message.includes('network') ||
+        message.includes('failed to fetch') ||
+        message.includes('fetch failed') ||
+        message.includes('offline')
+    )
+}
+
+function canUseRecoveryBridge(error?: unknown) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        return true
+    }
+
+    return isRecoveryEligibleError(error)
+}
+
 
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -143,6 +169,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             if (!parsedUser) {
                 setUser(null)
+                clearRecovery()
+                setIsLoading(false)
                 return
             }
 
@@ -181,23 +209,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                         saveRecovery(enriched)
                     }
                 } else {
-                    // NO SESSION: check recovery bridge
-                    const recovered = getRecoveredUser()
-                    if (recovered) {
-                        const maxAge = 7 * 24 * 60 * 60 * 1000
-                        const isStale = recovered.recoveredAt && (Date.now() - recovered.recoveredAt > maxAge)
+                    if (canUseRecoveryBridge()) {
+                        const recovered = getRecoveredUser()
+                        if (recovered) {
+                            const maxAge = 7 * 24 * 60 * 60 * 1000
+                            const isStale = recovered.recoveredAt && (Date.now() - recovered.recoveredAt > maxAge)
 
-                        if (!isStale) {
-                            console.log('[Auth] Restoring session from recovery bridge...')
-                            setUser(recovered)
-                        } else {
-                            console.log('[Auth] Recovery bridge is stale (>7 days), clearing.')
-                            clearRecovery()
+                            if (!isStale) {
+                                console.log('[Auth] Restoring session from recovery bridge...')
+                                setUser(recovered)
+                            } else {
+                                console.log('[Auth] Recovery bridge is stale (>7 days), clearing.')
+                                clearRecovery()
+                            }
                         }
+                    } else {
+                        clearRecovery()
                     }
                 }
             } catch (e) {
                 console.error('[Auth] Initial session fetch failed:', e);
+                let allowRecovery = canUseRecoveryBridge(e)
 
                 // Second chance: try refreshSession directly (different code path)
                 try {
@@ -219,13 +251,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     }
                 } catch (refreshErr) {
                     console.warn('[Auth] refreshSession also failed:', refreshErr)
+                    allowRecovery = allowRecovery || canUseRecoveryBridge(refreshErr)
+
+                    if (!allowRecovery) {
+                        clearRecovery()
+                    }
                 }
 
-                // Final fallback: recovery bridge (user-only, no session)
-                const recovered = getRecoveredUser()
-                if (recovered) {
-                    console.log('[Auth] Using recovery bridge (limited mode).')
-                    setUser(recovered)
+                if (!allowRecovery) {
+                    clearRecovery()
+                }
+
+                if (allowRecovery) {
+                    const recovered = getRecoveredUser()
+                    if (recovered) {
+                        console.log('[Auth] Using recovery bridge (limited mode).')
+                        setUser(recovered)
+                    }
                 }
             } finally {
                 setIsLoading(false)
@@ -439,7 +481,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setUser(null)
             setSession(null)
 
-            localStorage.removeItem('asaas_workspace_cache')
+            clearWorkspaceCache()
             clearRecovery()
 
             console.log('[Auth] Sign out complete')

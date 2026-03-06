@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
 import { useLocation } from 'wouter'
@@ -45,11 +45,11 @@ export function WorkspaceConfiguration() {
     const isTauri = isTauriCheck()
     const workspaceId = user?.workspaceId || ''
 
-    // Redirect if already configured - Moved after state to avoid early return issues
-    if (!isWorkspaceLoading && currentFeatures.is_configured) {
-        navigate('/')
-        return null
-    }
+    useEffect(() => {
+        if (!isWorkspaceLoading && currentFeatures.is_configured) {
+            navigate('/')
+        }
+    }, [currentFeatures.is_configured, isWorkspaceLoading, navigate])
 
     const [features, setFeatures] = useState({
         allow_pos: currentFeatures.allow_pos,
