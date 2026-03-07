@@ -68,6 +68,7 @@ const routePrefetchMap: Record<string, () => Promise<unknown>> = {
     '/sales': () => import('@/ui/pages/Sales'),
     '/loans': () => import('@/ui/pages/Loans'),
     '/revenue': () => import('@/ui/pages/Revenue'),
+    '/monthly-comparison': () => import('@/ui/pages/MonthlyComparison'),
     '/budget': () => import('@/ui/pages/Budget'),
     '/performance': () => import('@/ui/pages/TeamPerformance'),
     '/whatsapp': () => import('@/ui/pages/WhatsAppWeb'),
@@ -226,6 +227,7 @@ export function Layout({ children }: LayoutProps) {
         // Revenue - admin only
         ...(user?.role === 'admin' ? [
             { name: t('nav.revenue') || 'Net Revenue', href: '/revenue', icon: BarChart3 },
+            { name: t('monthlyComparison.title', 'Monthly Comparison'), href: '/monthly-comparison', icon: ArrowRightLeft },
             { name: t('nav.budget') || 'Budget', href: '/budget', icon: Wallet, alert: budgetLimitReached },
             { name: t('nav.performance') || 'Team Performance', href: '/performance', icon: TrendingUp }
         ] : []),

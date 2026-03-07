@@ -68,7 +68,7 @@ interface StaffPerformance {
 
 export function TeamPerformance() {
     const { user } = useAuth()
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const { features, workspaceName } = useWorkspace()
     const [sales, setSales] = useState<Sale[]>([])
     const [members, setMembers] = useState<User[]>([])
@@ -301,8 +301,8 @@ export function TeamPerformance() {
         }
         if (dateRange === 'month') {
             const now = new Date()
-            return new Intl.DateTimeFormat('en-GB', {
-                month: 'short',
+            return new Intl.DateTimeFormat(i18n.language, {
+                month: 'long',
                 year: 'numeric'
             }).format(now)
         }

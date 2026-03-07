@@ -38,6 +38,7 @@ export function DividendDistributionModal({
                 <DividendDistributionPanel
                     recipients={recipients}
                     surplus={surplus}
+                    paidAmount={0}
                     baseCurrency={baseCurrency}
                     iqdPreference={iqdPreference}
                     onPrint={handlePrint}

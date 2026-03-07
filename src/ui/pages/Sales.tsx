@@ -101,7 +101,7 @@ function saleHasAnyReturnActivity(sale: Sale): boolean {
 
 export function Sales() {
     const { user } = useAuth()
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const [, setLocation] = useLocation()
     const { features, workspaceName, activeWorkspace } = useWorkspace()
     const { style } = useTheme()
@@ -250,8 +250,8 @@ export function Sales() {
         }
         if (dateRange === 'month') {
             const now = new Date()
-            return new Intl.DateTimeFormat('en-GB', {
-                month: 'short',
+            return new Intl.DateTimeFormat(i18n.language, {
+                month: 'long',
                 year: 'numeric'
             }).format(now)
         }
@@ -637,15 +637,15 @@ export function Sales() {
                     if (!navigator.onLine) {
                         console.error('Supabase update failed, falling back to offline sync:', normalized)
                         await db.offline_mutations.add({
-                        id: crypto.randomUUID(),
-                        workspaceId: activeWorkspace?.id || selectedSaleForNote.workspace_id,
-                        entityType: 'sales',
-                        entityId: selectedSaleForNote.id,
-                        operation: 'update',
-                        payload: { notes: note, updated_at: now },
-                        status: 'pending',
-                        createdAt: now
-                    })
+                            id: crypto.randomUUID(),
+                            workspaceId: activeWorkspace?.id || selectedSaleForNote.workspace_id,
+                            entityType: 'sales',
+                            entityId: selectedSaleForNote.id,
+                            operation: 'update',
+                            payload: { notes: note, updated_at: now },
+                            status: 'pending',
+                            createdAt: now
+                        })
 
                         await db.sales.update(selectedSaleForNote.id, {
                             notes: note,

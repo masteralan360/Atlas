@@ -150,6 +150,15 @@
         "tools": "Tools",
         "actions": "Actions"
     },
+    "monthlyComparison": {
+        "title": "Monthly Comparison",
+        "subtitle": "Compare two months across revenue, costs, expenses, dividends, and retained profit",
+        "monthA": "Month A",
+        "monthB": "Month B",
+        "currentVsPrevious": "Current vs Previous",
+        "sameMonthLastYear": "Same Month Last Year",
+        "reset": "Reset"
+    },
     "report": {
         "print": "Print Performance Report",
         "generatedOn": "Report generated on"

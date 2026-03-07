@@ -35,7 +35,7 @@ export function InvoicesHistory() {
     const { user } = useAuth()
     const invoices = useInvoices(user?.workspaceId)
     const { features } = useWorkspace()
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const { dateRange, customDates } = useDateRange()
     const [search, setSearch] = useState('')
     const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null)
@@ -50,8 +50,8 @@ export function InvoicesHistory() {
         }
         if (dateRange === 'month') {
             const now = new Date()
-            return new Intl.DateTimeFormat('en-GB', {
-                month: 'short',
+            return new Intl.DateTimeFormat(i18n.language, {
+                month: 'long',
                 year: 'numeric'
             }).format(now)
         }

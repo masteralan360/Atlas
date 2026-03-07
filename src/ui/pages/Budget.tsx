@@ -1450,8 +1450,8 @@ export default function Budget() {
                             {isMonthlyFinancialsLoading
                                 ? <LoadingValue className="h-3 w-32" />
                                 : metrics.isDeficit
-                                ? t('budget.projectedDeficit', 'Dividends exceed profit')
-                                : t('budget.projectedSurplus', 'Projected Surplus')
+                                    ? t('budget.projectedDeficit', 'Dividends exceed profit')
+                                    : t('budget.projectedSurplus', 'Projected Surplus')
                             }
                         </p>
                     </CardContent>
@@ -1650,37 +1650,6 @@ export default function Budget() {
                 </TabsContent>
 
                 <TabsContent value="dividends" className="mt-0 space-y-4">
-                    {isMonthlyFinancialsLoading ? (
-                        <Card className="p-4 md:p-6 rounded-[2rem] border bg-card">
-                            <div className="space-y-6 animate-pulse">
-                                <div className="flex items-center justify-between gap-4">
-                                    <div className="space-y-3">
-                                        <div className="h-7 w-56 rounded-full bg-black/10 dark:bg-white/10" />
-                                        <div className="h-4 w-72 rounded-full bg-black/10 dark:bg-white/10" />
-                                    </div>
-                                    <div className="h-10 w-10 rounded-xl bg-black/10 dark:bg-white/10" />
-                                </div>
-                                <div className="grid gap-6 md:grid-cols-2">
-                                    <div className="h-[300px] rounded-[2rem] bg-black/10 dark:bg-white/10" />
-                                    <div className="space-y-4">
-                                        <div className="h-24 rounded-[2rem] bg-black/10 dark:bg-white/10" />
-                                        <div className="h-24 rounded-[2rem] bg-black/10 dark:bg-white/10" />
-                                    </div>
-                                </div>
-                                <div className="h-64 rounded-[2rem] bg-black/10 dark:bg-white/10" />
-                            </div>
-                        </Card>
-                    ) : (
-                        <DividendDistributionPanel
-                            recipients={metrics.dividendRecipients}
-                            surplus={metrics.finalNetProfit}
-                            baseCurrency={baseCurrency}
-                            iqdPreference={iqdPreference}
-                            onPrint={handlePrintDividends}
-                            className="p-4 md:p-6 rounded-[2rem] border bg-card"
-                        />
-                    )}
-
                     <Card className="rounded-[2rem] border">
                         <CardHeader>
                             <CardTitle className="text-lg font-bold">
@@ -1770,6 +1739,38 @@ export default function Budget() {
                             )}
                         </CardContent>
                     </Card>
+
+                    {isMonthlyFinancialsLoading ? (
+                        <Card className="p-4 md:p-6 rounded-[2rem] border bg-card">
+                            <div className="space-y-6 animate-pulse">
+                                <div className="flex items-center justify-between gap-4">
+                                    <div className="space-y-3">
+                                        <div className="h-7 w-56 rounded-full bg-black/10 dark:bg-white/10" />
+                                        <div className="h-4 w-72 rounded-full bg-black/10 dark:bg-white/10" />
+                                    </div>
+                                    <div className="h-10 w-10 rounded-xl bg-black/10 dark:bg-white/10" />
+                                </div>
+                                <div className="grid gap-6 md:grid-cols-2">
+                                    <div className="h-[300px] rounded-[2rem] bg-black/10 dark:bg-white/10" />
+                                    <div className="space-y-4">
+                                        <div className="h-24 rounded-[2rem] bg-black/10 dark:bg-white/10" />
+                                        <div className="h-24 rounded-[2rem] bg-black/10 dark:bg-white/10" />
+                                    </div>
+                                </div>
+                                <div className="h-64 rounded-[2rem] bg-black/10 dark:bg-white/10" />
+                            </div>
+                        </Card>
+                    ) : (
+                        <DividendDistributionPanel
+                            recipients={metrics.dividendRecipients}
+                            surplus={metrics.finalNetProfit}
+                            paidAmount={metrics.dividendPaid}
+                            baseCurrency={baseCurrency}
+                            iqdPreference={iqdPreference}
+                            onPrint={handlePrintDividends}
+                            className="p-4 md:p-6 rounded-[2rem] border bg-card"
+                        />
+                    )}
                 </TabsContent>
             </Tabs>
             <div className="fixed left-[-10000px] top-0 pointer-events-none">
@@ -1790,6 +1791,7 @@ export default function Budget() {
                     <DividendDistributionPanel
                         recipients={metrics.dividendRecipients}
                         surplus={metrics.finalNetProfit}
+                        paidAmount={metrics.dividendPaid}
                         baseCurrency={baseCurrency}
                         iqdPreference={iqdPreference}
                         className="p-8 min-w-[950px] bg-background"

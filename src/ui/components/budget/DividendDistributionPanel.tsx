@@ -38,6 +38,7 @@ export interface DividendRecipient {
 interface DividendDistributionPanelProps {
     recipients: DividendRecipient[]
     surplus: number
+    paidAmount: number
     baseCurrency: string
     iqdPreference: string
     onPrint?: () => void
@@ -51,6 +52,7 @@ const SURPLUS_COLOR = '#8b5cf6'
 export function DividendDistributionPanel({
     recipients,
     surplus,
+    paidAmount,
     baseCurrency,
     iqdPreference,
     onPrint,
@@ -191,6 +193,23 @@ export function DividendDistributionPanel({
                             </div>
                         </CardContent>
                     </Card>
+
+                    <Card className="bg-emerald-500/5 border-emerald-500/10 rounded-3xl overflow-hidden shadow-sm">
+                        <CardContent className="p-5 flex items-center gap-4">
+                            <div className="p-3.5 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                <CheckCircle2 className="w-5 h-5" />
+                            </div>
+                            <div>
+                                <div className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
+                                    {t('budget.dividendsWithdrawn', 'Dividends Withdrawn')}
+                                </div>
+                                <div className="text-2xl font-black tabular-nums tracking-tight text-emerald-700 dark:text-emerald-300">
+                                    {formatCurrency(paidAmount, baseCurrency as any, iqdPreference as any)}
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
                     <Card className={cn(
                         "rounded-3xl overflow-hidden",
                         surplus < 0 ? 'bg-red-500/5 border-red-500/10' : 'bg-violet-500/5 border-violet-500/10'

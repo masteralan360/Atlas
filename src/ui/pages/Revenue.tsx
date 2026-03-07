@@ -128,8 +128,8 @@ export function Revenue() {
         }
         if (dateRange === 'month') {
             const now = new Date()
-            return new Intl.DateTimeFormat('en-GB', {
-                month: 'short',
+            return new Intl.DateTimeFormat(i18n.language, {
+                month: 'long',
                 year: 'numeric'
             }).format(now)
         }
