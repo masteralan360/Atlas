@@ -121,11 +121,17 @@ const isSameDay = (a: Date, b: Date) =>
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate()
 
+const toMonthKey = (date: Date) => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    return `${year}-${month}`
+}
+
 const getReminderMonth = (dateLike: string | Date): string | null => {
     const date = new Date(dateLike)
     if (isNaN(date.getTime())) return null
 
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+    return toMonthKey(date)
 }
 
 const getDividendReminderId = (employeeId: string, dateLike: string | Date) => {
@@ -173,6 +179,7 @@ export default function Budget() {
     const [snoozedItems, setSnoozedItems] = useState<BudgetReminderItem[]>([])
     const [reminderIndex, setReminderIndex] = useState(0)
     const [reminderStep, setReminderStep] = useState<'idle' | 'reminder' | 'lock' | 'snooze'>('idle')
+    const [pendingAdvanceMonth, setPendingAdvanceMonth] = useState<Date | null>(null)
 
     const [isProcessing, setIsProcessing] = useState(false)
     const [dividendPaidMap, setDividendPaidMap] = useState<Map<string, boolean>>(new Map())
@@ -184,11 +191,7 @@ export default function Budget() {
         reminderStepRef.current = reminderStep
     }, [reminderStep])
 
-    const monthStr = useMemo(() => {
-        const year = selectedMonth.getFullYear()
-        const month = String(selectedMonth.getMonth() + 1).padStart(2, '0')
-        return `${year}-${month}`
-    }, [selectedMonth])
+    const monthStr = useMemo(() => toMonthKey(selectedMonth), [selectedMonth])
 
     const currentAllocationState = useBudgetAllocationState(workspaceId, monthStr)
     const currentAllocation = currentAllocationState.data
@@ -203,6 +206,7 @@ export default function Budget() {
         const sp = allAllocations.find(a => a.startPoint === true)
         return sp?.month ?? null // e.g. "2026-02"
     }, [allAllocations])
+    const allocatedMonths = useMemo(() => new Set(allAllocations.map(allocation => allocation.month)), [allAllocations])
 
     const isAtStartPoint = useMemo(() => {
         if (!startPointMonth) return false
@@ -243,7 +247,24 @@ export default function Budget() {
         if (isAtStartPoint) return // Cannot go before start_point
         setSelectedMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))
     }
-    const handleNextMonth = () => setSelectedMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))
+    const handleNextMonth = () => {
+        const nextMonth = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1)
+        const currentReachedMonth = toMonthKey(new Date())
+        const nextMonthKey = toMonthKey(nextMonth)
+
+        if (nextMonthKey > currentReachedMonth && !allocatedMonths.has(nextMonthKey)) {
+            setPendingAdvanceMonth(nextMonth)
+            return
+        }
+
+        setSelectedMonth(nextMonth)
+    }
+
+    const handleConfirmAdvanceMonth = () => {
+        if (!pendingAdvanceMonth) return
+        setSelectedMonth(new Date(pendingAdvanceMonth.getFullYear(), pendingAdvanceMonth.getMonth(), 1))
+        setPendingAdvanceMonth(null)
+    }
 
     useEffect(() => {
         // Only trigger if start_point exists (user has set at least one allocation)
@@ -1218,6 +1239,8 @@ export default function Budget() {
 
     const isCurrentMonth = selectedMonth.getFullYear() === new Date().getFullYear() &&
         selectedMonth.getMonth() === new Date().getMonth()
+    const currentCalendarMonthLabel = formatLocalizedMonthYear(new Date(), i18n.language)
+    const pendingAdvanceMonthLabel = pendingAdvanceMonth ? formatLocalizedMonthYear(pendingAdvanceMonth, i18n.language) : ''
 
     return (
         <div className="space-y-6 pb-10">
@@ -2094,6 +2117,34 @@ export default function Budget() {
                             onClick={handleConfirmLock}
                         >
                             {t('common.confirm', 'Confirm')}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={!!pendingAdvanceMonth} onOpenChange={(open) => !open && setPendingAdvanceMonth(null)}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>
+                            {t('budget.futureMonthConfirmTitle', 'Open {{month}} early?', { month: pendingAdvanceMonthLabel })}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {t(
+                                'budget.futureMonthConfirmDesc',
+                                '{{month}} has not been reached yet. You are still in {{currentMonth}}, and no budget allocation exists for {{month}}. Do you want to continue?',
+                                {
+                                    month: pendingAdvanceMonthLabel,
+                                    currentMonth: currentCalendarMonthLabel
+                                }
+                            )}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setPendingAdvanceMonth(null)}>
+                            {t('common.cancel', 'Cancel')}
+                        </Button>
+                        <Button onClick={handleConfirmAdvanceMonth}>
+                            {t('budget.futureMonthConfirmAction', 'Continue to {{month}}', { month: pendingAdvanceMonthLabel })}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

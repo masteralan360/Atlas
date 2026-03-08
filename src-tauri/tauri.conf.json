@@ -41,7 +41,7 @@
     "targets": "all",
     "createUpdaterArtifacts": true,
     "icon": [
-      "../public/logo.ico"
+      "../public/logo.png"
     ],
     "windows": {
       "nsis": {

@@ -877,6 +877,10 @@
         "continueSale": "بەردەوامبە",
         "backToPos": "گەڕانەوە بۆ POS",
         "outOfStock": "تەواو بووە",
+        "available": "بەردەستە",
+        "inCart": "لە سەبەتەکەدا",
+        "addOne": "یەک زیاد بکە",
+        "removeOne": "یەک کەم بکە",
         "loan": "Loan"
     },
     "print": {
@@ -1382,6 +1386,9 @@
         "estimatedLimit": "سنووری خەمڵێنراو",
         "basedOnRevenue": "لەسەر بنەمای داهاتی مانگی {{month}}",
         "startPoint": "دەستپێک",
+        "futureMonthConfirmTitle": "مانگی {{month}} پێشوەخت بکەیتەوە؟",
+        "futureMonthConfirmDesc": "{{month}} هێشتا نەگەیشتووە. ئێستاش لە {{currentMonth}}دایە و هیچ تەڕخانکردنی بودجەیەک بۆ {{month}} نییە. دەتەوێت بەردەوام ببیت؟",
+        "futureMonthConfirmAction": "بڕۆ بۆ {{month}}",
         "snoozedItems": "بیرخستنەوە دواخراوەکان",
         "snoozedItemsDesc": "ئەم بڕگانە لە ئێستادا دواخراون. پاشگەز ببەرەوە لە دواخستن بۆ ئەوەی دووبارە بیرت بهێنرێتەوە.",
         "snoozedUntil": "دواخراوە تا",

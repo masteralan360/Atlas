@@ -887,7 +887,12 @@
         "backToPos": "Back to POS",
         "printReceipt": "Print Receipt",
         "continueSale": "Continue Sale",
-        "outOfStock": "Out of Stock"
+        "outOfStock": "Out of Stock",
+        "available": "Available",
+        "inCart": "In Cart",
+        "addOne": "Add one",
+        "removeOne": "Remove one",
+        "totalItems": "Total Items"
     },
     "print": {
         "clickToExpand": "Click to expand",
@@ -1475,6 +1480,9 @@
         "estimatedLimit": "Estimated Limit",
         "basedOnRevenue": "Based on {{month}} revenue",
         "startPoint": "Start",
+        "futureMonthConfirmTitle": "Open {{month}} early?",
+        "futureMonthConfirmDesc": "{{month}} has not been reached yet. You are still in {{currentMonth}}, and no budget allocation exists for {{month}}. Do you want to continue?",
+        "futureMonthConfirmAction": "Continue to {{month}}",
         "snoozedItems": "Snoozed Reminders",
         "snoozedItemsDesc": "These items are currently snoozed. Un-snooze to be reminded again.",
         "snoozedUntil": "Snoozed until",

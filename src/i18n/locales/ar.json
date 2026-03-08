@@ -881,6 +881,10 @@
         "continueSale": "متابعة البيع",
         "backToPos": "العودة إلى نقطة البيع",
         "outOfStock": "نفذ المخزون",
+        "available": "متاح",
+        "inCart": "في السلة",
+        "addOne": "إضافة واحدة",
+        "removeOne": "إزالة واحدة",
         "loan": "Loan"
     },
     "print": {
@@ -1395,6 +1399,9 @@
         "estimatedLimit": "الحد التقديري",
         "basedOnRevenue": "بناءً على إيرادات {{month}}",
         "startPoint": "البداية",
+        "futureMonthConfirmTitle": "فتح ميزانية {{month}} مبكرًا؟",
+        "futureMonthConfirmDesc": "لم يحن موعد {{month}} بعد. ما زلت في {{currentMonth}}، ولا توجد مخصصات ميزانية لـ {{month}} حتى الآن. هل تريد المتابعة؟",
+        "futureMonthConfirmAction": "المتابعة إلى {{month}}",
         "snoozedItems": "التذكيرات المؤجلة",
         "snoozedItemsDesc": "هذه العناصر مؤجلة حالياً. قم بإلغاء التأجيل ليتم تذكيرك مرة أخرى.",
         "snoozedUntil": "مؤجل حتى",
