@@ -32,6 +32,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/ui/components/card'
 import { Input } from '@/ui/components/input'
 import { CurrencyCode } from '@/local-db'
 import { formatCurrency, formatDate, formatNumberWithCommas, parseFormattedNumber, cn } from '@/lib/utils'
+import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { convertToStoreBase as convertToStoreBaseUtil } from '@/lib/currency'
 import { buildDividendReminderMetaMap } from '@/lib/dividendReminderMeta'
 // sonner removed
@@ -1232,7 +1233,7 @@ export default function Budget() {
                         <ChevronLeft className="w-4 h-4" />
                     </Button>
                     <div className="px-4 py-2 bg-secondary rounded-md font-bold text-sm flex items-center gap-2">
-                        {selectedMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}
+                        {formatLocalizedMonthYear(selectedMonth, i18n.language)}
                         {isAtStartPoint && (
                             <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-fuchsia-600 dark:text-fuchsia-400">
                                 <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-500 animate-pulse" />

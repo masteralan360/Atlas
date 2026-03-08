@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useInvoices, type Invoice } from '@/local-db'
 import { formatCurrency, formatDateTime, formatDate } from '@/lib/utils'
+import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import {
     Table,
     TableBody,
@@ -50,10 +51,7 @@ export function InvoicesHistory() {
         }
         if (dateRange === 'month') {
             const now = new Date()
-            return new Intl.DateTimeFormat(i18n.language, {
-                month: 'long',
-                year: 'numeric'
-            }).format(now)
+            return formatLocalizedMonthYear(now, i18n.language)
         }
         if (dateRange === 'custom') {
             if (filteredInvoices && filteredInvoices.length > 0) {

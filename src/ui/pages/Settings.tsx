@@ -20,6 +20,7 @@ import { platformService } from '@/services/platformService'
 import { r2Service } from '@/services/r2Service'
 import { Image as ImageIcon } from 'lucide-react'
 import { assetManager } from '@/lib/assetManager'
+import { getMonthDisplayPreference, setMonthDisplayPreference, type MonthDisplayPreference } from '@/lib/monthDisplay'
 import { useWorkspaceContacts } from '@/local-db/hooks'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
@@ -41,6 +42,7 @@ export function Settings() {
     const [tryExchangeRateSource, setTryExchangeRateSource] = useState(localStorage.getItem('primary_try_exchange_rate_source') || 'forexfy')
     const [exchangeRateThreshold, setExchangeRateThreshold] = useState(localStorage.getItem('exchange_rate_threshold') || '2500')
     const [whatsappAutoLaunch, setWhatsappAutoLaunch] = useState(localStorage.getItem('whatsapp_auto_launch') === 'true')
+    const [monthDisplayPreference, setMonthDisplayPreferenceState] = useState<MonthDisplayPreference>(getMonthDisplayPreference())
 
     // Connection Settings State
     const [isElectron, setIsElectron] = useState(false)
@@ -690,10 +692,37 @@ export function Settings() {
 
                                 <div className="flex flex-col gap-2">
                                     <Label>{t('settings.language')}</Label>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex flex-wrap items-center gap-2">
                                         <LanguageSwitcher />
                                         <span className="text-sm text-muted-foreground">
                                             {t('settings.languageDesc')}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div className="flex flex-col gap-2">
+                                    <Label>{t('settings.monthDisplay.title')}</Label>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <Select
+                                            value={monthDisplayPreference}
+                                            onValueChange={(value) => {
+                                                const nextValue = value as MonthDisplayPreference
+                                                setMonthDisplayPreferenceState(nextValue)
+                                                setMonthDisplayPreference(nextValue)
+                                            }}
+                                        >
+                                            <SelectTrigger className="w-[180px]">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="native">{t('settings.monthDisplay.native')}</SelectItem>
+                                                <SelectItem value="en">{t('settings.monthDisplay.english')}</SelectItem>
+                                                <SelectItem value="ar">{t('settings.monthDisplay.arabic')}</SelectItem>
+                                                <SelectItem value="ku">{t('settings.monthDisplay.kurdish')}</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <span className="text-sm text-muted-foreground">
+                                            {t('settings.monthDisplay.desc')}
                                         </span>
                                     </div>
                                 </div>

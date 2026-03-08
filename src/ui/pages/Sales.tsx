@@ -6,6 +6,7 @@ import { supabase } from '@/auth/supabase'
 import { Sale } from '@/types'
 import { mapSaleToUniversal } from '@/lib/mappings'
 import { formatCurrency, formatDateTime, formatCompactDateTime, formatDate, cn } from '@/lib/utils'
+import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
 import { db, useLoans, useSales, toUISale, type Loan } from '@/local-db'
@@ -250,10 +251,7 @@ export function Sales() {
         }
         if (dateRange === 'month') {
             const now = new Date()
-            return new Intl.DateTimeFormat(i18n.language, {
-                month: 'long',
-                year: 'numeric'
-            }).format(now)
+            return formatLocalizedMonthYear(now, i18n.language)
         }
         if (dateRange === 'custom') {
             if (sales && sales.length > 0) {

@@ -40,7 +40,7 @@ export function GlobalSearch({ className, placeholder }: GlobalSearchProps) {
         { id: 'nav-customers', title: t('nav.customers'), category: 'Navigation', icon: Users, action: () => setLocation('/customers') },
         { id: 'nav-settings', title: t('nav.settings'), category: 'Navigation', icon: SettingsIcon, action: () => setLocation('/settings') },
         { id: 'nav-revenue', title: t('nav.revenue'), category: 'Navigation', icon: BarChart3, action: () => setLocation('/revenue') },
-        { id: 'nav-monthly-comparison', title: t('monthlyComparison.title', 'Monthly Comparison'), category: 'Navigation', icon: ArrowRightLeft, action: () => setLocation('/monthly-comparison') },
+        { id: 'nav-monthly-comparison', title: t('monthlyComparison.title'), category: 'Navigation', icon: ArrowRightLeft, action: () => setLocation('/monthly-comparison') },
         { id: 'nav-performance', title: t('nav.performance'), category: 'Navigation', icon: Users2, action: () => setLocation('/performance') },
         { id: 'nav-suppliers', title: t('nav.suppliers') || 'Suppliers', category: 'Navigation', icon: Truck, action: () => setLocation('/suppliers') },
         { id: 'nav-orders', title: t('nav.orders') || 'Orders', category: 'Navigation', icon: ShoppingBag, action: () => setLocation('/orders') },

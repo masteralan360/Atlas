@@ -5,6 +5,7 @@ import { Sale, SaleItem } from '@/types'
 import { useSales, toUISale } from '@/local-db'
 import { formatCurrency, formatDateTime, formatDate } from '@/lib/utils'
 import { cn } from '@/lib/utils'
+import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { isMobile } from '@/lib/platform'
 import { useWorkspace } from '@/workspace'
 import { useDateRange } from '@/context/DateRangeContext'
@@ -128,10 +129,7 @@ export function Revenue() {
         }
         if (dateRange === 'month') {
             const now = new Date()
-            return new Intl.DateTimeFormat(i18n.language, {
-                month: 'long',
-                year: 'numeric'
-            }).format(now)
+            return formatLocalizedMonthYear(now, i18n.language)
         }
         if (dateRange === 'custom') {
             if (sales && sales.length > 0) {

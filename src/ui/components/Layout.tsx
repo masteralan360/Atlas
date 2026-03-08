@@ -227,7 +227,7 @@ export function Layout({ children }: LayoutProps) {
         // Revenue - admin only
         ...(user?.role === 'admin' ? [
             { name: t('nav.revenue') || 'Net Revenue', href: '/revenue', icon: BarChart3 },
-            { name: t('monthlyComparison.title', 'Monthly Comparison'), href: '/monthly-comparison', icon: ArrowRightLeft },
+            { name: t('monthlyComparison.title'), href: '/monthly-comparison', icon: ArrowRightLeft },
             { name: t('nav.budget') || 'Budget', href: '/budget', icon: Wallet, alert: budgetLimitReached },
             { name: t('nav.performance') || 'Team Performance', href: '/performance', icon: TrendingUp }
         ] : []),

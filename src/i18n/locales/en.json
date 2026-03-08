@@ -156,8 +156,157 @@
         "monthA": "Month A",
         "monthB": "Month B",
         "currentVsPrevious": "Current vs Previous",
+        "currentVsPreviousShort": "Current / Prev",
         "sameMonthLastYear": "Same Month Last Year",
-        "reset": "Reset"
+        "sameMonthLastYearShort": "Same Month LY",
+        "reset": "Reset",
+        "swapMonths": "Swap months",
+        "projected": "Projected",
+        "day": "Day",
+        "dayLabel": "Day {{label}}",
+        "paceSubtitle": "Cumulative by day of month",
+        "projectionNote": "Dashed segment projects the remaining days for the current month.",
+        "revenuePace": "Revenue Pace",
+        "profitPace": "Profit Pace",
+        "spendPace": "Operational Spend Pace",
+        "revenue": "Revenue",
+        "profit": "Profit",
+        "spend": "Spend",
+        "sections": {
+            "monthSummaries": "Month Summaries",
+            "chartsAnalytics": "Charts & Analytics",
+            "detailsBreakdown": "Details & Breakdown"
+        },
+        "status": {
+            "current": "Current",
+            "historical": "Historical",
+            "winner": "Winner",
+            "new": "New",
+            "dropped": "Dropped"
+        },
+        "meta": {
+            "sales": "Sales",
+            "noSales": "No sales",
+            "expenses": "Expenses",
+            "noExpenses": "No expenses",
+            "budgetSet": "Budget set",
+            "budgetNotSet": "Budget not set",
+            "expensesTracked": "expenses tracked",
+            "noExpensesLogged": "no expenses logged",
+            "toolbarSummary": "{{sales}} • {{expenses}} • {{budget}}",
+            "panelSummary": "{{count}} transactions • {{expenses}} • {{budget}}"
+        },
+        "empty": {
+            "notEnoughHistoryTitle": "Not enough month history to compare",
+            "notEnoughHistoryDescription": "This page needs at least two months with synced sales, expense, or budget data before it can render a comparison.",
+            "noDataAvailable": "No data available",
+            "noExpenseData": "No expense data",
+            "noProductRevenue": "No product revenue to compare",
+            "noReturnsEitherMonth": "No returns recorded in either month",
+            "noReturnedProducts": "No returned products"
+        },
+        "summary": {
+            "title": "What Changed",
+            "subtitle": "Three deterministic takeaways from the comparison"
+        },
+        "kpis": {
+            "revenueKpis": "Revenue KPIs",
+            "monthHealth": "Month Health",
+            "grossRevenue": "Gross Revenue",
+            "totalCost": "Total Cost",
+            "netProfit": "Net Profit",
+            "profitMargin": "Profit Margin",
+            "totalAllocated": "Total Allocated",
+            "totalPaid": "Total Paid",
+            "outstanding": "Outstanding",
+            "dividends": "Dividends",
+            "totalReturns": "Total Returns",
+            "refundedAmount": "Refunded Amount",
+            "returnRate": "Return Rate",
+            "transactions": "{{count}} transactions",
+            "costRatio": "{{value}}% cost ratio",
+            "ofRevenue": "{{value}}% of revenue",
+            "budgetLimit": "{{amount}} limit",
+            "allocatedSpend": "{{value}}% of allocated spend",
+            "dueByMonthEnd": "Due by month end",
+            "configuredDistributionTotal": "Configured distribution total"
+        },
+        "marginBand": {
+            "strong": "Strong",
+            "average": "Average",
+            "weak": "Weak"
+        },
+        "delta": {
+            "netProfit": "Net Profit",
+            "profitMargin": "Profit Margin",
+            "operationalSpend": "Operational Spend",
+            "noChange": "No change",
+            "flat": "Flat",
+            "versus": "{{left}} vs {{right}}"
+        },
+        "chartSummary": {
+            "noMeaningfulDifference": "No meaningful difference",
+            "favored": "{{category}} favored {{winner}}"
+        },
+        "categories": {
+            "revenue": "Revenue Categories",
+            "expense": "Expense Categories"
+        },
+        "topProducts": {
+            "title": "Top Products Comparison",
+            "subtitle": "Top 5 products by combined revenue across the selected months",
+            "product": "Product",
+            "delta": "Delta",
+            "share": "Share",
+            "shareInline": "Share: {{left}}% / {{right}}%"
+        },
+        "returns": {
+            "title": "Returns Comparison",
+            "subtitle": "Refund pressure and returned-product differences",
+            "count": "{{count}} returns",
+            "returnedCount": "{{count}} returned"
+        },
+        "peakActivity": {
+            "title": "Peak Activity Comparison",
+            "subtitle": "Busy-hour profile for both months",
+            "hourly": "Hourly",
+            "heatmap": "Heatmap",
+            "peakAt": "Peak {{time}}"
+        },
+        "profitBridge": {
+            "title": "Profit Bridge",
+            "subtitle": "How each month moved from sales profit to retained profit",
+            "profitFromRevenue": "Profit from Revenue",
+            "operationalExpenses": "Operational Expenses",
+            "personnel": "Personnel",
+            "dividends": "Dividends",
+            "noteCovered": "Revenue profit covered operational costs",
+            "noteExceeded": "Operational costs exceeded profit from revenue"
+        },
+        "insights": {
+            "revenueFlat": "Revenue: {{monthA}} and {{monthB}} closed at nearly the same level.",
+            "revenueOutperformed": "Revenue: {{monthB}} outperformed {{monthA}} by {{percent}}%.",
+            "revenueTrailed": "Revenue: {{monthB}} trailed {{monthA}} by {{percent}}%.",
+            "profitFlat": "Profitability: Net profit stayed broadly flat, with margin shifting {{points}} percentage points.",
+            "profitChanged": "Profitability: Net profit moved {{direction}} while margin {{marginDirection}} by {{points}} points.",
+            "returnsRose": "Returns: Return rate rose by {{points}} points between the two months.",
+            "returnsFell": "Returns: Return rate fell by {{points}} points between the two months.",
+            "productsStrongestMover": "Products: {{product}} was the strongest visible mover, shifting {{delta}} between the selected months.",
+            "spendFallback": "Spend: Operational changes shaped the retained profit gap between the selected months.",
+            "direction": {
+                "up": "up",
+                "down": "down"
+            },
+            "marginDirection": {
+                "expanded": "expanded",
+                "compressed": "compressed"
+            }
+        },
+        "fallback": {
+            "uncategorized": "Uncategorized",
+            "unknownProduct": "Unknown Product",
+            "payroll": "Payroll"
+        }
     },
     "report": {
         "print": "Print Performance Report",
@@ -509,6 +658,14 @@
         "appearanceDesc": "Customize the look and feel of the application",
         "language": "Language",
         "languageDesc": "Select your preferred language",
+        "monthDisplay": {
+            "title": "Month Display",
+            "desc": "Choose your preferred language for month names in charts and tables.",
+            "native": "System Default",
+            "english": "English",
+            "arabic": "Arabic",
+            "kurdish": "Kurdish"
+        },
         "theme": {
             "title": "Theme Preference",
             "style": "Theme Style",

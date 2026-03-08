@@ -154,8 +154,157 @@
         "monthA": "مانگی A",
         "monthB": "مانگی B",
         "currentVsPrevious": "ئێستا بەرامبەر پێشوو",
+        "currentVsPreviousShort": "ئێستا / پێشوو",
         "sameMonthLastYear": "هەمان مانگ لە ساڵی پار",
-        "reset": "نوێکردنەوە"
+        "sameMonthLastYearShort": "هەمان مانگ پار",
+        "reset": "نوێکردنەوە",
+        "swapMonths": "گۆڕینی مانگەکان",
+        "projected": "پێشبینیکراو",
+        "day": "ڕۆژ",
+        "dayLabel": "ڕۆژی {{label}}",
+        "paceSubtitle": "کۆکراوە بەپێی ڕۆژانی مانگ",
+        "projectionNote": "هێڵە پچڕپچڕەکان پێشبینی ڕۆژانی ماوەی ئەم مانگە دەردەخەن.",
+        "revenuePace": "ڕێرەوی داهات",
+        "profitPace": "ڕێرەوی قازانج",
+        "spendPace": "ڕێرەوی خەرجیی کارگێڕی",
+        "revenue": "داهات",
+        "profit": "قازانج",
+        "spend": "خەرجی",
+        "sections": {
+            "monthSummaries": "کورتەی مانگەکان",
+            "chartsAnalytics": "گراف و شیکاری",
+            "detailsBreakdown": "وردەکاری و شکاندنەوە"
+        },
+        "status": {
+            "current": "ئێستا",
+            "historical": "مێژوویی",
+            "winner": "براوە",
+            "new": "نوێ",
+            "dropped": "دەرچوو"
+        },
+        "meta": {
+            "sales": "فرۆشتن",
+            "noSales": "بێ فرۆشتن",
+            "expenses": "خەرجی",
+            "noExpenses": "بێ خەرجی",
+            "budgetSet": "بودجە دانراوە",
+            "budgetNotSet": "بودجە دانەنراوە",
+            "expensesTracked": "خەرجی تۆمارکراوە",
+            "noExpensesLogged": "هیچ خەرجییەک تۆمار نەکراوە",
+            "toolbarSummary": "{{sales}} • {{expenses}} • {{budget}}",
+            "panelSummary": "{{count}} مامەڵە • {{expenses}} • {{budget}}"
+        },
+        "empty": {
+            "notEnoughHistoryTitle": "مێژووی مانگانە بۆ بەراورد بەس نییە",
+            "notEnoughHistoryDescription": "ئەم پەڕەیە پێویستی بە لانیکەم دوو مانگ داتای هاوکاتکراوی فرۆشتن، خەرجی یان بودجە هەیە تا بتوانێت بەراورد پیشان بدات.",
+            "noDataAvailable": "هیچ زانیارییەک بەردەست نییە",
+            "noExpenseData": "هیچ داتای خەرجییەک نییە",
+            "noProductRevenue": "هیچ داهاتی بەرهەمێک بۆ بەراورد نییە",
+            "noReturnsEitherMonth": "لە هەردوو مانگەکەدا هیچ گەڕاندنەوەیەک تۆمار نەکراوە",
+            "noReturnedProducts": "هیچ بەرهەمی گەڕاوە نییە"
+        },
+        "summary": {
+            "title": "چی گۆڕا",
+            "subtitle": "سێ تێبینی دیاریکراو لە بەراوردەکە"
+        },
+        "kpis": {
+            "revenueKpis": "پێوەرەکانی داهات",
+            "monthHealth": "دۆخی مانگ",
+            "grossRevenue": "کۆی داهات",
+            "totalCost": "کۆی تێچوو",
+            "netProfit": "قازانجی خاوێن",
+            "profitMargin": "مارجینی قازانج",
+            "totalAllocated": "کۆی تەرخانکراو",
+            "totalPaid": "کۆی پارەدراو",
+            "outstanding": "ماوە",
+            "dividends": "دابەشکردن",
+            "totalReturns": "کۆی گەڕاندنەوە",
+            "refundedAmount": "بڕی گەڕاوە",
+            "returnRate": "ڕێژەی گەڕاندنەوە",
+            "transactions": "{{count}} مامەڵە",
+            "costRatio": "{{value}}% ڕێژەی تێچوو",
+            "ofRevenue": "{{value}}% لە داهات",
+            "budgetLimit": "سقفی {{amount}}",
+            "allocatedSpend": "{{value}}% لە خەرجیی تەرخانکراو",
+            "dueByMonthEnd": "تا کۆتایی مانگ دەبێت بدرێت",
+            "configuredDistributionTotal": "کۆی دابەشکردنی دیاریکراو"
+        },
+        "marginBand": {
+            "strong": "بەهێز",
+            "average": "ناوەند",
+            "weak": "لاواز"
+        },
+        "delta": {
+            "netProfit": "قازانجی خاوێن",
+            "profitMargin": "مارجینی قازانج",
+            "operationalSpend": "خەرجیی کارگێڕی",
+            "noChange": "گۆڕان نییە",
+            "flat": "جێگیر",
+            "versus": "{{left}} بەرامبەر {{right}}"
+        },
+        "chartSummary": {
+            "noMeaningfulDifference": "جیاوازییەکی گرنگ نییە",
+            "favored": "{{category}} لای {{winner}} قورس‌تر بوو"
+        },
+        "categories": {
+            "revenue": "بەراوردی پۆلەکانی داهات",
+            "expense": "بەراوردی پۆلەکانی خەرجی"
+        },
+        "topProducts": {
+            "title": "بەراوردی باشترین بەرهەمەکان",
+            "subtitle": "باشترین 5 بەرهەم بە پێی کۆی داهات لە هەردوو مانگی هەڵبژێردراودا",
+            "product": "بەرهەم",
+            "delta": "جیاوازی",
+            "share": "بەش",
+            "shareInline": "بەش: {{left}}% / {{right}}%"
+        },
+        "returns": {
+            "title": "بەراوردی گەڕاندنەوەکان",
+            "subtitle": "فشاری پارەگەڕاندنەوە و جیاوازیی بەرهەمە گەڕاوەکان",
+            "count": "{{count}} گەڕاندنەوە",
+            "returnedCount": "{{count}} گەڕاوە"
+        },
+        "peakActivity": {
+            "title": "بەراوردی کاتی چڕی چالاکی",
+            "subtitle": "شێوازی کاتی چالاکی بۆ هەردوو مانگ",
+            "hourly": "کاتژمێری",
+            "heatmap": "خەریتەی گەرمی",
+            "peakAt": "لووتکە {{time}}"
+        },
+        "profitBridge": {
+            "title": "پردی قازانج",
+            "subtitle": "چۆن هەر مانگێک لە قازانجی فرۆشتن گەیشتە قازانجی ماوەوە",
+            "profitFromRevenue": "قازانج لە داهات",
+            "operationalExpenses": "خەرجیی کارگێڕی",
+            "personnel": "مووچە",
+            "dividends": "دابەشکردن",
+            "noteCovered": "قازانجی داهات خەرجیی کارگێڕی داپۆشی",
+            "noteExceeded": "خەرجیی کارگێڕی لە قازانجی داهات زیاتر بوو"
+        },
+        "insights": {
+            "revenueFlat": "داهات: {{monthA}} و {{monthB}} بە ئاستێکی نزیک داخراون.",
+            "revenueOutperformed": "داهات: {{monthB}} بە {{percent}}% لە {{monthA}} باشتر بوو.",
+            "revenueTrailed": "داهات: {{monthB}} بە {{percent}}% لە {{monthA}} خوارتر بوو.",
+            "profitFlat": "قازانج: قازانجی خاوێن نزیکەی جێگیر مایەوە، لەگەڵ گۆڕانی مارجین بە {{points}} خاڵی سەدی.",
+            "profitChanged": "قازانج: قازانجی خاوێن {{direction}} و مارجینیش بە {{points}} خاڵ {{marginDirection}}.",
+            "returnsRose": "گەڕاندنەوە: ڕێژەی گەڕاندنەوە بە {{points}} خاڵ لەنێوان هەردوو مانگدا بەرزبوو.",
+            "returnsFell": "گەڕاندنەوە: ڕێژەی گەڕاندنەوە بە {{points}} خاڵ لەنێوان هەردوو مانگدا دابەزی.",
+            "productsStrongestMover": "بەرهەمەکان: {{product}} زۆرترین جوڵەی دیاربوو، بە گۆڕانێکی {{delta}} لەنێوان مانگە هەڵبژێردراوەکاندا.",
+            "spendFallback": "خەرجی: گۆڕانکارییە کارگێڕییەکان بۆشایی قازانجی ماوەوە لەنێوان هەردوو مانگدا دروست کرد.",
+            "direction": {
+                "up": "بەرزبوو",
+                "down": "دابەزی"
+            },
+            "marginDirection": {
+                "expanded": "فراوانبوو",
+                "compressed": "تەنگتر بوو"
+            }
+        },
+        "fallback": {
+            "uncategorized": "بێ پۆل",
+            "unknownProduct": "بەرهەمی نەناسراو",
+            "payroll": "مووچە"
+        }
     },
     "report": {
         "print": "چاپکردنی ڕاپۆرتی ئەدا",
@@ -503,6 +652,14 @@
         "appearanceDesc": "گۆڕینی ڕەنگ و شێوەی بەرنامە",
         "language": "زمان",
         "languageDesc": "زمانە پەسەندەکەت هەڵبژێرە",
+        "monthDisplay": {
+            "title": "نیشاندانی مانگ",
+            "desc": "زمانی دڵخوازت هەڵبژێرە بۆ ناوی مانگەکان لە چارت و خشتەکاندا.",
+            "native": "سیستەمی بنەڕەتی",
+            "english": "ئینگلیزی",
+            "arabic": "عەرەبی",
+            "kurdish": "کوردی"
+        },
         "theme": {
             "title": "پەسەندکردنی تێم",
             "style": "ستایلی تێم",

@@ -7,6 +7,7 @@ import { db } from '@/local-db/database'
 import { Sale } from '@/types'
 import { formatCurrency, formatDateTime, formatDate } from '@/lib/utils'
 import { cn } from '@/lib/utils'
+import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { useWorkspace } from '@/workspace'
 import { useDateRange } from '@/context/DateRangeContext'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
@@ -301,10 +302,7 @@ export function TeamPerformance() {
         }
         if (dateRange === 'month') {
             const now = new Date()
-            return new Intl.DateTimeFormat(i18n.language, {
-                month: 'long',
-                year: 'numeric'
-            }).format(now)
+            return formatLocalizedMonthYear(now, i18n.language)
         }
         if (dateRange === 'allTime') {
             if (sales && sales.length > 0) {

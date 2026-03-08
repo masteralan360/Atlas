@@ -155,8 +155,157 @@
         "monthA": "الشهر أ",
         "monthB": "الشهر ب",
         "currentVsPrevious": "الحالي مقابل السابق",
+        "currentVsPreviousShort": "الحالي / السابق",
         "sameMonthLastYear": "نفس الشهر من العام الماضي",
-        "reset": "إعادة ضبط"
+        "sameMonthLastYearShort": "نفس الشهر م.م",
+        "reset": "إعادة ضبط",
+        "swapMonths": "تبديل الشهرين",
+        "projected": "متوقع",
+        "day": "اليوم",
+        "dayLabel": "اليوم {{label}}",
+        "paceSubtitle": "تراكمي حسب يوم الشهر",
+        "projectionNote": "الخط المقطع يوضح التوقعات للأيام المتبقية من الشهر الحالي.",
+        "revenuePace": "مسار الإيرادات",
+        "profitPace": "مسار الأرباح",
+        "spendPace": "مسار مصروفات التشغيل",
+        "revenue": "الإيرادات",
+        "profit": "الأرباح",
+        "spend": "المصروفات",
+        "sections": {
+            "monthSummaries": "ملخصات الشهر",
+            "chartsAnalytics": "الرسوم والتحليلات",
+            "detailsBreakdown": "التفاصيل والتفصيل"
+        },
+        "status": {
+            "current": "الحالي",
+            "historical": "تاريخي",
+            "winner": "الأفضل",
+            "new": "جديد",
+            "dropped": "متراجع"
+        },
+        "meta": {
+            "sales": "مبيعات",
+            "noSales": "بلا مبيعات",
+            "expenses": "مصروفات",
+            "noExpenses": "بلا مصروفات",
+            "budgetSet": "تم تعيين الميزانية",
+            "budgetNotSet": "لم تُعيَّن الميزانية",
+            "expensesTracked": "تم تتبع المصروفات",
+            "noExpensesLogged": "لا توجد مصروفات مسجلة",
+            "toolbarSummary": "{{sales}} • {{expenses}} • {{budget}}",
+            "panelSummary": "{{count}} معاملة • {{expenses}} • {{budget}}"
+        },
+        "empty": {
+            "notEnoughHistoryTitle": "لا يوجد سجل شهري كافٍ للمقارنة",
+            "notEnoughHistoryDescription": "تحتاج هذه الصفحة إلى شهرين على الأقل من بيانات المبيعات أو المصروفات أو الميزانية المتزامنة حتى تتمكن من عرض المقارنة.",
+            "noDataAvailable": "لا توجد بيانات متاحة",
+            "noExpenseData": "لا توجد بيانات مصروفات",
+            "noProductRevenue": "لا توجد إيرادات منتجات للمقارنة",
+            "noReturnsEitherMonth": "لا توجد مرتجعات مسجلة في أي من الشهرين",
+            "noReturnedProducts": "لا توجد منتجات مرتجعة"
+        },
+        "summary": {
+            "title": "ماذا تغيّر",
+            "subtitle": "ثلاث ملاحظات محددة من المقارنة"
+        },
+        "kpis": {
+            "revenueKpis": "مؤشرات الإيرادات",
+            "monthHealth": "صحة الشهر",
+            "grossRevenue": "إجمالي الإيرادات",
+            "totalCost": "إجمالي التكلفة",
+            "netProfit": "صافي الربح",
+            "profitMargin": "هامش الربح",
+            "totalAllocated": "إجمالي المخصص",
+            "totalPaid": "إجمالي المدفوع",
+            "outstanding": "المتبقي",
+            "dividends": "التوزيعات",
+            "totalReturns": "إجمالي المرتجعات",
+            "refundedAmount": "قيمة المبالغ المستردة",
+            "returnRate": "معدل المرتجعات",
+            "transactions": "{{count}} معاملة",
+            "costRatio": "نسبة التكلفة {{value}}%",
+            "ofRevenue": "{{value}}% من الإيرادات",
+            "budgetLimit": "حد {{amount}}",
+            "allocatedSpend": "{{value}}% من الإنفاق المخصص",
+            "dueByMonthEnd": "مستحق بنهاية الشهر",
+            "configuredDistributionTotal": "إجمالي التوزيع المحدد"
+        },
+        "marginBand": {
+            "strong": "قوي",
+            "average": "متوسط",
+            "weak": "ضعيف"
+        },
+        "delta": {
+            "netProfit": "صافي الربح",
+            "profitMargin": "هامش الربح",
+            "operationalSpend": "الإنفاق التشغيلي",
+            "noChange": "بلا تغيير",
+            "flat": "ثابت",
+            "versus": "{{left}} مقابل {{right}}"
+        },
+        "chartSummary": {
+            "noMeaningfulDifference": "لا يوجد فرق ملحوظ",
+            "favored": "{{category}} رجّح {{winner}}"
+        },
+        "categories": {
+            "revenue": "الإيرادات حسب الفئة",
+            "expense": "المصروفات حسب الفئة"
+        },
+        "topProducts": {
+            "title": "مقارنة أفضل المنتجات",
+            "subtitle": "أفضل 5 منتجات حسب الإيراد الموحّد عبر الشهرين المحددين",
+            "product": "المنتج",
+            "delta": "الفارق",
+            "share": "الحصة",
+            "shareInline": "الحصة: {{left}}% / {{right}}%"
+        },
+        "returns": {
+            "title": "مقارنة المرتجعات",
+            "subtitle": "ضغط الاسترداد وفروقات المنتجات المرتجعة",
+            "count": "{{count}} مرتجعات",
+            "returnedCount": "{{count}} مرتجع"
+        },
+        "peakActivity": {
+            "title": "مقارنة أوقات الذروة",
+            "subtitle": "نمط ساعات النشاط لكلا الشهرين",
+            "hourly": "ساعي",
+            "heatmap": "خريطة حرارية",
+            "peakAt": "الذروة {{time}}"
+        },
+        "profitBridge": {
+            "title": "جسر الربح",
+            "subtitle": "كيف انتقل كل شهر من ربح المبيعات إلى الربح المحتفظ به",
+            "profitFromRevenue": "الربح من الإيرادات",
+            "operationalExpenses": "المصروفات التشغيلية",
+            "personnel": "الرواتب",
+            "dividends": "التوزيعات",
+            "noteCovered": "غطى ربح الإيرادات التكاليف التشغيلية",
+            "noteExceeded": "تجاوزت التكاليف التشغيلية الربح من الإيرادات"
+        },
+        "insights": {
+            "revenueFlat": "الإيرادات: أنهى {{monthA}} و{{monthB}} الفترة عند مستويات متقاربة.",
+            "revenueOutperformed": "الإيرادات: تفوق {{monthB}} على {{monthA}} بنسبة {{percent}}%.",
+            "revenueTrailed": "الإيرادات: جاء {{monthB}} أقل من {{monthA}} بنسبة {{percent}}%.",
+            "profitFlat": "الربحية: بقي صافي الربح شبه ثابت، مع تغيّر في الهامش بمقدار {{points}} نقطة مئوية.",
+            "profitChanged": "الربحية: تحرك صافي الربح {{direction}} بينما {{marginDirection}} الهامش بمقدار {{points}} نقطة.",
+            "returnsRose": "المرتجعات: ارتفع معدل المرتجعات بمقدار {{points}} نقطة بين الشهرين.",
+            "returnsFell": "المرتجعات: انخفض معدل المرتجعات بمقدار {{points}} نقطة بين الشهرين.",
+            "productsStrongestMover": "المنتجات: كان {{product}} أبرز متغير واضح، مع تحرك قدره {{delta}} بين الشهرين المحددين.",
+            "spendFallback": "الإنفاق: شكّلت التغييرات التشغيلية فجوة الربح المحتفظ به بين الشهرين المحددين.",
+            "direction": {
+                "up": "صعودًا",
+                "down": "هبوطًا"
+            },
+            "marginDirection": {
+                "expanded": "اتسع",
+                "compressed": "انكمش"
+            }
+        },
+        "fallback": {
+            "uncategorized": "غير مصنف",
+            "unknownProduct": "منتج غير معروف",
+            "payroll": "الرواتب"
+        }
     },
     "report": {
         "print": "طباعة تقرير الأداء",
@@ -505,6 +654,14 @@
         "appearanceDesc": "تخصيص شكل ومظهر التطبيق",
         "language": "اللغة",
         "languageDesc": "اختر لغتك المفضلة",
+        "monthDisplay": {
+            "title": "عرض الأشهر",
+            "desc": "اختر لغتك المفضلة لأسماء الأشهر في الرسوم البيانية والجداول.",
+            "native": "افتراضي النظام",
+            "english": "الإنجليزية",
+            "arabic": "العربية",
+            "kurdish": "الكردية"
+        },
         "theme": {
             "title": "تفضيلات السمة",
             "style": "نمط السمة",

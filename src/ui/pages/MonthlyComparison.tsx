@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import {
     Activity,
@@ -23,6 +24,7 @@ import {
     BarChart,
     CartesianGrid,
     Legend,
+    Line,
     ResponsiveContainer,
     Tooltip as RechartsTooltip,
     XAxis,
@@ -32,6 +34,7 @@ import { useAuth } from '@/auth'
 import { useWorkspace } from '@/workspace'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { cn, formatCurrency } from '@/lib/utils'
+import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { convertToStoreBase as convertToStoreBaseUtil } from '@/lib/currency'
 import { useSales, toUISale, useExpenses, useEmployees, useBudgetAllocations } from '@/local-db'
 import type { BudgetAllocation, Employee, Expense } from '@/local-db'
@@ -145,6 +148,20 @@ interface DeltaCardConfig {
     tone: 'blue' | 'emerald' | 'violet' | 'orange' | 'sky'
 }
 
+interface PaceDataPoint {
+    day: number
+    leftActual: number | null
+    leftProjected: number | null
+    rightActual: number | null
+    rightProjected: number | null
+}
+
+interface MonthlyComparisonFallbackLabels {
+    uncategorized: string
+    unknownProduct: string
+    payroll: string
+}
+
 const LEFT_ACCENT = {
     badge: 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/20',
     soft: 'bg-blue-500/5 border-blue-500/15',
@@ -197,8 +214,25 @@ function monthDateFromKey(month: MonthKey) {
     return new Date(year, monthIndex - 1, 1)
 }
 
+const KURDISH_MONTH_NAMES = [
+    'کانوونی دووەم',
+    'شوبات',
+    'ئازار',
+    'نیسان',
+    'ئایار',
+    'حوزەیران',
+    'تەمووز',
+    'ئاب',
+    'ئەیلوول',
+    'تشرینی یەکەم',
+    'تشرینی دووەم',
+    'کانونی یەکەم',
+]
+
+void KURDISH_MONTH_NAMES
+
 function formatMonthLabel(month: MonthKey, language: string) {
-    return new Intl.DateTimeFormat(language, { month: 'long', year: 'numeric' }).format(monthDateFromKey(month))
+    return formatLocalizedMonthYear(monthDateFromKey(month), language)
 }
 
 function getDaysInMonth(month: MonthKey) {
@@ -220,10 +254,18 @@ function humanizeExpenseCategory(name: string) {
     return name.replace(/[_-]/g, ' ').replace(/\b\w/g, char => char.toUpperCase())
 }
 
-function getMarginBand(margin: number) {
-    if (margin >= 25) return 'Strong'
-    if (margin >= 12) return 'Average'
-    return 'Weak'
+function getMarginBand(margin: number, t: TFunction) {
+    if (margin >= 25) return t('monthlyComparison.marginBand.strong')
+    if (margin >= 12) return t('monthlyComparison.marginBand.average')
+    return t('monthlyComparison.marginBand.weak')
+}
+
+function buildToolbarMeta(option: MonthOption, t: TFunction) {
+    return t('monthlyComparison.meta.toolbarSummary', {
+        sales: t(option.hasSales ? 'monthlyComparison.meta.sales' : 'monthlyComparison.meta.noSales'),
+        expenses: t(option.hasExpenses ? 'monthlyComparison.meta.expenses' : 'monthlyComparison.meta.noExpenses'),
+        budget: t(option.hasAllocation ? 'monthlyComparison.meta.budgetSet' : 'monthlyComparison.meta.budgetNotSet'),
+    })
 }
 
 function buildAvailableMonths(
@@ -277,7 +319,8 @@ function analyzeSalesMonth(
     sales: Sale[],
     month: MonthKey,
     baseCurrency: string,
-    convertToBase: (amount: number | undefined | null, currency: string | undefined | null) => number
+    convertToBase: (amount: number | undefined | null, currency: string | undefined | null) => number,
+    labels: MonthlyComparisonFallbackLabels
 ): SalesSnapshot {
     const monthSales = sales.filter(sale => monthKeyFromDate(sale.created_at) === month)
     const currencyTotals: Record<string, CurrencyTotals> = {}
@@ -317,14 +360,14 @@ function analyzeSalesMonth(
                 saleRevenueInCurrency += itemRevenue
                 saleCostInCurrency += itemCost
 
-                const category = item.product_category || item.product?.category || 'Uncategorized'
+                const category = item.product_category || item.product?.category || labels.uncategorized
                 categoryRevenue[category] = (categoryRevenue[category] || 0) + itemRevenueBase
 
                 const productId = item.product_id || item.id
                 if (!productPerformance[productId]) {
                     productPerformance[productId] = {
                         id: productId,
-                        name: item.product_name || item.product?.name || 'Unknown Product',
+                        name: item.product_name || item.product?.name || labels.unknownProduct,
                         revenue: 0,
                         quantity: 0,
                     }
@@ -346,7 +389,7 @@ function analyzeSalesMonth(
                 const productId = item.product_id || item.id
                 if (!productReturns[productId]) {
                     productReturns[productId] = {
-                        name: item.product_name || item.product?.name || 'Unknown Product',
+                        name: item.product_name || item.product?.name || labels.unknownProduct,
                         count: 0,
                         amount: 0,
                     }
@@ -439,7 +482,8 @@ function analyzeBudgetMonth(
     expenses: Expense[],
     employees: Employee[],
     allocations: BudgetAllocation[],
-    convertToBase: (amount: number | undefined | null, currency: string | undefined | null) => number
+    convertToBase: (amount: number | undefined | null, currency: string | undefined | null) => number,
+    labels: MonthlyComparisonFallbackLabels
 ): BudgetSnapshot {
     const monthDate = monthDateFromKey(month)
     const year = monthDate.getFullYear()
@@ -520,7 +564,7 @@ function analyzeBudgetMonth(
         else personnelPending += baseAmount
     })
 
-    if (personnelTotal > 0) expenseCategoryMap['Payroll'] = (expenseCategoryMap['Payroll'] || 0) + personnelTotal
+    if (personnelTotal > 0) expenseCategoryMap[labels.payroll] = (expenseCategoryMap[labels.payroll] || 0) + personnelTotal
 
     const totalAllocated = operationalTotal + personnelTotal
     const referenceProfit = sales.baseTotals.profit
@@ -562,16 +606,130 @@ function analyzeBudgetMonth(
     }
 }
 
-function buildPaceData(left: MonthSnapshot, right: MonthSnapshot, metric: ComparisonMetric) {
+function buildPaceSeries(
+    series: number[],
+    month: MonthKey,
+    metric: ComparisonMetric
+) {
+    const daysInMonth = getDaysInMonth(month)
+    const actual = new Array<number | null>(daysInMonth).fill(null)
+    const projected = new Array<number | null>(daysInMonth).fill(null)
+    const currentMonthKey = monthKeyFromDate(new Date())
+
+    if (month !== currentMonthKey) {
+        return {
+            actual: series.map(value => value ?? 0),
+            projected,
+            hasProjection: false,
+        }
+    }
+
+    const today = Math.min(new Date().getDate(), daysInMonth)
+    const currentValue = series[Math.max(0, today - 1)] ?? 0
+
+    for (let index = 0; index < today; index += 1) {
+        actual[index] = series[index] ?? 0
+    }
+
+    if (today >= daysInMonth) {
+        return { actual, projected, hasProjection: false }
+    }
+
+    projected[today - 1] = currentValue
+
+    if (metric === 'spend') {
+        for (let index = today; index < daysInMonth; index += 1) {
+            projected[index] = series[index] ?? currentValue
+        }
+    } else {
+        const averageDailyPace = today > 0 ? currentValue / today : 0
+
+        for (let index = today; index < daysInMonth; index += 1) {
+            projected[index] = currentValue + averageDailyPace * (index - today + 1)
+        }
+    }
+
+    return { actual, projected, hasProjection: true }
+}
+
+function buildPaceData(left: MonthSnapshot, right: MonthSnapshot, metric: ComparisonMetric): PaceDataPoint[] {
     const maxDays = Math.max(getDaysInMonth(left.option.value), getDaysInMonth(right.option.value))
     const leftSeries = metric === 'revenue' ? left.sales.cumulativeRevenue : metric === 'profit' ? left.sales.cumulativeProfit : left.budget.cumulativeSpend
     const rightSeries = metric === 'revenue' ? right.sales.cumulativeRevenue : metric === 'profit' ? right.sales.cumulativeProfit : right.budget.cumulativeSpend
+    const leftPace = buildPaceSeries(leftSeries, left.option.value, metric)
+    const rightPace = buildPaceSeries(rightSeries, right.option.value, metric)
 
     return Array.from({ length: maxDays }, (_, index) => ({
         day: index + 1,
-        left: index < leftSeries.length ? leftSeries[index] : null,
-        right: index < rightSeries.length ? rightSeries[index] : null,
+        leftActual: index < leftPace.actual.length ? leftPace.actual[index] : null,
+        leftProjected: index < leftPace.projected.length ? leftPace.projected[index] : null,
+        rightActual: index < rightPace.actual.length ? rightPace.actual[index] : null,
+        rightProjected: index < rightPace.projected.length ? rightPace.projected[index] : null,
     }))
+}
+
+function PaceTooltipContent({
+    active,
+    payload,
+    label,
+    baseCurrency,
+    iqdPreference,
+    leftLabel,
+    rightLabel,
+}: {
+    active?: boolean
+    payload?: ReadonlyArray<{ payload?: PaceDataPoint }>
+    label?: string | number
+    baseCurrency: string
+    iqdPreference: 'IQD' | 'د.ع'
+    leftLabel: string
+    rightLabel: string
+}) {
+    const { t } = useTranslation()
+    const point = payload?.find(entry => entry?.payload)?.payload
+
+    if (!active || !point) return null
+
+    const rows = [
+        {
+            label: leftLabel,
+            value: point.leftActual ?? point.leftProjected,
+            projected: point.leftActual == null && point.leftProjected != null,
+            color: LEFT_ACCENT.line,
+        },
+        {
+            label: rightLabel,
+            value: point.rightActual ?? point.rightProjected,
+            projected: point.rightActual == null && point.rightProjected != null,
+            color: RIGHT_ACCENT.line,
+        },
+    ]
+
+    return (
+        <div className="min-w-[190px] rounded-[18px] border border-border bg-card px-3 py-2.5 shadow-xl">
+            <p className="mb-2 text-[11px] font-black uppercase tracking-[0.16em] text-muted-foreground">
+                {t('monthlyComparison.dayLabel', { label })}
+            </p>
+            <div className="space-y-2">
+                {rows.map(row => (
+                    <div key={row.label} className="flex items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-2">
+                            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: row.color }} />
+                            <span className="truncate text-xs font-semibold text-foreground">{row.label}</span>
+                            {row.projected ? (
+                                <span className="rounded-full border border-border/60 bg-background/70 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-muted-foreground">
+                                    {t('monthlyComparison.projected')}
+                                </span>
+                            ) : null}
+                        </div>
+                        <span className="text-xs font-black text-foreground">
+                            {row.value == null ? '--' : formatCurrency(row.value, baseCurrency, iqdPreference)}
+                        </span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    )
 }
 
 function buildCategoryComparison(leftItems: Array<{ name: string; value: number }>, rightItems: Array<{ name: string; value: number }>, limit = 6) {
@@ -616,7 +774,7 @@ function buildTopProductRows(left: MonthSnapshot, right: MonthSnapshot) {
             ...product,
             rank: index + 1,
             delta: product.rightRevenue - product.leftRevenue,
-            state: leftTopIds.has(product.id) && !rightTopIds.has(product.id) ? 'Dropped' : !leftTopIds.has(product.id) && rightTopIds.has(product.id) ? 'New' : null,
+            state: leftTopIds.has(product.id) && !rightTopIds.has(product.id) ? 'dropped' : !leftTopIds.has(product.id) && rightTopIds.has(product.id) ? 'new' : null,
         }))
 }
 
@@ -627,7 +785,7 @@ function formatSignedShort(value: number) {
     return `${value > 0 ? '+' : '-'}${abs.toFixed(0)}`
 }
 
-function buildInsights(left: MonthSnapshot, right: MonthSnapshot) {
+function buildInsights(left: MonthSnapshot, right: MonthSnapshot, t: TFunction) {
     const revenueDelta = right.sales.baseTotals.revenue - left.sales.baseTotals.revenue
     const profitDelta = right.sales.baseTotals.profit - left.sales.baseTotals.profit
     const marginDelta = right.sales.baseTotals.margin - left.sales.baseTotals.margin
@@ -637,17 +795,49 @@ function buildInsights(left: MonthSnapshot, right: MonthSnapshot) {
     const monthB = right.option.label
 
     return [
-        revenueDelta === 0 ? `Revenue: ${monthA} and ${monthB} closed at nearly the same level.` : `Revenue: ${monthB} ${revenueDelta > 0 ? 'outperformed' : 'trailed'} ${monthA} by ${Math.abs(safePercentChange(right.sales.baseTotals.revenue, left.sales.baseTotals.revenue)).toFixed(1)}%.`,
-        profitDelta === 0 ? `Profitability: Net profit stayed broadly flat, with margin shifting ${Math.abs(marginDelta).toFixed(1)} percentage points.` : `Profitability: Net profit moved ${profitDelta > 0 ? 'up' : 'down'} while margin ${marginDelta >= 0 ? 'expanded' : 'compressed'} by ${Math.abs(marginDelta).toFixed(1)} points.`,
-        Math.abs(returnsDelta) > 0.5 ? `Returns: Return rate ${returnsDelta >= 0 ? 'rose' : 'fell'} by ${Math.abs(returnsDelta).toFixed(1)} points between the two months.` : topMover ? `Products: ${topMover.name} was the strongest visible mover, shifting ${formatSignedShort(topMover.delta)} between the selected months.` : 'Spend: Operational changes shaped the retained profit gap between the selected months.',
+        revenueDelta === 0
+            ? t('monthlyComparison.insights.revenueFlat', { monthA, monthB })
+            : t(
+                revenueDelta > 0
+                    ? 'monthlyComparison.insights.revenueOutperformed'
+                    : 'monthlyComparison.insights.revenueTrailed',
+                {
+                    monthA,
+                    monthB,
+                    percent: Math.abs(safePercentChange(right.sales.baseTotals.revenue, left.sales.baseTotals.revenue)).toFixed(1),
+                }
+            ),
+        profitDelta === 0
+            ? t('monthlyComparison.insights.profitFlat', { points: Math.abs(marginDelta).toFixed(1) })
+            : t('monthlyComparison.insights.profitChanged', {
+                direction: t(profitDelta > 0 ? 'monthlyComparison.insights.direction.up' : 'monthlyComparison.insights.direction.down'),
+                marginDirection: t(marginDelta >= 0 ? 'monthlyComparison.insights.marginDirection.expanded' : 'monthlyComparison.insights.marginDirection.compressed'),
+                points: Math.abs(marginDelta).toFixed(1),
+            }),
+        Math.abs(returnsDelta) > 0.5
+            ? t(
+                returnsDelta >= 0
+                    ? 'monthlyComparison.insights.returnsRose'
+                    : 'monthlyComparison.insights.returnsFell',
+                { points: Math.abs(returnsDelta).toFixed(1) }
+            )
+            : topMover
+                ? t('monthlyComparison.insights.productsStrongestMover', {
+                    product: topMover.name,
+                    delta: formatSignedShort(topMover.delta),
+                })
+                : t('monthlyComparison.insights.spendFallback'),
     ]
 }
 
-function getChartSummaryLabel(data: Array<{ name: string; left: number; right: number }>, winnerLabel: string, loserLabel: string) {
-    if (data.length === 0) return 'No meaningful difference'
+function getChartSummaryLabel(data: Array<{ name: string; left: number; right: number }>, winnerLabel: string, loserLabel: string, t: TFunction) {
+    if (data.length === 0) return t('monthlyComparison.chartSummary.noMeaningfulDifference')
     const strongest = [...data].sort((a, b) => Math.abs(b.right - b.left) - Math.abs(a.right - a.left))[0]
-    if (!strongest || strongest.left === strongest.right) return 'No meaningful difference'
-    return `${strongest.name} favored ${strongest.right > strongest.left ? winnerLabel : loserLabel}`
+    if (!strongest || strongest.left === strongest.right) return t('monthlyComparison.chartSummary.noMeaningfulDifference')
+    return t('monthlyComparison.chartSummary.favored', {
+        category: strongest.name,
+        winner: strongest.right > strongest.left ? winnerLabel : loserLabel,
+    })
 }
 
 function MonthSelectorCard({
@@ -658,6 +848,7 @@ function MonthSelectorCard({
     otherValue,
     onChange,
     meta,
+    compact = false,
 }: {
     title: string
     accent: typeof LEFT_ACCENT
@@ -666,17 +857,29 @@ function MonthSelectorCard({
     otherValue: MonthKey
     onChange: (value: MonthKey) => void
     meta: string
+    compact?: boolean
 }) {
     return (
-        <Card className={cn('min-w-0 flex-1 rounded-[1.75rem] border shadow-sm backdrop-blur-sm', accent.soft)}>
-            <CardContent className="p-4">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                    <span className={cn('inline-flex rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.2em]', accent.badge)}>
+        <Card className={cn(
+            'min-w-0 flex-1 border shadow-sm backdrop-blur-sm transition-all duration-200 ease-out',
+            compact ? 'rounded-[1.2rem] shadow-none' : 'rounded-[1.75rem]',
+            accent.soft,
+        )}>
+            <CardContent className={cn('transition-all duration-200 ease-out', compact ? 'p-2' : 'p-4')}>
+                <div className={cn('flex items-center justify-between gap-3 transition-all duration-200 ease-out', compact ? 'mb-2' : 'mb-3')}>
+                    <span className={cn(
+                        'inline-flex rounded-full border font-black uppercase transition-all duration-200 ease-out',
+                        compact ? 'px-1.5 py-0 text-[8px] tracking-[0.12em]' : 'px-2.5 py-1 text-[10px] tracking-[0.2em]',
+                        accent.badge,
+                    )}>
                         {title}
                     </span>
                 </div>
                 <Select value={value} onValueChange={next => onChange(next as MonthKey)}>
-                    <SelectTrigger className="h-12 rounded-2xl border-border/50 bg-background/70 text-left font-black">
+                    <SelectTrigger className={cn(
+                        'border-border/50 bg-background/70 text-left font-black transition-all duration-200 ease-out',
+                        compact ? 'h-9 rounded-[0.9rem] px-3 text-[13px]' : 'h-12 rounded-2xl',
+                    )}>
                         <SelectValue placeholder={title} />
                     </SelectTrigger>
                     <SelectContent className="rounded-2xl">
@@ -692,7 +895,12 @@ function MonthSelectorCard({
                         ))}
                     </SelectContent>
                 </Select>
-                <p className="mt-3 text-[11px] font-semibold text-muted-foreground">{meta}</p>
+                <p className={cn(
+                    'overflow-hidden text-[11px] font-semibold text-muted-foreground transition-all duration-200 ease-out',
+                    compact ? 'mt-0 max-h-0 opacity-0' : 'mt-3 max-h-8 opacity-100',
+                )}>
+                    {meta}
+                </p>
             </CardContent>
         </Card>
     )
@@ -709,12 +917,13 @@ function ComparisonDeltaCard({
     iqdPreference,
     leftLabel,
     rightLabel,
-}: DeltaCardConfig & {
+}: Omit<DeltaCardConfig, 'key'> & {
     baseCurrency: string
     iqdPreference: 'IQD' | 'د.ع'
     leftLabel: string
     rightLabel: string
 }) {
+    const { t } = useTranslation()
     const delta = rightValue - leftValue
     const percent = safePercentChange(rightValue, leftValue)
     const isNeutral = leftValue === 0 && rightValue === 0
@@ -733,7 +942,7 @@ function ComparisonDeltaCard({
 
     return (
         <Card className={cn('rounded-[1.75rem] border shadow-sm transition-all duration-300 hover:scale-[1.02] hover:shadow-md cursor-default', toneClasses, isNeutral && 'border-border bg-card text-foreground')}>
-            <CardContent className="p-4">
+            <CardContent className="p-3.5 sm:p-4">
                 <div className="mb-3 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                         <div className={cn('rounded-2xl p-2', !isNeutral && 'bg-background/70')}>
@@ -742,7 +951,7 @@ function ComparisonDeltaCard({
                         <span className="text-[11px] font-black uppercase tracking-[0.18em]">{label}</span>
                     </div>
                     {isNeutral ? (
-                        <span className="rounded-full border border-border px-2 py-1 text-[10px] font-bold text-muted-foreground">No change</span>
+                        <span className="rounded-full border border-border px-2 py-1 text-[10px] font-bold text-muted-foreground">{t('monthlyComparison.delta.noChange')}</span>
                     ) : (
                         <span className={cn(
                             'inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-black',
@@ -754,10 +963,10 @@ function ComparisonDeltaCard({
                     )}
                 </div>
                 <div className="text-xl font-black tracking-tight">
-                    {isNeutral ? 'Flat' : valueText}
+                    {isNeutral ? t('monthlyComparison.delta.flat') : valueText}
                 </div>
                 <p className="mt-1 text-[11px] font-medium text-muted-foreground">
-                    {leftLabel} vs {rightLabel}
+                    {t('monthlyComparison.delta.versus', { left: leftLabel, right: rightLabel })}
                 </p>
             </CardContent>
         </Card>
@@ -823,7 +1032,7 @@ function KpiCard({
                 <div className="flex items-start justify-between gap-3">
                     <div>
                         <p className="text-[10px] font-black uppercase tracking-[0.18em] text-muted-foreground">{title}</p>
-                        <div className="mt-2 text-2xl font-black tracking-tight text-foreground">{value}</div>
+                        <div className="mt-2 break-words text-xl font-black leading-tight tracking-tight text-foreground sm:text-2xl">{value}</div>
                     </div>
                     <div className="rounded-2xl bg-background/70 p-2">
                         <Icon className="h-4 w-4" />
@@ -850,52 +1059,54 @@ function MonthSummaryPanel({
     iqdPreference: 'IQD' | 'د.ع'
     isCurrent: boolean
 }) {
+    const { t } = useTranslation()
     const { sales, budget } = snapshot
     const budgetPct = budget.budgetLimit > 0 ? (budget.totalAllocated / budget.budgetLimit) * 100 : undefined
     const paidPct = budget.totalAllocated > 0 ? (budget.paid / budget.totalAllocated) * 100 : 0
+    const summaryLine = t('monthlyComparison.meta.panelSummary', {
+        count: sales.baseTotals.transactions,
+        expenses: t(snapshot.option.hasExpenses ? 'monthlyComparison.meta.expensesTracked' : 'monthlyComparison.meta.noExpensesLogged'),
+        budget: t(snapshot.option.hasAllocation ? 'monthlyComparison.meta.budgetSet' : 'monthlyComparison.meta.budgetNotSet'),
+    })
 
     return (
-        <Card className="rounded-[2rem] border border-border/50 shadow-sm overflow-hidden">
+        <Card className="overflow-hidden rounded-[1.7rem] border border-border/50 shadow-sm sm:rounded-[2rem]">
             <div className="h-1" style={{ backgroundColor: accent.line }} />
-            <CardHeader className="pb-4">
+            <CardHeader className="pb-3 sm:pb-4">
                 <div className="flex items-start justify-between gap-4">
                     <div>
                         <span className={cn('inline-flex rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.2em]', accent.badge)}>
-                            {isCurrent ? 'Current' : 'Historical'}
+                            {isCurrent ? t('monthlyComparison.status.current') : t('monthlyComparison.status.historical')}
                         </span>
-                        <CardTitle className="mt-3 text-2xl font-black tracking-tight">{snapshot.option.label}</CardTitle>
-                        <p className="mt-1 text-sm font-medium text-muted-foreground">
-                            {sales.baseTotals.transactions} transactions
-                            {snapshot.option.hasExpenses ? ' • expenses tracked' : ' • no expenses logged'}
-                            {snapshot.option.hasAllocation ? ' • budget set' : ' • budget not set'}
-                        </p>
+                        <CardTitle className="mt-3 text-xl font-black tracking-tight sm:text-2xl">{snapshot.option.label}</CardTitle>
+                        <p className="mt-1 text-xs font-medium leading-5 text-muted-foreground sm:text-sm">{summaryLine}</p>
                     </div>
                 </div>
             </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent className="space-y-5 sm:space-y-6">
                 <div>
                     <div className="mb-3 flex items-center gap-2">
                         <BarChart3 className={cn('h-4 w-4', accent.text)} />
-                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-muted-foreground">Revenue KPIs</p>
+                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-muted-foreground">{t('monthlyComparison.kpis.revenueKpis')}</p>
                     </div>
                     <div className="grid gap-4 sm:grid-cols-2">
-                        <KpiCard title="Gross Revenue" value={formatCurrency(sales.baseTotals.revenue, baseCurrency, iqdPreference)} icon={DollarSign} tone="blue" subtitle={`${sales.baseTotals.transactions} transactions`} currencyTotals={sales.currencyTotals} iqdPreference={iqdPreference} />
-                        <KpiCard title="Total Cost" value={formatCurrency(sales.baseTotals.cost, baseCurrency, iqdPreference)} icon={Package} tone="orange" subtitle={`${sales.baseTotals.revenue > 0 ? ((sales.baseTotals.cost / sales.baseTotals.revenue) * 100).toFixed(1) : '0.0'}% cost ratio`} iqdPreference={iqdPreference} />
-                        <KpiCard title="Net Profit" value={formatCurrency(sales.baseTotals.profit, baseCurrency, iqdPreference)} icon={TrendingUp} tone="emerald" subtitle={`${sales.baseTotals.revenue > 0 ? ((sales.baseTotals.profit / sales.baseTotals.revenue) * 100).toFixed(1) : '0.0'}% of revenue`} iqdPreference={iqdPreference} />
-                        <KpiCard title="Profit Margin" value={`${sales.baseTotals.margin.toFixed(1)}%`} icon={Percent} tone="violet" subtitle={getMarginBand(sales.baseTotals.margin)} progress={sales.baseTotals.margin} iqdPreference={iqdPreference} />
+                        <KpiCard title={t('monthlyComparison.kpis.grossRevenue')} value={formatCurrency(sales.baseTotals.revenue, baseCurrency, iqdPreference)} icon={DollarSign} tone="blue" subtitle={t('monthlyComparison.kpis.transactions', { count: sales.baseTotals.transactions })} currencyTotals={sales.currencyTotals} iqdPreference={iqdPreference} />
+                        <KpiCard title={t('monthlyComparison.kpis.totalCost')} value={formatCurrency(sales.baseTotals.cost, baseCurrency, iqdPreference)} icon={Package} tone="orange" subtitle={t('monthlyComparison.kpis.costRatio', { value: sales.baseTotals.revenue > 0 ? ((sales.baseTotals.cost / sales.baseTotals.revenue) * 100).toFixed(1) : '0.0' })} iqdPreference={iqdPreference} />
+                        <KpiCard title={t('monthlyComparison.kpis.netProfit')} value={formatCurrency(sales.baseTotals.profit, baseCurrency, iqdPreference)} icon={TrendingUp} tone="emerald" subtitle={t('monthlyComparison.kpis.ofRevenue', { value: sales.baseTotals.revenue > 0 ? ((sales.baseTotals.profit / sales.baseTotals.revenue) * 100).toFixed(1) : '0.0' })} iqdPreference={iqdPreference} />
+                        <KpiCard title={t('monthlyComparison.kpis.profitMargin')} value={`${sales.baseTotals.margin.toFixed(1)}%`} icon={Percent} tone="violet" subtitle={getMarginBand(sales.baseTotals.margin, t)} progress={sales.baseTotals.margin} iqdPreference={iqdPreference} />
                     </div>
                 </div>
 
                 <div>
                     <div className="mb-3 flex items-center gap-2">
                         <Wallet className={cn('h-4 w-4', accent.text)} />
-                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-muted-foreground">Month Health</p>
+                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-muted-foreground">{t('monthlyComparison.kpis.monthHealth')}</p>
                     </div>
                     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                        <KpiCard title="Total Allocated" value={formatCurrency(budget.totalAllocated, baseCurrency, iqdPreference)} icon={BarChart3} tone={budget.budgetLimit > 0 && budgetPct && budgetPct > 100 ? 'red' : 'blue'} subtitle={budget.budgetLimit > 0 ? `${formatCurrency(budget.budgetLimit, baseCurrency, iqdPreference)} limit` : 'Budget not set'} progress={budgetPct} iqdPreference={iqdPreference} />
-                        <KpiCard title="Total Paid" value={formatCurrency(budget.paid, baseCurrency, iqdPreference)} icon={TrendingUp} tone="emerald" subtitle={`${paidPct.toFixed(1)}% of allocated spend`} progress={paidPct} iqdPreference={iqdPreference} />
-                        <KpiCard title="Outstanding" value={formatCurrency(budget.outstanding, baseCurrency, iqdPreference)} icon={Clock} tone="amber" subtitle="Due by month end" iqdPreference={iqdPreference} />
-                        <KpiCard title="Dividends" value={formatCurrency(budget.dividends, baseCurrency, iqdPreference)} icon={Wallet} tone="sky" subtitle="Configured distribution total" iqdPreference={iqdPreference} />
+                        <KpiCard title={t('monthlyComparison.kpis.totalAllocated')} value={formatCurrency(budget.totalAllocated, baseCurrency, iqdPreference)} icon={BarChart3} tone={budget.budgetLimit > 0 && budgetPct && budgetPct > 100 ? 'red' : 'blue'} subtitle={budget.budgetLimit > 0 ? t('monthlyComparison.kpis.budgetLimit', { amount: formatCurrency(budget.budgetLimit, baseCurrency, iqdPreference) }) : t('monthlyComparison.meta.budgetNotSet')} progress={budgetPct} iqdPreference={iqdPreference} />
+                        <KpiCard title={t('monthlyComparison.kpis.totalPaid')} value={formatCurrency(budget.paid, baseCurrency, iqdPreference)} icon={TrendingUp} tone="emerald" subtitle={t('monthlyComparison.kpis.allocatedSpend', { value: paidPct.toFixed(1) })} progress={paidPct} iqdPreference={iqdPreference} />
+                        <KpiCard title={t('monthlyComparison.kpis.outstanding')} value={formatCurrency(budget.outstanding, baseCurrency, iqdPreference)} icon={Clock} tone="amber" subtitle={t('monthlyComparison.kpis.dueByMonthEnd')} iqdPreference={iqdPreference} />
+                        <KpiCard title={t('monthlyComparison.kpis.dividends')} value={formatCurrency(budget.dividends, baseCurrency, iqdPreference)} icon={Wallet} tone="sky" subtitle={t('monthlyComparison.kpis.configuredDistributionTotal')} iqdPreference={iqdPreference} />
                     </div>
                 </div>
             </CardContent>
@@ -904,6 +1115,7 @@ function MonthSummaryPanel({
 }
 
 function ComparisonInsightsStrip({ insights }: { insights: string[] }) {
+    const { t } = useTranslation()
     return (
         <Card className="rounded-[2rem] border border-border/50 bg-card/70 shadow-sm">
             <CardContent className="p-5">
@@ -912,8 +1124,8 @@ function ComparisonInsightsStrip({ insights }: { insights: string[] }) {
                         <Sparkles className="h-4 w-4" />
                     </div>
                     <div>
-                        <p className="text-[11px] font-black uppercase tracking-[0.2em] text-muted-foreground">What Changed</p>
-                        <p className="text-sm font-medium text-muted-foreground">Three deterministic takeaways from the comparison</p>
+                        <p className="text-[11px] font-black uppercase tracking-[0.2em] text-muted-foreground">{t('monthlyComparison.summary.title')}</p>
+                        <p className="text-sm font-medium text-muted-foreground">{t('monthlyComparison.summary.subtitle')}</p>
                     </div>
                 </div>
                 <div className="grid gap-3 lg:grid-cols-3">
@@ -945,27 +1157,37 @@ function MonthPaceComparisonChart({
     baseCurrency: string
     iqdPreference: 'IQD' | 'د.ع'
 }) {
+    const { t } = useTranslation()
     const data = useMemo(() => buildPaceData(left, right, metric), [left, right, metric])
-    const label = metric === 'revenue' ? 'Revenue Pace' : metric === 'profit' ? 'Profit Pace' : 'Operational Spend Pace'
+    const hasProjection = useMemo(
+        () => data.some(point => point.leftProjected != null || point.rightProjected != null),
+        [data]
+    )
+    const label = t(`monthlyComparison.${metric}Pace`)
 
     return (
-        <Card className="rounded-[2rem] border border-border/50 shadow-sm xl:col-span-2">
+        <Card className="rounded-[1.7rem] border border-border/50 shadow-sm sm:rounded-[2rem] xl:col-span-2">
             <CardHeader className="pb-4">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div>
-                        <CardTitle className="text-xl font-black tracking-tight">{label}</CardTitle>
-                        <p className="mt-1 text-sm text-muted-foreground">Cumulative by day of month</p>
+                        <CardTitle className="text-lg font-black tracking-tight sm:text-xl">{label}</CardTitle>
+                        <p className="mt-1 text-xs text-muted-foreground sm:text-sm">{t('monthlyComparison.paceSubtitle')}</p>
+                        {hasProjection ? (
+                            <p className="mt-1 text-[11px] font-semibold text-muted-foreground">
+                                {t('monthlyComparison.projectionNote')}
+                            </p>
+                        ) : null}
                     </div>
                     <Tabs value={metric} onValueChange={value => onMetricChange(value as ComparisonMetric)}>
-                        <TabsList className="grid h-10 w-full grid-cols-3 rounded-2xl bg-secondary/50 p-1 lg:w-[360px]">
-                            <TabsTrigger value="revenue" className="rounded-xl text-xs font-black uppercase tracking-wide">Revenue</TabsTrigger>
-                            <TabsTrigger value="profit" className="rounded-xl text-xs font-black uppercase tracking-wide">Profit</TabsTrigger>
-                            <TabsTrigger value="spend" className="rounded-xl text-xs font-black uppercase tracking-wide">Spend</TabsTrigger>
+                        <TabsList className="grid h-9 w-full grid-cols-3 rounded-2xl bg-secondary/50 p-1 sm:h-10 lg:w-[360px]">
+                            <TabsTrigger value="revenue" className="rounded-xl px-2 text-[11px] font-bold tracking-normal sm:text-xs sm:font-black sm:uppercase sm:tracking-wide">{t('monthlyComparison.revenue')}</TabsTrigger>
+                            <TabsTrigger value="profit" className="rounded-xl px-2 text-[11px] font-bold tracking-normal sm:text-xs sm:font-black sm:uppercase sm:tracking-wide">{t('monthlyComparison.profit')}</TabsTrigger>
+                            <TabsTrigger value="spend" className="rounded-xl px-2 text-[11px] font-bold tracking-normal sm:text-xs sm:font-black sm:uppercase sm:tracking-wide">{t('monthlyComparison.spend')}</TabsTrigger>
                         </TabsList>
                     </Tabs>
                 </div>
             </CardHeader>
-            <CardContent className="h-[340px]">
+            <CardContent className="h-[280px] sm:h-[340px]">
                 <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                         <defs>
@@ -982,15 +1204,21 @@ function MonthPaceComparisonChart({
                         <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: 'currentColor' }} className="text-muted-foreground/70" />
                         <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: 'currentColor' }} className="text-muted-foreground/70" tickFormatter={value => value >= 1000 ? `${(value / 1000).toFixed(0)}k` : value} />
                         <RechartsTooltip
-                            contentStyle={{ backgroundColor: 'hsl(var(--card))', borderRadius: '18px', border: '1px solid hsl(var(--border))', padding: '12px' }}
-                            formatter={(value, name) => [
-                                value == null ? '--' : formatCurrency(Number(value), baseCurrency, iqdPreference),
-                                name === 'left' ? left.option.label : right.option.label,
-                            ]}
+                            content={tooltipProps => (
+                                <PaceTooltipContent
+                                    {...tooltipProps}
+                                    baseCurrency={baseCurrency}
+                                    iqdPreference={iqdPreference}
+                                    leftLabel={left.option.label}
+                                    rightLabel={right.option.label}
+                                />
+                            )}
                         />
                         <Legend wrapperStyle={{ paddingTop: '16px' }} formatter={value => value === 'left' ? left.option.label : right.option.label} />
-                        <Area type="monotone" dataKey="left" name="left" stroke={LEFT_ACCENT.line} strokeWidth={3} fill="url(#paceLeft)" connectNulls={false} />
-                        <Area type="monotone" dataKey="right" name="right" stroke={RIGHT_ACCENT.line} strokeWidth={3} fill="url(#paceRight)" connectNulls={false} />
+                        <Area type="monotone" dataKey="leftActual" name="left" stroke={LEFT_ACCENT.line} strokeWidth={3} fill="url(#paceLeft)" connectNulls={false} />
+                        <Area type="monotone" dataKey="rightActual" name="right" stroke={RIGHT_ACCENT.line} strokeWidth={3} fill="url(#paceRight)" connectNulls={false} />
+                        <Line type="monotone" dataKey="leftProjected" stroke={LEFT_ACCENT.line} strokeWidth={3} strokeDasharray="6 6" dot={false} activeDot={false} legendType="none" connectNulls={false} />
+                        <Line type="monotone" dataKey="rightProjected" stroke={RIGHT_ACCENT.line} strokeWidth={3} strokeDasharray="6 6" dot={false} activeDot={false} legendType="none" connectNulls={false} />
                     </AreaChart>
                 </ResponsiveContainer>
             </CardContent>
@@ -1004,23 +1232,28 @@ function CategoryComparisonChart({
     data,
     baseCurrency,
     iqdPreference,
+    leftLabel,
+    rightLabel,
 }: {
     title: string
     summary: string
     data: Array<{ name: string; left: number; right: number }>
     baseCurrency: string
     iqdPreference: 'IQD' | 'د.ع'
+    leftLabel: string
+    rightLabel: string
 }) {
+    const { t } = useTranslation()
     return (
-        <Card className="rounded-[2rem] border border-border/50 shadow-sm">
+        <Card className="rounded-[1.7rem] border border-border/50 shadow-sm sm:rounded-[2rem]">
             <CardHeader className="pb-4">
-                <CardTitle className="text-lg font-black tracking-tight">{title}</CardTitle>
-                <p className="text-sm text-muted-foreground">{summary}</p>
+                <CardTitle className="text-base font-black tracking-tight sm:text-lg">{title}</CardTitle>
+                <p className="text-xs text-muted-foreground sm:text-sm">{summary}</p>
             </CardHeader>
-            <CardContent className="h-[320px]">
+            <CardContent className="h-[280px] sm:h-[320px]">
                 {data.length === 0 ? (
                     <div className="flex h-full items-center justify-center rounded-[1.4rem] border border-dashed border-border/60 text-sm font-medium text-muted-foreground">
-                        No data available
+                        {t('monthlyComparison.empty.noDataAvailable')}
                     </div>
                 ) : (
                     <ResponsiveContainer width="100%" height="100%">
@@ -1032,10 +1265,10 @@ function CategoryComparisonChart({
                                 contentStyle={{ backgroundColor: 'hsl(var(--card))', borderRadius: '18px', border: '1px solid hsl(var(--border))', padding: '12px' }}
                                 formatter={(value, name) => [
                                     formatCurrency(Number(value ?? 0), baseCurrency, iqdPreference),
-                                    name === 'left' ? 'Month A' : 'Month B',
+                                    name === 'left' ? leftLabel : rightLabel,
                                 ]}
                             />
-                            <Legend />
+                            <Legend formatter={value => value === 'left' ? leftLabel : rightLabel} />
                             <Bar dataKey="left" fill={LEFT_ACCENT.line} radius={[0, 8, 8, 0]} />
                             <Bar dataKey="right" fill={RIGHT_ACCENT.line} radius={[0, 8, 8, 0]} />
                         </BarChart>
@@ -1059,53 +1292,114 @@ function TopProductsComparisonCard({
     leftLabel: string
     rightLabel: string
 }) {
+    const { t } = useTranslation()
+    const hasRows = rows.length > 0
+
     return (
-        <Card className="rounded-[2rem] border border-border/50 shadow-sm">
+        <Card className="rounded-[1.7rem] border border-border/50 shadow-sm sm:rounded-[2rem]">
             <CardHeader className="pb-4">
-                <CardTitle className="text-lg font-black tracking-tight">Top Products Comparison</CardTitle>
-                <p className="text-sm text-muted-foreground">Top 5 products by combined revenue across the selected months</p>
+                <CardTitle className="text-base font-black tracking-tight sm:text-lg">{t('monthlyComparison.topProducts.title')}</CardTitle>
+                <p className="text-xs text-muted-foreground sm:text-sm">{t('monthlyComparison.topProducts.subtitle')}</p>
             </CardHeader>
-            <CardContent className="overflow-x-auto">
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead className="w-12">#</TableHead>
-                            <TableHead>Product</TableHead>
-                            <TableHead className="text-end">{leftLabel}</TableHead>
-                            <TableHead className="text-end">{rightLabel}</TableHead>
-                            <TableHead className="text-end">Delta</TableHead>
-                            <TableHead className="text-end">Share</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
+            <CardContent className="space-y-3">
+                {!hasRows ? (
+                    <div className="rounded-[1.4rem] border border-dashed border-border/60 bg-background/70 p-6 text-center text-sm font-medium text-muted-foreground">
+                        {t('monthlyComparison.empty.noProductRevenue')}
+                    </div>
+                ) : null}
+
+                {hasRows ? (
+                    <div className="space-y-3 md:hidden">
                         {rows.map(row => (
-                            <TableRow key={row.id}>
-                                <TableCell className="font-black">{row.rank}</TableCell>
-                                <TableCell>
-                                    <div className="flex items-center gap-2">
-                                        <span className="font-semibold">{row.name}</span>
+                            <div key={row.id} className="rounded-[1.3rem] border border-border/50 bg-background/70 p-4">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-[11px] font-black">
+                                                {row.rank}
+                                            </span>
+                                            <p className="truncate text-sm font-semibold">{row.name}</p>
+                                        </div>
                                         {row.state ? (
                                             <span className={cn(
-                                                'rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide',
-                                                row.state === 'New' ? RIGHT_ACCENT.badge : LEFT_ACCENT.badge
+                                                'mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide',
+                                                row.state === 'new' ? RIGHT_ACCENT.badge : LEFT_ACCENT.badge
                                             )}>
-                                                {row.state}
+                                                {row.state === 'new' ? t('monthlyComparison.status.new') : t('monthlyComparison.status.dropped')}
                                             </span>
                                         ) : null}
                                     </div>
-                                </TableCell>
-                                <TableCell className="text-end font-medium">{formatCurrency(row.leftRevenue, baseCurrency, iqdPreference)}</TableCell>
-                                <TableCell className="text-end font-medium">{formatCurrency(row.rightRevenue, baseCurrency, iqdPreference)}</TableCell>
-                                <TableCell className={cn('text-end font-black', row.delta >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400')}>
-                                    {row.delta >= 0 ? '+' : '-'}{formatCurrency(Math.abs(row.delta), baseCurrency, iqdPreference)}
-                                </TableCell>
-                                <TableCell className="text-end text-xs text-muted-foreground">
-                                    {row.leftShare.toFixed(0)}% / {row.rightShare.toFixed(0)}%
-                                </TableCell>
-                            </TableRow>
+                                    <span className={cn(
+                                        'shrink-0 text-sm font-black',
+                                        row.delta >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
+                                    )}>
+                                        {row.delta >= 0 ? '+' : '-'}{formatCurrency(Math.abs(row.delta), baseCurrency, iqdPreference)}
+                                    </span>
+                                </div>
+
+                                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                                    <div className="rounded-xl border border-border/40 px-3 py-2">
+                                        <p className="text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">{leftLabel}</p>
+                                        <p className="mt-1 text-sm font-semibold">{formatCurrency(row.leftRevenue, baseCurrency, iqdPreference)}</p>
+                                    </div>
+                                    <div className="rounded-xl border border-border/40 px-3 py-2">
+                                        <p className="text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">{rightLabel}</p>
+                                        <p className="mt-1 text-sm font-semibold">{formatCurrency(row.rightRevenue, baseCurrency, iqdPreference)}</p>
+                                    </div>
+                                </div>
+
+                                <p className="mt-3 text-xs font-medium text-muted-foreground">
+                                    {t('monthlyComparison.topProducts.shareInline', { left: row.leftShare.toFixed(0), right: row.rightShare.toFixed(0) })}
+                                </p>
+                            </div>
                         ))}
-                    </TableBody>
-                </Table>
+                    </div>
+                ) : null}
+
+                {hasRows ? (
+                    <div className="hidden overflow-x-auto md:block">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead className="w-12">#</TableHead>
+                                    <TableHead>{t('monthlyComparison.topProducts.product')}</TableHead>
+                                    <TableHead className="text-end">{leftLabel}</TableHead>
+                                    <TableHead className="text-end">{rightLabel}</TableHead>
+                                    <TableHead className="text-end">{t('monthlyComparison.topProducts.delta')}</TableHead>
+                                    <TableHead className="text-end">{t('monthlyComparison.topProducts.share')}</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {rows.map(row => (
+                                    <TableRow key={row.id}>
+                                        <TableCell className="font-black">{row.rank}</TableCell>
+                                        <TableCell>
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-semibold">{row.name}</span>
+                                                {row.state ? (
+                                                    <span className={cn(
+                                                        'rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide',
+                                                        row.state === 'new' ? RIGHT_ACCENT.badge : LEFT_ACCENT.badge
+                                                    )}>
+                                                        {row.state === 'new' ? t('monthlyComparison.status.new') : t('monthlyComparison.status.dropped')}
+                                                    </span>
+                                                ) : null}
+                                            </div>
+                                        </TableCell>
+                                        <TableCell className="text-end font-medium">{formatCurrency(row.leftRevenue, baseCurrency, iqdPreference)}</TableCell>
+                                        <TableCell className="text-end font-medium">{formatCurrency(row.rightRevenue, baseCurrency, iqdPreference)}</TableCell>
+                                        <TableCell className={cn('text-end font-black', row.delta >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400')}>
+                                            {row.delta >= 0 ? '+' : '-'}{formatCurrency(Math.abs(row.delta), baseCurrency, iqdPreference)}
+                                        </TableCell>
+                                        <TableCell className="text-end text-xs text-muted-foreground">
+                                            {row.leftShare.toFixed(0)}% / {row.rightShare.toFixed(0)}%
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </div>
+                ) : null}
             </CardContent>
         </Card>
     )
@@ -1122,24 +1416,25 @@ function ReturnsComparisonCard({
     baseCurrency: string
     iqdPreference: 'IQD' | 'د.ع'
 }) {
+    const { t } = useTranslation()
     const isEmpty = left.sales.returns.totalReturns === 0 && right.sales.returns.totalReturns === 0
 
     return (
-        <Card className="rounded-[2rem] border border-red-500/10 bg-red-500/5 shadow-sm">
+        <Card className="rounded-[1.7rem] border border-red-500/10 bg-red-500/5 shadow-sm sm:rounded-[2rem]">
             <CardHeader className="pb-4">
-                <CardTitle className="text-lg font-black tracking-tight text-red-700 dark:text-red-300">Returns Comparison</CardTitle>
-                <p className="text-sm text-red-900/60 dark:text-red-100/60">Refund pressure and returned-product differences</p>
+                <CardTitle className="text-base font-black tracking-tight text-red-700 dark:text-red-300 sm:text-lg">{t('monthlyComparison.returns.title')}</CardTitle>
+                <p className="text-xs text-red-900/60 dark:text-red-100/60 sm:text-sm">{t('monthlyComparison.returns.subtitle')}</p>
             </CardHeader>
             <CardContent className="space-y-5">
                 <div className="grid gap-3 sm:grid-cols-3">
-                    <KpiCard title="Total Returns" value={`${right.sales.returns.totalReturns}`} icon={RotateCcw} tone="red" subtitle={`${left.option.label}: ${left.sales.returns.totalReturns}`} iqdPreference={iqdPreference} />
-                    <KpiCard title="Refunded Amount" value={formatCurrency(right.sales.returns.refundedAmount, baseCurrency, iqdPreference)} icon={TrendingDown} tone="orange" subtitle={`${left.option.label}: ${formatCurrency(left.sales.returns.refundedAmount, baseCurrency, iqdPreference)}`} iqdPreference={iqdPreference} />
-                    <KpiCard title="Return Rate" value={`${right.sales.returns.returnRate.toFixed(1)}%`} icon={Percent} tone="amber" subtitle={`${left.option.label}: ${left.sales.returns.returnRate.toFixed(1)}%`} iqdPreference={iqdPreference} />
+                    <KpiCard title={t('monthlyComparison.kpis.totalReturns')} value={`${right.sales.returns.totalReturns}`} icon={RotateCcw} tone="red" subtitle={`${left.option.label}: ${left.sales.returns.totalReturns}`} iqdPreference={iqdPreference} />
+                    <KpiCard title={t('monthlyComparison.kpis.refundedAmount')} value={formatCurrency(right.sales.returns.refundedAmount, baseCurrency, iqdPreference)} icon={TrendingDown} tone="orange" subtitle={`${left.option.label}: ${formatCurrency(left.sales.returns.refundedAmount, baseCurrency, iqdPreference)}`} iqdPreference={iqdPreference} />
+                    <KpiCard title={t('monthlyComparison.kpis.returnRate')} value={`${right.sales.returns.returnRate.toFixed(1)}%`} icon={Percent} tone="amber" subtitle={`${left.option.label}: ${left.sales.returns.returnRate.toFixed(1)}%`} iqdPreference={iqdPreference} />
                 </div>
 
                 {isEmpty ? (
                     <div className="rounded-[1.4rem] border border-dashed border-red-500/20 bg-background/70 p-6 text-center text-sm font-medium text-muted-foreground">
-                        No returns recorded in either month
+                        {t('monthlyComparison.empty.noReturnsEitherMonth')}
                     </div>
                 ) : (
                     <div className="grid gap-4 lg:grid-cols-2">
@@ -1149,14 +1444,14 @@ function ReturnsComparisonCard({
                                     <p className={cn('text-xs font-black uppercase tracking-[0.18em]', index === 0 ? LEFT_ACCENT.text : RIGHT_ACCENT.text)}>
                                         {snapshot.option.label}
                                     </p>
-                                    <span className="text-xs font-medium text-muted-foreground">{snapshot.sales.returns.totalReturns} returns</span>
+                                    <span className="text-xs font-medium text-muted-foreground">{t('monthlyComparison.returns.count', { count: snapshot.sales.returns.totalReturns })}</span>
                                 </div>
                                 <div className="space-y-2">
                                     {snapshot.sales.returns.topProducts.length > 0 ? snapshot.sales.returns.topProducts.map((product, productIndex) => (
                                         <div key={`${snapshot.option.value}-${product.name}`} className="flex items-center justify-between rounded-xl border border-border/40 px-3 py-2">
                                             <div>
                                                 <p className="text-sm font-semibold">{productIndex + 1}. {product.name}</p>
-                                                <p className="text-xs text-muted-foreground">{product.count} returned</p>
+                                                <p className="text-xs text-muted-foreground">{t('monthlyComparison.returns.returnedCount', { count: product.count })}</p>
                                             </div>
                                             <span className="text-sm font-black text-red-600 dark:text-red-400">
                                                 {formatCurrency(product.amount, baseCurrency, iqdPreference)}
@@ -1164,7 +1459,7 @@ function ReturnsComparisonCard({
                                         </div>
                                     )) : (
                                         <div className="rounded-xl border border-dashed border-border/50 px-3 py-4 text-center text-sm text-muted-foreground">
-                                            No returned products
+                                            {t('monthlyComparison.empty.noReturnedProducts')}
                                         </div>
                                     )}
                                 </div>
@@ -1188,6 +1483,7 @@ function PeakActivityComparisonCard({
     peakView: PeakView
     onPeakViewChange: (view: PeakView) => void
 }) {
+    const { t } = useTranslation()
     const peakData = useMemo(() => {
         return left.sales.hourly.map((point, index) => ({
             hour: point.label,
@@ -1197,17 +1493,17 @@ function PeakActivityComparisonCard({
     }, [left.sales.hourly, right.sales.hourly])
 
     return (
-        <Card className="rounded-[2rem] border border-border/50 shadow-sm">
+        <Card className="rounded-[1.7rem] border border-border/50 shadow-sm sm:rounded-[2rem]">
             <CardHeader className="pb-4">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div>
-                        <CardTitle className="text-lg font-black tracking-tight">Peak Activity Comparison</CardTitle>
-                        <p className="text-sm text-muted-foreground">Busy-hour profile for both months</p>
+                        <CardTitle className="text-base font-black tracking-tight sm:text-lg">{t('monthlyComparison.peakActivity.title')}</CardTitle>
+                        <p className="text-xs text-muted-foreground sm:text-sm">{t('monthlyComparison.peakActivity.subtitle')}</p>
                     </div>
                     <Tabs value={peakView} onValueChange={value => onPeakViewChange(value as PeakView)}>
-                        <TabsList className="grid h-10 w-[220px] grid-cols-2 rounded-2xl bg-secondary/50 p-1">
-                            <TabsTrigger value="hourly" className="rounded-xl text-xs font-black uppercase tracking-wide">Hourly</TabsTrigger>
-                            <TabsTrigger value="heatmap" className="rounded-xl text-xs font-black uppercase tracking-wide">Heatmap</TabsTrigger>
+                        <TabsList className="grid h-9 w-full max-w-[220px] grid-cols-2 rounded-2xl bg-secondary/50 p-1 sm:h-10">
+                            <TabsTrigger value="hourly" className="rounded-xl px-2 text-[11px] font-bold tracking-normal sm:text-xs sm:font-black sm:uppercase sm:tracking-wide">{t('monthlyComparison.peakActivity.hourly')}</TabsTrigger>
+                            <TabsTrigger value="heatmap" className="rounded-xl px-2 text-[11px] font-bold tracking-normal sm:text-xs sm:font-black sm:uppercase sm:tracking-wide">{t('monthlyComparison.peakActivity.heatmap')}</TabsTrigger>
                         </TabsList>
                     </Tabs>
                 </div>
@@ -1217,27 +1513,30 @@ function PeakActivityComparisonCard({
                     <div className="rounded-[1.4rem] border border-border/60 bg-background/70 p-4">
                         <div className="flex items-center justify-between">
                             <span className="text-[11px] font-black uppercase tracking-[0.18em] text-muted-foreground">{left.option.label}</span>
-                            <span className={cn('rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-wide', LEFT_ACCENT.badge)}>Peak {left.sales.peakHourLabel}</span>
+                            <span className={cn('rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-wide', LEFT_ACCENT.badge)}>{t('monthlyComparison.peakActivity.peakAt', { time: left.sales.peakHourLabel })}</span>
                         </div>
                     </div>
                     <div className="rounded-[1.4rem] border border-border/60 bg-background/70 p-4">
                         <div className="flex items-center justify-between">
                             <span className="text-[11px] font-black uppercase tracking-[0.18em] text-muted-foreground">{right.option.label}</span>
-                            <span className={cn('rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-wide', RIGHT_ACCENT.badge)}>Peak {right.sales.peakHourLabel}</span>
+                            <span className={cn('rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-wide', RIGHT_ACCENT.badge)}>{t('monthlyComparison.peakActivity.peakAt', { time: right.sales.peakHourLabel })}</span>
                         </div>
                     </div>
                 </div>
 
                 <Tabs value={peakView} onValueChange={value => onPeakViewChange(value as PeakView)}>
                     <TabsContent value="hourly" className="mt-0">
-                        <div className="h-[280px]">
+                        <div className="h-[240px] sm:h-[280px]">
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={peakData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} vertical={false} />
                                     <XAxis dataKey="hour" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 700, fill: 'currentColor' }} className="text-muted-foreground/70" interval={1} />
                                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: 'currentColor' }} className="text-muted-foreground/70" allowDecimals={false} />
-                                    <RechartsTooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', borderRadius: '18px', border: '1px solid hsl(var(--border))', padding: '12px' }} />
-                                    <Legend />
+                                    <RechartsTooltip
+                                        contentStyle={{ backgroundColor: 'hsl(var(--card))', borderRadius: '18px', border: '1px solid hsl(var(--border))', padding: '12px' }}
+                                        formatter={(value, name) => [value, name === 'left' ? left.option.label : right.option.label]}
+                                    />
+                                    <Legend formatter={value => value === 'left' ? left.option.label : right.option.label} />
                                     <Bar dataKey="left" fill={LEFT_ACCENT.line} radius={[6, 6, 0, 0]} />
                                     <Bar dataKey="right" fill={RIGHT_ACCENT.line} radius={[6, 6, 0, 0]} />
                                 </BarChart>
@@ -1273,28 +1572,29 @@ function ProfitBridgeComparisonCard({
     baseCurrency: string
     iqdPreference: 'IQD' | 'د.ع'
 }) {
+    const { t } = useTranslation()
     const columns = [
         {
             label: left.option.label,
             accent: LEFT_ACCENT,
             steps: [
-                { label: 'Profit from Revenue', value: left.sales.baseTotals.profit, tone: 'emerald' as const },
-                { label: 'Operational Expenses', value: -left.budget.operationalTotal, tone: 'orange' as const },
-                { label: 'Personnel', value: -left.budget.personnelTotal, tone: 'orange' as const },
-                { label: 'Dividends', value: left.budget.dividends, tone: 'blue' as const },
+                { label: t('monthlyComparison.profitBridge.profitFromRevenue'), value: left.sales.baseTotals.profit, tone: 'emerald' as const },
+                { label: t('monthlyComparison.profitBridge.operationalExpenses'), value: -left.budget.operationalTotal, tone: 'orange' as const },
+                { label: t('monthlyComparison.profitBridge.personnel'), value: -left.budget.personnelTotal, tone: 'orange' as const },
+                { label: t('monthlyComparison.profitBridge.dividends'), value: left.budget.dividends, tone: 'blue' as const },
             ],
-            note: left.sales.baseTotals.profit > left.budget.totalAllocated ? 'Revenue profit covered operational costs' : 'Operational costs exceeded profit from revenue',
+            note: left.sales.baseTotals.profit > left.budget.totalAllocated ? t('monthlyComparison.profitBridge.noteCovered') : t('monthlyComparison.profitBridge.noteExceeded'),
         },
         {
             label: right.option.label,
             accent: RIGHT_ACCENT,
             steps: [
-                { label: 'Profit from Revenue', value: right.sales.baseTotals.profit, tone: 'emerald' as const },
-                { label: 'Operational Expenses', value: -right.budget.operationalTotal, tone: 'orange' as const },
-                { label: 'Personnel', value: -right.budget.personnelTotal, tone: 'orange' as const },
-                { label: 'Dividends', value: right.budget.dividends, tone: 'blue' as const },
+                { label: t('monthlyComparison.profitBridge.profitFromRevenue'), value: right.sales.baseTotals.profit, tone: 'emerald' as const },
+                { label: t('monthlyComparison.profitBridge.operationalExpenses'), value: -right.budget.operationalTotal, tone: 'orange' as const },
+                { label: t('monthlyComparison.profitBridge.personnel'), value: -right.budget.personnelTotal, tone: 'orange' as const },
+                { label: t('monthlyComparison.profitBridge.dividends'), value: right.budget.dividends, tone: 'blue' as const },
             ],
-            note: right.sales.baseTotals.profit > right.budget.totalAllocated ? 'Revenue profit covered operational costs' : 'Operational costs exceeded profit from revenue',
+            note: right.sales.baseTotals.profit > right.budget.totalAllocated ? t('monthlyComparison.profitBridge.noteCovered') : t('monthlyComparison.profitBridge.noteExceeded'),
         },
     ]
 
@@ -1302,15 +1602,15 @@ function ProfitBridgeComparisonCard({
     const winnerIsRight = right.sales.baseTotals.profit > left.sales.baseTotals.profit
 
     return (
-        <Card className="rounded-[2rem] border border-border/50 shadow-sm">
+        <Card className="rounded-[1.7rem] border border-border/50 shadow-sm sm:rounded-[2rem]">
             <CardHeader className="pb-4">
                 <div className="flex items-center gap-3">
                     <div className="p-2.5 rounded-2xl bg-primary/10 text-primary">
                         <TrendingUp className="w-5 h-5" />
                     </div>
                     <div>
-                        <CardTitle className="text-xl font-black tracking-tight">Profit Bridge</CardTitle>
-                        <p className="text-sm text-muted-foreground">How each month moved from sales profit to retained profit</p>
+                        <CardTitle className="text-lg font-black tracking-tight sm:text-xl">{t('monthlyComparison.profitBridge.title')}</CardTitle>
+                        <p className="text-xs text-muted-foreground sm:text-sm">{t('monthlyComparison.profitBridge.subtitle')}</p>
                     </div>
                 </div>
             </CardHeader>
@@ -1327,7 +1627,7 @@ function ProfitBridgeComparisonCard({
                                 <div className="mb-4 flex items-center justify-between">
                                     <span className={cn('rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.2em]', column.accent.badge)}>{column.label}</span>
                                     {isWinner && (
-                                        <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-400">Winner</span>
+                                        <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-400">{t('monthlyComparison.status.winner')}</span>
                                     )}
                                 </div>
                                 <div className="space-y-2">
@@ -1400,6 +1700,11 @@ export function MonthlyComparison() {
         () => buildAvailableMonths(sales, expenses, allocations, i18n.language),
         [sales, expenses, allocations, i18n.language]
     )
+    const localizedFallbackLabels = useMemo<MonthlyComparisonFallbackLabels>(() => ({
+        uncategorized: t('monthlyComparison.fallback.uncategorized'),
+        unknownProduct: t('monthlyComparison.fallback.unknownProduct'),
+        payroll: t('monthlyComparison.fallback.payroll'),
+    }), [t, i18n.language])
 
     const defaultSelection = useMemo(() => ({
         right: monthOptions[0]?.value || '' as MonthKey,
@@ -1410,6 +1715,9 @@ export function MonthlyComparison() {
     const [rightMonth, setRightMonth] = useState<MonthKey>('' as MonthKey)
     const [paceMetric, setPaceMetric] = useState<ComparisonMetric>('profit')
     const [peakView, setPeakView] = useState<PeakView>('hourly')
+    const [isToolbarCondensed, setIsToolbarCondensed] = useState(false)
+    const pageRef = useRef<HTMLDivElement | null>(null)
+    const pageTopBaselineRef = useRef<number | null>(null)
 
     useEffect(() => {
         if (!monthOptions.length) return
@@ -1425,27 +1733,73 @@ export function MonthlyComparison() {
         if (nextRight && nextRight !== rightMonth) setRightMonth(nextRight)
     }, [monthOptions, defaultSelection, leftMonth, rightMonth])
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+
+        const getMainNode = () => {
+            const pageNode = pageRef.current
+            if (pageNode?.closest('main')) return pageNode.closest('main') as HTMLElement
+            const fallbackMain = document.querySelector('main')
+            return fallbackMain instanceof HTMLElement ? fallbackMain : null
+        }
+
+        const syncToolbarState = () => {
+            const mainNode = getMainNode()
+            const documentScrollTop = Math.max(
+                window.scrollY,
+                document.documentElement?.scrollTop || 0,
+                document.body?.scrollTop || 0,
+            )
+            const mainScrollTop = mainNode?.scrollTop || 0
+            const pageTop = pageRef.current?.getBoundingClientRect().top ?? 0
+            if (pageTopBaselineRef.current == null || Math.max(documentScrollTop, mainScrollTop) <= 1) {
+                pageTopBaselineRef.current = pageTop
+            }
+
+            const isDesktopViewport = window.innerWidth >= 768
+            const movedFromBaseline = pageTopBaselineRef.current != null && pageTop < (pageTopBaselineRef.current - 4)
+            const next = isDesktopViewport && (Math.max(documentScrollTop, mainScrollTop) > 4 || movedFromBaseline)
+            setIsToolbarCondensed(prev => prev === next ? prev : next)
+        }
+
+        const mainNode = getMainNode()
+        syncToolbarState()
+
+        mainNode?.addEventListener('scroll', syncToolbarState, { passive: true })
+        window.addEventListener('scroll', syncToolbarState, { passive: true })
+        window.addEventListener('resize', syncToolbarState, { passive: true })
+
+        const pollId = window.setInterval(syncToolbarState, 120)
+
+        return () => {
+            window.clearInterval(pollId)
+            mainNode?.removeEventListener('scroll', syncToolbarState)
+            window.removeEventListener('scroll', syncToolbarState)
+            window.removeEventListener('resize', syncToolbarState)
+        }
+    }, [])
+
     const leftSnapshot = useMemo(() => {
         const option = monthOptions.find(item => item.value === leftMonth)
         if (!option) return null
-        const salesSnapshot = analyzeSalesMonth(sales, option.value, baseCurrency, convertToBase)
+        const salesSnapshot = analyzeSalesMonth(sales, option.value, baseCurrency, convertToBase, localizedFallbackLabels)
         return {
             option,
             sales: salesSnapshot,
-            budget: analyzeBudgetMonth(option.value, salesSnapshot, expenses, employees, allocations, convertToBase),
+            budget: analyzeBudgetMonth(option.value, salesSnapshot, expenses, employees, allocations, convertToBase, localizedFallbackLabels),
         } satisfies MonthSnapshot
-    }, [monthOptions, leftMonth, sales, baseCurrency, convertToBase, expenses, employees, allocations])
+    }, [monthOptions, leftMonth, sales, baseCurrency, convertToBase, localizedFallbackLabels, expenses, employees, allocations])
 
     const rightSnapshot = useMemo(() => {
         const option = monthOptions.find(item => item.value === rightMonth)
         if (!option) return null
-        const salesSnapshot = analyzeSalesMonth(sales, option.value, baseCurrency, convertToBase)
+        const salesSnapshot = analyzeSalesMonth(sales, option.value, baseCurrency, convertToBase, localizedFallbackLabels)
         return {
             option,
             sales: salesSnapshot,
-            budget: analyzeBudgetMonth(option.value, salesSnapshot, expenses, employees, allocations, convertToBase),
+            budget: analyzeBudgetMonth(option.value, salesSnapshot, expenses, employees, allocations, convertToBase, localizedFallbackLabels),
         } satisfies MonthSnapshot
-    }, [monthOptions, rightMonth, sales, baseCurrency, convertToBase, expenses, employees, allocations])
+    }, [monthOptions, rightMonth, sales, baseCurrency, convertToBase, localizedFallbackLabels, expenses, employees, allocations])
 
     const currentMonthKey = monthKeyFromDate(new Date())
     const yearAgoMonth = useMemo(() => {
@@ -1454,6 +1808,8 @@ export function MonthlyComparison() {
         const candidate = monthKeyFromDate(new Date(baseDate.getFullYear() - 1, baseDate.getMonth(), 1))
         return monthOptions.some(option => option.value === candidate) ? candidate : null
     }, [monthOptions])
+    const currentVsPreviousLabel = t(isToolbarCondensed ? 'monthlyComparison.currentVsPreviousShort' : 'monthlyComparison.currentVsPrevious')
+    const sameMonthLastYearLabel = t(isToolbarCondensed ? 'monthlyComparison.sameMonthLastYearShort' : 'monthlyComparison.sameMonthLastYear')
 
     const revenueCategoryData = useMemo(
         () => leftSnapshot && rightSnapshot ? buildCategoryComparison(leftSnapshot.sales.categories, rightSnapshot.sales.categories, 6) : [],
@@ -1468,20 +1824,20 @@ export function MonthlyComparison() {
         [leftSnapshot, rightSnapshot]
     )
     const insights = useMemo(
-        () => leftSnapshot && rightSnapshot ? buildInsights(leftSnapshot, rightSnapshot) : [],
-        [leftSnapshot, rightSnapshot]
+        () => leftSnapshot && rightSnapshot ? buildInsights(leftSnapshot, rightSnapshot, t) : [],
+        [leftSnapshot, rightSnapshot, t, i18n.language]
     )
 
     const deltaCards = useMemo<DeltaCardConfig[]>(() => {
         if (!leftSnapshot || !rightSnapshot) return []
         return [
-            { key: 'revenue', label: 'Revenue', leftValue: leftSnapshot.sales.baseTotals.revenue, rightValue: rightSnapshot.sales.baseTotals.revenue, format: 'currency', icon: DollarSign, tone: 'blue' },
-            { key: 'profit', label: 'Net Profit', leftValue: leftSnapshot.sales.baseTotals.profit, rightValue: rightSnapshot.sales.baseTotals.profit, format: 'currency', icon: TrendingUp, tone: 'emerald' },
-            { key: 'margin', label: 'Profit Margin', leftValue: leftSnapshot.sales.baseTotals.margin, rightValue: rightSnapshot.sales.baseTotals.margin, format: 'percent', icon: Percent, tone: 'violet' },
-            { key: 'spend', label: 'Operational Spend', leftValue: leftSnapshot.budget.totalAllocated, rightValue: rightSnapshot.budget.totalAllocated, format: 'currency', icon: BarChart3, tone: 'orange' },
-            { key: 'dividends', label: 'Dividends', leftValue: leftSnapshot.budget.dividends, rightValue: rightSnapshot.budget.dividends, format: 'currency', icon: Wallet, tone: 'sky' },
+            { key: 'revenue', label: t('monthlyComparison.revenue'), leftValue: leftSnapshot.sales.baseTotals.revenue, rightValue: rightSnapshot.sales.baseTotals.revenue, format: 'currency', icon: DollarSign, tone: 'blue' },
+            { key: 'profit', label: t('monthlyComparison.delta.netProfit'), leftValue: leftSnapshot.sales.baseTotals.profit, rightValue: rightSnapshot.sales.baseTotals.profit, format: 'currency', icon: TrendingUp, tone: 'emerald' },
+            { key: 'margin', label: t('monthlyComparison.delta.profitMargin'), leftValue: leftSnapshot.sales.baseTotals.margin, rightValue: rightSnapshot.sales.baseTotals.margin, format: 'percent', icon: Percent, tone: 'violet' },
+            { key: 'spend', label: t('monthlyComparison.delta.operationalSpend'), leftValue: leftSnapshot.budget.totalAllocated, rightValue: rightSnapshot.budget.totalAllocated, format: 'currency', icon: BarChart3, tone: 'orange' },
+            { key: 'dividends', label: t('monthlyComparison.kpis.dividends'), leftValue: leftSnapshot.budget.dividends, rightValue: rightSnapshot.budget.dividends, format: 'currency', icon: Wallet, tone: 'sky' },
         ]
-    }, [leftSnapshot, rightSnapshot])
+    }, [leftSnapshot, rightSnapshot, t, i18n.language])
 
     if (monthOptions.length < 2 || !leftSnapshot || !rightSnapshot) {
         return (
@@ -1491,9 +1847,9 @@ export function MonthlyComparison() {
                         <BarChart3 className="w-6 h-6" />
                     </div>
                     <div>
-                        <h1 className="text-3xl font-black tracking-tight">{t('monthlyComparison.title', 'Monthly Comparison')}</h1>
+                        <h1 className="text-3xl font-black tracking-tight">{t('monthlyComparison.title')}</h1>
                         <p className="text-sm font-medium text-muted-foreground/80">
-                            {t('monthlyComparison.subtitle', 'Compare two months across revenue, costs, expenses, dividends, and retained profit')}
+                            {t('monthlyComparison.subtitle')}
                         </p>
                     </div>
                 </div>
@@ -1503,9 +1859,9 @@ export function MonthlyComparison() {
                             <CalendarDays className="h-8 w-8 text-muted-foreground" />
                         </div>
                         <div>
-                            <h2 className="text-xl font-black tracking-tight">Not enough month history to compare</h2>
+                            <h2 className="text-xl font-black tracking-tight">{t('monthlyComparison.empty.notEnoughHistoryTitle')}</h2>
                             <p className="mt-2 max-w-md text-sm text-muted-foreground">
-                                This page needs at least two months with synced sales, expense, or budget data before it can render a comparison.
+                                {t('monthlyComparison.empty.notEnoughHistoryDescription')}
                             </p>
                         </div>
                     </CardContent>
@@ -1516,47 +1872,70 @@ export function MonthlyComparison() {
 
 
     return (
-        <div className="space-y-8 pb-10">
+        <div ref={pageRef} className="space-y-6 pb-10 sm:space-y-8">
             <div className="space-y-2">
                 <div className="flex items-center gap-3">
-                    <div className="p-3 rounded-2xl bg-primary/10 text-primary shadow-inner">
-                        <BarChart3 className="w-6 h-6" />
+                    <div className="rounded-2xl bg-primary/10 p-2.5 text-primary shadow-inner sm:p-3">
+                        <BarChart3 className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
                     <div>
-                        <h1 className="text-3xl font-black tracking-tight">{t('monthlyComparison.title', 'Monthly Comparison')}</h1>
-                        <p className="text-sm font-medium text-muted-foreground/80">
-                            {t('monthlyComparison.subtitle', 'Compare two months across revenue, costs, expenses, dividends, and retained profit')}
+                        <h1 className="text-2xl font-black tracking-tight sm:text-3xl">{t('monthlyComparison.title')}</h1>
+                        <p className="text-xs font-medium text-muted-foreground/80 sm:text-sm">
+                            {t('monthlyComparison.subtitle')}
                         </p>
                     </div>
                 </div>
             </div>
 
-            <div className="sticky top-3 z-20 rounded-[2rem] border border-border/60 bg-background/90 p-3 shadow-lg backdrop-blur-xl ring-1 ring-primary/5">
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-stretch">
-                    <MonthSelectorCard title={t('monthlyComparison.monthA', 'Month A')} accent={LEFT_ACCENT} value={leftMonth} options={monthOptions} otherValue={rightMonth} onChange={setLeftMonth} meta={`${leftSnapshot.option.hasSales ? 'Sales' : 'No sales'} • ${leftSnapshot.option.hasExpenses ? 'Expenses' : 'No expenses'} • ${leftSnapshot.option.hasAllocation ? 'Budget set' : 'Budget not set'}`} />
+            <div className={cn(
+                'z-20 border border-border/60 bg-background/90 ring-1 ring-primary/5 transition-all duration-200 ease-out md:sticky',
+                isToolbarCondensed ? 'rounded-[1.3rem] p-1.5 shadow-md backdrop-blur-2xl md:top-0' : 'rounded-[2rem] p-3 shadow-lg backdrop-blur-xl md:top-3',
+            )}>
+                <div className={cn(
+                    'flex flex-col transition-all duration-200 ease-out xl:flex-row',
+                    isToolbarCondensed ? 'gap-1.5 xl:items-center' : 'gap-3 xl:items-stretch',
+                )}>
+                    <MonthSelectorCard title={t('monthlyComparison.monthA')} accent={LEFT_ACCENT} value={leftMonth} options={monthOptions} otherValue={rightMonth} onChange={setLeftMonth} meta={buildToolbarMeta(leftSnapshot.option, t)} compact={isToolbarCondensed} />
                     <div className="flex items-center justify-center">
-                        <Button type="button" variant="outline" size="icon" onClick={() => { setLeftMonth(rightMonth); setRightMonth(leftMonth) }} className="h-12 w-12 rounded-2xl border-border/50 hover:rotate-180 transition-all duration-500" title="Swap months">
+                        <Button type="button" variant="outline" size="icon" onClick={() => { setLeftMonth(rightMonth); setRightMonth(leftMonth) }} className={cn(
+                            'border-border/50 transition-all duration-200 ease-out hover:rotate-180',
+                            isToolbarCondensed ? 'h-9 w-9 rounded-[0.9rem]' : 'h-12 w-12 rounded-2xl',
+                        )} title={t('monthlyComparison.swapMonths')}>
                             <Activity className="h-4 w-4" />
                         </Button>
                     </div>
-                    <MonthSelectorCard title={t('monthlyComparison.monthB', 'Month B')} accent={RIGHT_ACCENT} value={rightMonth} options={monthOptions} otherValue={leftMonth} onChange={setRightMonth} meta={`${rightSnapshot.option.hasSales ? 'Sales' : 'No sales'} • ${rightSnapshot.option.hasExpenses ? 'Expenses' : 'No expenses'} • ${rightSnapshot.option.hasAllocation ? 'Budget set' : 'Budget not set'}`} />
-                    <div className="grid gap-3 md:grid-cols-3 xl:w-[420px]">
-                        <Button type="button" variant="outline" onClick={() => { if (defaultSelection.left && defaultSelection.right) { setLeftMonth(defaultSelection.left); setRightMonth(defaultSelection.right) } }} className="h-full min-h-12 rounded-[1.5rem] border-border/50 text-xs font-black uppercase tracking-[0.16em] hover:bg-primary/5 transition-colors">
-                            {t('monthlyComparison.currentVsPrevious', 'Current vs Previous')}
+                    <MonthSelectorCard title={t('monthlyComparison.monthB')} accent={RIGHT_ACCENT} value={rightMonth} options={monthOptions} otherValue={leftMonth} onChange={setRightMonth} meta={buildToolbarMeta(rightSnapshot.option, t)} compact={isToolbarCondensed} />
+                    <div className={cn(
+                        'flex overflow-x-auto pb-1 transition-all duration-200 ease-out [-ms-overflow-style:none] [scrollbar-width:none] md:grid md:overflow-visible md:pb-0 md:grid-cols-3 [&::-webkit-scrollbar]:hidden',
+                        isToolbarCondensed ? 'gap-1.5 xl:w-[350px]' : 'gap-2.5 md:gap-3 xl:w-[420px]',
+                    )}>
+                        <Button type="button" variant="outline" title={t('monthlyComparison.currentVsPrevious')} onClick={() => { if (defaultSelection.left && defaultSelection.right) { setLeftMonth(defaultSelection.left); setRightMonth(defaultSelection.right) } }} className={cn(
+                            'border-border/50 transition-all duration-200 ease-out hover:bg-primary/5',
+                            isToolbarCondensed ? 'h-9 min-w-[122px] flex-none rounded-[0.9rem] px-2.5 text-[10px] font-bold normal-case tracking-normal text-center whitespace-nowrap md:min-w-0' : 'h-full min-h-12 min-w-[138px] flex-none rounded-[1.5rem] px-3 text-[11px] font-bold normal-case tracking-[0.01em] text-center whitespace-nowrap md:min-w-0',
+                        )}>
+                            {currentVsPreviousLabel}
                         </Button>
-                        <Button type="button" variant="outline" disabled={!yearAgoMonth || !monthOptions[0]} onClick={() => { if (yearAgoMonth && monthOptions[0]) { setLeftMonth(yearAgoMonth); setRightMonth(monthOptions[0].value) } }} className="h-full min-h-12 rounded-[1.5rem] border-border/50 text-xs font-black uppercase tracking-[0.16em] hover:bg-primary/5 transition-colors">
-                            {t('monthlyComparison.sameMonthLastYear', 'Same Month Last Year')}
+                        <Button type="button" variant="outline" title={t('monthlyComparison.sameMonthLastYear')} disabled={!yearAgoMonth || !monthOptions[0]} onClick={() => { if (yearAgoMonth && monthOptions[0]) { setLeftMonth(yearAgoMonth); setRightMonth(monthOptions[0].value) } }} className={cn(
+                            'border-border/50 transition-all duration-200 ease-out hover:bg-primary/5',
+                            isToolbarCondensed ? 'h-9 min-w-[122px] flex-none rounded-[0.9rem] px-2.5 text-[10px] font-bold normal-case tracking-normal text-center whitespace-nowrap md:min-w-0' : 'h-full min-h-12 min-w-[138px] flex-none rounded-[1.5rem] px-3 text-[11px] font-bold normal-case tracking-[0.01em] text-center whitespace-nowrap md:min-w-0',
+                        )}>
+                            {sameMonthLastYearLabel}
                         </Button>
-                        <Button type="button" variant="ghost" disabled={leftMonth === defaultSelection.left && rightMonth === defaultSelection.right} onClick={() => { if (defaultSelection.left && defaultSelection.right) { setLeftMonth(defaultSelection.left); setRightMonth(defaultSelection.right) } }} className="h-full min-h-12 rounded-[1.5rem] text-xs font-black uppercase tracking-[0.16em]">
-                            {t('monthlyComparison.reset', 'Reset')}
+                        <Button type="button" variant="ghost" disabled={leftMonth === defaultSelection.left && rightMonth === defaultSelection.right} onClick={() => { if (defaultSelection.left && defaultSelection.right) { setLeftMonth(defaultSelection.left); setRightMonth(defaultSelection.right) } }} className={cn(
+                            'transition-all duration-200 ease-out',
+                            isToolbarCondensed ? 'h-9 min-w-[96px] flex-none rounded-[0.9rem] px-2.5 text-[10px] font-bold normal-case tracking-normal text-center whitespace-nowrap md:min-w-0' : 'h-full min-h-12 min-w-[96px] flex-none rounded-[1.5rem] px-3 text-[11px] font-bold normal-case tracking-[0.01em] text-center whitespace-nowrap md:min-w-0',
+                        )}>
+                            {t('monthlyComparison.reset')}
                         </Button>
                     </div>
                 </div>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <div className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] md:mx-0 md:grid md:gap-4 md:overflow-visible md:px-0 md:pb-0 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 [&::-webkit-scrollbar]:hidden">
                 {deltaCards.map(({ key, ...card }) => (
-                    <ComparisonDeltaCard key={key} {...card} baseCurrency={baseCurrency} iqdPreference={iqdPreference} leftLabel={leftSnapshot.option.label} rightLabel={rightSnapshot.option.label} />
+                    <div key={key} className="min-w-[240px] snap-start md:min-w-0">
+                        <ComparisonDeltaCard {...card} baseCurrency={baseCurrency} iqdPreference={iqdPreference} leftLabel={leftSnapshot.option.label} rightLabel={rightSnapshot.option.label} />
+                    </div>
                 ))}
             </div>
 
@@ -1564,10 +1943,10 @@ export function MonthlyComparison() {
             <div className="space-y-4">
                 <div className="flex items-center gap-3 px-1">
                     <div className="h-px flex-1 bg-border/60" />
-                    <span className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/60">Month Summaries</span>
+                    <span className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/60">{t('monthlyComparison.sections.monthSummaries')}</span>
                     <div className="h-px flex-1 bg-border/60" />
                 </div>
-                <div className="grid gap-6 xl:grid-cols-2">
+                <div className="grid gap-4 sm:gap-6 xl:grid-cols-2">
                     <MonthSummaryPanel snapshot={leftSnapshot} accent={LEFT_ACCENT} baseCurrency={baseCurrency} iqdPreference={iqdPreference} isCurrent={leftSnapshot.option.value === currentMonthKey} />
                     <MonthSummaryPanel snapshot={rightSnapshot} accent={RIGHT_ACCENT} baseCurrency={baseCurrency} iqdPreference={iqdPreference} isCurrent={rightSnapshot.option.value === currentMonthKey} />
                 </div>
@@ -1579,13 +1958,13 @@ export function MonthlyComparison() {
             <div className="space-y-4">
                 <div className="flex items-center gap-3 px-1">
                     <div className="h-px flex-1 bg-border/60" />
-                    <span className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/60">Charts & Analytics</span>
+                    <span className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/60">{t('monthlyComparison.sections.chartsAnalytics')}</span>
                     <div className="h-px flex-1 bg-border/60" />
                 </div>
-                <div className="grid gap-6 xl:grid-cols-3">
+                <div className="grid gap-4 sm:gap-6 xl:grid-cols-3">
                     <MonthPaceComparisonChart left={leftSnapshot} right={rightSnapshot} metric={paceMetric} onMetricChange={setPaceMetric} baseCurrency={baseCurrency} iqdPreference={iqdPreference} />
-                    <CategoryComparisonChart title="Revenue Categories" summary={getChartSummaryLabel(revenueCategoryData, rightSnapshot.option.label, leftSnapshot.option.label)} data={revenueCategoryData} baseCurrency={baseCurrency} iqdPreference={iqdPreference} />
-                    <CategoryComparisonChart title="Expense Categories" summary={expenseCategoryData.length === 0 ? 'No expense data' : getChartSummaryLabel(expenseCategoryData, rightSnapshot.option.label, leftSnapshot.option.label)} data={expenseCategoryData} baseCurrency={baseCurrency} iqdPreference={iqdPreference} />
+                    <CategoryComparisonChart title={t('monthlyComparison.categories.revenue')} summary={getChartSummaryLabel(revenueCategoryData, rightSnapshot.option.label, leftSnapshot.option.label, t)} data={revenueCategoryData} baseCurrency={baseCurrency} iqdPreference={iqdPreference} leftLabel={leftSnapshot.option.label} rightLabel={rightSnapshot.option.label} />
+                    <CategoryComparisonChart title={t('monthlyComparison.categories.expense')} summary={expenseCategoryData.length === 0 ? t('monthlyComparison.empty.noExpenseData') : getChartSummaryLabel(expenseCategoryData, rightSnapshot.option.label, leftSnapshot.option.label, t)} data={expenseCategoryData} baseCurrency={baseCurrency} iqdPreference={iqdPreference} leftLabel={leftSnapshot.option.label} rightLabel={rightSnapshot.option.label} />
                 </div>
             </div>
 
@@ -1593,10 +1972,10 @@ export function MonthlyComparison() {
             <div className="space-y-4">
                 <div className="flex items-center gap-3 px-1">
                     <div className="h-px flex-1 bg-border/60" />
-                    <span className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/60">Details & Breakdown</span>
+                    <span className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/60">{t('monthlyComparison.sections.detailsBreakdown')}</span>
                     <div className="h-px flex-1 bg-border/60" />
                 </div>
-                <div className="grid gap-6 xl:grid-cols-3">
+                <div className="grid gap-4 sm:gap-6 xl:grid-cols-3">
                     <TopProductsComparisonCard rows={topProductRows} baseCurrency={baseCurrency} iqdPreference={iqdPreference} leftLabel={leftSnapshot.option.label} rightLabel={rightSnapshot.option.label} />
                     <ReturnsComparisonCard left={leftSnapshot} right={rightSnapshot} baseCurrency={baseCurrency} iqdPreference={iqdPreference} />
                     <PeakActivityComparisonCard left={leftSnapshot} right={rightSnapshot} peakView={peakView} onPeakViewChange={setPeakView} />
