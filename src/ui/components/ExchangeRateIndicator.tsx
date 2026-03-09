@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { RefreshCw, Globe, AlertCircle, Loader2, Calculator, Coins, X, Pencil, AlertTriangle, Plus } from 'lucide-react'
+import { RefreshCw, Globe, AlertCircle, Loader2, Calculator, Coins, X, Pencil, AlertTriangle, Plus, NotebookPen } from 'lucide-react'
 import { useLocation } from 'wouter'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { useWorkspace } from '@/workspace'
@@ -238,12 +238,14 @@ export function ExchangeRateList({ isMobile = false }: { isMobile?: boolean }) {
 }
 
 export function ExchangeRateIndicator() {
-    const [, setLocation] = useLocation()
+    const [location, setLocation] = useLocation()
     const { status, refresh } = useExchangeRate()
     const { t, i18n } = useTranslation()
     const { style } = useTheme()
     const [isOpen, setIsOpen] = useState(false)
     const direction = i18n.dir()
+    const isCurrencyConverterPage = location === '/currency-converter'
+    const isNotebookPage = location === '/notebook'
 
     return (
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -251,10 +253,27 @@ export function ExchangeRateIndicator() {
                 {/* Desktop View */}
                 <div className="hidden md:flex items-center gap-2">
                     <button
+                        onClick={() => setLocation('/notebook')}
+                        className={cn(
+                            "p-1.5 hover:bg-secondary border transition-all group",
+                            style === 'neo-orange'
+                                ? "rounded-[var(--radius)] border-black dark:border-white bg-white dark:bg-black"
+                                : "rounded-lg hover:bg-secondary border-transparent hover:border-border",
+                            isNotebookPage && "border-border bg-secondary text-foreground"
+                        )}
+                        title={t('notebook.label') || 'Notebook'}
+                    >
+                        <NotebookPen className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                    </button>
+
+                    <button
                         onClick={() => setLocation('/currency-converter')}
                         className={cn(
                             "p-1.5 hover:bg-secondary border transition-all group",
-                            style === 'neo-orange' ? "rounded-[var(--radius)] border-black dark:border-white bg-white dark:bg-black" : "rounded-lg border-transparent hover:border-border"
+                            style === 'neo-orange'
+                                ? "rounded-[var(--radius)] border-black dark:border-white bg-white dark:bg-black"
+                                : "rounded-lg hover:bg-secondary border-transparent hover:border-border",
+                            isCurrencyConverterPage && "border-border bg-secondary text-foreground"
                         )}
                         title="Currency Converter"
                     >

@@ -45,6 +45,7 @@ const TeamPerformance = lazy(() => import('@/ui/pages/TeamPerformance').then(m =
 const WorkspaceConfiguration = lazy(() => import('@/ui/pages/WorkspaceConfiguration').then(m => ({ default: m.WorkspaceConfiguration })))
 const LockedWorkspace = lazy(() => import('@/ui/pages/LockedWorkspace').then(m => ({ default: m.LockedWorkspace })))
 const CurrencyConverter = lazy(() => import('@/ui/pages/CurrencyConverter').then(m => ({ default: m.CurrencyConverter })))
+const Notebook = lazy(() => import('@/ui/pages/Notebook').then(m => ({ default: m.Notebook })))
 const ConnectionConfiguration = lazy(() => import('@/ui/pages/ConnectionConfiguration').then(m => ({ default: m.ConnectionConfiguration })))
 const WhatsApp = lazy(() => import('@/ui/pages/WhatsAppWeb').then(m => ({ default: m.default })))
 const Suppliers = lazy(() => import('@/ui/pages/Suppliers').then(m => ({ default: m.default })))
@@ -433,6 +434,13 @@ function App() {
                                             <ProtectedRoute allowedRoles={['admin', 'staff']}>
                                                 <Layout>
                                                     <CurrencyConverter />
+                                                </Layout>
+                                            </ProtectedRoute>
+                                        </Route>
+                                        <Route path="/notebook">
+                                            <ProtectedRoute>
+                                                <Layout>
+                                                    <Notebook />
                                                 </Layout>
                                             </ProtectedRoute>
                                         </Route>

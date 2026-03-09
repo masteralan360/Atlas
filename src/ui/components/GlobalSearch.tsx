@@ -1,4 +1,4 @@
-import { Search, Command, LayoutDashboard, ShoppingCart, Package, ListOrdered, Users, Settings as SettingsIcon, BarChart3, Users2, Globe, MessageSquare, Moon, Sun, LogOut, ChevronRight, Truck, ShoppingBag, ArrowRightLeft } from 'lucide-react'
+import { Search, Command, LayoutDashboard, ShoppingCart, Package, ListOrdered, Users, Settings as SettingsIcon, BarChart3, Users2, Globe, MessageSquare, Moon, Sun, LogOut, ChevronRight, Truck, ShoppingBag, ArrowRightLeft, NotebookPen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState, useEffect, useRef } from 'react'
 import { useHashLocation } from '@/hooks/useHashLocation'
@@ -47,6 +47,7 @@ export function GlobalSearch({ className, placeholder }: GlobalSearchProps) {
 
         // Tools
         { id: 'tool-currency', title: t('nav.currencyConverter'), category: 'Tools', icon: Globe, action: () => setLocation('/currency-converter') },
+        { id: 'tool-notebook', title: t('notebook.label') || 'Notebook', category: 'Tools', icon: NotebookPen, action: () => setLocation('/notebook') },
         { id: 'tool-whatsapp', title: t('nav.whatsapp'), category: 'Tools', icon: MessageSquare, action: () => setLocation('/whatsapp') },
 
         // Actions

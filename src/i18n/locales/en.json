@@ -150,13 +150,39 @@
         "tools": "Tools",
         "actions": "Actions"
     },
+    "notebook": {
+        "label": "Notebook",
+        "title": "Local notebook",
+        "description": "Rich notes stored only on this device. They are not saved to the database and do not sync to other devices.",
+        "status": {
+            "saving": "Saving locally",
+            "localDraft": "Local draft",
+            "savedAt": "Saved {{date}}",
+            "saveFailed": "Save failed",
+            "loading": "Loading notebook"
+        },
+        "actions": {
+            "saveNow": "Save now"
+        },
+        "fields": {
+            "titlePlaceholder": "Notebook title",
+            "editorPlaceholder": "Start writing, or type '/' for commands..."
+        },
+        "messages": {
+            "loadError": "Failed to load your local notebook.",
+            "loadingEditor": "Loading notebook editor..."
+        },
+        "sections": {
+            "notes": "Notes"
+        }
+    },
     "monthlyComparison": {
         "title": "Monthly Comparison",
         "subtitle": "Compare two months across revenue, costs, expenses, dividends, and retained profit",
         "monthA": "Month A",
         "monthB": "Month B",
-        "currentVsPrevious": "Current vs Previous",
-        "currentVsPreviousShort": "Current / Prev",
+        "previousVsCurrent": "Previous vs Current",
+        "previousVsCurrentShort": "Previous / Current",
         "sameMonthLastYear": "Same Month Last Year",
         "sameMonthLastYearShort": "Same Month LY",
         "reset": "Reset",

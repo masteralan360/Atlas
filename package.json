@@ -1,7 +1,7 @@
 {
   "name": "asaas",
   "private": true,
-  "version": "0.0.30",
+  "version": "0.0.31",
   "main": "electron/main.cjs",
   "type": "module",
   "repository": {
@@ -20,7 +20,7 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "public/en-default.ico"
+      "icon": "public/logo.ico"
     },
     "publish": {
       "provider": "github",
@@ -46,6 +46,7 @@
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@lglab/react-qr-code": "^1.4.9",
+    "@lyfie/luthor": "^2.3.6",
     "@mui/material": "^7.3.8",
     "@novu/node": "^2.6.6",
     "@novu/react": "^3.13.0",

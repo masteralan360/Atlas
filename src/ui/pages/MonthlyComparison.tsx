@@ -1530,7 +1530,7 @@ function PeakActivityComparisonCard({
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={peakData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} vertical={false} />
-                                    <XAxis dataKey="hour" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 700, fill: 'currentColor' }} className="text-muted-foreground/70" interval={1} />
+                                    <XAxis dataKey="hour" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 700, fill: 'currentColor' }} className="text-muted-foreground/70" interval="preserveStartEnd" minTickGap={10} />
                                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: 'currentColor' }} className="text-muted-foreground/70" allowDecimals={false} />
                                     <RechartsTooltip
                                         contentStyle={{ backgroundColor: 'hsl(var(--card))', borderRadius: '18px', border: '1px solid hsl(var(--border))', padding: '12px' }}
@@ -1808,7 +1808,7 @@ export function MonthlyComparison() {
         const candidate = monthKeyFromDate(new Date(baseDate.getFullYear() - 1, baseDate.getMonth(), 1))
         return monthOptions.some(option => option.value === candidate) ? candidate : null
     }, [monthOptions])
-    const currentVsPreviousLabel = t(isToolbarCondensed ? 'monthlyComparison.currentVsPreviousShort' : 'monthlyComparison.currentVsPrevious')
+    const previousVsCurrentLabel = t(isToolbarCondensed ? 'monthlyComparison.previousVsCurrentShort' : 'monthlyComparison.previousVsCurrent')
     const sameMonthLastYearLabel = t(isToolbarCondensed ? 'monthlyComparison.sameMonthLastYearShort' : 'monthlyComparison.sameMonthLastYear')
 
     const revenueCategoryData = useMemo(
@@ -1909,11 +1909,11 @@ export function MonthlyComparison() {
                         'flex overflow-x-auto pb-1 transition-all duration-200 ease-out [-ms-overflow-style:none] [scrollbar-width:none] md:grid md:overflow-visible md:pb-0 md:grid-cols-3 [&::-webkit-scrollbar]:hidden',
                         isToolbarCondensed ? 'gap-1.5 xl:w-[350px]' : 'gap-2.5 md:gap-3 xl:w-[420px]',
                     )}>
-                        <Button type="button" variant="outline" title={t('monthlyComparison.currentVsPrevious')} onClick={() => { if (defaultSelection.left && defaultSelection.right) { setLeftMonth(defaultSelection.left); setRightMonth(defaultSelection.right) } }} className={cn(
+                        <Button type="button" variant="outline" title={t('monthlyComparison.previousVsCurrent')} onClick={() => { if (defaultSelection.left && defaultSelection.right) { setLeftMonth(defaultSelection.left); setRightMonth(defaultSelection.right) } }} className={cn(
                             'border-border/50 transition-all duration-200 ease-out hover:bg-primary/5',
                             isToolbarCondensed ? 'h-9 min-w-[122px] flex-none rounded-[0.9rem] px-2.5 text-[10px] font-bold normal-case tracking-normal text-center whitespace-nowrap md:min-w-0' : 'h-full min-h-12 min-w-[138px] flex-none rounded-[1.5rem] px-3 text-[11px] font-bold normal-case tracking-[0.01em] text-center whitespace-nowrap md:min-w-0',
                         )}>
-                            {currentVsPreviousLabel}
+                            {previousVsCurrentLabel}
                         </Button>
                         <Button type="button" variant="outline" title={t('monthlyComparison.sameMonthLastYear')} disabled={!yearAgoMonth || !monthOptions[0]} onClick={() => { if (yearAgoMonth && monthOptions[0]) { setLeftMonth(yearAgoMonth); setRightMonth(monthOptions[0].value) } }} className={cn(
                             'border-border/50 transition-all duration-200 ease-out hover:bg-primary/5',

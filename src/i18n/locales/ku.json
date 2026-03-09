@@ -148,13 +148,39 @@
         "actions": "کردارەکان",
         "loans": "قەرزارەکان"
     },
+    "notebook": {
+        "label": "تێبینی",
+        "title": "تێبینیی ناوخۆیی",
+        "description": "تێبینییەکان لە بنکەی زانیاری پاشەکەوت ناکرێن و بۆ ئامێرەکانی تر هاوتا ناکرێن.",
+        "status": {
+            "saving": "بە شێوەی ناوخۆیی پاشەکەوت دەکرێت",
+            "localDraft": "ڕەشنووسی ناوخۆیی",
+            "savedAt": "پاشەکەوت کرا {{date}}",
+            "saveFailed": "پاشەکەوتکردن سەرکەوتوو نەبوو",
+            "loading": "تێبینی بار دەکرێت"
+        },
+        "actions": {
+            "saveNow": "ئێستا پاشەکەوت بکە"
+        },
+        "fields": {
+            "titlePlaceholder": "ناونیشانی تێبینی",
+            "editorPlaceholder": "دەست بە نووسین بکە، یان '/' بنووسە بۆ فەرمانەکان..."
+        },
+        "messages": {
+            "loadError": "بارکردنی تێبینیی ناوخۆیی سەرکەوتوو نەبوو.",
+            "loadingEditor": "ئەدەیتەری تێبینی بار دەکرێت..."
+        },
+        "sections": {
+            "notes": "تێبینی"
+        }
+    },
     "monthlyComparison": {
         "title": "بەراوردی مانگانە",
         "subtitle": "دوو مانگ لە ڕووی داهات، تێچوو، خەرجی، دابەشکردنی قازانج و قازانجی ماوەوە بەراورد بکە",
         "monthA": "مانگی A",
         "monthB": "مانگی B",
-        "currentVsPrevious": "ئێستا بەرامبەر پێشوو",
-        "currentVsPreviousShort": "ئێستا / پێشوو",
+        "previousVsCurrent": "پێشوو بەرامبەر ئێستا",
+        "previousVsCurrentShort": "پێشوو / ئێستا",
         "sameMonthLastYear": "هەمان مانگ لە ساڵی پار",
         "sameMonthLastYearShort": "هەمان مانگ پار",
         "reset": "نوێکردنەوە",

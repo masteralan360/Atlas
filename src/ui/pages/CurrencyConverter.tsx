@@ -14,7 +14,7 @@ import {
     ArrowRightLeft,
     Calculator,
 } from 'lucide-react'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatNumberWithCommas } from '@/lib/utils'
 import type { CurrencyCode } from '@/local-db'
 
 export function CurrencyConverter() {
@@ -28,8 +28,31 @@ export function CurrencyConverter() {
     const [toCurrency, setToCurrency] = useState<CurrencyCode>('iqd')
     const [result, setResult] = useState<number>(0)
 
-    const convertPrice = useCallback((amount: number, from: CurrencyCode, to: CurrencyCode) => {
-        if (from === to) return amount
+    const handleBack = () => {
+        if (window.history.length > 2) {
+            window.history.back()
+        } else {
+            setLocation('/')
+        }
+    }
+
+    const handleAmountChange = (val: string) => {
+        if (val === '') {
+            setAmount('')
+            return
+        }
+        // Only allow numbers and one decimal point
+        const cleanVal = val.replace(/[^0-9.]/g, '')
+        const parts = cleanVal.split('.')
+        if (parts.length > 2) return // Don't allow multiple dots
+
+        // Format with commas
+        const formatted = formatNumberWithCommas(parts[0]) + (parts.length > 1 ? '.' + parts[1] : '')
+        setAmount(formatted)
+    }
+
+    const convertPrice = useCallback((amountValue: number, from: CurrencyCode, to: CurrencyCode) => {
+        if (from === to) return amountValue
 
         const getRate = (pair: 'usd_iqd' | 'usd_eur' | 'eur_iqd') => {
             if (pair === 'usd_iqd') return exchangeData ? exchangeData.rate / 100 : null
@@ -38,43 +61,43 @@ export function CurrencyConverter() {
             return null
         }
 
-        let converted = amount
+        let converted = amountValue
 
         if (from === 'usd' && to === 'iqd') {
-            const r = getRate('usd_iqd'); if (r) converted = amount * r
+            const r = getRate('usd_iqd'); if (r) converted = amountValue * r
         } else if (from === 'iqd' && to === 'usd') {
-            const r = getRate('usd_iqd'); if (r) converted = amount / r
+            const r = getRate('usd_iqd'); if (r) converted = amountValue / r
         } else if (from === 'usd' && to === 'eur') {
-            const r = getRate('usd_eur'); if (r) converted = amount * r
+            const r = getRate('usd_eur'); if (r) converted = amountValue * r
         } else if (from === 'eur' && to === 'usd') {
-            const r = getRate('usd_eur'); if (r) converted = amount / r
+            const r = getRate('usd_eur'); if (r) converted = amountValue / r
         } else if (from === 'eur' && to === 'iqd') {
-            const r = getRate('eur_iqd'); if (r) converted = amount * r
+            const r = getRate('eur_iqd'); if (r) converted = amountValue * r
         } else if (from === 'iqd' && to === 'eur') {
-            const r = getRate('eur_iqd'); if (r) converted = amount / r
+            const r = getRate('eur_iqd'); if (r) converted = amountValue / r
         } else if (from === 'try' && to === 'iqd') {
-            if (tryRates.try_iqd) converted = amount * (tryRates.try_iqd.rate / 100)
+            if (tryRates.try_iqd) converted = amountValue * (tryRates.try_iqd.rate / 100)
         } else if (from === 'iqd' && to === 'try') {
-            if (tryRates.try_iqd) converted = amount / (tryRates.try_iqd.rate / 100)
+            if (tryRates.try_iqd) converted = amountValue / (tryRates.try_iqd.rate / 100)
         } else if (from === 'usd' && to === 'try') {
-            if (tryRates.usd_try) converted = amount * (tryRates.usd_try.rate / 100)
+            if (tryRates.usd_try) converted = amountValue * (tryRates.usd_try.rate / 100)
         } else if (from === 'try' && to === 'usd') {
-            if (tryRates.usd_try) converted = amount / (tryRates.usd_try.rate / 100)
+            if (tryRates.usd_try) converted = amountValue / (tryRates.usd_try.rate / 100)
         } else if (from === 'try' && to === 'eur') {
             const tryIqdRate = tryRates.try_iqd ? tryRates.try_iqd.rate / 100 : null
             const eurIqdRate = eurRates.eur_iqd ? eurRates.eur_iqd.rate / 100 : null
-            if (tryIqdRate && eurIqdRate) converted = (amount * tryIqdRate) / eurIqdRate
+            if (tryIqdRate && eurIqdRate) converted = (amountValue * tryIqdRate) / eurIqdRate
         } else if (from === 'eur' && to === 'try') {
             const eurIqdRate = eurRates.eur_iqd ? eurRates.eur_iqd.rate / 100 : null
             const tryIqdRate = tryRates.try_iqd ? tryRates.try_iqd.rate / 100 : null
-            if (eurIqdRate && tryIqdRate) converted = (amount * eurIqdRate) / tryIqdRate
+            if (eurIqdRate && tryIqdRate) converted = (amountValue * eurIqdRate) / tryIqdRate
         }
 
         return to === 'iqd' ? Math.round(converted) : Math.round(converted * 100) / 100
     }, [exchangeData, eurRates, tryRates])
 
     useEffect(() => {
-        const numAmount = parseFloat(amount) || 0
+        const numAmount = parseFloat(amount.replace(/,/g, '')) || 0
         setResult(convertPrice(numAmount, fromCurrency, toCurrency))
     }, [amount, fromCurrency, toCurrency, convertPrice])
 
@@ -95,7 +118,7 @@ export function CurrencyConverter() {
                     <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => setLocation('/pos')}
+                        onClick={handleBack}
                         className="rounded-full"
                     >
                         <ArrowLeft className="w-5 h-5" />
@@ -135,9 +158,9 @@ export function CurrencyConverter() {
                             </Label>
                             <div className="relative group">
                                 <Input
-                                    type="number"
+                                    type="text"
                                     value={amount}
-                                    onChange={(e) => setAmount(e.target.value)}
+                                    onChange={(e) => handleAmountChange(e.target.value)}
                                     className="h-16 text-2xl font-bold pl-4 pr-24 rounded-xl border-2 focus-visible:ring-primary/20 transition-all"
                                     placeholder="0.00"
                                 />

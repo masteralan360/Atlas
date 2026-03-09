@@ -149,13 +149,39 @@
         "actions": "إجراءات",
         "loans": "القروض"
     },
+    "notebook": {
+        "label": "المفكرة",
+        "title": "مفكرة محلية",
+        "description": "ملاحظات غنية محفوظة على هذا الجهاز فقط. لن يتم حفظها في قاعدة البيانات ولن تتم مزامنتها مع الأجهزة الأخرى.",
+        "status": {
+            "saving": "جارٍ الحفظ محليًا",
+            "localDraft": "مسودة محلية",
+            "savedAt": "تم الحفظ {{date}}",
+            "saveFailed": "فشل الحفظ",
+            "loading": "جارٍ تحميل المفكرة"
+        },
+        "actions": {
+            "saveNow": "حفظ الآن"
+        },
+        "fields": {
+            "titlePlaceholder": "عنوان المفكرة",
+            "editorPlaceholder": "ابدأ الكتابة، أو اكتب '/' للأوامر..."
+        },
+        "messages": {
+            "loadError": "فشل تحميل المفكرة المحلية.",
+            "loadingEditor": "جارٍ تحميل محرر المفكرة..."
+        },
+        "sections": {
+            "notes": "ملاحظات"
+        }
+    },
     "monthlyComparison": {
         "title": "المقارنة الشهرية",
         "subtitle": "قارن بين شهرين عبر الإيرادات، التكلفة، المصروفات، التوزيعات، والربح المحتفظ به",
         "monthA": "الشهر أ",
         "monthB": "الشهر ب",
-        "currentVsPrevious": "الحالي مقابل السابق",
-        "currentVsPreviousShort": "الحالي / السابق",
+        "previousVsCurrent": "السابق مقابل الحالي",
+        "previousVsCurrentShort": "السابق / الحالي",
         "sameMonthLastYear": "نفس الشهر من العام الماضي",
         "sameMonthLastYearShort": "نفس الشهر م.م",
         "reset": "إعادة ضبط",

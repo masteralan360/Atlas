@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Asaas",
-  "version": "0.0.30",
+  "version": "0.0.31",
   "identifier": "com.asaas.app",
   "build": {
     "frontendDist": "../dist",
@@ -41,7 +41,8 @@
     "targets": "all",
     "createUpdaterArtifacts": true,
     "icon": [
-      "../public/logo.png"
+      "icons/icon.ico",
+      "icons/icon.png"
     ],
     "windows": {
       "nsis": {
