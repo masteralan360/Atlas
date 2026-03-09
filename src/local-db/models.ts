@@ -400,6 +400,7 @@ export interface Workspace extends BaseEntity {
     receipt_template?: 'primary' | 'modern'
     a4_template?: 'primary' | 'modern'
     print_quality?: 'low' | 'high'
+    thermal_printing?: boolean
     subscription_expires_at?: string | null
 }
 

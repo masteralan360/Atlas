@@ -33,6 +33,7 @@ export interface WorkspaceFeatures {
     receipt_template: 'primary' | 'modern'
     a4_template: 'primary' | 'modern'
     print_quality: 'low' | 'high'
+    thermal_printing: boolean
     subscription_expires_at: string | null
 }
 
@@ -52,7 +53,7 @@ interface WorkspaceContextType {
     isLocked: boolean
     hasFeature: (feature: 'allow_pos' | 'allow_customers' | 'allow_suppliers' | 'allow_orders' | 'allow_invoices' | 'allow_whatsapp') => boolean
     refreshFeatures: () => Promise<void>
-    updateSettings: (settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'iqd_display_preference' | 'eur_conversion_enabled' | 'try_conversion_enabled' | 'allow_whatsapp' | 'logo_url' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'print_quality'>> & { name?: string }) => Promise<void>
+    updateSettings: (settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'iqd_display_preference' | 'eur_conversion_enabled' | 'try_conversion_enabled' | 'allow_whatsapp' | 'logo_url' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'print_quality' | 'thermal_printing'>> & { name?: string }) => Promise<void>
     activeWorkspace: { id: string } | undefined
 }
 
@@ -76,6 +77,7 @@ const defaultFeatures: WorkspaceFeatures = {
     receipt_template: 'primary',
     a4_template: 'primary',
     print_quality: 'low',
+    thermal_printing: false,
     subscription_expires_at: null
 }
 
@@ -108,6 +110,7 @@ function getFeaturesFromLocalWorkspace(localWorkspace: Workspace): WorkspaceFeat
         receipt_template: localWorkspace.receipt_template ?? 'primary',
         a4_template: localWorkspace.a4_template ?? 'primary',
         print_quality: localWorkspace.print_quality ?? 'low',
+        thermal_printing: localWorkspace.thermal_printing ?? false,
         subscription_expires_at: localWorkspace.subscription_expires_at ?? null
     })
 }
@@ -211,6 +214,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             receipt_template: nextFeatures.receipt_template,
             a4_template: nextFeatures.a4_template,
             print_quality: nextFeatures.print_quality,
+            thermal_printing: nextFeatures.thermal_printing,
             subscription_expires_at: nextFeatures.subscription_expires_at,
             syncStatus: 'synced',
             lastSyncedAt: timestamp,
@@ -323,6 +327,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 receipt_template: featureData.receipt_template ?? 'primary',
                 a4_template: featureData.a4_template ?? 'primary',
                 print_quality: featureData.print_quality ?? 'low',
+                thermal_printing: featureData.thermal_printing ?? false,
                 subscription_expires_at: featureData.subscription_expires_at ?? null
             })
             const nextWorkspaceName = featureData.workspace_name || user?.workspaceName || 'My Workspace'
@@ -414,6 +419,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                             receipt_template: data.receipt_template ?? currentFeatures.receipt_template,
                             a4_template: data.a4_template ?? currentFeatures.a4_template,
                             print_quality: data.print_quality ?? currentFeatures.print_quality,
+                            thermal_printing: data.thermal_printing ?? currentFeatures.thermal_printing,
                             subscription_expires_at: data.subscription_expires_at ?? currentFeatures.subscription_expires_at
                         })
                         const nextWorkspaceName = data.name || workspaceNameRef.current || user.workspaceName || 'My Workspace'
@@ -469,7 +475,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
 
     const updateSettings = async (
-        settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'iqd_display_preference' | 'eur_conversion_enabled' | 'try_conversion_enabled' | 'allow_whatsapp' | 'logo_url' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'print_quality'>> & { name?: string }
+        settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'iqd_display_preference' | 'eur_conversion_enabled' | 'try_conversion_enabled' | 'allow_whatsapp' | 'logo_url' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'print_quality' | 'thermal_printing'>> & { name?: string }
     ) => {
         const workspaceId = user?.workspaceId
         if (!workspaceId) return
@@ -528,6 +534,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 receipt_template: newFeatures.receipt_template,
                 a4_template: newFeatures.a4_template,
                 print_quality: newFeatures.print_quality,
+                thermal_printing: newFeatures.thermal_printing,
                 subscription_expires_at: newFeatures.subscription_expires_at,
                 syncStatus: 'pending',
                 lastSyncedAt: null,

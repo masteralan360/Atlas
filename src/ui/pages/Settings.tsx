@@ -1291,17 +1291,34 @@ export function Settings() {
                                     </p>
                                 </div>
 
-                                <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg border border-border max-w-sm">
-                                    <div className="space-y-0.5">
-                                        <Label className="text-sm font-medium">{t('settings.printing.qrTitle') || 'Generate QR Code'}</Label>
-                                        <p className="text-xs text-muted-foreground">
-                                            {t('settings.printing.qrDesc') || 'Include a QR code on invoices for digital verification.'}
-                                        </p>
+                                <div className="grid gap-4 md:grid-cols-2 max-w-3xl">
+                                    <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg border border-border">
+                                        <div className="space-y-0.5 pr-4">
+                                            <Label className="text-sm font-medium">{t('settings.printing.qrTitle') || 'Generate QR Code'}</Label>
+                                            <p className="text-xs text-muted-foreground">
+                                                {t('settings.printing.qrDesc') || 'Include a QR code on invoices for digital verification.'}
+                                            </p>
+                                        </div>
+                                        <Switch
+                                            checked={features.print_qr}
+                                            onCheckedChange={(val) => updateSettings({ print_qr: val })}
+                                        />
                                     </div>
-                                    <Switch
-                                        checked={features.print_qr}
-                                        onCheckedChange={(val) => updateSettings({ print_qr: val })}
-                                    />
+
+                                    <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg border border-border">
+                                        <div className="space-y-0.5 pr-4">
+                                            <Label className="text-sm font-medium">
+                                                {t('settings.printing.thermalTitle', { defaultValue: 'Thermal Printing' })}
+                                            </Label>
+                                            <p className="text-xs text-muted-foreground">
+                                                {t('settings.printing.thermalDesc', { defaultValue: 'Store a workspace-level thermal printer preference for future use. No printing behavior changes yet.' })}
+                                            </p>
+                                        </div>
+                                        <Switch
+                                            checked={features.thermal_printing}
+                                            onCheckedChange={(val) => updateSettings({ thermal_printing: val })}
+                                        />
+                                    </div>
                                 </div>
                             </div>
                         </CardContent>
