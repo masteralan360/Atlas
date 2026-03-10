@@ -102,7 +102,7 @@ export function Layout({ children }: LayoutProps) {
     const [location, setLocation] = useLocation()
     const { user, signOut } = useAuth()
     const { hasFeature, workspaceName, isFullscreen, features } = useWorkspace()
-    const { trigger: triggerHaptic } = useWebHaptics({ debug: true, showSwitch: true })
+    const { trigger: triggerHaptic } = useWebHaptics({ debug: true })
 
     // Budget Alert Monitoring
     const { exchangeData, eurRates, tryRates } = useExchangeRate()
