@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import {
@@ -33,10 +34,13 @@ import {
 import { useAuth } from '@/auth'
 import { useWorkspace } from '@/workspace'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
+import { db } from '@/local-db/database'
 import { cn, formatCurrency } from '@/lib/utils'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { convertToStoreBase as convertToStoreBaseUtil } from '@/lib/currency'
-import { useSales, toUISale } from '@/local-db'
+import { useSales, toUISale, useBudgetAllocations, useExpenseSeries, useEmployees, usePayrollStatuses, useDividendStatuses, ensureExpenseItemsForMonth } from '@/local-db'
+import type { BudgetAllocation, ExpenseItem, ExpenseSeries, Employee, PayrollStatus, DividendStatus } from '@/local-db/models'
+import { buildPayrollItems, buildDividendItems, calculateNetProfitForMonth, buildConversionRates } from '@/lib/budget'
 import type { Sale, SaleItem } from '@/types'
 import {
     Button,
@@ -238,20 +242,41 @@ function buildToolbarMeta(option: MonthOption, t: TFunction) {
 
 function buildAvailableMonths(
     sales: Sale[],
+    allocations: BudgetAllocation[],
+    expenseItems: ExpenseItem[],
     language: string
 ): MonthOption[] {
     const monthMap = new Map<MonthKey, MonthOption>()
 
+    const ensureMonth = (key: MonthKey) => {
+        if (!monthMap.has(key)) {
+            monthMap.set(key, {
+                value: key,
+                label: formatMonthLabel(key, language),
+                hasSales: false,
+                hasExpenses: false,
+                hasAllocation: false,
+            })
+        }
+        return monthMap.get(key)!
+    }
+
     sales.forEach(sale => {
         const key = monthKeyFromDate(sale.created_at)
-        const existing = monthMap.get(key)
-        monthMap.set(key, {
-            value: key,
-            label: formatMonthLabel(key, language),
-            hasSales: true,
-            hasExpenses: false,
-            hasAllocation: existing?.hasAllocation ?? false,
-        })
+        const entry = ensureMonth(key)
+        entry.hasSales = true
+    })
+
+    allocations.forEach(allocation => {
+        const key = allocation.month as MonthKey
+        const entry = ensureMonth(key)
+        entry.hasAllocation = true
+    })
+
+    expenseItems.forEach(item => {
+        const key = item.month as MonthKey
+        const entry = ensureMonth(key)
+        entry.hasExpenses = true
     })
 
     return Array.from(monthMap.values()).sort((a, b) => b.value.localeCompare(a.value))
@@ -418,20 +443,113 @@ function analyzeSalesMonth(
     }
 }
 
-function analyzeBudgetMonth(month: MonthKey): BudgetSnapshot {
+function analyzeBudgetMonth(
+    month: MonthKey,
+    params: {
+        expenseItems: ExpenseItem[]
+        expenseSeries: ExpenseSeries[]
+        employees: Employee[]
+        payrollStatuses: PayrollStatus[]
+        dividendStatuses: DividendStatus[]
+        sales: Sale[]
+        baseCurrency: string
+        rates: { usd_iqd: number; eur_iqd: number; try_iqd: number }
+        allocation?: BudgetAllocation | null
+        labels: MonthlyComparisonFallbackLabels
+    }
+): BudgetSnapshot {
+    const {
+        expenseItems,
+        expenseSeries,
+        employees,
+        payrollStatuses,
+        dividendStatuses,
+        sales,
+        baseCurrency,
+        rates,
+        allocation,
+        labels
+    } = params
+
     const daysInMonth = getDaysInMonth(month)
+    const dailySpend = new Array(daysInMonth).fill(0)
+
+    const seriesById = new Map(expenseSeries.map(series => [series.id, series] as const))
+
+    let operationalTotal = 0
+    let operationalPaid = 0
+    const expenseCategoryTotals: Record<string, number> = {}
+
+    expenseItems
+        .filter(item => item.month === month)
+        .forEach(item => {
+            const base = convertToStoreBaseUtil(item.amount, item.currency, baseCurrency, rates)
+            operationalTotal += base
+            if (item.status === 'paid') operationalPaid += base
+
+            const category = seriesById.get(item.seriesId)?.category || labels.uncategorized
+            expenseCategoryTotals[category] = (expenseCategoryTotals[category] || 0) + base
+
+            const dayIndex = Math.max(0, Math.min(daysInMonth - 1, new Date(item.dueDate).getDate() - 1))
+            dailySpend[dayIndex] += base
+        })
+
+    const payrollItems = buildPayrollItems(employees, payrollStatuses, month)
+    let payrollTotal = 0
+    let payrollPaid = 0
+    payrollItems.forEach(item => {
+        const base = convertToStoreBaseUtil(item.amount, item.currency, baseCurrency, rates)
+        payrollTotal += base
+        if (item.status === 'paid') payrollPaid += base
+        if (base > 0) {
+            expenseCategoryTotals[labels.payroll] = (expenseCategoryTotals[labels.payroll] || 0) + base
+        }
+
+        const dayIndex = Math.max(0, Math.min(daysInMonth - 1, new Date(item.dueDate).getDate() - 1))
+        dailySpend[dayIndex] += base
+    })
+
+    const netProfitBase = calculateNetProfitForMonth(sales, month, baseCurrency as any, rates)
+    const surplusPoolBase = netProfitBase - operationalTotal - payrollTotal
+    const dividendResult = buildDividendItems(employees, dividendStatuses, month, baseCurrency as any, rates, surplusPoolBase)
+    const dividendsTotal = dividendResult.totalBase
+    const dividendsPaid = dividendResult.items.reduce((sum, item) => item.status === 'paid' ? sum + item.baseAmount : sum, 0)
+
+    const totalAllocated = operationalTotal + payrollTotal
+    const paid = operationalPaid + payrollPaid + dividendsPaid
+    const outstanding = (totalAllocated + dividendsTotal) - paid
+    const retained = netProfitBase - operationalTotal - payrollTotal - dividendsTotal
+    const isDeficit = retained < 0
+
+    let budgetLimit = 0
+    if (allocation) {
+        const value = allocation.allocationValue || 0
+        const isPercent = allocation.allocationType === 'percentage'
+        const limitInCurrency = isPercent ? (netProfitBase * value / 100) : value
+        budgetLimit = convertToStoreBaseUtil(limitInCurrency, allocation.currency, baseCurrency, rates)
+    }
+
+    const cumulativeSpend: number[] = []
+    let runningSpend = 0
+    for (let i = 0; i < daysInMonth; i += 1) {
+        runningSpend += dailySpend[i]
+        cumulativeSpend.push(runningSpend)
+    }
+
     return {
-        totalAllocated: 0,
-        paid: 0,
-        outstanding: 0,
-        dividends: 0,
-        retained: 0,
-        isDeficit: false,
-        budgetLimit: 0,
-        operationalTotal: 0,
-        personnelTotal: 0,
-        expenseCategories: [],
-        cumulativeSpend: new Array(daysInMonth).fill(0),
+        totalAllocated,
+        paid,
+        outstanding,
+        dividends: dividendsTotal,
+        retained,
+        isDeficit,
+        budgetLimit,
+        operationalTotal,
+        personnelTotal: payrollTotal,
+        expenseCategories: Object.entries(expenseCategoryTotals)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value),
+        cumulativeSpend,
     }
 }
 
@@ -1511,26 +1629,41 @@ export function MonthlyComparison() {
     const iqdPreference = (features.iqd_display_preference || 'IQD') as 'IQD' | 'د.ع'
 
     const rawSales = useSales(workspaceId)
+    const budgetAllocations = useBudgetAllocations(workspaceId)
+    const expenseSeries = useExpenseSeries(workspaceId)
+    const employees = useEmployees(workspaceId)
+    const payrollStatuses = usePayrollStatuses(workspaceId)
+    const dividendStatuses = useDividendStatuses(workspaceId)
+    const expenseItems = useLiveQuery(
+        () => workspaceId
+            ? db.expense_items.where('workspaceId').equals(workspaceId).and(item => !item.isDeleted).toArray()
+            : [],
+        [workspaceId]
+    ) ?? []
 
     const sales = useMemo<Sale[]>(() => rawSales.map(toUISale), [rawSales])
 
+    const rates = useMemo(
+        () => buildConversionRates(exchangeData, eurRates, tryRates),
+        [exchangeData, eurRates, tryRates]
+    )
     const convertToBase = useMemo(() => {
-        return (amount: number | undefined | null, from: string | undefined | null) => convertToStoreBaseUtil(amount, from, baseCurrency, {
-            usd_iqd: (exchangeData?.rate || 145000) / 100,
-            eur_iqd: (eurRates.eur_iqd?.rate || 160000) / 100,
-            try_iqd: (tryRates.try_iqd?.rate || 4500) / 100,
-        })
-    }, [baseCurrency, exchangeData, eurRates, tryRates])
+        return (amount: number | undefined | null, from: string | undefined | null) => convertToStoreBaseUtil(amount, from, baseCurrency, rates)
+    }, [baseCurrency, rates])
 
     const monthOptions = useMemo(
-        () => buildAvailableMonths(sales, i18n.language),
-        [sales, i18n.language]
+        () => buildAvailableMonths(sales, budgetAllocations, expenseItems, i18n.language),
+        [sales, budgetAllocations, expenseItems, i18n.language]
     )
     const localizedFallbackLabels = useMemo<MonthlyComparisonFallbackLabels>(() => ({
         uncategorized: t('monthlyComparison.fallback.uncategorized'),
         unknownProduct: t('monthlyComparison.fallback.unknownProduct'),
         payroll: t('monthlyComparison.fallback.payroll'),
     }), [t, i18n.language])
+    const allocationByMonth = useMemo(
+        () => new Map(budgetAllocations.map(allocation => [allocation.month, allocation] as const)),
+        [budgetAllocations]
+    )
 
     const defaultSelection = useMemo(() => ({
         right: monthOptions[0]?.value || '' as MonthKey,
@@ -1558,6 +1691,16 @@ export function MonthlyComparison() {
         if (nextLeft && nextLeft !== leftMonth) setLeftMonth(nextLeft)
         if (nextRight && nextRight !== rightMonth) setRightMonth(nextRight)
     }, [monthOptions, defaultSelection, leftMonth, rightMonth])
+
+    useEffect(() => {
+        if (!workspaceId) return
+        if (leftMonth) {
+            void ensureExpenseItemsForMonth(workspaceId, leftMonth)
+        }
+        if (rightMonth && rightMonth !== leftMonth) {
+            void ensureExpenseItemsForMonth(workspaceId, rightMonth)
+        }
+    }, [workspaceId, leftMonth, rightMonth])
 
     useEffect(() => {
         if (typeof window === 'undefined') return
@@ -1612,9 +1755,20 @@ export function MonthlyComparison() {
         return {
             option,
             sales: salesSnapshot,
-            budget: analyzeBudgetMonth(option.value),
+            budget: analyzeBudgetMonth(option.value, {
+                expenseItems,
+                expenseSeries,
+                employees,
+                payrollStatuses,
+                dividendStatuses,
+                sales,
+                baseCurrency,
+                rates,
+                allocation: allocationByMonth.get(option.value) || null,
+                labels: localizedFallbackLabels
+            }),
         } satisfies MonthSnapshot
-    }, [monthOptions, leftMonth, sales, baseCurrency, convertToBase, localizedFallbackLabels])
+    }, [monthOptions, leftMonth, sales, baseCurrency, convertToBase, localizedFallbackLabels, expenseItems, expenseSeries, employees, payrollStatuses, dividendStatuses, rates, allocationByMonth])
 
     const rightSnapshot = useMemo(() => {
         const option = monthOptions.find(item => item.value === rightMonth)
@@ -1623,9 +1777,20 @@ export function MonthlyComparison() {
         return {
             option,
             sales: salesSnapshot,
-            budget: analyzeBudgetMonth(option.value),
+            budget: analyzeBudgetMonth(option.value, {
+                expenseItems,
+                expenseSeries,
+                employees,
+                payrollStatuses,
+                dividendStatuses,
+                sales,
+                baseCurrency,
+                rates,
+                allocation: allocationByMonth.get(option.value) || null,
+                labels: localizedFallbackLabels
+            }),
         } satisfies MonthSnapshot
-    }, [monthOptions, rightMonth, sales, baseCurrency, convertToBase, localizedFallbackLabels])
+    }, [monthOptions, rightMonth, sales, baseCurrency, convertToBase, localizedFallbackLabels, expenseItems, expenseSeries, employees, payrollStatuses, dividendStatuses, rates, allocationByMonth])
 
     const currentMonthKey = monthKeyFromDate(new Date())
     const yearAgoMonth = useMemo(() => {

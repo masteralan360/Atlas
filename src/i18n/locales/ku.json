@@ -1479,7 +1479,7 @@
         "reminder": {
             "didYouPay": "دراوت؟",
             "yesPaid": "بەڵێ، دراوە",
-            "noSnooze": "نەخێر، دواتر بیرمبخەرەوە",
+            "noSnooze": "No (Remind me tomorrow)",
             "overdue": "دواکەوتووە",
             "dueToday": "ئەمڕۆ مۆڵەتی تەواوە",
             "dueTomorrow": "سبەینێ مۆڵەتی تەواوە",
@@ -1497,12 +1497,23 @@
                 "dividend": "قازانج"
             },
             "snooze": {
-                "ignore": "ڕەتکردنەوە (بێ بیرخستنەوە)",
-                "1h": "١ کاتژمێر",
-                "6h": "٦ کاتژمێر",
-                "tomorrow": "سبەینێ",
-                "onDueDate": "لە ڕێککەوتی کۆتایی"
-            }
+                "30m": "30 minutes",
+                "12h": "12 hours",
+                "24h": "24 hours",
+                "2d": "2 days",
+                "4d": "4 days",
+                "none": "No reminder"
+            },
+            "queueProgress": "{{current}} of {{total}}",
+            "snoozed": "Reminder snoozed.",
+            "snoozeFailed": "Failed to snooze reminder.",
+            "unsnoozed": "Reminder un-snoozed.",
+            "unsnoozeFailed": "Failed to un-snooze reminder.",
+            "paid": "Marked as paid.",
+            "unpaid": "Marked as unpaid.",
+            "payFailed": "Failed to update payment.",
+            "lockFailed": "Failed to lock payment.",
+            "snoozeNow": "Snooze for now"
         },
         "subcat": {
             "Internet": "ئینتەرنێت",
@@ -1537,7 +1548,21 @@
             "Insurance": "دڵنیایی",
             "Taxes": "باج",
             "Miscellaneous": "جۆراوجۆر"
-        }
+        },
+        "expenseRatio": "Total Expenses / Net Profit",
+        "allocationInvalid": "Please enter a valid budget limit.",
+        "expenseInvalid": "Enter a name and amount.",
+        "expenseSaved": "Expense saved.",
+        "emptyExpenses": "No expenses for this month.",
+        "emptyPayroll": "No payroll entries for this month.",
+        "deletedSeries": "Deleted Series",
+        "dueDay": "Due Day (1-31)",
+        "recurring": "Recurring",
+        "recurringDesc": "Repeat every month",
+        "startMonthDesc": "Choose the first month you want to track budgets.",
+        "fixedDividend": "Fixed",
+        "snoozedItemsOtherMonths": "Snoozed Reminders (Other Months)",
+        "snoozedItemsOtherMonthsDesc": "These reminders belong to other months."
     },
     "admin": {
         "title": "داشبۆردی ئەدمین",

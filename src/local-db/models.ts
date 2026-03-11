@@ -88,6 +88,67 @@ export interface Employee extends BaseEntity {
     linkedUserId?: string
 }
 
+export type BudgetStatus = 'pending' | 'snoozed' | 'paid'
+export type ExpenseRecurrence = 'monthly' | 'one_time'
+
+export interface BudgetSettings extends BaseEntity {
+    startMonth: string
+}
+
+export interface BudgetAllocation extends BaseEntity {
+    month: string
+    currency: CurrencyCode
+    allocationType?: 'fixed' | 'percentage'
+    allocationValue?: number
+}
+
+export interface ExpenseSeries extends BaseEntity {
+    name: string
+    amount: number
+    currency: CurrencyCode
+    dueDay: number
+    recurrence: ExpenseRecurrence
+    startMonth: string
+    endMonth?: string | null
+    category?: string | null
+    subcategory?: string | null
+}
+
+export interface ExpenseItem extends BaseEntity {
+    seriesId: string
+    month: string
+    dueDate: string
+    amount: number
+    currency: CurrencyCode
+    status: BudgetStatus
+    snoozedUntil?: string | null
+    snoozedIndefinite?: boolean
+    snoozeCount?: number
+    paidAt?: string | null
+    isLocked?: boolean
+}
+
+export interface PayrollStatus extends BaseEntity {
+    employeeId: string
+    month: string
+    status: BudgetStatus
+    snoozedUntil?: string | null
+    snoozedIndefinite?: boolean
+    snoozeCount?: number
+    paidAt?: string | null
+    isLocked?: boolean
+}
+
+export interface DividendStatus extends BaseEntity {
+    employeeId: string
+    month: string
+    status: BudgetStatus
+    snoozedUntil?: string | null
+    snoozedIndefinite?: boolean
+    snoozeCount?: number
+    paidAt?: string | null
+    isLocked?: boolean
+}
 
 export interface Supplier extends BaseEntity {
     name: string
@@ -335,7 +396,7 @@ export interface LoanPayment extends BaseEntity {
 // Sync Queue Item for tracking pending changes
 export interface SyncQueueItem {
     id: string
-    entityType: 'products' | 'customers' | 'suppliers' | 'purchase_orders' | 'sales_orders' | 'invoices' | 'users' | 'sales' | 'categories' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments'
+    entityType: 'products' | 'customers' | 'suppliers' | 'purchase_orders' | 'sales_orders' | 'invoices' | 'users' | 'sales' | 'categories' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments' | 'budget_settings' | 'budget_allocations' | 'expense_series' | 'expense_items' | 'payroll_statuses' | 'dividend_statuses'
     entityId: string
     operation: 'create' | 'update' | 'delete'
     data: Record<string, unknown>
@@ -385,7 +446,7 @@ export interface WorkspaceContact extends Omit<BaseEntity, 'isDeleted'> {
 export interface OfflineMutation {
     id: string
     workspaceId: string
-    entityType: 'products' | 'customers' | 'suppliers' | 'purchase_orders' | 'sales_orders' | 'invoices' | 'users' | 'sales' | 'categories' | 'workspaces' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments'
+    entityType: 'products' | 'customers' | 'suppliers' | 'purchase_orders' | 'sales_orders' | 'invoices' | 'users' | 'sales' | 'categories' | 'workspaces' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments' | 'budget_settings' | 'budget_allocations' | 'expense_series' | 'expense_items' | 'payroll_statuses' | 'dividend_statuses'
     entityId: string
     operation: 'create' | 'update' | 'delete'
     payload: Record<string, unknown>

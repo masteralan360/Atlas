@@ -14,6 +14,7 @@ import { ResourceSyncOverlay } from './p2p/ResourceSyncOverlay'
 import { NotificationCenter } from './NotificationCenter'
 import { ManualRateModals } from './exchange/ManualRateModals'
 import { GlobalLoanReminders } from './loans/GlobalLoanReminders'
+import { GlobalBudgetReminders } from './budget/GlobalBudgetReminders'
 import { LoanPaymentModalProvider } from './loans/LoanPaymentModalProvider'
 
 import {
@@ -42,6 +43,7 @@ import {
     Warehouse,
     ArrowRightLeft,
     HandCoins,
+    Wallet,
     AlertCircle,
     PanelRightOpen,
     PanelRightClose
@@ -67,6 +69,7 @@ const routePrefetchMap: Record<string, () => Promise<unknown>> = {
     '/sales': () => import('@/ui/pages/Sales'),
     '/loans': () => import('@/ui/pages/Loans'),
     '/revenue': () => import('@/ui/pages/Revenue'),
+    '/budget': () => import('@/ui/pages/Budget'),
     '/monthly-comparison': () => import('@/ui/pages/MonthlyComparison'),
     '/performance': () => import('@/ui/pages/TeamPerformance'),
     '/whatsapp': () => import('@/ui/pages/WhatsAppWeb'),
@@ -202,7 +205,7 @@ export function Layout({ children }: LayoutProps) {
         }
     }, [isLocked, location])
 
-    const navigation = [
+    const navigation: Array<{ name: string; href: string; icon: any; status?: string; alert?: boolean }> = [
         { name: t('nav.dashboard'), href: '/', icon: LayoutDashboard },
         // POS - requires feature flag AND role
         ...((user?.role === 'admin' || user?.role === 'staff') && hasFeature('allow_pos') ? [
@@ -214,6 +217,7 @@ export function Layout({ children }: LayoutProps) {
         // Revenue - admin only
         ...(user?.role === 'admin' ? [
             { name: t('nav.revenue') || 'Net Revenue', href: '/revenue', icon: BarChart3 },
+            { name: t('nav.budget') || 'Budget', href: '/budget', icon: Wallet },
             { name: t('monthlyComparison.title'), href: '/monthly-comparison', icon: ArrowRightLeft },
             { name: t('nav.performance') || 'Team Performance', href: '/performance', icon: TrendingUp }
         ] : []),
@@ -258,6 +262,7 @@ export function Layout({ children }: LayoutProps) {
             <div className="h-screen overflow-hidden bg-transparent">
                 <ResourceSyncOverlay />
                 <ManualRateModals />
+                <GlobalBudgetReminders />
                 <GlobalLoanReminders />
                 {/* Mobile sidebar backdrop */}
                 {mobileSidebarOpen && (

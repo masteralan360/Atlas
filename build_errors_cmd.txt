@@ -1,0 +1,38 @@
+src/local-db/hooks.ts(1767,82): error TS2353: Object literal may only specify known properties, and 'startMonth' does not exist in type 'Partial<{ id: string; workspaceId: string; }>'.
+src/local-db/hooks.ts(1819,13): error TS2353: Object literal may only specify known properties, and 'currency' does not exist in type 'Partial<{ id: string; workspaceId: string; }>'.
+src/local-db/hooks.ts(1890,67): error TS2353: Object literal may only specify known properties, and 'endMonth' does not exist in type 'Partial<{ id: string; workspaceId: string; }>'.
+src/local-db/hooks.ts(2100,11): error TS2322: Type '{ id: string; workspaceId: string; employeeId: string; month: string; status: "pending"; snoozedUntil: null; snoozedIndefinite: false; snoozeCount: number; paidAt: null; isLocked: false; createdAt: string; ... 4 more ...; isDeleted: false; } & Partial<...>' is not assignable to type 'T'.
+  '{ id: string; workspaceId: string; employeeId: string; month: string; status: "pending"; snoozedUntil: null; snoozedIndefinite: false; snoozeCount: number; paidAt: null; isLocked: false; createdAt: string; ... 4 more ...; isDeleted: false; } & Partial<...>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'PayrollStatus | DividendStatus'.
+src/ui/components/budget/BudgetReminderModal.tsx(28,39): error TS2345: Argument of type '{ days: number; }' is not assignable to parameter of type 'string'.
+src/ui/components/budget/BudgetReminderModal.tsx(55,34): error TS2345: Argument of type 'TFunction<"translation", undefined>' is not assignable to parameter of type '(key: string, fallback?: string | undefined, opts?: any) => string'.
+  Types of parameters 'args' and 'key' are incompatible.
+    Type '[key: string, fallback?: string | undefined, opts?: any]' is not assignable to type '[key: string | string[], options: TOptionsBase & $Dictionary & { defaultValue: string; }] | [key: string | string[], defaultValue: string, options?: (TOptionsBase & $Dictionary) | undefined] | [key: ...]'.
+      Type '[key: string, fallback?: string | undefined, opts?: any]' is not assignable to type '[key: string | string[], defaultValue: string, options?: (TOptionsBase & $Dictionary) | undefined]'.
+        Source provides no match for required element at position 1 in target.
+src/ui/components/budget/BudgetReminderModal.tsx(68,47): error TS2345: Argument of type 'TFunction<"translation", undefined>' is not assignable to parameter of type '(key: string, fallback?: string | undefined) => string'.
+  Types of parameters 'args' and 'key' are incompatible.
+    Type '[key: string, fallback?: string | undefined]' is not assignable to type '[key: string | string[], options: TOptionsBase & $Dictionary & { defaultValue: string; }] | [key: string | string[], defaultValue: string, options?: (TOptionsBase & $Dictionary) | undefined] | [key: ...]'.
+      Type '[key: string, fallback?: string | undefined]' is not assignable to type '[key: string | string[], options?: (TOptionsBase & $Dictionary) | undefined]'.
+        Type at position 1 in source is not compatible with type at position 1 in target.
+          Type 'string | undefined' is not assignable to type '(TOptionsBase & $Dictionary) | undefined'.
+            Type 'string' is not assignable to type 'TOptionsBase & $Dictionary'.
+              Type 'string' is not assignable to type '$Dictionary'.
+src/ui/components/budget/BudgetReminderModal.tsx(122,47): error TS2345: Argument of type 'TFunction<"translation", undefined>' is not assignable to parameter of type '(key: string, fallback?: string | undefined) => string'.
+  Types of parameters 'args' and 'key' are incompatible.
+    Type '[key: string, fallback?: string | undefined]' is not assignable to type '[key: string | string[], options: TOptionsBase & $Dictionary & { defaultValue: string; }] | [key: string | string[], defaultValue: string, options?: (TOptionsBase & $Dictionary) | undefined] | [key: ...]'.
+      Type '[key: string, fallback?: string | undefined]' is not assignable to type '[key: string | string[], options?: (TOptionsBase & $Dictionary) | undefined]'.
+        Type at position 1 in source is not compatible with type at position 1 in target.
+          Type 'string | undefined' is not assignable to type '(TOptionsBase & $Dictionary) | undefined'.
+            Type 'string' is not assignable to type 'TOptionsBase & $Dictionary'.
+              Type 'string' is not assignable to type '$Dictionary'.
+src/ui/components/budget/MonthlyBudgetAllocationModal.tsx(1,8): error TS6133: 'React' is declared but its value is never read.
+src/ui/components/budget/MonthlyBudgetAllocationModal.tsx(129,37): error TS2322: Type '{ value: CurrencyCode; onChange: Dispatch<SetStateAction<CurrencyCode>>; iqdDisplayPreference: "IQD" | "د.ع"; className: string; }' is not assignable to type 'IntrinsicAttributes & CurrencySelectorProps'.
+  Property 'className' does not exist on type 'IntrinsicAttributes & CurrencySelectorProps'.
+src/ui/components/budget/SnoozedBudgetRemindersBell.tsx(113,55): error TS2345: Argument of type 'TFunction<"translation", undefined>' is not assignable to parameter of type '(key: string, fallback?: string | undefined) => string'.
+  Types of parameters 'args' and 'key' are incompatible.
+    Type '[key: string, fallback?: string | undefined]' is not assignable to type '[key: string | string[], options: TOptionsBase & $Dictionary & { defaultValue: string; }] | [key: string | string[], defaultValue: string, options?: (TOptionsBase & $Dictionary) | undefined] | [key: ...]'.
+      Type '[key: string, fallback?: string | undefined]' is not assignable to type '[key: string | string[], options?: (TOptionsBase & $Dictionary) | undefined]'.
+        Type at position 1 in source is not compatible with type at position 1 in target.
+          Type 'string | undefined' is not assignable to type '(TOptionsBase & $Dictionary) | undefined'.
+            Type 'string' is not assignable to type 'TOptionsBase & $Dictionary'.
+              Type 'string' is not assignable to type '$Dictionary'.

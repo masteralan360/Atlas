@@ -40,6 +40,7 @@ const Settings = lazy(() => import('@/ui/pages/Settings').then(m => ({ default: 
 const Admin = lazy(() => import('@/ui/pages/Admin').then(m => ({ default: m.Admin })))
 const WorkspaceRegistration = lazy(() => import('@/ui/pages/WorkspaceRegistration').then(m => ({ default: m.WorkspaceRegistration })))
 const Revenue = lazy(() => import('@/ui/pages/Revenue').then(m => ({ default: m.Revenue })))
+const Budget = lazy(() => import('@/ui/pages/Budget').then(m => ({ default: m.Budget })))
 const MonthlyComparison = lazy(() => import('@/ui/pages/MonthlyComparison').then(m => ({ default: m.MonthlyComparison })))
 const TeamPerformance = lazy(() => import('@/ui/pages/TeamPerformance').then(m => ({ default: m.TeamPerformance })))
 const WorkspaceConfiguration = lazy(() => import('@/ui/pages/WorkspaceConfiguration').then(m => ({ default: m.WorkspaceConfiguration })))
@@ -326,6 +327,13 @@ function App() {
                                             <ProtectedRoute allowedRoles={['admin']}>
                                                 <Layout>
                                                     <Revenue />
+                                                </Layout>
+                                            </ProtectedRoute>
+                                        </Route>
+                                        <Route path="/budget">
+                                            <ProtectedRoute allowedRoles={['admin']}>
+                                                <Layout>
+                                                    <Budget />
                                                 </Layout>
                                             </ProtectedRoute>
                                         </Route>

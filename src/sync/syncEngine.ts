@@ -1,6 +1,7 @@
 import { supabase, isSupabaseConfigured } from '@/auth/supabase'
 import { db } from '@/local-db'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
+import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 // import { getPendingItems, removeFromQueue, incrementRetry } from './syncQueue'
 
 export type SyncState = 'idle' | 'syncing' | 'error' | 'offline'
@@ -65,6 +66,7 @@ export async function processMutationQueue(userId: string): Promise<{ success: n
         try {
             const { entityType, operation, payload, entityId, workspaceId, id } = mutation
             const tableName = getTableName(entityType)
+            const client = getSupabaseClientForTable(tableName)
 
             // Prepare payload
             const dbPayload = toSnakeCase(payload) as Record<string, unknown>
@@ -98,7 +100,7 @@ export async function processMutationQueue(userId: string): Promise<{ success: n
                     // Remove workspace_id from payload for workspace table update itself
                     delete dbPayload.workspace_id
                     delete dbPayload.user_id
-                    const { error } = await supabase.from(tableName).update(dbPayload).eq('id', entityId)
+                    const { error } = await client.from(tableName).update(dbPayload).eq('id', entityId)
                     if (error) throw error
                 } else {
                     // Special handling for invoices to remove legacy fields
@@ -111,15 +113,15 @@ export async function processMutationQueue(userId: string): Promise<{ success: n
                         delete dbPayload.is_snapshot
                     }
 
-                    const { error } = await supabase.from(tableName).upsert(dbPayload)
+                    const { error } = await client.from(tableName).upsert(dbPayload)
                     if (error) throw error
                 }
             } else if (operation === 'delete') {
                 if (tableName === 'loans') {
-                    const { error } = await supabase.from(tableName).delete().eq('id', entityId)
+                    const { error } = await client.from(tableName).delete().eq('id', entityId)
                     if (error) throw error
                 } else {
-                    const { error } = await supabase.from(tableName).update({ is_deleted: true, updated_at: new Date().toISOString() }).eq('id', entityId)
+                    const { error } = await client.from(tableName).update({ is_deleted: true, updated_at: new Date().toISOString() }).eq('id', entityId)
                     if (error) throw error
                 }
             }
@@ -182,6 +184,12 @@ export async function pullChanges(workspaceId: string, lastSyncTime: string | nu
         'invoices',
         'workspaces',
         'sales',
+        'budget_settings',
+        'budget_allocations',
+        'expense_series',
+        'expense_items',
+        'payroll_statuses',
+        'dividend_statuses',
         'loans',
         'loan_installments',
         'loan_payments'
@@ -189,11 +197,12 @@ export async function pullChanges(workspaceId: string, lastSyncTime: string | nu
 
     for (const table of tables) {
         try {
+            const client = getSupabaseClientForTable(table)
             // console.log(`[Sync] pullChanges: Fetching ${table}...`)
             const { data, error } = (await withTimeout(
                 table === 'workspaces'
-                    ? supabase.from(table).select('*').eq('id', workspaceId).gt('updated_at', since)
-                    : supabase.from(table).select('*').eq('workspace_id', workspaceId).gt('updated_at', since) as any,
+                    ? client.from(table).select('*').eq('id', workspaceId).gt('updated_at', since)
+                    : client.from(table).select('*').eq('workspace_id', workspaceId).gt('updated_at', since) as any,
                 30000
             )) as any
 

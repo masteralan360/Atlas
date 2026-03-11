@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 
 import { db } from './database'
@@ -14,6 +14,12 @@ import type {
     Sale,
     SaleItem,
     Employee,
+    BudgetSettings,
+    BudgetAllocation,
+    ExpenseSeries,
+    ExpenseItem,
+    PayrollStatus,
+    DividendStatus,
     User,
     WorkspaceContact,
     Loan,
@@ -30,6 +36,7 @@ import { supabase } from '@/auth/supabase'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { isOnline } from '@/lib/network'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
+import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 
 // ===================
 // CATEGORIES HOOKS
@@ -770,7 +777,8 @@ export async function updateSalesOrder(id: string, data: Partial<SalesOrder>): P
 
 // Helpers for repetitive logic
 export async function fetchTableFromSupabase<T extends { id: string, syncStatus: any, lastSyncedAt: any }>(tableName: string, table: any, workspaceId: string) {
-    let query = supabase
+    const client = getSupabaseClientForTable(tableName)
+    let query = client
         .from(tableName)
         .select('*')
         .eq('workspace_id', workspaceId)
@@ -805,8 +813,9 @@ export async function fetchTableFromSupabase<T extends { id: string, syncStatus:
 
 async function saveEntity<T extends { id: string }>(tableName: string, table: any, entity: T, workspaceId: string) {
     if (isOnline()) {
+        const client = getSupabaseClientForTable(tableName)
         const payload = toSnakeCase({ ...entity, syncStatus: undefined, lastSyncedAt: undefined })
-        const { error } = await runMutation(`${tableName}.create`, () => supabase.from(tableName).insert(payload))
+        const { error } = await runMutation(`${tableName}.create`, () => client.from(tableName).insert(payload))
         if (error) {
             console.error('Supabase write failed:', error)
             throw normalizeSupabaseActionError(error)
@@ -818,7 +827,7 @@ async function saveEntity<T extends { id: string }>(tableName: string, table: an
     }
 }
 
-async function updateEntity<T extends { id: string, workspaceId: string, version: number, lastSyncedAt: any }>(tableName: string, table: any, id: string, data: Partial<T>) {
+async function updateEntity<T extends { id: string, workspaceId: string, version: number, lastSyncedAt: any }>(tableName: string, table: any, id: string, data: Partial<T> & Record<string, any>) {
     const now = new Date().toISOString()
     const existing = await table.get(id)
     if (!existing) throw new Error('Entity not found')
@@ -833,8 +842,9 @@ async function updateEntity<T extends { id: string, workspaceId: string, version
     }
 
     if (isOnline()) {
+        const client = getSupabaseClientForTable(tableName)
         const payload = toSnakeCase({ ...data, updatedAt: now })
-        const { error } = await runMutation(`${tableName}.update`, () => supabase.from(tableName).update(payload).eq('id', id))
+        const { error } = await runMutation(`${tableName}.update`, () => client.from(tableName).update(payload).eq('id', id))
         if (error) throw normalizeSupabaseActionError(error)
         await table.put(updated)
     } else {
@@ -1724,6 +1734,408 @@ export function useWorkspaceUsers(workspaceId: string | undefined) {
     }, [isOnline, workspaceId])
 
     return users ?? []
+}
+
+// ===================
+// BUDGET HOOKS
+// ===================
+
+export function useBudgetSettings(workspaceId: string | undefined) {
+    const isOnline = useNetworkStatus()
+
+    // 1. Local Cache
+    const settings = useLiveQuery(
+        () => workspaceId ? db.budget_settings.where('workspaceId').equals(workspaceId).and(s => !s.isDeleted).toArray() : [],
+        [workspaceId]
+    )
+
+    // 2. Online Sync
+    useEffect(() => {
+        if (isOnline && workspaceId) {
+            void fetchTableFromSupabase('budget_settings', db.budget_settings, workspaceId)
+        }
+    }, [isOnline, workspaceId])
+
+    return settings
+}
+
+export async function setBudgetSettings(workspaceId: string, startMonth: string): Promise<BudgetSettings> {
+    const now = new Date().toISOString()
+    const existing = await db.budget_settings.where('workspaceId').equals(workspaceId).and(s => !s.isDeleted).first()
+
+    if (existing) {
+        await updateEntity('budget_settings', db.budget_settings, existing.id, { startMonth })
+        return { ...existing, startMonth, updatedAt: now }
+    }
+
+    const settings: BudgetSettings = {
+        id: workspaceId,
+        workspaceId,
+        startMonth,
+        createdAt: now,
+        updatedAt: now,
+        syncStatus: (isOnline() ? 'synced' : 'pending') as any,
+        lastSyncedAt: isOnline() ? now : null,
+        version: 1,
+        isDeleted: false
+    }
+
+    await saveEntity('budget_settings', db.budget_settings, settings, workspaceId)
+    return settings
+}
+
+export function useBudgetAllocations(workspaceId: string | undefined) {
+    const isOnline = useNetworkStatus()
+    const allocations = useLiveQuery(
+        () => workspaceId ? db.budget_allocations.where('workspaceId').equals(workspaceId).and(a => !a.isDeleted).toArray() : [],
+        [workspaceId]
+    )
+
+    useEffect(() => {
+        if (isOnline && workspaceId) {
+            fetchTableFromSupabase('budget_allocations', db.budget_allocations, workspaceId)
+        }
+    }, [isOnline, workspaceId])
+
+    return allocations ?? []
+}
+
+export async function setBudgetAllocation(
+    workspaceId: string,
+    month: string,
+    currency: CurrencyCode,
+    allocationType: 'fixed' | 'percentage' = 'fixed',
+    allocationValue: number = 0
+): Promise<BudgetAllocation> {
+    const now = new Date().toISOString()
+    const existing = await db.budget_allocations
+        .where('[workspaceId+month]')
+        .equals([workspaceId, month])
+        .and(a => !a.isDeleted)
+        .first()
+
+    if (existing) {
+        await updateEntity('budget_allocations', db.budget_allocations, existing.id, { 
+            currency,
+            allocationType,
+            allocationValue
+        })
+        return { ...existing, currency, allocationType, allocationValue, updatedAt: now }
+    }
+
+    const allocation: BudgetAllocation = {
+        id: generateId(),
+        workspaceId,
+        month,
+        currency,
+        allocationType,
+        allocationValue,
+        createdAt: now,
+        updatedAt: now,
+        syncStatus: (isOnline() ? 'synced' : 'pending') as any,
+        lastSyncedAt: isOnline() ? now : null,
+        version: 1,
+        isDeleted: false
+    }
+
+    await saveEntity('budget_allocations', db.budget_allocations, allocation, workspaceId)
+    return allocation
+}
+
+export function useExpenseSeries(workspaceId: string | undefined, options?: { includeDeleted?: boolean }) {
+    const isOnline = useNetworkStatus()
+    const includeDeleted = options?.includeDeleted ?? false
+    const series = useLiveQuery(
+        () => workspaceId
+            ? db.expense_series.where('workspaceId').equals(workspaceId).and(s => includeDeleted || !s.isDeleted).toArray()
+            : [],
+        [workspaceId, includeDeleted]
+    )
+
+    useEffect(() => {
+        if (isOnline && workspaceId) {
+            fetchTableFromSupabase('expense_series', db.expense_series, workspaceId)
+        }
+    }, [isOnline, workspaceId])
+
+    return series ?? []
+}
+
+export async function createExpenseSeries(
+    workspaceId: string,
+    data: Omit<ExpenseSeries, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>
+): Promise<ExpenseSeries> {
+    const now = new Date().toISOString()
+    const series: ExpenseSeries = {
+        ...data,
+        id: generateId(),
+        workspaceId,
+        createdAt: now,
+        updatedAt: now,
+        syncStatus: (isOnline() ? 'synced' : 'pending') as any,
+        lastSyncedAt: isOnline() ? now : null,
+        version: 1,
+        isDeleted: false
+    }
+
+    await saveEntity('expense_series', db.expense_series, series, workspaceId)
+    return series
+}
+
+export async function updateExpenseSeries(id: string, data: Partial<ExpenseSeries>): Promise<void> {
+    await updateEntity('expense_series', db.expense_series, id, data)
+}
+
+export async function setExpenseSeriesEndMonth(id: string, endMonth: string | null): Promise<void> {
+    await updateEntity('expense_series', db.expense_series, id, { endMonth })
+}
+
+export async function deleteExpenseItem(id: string): Promise<void> {
+    const now = new Date().toISOString()
+    const existing = await db.expense_items.get(id)
+    if (!existing) return
+
+    const updated = {
+        ...existing,
+        isDeleted: true,
+        updatedAt: now,
+        syncStatus: (isOnline() ? 'synced' : 'pending') as any,
+        version: existing.version + 1
+    } as ExpenseItem
+
+    if (isOnline()) {
+        const client = getSupabaseClientForTable('expense_items')
+        const { error } = await runMutation('expense_items.delete', () =>
+            client.from('expense_items').update({ is_deleted: true, updated_at: now }).eq('id', id)
+        )
+        if (error) throw normalizeSupabaseActionError(error)
+        await db.expense_items.put(updated)
+    } else {
+        await db.expense_items.put(updated)
+        await addToOfflineMutations('expense_items', id, 'delete', { id }, existing.workspaceId)
+    }
+}
+
+export async function hardDeleteExpenseItem(id: string): Promise<void> {
+    const existing = await db.expense_items.get(id)
+    if (!existing) return
+
+    if (isOnline()) {
+        const client = getSupabaseClientForTable('expense_items')
+        const { error } = await runMutation('expense_items.hardDelete', () =>
+            client.from('expense_items').delete().eq('id', id)
+        )
+        if (error) throw normalizeSupabaseActionError(error)
+        await db.expense_items.delete(id)
+    } else {
+        await db.expense_items.delete(id)
+        await addToOfflineMutations('expense_items', id, 'delete', { id }, existing.workspaceId)
+    }
+}
+
+export function useExpenseItems(workspaceId: string | undefined, month: string | undefined) {
+    const isOnline = useNetworkStatus()
+    const items = useLiveQuery(
+        () => workspaceId && month
+            ? db.expense_items.where('workspaceId').equals(workspaceId).and(i => !i.isDeleted && i.month === month).toArray()
+            : [],
+        [workspaceId, month]
+    )
+
+    useEffect(() => {
+        if (isOnline && workspaceId) {
+            fetchTableFromSupabase('expense_items', db.expense_items, workspaceId)
+        }
+    }, [isOnline, workspaceId])
+
+    return items ?? []
+}
+
+function buildDueDateFromMonth(month: string, dueDay: number): string {
+    const [year, monthIndex] = month.split('-').map(Number)
+    const daysInMonth = new Date(year, monthIndex, 0).getDate()
+    const day = Math.min(Math.max(dueDay, 1), daysInMonth)
+    return `${month}-${String(day).padStart(2, '0')}`
+}
+
+export async function createExpenseItem(
+    workspaceId: string,
+    data: Omit<ExpenseItem, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>
+): Promise<ExpenseItem> {
+    const now = new Date().toISOString()
+    const item: ExpenseItem = {
+        ...data,
+        id: generateId(),
+        workspaceId,
+        createdAt: now,
+        updatedAt: now,
+        syncStatus: (isOnline() ? 'synced' : 'pending') as any,
+        lastSyncedAt: isOnline() ? now : null,
+        version: 1,
+        isDeleted: false
+    }
+
+    await saveEntity('expense_items', db.expense_items, item, workspaceId)
+    return item
+}
+
+export async function updateExpenseItem(id: string, data: Partial<ExpenseItem>): Promise<void> {
+    await updateEntity('expense_items', db.expense_items, id, data)
+}
+
+export async function ensureExpenseItemsForMonth(workspaceId: string, month: string): Promise<void> {
+    const series = await db.expense_series.where('workspaceId').equals(workspaceId).and(s => !s.isDeleted).toArray()
+    if (series.length === 0) return
+
+    const existingItems = await db.expense_items.where('workspaceId').equals(workspaceId).and(i => !i.isDeleted && i.month === month).toArray()
+    const existingKey = new Set(existingItems.map(item => `${item.seriesId}:${item.month}`))
+
+    const toCreate: ExpenseItem[] = []
+    const now = new Date().toISOString()
+
+    for (const entry of series) {
+        const seriesStart = entry.startMonth
+        const seriesEnd = entry.endMonth || null
+
+        if (month < seriesStart) continue
+        if (seriesEnd && month > seriesEnd) continue
+        if (entry.recurrence === 'one_time' && month !== seriesStart) continue
+
+        const key = `${entry.id}:${month}`
+        if (existingKey.has(key)) continue
+
+        const dueDate = buildDueDateFromMonth(month, entry.dueDay)
+
+        toCreate.push({
+            id: generateId(),
+            workspaceId,
+            seriesId: entry.id,
+            month,
+            dueDate,
+            amount: entry.amount,
+            currency: entry.currency,
+            status: 'pending',
+            snoozedUntil: null,
+            snoozedIndefinite: false,
+            snoozeCount: 0,
+            paidAt: null,
+            isLocked: false,
+            createdAt: now,
+            updatedAt: now,
+            syncStatus: (isOnline() ? 'synced' : 'pending') as any,
+            lastSyncedAt: isOnline() ? now : null,
+            version: 1,
+            isDeleted: false
+        } as ExpenseItem)
+    }
+
+    if (toCreate.length === 0) return
+
+    if (isOnline()) {
+        const payload = toCreate.map(item => toSnakeCase({ ...item, syncStatus: undefined, lastSyncedAt: undefined }))
+        const client = getSupabaseClientForTable('expense_items')
+        const { error } = await runMutation('expense_items.bulkCreate', () => client.from('expense_items').insert(payload))
+        if (error) throw normalizeSupabaseActionError(error)
+        await db.expense_items.bulkAdd(toCreate)
+    } else {
+        await db.expense_items.bulkAdd(toCreate)
+        for (const item of toCreate) {
+            await addToOfflineMutations('expense_items', item.id, 'create', item as unknown as Record<string, unknown>, workspaceId)
+        }
+    }
+}
+
+export function usePayrollStatuses(workspaceId: string | undefined) {
+    const isOnline = useNetworkStatus()
+    const statuses = useLiveQuery(
+        () => workspaceId ? db.payroll_statuses.where('workspaceId').equals(workspaceId).and(s => !s.isDeleted).toArray() : [],
+        [workspaceId]
+    )
+
+    useEffect(() => {
+        if (isOnline && workspaceId) {
+            fetchTableFromSupabase('payroll_statuses', db.payroll_statuses, workspaceId)
+        }
+    }, [isOnline, workspaceId])
+
+    return statuses ?? []
+}
+
+export function useDividendStatuses(workspaceId: string | undefined) {
+    const isOnline = useNetworkStatus()
+    const statuses = useLiveQuery(
+        () => workspaceId ? db.dividend_statuses.where('workspaceId').equals(workspaceId).and(s => !s.isDeleted).toArray() : [],
+        [workspaceId]
+    )
+
+    useEffect(() => {
+        if (isOnline && workspaceId) {
+            fetchTableFromSupabase('dividend_statuses', db.dividend_statuses, workspaceId)
+        }
+    }, [isOnline, workspaceId])
+
+    return statuses ?? []
+}
+
+async function upsertBudgetStatus<T extends PayrollStatus | DividendStatus>(
+    tableName: 'payroll_statuses' | 'dividend_statuses',
+    table: any,
+    workspaceId: string,
+    employeeId: string,
+    month: string,
+    data: Partial<T>
+): Promise<void> {
+    const existing = await table
+        .where('[employeeId+month]')
+        .equals([employeeId, month])
+        .and((s: T) => !s.isDeleted)
+        .first()
+
+    if (existing) {
+        await updateEntity(tableName, table, existing.id, data)
+        return
+    }
+
+    const now = new Date().toISOString()
+    const status = {
+        id: generateId(),
+        workspaceId,
+        employeeId,
+        month,
+        status: 'pending',
+        snoozedUntil: null,
+        snoozedIndefinite: false,
+        snoozeCount: 0,
+        paidAt: null,
+        isLocked: false,
+        createdAt: now,
+        updatedAt: now,
+        syncStatus: (isOnline() ? 'synced' : 'pending') as any,
+        lastSyncedAt: isOnline() ? now : null,
+        version: 1,
+        isDeleted: false,
+        ...data
+    }
+
+    await saveEntity(tableName, table, status, workspaceId)
+}
+
+export async function upsertPayrollStatus(
+    workspaceId: string,
+    employeeId: string,
+    month: string,
+    data: Partial<PayrollStatus>
+): Promise<void> {
+    await upsertBudgetStatus('payroll_statuses', db.payroll_statuses, workspaceId, employeeId, month, data)
+}
+
+export async function upsertDividendStatus(
+    workspaceId: string,
+    employeeId: string,
+    month: string,
+    data: Partial<DividendStatus>
+): Promise<void> {
+    await upsertBudgetStatus('dividend_statuses', db.dividend_statuses, workspaceId, employeeId, month, data)
 }
 
 // ===================
