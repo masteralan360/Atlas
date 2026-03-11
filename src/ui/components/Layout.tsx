@@ -13,7 +13,6 @@ import { whatsappManager } from '@/lib/whatsappWebviewManager'
 import { ResourceSyncOverlay } from './p2p/ResourceSyncOverlay'
 import { NotificationCenter } from './NotificationCenter'
 import { ManualRateModals } from './exchange/ManualRateModals'
-import { GlobalExpenseReminders } from './budget/GlobalExpenseReminders'
 import { GlobalLoanReminders } from './loans/GlobalLoanReminders'
 import { LoanPaymentModalProvider } from './loans/LoanPaymentModalProvider'
 
@@ -42,7 +41,6 @@ import {
     ShoppingBag,
     Warehouse,
     ArrowRightLeft,
-    Wallet,
     HandCoins,
     AlertCircle,
     PanelRightOpen,
@@ -61,8 +59,6 @@ interface LayoutProps {
     children: ReactNode
 }
 
-import { useExchangeRate } from '@/context/ExchangeRateContext'
-import { useBudgetLimitReached as useBudgetLimitReachedHook } from '@/local-db'
 
 // Route prefetch map for on-hover preloading (desktop only)
 const routePrefetchMap: Record<string, () => Promise<unknown>> = {
@@ -72,7 +68,6 @@ const routePrefetchMap: Record<string, () => Promise<unknown>> = {
     '/loans': () => import('@/ui/pages/Loans'),
     '/revenue': () => import('@/ui/pages/Revenue'),
     '/monthly-comparison': () => import('@/ui/pages/MonthlyComparison'),
-    '/budget': () => import('@/ui/pages/Budget'),
     '/performance': () => import('@/ui/pages/TeamPerformance'),
     '/whatsapp': () => import('@/ui/pages/WhatsAppWeb'),
     '/products': () => import('@/ui/pages/Products'),
@@ -103,18 +98,6 @@ export function Layout({ children }: LayoutProps) {
     const { user, signOut } = useAuth()
     const { hasFeature, workspaceName, isFullscreen, features } = useWorkspace()
     const { trigger: triggerHaptic } = useWebHaptics({ debug: true })
-
-    // Budget Alert Monitoring
-    const { exchangeData, eurRates, tryRates } = useExchangeRate()
-    const budgetLimitReached = useBudgetLimitReachedHook(
-        user?.workspaceId,
-        features.default_currency || 'usd',
-        {
-            usd_iqd: (exchangeData?.rate || 145000) / 100,
-            eur_iqd: (eurRates.eur_iqd?.rate || 160000) / 100,
-            try_iqd: (tryRates.try_iqd?.rate || 4500) / 100
-        }
-    )
 
     const { t } = useTranslation()
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
@@ -232,7 +215,6 @@ export function Layout({ children }: LayoutProps) {
         ...(user?.role === 'admin' ? [
             { name: t('nav.revenue') || 'Net Revenue', href: '/revenue', icon: BarChart3 },
             { name: t('monthlyComparison.title'), href: '/monthly-comparison', icon: ArrowRightLeft },
-            { name: t('nav.budget') || 'Budget', href: '/budget', icon: Wallet, alert: budgetLimitReached },
             { name: t('nav.performance') || 'Team Performance', href: '/performance', icon: TrendingUp }
         ] : []),
         // WhatsApp - requires feature flag AND role AND desktop platform
@@ -276,7 +258,6 @@ export function Layout({ children }: LayoutProps) {
             <div className="h-screen overflow-hidden bg-transparent">
                 <ResourceSyncOverlay />
                 <ManualRateModals />
-                <GlobalExpenseReminders />
                 <GlobalLoanReminders />
                 {/* Mobile sidebar backdrop */}
                 {mobileSidebarOpen && (

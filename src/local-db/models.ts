@@ -88,36 +88,6 @@ export interface Employee extends BaseEntity {
     linkedUserId?: string
 }
 
-export type ExpenseType = 'recurring' | 'one-time'
-export type ExpenseCategory = 'rent' | 'electricity' | 'payroll' | 'general'
-export type ExpenseStatus = 'pending' | 'paid' | 'snoozed'
-
-export interface Expense extends Omit<BaseEntity, 'isDeleted'> {
-    description?: string
-    type: ExpenseType
-    category: ExpenseCategory
-    subcategory?: string | null
-    amount: number
-    currency: CurrencyCode
-    status: ExpenseStatus
-    dueDate: string
-    paidAt: string | null
-    snoozeUntil: string | null
-    snoozeCount: number
-    employeeId?: string // Link to employee if category is 'payroll'
-    isLocked?: boolean
-}
-
-export type AllocationType = 'fixed' | 'percentage'
-
-export interface BudgetAllocation extends Omit<BaseEntity, 'isDeleted'> {
-    month: string // "YYYY-MM"
-    type: AllocationType
-    amount: number // Value or Percentage (0-100)
-    currency: CurrencyCode
-    startPoint?: boolean
-}
-
 
 export interface Supplier extends BaseEntity {
     name: string
@@ -365,7 +335,7 @@ export interface LoanPayment extends BaseEntity {
 // Sync Queue Item for tracking pending changes
 export interface SyncQueueItem {
     id: string
-    entityType: 'products' | 'customers' | 'suppliers' | 'purchase_orders' | 'sales_orders' | 'invoices' | 'users' | 'sales' | 'categories' | 'storages' | 'employees' | 'expenses' | 'budget_allocations' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments'
+    entityType: 'products' | 'customers' | 'suppliers' | 'purchase_orders' | 'sales_orders' | 'invoices' | 'users' | 'sales' | 'categories' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments'
     entityId: string
     operation: 'create' | 'update' | 'delete'
     data: Record<string, unknown>
@@ -415,7 +385,7 @@ export interface WorkspaceContact extends Omit<BaseEntity, 'isDeleted'> {
 export interface OfflineMutation {
     id: string
     workspaceId: string
-    entityType: 'products' | 'customers' | 'suppliers' | 'purchase_orders' | 'sales_orders' | 'invoices' | 'users' | 'sales' | 'categories' | 'workspaces' | 'storages' | 'employees' | 'expenses' | 'budget_allocations' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments'
+    entityType: 'products' | 'customers' | 'suppliers' | 'purchase_orders' | 'sales_orders' | 'invoices' | 'users' | 'sales' | 'categories' | 'workspaces' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments'
     entityId: string
     operation: 'create' | 'update' | 'delete'
     payload: Record<string, unknown>

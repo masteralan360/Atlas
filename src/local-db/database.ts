@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
-import type { Product, Category, Customer, Supplier, PurchaseOrder, SalesOrder, Invoice, User, SyncQueueItem, Sale, SaleItem, OfflineMutation, Workspace, AppSetting, Storage, Employee, Expense, BudgetAllocation, WorkspaceContact, Loan, LoanInstallment, LoanPayment } from './models'
+import type { Product, Category, Customer, Supplier, PurchaseOrder, SalesOrder, Invoice, User, SyncQueueItem, Sale, SaleItem, OfflineMutation, Workspace, AppSetting, Storage, Employee, WorkspaceContact, Loan, LoanInstallment, LoanPayment } from './models'
 
 // Asaas Database using Dexie.js for IndexedDB
 export class AsaasDatabase extends Dexie {
@@ -16,8 +16,6 @@ export class AsaasDatabase extends Dexie {
     workspaces!: EntityTable<Workspace, 'id'>
     storages!: EntityTable<Storage, 'id'>
     employees!: EntityTable<Employee, 'id'>
-    expenses!: EntityTable<Expense, 'id'>
-    budgetAllocations!: EntityTable<BudgetAllocation, 'id'>
     syncQueue!: EntityTable<SyncQueueItem, 'id'>
     offline_mutations!: EntityTable<OfflineMutation, 'id'>
     app_settings!: EntityTable<AppSetting, 'key'>
@@ -29,7 +27,7 @@ export class AsaasDatabase extends Dexie {
     constructor() {
         super('AsaasDatabase')
 
-        this.version(35).stores({
+        this.version(37).stores({
             products: 'id, sku, name, categoryId, storageId, workspaceId, currency, syncStatus, updatedAt, isDeleted, canBeReturned',
             categories: 'id, name, workspaceId, syncStatus, updatedAt, isDeleted',
             suppliers: 'id, name, workspaceId, syncStatus, updatedAt, isDeleted',
@@ -44,8 +42,6 @@ export class AsaasDatabase extends Dexie {
             workspaces: 'id, name, code, syncStatus, updatedAt, isDeleted, print_lang, print_qr',
             storages: 'id, name, workspaceId, isSystem, isProtected, syncStatus, updatedAt, isDeleted',
             employees: 'id, name, workspaceId, linkedUserId, syncStatus, updatedAt, isDeleted',
-            expenses: 'id, type, category, subcategory, status, dueDate, snoozeUntil, workspaceId, syncStatus, updatedAt',
-            budgetAllocations: 'id, month, type, workspaceId, syncStatus, updatedAt, startPoint, [workspaceId+month]',
             syncQueue: 'id, entityType, entityId, operation, timestamp',
             offline_mutations: 'id, workspaceId, entityType, entityId, status, createdAt, [entityType+entityId+status]',
             workspace_contacts: 'id, workspaceId, type, value, syncStatus, updatedAt',
@@ -53,7 +49,10 @@ export class AsaasDatabase extends Dexie {
             loan_installments: 'id, loanId, workspaceId, dueDate, status, syncStatus, updatedAt, isDeleted, [loanId+installmentNo]',
             loan_payments: 'id, loanId, workspaceId, paidAt, syncStatus, updatedAt, isDeleted',
             app_settings: 'key'
-        })
+        }).upgrade(tx => Promise.all([
+            tx.table('offline_mutations').where('entityType').anyOf(['budget_allocations', 'expenses']).delete(),
+            tx.table('syncQueue').where('entityType').anyOf(['budget_allocations', 'expenses']).delete()
+        ]))
     }
 }
 

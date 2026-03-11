@@ -36,8 +36,7 @@ import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { cn, formatCurrency } from '@/lib/utils'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { convertToStoreBase as convertToStoreBaseUtil } from '@/lib/currency'
-import { useSales, toUISale, useExpenses, useEmployees, useBudgetAllocations } from '@/local-db'
-import type { BudgetAllocation, Employee, Expense } from '@/local-db'
+import { useSales, toUISale } from '@/local-db'
 import type { Sale, SaleItem } from '@/types'
 import {
     Button,
@@ -176,33 +175,6 @@ const RIGHT_ACCENT = {
     line: '#f59e0b',
 }
 
-const normalizeExpenseField = (value?: string | null) => (value || '').trim().toLowerCase()
-
-const isRecurringOccurrenceMatch = (
-    recurringTemplate: Expense,
-    expenseRecord: Expense,
-    monthStart: Date,
-    monthEnd: Date
-): boolean => {
-    if (!recurringTemplate || !expenseRecord || expenseRecord.type !== 'one-time') return false
-
-    const expenseDueDate = new Date(expenseRecord.dueDate)
-    if (isNaN(expenseDueDate.getTime()) || expenseDueDate < monthStart || expenseDueDate > monthEnd) return false
-
-    if (expenseRecord.category !== recurringTemplate.category) return false
-    if (normalizeExpenseField(expenseRecord.description) !== normalizeExpenseField(recurringTemplate.description)) return false
-    if (normalizeExpenseField(expenseRecord.subcategory) !== normalizeExpenseField(recurringTemplate.subcategory)) return false
-
-    const recurringDay = new Date(recurringTemplate.dueDate).getDate()
-    if (isNaN(recurringDay)) return false
-
-    const projectedDay = Math.min(
-        recurringDay,
-        new Date(expenseDueDate.getFullYear(), expenseDueDate.getMonth() + 1, 0).getDate()
-    )
-
-    return expenseDueDate.getDate() === projectedDay
-}
 
 function monthKeyFromDate(date: Date | string): MonthKey {
     const d = new Date(date)
@@ -250,10 +222,6 @@ function clampPercentage(value: number) {
     return Math.max(0, Math.min(value, 100))
 }
 
-function humanizeExpenseCategory(name: string) {
-    return name.replace(/[_-]/g, ' ').replace(/\b\w/g, char => char.toUpperCase())
-}
-
 function getMarginBand(margin: number, t: TFunction) {
     if (margin >= 25) return t('monthlyComparison.marginBand.strong')
     if (margin >= 12) return t('monthlyComparison.marginBand.average')
@@ -270,8 +238,6 @@ function buildToolbarMeta(option: MonthOption, t: TFunction) {
 
 function buildAvailableMonths(
     sales: Sale[],
-    expenses: Expense[],
-    allocations: BudgetAllocation[],
     language: string
 ): MonthOption[] {
     const monthMap = new Map<MonthKey, MonthOption>()
@@ -283,32 +249,8 @@ function buildAvailableMonths(
             value: key,
             label: formatMonthLabel(key, language),
             hasSales: true,
-            hasExpenses: existing?.hasExpenses ?? false,
+            hasExpenses: false,
             hasAllocation: existing?.hasAllocation ?? false,
-        })
-    })
-
-    expenses.forEach(expense => {
-        const key = monthKeyFromDate(expense.dueDate)
-        const existing = monthMap.get(key)
-        monthMap.set(key, {
-            value: key,
-            label: formatMonthLabel(key, language),
-            hasSales: existing?.hasSales ?? false,
-            hasExpenses: true,
-            hasAllocation: existing?.hasAllocation ?? false,
-        })
-    })
-
-    allocations.forEach(allocation => {
-        const key = allocation.month as MonthKey
-        const existing = monthMap.get(key)
-        monthMap.set(key, {
-            value: key,
-            label: formatMonthLabel(key, language),
-            hasSales: existing?.hasSales ?? false,
-            hasExpenses: existing?.hasExpenses ?? false,
-            hasAllocation: true,
         })
     })
 
@@ -476,133 +418,20 @@ function analyzeSalesMonth(
     }
 }
 
-function analyzeBudgetMonth(
-    month: MonthKey,
-    sales: SalesSnapshot,
-    expenses: Expense[],
-    employees: Employee[],
-    allocations: BudgetAllocation[],
-    convertToBase: (amount: number | undefined | null, currency: string | undefined | null) => number,
-    labels: MonthlyComparisonFallbackLabels
-): BudgetSnapshot {
-    const monthDate = monthDateFromKey(month)
-    const year = monthDate.getFullYear()
-    const monthIndex = monthDate.getMonth()
-    const monthStart = new Date(year, monthIndex, 1)
-    const monthEnd = new Date(year, monthIndex + 1, 0, 23, 59, 59)
+function analyzeBudgetMonth(month: MonthKey): BudgetSnapshot {
     const daysInMonth = getDaysInMonth(month)
-
-    const recurringTemplates = expenses.filter(expense => expense.type === 'recurring')
-    const monthExpenses = expenses
-        .filter(expense => {
-            const dueDate = new Date(expense.dueDate)
-            if (expense.type !== 'one-time') return false
-            if (expense.category === 'payroll' && expense.employeeId) return false
-            return dueDate >= monthStart && dueDate <= monthEnd
-        })
-        .map(expense => ({
-            ...expense,
-            isRecurringLinked: recurringTemplates.some(template => isRecurringOccurrenceMatch(template, expense, monthStart, monthEnd)),
-        }))
-
-    const virtualRecurringExpenses = recurringTemplates
-        .filter(template => !monthExpenses.some(expense => isRecurringOccurrenceMatch(template, expense, monthStart, monthEnd)))
-        .map(template => {
-            const templateDate = new Date(template.dueDate)
-            const projectedDate = new Date(year, monthIndex, Math.min(templateDate.getDate(), new Date(year, monthIndex + 1, 0).getDate()))
-            return {
-                ...template,
-                id: `virtual-${template.id}-${month}`,
-                dueDate: projectedDate.toISOString(),
-                status: 'pending' as const,
-            }
-        })
-
-    const dailySpend = new Array(daysInMonth).fill(0)
-    const expenseCategoryMap: Record<string, number> = {}
-
-    let operationalTotal = 0
-    let operationalPaid = 0
-    let operationalPending = 0
-
-        ;[...monthExpenses, ...virtualRecurringExpenses].forEach(expense => {
-            const baseAmount = convertToBase(expense.amount, expense.currency)
-            const dayIndex = Math.max(0, Math.min(daysInMonth - 1, new Date(expense.dueDate).getDate() - 1))
-            dailySpend[dayIndex] += baseAmount
-            operationalTotal += baseAmount
-            if (expense.status === 'paid') operationalPaid += baseAmount
-            else operationalPending += baseAmount
-
-            const bucket = humanizeExpenseCategory(expense.subcategory || expense.category)
-            expenseCategoryMap[bucket] = (expenseCategoryMap[bucket] || 0) + baseAmount
-        })
-
-    let personnelTotal = 0
-    let personnelPaid = 0
-    let personnelPending = 0
-
-    employees.forEach(employee => {
-        if (!employee.salary || employee.salary <= 0) return
-
-        const existingPayrollExpense = expenses.find(expense =>
-            expense.type === 'one-time' &&
-            expense.category === 'payroll' &&
-            expense.employeeId === employee.id &&
-            new Date(expense.dueDate) >= monthStart &&
-            new Date(expense.dueDate) <= monthEnd
-        )
-
-        const baseAmount = convertToBase(employee.salary, employee.salaryCurrency || 'usd')
-        const payday = Number(employee.salaryPayday) || 30
-        const dueDate = new Date(year, monthIndex, Math.min(payday, daysInMonth))
-        const dayIndex = Math.max(0, Math.min(daysInMonth - 1, dueDate.getDate() - 1))
-
-        personnelTotal += baseAmount
-        dailySpend[dayIndex] += baseAmount
-
-        if (existingPayrollExpense?.status === 'paid') personnelPaid += baseAmount
-        else personnelPending += baseAmount
-    })
-
-    if (personnelTotal > 0) expenseCategoryMap[labels.payroll] = (expenseCategoryMap[labels.payroll] || 0) + personnelTotal
-
-    const totalAllocated = operationalTotal + personnelTotal
-    const referenceProfit = sales.baseTotals.profit
-    const profitPool = Math.max(0, referenceProfit - totalAllocated)
-    const dividends = employees.reduce((sum, employee) => {
-        if (!employee.hasDividends || !employee.dividendAmount || employee.dividendAmount <= 0 || employee.isFired) return sum
-        if (employee.dividendType === 'fixed') return sum + convertToBase(employee.dividendAmount, employee.dividendCurrency || 'usd')
-        return sum + profitPool * ((employee.dividendAmount || 0) / 100)
-    }, 0)
-
-    const retained = profitPool - dividends
-    const allocation = allocations.find(item => item.month === month)
-    let budgetLimit = 0
-    if (allocation) {
-        budgetLimit = allocation.type === 'fixed'
-            ? convertToBase(allocation.amount, allocation.currency)
-            : referenceProfit * (allocation.amount / 100)
-    }
-
-    const cumulativeSpend: number[] = []
-    let runningSpend = 0
-    dailySpend.forEach(value => {
-        runningSpend += value
-        cumulativeSpend.push(runningSpend)
-    })
-
     return {
-        totalAllocated,
-        paid: operationalPaid + personnelPaid,
-        outstanding: operationalPending + personnelPending,
-        dividends,
-        retained,
-        isDeficit: retained < 0,
-        budgetLimit,
-        operationalTotal,
-        personnelTotal,
-        expenseCategories: Object.entries(expenseCategoryMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value),
-        cumulativeSpend,
+        totalAllocated: 0,
+        paid: 0,
+        outstanding: 0,
+        dividends: 0,
+        retained: 0,
+        isDeficit: false,
+        budgetLimit: 0,
+        operationalTotal: 0,
+        personnelTotal: 0,
+        expenseCategories: [],
+        cumulativeSpend: new Array(daysInMonth).fill(0),
     }
 }
 
@@ -1682,9 +1511,6 @@ export function MonthlyComparison() {
     const iqdPreference = (features.iqd_display_preference || 'IQD') as 'IQD' | 'د.ع'
 
     const rawSales = useSales(workspaceId)
-    const expenses = useExpenses(workspaceId)
-    const employees = useEmployees(workspaceId)
-    const allocations = useBudgetAllocations(workspaceId)
 
     const sales = useMemo<Sale[]>(() => rawSales.map(toUISale), [rawSales])
 
@@ -1697,8 +1523,8 @@ export function MonthlyComparison() {
     }, [baseCurrency, exchangeData, eurRates, tryRates])
 
     const monthOptions = useMemo(
-        () => buildAvailableMonths(sales, expenses, allocations, i18n.language),
-        [sales, expenses, allocations, i18n.language]
+        () => buildAvailableMonths(sales, i18n.language),
+        [sales, i18n.language]
     )
     const localizedFallbackLabels = useMemo<MonthlyComparisonFallbackLabels>(() => ({
         uncategorized: t('monthlyComparison.fallback.uncategorized'),
@@ -1786,9 +1612,9 @@ export function MonthlyComparison() {
         return {
             option,
             sales: salesSnapshot,
-            budget: analyzeBudgetMonth(option.value, salesSnapshot, expenses, employees, allocations, convertToBase, localizedFallbackLabels),
+            budget: analyzeBudgetMonth(option.value),
         } satisfies MonthSnapshot
-    }, [monthOptions, leftMonth, sales, baseCurrency, convertToBase, localizedFallbackLabels, expenses, employees, allocations])
+    }, [monthOptions, leftMonth, sales, baseCurrency, convertToBase, localizedFallbackLabels])
 
     const rightSnapshot = useMemo(() => {
         const option = monthOptions.find(item => item.value === rightMonth)
@@ -1797,9 +1623,9 @@ export function MonthlyComparison() {
         return {
             option,
             sales: salesSnapshot,
-            budget: analyzeBudgetMonth(option.value, salesSnapshot, expenses, employees, allocations, convertToBase, localizedFallbackLabels),
+            budget: analyzeBudgetMonth(option.value),
         } satisfies MonthSnapshot
-    }, [monthOptions, rightMonth, sales, baseCurrency, convertToBase, localizedFallbackLabels, expenses, employees, allocations])
+    }, [monthOptions, rightMonth, sales, baseCurrency, convertToBase, localizedFallbackLabels])
 
     const currentMonthKey = monthKeyFromDate(new Date())
     const yearAgoMonth = useMemo(() => {

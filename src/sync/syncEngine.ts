@@ -115,10 +115,7 @@ export async function processMutationQueue(userId: string): Promise<{ success: n
                     if (error) throw error
                 }
             } else if (operation === 'delete') {
-                if (tableName === 'expenses' || tableName === 'budget_allocations') {
-                    const { error } = await supabase.from(tableName).delete().eq('id', entityId)
-                    if (error) throw error
-                } else if (tableName === 'loans') {
+                if (tableName === 'loans') {
                     const { error } = await supabase.from(tableName).delete().eq('id', entityId)
                     if (error) throw error
                 } else {
