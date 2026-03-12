@@ -1,6 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { Novu } from 'npm:@novu/api'
-import { ChatOrPushProviderEnum } from 'npm:@novu/api/models/components'
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
 const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') || ''
@@ -12,19 +11,36 @@ const novuApiKey = novuApiKeyRaw.startsWith('ApiKey ')
 
 const novu = new Novu({ secretKey: novuApiKey })
 
+const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+
+function jsonResponse(body: Record<string, unknown>, status = 200) {
+    return new Response(JSON.stringify(body), {
+        status,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    })
+}
+
 Deno.serve(async (req) => {
+    if (req.method === 'OPTIONS') {
+        return new Response('ok', { headers: corsHeaders })
+    }
+
     try {
         if (req.method !== 'POST') {
-            return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 })
+            return jsonResponse({ error: 'Method not allowed' }, 405)
         }
 
         if (!supabaseUrl || !supabaseAnonKey || !novuApiKeyRaw) {
-            return new Response(JSON.stringify({ error: 'Missing server configuration' }), { status: 500 })
+            return jsonResponse({ error: 'Missing server configuration' }, 500)
         }
 
         const authHeader = req.headers.get('authorization') || ''
         if (!authHeader) {
-            return new Response(JSON.stringify({ error: 'Missing authorization' }), { status: 401 })
+            return jsonResponse({ error: 'Missing authorization' }, 401)
         }
 
         const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -37,13 +53,13 @@ Deno.serve(async (req) => {
 
         const { data: userData, error: userError } = await supabase.auth.getUser()
         if (userError || !userData?.user) {
-            return new Response(JSON.stringify({ error: userError?.message || 'Unauthorized' }), { status: 401 })
+            return jsonResponse({ error: userError?.message || 'Unauthorized' }, 401)
         }
 
         const { token, platform } = await req.json()
         const resolvedToken = typeof token === 'string' ? token.trim() : ''
         if (!resolvedToken) {
-            return new Response(JSON.stringify({ error: 'Missing token' }), { status: 400 })
+            return jsonResponse({ error: 'Missing token' }, 400)
         }
 
         const user = userData.user
@@ -59,7 +75,7 @@ Deno.serve(async (req) => {
         }
 
         if (!workspaceId) {
-            return new Response(JSON.stringify({ error: 'Missing workspace' }), { status: 400 })
+            return jsonResponse({ error: 'Missing workspace' }, 400)
         }
 
         const { error: upsertError } = await supabase
@@ -79,7 +95,7 @@ Deno.serve(async (req) => {
             )
 
         if (upsertError) {
-            return new Response(JSON.stringify({ error: upsertError.message }), { status: 500 })
+            return jsonResponse({ error: upsertError.message }, 500)
         }
 
         try {
@@ -88,21 +104,21 @@ Deno.serve(async (req) => {
             })
             await novu.subscribers.credentials.update(
                 {
-                    providerId: ChatOrPushProviderEnum.Fcm,
+                    providerId: 'fcm',
                     credentials: {
                         deviceTokens: [resolvedToken]
                     }
                 },
                 user.id
             )
+
         } catch (novuError: any) {
-            return new Response(JSON.stringify({ error: novuError?.message || String(novuError) }), { status: 500 })
+            return jsonResponse({ error: novuError?.message || String(novuError) }, 500)
         }
 
-        return new Response(JSON.stringify({ ok: true }), {
-            headers: { 'Content-Type': 'application/json' }
-        })
+        return jsonResponse({ ok: true })
     } catch (error: any) {
-        return new Response(JSON.stringify({ error: error?.message || String(error) }), { status: 500 })
+        return jsonResponse({ error: error?.message || String(error) }, 500)
     }
 })
+

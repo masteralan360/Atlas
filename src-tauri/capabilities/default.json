@@ -78,6 +78,9 @@
         },
         {
           "url": "https://opensheet.elk.sh/*"
+        },
+        {
+          "url": "https://*.supabase.co/*"
         }
       ]
     },
