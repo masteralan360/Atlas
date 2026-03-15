@@ -185,3 +185,25 @@ export function formatOriginLabel(origin?: string | null): string {
     if (normalized === 'loans' || normalized === 'loan') return 'Loans'
     return origin
 }
+
+/**
+ * Transforms text into Mathematical Sans-Serif Bold Italic characters
+ * for a stylized visual effect without special CSS.
+ */
+export function stylizeText(text: string): string {
+    if (!text) return ''
+    return text.split('').map(char => {
+        const code = char.charCodeAt(0)
+        // Lowercase a-z (U+0061 to U+007A) -> Sans-Serif Bold Italic (U+1D5BA to U+1D5D3)
+        // Offset: 0x1D559
+        if (code >= 0x61 && code <= 0x7A) {
+            return String.fromCodePoint(code + 0x1D559)
+        }
+        // Uppercase A-Z (U+0041 to U+005A) -> Sans-Serif Bold Italic (U+1D5A0 to U+1D5B9)
+        // Offset: 0x1D55F
+        if (code >= 0x41 && code <= 0x5A) {
+            return String.fromCodePoint(code + 0x1D55F)
+        }
+        return char
+    }).join('')
+}

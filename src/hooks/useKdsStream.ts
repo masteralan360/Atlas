@@ -27,6 +27,25 @@ export function useKdsStream(isMain: boolean = true) {
                 }
             }
             initHost()
+
+            // Listen for Tauri events from remote clients
+            let unlisten: (() => void) | null = null
+            import('@tauri-apps/api/event').then(({ listen }) => {
+                listen<string>('kds-remote-update', (event) => {
+                    try {
+                        const data = JSON.parse(event.payload)
+                        if (data.event === 'TICKET_UPDATED') {
+                            window.dispatchEvent(new CustomEvent('kds-remote-sync', { detail: data.payload }))
+                        }
+                    } catch (err) {
+                        console.error('Failed to parse remote KDS update:', err)
+                    }
+                }).then(fn => { unlisten = fn })
+            }).catch(() => {})
+
+            return () => {
+                if (unlisten) unlisten()
+            }
         } else {
             // Remote client logic: Connect to the websocket
             const host = window.location.hostname
@@ -96,11 +115,21 @@ export function useKdsStream(isMain: boolean = true) {
         }
     }
 
+    // Remote clients send updates via WebSocket
+    const sendViaSocket = (event: string, payload: any) => {
+        const ws = socketRef.current
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ event, payload }))
+        }
+    }
+
     return {
         status,
         streamUrl,
         lastEvent,
         startStream,
         broadcast,
+        sendViaSocket,
     }
 }
+

@@ -80,6 +80,19 @@ export function ExchangeRateProvider({ children }: { children: React.ReactNode }
     const effectiveStatus = !isOnline ? 'error' : status
 
     const refresh = useCallback(async () => {
+        // Optimization: Strictly disable fetching for remote KDS clients
+        // Check both port 4004 and the specific route to be absolutely sure
+        // @ts-ignore
+        const isRemoteKds = typeof window !== 'undefined' && (window.location.port === '4004' || window.location.hash.includes('/kds/local') || !window.__TAURI_INTERNALS__)
+        
+        // However, we only want to block if it's NOT in Tauri AND it's a KDS-related environment
+        // @ts-ignore
+        if (!window.__TAURI_INTERNALS__ && (window.location.port === '4004' || window.location.hash.includes('/kds/local'))) {
+            console.log('[ExchangeRate] Remote KDS detected - skipping sync.')
+            setStatus('live')
+            return
+        }
+
         setStatus('loading')
         setCurrencyStatus({ usd: 'loading', eur: 'loading', try: 'loading' })
 

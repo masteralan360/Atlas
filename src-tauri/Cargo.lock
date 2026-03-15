@@ -95,6 +95,7 @@ name = "asaas"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "futures-util",
  "if-addrs",
  "log",
  "serde",

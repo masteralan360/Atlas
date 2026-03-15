@@ -156,6 +156,13 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 
 // Helper to handle fetching in both Tauri (Native HTTP) and Web (via Proxy)
 async function fetchUrl(url: string, isApiProxy = false): Promise<string> {
+    // Optimization: Block all exchange rate fetches for remote KDS clients
+    // @ts-ignore
+    const isRemoteKds = typeof window !== 'undefined' && !window.__TAURI_INTERNALS__ && (window.location.port === '4004' || window.location.hash.includes('/kds/local'))
+    if (isRemoteKds) {
+        throw new Error('KDS Mode: Exchange rate fetching is disabled.');
+    }
+
     // If in Tauri, use the Native HTTP client to bypass CORS
     // @ts-ignore
     if (window.__TAURI_INTERNALS__) {

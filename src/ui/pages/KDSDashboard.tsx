@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react'
-import { useAuth } from '@/auth'
 import { useKdsStream } from '@/hooks/useKdsStream'
 import { useWorkspace } from '@/workspace'
-import { useCategories, useProducts } from '@/local-db'
-import { cn } from '@/lib/utils'
-import { Check, Clock, GripVertical } from 'lucide-react'
+import { cn, stylizeText } from '@/lib/utils'
+import { Check } from 'lucide-react'
 
 const TICKETS_STORAGE_KEY = 'instant_pos_tickets'
 const LATE_THRESHOLD_MS = 10 * 60 * 1000
@@ -18,6 +16,7 @@ type InstantPosItem = {
     unitPrice: number
     quantity: number
     currency: string
+    note?: string
 }
 
 type InstantPosTicket = {
@@ -36,8 +35,7 @@ const COLUMN_ORDER: KdsColumnStatus[] = ['pending', 'preparing', 'ready', 'serve
 const COLUMN_CONFIG: Record<KdsColumnStatus, {
     label: string
     accent: string
-    dot: string
-    card: string
+    stripe: string
     action?: {
         label: string
         next: KdsColumnStatus
@@ -46,42 +44,38 @@ const COLUMN_CONFIG: Record<KdsColumnStatus, {
 }> = {
     pending: {
         label: 'Pending',
-        accent: 'text-amber-400',
-        dot: 'bg-amber-400',
-        card: 'bg-amber-500/10 border-amber-500/20',
+        accent: 'text-amber-700',
+        stripe: 'bg-amber-500',
         action: {
             label: 'Start Cooking',
             next: 'preparing',
-            button: 'bg-amber-500 text-slate-900 hover:bg-amber-400'
+            button: 'bg-[#F2991A] text-white hover:bg-amber-600'
         }
     },
     preparing: {
         label: 'Preparing',
-        accent: 'text-blue-400',
-        dot: 'bg-blue-400',
-        card: 'bg-blue-500/10 border-blue-500/20',
+        accent: 'text-blue-700',
+        stripe: 'bg-blue-500',
         action: {
             label: 'Mark Ready',
             next: 'ready',
-            button: 'bg-blue-500 text-white hover:bg-blue-400'
+            button: 'bg-blue-600 text-white hover:bg-blue-500'
         }
     },
     ready: {
         label: 'Ready',
-        accent: 'text-emerald-400',
-        dot: 'bg-emerald-400',
-        card: 'bg-emerald-500/10 border-emerald-500/20',
+        accent: 'text-emerald-700',
+        stripe: 'bg-emerald-500',
         action: {
             label: 'Serve Order',
             next: 'served',
-            button: 'bg-emerald-500 text-white hover:bg-emerald-400'
+            button: 'bg-emerald-600 text-white hover:bg-emerald-500'
         }
     },
     served: {
         label: 'Served',
-        accent: 'text-slate-300',
-        dot: 'bg-slate-400',
-        card: 'bg-slate-800/50 border-slate-700/50'
+        accent: 'text-slate-600',
+        stripe: 'bg-slate-400'
     }
 }
 
@@ -123,19 +117,17 @@ function formatClockTime(date: Date, withSeconds: boolean) {
 }
 
 export function KDSDashboard() {
-    const { user } = useAuth()
     const { features, workspaceName } = useWorkspace()
-    const products = useProducts(user?.workspaceId)
-    const categories = useCategories(user?.workspaceId)
 
     const [tickets, setTickets] = useState<InstantPosTicket[]>(() => loadTickets())
     const [now, setNow] = useState(() => new Date())
     const [draggingId, setDraggingId] = useState<string | null>(null)
     const [dragOverStatus, setDragOverStatus] = useState<KdsColumnStatus | null>(null)
+    const [touchDragging, setTouchDragging] = useState<{ id: string, initialX: number, initialY: number } | null>(null)
 
     // @ts-ignore
     const isMain = !!window.__TAURI_INTERNALS__
-    const { status: streamStatus, streamUrl, broadcast } = useKdsStream(isMain)
+    const { status: streamStatus, streamUrl, broadcast, sendViaSocket } = useKdsStream(isMain)
 
     useEffect(() => {
         const interval = window.setInterval(() => setNow(new Date()), 1000)
@@ -144,6 +136,10 @@ export function KDSDashboard() {
 
     useEffect(() => {
         saveTickets(tickets)
+        // Broadcast to remote clients whenever tickets change on the main terminal
+        if (isMain && streamStatus === 'host') {
+            broadcast('TICKET_UPDATED', tickets)
+        }
     }, [tickets])
 
     useEffect(() => {
@@ -154,10 +150,15 @@ export function KDSDashboard() {
         }
         window.addEventListener('storage', handleStorage)
 
+        // Internal event for same-window updates (e.g. from POS to KDS Dashboard)
+        const handleInternalSync = () => {
+            setTickets(loadTickets())
+        }
+        window.addEventListener('instant-pos-tickets-updated', handleInternalSync)
+
         const handleStreamUpdate = (event: any) => {
             const updatedTickets = event.detail
             if (updatedTickets && Array.isArray(updatedTickets)) {
-                // To avoid loops, we only set if it's actually different or if we are not main
                 if (!isMain) {
                     setTickets(updatedTickets)
                 }
@@ -165,26 +166,25 @@ export function KDSDashboard() {
         }
         window.addEventListener('kds-stream-update', handleStreamUpdate)
 
+        // Main terminal listens for updates from remote clients
+        const handleRemoteSync = (event: any) => {
+            const updatedTickets = event.detail
+            if (updatedTickets && Array.isArray(updatedTickets) && isMain) {
+                setTickets(updatedTickets)
+            }
+        }
+        window.addEventListener('kds-remote-sync', handleRemoteSync)
+
         return () => {
             window.removeEventListener('storage', handleStorage)
+            window.removeEventListener('instant-pos-tickets-updated', handleInternalSync)
             window.removeEventListener('kds-stream-update', handleStreamUpdate)
+            window.removeEventListener('kds-remote-sync', handleRemoteSync)
         }
     }, [isMain])
 
-    const productById = useMemo(() => {
-        const map = new Map<string, typeof products[number]>()
-        products.forEach(product => map.set(product.id, product))
-        return map
-    }, [products])
-
-    const categoryById = useMemo(() => {
-        const map = new Map<string, string>()
-        categories.forEach(category => map.set(category.id, category.name))
-        return map
-    }, [categories])
-
     const visibleTickets = useMemo(
-        () => tickets.filter(ticket => ticket.items.length > 0),
+        () => tickets.filter((ticket: InstantPosTicket) => ticket.items.length > 0),
         [tickets]
     )
 
@@ -196,7 +196,7 @@ export function KDSDashboard() {
             served: []
         }
 
-        visibleTickets.forEach(ticket => {
+        visibleTickets.forEach((ticket: InstantPosTicket) => {
             const normalized = ticket.status === 'paid' ? 'served' : ticket.status
             groups[normalized as KdsColumnStatus].push(ticket)
         })
@@ -210,13 +210,13 @@ export function KDSDashboard() {
 
     const stationLabel = workspaceName ? `${workspaceName} - Kitchen` : 'Main Kitchen - Grill'
     const isOnline = typeof navigator === 'undefined' ? true : navigator.onLine
-    const isSystemOnline = features.kds_enabled && isOnline
-    const systemStatusLabel = features.kds_enabled
+    const isSystemOnline = isMain ? (features.kds_enabled && isOnline) : isOnline
+    const systemStatusLabel = isMain ? (features.kds_enabled
         ? (isOnline ? 'System Online' : 'System Offline')
-        : 'KDS Disabled'
+        : 'KDS Disabled') : (isOnline ? 'System Online' : 'System Offline')
 
     const updateTicketStatus = (ticketId: string, status: KdsColumnStatus) => {
-        setTickets(prev => prev.map(ticket => {
+        const nextTickets = tickets.map((ticket: InstantPosTicket) => {
             if (ticket.id !== ticketId) return ticket
             return {
                 ...ticket,
@@ -225,20 +225,11 @@ export function KDSDashboard() {
                     ? (ticket.kitchenRoutedAt || new Date().toISOString())
                     : ticket.kitchenRoutedAt
             }
-        }))
-        // Broadcast the update if we are the main terminal
-        if (isMain) {
-            const nextTickets = tickets.map(ticket => {
-                if (ticket.id !== ticketId) return ticket
-                return {
-                    ...ticket,
-                    status,
-                    kitchenRoutedAt: status === 'preparing'
-                        ? (ticket.kitchenRoutedAt || new Date().toISOString())
-                        : ticket.kitchenRoutedAt
-                }
-            })
-            broadcast('TICKET_UPDATED', nextTickets)
+        })
+        setTickets(nextTickets)
+        // Remote client sends via WebSocket
+        if (!isMain) {
+            sendViaSocket('TICKET_UPDATED', nextTickets)
         }
     }
 
@@ -262,11 +253,45 @@ export function KDSDashboard() {
         setDragOverStatus(null)
     }
 
-    const getItemStation = (item: InstantPosItem) => {
-        const product = productById.get(item.productId)
-        if (!product?.categoryId) return null
-        return categoryById.get(product.categoryId) || null
+    const handleTouchStart = (event: React.TouchEvent, ticketId: string) => {
+        const touch = event.touches[0]
+        setTouchDragging({ id: ticketId, initialX: touch.clientX, initialY: touch.clientY })
+        setDraggingId(ticketId)
     }
+
+    const handleTouchMove = (event: React.TouchEvent) => {
+        if (!touchDragging) return
+        if (event.cancelable) event.preventDefault() // Prevent scrolling while dragging
+        const touch = event.touches[0]
+        const element = document.elementFromPoint(touch.clientX, touch.clientY)
+        const column = element?.closest('[data-kds-column]')
+        const status = column?.getAttribute('data-kds-column') as KdsColumnStatus | null
+        
+        if (status && status !== dragOverStatus) {
+            setDragOverStatus(status)
+        } else if (!status && dragOverStatus) {
+            setDragOverStatus(null)
+        }
+    }
+
+    const handleTouchEnd = (event: React.TouchEvent) => {
+        if (!touchDragging) return
+        
+        const touch = event.changedTouches[0]
+        const element = document.elementFromPoint(touch.clientX, touch.clientY)
+        const column = element?.closest('[data-kds-column]')
+        const status = column?.getAttribute('data-kds-column') as KdsColumnStatus | null
+
+        if (status) {
+            updateTicketStatus(touchDragging.id, status)
+        }
+
+        setTouchDragging(null)
+        setDraggingId(null)
+        setDragOverStatus(null)
+    }
+
+
 
     return (
         <div className="relative flex h-full min-h-[calc(100vh-180px)] flex-col overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 text-slate-100 shadow-2xl">
@@ -310,7 +335,7 @@ export function KDSDashboard() {
                 </div>
             </header>
 
-            {!features.kds_enabled && (
+            {isMain && !features.kds_enabled && (
                 <div className="relative z-10 border-b border-amber-500/30 bg-amber-500/10 px-6 py-2 text-xs text-amber-200">
                     Kitchen routing is disabled. Enable KDS in Settings to auto-send tickets here.
                 </div>
@@ -326,6 +351,7 @@ export function KDSDashboard() {
                         return (
                             <section
                                 key={status}
+                                data-kds-column={status}
                                 onDragOver={(event) => {
                                     event.preventDefault()
                                     event.dataTransfer.dropEffect = 'move'
@@ -342,7 +368,7 @@ export function KDSDashboard() {
                             >
                                 <div className="flex items-center justify-between">
                                     <div className={cn('flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.3em]', config.accent)}>
-                                        <span className={cn('h-2 w-2 rounded-full', config.dot)} />
+                                        <span className={cn('h-2 w-2 rounded-full', config.stripe)} />
                                         {config.label}
                                     </div>
                                     <div className="rounded-full bg-white/10 px-2.5 py-0.5 text-xs font-semibold text-slate-200">
@@ -356,11 +382,9 @@ export function KDSDashboard() {
                                             Drag orders here
                                         </div>
                                     ) : (
-                                        columnTickets.map(ticket => {
+                                        columnTickets.map((ticket: InstantPosTicket) => {
                                             const normalizedStatus = ticket.status === 'paid' ? 'served' : ticket.status
                                             const action = COLUMN_CONFIG[normalizedStatus as KdsColumnStatus].action
-                                            const primaryItem = ticket.items[0]
-                                            const extraItems = ticket.items.length - 1
                                             const elapsedFrom = ticket.kitchenRoutedAt || ticket.createdAt
                                             const elapsed = formatElapsed(elapsedFrom, now)
                                             const isLate = (normalizedStatus === 'pending' || normalizedStatus === 'preparing')
@@ -382,91 +406,75 @@ export function KDSDashboard() {
                                                     draggable
                                                     onDragStart={(event) => handleDragStart(event, ticket.id)}
                                                     onDragEnd={handleDragEnd}
+                                                    onTouchStart={(e) => handleTouchStart(e, ticket.id)}
+                                                    onTouchMove={handleTouchMove}
+                                                    onTouchEnd={handleTouchEnd}
                                                     className={cn(
-                                                        'rounded-2xl border p-4 shadow-lg transition-all select-none cursor-grab active:cursor-grabbing',
-                                                        config.card,
-                                                        draggingId === ticket.id ? 'opacity-60' : 'hover:-translate-y-0.5 hover:border-white/30'
+                                                        'relative overflow-hidden rounded-lg bg-[#FFF9E6] shadow-xl transition-all select-none cursor-grab active:cursor-grabbing border-b-4 border-black/5 touch-action-none',
+                                                        draggingId === ticket.id ? 'opacity-40 scale-95' : 'hover:-translate-y-0.5'
                                                     )}
+                                                    style={{ touchAction: 'none' }}
                                                 >
-                                                    <div className="flex items-start justify-between gap-3">
-                                                        <div className="flex items-start gap-2">
-                                                            <GripVertical className="mt-1 h-4 w-4 text-white/40" />
-                                                            <div>
-                                                                <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">
-                                                                    Order {ticket.number}
-                                                                </div>
-                                                                <div className="text-lg font-semibold text-white line-clamp-1">
-                                                                    {primaryItem?.name || 'New Ticket'}
-                                                                </div>
-                                                                {extraItems > 0 && (
-                                                                    <div className="text-xs text-slate-400">+{extraItems} more items</div>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                        <div className="text-right">
-                                                            <div className="flex items-center justify-end gap-2">
-                                                                {normalizedStatus === 'ready' && (
-                                                                    <Check className="h-4 w-4 text-emerald-300" />
-                                                                )}
-                                                                <span className={cn(
-                                                                    'text-sm font-bold',
-                                                                    isLate ? 'text-rose-300' : 'text-slate-100'
-                                                                )}>
-                                                                    {timeLabel}
-                                                                </span>
-                                                            </div>
-                                                            <div className={cn(
-                                                                'text-[10px] uppercase tracking-[0.3em]',
-                                                                isLate ? 'text-rose-300' : 'text-slate-400'
-                                                            )}>
-                                                                {timeCaption}
-                                                            </div>
-                                                        </div>
-                                                    </div>
+                                                    {/* Left Stripe */}
+                                                    <div className={cn("absolute left-0 top-0 bottom-0 w-3", config.stripe)} />
 
-                                                    <div className="mt-4 space-y-2">
-                                                        {ticket.items.map(item => {
-                                                            const station = getItemStation(item)
-                                                            return (
-                                                                <div key={item.productId} className="flex items-center justify-between gap-2 text-sm">
-                                                                    <span className="flex-1 font-medium text-slate-100 line-clamp-1">
+                                                    <div className="pl-6 pr-4 py-4">
+                                                        <div className="flex items-start justify-between">
+                                                            <div>
+                                                                <div className="text-[10px] font-bold uppercase tracking-wider text-[#7A5C33]">
+                                                                    Order #{ticket.number}
+                                                                </div>
+                                                                <div className="mt-1 text-2xl font-black text-[#1A1A1A]">
+                                                                    Ticket {ticket.number}
+                                                                </div>
+                                                            </div>
+                                                            <div className="text-right">
+                                                                <div className="text-2xl font-black text-[#7A5C33]">
+                                                                    {timeLabel}
+                                                                </div>
+                                                                <div className="text-[10px] font-bold uppercase tracking-widest text-[#7A5C33]">
+                                                                    {timeCaption}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="mt-4 h-px bg-[#7A5C33]/10" />
+
+                                                        <div className="mt-4 space-y-4">
+                                                            {ticket.items.map((item: InstantPosItem) => (
+                                                                <div key={item.productId} className="space-y-1">
+                                                                    <div className="text-lg font-bold leading-none text-[#1A1A1A]">
                                                                         {item.quantity}x {item.name}
-                                                                    </span>
-                                                                    {station && (
-                                                                        <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-200">
-                                                                            {station}
-                                                                        </span>
+                                                                    </div>
+                                                                    {item.note && (
+                                                                        <div className="text-sm font-bold italic text-[#D93025]">
+                                                                            — {stylizeText(item.note).toUpperCase()}
+                                                                        </div>
                                                                     )}
                                                                 </div>
-                                                            )
-                                                        })}
+                                                            ))}
+                                                        </div>
+
+                                                        {action && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => updateTicketStatus(ticket.id, action.next)}
+                                                                className={cn(
+                                                                    'mt-6 w-full py-3 rounded-md text-base font-black uppercase tracking-widest transition-colors shadow-[0_4px_0_0_rgba(0,0,0,0.1)] active:translate-y-[2px] active:shadow-none',
+                                                                    action.button
+                                                                )}
+                                                            >
+                                                                {action.label}
+                                                            </button>
+                                                        )}
+
+                                                        {normalizedStatus === 'served' && (
+                                                            <div className="mt-4 flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-widest text-[#7A5C33]/60">
+                                                                <Check className="h-3 w-3" />
+                                                                Completed at {formatClockTime(new Date(ticket.createdAt), false)}
+                                                            </div>
+                                                        )}
                                                     </div>
-
-                                                    {normalizedStatus === 'ready' && (
-                                                        <div className="mt-3 rounded-lg bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-200">
-                                                            Items ready for pickup
-                                                        </div>
-                                                    )}
-
-                                                    {normalizedStatus === 'served' && (
-                                                        <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
-                                                            <Clock className="h-3.5 w-3.5" />
-                                                            Completed on {formatClockTime(new Date(ticket.createdAt), false)}
-                                                        </div>
-                                                    )}
-
-                                                    {action && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => updateTicketStatus(ticket.id, action.next)}
-                                                            className={cn(
-                                                                'mt-4 w-full rounded-lg px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.3em] transition',
-                                                                action.button
-                                                            )}
-                                                        >
-                                                            {action.label}
-                                                        </button>
-                                                    )}
                                                 </div>
                                             )
                                         })

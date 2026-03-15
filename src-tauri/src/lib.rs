@@ -1,5 +1,5 @@
 use std::fs;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tokio::sync::broadcast;
 
@@ -8,6 +8,7 @@ mod kds_server;
 pub struct KdsState {
     pub server_url: Mutex<Option<String>>,
     pub tx: broadcast::Sender<String>,
+    pub last_message: Arc<Mutex<Option<String>>>,
 }
 
 #[tauri::command]
@@ -54,7 +55,7 @@ async fn start_kds_stream(app: tauri::AppHandle, state: tauri::State<'_, KdsStat
         }
     } // lock dropped
 
-    let url = kds_server::start_server(app, port).await?;
+    let url = kds_server::start_server(app, port, state.tx.clone(), state.last_message.clone()).await?;
     
     let mut url_lock = state.server_url.lock().map_err(|e| e.to_string())?;
     *url_lock = Some(url.clone());
@@ -71,6 +72,10 @@ fn get_kds_stream_url(state: tauri::State<'_, KdsState>) -> Result<Option<String
 fn broadcast_kds_update(state: tauri::State<'_, KdsState>, event: String, payload: serde_json::Value) -> Result<(), String> {
     let message = kds_server::KdsMessage { event, payload };
     let json = serde_json::to_string(&message).map_err(|e| e.to_string())?;
+    // Cache the last message for new WebSocket clients
+    if let Ok(mut cached) = state.last_message.lock() {
+        *cached = Some(json.clone());
+    }
     let _ = state.tx.send(json);
     Ok(())
 }
@@ -99,6 +104,7 @@ pub fn run() {
         .manage(KdsState {
             server_url: Mutex::new(None),
             tx,
+            last_message: Arc::new(Mutex::new(None)),
         })
         .setup(|app| {
         use tauri::Manager;

@@ -15,6 +15,7 @@ import { isBackendConfigurationRequired, isSupabaseConfigured } from '@/auth/sup
 import { isMobile } from '@/lib/platform'
 import { useFavicon } from '@/hooks/useFavicon'
 import { whatsappManager } from '@/lib/whatsappWebviewManager'
+import { useKdsStream } from '@/hooks/useKdsStream'
 
 // @ts-ignore
 const isTauri = !!window.__TAURI_INTERNALS__
@@ -274,6 +275,40 @@ function FaviconHandler() {
     return null
 }
 
+function KdsSecurityGuard({ children }: { children: React.ReactNode }) {
+    const [location] = useHashLocation()
+    
+    useEffect(() => {
+        // Restricted mode: Web browser on port 4004
+        // We use port 4004 as the hardcoded identifier for the KDS stream server
+        const isRemoteKds = !isTauri && window.location.port === '4004'
+        
+        if (isRemoteKds && location !== '/kds/local') {
+            console.warn('[Security] Restricting remote KDS client to /kds/local')
+            // Use window.location.replace to prevent back-button loops
+            window.location.replace('/#/kds/local')
+        }
+    }, [location])
+
+    return <>{children}</>
+}
+
+function KdsStreamAutostart() {
+    const { features } = useWorkspace()
+    const { status, startStream } = useKdsStream(isTauri)
+
+    useEffect(() => {
+        if (isTauri && features.kds_enabled && status === 'idle') {
+            console.log('[KDS] Autostarting stream...')
+            startStream(4004).catch((err: any) => {
+                console.error('[KDS] Autostart failed:', err)
+            })
+        }
+    }, [features.kds_enabled, status, startStream])
+
+    return null
+}
+
 function App() {
     const { showModal, currentPatch, version, dismissModal } = usePatchNotes()
 
@@ -299,6 +334,7 @@ function App() {
             <DeviceTokenBootstrap />
             <WorkspaceProvider>
                 <DateRangeProvider>
+                    <KdsStreamAutostart />
                     <UpdateHandler />
                     <FaviconHandler />
                     {(!isMobile()) && <TitleBar />}
@@ -308,9 +344,10 @@ function App() {
                         </Suspense>
                     ) : (
                         <ExchangeRateProvider>
-                            <Suspense fallback={<LoadingState />}>
-                                <Router hook={useHashLocation}>
-                                    <Switch>
+                            <KdsSecurityGuard>
+                                <Suspense fallback={<LoadingState />}>
+                                    <Router hook={useHashLocation}>
+                                        <Switch>
                                         {/* Guest Routes */}
                                         <Route path="/login">
                                             <GuestRoute>
@@ -367,6 +404,11 @@ function App() {
                                                     <KDSDashboard />
                                                 </Layout>
                                             </ProtectedRoute>
+                                        </Route>
+                                        <Route path="/kds/local">
+                                            <div className="h-screen w-screen bg-background text-foreground overflow-hidden">
+                                                <KDSDashboard />
+                                            </div>
                                         </Route>
                                         <Route path="/sales">
                                             <ProtectedRoute>
@@ -537,9 +579,10 @@ function App() {
                                     </Switch>
                                 </Router>
                             </Suspense>
-                        </ExchangeRateProvider>
-                    )}
-                    <Toaster />
+                        </KdsSecurityGuard>
+                    </ExchangeRateProvider>
+                )}
+                <Toaster />
                     {isTauri && currentPatch && (
                         <PatchNoteModal
                             isOpen={showModal}

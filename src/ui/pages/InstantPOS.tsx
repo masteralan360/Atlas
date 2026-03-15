@@ -6,11 +6,12 @@ import { addToOfflineMutations, useCategories, useProducts } from '@/local-db'
 import { db } from '@/local-db/database'
 import type { CurrencyCode } from '@/local-db/models'
 import { useWorkspace } from '@/workspace'
-import { formatCompactDateTime, formatCurrency, generateId, cn } from '@/lib/utils'
-import { Button, Input, Switch, useToast } from '@/ui/components'
-import { AlertCircle, CheckCircle2, Minus, Plus, Receipt, Search, Trash2 } from 'lucide-react'
+import { formatCompactDateTime, formatCurrency, generateId, cn, stylizeText } from '@/lib/utils'
+import { Button, Input, Switch, useToast, Textarea, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/ui/components'
+import { AlertCircle, CheckCircle2, Minus, Plus, Receipt, Search, StickyNote, Trash2 } from 'lucide-react'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { platformService } from '@/services/platformService'
+import { useKdsStream } from '@/hooks/useKdsStream'
 
 const TICKETS_STORAGE_KEY = 'instant_pos_tickets'
 const TICKET_COUNTER_KEY = 'instant_pos_ticket_counter'
@@ -28,6 +29,7 @@ type InstantPosItem = {
     unitPrice: number
     quantity: number
     currency: string
+    note?: string
 }
 
 type InstantPosTicket = {
@@ -113,6 +115,15 @@ export function InstantPOS() {
     const products = useProducts(user?.workspaceId)
     const categories = useCategories(user?.workspaceId)
 
+    // KDS Streaming
+    const { status: kdsStatus, startStream, broadcast } = useKdsStream(true)
+
+    useEffect(() => {
+        if (features.kds_enabled && kdsStatus === 'idle') {
+            startStream(4004).catch(console.error)
+        }
+    }, [features.kds_enabled, kdsStatus, startStream])
+
     const [tickets, setTickets] = useState<InstantPosTicket[]>(() => loadTickets())
     const [activeTicketId, setActiveTicketId] = useState<string | null>(null)
     const [search, setSearch] = useState('')
@@ -120,12 +131,17 @@ export function InstantPOS() {
     const [isKdsSaving, setIsKdsSaving] = useState(false)
     const [isCheckoutLoading, setIsCheckoutLoading] = useState(false)
     const [now, setNow] = useState(() => Date.now())
+    const [noteItem, setNoteItem] = useState<{ productId: string, name: string, note: string } | null>(null)
 
     const settlementCurrency = features.default_currency || 'usd'
 
     useEffect(() => {
         saveTickets(tickets)
-    }, [tickets])
+        // Broadcast to KDS remote clients whenever tickets change
+        if (features.kds_enabled && kdsStatus === 'host') {
+            broadcast('TICKET_UPDATED', tickets)
+        }
+    }, [tickets, kdsStatus, features.kds_enabled])
 
     useEffect(() => {
         const timer = setInterval(() => setNow(Date.now()), 1000)
@@ -138,8 +154,29 @@ export function InstantPOS() {
                 setTickets(loadTickets())
             }
         }
+        
+        // Internal event for same-window updates (e.g. from KDS Dashboard to POS)
+        const handleInternalSync = () => {
+            setTickets(loadTickets())
+        }
+
+        // Event for updates from remote tablets
+        const handleRemoteSync = (event: any) => {
+            const updatedTickets = event.detail
+            if (updatedTickets && Array.isArray(updatedTickets)) {
+                setTickets(updatedTickets)
+            }
+        }
+
         window.addEventListener('storage', handleStorage)
-        return () => window.removeEventListener('storage', handleStorage)
+        window.addEventListener('instant-pos-tickets-updated', handleInternalSync)
+        window.addEventListener('kds-remote-sync', handleRemoteSync)
+
+        return () => {
+            window.removeEventListener('storage', handleStorage)
+            window.removeEventListener('instant-pos-tickets-updated', handleInternalSync)
+            window.removeEventListener('kds-remote-sync', handleRemoteSync)
+        }
     }, [])
 
     useEffect(() => {
@@ -281,6 +318,17 @@ export function InstantPOS() {
         }))
     }
 
+    const updateItemNote = (productId: string, note: string) => {
+        if (!activeTicket) return
+        updateTicket(activeTicket.id, ticket => ({
+            ...ticket,
+            items: ticket.items.map(item =>
+                item.productId === productId ? { ...item, note } : item
+            )
+        }))
+        setNoteItem(null)
+    }
+
     const setTicketStatus = (status: InstantPosStatus) => {
         if (!activeTicket) return
         updateTicket(activeTicket.id, ticket => ({
@@ -373,6 +421,11 @@ export function InstantPOS() {
 
         const totalAmount = itemsWithMetadata.reduce((sum, item) => sum + item.total_price, 0)
 
+        const consolidatedNotes = activeTicket.items
+            .filter(item => item.note)
+            .map(item => `${item.name} --${stylizeText(item.note || '')}`)
+            .join('\n')
+
         const checkoutPayload = {
             id: saleId,
             items: itemsWithMetadata,
@@ -386,7 +439,8 @@ export function InstantPOS() {
             payment_method: 'cash',
             system_verified: true,
             system_review_status: 'approved',
-            system_review_reason: null
+            system_review_reason: null,
+            notes: consolidatedNotes || null
         }
 
         try {
@@ -818,6 +872,11 @@ export function InstantPOS() {
                                                     </div>
                                                     <div>
                                                         <div className="text-sm font-semibold text-foreground">{item.name}</div>
+                                                        {item.note && (
+                                                            <div className="text-[10px] italic text-primary/80 font-medium">
+                                                                --{stylizeText(item.note)}
+                                                            </div>
+                                                        )}
                                                         <div className="text-xs text-muted-foreground">{item.sku || '---'}</div>
                                                     </div>
                                                 </div>
@@ -838,6 +897,16 @@ export function InstantPOS() {
                                                         className="flex h-7 w-7 items-center justify-center rounded-full border border-border/60 bg-background text-foreground hover:bg-muted/60"
                                                     >
                                                         <Plus className="h-3 w-3" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setNoteItem({ productId: item.productId, name: item.name, note: item.note || '' })}
+                                                        className={cn(
+                                                            "flex h-7 px-2 items-center justify-center rounded-full border border-border/60 text-[10px] font-bold uppercase transition",
+                                                            item.note ? "bg-primary/10 border-primary/40 text-primary" : "bg-background text-muted-foreground hover:bg-muted/60"
+                                                        )}
+                                                    >
+                                                        <StickyNote className="h-3 w-3 mr-1" />
+                                                        {t('common.note') || 'Note'}
                                                     </button>
                                                 </div>
                                                 <button
@@ -914,6 +983,30 @@ export function InstantPOS() {
                     )}
                 </aside>
             </div>
+
+            <Dialog open={!!noteItem} onOpenChange={(open) => !open && setNoteItem(null)}>
+                <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                        <DialogTitle>{t('instantPos.addNote') || 'Add Note'} - {noteItem?.name}</DialogTitle>
+                    </DialogHeader>
+                    <div className="py-4">
+                        <Textarea
+                            value={noteItem?.note || ''}
+                            onChange={(e) => setNoteItem(prev => prev ? { ...prev, note: e.target.value } : null)}
+                            placeholder={t('instantPos.notePlaceholder') || 'Add cooking instructions or preferences...'}
+                            className="min-h-[100px]"
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setNoteItem(null)}>
+                            {t('common.cancel') || 'Cancel'}
+                        </Button>
+                        <Button onClick={() => noteItem && updateItemNote(noteItem.productId, noteItem.note)}>
+                            {t('common.save') || 'Save Note'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

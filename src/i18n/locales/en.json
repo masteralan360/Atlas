@@ -35,6 +35,7 @@
         "date": "Date",
         "time": "Time",
         "id": "ID",
+        "note": "Note",
         "scanToVerify": "Scan to Verify",
         "amount": "Amount",
         "description": "Description",
