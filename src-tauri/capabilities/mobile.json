@@ -8,6 +8,11 @@
     "main"
   ],
   "permissions": [
-    "biometric:default"
+    "biometric:default",
+    "core:default",
+    "shell:default",
+    "dialog:default",
+    "http:default",
+    "updater:default"
   ]
 }

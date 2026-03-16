@@ -12,7 +12,7 @@ import { formatDateTime, cn } from '@/lib/utils'
 import { useTheme } from '@/ui/components/theme-provider'
 import { Moon, Sun, Monitor, Unlock, Server, MessageSquare, Bell, MonitorPlay, Wifi } from 'lucide-react'
 import { useState, useEffect } from 'react'
-import { isMobile } from '@/lib/platform'
+import { isMobile, isDesktop } from '@/lib/platform'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { getAppSettingSync, setAppSetting } from '@/local-db/settings'
 import { decrypt } from '@/lib/encryption'
@@ -39,7 +39,7 @@ export function Settings() {
     const { streamUrl, status: kdsStatus, startStream } = useKdsStream(true)
 
     useEffect(() => {
-        if (features.kds_enabled && kdsStatus === 'idle') {
+        if (isDesktop() && features.kds_enabled && kdsStatus === 'idle') {
             startStream(4004).catch(console.error)
         }
     }, [features.kds_enabled, kdsStatus, startStream])
@@ -1389,12 +1389,17 @@ export function Settings() {
                                         {t('settings.pos.kdsDesc') || 'Send Instant POS tickets to the kitchen display/printer when preparing.'}
                                     </p>
                                 </div>
-                                <Switch
-                                    checked={features.kds_enabled}
-                                    onCheckedChange={handleKdsToggle}
-                                    disabled={isKdsSaving}
-                                />
-                            </div>
+                                    <Switch
+                                        checked={features.kds_enabled}
+                                        onCheckedChange={handleKdsToggle}
+                                        disabled={isKdsSaving || !isDesktop()}
+                                    />
+                                </div>
+                                {!isDesktop() && (
+                                    <p className="mt-2 text-[10px] text-amber-500 font-medium">
+                                        {t('settings.pos.kdsDesktopOnly') || 'KDS Hosting is only available on Desktop app.'}
+                                    </p>
+                                )}
                         </CardContent>
                     </Card>
 

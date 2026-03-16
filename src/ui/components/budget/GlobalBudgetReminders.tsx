@@ -1,4 +1,5 @@
-﻿import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/auth'
@@ -249,6 +250,34 @@ export function GlobalBudgetReminders() {
     const handledSet = useMemo(() => new Set(sessionHandledIds), [sessionHandledIds])
     const now = new Date()
 
+    useEffect(() => {
+        const resetExpiredSnoozes = async () => {
+            const currentTime = new Date()
+            const expired = reminderItems.filter(item => {
+                if (item.status !== 'snoozed') return false
+                if (item.snoozedIndefinite) return false
+                if (!item.snoozedUntil) return false
+                return new Date(item.snoozedUntil).getTime() <= currentTime.getTime()
+            })
+
+            for (const item of expired) {
+                try {
+                    await applyStatusUpdate(item, {
+                        status: 'pending',
+                        snoozedUntil: null,
+                        snoozedIndefinite: false
+                    })
+                } catch (error) {
+                    console.error('[GlobalBudgetReminders] Failed to reset expired snooze:', error)
+                }
+            }
+        }
+
+        void resetExpiredSnoozes()
+        const interval = setInterval(() => { void resetExpiredSnoozes() }, 30_000)
+        return () => clearInterval(interval)
+    }, [reminderItems])
+
     const snoozedReminderItems = useMemo(
         () => reminderItems.filter(item => isCurrentlySnoozed(item, now)),
         [reminderItems, now]
@@ -430,32 +459,37 @@ export function GlobalBudgetReminders() {
 
     return (
         <>
-            {(currentMonthSnoozed.length > 0 || otherMonthSnoozed.length > 0) && (
-                <div className="fixed bottom-[calc(1rem+var(--safe-area-bottom))] end-4 z-40 flex flex-col gap-2">
-                    {currentMonthSnoozed.length > 0 && (
-                        <SnoozedBudgetRemindersBell
-                            items={currentMonthSnoozed}
-                            iqdPreference={features.iqd_display_preference}
-                            variant="warning"
-                            isProcessing={isReminderActionLoading}
-                            onMarkPaid={item => { void handleMarkPaid(item) }}
-                            onUnsnooze={item => { void handleReminderUnsnooze(item) }}
-                        />
-                    )}
-                    {otherMonthSnoozed.length > 0 && (
-                        <SnoozedBudgetRemindersBell
-                            items={otherMonthSnoozed}
-                            iqdPreference={features.iqd_display_preference}
-                            variant="info"
-                            title={t('budget.snoozedItemsOtherMonths') || 'Snoozed Reminders (Other Months)'}
-                            description={t('budget.snoozedItemsOtherMonthsDesc') || 'These reminders belong to other months.'}
-                            isProcessing={isReminderActionLoading}
-                            onMarkPaid={item => { void handleMarkPaid(item) }}
-                            onUnsnooze={item => { void handleReminderUnsnooze(item) }}
-                        />
-                    )}
-                </div>
-            )}
+            {(currentMonthSnoozed.length > 0 || otherMonthSnoozed.length > 0) && (() => {
+                const portalTarget = document.getElementById('snoozed-bell-portal')
+                if (!portalTarget) return null
+                return createPortal(
+                    <>
+                        {currentMonthSnoozed.length > 0 && (
+                            <SnoozedBudgetRemindersBell
+                                items={currentMonthSnoozed}
+                                iqdPreference={features.iqd_display_preference}
+                                variant="warning"
+                                isProcessing={isReminderActionLoading}
+                                onMarkPaid={item => { void handleMarkPaid(item) }}
+                                onUnsnooze={item => { void handleReminderUnsnooze(item) }}
+                            />
+                        )}
+                        {otherMonthSnoozed.length > 0 && (
+                            <SnoozedBudgetRemindersBell
+                                items={otherMonthSnoozed}
+                                iqdPreference={features.iqd_display_preference}
+                                variant="info"
+                                title={t('budget.snoozedItemsOtherMonths') || 'Snoozed Reminders (Other Months)'}
+                                description={t('budget.snoozedItemsOtherMonthsDesc') || 'These reminders belong to other months.'}
+                                isProcessing={isReminderActionLoading}
+                                onMarkPaid={item => { void handleMarkPaid(item) }}
+                                onUnsnooze={item => { void handleReminderUnsnooze(item) }}
+                            />
+                        )}
+                    </>,
+                    portalTarget
+                )
+            })()}
 
             <BudgetReminderModal
                 isOpen={!!currentReminder}

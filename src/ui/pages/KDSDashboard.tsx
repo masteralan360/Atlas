@@ -3,6 +3,7 @@ import { useKdsStream } from '@/hooks/useKdsStream'
 import { useWorkspace } from '@/workspace'
 import { cn, stylizeText } from '@/lib/utils'
 import { Check } from 'lucide-react'
+import { isDesktop } from '@/lib/platform'
 
 const TICKETS_STORAGE_KEY = 'instant_pos_tickets'
 const LATE_THRESHOLD_MS = 10 * 60 * 1000
@@ -125,8 +126,7 @@ export function KDSDashboard() {
     const [dragOverStatus, setDragOverStatus] = useState<KdsColumnStatus | null>(null)
     const [touchDragging, setTouchDragging] = useState<{ id: string, initialX: number, initialY: number } | null>(null)
 
-    // @ts-ignore
-    const isMain = !!window.__TAURI_INTERNALS__
+    const isMain = isDesktop()
     const { status: streamStatus, streamUrl, broadcast, sendViaSocket } = useKdsStream(isMain)
 
     useEffect(() => {
@@ -211,9 +211,13 @@ export function KDSDashboard() {
     const stationLabel = workspaceName ? `${workspaceName} - Kitchen` : 'Main Kitchen - Grill'
     const isOnline = typeof navigator === 'undefined' ? true : navigator.onLine
     const isSystemOnline = isMain ? (features.kds_enabled && isOnline) : isOnline
-    const systemStatusLabel = isMain ? (features.kds_enabled
-        ? (isOnline ? 'System Online' : 'System Offline')
-        : 'KDS Disabled') : (isOnline ? 'System Online' : 'System Offline')
+    const systemStatusLabel = isMain 
+        ? (features.kds_enabled
+            ? (isOnline ? 'System Online' : 'System Offline')
+            : 'KDS Disabled') 
+        : (isDesktop() 
+            ? (isOnline ? 'System Online' : 'System Offline') 
+            : 'KDS Hosting Disabled (Desktop Only)')
 
     const updateTicketStatus = (ticketId: string, status: KdsColumnStatus) => {
         const nextTickets = tickets.map((ticket: InstantPosTicket) => {

@@ -678,13 +678,13 @@ export function Layout({ children }: LayoutProps) {
                             )}
                         </button>
 
-                        <div className="flex-1 flex justify-center px-4">
-                            {(!isTauri || isFullscreen) && (
+                        <div className={cn("flex-1 justify-center px-4", !isMobile() ? "flex" : "hidden md:flex")}>
+                            {(!isTauri || isFullscreen) && !isMobile() && (
                                 <GlobalSearch className="max-w-[500px] animate-in fade-in slide-in-from-top-2 duration-300" />
                             )}
                         </div>
 
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1.5 md:gap-3 ml-auto">
                             {isTauri && location === '/whatsapp' && (
                                 <Button
                                     variant="outline"
@@ -706,10 +706,11 @@ export function Layout({ children }: LayoutProps) {
                                     </span>
                                 </Button>
                             )}
-                            {!isMobile() && <P2PSyncIndicator />}
-                            {!isMobile() && <ExchangeRateIndicator />}
+                            <P2PSyncIndicator />
+                            <ExchangeRateIndicator />
                             <div className="w-px h-4 bg-border mx-1" />
                             {(!isTauri || isFullscreen || isMobile()) && <NotificationCenter />}
+                            <div id="snoozed-bell-portal" className="flex items-center" />
                             {!isMobile() && <SyncStatusIndicator />}
 
                             {/* Refresh Button - Only for non-Tauri or Mobile where TitleBar is absent */}

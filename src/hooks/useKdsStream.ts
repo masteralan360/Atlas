@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { isDesktop } from '@/lib/platform'
 
 type KdsEvent = {
     event: string
@@ -13,7 +14,7 @@ export function useKdsStream(isMain: boolean = true) {
     const [lastEvent, setLastEvent] = useState<KdsEvent | null>(null)
 
     useEffect(() => {
-        if (isMain) {
+        if (isMain && isDesktop()) {
             // Main terminal logic: Start the server if not already started
             const initHost = async () => {
                 try {

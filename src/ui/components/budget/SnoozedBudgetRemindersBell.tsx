@@ -47,14 +47,14 @@ export function SnoozedBudgetRemindersBell({
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
                 <Button variant="ghost" size="icon" className={cn(
-                    'relative h-10 w-10',
+                    'relative h-8 w-8',
                     tone === 'blue' ? 'hover:bg-blue-500/10' : 'hover:bg-yellow-500/10'
                 )}>
                     <Bell className={cn(
-                        'h-5 w-5 animate-pulse',
+                        'h-4 w-4 animate-pulse',
                         tone === 'blue' ? 'fill-blue-500 text-blue-500' : 'fill-yellow-500 text-yellow-500'
                     )} />
-                    <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ring-2 ring-background">
+                    <span className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white ring-1 ring-background">
                         {items.length}
                     </span>
                 </Button>
