@@ -225,8 +225,6 @@ class ReleaseApp:
         current_msg = self.msg_var.get()
         if is_stealth:
             self.status_var.set("Stealth mode active")
-            if "(Stealth)" not in current_msg:
-                self.msg_var.set(f"{current_msg} (Stealth)")
         else:
             self.status_var.set("Ready")
             if " (Stealth)" in current_msg:
