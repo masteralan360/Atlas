@@ -1,0 +1,29 @@
+CREATE OR REPLACE FUNCTION public.get_all_workspaces(provided_key text)
+ RETURNS TABLE(id uuid, name text, code text, created_at timestamp with time zone, allow_pos boolean, allow_customers boolean, allow_orders boolean, allow_invoices boolean, is_configured boolean, deleted_at timestamp with time zone, coordination text, logo_url text, subscription_expires_at timestamp with time zone)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+BEGIN
+    IF NOT public.verify_admin_passkey(provided_key) THEN
+        RAISE EXCEPTION 'Unauthorized: Invalid admin passkey';
+    END IF;
+
+    RETURN QUERY
+    SELECT 
+        w.id,
+        w.name,
+        w.code,
+        w.created_at,
+        COALESCE(w.allow_pos, false),
+        COALESCE(w.allow_customers, false),
+        COALESCE(w.allow_orders, false),
+        COALESCE(w.allow_invoices, false),
+        COALESCE(w.is_configured, false),
+        w.deleted_at,
+        w.coordination,
+        w.logo_url,
+        w.subscription_expires_at
+    FROM public.workspaces w
+    ORDER BY w.created_at DESC;
+END;
+$function$

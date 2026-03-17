@@ -1,0 +1,20 @@
+CREATE TABLE budget.expense_series (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  workspace_id uuid NOT NULL,
+  name text NOT NULL,
+  amount numeric NOT NULL DEFAULT 0,
+  currency text NOT NULL DEFAULT 'usd'::text,
+  due_day integer NOT NULL DEFAULT 1,
+  recurrence text NOT NULL,
+  start_month text NOT NULL,
+  end_month text NULL,
+  category text NULL,
+  subcategory text NULL,
+  version integer NOT NULL DEFAULT 1,
+  is_deleted boolean NOT NULL DEFAULT false,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  sync_status text NULL DEFAULT 'synced'::text,
+  last_synced_at timestamp with time zone NULL,
+  PRIMARY KEY (id)
+);

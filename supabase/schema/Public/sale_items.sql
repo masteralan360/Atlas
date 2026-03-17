@@ -1,0 +1,22 @@
+CREATE TABLE public.sale_items (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  sale_id uuid NOT NULL,
+  product_id uuid NOT NULL,
+  quantity integer NOT NULL,
+  unit_price numeric NOT NULL,
+  total_price numeric NOT NULL,
+  original_currency text NOT NULL DEFAULT 'usd'::text,
+  original_unit_price numeric NOT NULL DEFAULT 0,
+  converted_unit_price numeric NOT NULL DEFAULT 0,
+  settlement_currency text NOT NULL DEFAULT 'usd'::text,
+  cost_price numeric NOT NULL DEFAULT 0,
+  converted_cost_price numeric NOT NULL DEFAULT 0,
+  negotiated_price numeric NULL,
+  is_returned boolean NULL DEFAULT false,
+  return_reason text NULL,
+  returned_at timestamp with time zone NULL,
+  returned_by uuid NULL,
+  returned_quantity integer NULL DEFAULT 0,
+  inventory_snapshot integer NULL DEFAULT 0,
+  PRIMARY KEY (id)
+);

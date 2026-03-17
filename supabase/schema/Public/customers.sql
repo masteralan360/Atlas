@@ -1,0 +1,22 @@
+CREATE TABLE public.customers (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  workspace_id uuid NOT NULL,
+  name text NOT NULL,
+  email text NULL,
+  phone text NULL,
+  address text NULL,
+  city text NULL,
+  country text NULL,
+  notes text NULL,
+  default_currency text NOT NULL DEFAULT 'usd'::text,
+  total_orders numeric NULL DEFAULT 0,
+  total_spent numeric NULL DEFAULT 0,
+  outstanding_balance numeric NULL DEFAULT 0,
+  created_at timestamp with time zone NULL DEFAULT now(),
+  updated_at timestamp with time zone NULL DEFAULT now(),
+  sync_status text NULL DEFAULT 'synced'::text,
+  version bigint NULL DEFAULT 1,
+  is_deleted boolean NULL DEFAULT false,
+  credit_limit numeric NULL DEFAULT 0,
+  PRIMARY KEY (id)
+);

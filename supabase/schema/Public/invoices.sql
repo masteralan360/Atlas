@@ -1,0 +1,23 @@
+CREATE TABLE public.invoices (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  user_id uuid NULL,
+  invoiceid character varying NOT NULL,
+  total numeric NOT NULL DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  version integer NOT NULL DEFAULT 1,
+  is_deleted boolean NOT NULL DEFAULT false,
+  workspace_id uuid NULL,
+  is_snapshot boolean NULL DEFAULT false,
+  origin text NULL,
+  created_by uuid NULL,
+  created_by_name text NULL,
+  cashier_name text NULL,
+  sequence_id integer NULL,
+  print_format character varying NULL,
+  total_amount numeric NULL,
+  settlement_currency text NULL,
+  r2_path_a4 text NULL,
+  r2_path_receipt text NULL,
+  PRIMARY KEY (id)
+);
