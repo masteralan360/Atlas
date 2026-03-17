@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import type { LoanReminderItem } from '@/lib/loanReminders'
 import type { IQDDisplayPreference } from '@/local-db'
+import { LoanNoDisplay } from './LoanNoDisplay'
 import {
     Dialog,
     DialogContent,
@@ -71,7 +72,7 @@ export function LoanOverdueReminderModal({
                     <div className="flex items-start justify-between gap-4">
                         <div>
                             <div className="text-lg font-bold">{item.borrowerName}</div>
-                            <div className="text-sm text-muted-foreground">{item.loanNo}</div>
+                            <LoanNoDisplay loanNo={item.loanNo} className="text-sm text-muted-foreground" />
                         </div>
                         <div className={cn(
                             'rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide',

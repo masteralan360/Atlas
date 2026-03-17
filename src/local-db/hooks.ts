@@ -2868,8 +2868,18 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
         }
     }
 
+    const existingPayments = await db.loan_payments
+        .where('loanId')
+        .equals(input.loanId)
+        .and(item => !item.isDeleted)
+        .count()
+    const paymentSuffix = existingPayments + 1
+    const baseLoanNo = loan.loanNo.replace(/-\d+$/, '')
+    const newLoanNo = `${baseLoanNo}-${paymentSuffix}`
+
     const updatedLoan: Loan = {
         ...loan,
+        loanNo: newLoanNo,
         totalPaidAmount: roundLoanAmount(loan.totalPaidAmount + payableAmount, loan.settlementCurrency),
         balanceAmount: roundLoanAmount(Math.max(loan.balanceAmount - payableAmount, 0), loan.settlementCurrency),
         updatedAt: now,
@@ -2939,6 +2949,7 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
             supabase
                 .from('loans')
                 .update(toSnakeCase({
+                    loanNo: updatedLoan.loanNo,
                     totalPaidAmount: updatedLoan.totalPaidAmount,
                     balanceAmount: updatedLoan.balanceAmount,
                     nextDueDate: updatedLoan.nextDueDate,

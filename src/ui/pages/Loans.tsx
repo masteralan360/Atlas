@@ -15,7 +15,9 @@ import {
     type LoanInstallment
 } from '@/local-db'
 import { useWorkspace } from '@/workspace'
-import { formatCurrency, formatDate, cn } from '@/lib/utils'
+import { formatCurrency, formatDate, cn, formatLoanDetailsForWhatsApp } from '@/lib/utils'
+import { whatsappManager } from '@/lib/whatsappWebviewManager'
+import { WhatsAppNumberInputModal } from '@/ui/components/modals/WhatsAppNumberInputModal'
 import { isMobile } from '@/lib/platform'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import {
@@ -36,16 +38,13 @@ import {
     PrintPreviewModal,
     useToast
 } from '@/ui/components'
-import { Search, Plus, ArrowLeft, Printer, Trash2, List, LayoutGrid } from 'lucide-react'
+import { Search, Plus, ArrowLeft, Printer, Trash2, List, LayoutGrid, MessageCircle } from 'lucide-react'
 import { CreateManualLoanModal } from '@/ui/components/loans/CreateManualLoanModal'
 import { LoanDetailsPrintTemplate, LoanListPrintTemplate } from '@/ui/components/loans/LoanPrintTemplates'
+import { LoanNoDisplay } from '@/ui/components/loans/LoanNoDisplay'
 import { useLoanPaymentModal } from '@/ui/components/loans/LoanPaymentModalProvider'
 
 type LoanFilter = 'all' | 'active' | 'overdue' | 'completed'
-
-function escapeRegExp(value: string) {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
 
 function statusClass(status: string) {
     if (status === 'completed') return 'bg-blue-500/15 text-blue-600 dark:text-blue-300'
@@ -341,9 +340,10 @@ function LoanListView({
                                             <div className="flex justify-between items-start">
                                                 <div className="space-y-1">
                                                     <div className="flex items-center gap-2">
-                                                        <span className="text-sm font-bold text-primary">
-                                                            {loan.loanNo}
-                                                        </span>
+                                                        <LoanNoDisplay 
+                                                            loanNo={loan.loanNo} 
+                                                            className="text-sm text-primary" 
+                                                        />
                                                         <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-bold uppercase', sourceClass(loan.source))}>
                                                             {loan.source}
                                                         </span>
@@ -428,7 +428,9 @@ function LoanListView({
                                         </TableRow>
                                     ) : paginated.map(loan => (
                                         <TableRow key={loan.id}>
-                                            <TableCell className="font-semibold text-primary">{loan.loanNo}</TableCell>
+                                            <TableCell>
+                                                <LoanNoDisplay loanNo={loan.loanNo} className="text-primary" />
+                                            </TableCell>
                                             <TableCell>
                                                 <div className="font-medium">{loan.borrowerName}</div>
                                                 <div className="text-xs text-muted-foreground">{loan.borrowerNationalId}</div>
@@ -541,9 +543,24 @@ function LoanDetailsView({
         return (localStorage.getItem('loan_details_view_mode') as 'table' | 'grid') || 'table'
     })
 
+    const [showWhatsAppModal, setShowWhatsAppModal] = useState(false)
     useEffect(() => {
         localStorage.setItem('loan_details_view_mode', viewMode)
     }, [viewMode])
+
+    const handleWhatsAppConfirm = (phone: string, dialogLanguage: string) => {
+        if (!loan) return; // Changed selectedLoan to loan based on context
+
+        const formattedPhone = phone.replace(/\D/g, '');
+        const translator = i18n.getFixedT(dialogLanguage);
+        const message = formatLoanDetailsForWhatsApp(loan, translator); // Changed selectedLoan to loan
+        const whatsappUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`;
+
+        // Assuming isDesktop and whatsappAutoLaunch are defined elsewhere or need to be added
+        // For now, just open the URL
+        window.open(whatsappUrl, '_blank');
+    };
+
 
     const [deleteOpen, setDeleteOpen] = useState(false)
     const [isDeletingLoan, setIsDeletingLoan] = useState(false)
@@ -585,38 +602,10 @@ function LoanDetailsView({
         })
     }, [features.print_quality, printLang, renderLoanDetailsTemplate])
 
-    const loanInvoiceId = useLiveQuery(
-        async () => {
-            if (!normalizedLoanNo) return null
-            const matches = await db.invoices
-                .where('invoiceid')
-                .startsWithIgnoreCase(normalizedLoanNo)
-                .toArray()
-
-            const pattern = new RegExp(`^${escapeRegExp(normalizedLoanNo)}(?:-(\\d+))?$`, 'i')
-            const used = new Set(
-                matches
-                    .filter((invoice) => !invoice.isDeleted && pattern.test(invoice.invoiceid))
-                    .map((invoice) => invoice.invoiceid)
-            )
-
-            if (!used.has(normalizedLoanNo)) {
-                return normalizedLoanNo
-            }
-
-            let suffix = 1
-            while (used.has(`${normalizedLoanNo}-${suffix}`)) {
-                suffix += 1
-            }
-            return `${normalizedLoanNo}-${suffix}`
-        },
-        [normalizedLoanNo]
-    )
-
     const loanDetailsInvoiceData = useMemo(() => {
         if (!loan) return null
         return {
-            invoiceid: loanInvoiceId || normalizedLoanNo || loan.loanNo,
+            invoiceid: normalizedLoanNo || loan.loanNo,
             totalAmount: loan.principalAmount,
             settlementCurrency: loan.settlementCurrency,
             origin: 'Loans' as const,
@@ -624,7 +613,7 @@ function LoanDetailsView({
             cashierName: user?.name || 'Unknown',
             printFormat: 'a4' as const
         }
-    }, [loan, loanInvoiceId, normalizedLoanNo, user?.name])
+    }, [loan, normalizedLoanNo, user?.name])
     const linkedSaleMissingOrDeleted = useLiveQuery(
         async () => {
             if (!loan?.saleId) {
@@ -705,9 +694,12 @@ function LoanDetailsView({
                         {t('nav.loans') || 'Loans'}
                     </Link>
                     <span>/</span>
-                    <span className="text-foreground font-semibold">{loan.loanNo}</span>
+                    <LoanNoDisplay loanNo={loan.loanNo} className="text-foreground" />
                 </div>
                 <div className="flex items-center gap-2">
+                    <Button variant="outline" onClick={() => setShowWhatsAppModal(true)} className="gap-2 text-emerald-600 border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 dark:border-emerald-800 dark:hover:bg-emerald-500/10">
+                        <MessageCircle className="w-4 h-4" />
+                    </Button>
                     <Button variant="outline" onClick={() => setShowPrintPreview(true)} className="gap-2 print:hidden">
                         <Printer className="w-4 h-4" />
                         {t('common.print') || 'Print'}
@@ -989,6 +981,12 @@ function LoanDetailsView({
                 invoiceData={loanDetailsInvoiceData || undefined}
                 pdfBuilder={buildLoanDetailsPdf}
                 printTemplate={loan ? ({ effectiveId }) => renderLoanDetailsTemplate(effectiveId) : undefined}
+            />
+
+            <WhatsAppNumberInputModal
+                isOpen={showWhatsAppModal}
+                onClose={() => setShowWhatsAppModal(false)}
+                onConfirm={handleWhatsAppConfirm}
             />
         </div>
     )

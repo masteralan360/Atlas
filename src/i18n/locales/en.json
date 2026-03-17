@@ -1166,6 +1166,8 @@
     },
     "loans": {
         "title": "Loans",
+        "details": "Loan Details",
+        "date": "Date",
         "view": {
             "table": "Loans Details",
             "grid": "Loans Grid"

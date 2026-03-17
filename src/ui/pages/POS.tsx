@@ -255,7 +255,10 @@ export function POS() {
     const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false)
     const [completedSaleData, setCompletedSaleData] = useState<any>(null)
     const [showExchangeTicker, setShowExchangeTicker] = useState(() => {
-        return localStorage.getItem('pos_show_exchange_ticker') === 'true'
+        const saved = localStorage.getItem('pos_show_exchange_ticker')
+        if (saved !== null) return saved === 'true'
+        // Default to ON only if we started in a mobile layout
+        return window.innerWidth < 1024
     })
 
     useEffect(() => {

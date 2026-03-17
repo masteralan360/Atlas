@@ -76,9 +76,10 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onReturn
     const { style } = useTheme()
     const linkedLoan = useLoanBySaleId(sale?.id, user?.workspaceId)
 
-    const handleWhatsAppConfirm = async (phone: string) => {
+    const handleShareOnWhatsApp = async (phone: string, dialogLanguage: string) => {
         if (!sale) return
-        const text = formatSaleDetailsForWhatsApp(sale, t)
+        const translator = i18n.getFixedT(dialogLanguage)
+        const text = formatSaleDetailsForWhatsApp(sale, translator)
         await whatsappManager.openChat(phone, text)
         setLocation('/whatsapp')
     }
@@ -801,7 +802,7 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onReturn
             <WhatsAppNumberInputModal
                 isOpen={showWhatsAppModal}
                 onClose={() => setShowWhatsAppModal(false)}
-                onConfirm={handleWhatsAppConfirm}
+                onConfirm={handleShareOnWhatsApp}
             />
         </Dialog>
     )

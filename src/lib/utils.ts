@@ -176,6 +176,35 @@ export function formatSaleDetailsForWhatsApp(sale: any, t: (key: string) => stri
     return text
 }
 
+export function formatLoanDetailsForWhatsApp(loan: any, t: (key: string) => string): string {
+    const date = formatDateTime(loan.createdAt)
+    const id = loan.loanNo
+
+    // Header
+    let text = `*${t('loans.details') || 'Loan Details'}*\n`
+    text += `*${t('loans.loanNo') || 'Loan No'}:* ${id}\n`
+    text += `*${t('loans.borrower') || 'Borrower'}:* ${loan.borrowerName}\n`
+    text += `*${t('loans.date') || 'Disbursed Date'}:* ${date}\n`
+
+    // Summary
+    const currency = loan.settlementCurrency || 'usd'
+    const principal = formatCurrency(loan.principalAmount, currency, 'IQD')
+    const paid = formatCurrency(loan.totalPaidAmount, currency, 'IQD')
+    const balance = formatCurrency(loan.balanceAmount, currency, 'IQD')
+
+    text += `\n*${t('loans.summary') || 'Summary'}:*\n`
+    text += `*${t('loans.totalPrincipal') || 'Total Principal'}:* ${principal}\n`
+    text += `*${t('loans.totalRepaid') || 'Total Repaid'}:* ${paid}\n`
+    text += `*${t('loans.balanceDue') || 'Balance Due'}:* ${balance}\n`
+
+    // Next Due
+    if (loan.nextDueDate) {
+        text += `\n*${t('loans.nextDue') || 'Next Due'}:* ${formatDate(loan.nextDueDate)}\n`
+    }
+
+    return text
+}
+
 export function formatOriginLabel(origin?: string | null): string {
     if (!origin) return 'POS'
     const normalized = origin.trim().toLowerCase()

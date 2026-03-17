@@ -3,6 +3,7 @@ import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { platformService } from '@/services/platformService'
 import { useTranslation } from 'react-i18next'
 import { ReactQRCode } from '@lglab/react-qr-code'
+import { LoanNoDisplay } from './LoanNoDisplay'
 
 type LoanFilter = 'all' | 'active' | 'overdue' | 'completed'
 
@@ -66,7 +67,7 @@ interface LoanPrintHeaderProps {
     workspaceName?: string | null
     printLang: string
     title: string
-    subtitle?: string
+    subtitle?: React.ReactNode
     logoUrl?: string | null
     qrValue?: string | null
 }
@@ -216,7 +217,9 @@ export function LoanListPrintTemplate({
                         </tr>
                     ) : loans.map((loan) => (
                         <tr key={loan.id}>
-                            <td className="border border-slate-300 p-2 font-semibold">{loan.loanNo}</td>
+                            <td className="border border-slate-300 p-2 font-semibold">
+                                <LoanNoDisplay loanNo={loan.loanNo} plain />
+                            </td>
                             <td className="border border-slate-300 p-2">
                                 <p className="font-medium">{loan.borrowerName}</p>
                                 <p className="text-[10px] text-slate-500">{loan.borrowerNationalId}</p>
@@ -269,7 +272,13 @@ export function LoanDetailsPrintTemplate({
                 workspaceName={workspaceName}
                 printLang={printLang}
                 title={t('nav.loans') || 'Loans'}
-                subtitle={`${loan.loanNo} • ${formatDateTime(new Date().toISOString())}`}
+                subtitle={
+                    <span className="flex items-center justify-center gap-1">
+                        <LoanNoDisplay loanNo={loan.loanNo} className="text-slate-600" plain />
+                        <span>•</span>
+                        <span>{formatDateTime(new Date().toISOString())}</span>
+                    </span>
+                }
                 logoUrl={logoUrl}
                 qrValue={qrValue}
             />
@@ -429,8 +438,10 @@ export function LoanReceiptPrintTemplate({
                 </div>
                 <div className="text-lg font-bold">{workspaceName || 'Asaas'}</div>
                 <div className="text-[10px] font-semibold">{t('nav.loans') || 'Loans'}</div>
-                <div className="text-[10px] text-gray-500 mt-1">
-                    {loan.loanNo} • {formatDateTime(new Date().toISOString())}
+                <div className="text-[10px] text-gray-500 mt-1 flex items-center justify-center gap-1">
+                    <LoanNoDisplay loanNo={loan.loanNo} suffixClassName="text-slate-500" plain />
+                    <span>•</span>
+                    <span>{formatDateTime(new Date().toISOString())}</span>
                 </div>
             </div>
 

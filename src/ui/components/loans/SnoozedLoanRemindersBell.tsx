@@ -6,6 +6,7 @@ import type { IQDDisplayPreference } from '@/local-db'
 import { Button } from '@/ui/components'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/ui/components/dialog'
 import { formatCurrency, formatDate, formatDateTime, cn } from '@/lib/utils'
+import { LoanNoDisplay } from './LoanNoDisplay'
 
 interface SnoozedLoanRemindersBellProps {
     items: LoanReminderItem[]
@@ -63,7 +64,7 @@ export function SnoozedLoanRemindersBell({
                             <div className="flex items-start justify-between gap-3">
                                 <div>
                                     <div className="font-bold">{item.borrowerName}</div>
-                                    <div className="text-sm text-muted-foreground">{item.loanNo}</div>
+                                    <LoanNoDisplay loanNo={item.loanNo} className="text-sm text-muted-foreground" />
                                 </div>
                                 <div className="text-right">
                                     <div className="text-base font-bold">
