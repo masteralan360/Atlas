@@ -300,6 +300,9 @@ export interface Invoice extends BaseEntity {
     // PDF Storage (R2)
     r2PathA4?: string;
     r2PathReceipt?: string;
+    // Local PDF Storage (AppData)
+    localPathA4?: string;
+    localPathReceipt?: string;
     // Local PDF Blob (pending upload)
     pdfBlobA4?: Blob;
     pdfBlobReceipt?: Blob;

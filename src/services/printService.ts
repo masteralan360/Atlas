@@ -4,6 +4,7 @@ import { isDesktop } from '@/lib/platform'
 import { clearAppSetting, getAppSetting, setAppSetting } from '@/local-db/settings'
 import type { UniversalInvoice } from '@/types'
 import type { WorkspaceFeatures } from '@/workspace'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import {
     list_thermal_printers,
     print_thermal_printer,
@@ -194,7 +195,7 @@ function buildReceiptSections(
         }
     )
 
-    if (features.print_qr && workspaceId) {
+    if (features.print_qr && workspaceId && !isLocalWorkspaceMode(workspaceId)) {
         sections.push({
             Qr: {
                 data: `https://asaas-r2-proxy.alanepic360.workers.dev/${workspaceId}/printed-invoices/receipts/${saleData.id}.pdf`,

@@ -958,6 +958,10 @@ export async function createInvoice(
     const now = new Date().toISOString()
     const invoiceid = data.invoiceid || `INV-${Date.now().toString(36).toUpperCase()}`
     const id = overrideId || generateId()
+    const usesCloudBusinessData = shouldUseCloudBusinessData(workspaceId)
+    const syncStatus: Invoice['syncStatus'] = usesCloudBusinessData
+        ? (isOnline() ? 'synced' : 'pending')
+        : 'synced'
 
     const invoice: Invoice = {
         ...data,
@@ -966,8 +970,8 @@ export async function createInvoice(
         invoiceid,
         createdAt: now,
         updatedAt: now,
-        syncStatus: (isOnline() ? 'synced' : 'pending') as any,
-        lastSyncedAt: isOnline() ? now : null,
+        syncStatus,
+        lastSyncedAt: syncStatus === 'synced' ? now : null,
         version: 1,
         isDeleted: false,
         createdByName: data.createdByName,
@@ -977,11 +981,22 @@ export async function createInvoice(
     }
 
 
-    if (isOnline()) {
+    if (usesCloudBusinessData && isOnline()) {
         // ONLINE
         // Omit items/blobs and legacy fields that don't belong in the table schema
         // We keep createdBy/created_by in local but map to user_id in remote for RLS
-        const { items, currency, subtotal, discount, printMetadata, pdfBlobA4, pdfBlobReceipt, ...rest } = invoice as any
+        const {
+            items,
+            currency,
+            subtotal,
+            discount,
+            printMetadata,
+            pdfBlobA4,
+            pdfBlobReceipt,
+            localPathA4,
+            localPathReceipt,
+            ...rest
+        } = invoice as any
 
         // @ts-ignore - isSnapshot might be passed but not in Invoice type
         const { isSnapshot, ...finalRest } = rest
@@ -1008,9 +1023,12 @@ export async function createInvoice(
         // Use put instead of add for local idempotency
         await db.invoices.put(invoice)
     } else {
-        // OFFLINE
+        // Local Mode and offline-cloud both persist locally first.
         await db.invoices.put(invoice)
-        await addToOfflineMutations('invoices', id, 'create', invoice as unknown as Record<string, unknown>, workspaceId)
+
+        if (usesCloudBusinessData) {
+            await addToOfflineMutations('invoices', id, 'create', invoice as unknown as Record<string, unknown>, workspaceId)
+        }
     }
 
     return invoice
@@ -1048,20 +1066,35 @@ export async function updateInvoice(id: string, data: Partial<Invoice>): Promise
     const now = new Date().toISOString()
     const existing = await db.invoices.get(id)
     if (!existing) throw new Error('Invoice not found')
+    const usesCloudBusinessData = shouldUseCloudBusinessData(existing.workspaceId)
+    const syncStatus: Invoice['syncStatus'] = usesCloudBusinessData
+        ? (isOnline() ? 'synced' : 'pending')
+        : 'synced'
 
     const updated = {
         ...existing,
         ...data,
         updatedAt: now,
-        syncStatus: (isOnline() ? 'synced' : 'pending') as any,
-        lastSyncedAt: isOnline() ? now : existing.lastSyncedAt,
+        syncStatus,
+        lastSyncedAt: syncStatus === 'synced' ? now : existing.lastSyncedAt,
         version: existing.version + 1
     }
 
-    if (isOnline()) {
+    if (usesCloudBusinessData && isOnline()) {
         // ONLINE
         // Filter out legacy fields from update payload
-        const { items, currency, subtotal, discount, printMetadata, pdfBlobA4, pdfBlobReceipt, ...restData } = data as any
+        const {
+            items,
+            currency,
+            subtotal,
+            discount,
+            printMetadata,
+            pdfBlobA4,
+            pdfBlobReceipt,
+            localPathA4,
+            localPathReceipt,
+            ...restData
+        } = data as any
         const payload = toSnakeCase({ ...restData, updatedAt: now })
         const { error } = await runMutation('invoices.update', () => supabase.from('invoices').update(payload).eq('id', id))
 
@@ -1069,9 +1102,12 @@ export async function updateInvoice(id: string, data: Partial<Invoice>): Promise
 
         await db.invoices.put(updated)
     } else {
-        // OFFLINE
+        // Local Mode and offline-cloud both persist locally first.
         await db.invoices.put(updated)
-        await addToOfflineMutations('invoices', id, 'update', updated as unknown as Record<string, unknown>, existing.workspaceId)
+
+        if (usesCloudBusinessData) {
+            await addToOfflineMutations('invoices', id, 'update', updated as unknown as Record<string, unknown>, existing.workspaceId)
+        }
     }
 }
 
@@ -1079,25 +1115,33 @@ export async function deleteInvoice(id: string): Promise<void> {
     const now = new Date().toISOString()
     const existing = await db.invoices.get(id)
     if (!existing) return
+    const usesCloudBusinessData = shouldUseCloudBusinessData(existing.workspaceId)
+    const syncStatus: Invoice['syncStatus'] = usesCloudBusinessData
+        ? (isOnline() ? 'synced' : 'pending')
+        : 'synced'
 
     const updated = {
         ...existing,
         isDeleted: true,
         updatedAt: now,
-        syncStatus: (isOnline() ? 'synced' : 'pending') as any,
+        syncStatus,
+        lastSyncedAt: syncStatus === 'synced' ? now : existing.lastSyncedAt,
         version: existing.version + 1
     } as Invoice
 
-    if (isOnline()) {
+    if (usesCloudBusinessData && isOnline()) {
         // ONLINE
         const { error } = await runMutation('invoices.delete', () => supabase.from('invoices').update({ is_deleted: true, updated_at: now }).eq('id', id))
         if (error) throw normalizeSupabaseActionError(error)
 
         await db.invoices.put(updated)
     } else {
-        // OFFLINE
+        // Local Mode and offline-cloud both persist locally first.
         await db.invoices.put(updated)
-        await addToOfflineMutations('invoices', id, 'delete', { id }, existing.workspaceId)
+
+        if (usesCloudBusinessData) {
+            await addToOfflineMutations('invoices', id, 'delete', { id }, existing.workspaceId)
+        }
     }
 }
 

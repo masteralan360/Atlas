@@ -1,7 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useInvoices, type Invoice } from '@/local-db'
 import { formatCurrency, formatDateTime, formatDate, formatOriginLabel } from '@/lib/utils'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
+import { platformService } from '@/services/platformService'
+import {
+    getAbsoluteAppDataPath,
+    getStoredLocalInvoicePdfPath
+} from '@/services/localInvoiceStorage'
 import {
     Table,
     TableBody,
@@ -42,8 +47,17 @@ export function InvoicesHistory() {
     const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null)
     const [showPdfViewer, setShowPdfViewer] = useState(false)
     const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+    const [pdfPath, setPdfPath] = useState<string | null>(null)
     const [pdfError, setPdfError] = useState<string | null>(null)
     const [isLoadingPdf, setIsLoadingPdf] = useState(false)
+
+    useEffect(() => {
+        return () => {
+            if (pdfUrl?.startsWith('blob:')) {
+                URL.revokeObjectURL(pdfUrl)
+            }
+        }
+    }, [pdfUrl])
 
     const getDateDisplay = () => {
         if (dateRange === 'today') {
@@ -80,11 +94,28 @@ export function InvoicesHistory() {
         setSelectedInvoice(invoice)
         setIsLoadingPdf(true)
         setPdfError(null)
+        setPdfUrl(null)
+        setPdfPath(null)
         setShowPdfViewer(true)
 
         try {
-            // Determine which R2 path to use
+            const localPath = getStoredLocalInvoicePdfPath(invoice, format)
+            const pdfBlob = format === 'a4' ? invoice.pdfBlobA4 : invoice.pdfBlobReceipt
             const r2Path = format === 'a4' ? invoice.r2PathA4 : invoice.r2PathReceipt
+
+            if (localPath) {
+                const exists = await platformService.exists(localPath)
+                if (exists) {
+                    setPdfPath(localPath)
+                    setPdfUrl(platformService.convertFileSrc(localPath))
+                    return
+                }
+            }
+
+            if (pdfBlob) {
+                setPdfUrl(URL.createObjectURL(pdfBlob))
+                return
+            }
 
             if (!r2Path) {
                 setPdfError(t('invoices.pdfNotAvailable') || 'PDF not available. This invoice was created before PDF storage was enabled.')
@@ -108,16 +139,26 @@ export function InvoicesHistory() {
     }
 
     const handleDownload = async () => {
-        if (!pdfUrl || !selectedInvoice) return
+        if ((!pdfUrl && !pdfPath) || !selectedInvoice) return
 
         try {
-            // Use Tauri Shell API to open the URL in the default browser
-            // This works on both desktop and mobile in Tauri v2
+            if (pdfPath) {
+                await open(await getAbsoluteAppDataPath(pdfPath))
+                return
+            }
+
+            if (!pdfUrl) {
+                return
+            }
+
             await open(pdfUrl)
         } catch (error) {
             console.error('[InvoicesHistory] Failed to open URL with Tauri shell:', error)
 
-            // Fallback for non-Tauri environments (browser)
+            if (!pdfUrl) {
+                return
+            }
+
             const link = document.createElement('a')
             link.href = pdfUrl
             link.download = `invoice-${selectedInvoice.invoiceid.replace('#', '')}.pdf`
@@ -243,7 +284,7 @@ export function InvoicesHistory() {
                                         </TableCell>
                                         <TableCell className="text-right pr-6">
                                             <div className="flex justify-end gap-2">
-                                                {invoice.r2PathA4 && (
+                                                {(invoice.localPathA4 || invoice.pdfBlobA4 || invoice.r2PathA4) && (
                                                     <Button
                                                         variant="ghost"
                                                         size="sm"
@@ -254,7 +295,7 @@ export function InvoicesHistory() {
                                                         <span className="text-xs font-bold font-mono">A4</span>
                                                     </Button>
                                                 )}
-                                                {invoice.r2PathReceipt && (
+                                                {(invoice.localPathReceipt || invoice.pdfBlobReceipt || invoice.r2PathReceipt) && (
                                                     <Button
                                                         variant="ghost"
                                                         size="sm"
@@ -281,6 +322,7 @@ export function InvoicesHistory() {
                     setShowPdfViewer(false)
                     setSelectedInvoice(null)
                     setPdfUrl(null)
+                    setPdfPath(null)
                     setPdfError(null)
                 }
             }}>

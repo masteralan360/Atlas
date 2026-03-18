@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useReactToPrint } from 'react-to-print'
 import {
@@ -12,6 +12,7 @@ import {
 import { CheckCircle2, Printer, Coins } from 'lucide-react'
 import { formatCurrency, cn } from '@/lib/utils'
 import { triggerInvoiceSync } from '@/services/invoiceSyncService'
+import { disableInvoiceQrInLocalMode } from '@/services/localInvoiceStorage'
 import { printService } from '@/services/printService'
 import { useAuth } from '@/auth'
 import { useWorkspace, type WorkspaceFeatures } from '@/workspace'
@@ -45,6 +46,10 @@ export function CheckoutSuccessModal({
     const [note, setNote] = useState(saleData?.notes || '')
     const debouncedNote = useDebounce(note, 1000)
     const printRef = useRef<HTMLDivElement>(null)
+    const printFeatures = useMemo(
+        () => disableInvoiceQrInLocalMode(activeWorkspace?.id || user?.workspaceId, features),
+        [activeWorkspace?.id, features, user?.workspaceId]
+    )
 
     const handlePrint = useReactToPrint({
         contentRef: printRef,
@@ -120,7 +125,7 @@ export function CheckoutSuccessModal({
             // 1. Trigger background sync (non-blocking for UI)
             triggerInvoiceSync({
                 saleData,
-                features,
+                features: printFeatures,
                 workspaceName: workspaceName || user?.workspaceId || 'Asaas',
                 workspaceId: activeWorkspace?.id || user.workspaceId,
                 user: {
@@ -136,7 +141,7 @@ export function CheckoutSuccessModal({
                 try {
                     handledByThermalPrinter = await printService.silentPrintReceipt({
                         saleData,
-                        features,
+                        features: printFeatures,
                         workspaceName: workspaceName || user?.workspaceId || 'Asaas',
                         workspaceId: activeWorkspace?.id || user.workspaceId
                     })
@@ -276,7 +281,7 @@ export function CheckoutSuccessModal({
                         {saleData && (
                             <SaleReceiptBase
                                 data={saleData}
-                                features={features}
+                                features={printFeatures}
                                 workspaceName={workspaceName || user?.workspaceId || 'Asaas'}
                                 workspaceId={activeWorkspace?.id || user?.workspaceId}
                             />

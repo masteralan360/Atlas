@@ -3,6 +3,10 @@ import { db } from '@/local-db'
 import { assetManager } from '@/lib/assetManager'
 import { isOnline } from '@/lib/network'
 import { generateInvoicePdf } from './pdfGenerator'
+import {
+    disableInvoiceQrInLocalMode,
+    saveInvoicePdfToLocalAppData
+} from './localInvoiceStorage'
 import { toast } from '@/ui/components/use-toast'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
@@ -29,6 +33,7 @@ export async function triggerInvoiceSync(options: SyncInvoiceOptions): Promise<v
     const { saleData, features, workspaceName, user } = options;
     const invoiceId = saleData.id;
     const isLocalMode = isLocalWorkspaceMode(options.workspaceId);
+    const printableFeatures = disableInvoiceQrInLocalMode(options.workspaceId, features);
 
     if (!invoiceId) {
         console.error('[InvoiceSyncService] No ID provided for sync');
@@ -49,7 +54,7 @@ export async function triggerInvoiceSync(options: SyncInvoiceOptions): Promise<v
         const pdfBlob = await generateInvoicePdf({
             data: saleData,
             format: format,
-            features,
+            features: printableFeatures,
             workspaceName: workspaceName || 'Asaas',
             workspaceId: options.workspaceId
         });
@@ -65,7 +70,7 @@ export async function triggerInvoiceSync(options: SyncInvoiceOptions): Promise<v
                     customerId: saleData.customer_id || '',
                     status: 'paid',
                     totalAmount: saleData.total_amount ?? saleData.totalAmount ?? 0,
-                    settlementCurrency: saleData.settlement_currency ?? saleData.settlementCurrency ?? features.default_currency ?? 'usd',
+                    settlementCurrency: saleData.settlement_currency ?? saleData.settlementCurrency ?? printableFeatures.default_currency ?? 'usd',
                     origin: saleData.origin || 'pos',
                     createdBy: user.id,
                     cashierName: saleData.cashier_name || user.name,
@@ -80,6 +85,7 @@ export async function triggerInvoiceSync(options: SyncInvoiceOptions): Promise<v
                 })
             }
 
+            const localPath = await saveInvoicePdfToLocalAppData(options.workspaceId, invoiceId, format, pdfBlob)
             const dbUpdate: any = {
                 printFormat: format,
                 syncStatus: 'synced',
@@ -88,16 +94,22 @@ export async function triggerInvoiceSync(options: SyncInvoiceOptions): Promise<v
             };
 
             if (format === 'a4') {
-                dbUpdate.pdfBlobA4 = pdfBlob;
+                dbUpdate.localPathA4 = localPath ?? undefined;
+                dbUpdate.r2PathA4 = undefined;
+                dbUpdate.pdfBlobA4 = localPath ? undefined : pdfBlob;
             } else {
-                dbUpdate.pdfBlobReceipt = pdfBlob;
+                dbUpdate.localPathReceipt = localPath ?? undefined;
+                dbUpdate.r2PathReceipt = undefined;
+                dbUpdate.pdfBlobReceipt = localPath ? undefined : pdfBlob;
             }
 
             await db.invoices.update(invoiceId, dbUpdate);
 
             toast({
                 title: "Receipt saved",
-                description: "Invoice snapshot was stored locally for this workspace.",
+                description: localPath
+                    ? "Invoice snapshot was stored in this device's local workspace files."
+                    : "Invoice snapshot was stored locally for this workspace.",
                 variant: "default",
             });
             return;

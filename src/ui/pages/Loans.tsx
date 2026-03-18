@@ -42,6 +42,7 @@ import { CreateManualLoanModal } from '@/ui/components/loans/CreateManualLoanMod
 import { LoanDetailsPrintTemplate, LoanListPrintTemplate } from '@/ui/components/loans/LoanPrintTemplates'
 import { LoanNoDisplay } from '@/ui/components/loans/LoanNoDisplay'
 import { useLoanPaymentModal } from '@/ui/components/loans/LoanPaymentModalProvider'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 type LoanFilter = 'all' | 'active' | 'overdue' | 'completed'
 
@@ -140,7 +141,7 @@ function LoanListView({
     const iqdPreference = features.iqd_display_preference
     const printLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
     const buildQrValue = useCallback((effectiveId: string) => {
-        if (!features.print_qr || !workspaceId) return undefined
+        if (!features.print_qr || !workspaceId || isLocalWorkspaceMode(workspaceId)) return undefined
         return `https://asaas-r2-proxy.alanepic360.workers.dev/${workspaceId}/printed-invoices/A4/${effectiveId}.pdf`
     }, [features.print_qr, workspaceId])
 
@@ -566,7 +567,7 @@ function LoanDetailsView({
     const [showPrintPreview, setShowPrintPreview] = useState(false)
     const printLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
     const buildQrValue = useCallback((effectiveId: string) => {
-        if (!features.print_qr || !workspaceId) return undefined
+        if (!features.print_qr || !workspaceId || isLocalWorkspaceMode(workspaceId)) return undefined
         return `https://asaas-r2-proxy.alanepic360.workers.dev/${workspaceId}/printed-invoices/A4/${effectiveId}.pdf`
     }, [features.print_qr, workspaceId])
     const normalizedLoanNo = loan?.loanNo?.trim() || ''

@@ -293,10 +293,10 @@ export function Sales() {
     const loanPrintPayments = useLoanPayments(loanForPrint?.id, user?.workspaceId)
     const shouldUseLoanPrint = printingSale?.payment_method === 'loan'
     const buildLoanQrValue = useCallback((effectiveId: string, format: PrintFormat) => {
-        if (!features.print_qr || !user?.workspaceId) return undefined
+        if (!features.print_qr || !user?.workspaceId || isLocalMode) return undefined
         const folder = format === 'receipt' ? 'receipts' : 'A4'
         return `https://asaas-r2-proxy.alanepic360.workers.dev/${user.workspaceId}/printed-invoices/${folder}/${effectiveId}.pdf`
-    }, [features.print_qr, user?.workspaceId])
+    }, [features.print_qr, isLocalMode, user?.workspaceId])
 
     const renderLoanPrintTemplate = useCallback((effectiveId?: string) => {
         if (!loanForPrint) return null

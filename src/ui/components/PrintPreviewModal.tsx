@@ -24,6 +24,11 @@ import { db, type Invoice } from '@/local-db'
 import { generateInvoicePdf, type PrintFormat } from '@/services/pdfGenerator'
 import { assetManager } from '@/lib/assetManager'
 import { isOnline } from '@/lib/network'
+import {
+    disableInvoiceQrInLocalMode,
+    saveInvoicePdfToLocalAppData,
+    shouldUseLocalInvoiceStorage
+} from '@/services/localInvoiceStorage'
 import { type WorkspaceFeatures } from '@/workspace'
 import { supabase } from '@/auth/supabase'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
@@ -110,13 +115,18 @@ export function PrintPreviewModal({
 
     const hasPdfData = !!pdfBuilder || !!(pdfData && features)
     const printFormat: PrintFormat = (invoiceData?.printFormat || 'a4') as PrintFormat
+    const usesLocalInvoiceStorage = shouldUseLocalInvoiceStorage(workspaceId)
+    const printableFeatures = useMemo(
+        () => disableInvoiceQrInLocalMode(workspaceId, features),
+        [features, workspaceId]
+    )
     const isTauri = useMemo(() => {
         if (typeof window === 'undefined') return false
         const w = window as any
         return !!(w.__TAURI_INTERNALS__ || w.__TAURI__)
     }, [])
 
-    const printLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
+    const printLang = printableFeatures?.print_lang && printableFeatures.print_lang !== 'auto' ? printableFeatures.print_lang : i18n.language
     const t_print = useMemo(() => i18n.getFixedT(printLang), [i18n, printLang])
 
     const translations = useMemo(() => ({
@@ -182,37 +192,37 @@ export function PrintPreviewModal({
                 : printTemplate
         }
 
-        if (pdfData && features) {
+        if (pdfData && printableFeatures) {
             return printFormat === 'receipt' ? (
                 <div className="w-[80mm]">
                     <SaleReceiptBase
                         data={pdfData}
-                        features={features}
+                        features={printableFeatures}
                         workspaceName={workspaceName || workspaceId || 'Asaas'}
                         workspaceId={workspaceId || undefined}
                     />
                 </div>
             ) : (
                 pdfData?.is_refund_invoice ? (
-                    features?.a4_template === 'modern' ? (
+                    printableFeatures?.a4_template === 'modern' ? (
                         <RefundA4InvoiceTemplate
                             data={pdfData}
-                            features={features}
+                            features={printableFeatures}
                             workspaceId={workspaceId || undefined}
                             workspaceName={workspaceName || workspaceId || 'Asaas'}
                         />
                     ) : (
                         <RefundPrimaryA4InvoiceTemplate
                             data={pdfData}
-                            features={features}
+                            features={printableFeatures}
                             workspaceId={workspaceId || undefined}
                             workspaceName={workspaceName || workspaceId || 'Asaas'}
                         />
                     )
-                ) : features?.a4_template === 'modern' ? (
+                ) : printableFeatures?.a4_template === 'modern' ? (
                     <ModernA4InvoiceTemplate
                         data={pdfData}
-                        features={features}
+                        features={printableFeatures}
                         workspaceId={workspaceId || undefined}
                         workspaceName={workspaceName || workspaceId || 'Asaas'}
                         workspaceFooterContacts={workspaceFooterContacts}
@@ -220,7 +230,7 @@ export function PrintPreviewModal({
                 ) : (
                     <A4InvoiceTemplate
                         data={pdfData}
-                        features={features}
+                        features={printableFeatures}
                         workspaceId={workspaceId || undefined}
                         workspaceName={workspaceName || workspaceId || 'Asaas'}
                     />
@@ -229,7 +239,7 @@ export function PrintPreviewModal({
         }
 
         return children || null
-    }, [children, effectiveId, features, pdfData, printFormat, printTemplate, workspaceFooterContacts, workspaceId, workspaceName])
+    }, [children, effectiveId, pdfData, printFormat, printTemplate, printableFeatures, workspaceFooterContacts, workspaceId, workspaceName])
 
     const canTemplatePrint = !!templateContent
 
@@ -257,7 +267,7 @@ export function PrintPreviewModal({
             return { [format]: blob }
         }
 
-        if (!pdfData || !features) {
+        if (!pdfData || !printableFeatures) {
             throw new Error('Missing PDF data or features')
         }
 
@@ -266,8 +276,8 @@ export function PrintPreviewModal({
             format: format,
             workspaceId: workspaceId || '',
             features: {
-                ...features,
-                logo_url: features.logo_url || undefined
+                ...printableFeatures,
+                logo_url: printableFeatures.logo_url || undefined
             },
             workspaceName: workspaceName || workspaceId || '',
             translations,
@@ -275,7 +285,7 @@ export function PrintPreviewModal({
         })
 
         return { [format]: blob }
-    }, [features, pdfData, pdfBuilder, translations, workspaceId, workspaceName, effectiveId, printFormat, workspaceFooterContacts])
+    }, [printableFeatures, pdfData, pdfBuilder, translations, workspaceId, workspaceName, effectiveId, printFormat, workspaceFooterContacts])
 
     const ensurePdfBlobs = useCallback(async (requestedFormat?: PrintFormat): Promise<{ a4?: Blob; receipt?: Blob }> => {
         const format = requestedFormat || printFormat;
@@ -416,11 +426,16 @@ export function PrintPreviewModal({
                 }
             }
 
-            if (savedInvoice && isOnline() && assetManager) {
+            if (savedInvoice && usesLocalInvoiceStorage) {
                 try {
+                    const storageWorkspaceId = workspaceId || savedInvoice.workspaceId
+                    if (!storageWorkspaceId) {
+                        throw new Error('Missing workspace ID')
+                    }
+
                     let finalBlob = activeBlob
                     if (!pdfBuilder) {
-                        if (!pdfData || !features) {
+                        if (!pdfData || !printableFeatures) {
                             throw new Error('Missing PDF data or features')
                         }
 
@@ -429,8 +444,67 @@ export function PrintPreviewModal({
                             format: printFormat,
                             workspaceId: workspaceId || '',
                             features: {
-                                ...features,
-                                logo_url: features?.logo_url || undefined
+                                ...printableFeatures,
+                                logo_url: printableFeatures?.logo_url || undefined
+                            },
+                            workspaceName: workspaceName || workspaceId || '',
+                            translations,
+                            workspaceFooterContacts
+                        })
+                    }
+
+                    const localPath = await saveInvoicePdfToLocalAppData(storageWorkspaceId, savedInvoice.id, printFormat, finalBlob)
+                    const dbUpdate: any = {
+                        syncStatus: 'synced',
+                        lastSyncedAt: new Date().toISOString()
+                    }
+
+                    if (printFormat === 'a4') {
+                        dbUpdate.localPathA4 = localPath ?? undefined
+                        dbUpdate.r2PathA4 = undefined
+                        dbUpdate.pdfBlobA4 = localPath ? undefined : finalBlob
+                    } else {
+                        dbUpdate.localPathReceipt = localPath ?? undefined
+                        dbUpdate.r2PathReceipt = undefined
+                        dbUpdate.pdfBlobReceipt = localPath ? undefined : finalBlob
+                    }
+
+                    await db.invoices.update(savedInvoice.id, dbUpdate)
+                } catch (saveError) {
+                    console.error('Local invoice file save failed:', saveError)
+
+                    const dbUpdate: any = {
+                        syncStatus: 'synced',
+                        lastSyncedAt: new Date().toISOString()
+                    }
+
+                    if (printFormat === 'a4') {
+                        dbUpdate.localPathA4 = undefined
+                        dbUpdate.r2PathA4 = undefined
+                        dbUpdate.pdfBlobA4 = activeBlob
+                    } else {
+                        dbUpdate.localPathReceipt = undefined
+                        dbUpdate.r2PathReceipt = undefined
+                        dbUpdate.pdfBlobReceipt = activeBlob
+                    }
+
+                    await db.invoices.update(savedInvoice.id, dbUpdate)
+                }
+            } else if (savedInvoice && isOnline() && assetManager) {
+                try {
+                    let finalBlob = activeBlob
+                    if (!pdfBuilder) {
+                        if (!pdfData || !printableFeatures) {
+                            throw new Error('Missing PDF data or features')
+                        }
+
+                        finalBlob = await generateInvoicePdf({
+                            data: { ...pdfData, ...savedInvoice, id: savedInvoice.id, invoiceid: savedInvoice.invoiceid, sequenceId: savedInvoice.sequenceId },
+                            format: printFormat,
+                            workspaceId: workspaceId || '',
+                            features: {
+                                ...printableFeatures,
+                                logo_url: printableFeatures?.logo_url || undefined
                             },
                             workspaceName: workspaceName || workspaceId || '',
                             translations,
@@ -501,7 +575,9 @@ export function PrintPreviewModal({
             if (savedInvoice) {
                 toast({
                     title: t('print.saveSuccess') || 'Invoice Saved',
-                    description: t('print.saveSuccessDesc') || 'A record of this invoice has been added to history.'
+                    description: usesLocalInvoiceStorage
+                        ? (t('print.saveSuccessDesc') || 'A record of this invoice has been added to history.')
+                        : (t('print.saveSuccessDesc') || 'A record of this invoice has been added to history.')
                 })
             }
 
