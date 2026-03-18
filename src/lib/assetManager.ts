@@ -3,6 +3,7 @@ import { platformService } from '@/services/platformService';
 import { r2Service } from '@/services/r2Service';
 import { db } from '@/local-db';
 import { supabase } from '@/auth/supabase';
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode';
 
 // Simple browser-compatible EventEmitter implementation
 type Listener = (...args: any[]) => void;
@@ -77,6 +78,7 @@ class AssetManager extends SimpleEventEmitter {
      */
     async uploadAsset(file: File, folder: string = 'general'): Promise<string | null> {
         if (!this.workspaceId) return null;
+        if (isLocalWorkspaceMode(this.workspaceId)) return null;
 
         try {
             this.emitStatus({ status: 'uploading', currentFile: file.name });
@@ -109,6 +111,7 @@ class AssetManager extends SimpleEventEmitter {
         customPath?: string
     ): Promise<string | null> {
         if (!this.workspaceId) return null;
+        if (isLocalWorkspaceMode(this.workspaceId)) return null;
 
         try {
             const folder = format === 'a4' ? 'A4' : 'receipts';
@@ -137,6 +140,7 @@ class AssetManager extends SimpleEventEmitter {
      */
     async uploadFromPath(filePath: string, _folder: string = 'general'): Promise<string | null> {
         if (!isTauri()) return null;
+        if (this.workspaceId && isLocalWorkspaceMode(this.workspaceId)) return null;
 
         try {
             const fileName = filePath.split(/[\\/]/).pop() || 'file';
@@ -182,6 +186,7 @@ class AssetManager extends SimpleEventEmitter {
      */
     async deleteAsset(remotePath: string): Promise<void> {
         if (!this.workspaceId || !remotePath) return;
+        if (isLocalWorkspaceMode(this.workspaceId)) return;
 
         if (remotePath.startsWith('data:') || remotePath.startsWith('blob:')) {
             return;
@@ -237,6 +242,11 @@ class AssetManager extends SimpleEventEmitter {
 
     async scanAndSync() {
         if (this.isScanning || !isTauri() || !this.workspaceId) return;
+        if (isLocalWorkspaceMode(this.workspaceId)) {
+            this.isInitialSync = false;
+            this.emitStatus({ status: 'idle' });
+            return;
+        }
         this.isScanning = true;
 
         try {
@@ -281,6 +291,7 @@ class AssetManager extends SimpleEventEmitter {
      */
     private async syncPendingInvoices() {
         if (!this.workspaceId) return;
+        if (isLocalWorkspaceMode(this.workspaceId)) return;
 
         try {
             // Find invoices with pending sync status and local blobs
@@ -376,6 +387,7 @@ class AssetManager extends SimpleEventEmitter {
 
     private async ensureLocal(remotePath: string) {
         if (!this.workspaceId) return;
+        if (isLocalWorkspaceMode(this.workspaceId)) return;
 
         try {
             // Check if we already have it locally

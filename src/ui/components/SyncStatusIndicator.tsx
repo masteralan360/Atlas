@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { usePendingSyncCount } from '@/local-db/hooks'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
+import { useWorkspace } from '@/workspace'
 import { ManualSyncModal } from './ManualSyncModal'
 import { cn } from '@/lib/utils'
 import { CloudOff, Check, AlertCircle } from 'lucide-react'
@@ -9,6 +10,7 @@ import { useTheme } from './theme-provider'
 export function SyncStatusIndicator() {
     const pendingCount = usePendingSyncCount()
     const isOnline = useNetworkStatus()
+    const { isLocalMode } = useWorkspace()
     const [isModalOpen, setIsModalOpen] = useState(false)
     const { style } = useTheme()
 
@@ -21,7 +23,16 @@ export function SyncStatusIndicator() {
         clickable: false
     }
 
-    if (!isOnline) {
+    if (isLocalMode) {
+        status = {
+            icon: Check,
+            label: 'Local Mode',
+            color: 'text-sky-600',
+            bgColor: 'bg-sky-500/10',
+            dotColor: 'bg-sky-500',
+            clickable: false
+        }
+    } else if (!isOnline) {
         status = {
             icon: CloudOff,
             label: pendingCount > 0 ? `Offline (${pendingCount})` : 'Offline',
@@ -47,7 +58,7 @@ export function SyncStatusIndicator() {
         <>
             <button
                 onClick={() => isOnline && pendingCount > 0 && setIsModalOpen(true)}
-                disabled={!isOnline || pendingCount === 0}
+                disabled={isLocalMode || !isOnline || pendingCount === 0}
                 className={cn(
                     'flex items-center gap-2 px-3 py-1.5 transition-all text-xs font-bold',
                     style === 'neo-orange' ? 'neo-indicator' : cn(bgColor, 'rounded-full'),

@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/local-db/database'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { useAuth } from '@/auth/AuthContext'
+import { useWorkspace } from '@/workspace'
 import { fullSync, type SyncState } from './syncEngine'
 import { isSupabaseConfigured } from '@/auth/supabase'
 import { connectionManager } from '@/lib/connectionManager'
@@ -32,6 +33,7 @@ export function useSyncStatus(): UseSyncStatusResult {
 
     const isOnline = useNetworkStatus()
     const { user, isAuthenticated } = useAuth()
+    const { isLocalMode } = useWorkspace()
     const syncInProgress = useRef(false)
     const lastSyncTimeRef = useRef(lastSyncTime)
 
@@ -41,11 +43,17 @@ export function useSyncStatus(): UseSyncStatusResult {
     }, [lastSyncTime])
 
     // Get pending sync count from offline_mutations
-    const pendingCount = useLiveQuery(() => db.offline_mutations.where('status').equals('pending').count(), []) ?? 0
+    const livePendingCount = useLiveQuery(() => db.offline_mutations.where('status').equals('pending').count(), []) ?? 0
+    const pendingCount = isLocalMode ? 0 : livePendingCount
 
     // Perform sync
     const sync = useCallback(async () => {
         if (!isSupabaseConfigured || !isAuthenticated || !user || syncInProgress.current) {
+            return
+        }
+
+        if (isLocalMode) {
+            setSyncState('idle')
             return
         }
 
@@ -78,13 +86,13 @@ export function useSyncStatus(): UseSyncStatusResult {
         } finally {
             syncInProgress.current = false
         }
-    }, [isOnline, isAuthenticated, user])
+    }, [isLocalMode, isOnline, isAuthenticated, user])
 
     // ───────────────────────────────────────────────────────
     // RESILIENCE: Auto-sync on reconnect and wake
     // ───────────────────────────────────────────────────────
     useEffect(() => {
-        if (!isSupabaseConfigured || !isAuthenticated || !user) return
+        if (!isSupabaseConfigured || !isAuthenticated || !user || isLocalMode) return
 
         let retryCount = 0
         let retryTimer: ReturnType<typeof setTimeout> | null = null
@@ -140,15 +148,15 @@ export function useSyncStatus(): UseSyncStatusResult {
             unsubscribe()
             if (retryTimer) clearTimeout(retryTimer)
         }
-    }, [isAuthenticated, user, isOnline, sync])
+    }, [isAuthenticated, isLocalMode, user, isOnline, sync])
 
     return {
-        syncState,
+        syncState: isLocalMode ? 'idle' : syncState,
         pendingCount,
-        lastSyncTime,
+        lastSyncTime: isLocalMode ? null : lastSyncTime,
         lastSyncResult,
         isOnline,
         sync,
-        isSyncing: syncState === 'syncing'
+        isSyncing: !isLocalMode && syncState === 'syncing'
     }
 }

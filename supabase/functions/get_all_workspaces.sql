@@ -1,5 +1,7 @@
-CREATE OR REPLACE FUNCTION public.get_all_workspaces(provided_key text)
- RETURNS TABLE(id uuid, name text, code text, created_at timestamp with time zone, allow_pos boolean, allow_customers boolean, allow_orders boolean, allow_invoices boolean, is_configured boolean, deleted_at timestamp with time zone, coordination text, logo_url text, subscription_expires_at timestamp with time zone)
+DROP FUNCTION IF EXISTS public.get_all_workspaces(text);
+
+CREATE FUNCTION public.get_all_workspaces(provided_key text)
+ RETURNS TABLE(id uuid, name text, code text, created_at timestamp with time zone, data_mode text, allow_pos boolean, allow_customers boolean, allow_orders boolean, allow_invoices boolean, is_configured boolean, locked_workspace boolean, deleted_at timestamp with time zone, coordination text, logo_url text, subscription_expires_at timestamp with time zone)
  LANGUAGE plpgsql
  SECURITY DEFINER
 AS $function$
@@ -14,11 +16,13 @@ BEGIN
         w.name,
         w.code,
         w.created_at,
+        COALESCE(w.data_mode, 'cloud'),
         COALESCE(w.allow_pos, false),
         COALESCE(w.allow_customers, false),
         COALESCE(w.allow_orders, false),
         COALESCE(w.allow_invoices, false),
         COALESCE(w.is_configured, false),
+        COALESCE(w.locked_workspace, false),
         w.deleted_at,
         w.coordination,
         w.logo_url,

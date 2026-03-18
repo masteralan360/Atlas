@@ -81,7 +81,7 @@ export function POS() {
     const { toast } = useToast()
     const { user } = useAuth()
     const { t } = useTranslation()
-    const { features } = useWorkspace()
+    const { features, isLocalMode } = useWorkspace()
     const products = useProducts(user?.workspaceId)
     const storages = useStorages(user?.workspaceId)
     const [selectedStorageId, setSelectedStorageId] = useState<string>(() => {
@@ -1208,6 +1208,10 @@ export function POS() {
         }
 
         try {
+            if (isLocalMode) {
+                throw new Error('local_workspace_sale')
+            }
+
             // Attempt online checkout
             const { data, error } = await runSupabaseAction('pos.completeSale', () =>
                 supabase.rpc('complete_sale', {
@@ -1301,7 +1305,7 @@ export function POS() {
             console.error('Checkout failed, attempting offline save:', err)
             const normalizedError = normalizeSupabaseActionError(err)
 
-            if (!navigator.onLine) {
+            if (!navigator.onLine || isLocalMode) {
                 try {
                     // Run local verification FIRST (before save, but using the data we're about to save)
                     const verificationSale = createVerificationSale(
@@ -1443,7 +1447,7 @@ export function POS() {
                 }
             }
 
-            if (isRetriableWebRequestError(normalizedError)) {
+            if (!isLocalMode && isRetriableWebRequestError(normalizedError)) {
                 const message = getRetriableActionToast(normalizedError)
                 toast({
                     variant: 'destructive',

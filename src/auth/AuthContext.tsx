@@ -1,9 +1,14 @@
 import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from 'react'
 import { supabase, isSupabaseConfigured } from './supabase'
 import type { User, Session } from '@supabase/supabase-js'
-import type { UserRole } from '@/local-db/models'
+import type {
+    UserRole,
+    WorkspaceDataMode
+} from '@/local-db/models'
 import { connectionManager } from '@/lib/connectionManager'
+import { setActiveBusinessWorkspace } from '@/lib/network'
 import { clearWorkspaceCache } from '@/workspace/workspaceCache'
+import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
 
 interface AuthUser {
@@ -16,6 +21,7 @@ interface AuthUser {
     workspaceName?: string
     profileUrl?: string
     isConfigured?: boolean
+    workspaceMode: WorkspaceDataMode
 }
 
 interface AuthContextType {
@@ -53,7 +59,8 @@ const DEMO_USER: AuthUser = {
     workspaceId: 'demo-workspace',
     workspaceCode: 'DEMO-1234',
     workspaceName: 'Demo Workspace',
-    profileUrl: undefined
+    profileUrl: undefined,
+    workspaceMode: 'local'
 }
 
 function parseUserFromSupabase(user: User): AuthUser {
@@ -66,7 +73,8 @@ function parseUserFromSupabase(user: User): AuthUser {
         workspaceCode: user.user_metadata?.workspace_code ?? '',
         workspaceName: user.user_metadata?.workspace_name,
         profileUrl: user.user_metadata?.profile_url,
-        isConfigured: user.user_metadata?.is_configured
+        isConfigured: user.user_metadata?.is_configured,
+        workspaceMode: user.user_metadata?.data_mode === 'local' ? 'local' : 'cloud'
     }
 }
 
@@ -77,7 +85,7 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
     const [wsResult, profileResult] = await Promise.allSettled([
         supabase
             .from('workspaces')
-            .select('code, name, is_configured')
+            .select('code, name, is_configured, data_mode')
             .eq('id', parsedUser.workspaceId)
             .single(),
         supabase
@@ -91,6 +99,11 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
         parsedUser.workspaceCode = wsResult.value.data.code
         parsedUser.workspaceName = wsResult.value.data.name
         parsedUser.isConfigured = wsResult.value.data.is_configured
+        parsedUser.workspaceMode = wsResult.value.data.data_mode === 'local' ? 'local' : 'cloud'
+        writeWorkspaceModeSnapshot({
+            workspaceId: parsedUser.workspaceId,
+            dataMode: parsedUser.workspaceMode
+        })
     }
     if (profileResult.status === 'fulfilled' && profileResult.value.data?.profile_url) {
         parsedUser.profileUrl = profileResult.value.data.profile_url
@@ -155,10 +168,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Keep sessionRef in sync
     useEffect(() => { sessionRef.current = session }, [session])
+    useEffect(() => {
+        setActiveBusinessWorkspace(user?.workspaceId ?? null)
+    }, [user?.workspaceId])
 
     useEffect(() => {
         if (!isSupabaseConfigured) {
             setUser(DEMO_USER)
+            writeWorkspaceModeSnapshot({
+                workspaceId: DEMO_USER.workspaceId,
+                dataMode: DEMO_USER.workspaceMode
+            })
             setIsLoading(false)
             return
         }
@@ -172,6 +192,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const parsedUser = session?.user ? parseUserFromSupabase(session.user) : null
 
             if (!parsedUser) {
+                clearWorkspaceModeSnapshot(user?.workspaceId)
                 setUser(null)
                 clearRecovery()
                 setIsLoading(false)
@@ -393,6 +414,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const signIn = async (email: string, password: string) => {
         if (!isSupabaseConfigured) {
             setUser(DEMO_USER)
+            writeWorkspaceModeSnapshot({
+                workspaceId: DEMO_USER.workspaceId,
+                dataMode: DEMO_USER.workspaceMode
+            })
             return { error: null }
         }
 
@@ -423,7 +448,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         adminContacts?: { type: 'phone' | 'email' | 'address'; value: string; label?: string; isPrimary: boolean }[];
     }) => {
         if (!isSupabaseConfigured) {
-            setUser({ ...DEMO_USER, email, name, role, workspaceName: workspaceName || 'Local Workspace' })
+            const localDemoUser = { ...DEMO_USER, email, name, role, workspaceName: workspaceName || 'Local Workspace' }
+            setUser(localDemoUser)
+            writeWorkspaceModeSnapshot({
+                workspaceId: localDemoUser.workspaceId,
+                dataMode: localDemoUser.workspaceMode
+            })
             return { error: null }
         }
 
@@ -434,7 +464,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (role === 'admin') {
                 if (!workspaceName) throw new Error('Workspace name is required for Admins')
 
-                const { data: wsData, error: wsError } = await supabase.rpc('create_workspace', { w_name: workspaceName })
+                const { data: wsData, error: wsError } = await supabase.rpc('create_workspace', {
+                    w_name: workspaceName
+                })
                 if (wsError) throw wsError
 
                 workspaceId = wsData?.id || (Array.isArray(wsData) ? wsData[0]?.id : (wsData?.create_workspace?.id || ''))
@@ -517,6 +549,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setSession(null)
 
             clearWorkspaceCache()
+            clearWorkspaceModeSnapshot()
             clearRecovery()
 
             console.log('[Auth] Sign out complete')
@@ -552,7 +585,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const updateUser = (updates: Partial<AuthUser>) => {
         if (!user) return
-        setUser({ ...user, ...updates })
+        const nextUser = { ...user, ...updates }
+        setUser(nextUser)
+
+        if (nextUser.workspaceId) {
+            writeWorkspaceModeSnapshot({
+                workspaceId: nextUser.workspaceId,
+                dataMode: nextUser.workspaceMode
+            })
+        }
     }
 
     // User is kicked if authenticated but has no workspace

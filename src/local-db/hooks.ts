@@ -37,6 +37,7 @@ import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { isOnline } from '@/lib/network'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
+import { isCloudWorkspaceMode, isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 // ===================
 // CATEGORIES HOOKS
@@ -63,6 +64,10 @@ function shouldUseOfflineMutationFallback(error: unknown): boolean {
     return isRetriableWebRequestError(error)
 }
 
+function shouldUseCloudBusinessData(workspaceId?: string | null): boolean {
+    return !!workspaceId && isCloudWorkspaceMode(workspaceId)
+}
+
 // ===================
 // CATEGORIES HOOKS
 // ===================
@@ -79,7 +84,7 @@ export function useCategories(workspaceId: string | undefined) {
     // 2. Online: Fetch fresh data from Supabase & cleanup cache
     useEffect(() => {
         async function fetchFromSupabase() {
-            if (isOnline && workspaceId) {
+            if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
                 const { data, error } = await supabase
                     .from('categories')
                     .select('*')
@@ -233,7 +238,7 @@ export function useProducts(workspaceId: string | undefined) {
 
     useEffect(() => {
         async function fetchFromSupabase() {
-            if (isOnline && workspaceId) {
+            if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
                 const { data, error } = await supabase
                     .from('products')
                     .select('*')
@@ -380,7 +385,7 @@ export function useSuppliers(workspaceId: string | undefined) {
 
     useEffect(() => {
         async function fetchFromSupabase() {
-            if (isOnline && workspaceId) {
+            if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
                 const { data, error } = await supabase
                     .from('suppliers')
                     .select('*')
@@ -512,7 +517,7 @@ export function useCustomers(workspaceId: string | undefined) {
 
     useEffect(() => {
         async function fetchFromSupabase() {
-            if (isOnline && workspaceId) {
+            if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
                 const { data, error } = await supabase
                     .from('customers')
                     .select('*')
@@ -666,7 +671,7 @@ export function usePurchaseOrders(workspaceId: string | undefined) {
     )
 
     useEffect(() => {
-        if (isOnline && workspaceId) {
+        if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
             fetchTableFromSupabase('purchase_orders', db.purchaseOrders, workspaceId)
         }
     }, [isOnline, workspaceId])
@@ -727,7 +732,7 @@ export function useSalesOrders(workspaceId: string | undefined) {
     )
 
     useEffect(() => {
-        if (isOnline && workspaceId) {
+        if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
             fetchTableFromSupabase('sales_orders', db.salesOrders, workspaceId)
         }
     }, [isOnline, workspaceId])
@@ -777,6 +782,10 @@ export async function updateSalesOrder(id: string, data: Partial<SalesOrder>): P
 
 // Helpers for repetitive logic
 export async function fetchTableFromSupabase<T extends { id: string, syncStatus: any, lastSyncedAt: any }>(tableName: string, table: any, workspaceId: string) {
+    if (!shouldUseCloudBusinessData(workspaceId)) {
+        return
+    }
+
     const client = getSupabaseClientForTable(tableName)
     let query = client
         .from(tableName)
@@ -867,7 +876,7 @@ export function useInvoices(workspaceId: string | undefined) {
 
     useEffect(() => {
         async function fetchFromSupabase() {
-            if (isOnline && workspaceId) {
+            if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
                 const { data, error } = await supabase
                     .from('invoices')
                     .select('*')
@@ -1082,7 +1091,7 @@ export function useSales(workspaceId: string | undefined) {
 
     useEffect(() => {
         async function fetchFromSupabase() {
-            if (isOnline && workspaceId) {
+            if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
                 const { data, error } = await supabase
                     .from('sales')
                     .select(`
@@ -1220,6 +1229,10 @@ export async function addToOfflineMutations(
     payload: Record<string, unknown>,
     workspaceId: string
 ): Promise<void> {
+    if (isLocalWorkspaceMode(workspaceId)) {
+        return
+    }
+
     // 1. Check for existing pending mutation for this entity
     const existing = await db.offline_mutations
         .where('[entityType+entityId+status]')
@@ -1413,7 +1426,7 @@ export function useStorages(workspaceId: string | undefined) {
 
     useEffect(() => {
         async function fetchFromSupabase() {
-            if (online && workspaceId) {
+            if (online && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
                 const { data, error } = await supabase
                     .from('storages')
                     .select('*')
@@ -1656,7 +1669,7 @@ export function useEmployees(workspaceId: string | undefined) {
     )
 
     useEffect(() => {
-        if (isOnline && workspaceId) {
+        if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
             fetchTableFromSupabase('employees', db.employees, workspaceId)
         }
     }, [isOnline, workspaceId])
@@ -1719,7 +1732,7 @@ export function useWorkspaceUsers(workspaceId: string | undefined) {
 
     useEffect(() => {
         async function fetchFromSupabase() {
-            if (isOnline && workspaceId) {
+            if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
                 // Fetch profiles for the workspace
                 const { data, error } = await supabase
                     .from('profiles')
@@ -1759,7 +1772,7 @@ export function useBudgetSettings(workspaceId: string | undefined) {
 
     // 2. Online Sync
     useEffect(() => {
-        if (isOnline && workspaceId) {
+        if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
             void fetchTableFromSupabase('budget_settings', db.budget_settings, workspaceId)
         }
     }, [isOnline, workspaceId])
@@ -1800,7 +1813,7 @@ export function useBudgetAllocations(workspaceId: string | undefined) {
     )
 
     useEffect(() => {
-        if (isOnline && workspaceId) {
+        if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
             fetchTableFromSupabase('budget_allocations', db.budget_allocations, workspaceId)
         }
     }, [isOnline, workspaceId])
@@ -1861,7 +1874,7 @@ export function useExpenseSeries(workspaceId: string | undefined, options?: { in
     )
 
     useEffect(() => {
-        if (isOnline && workspaceId) {
+        if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
             fetchTableFromSupabase('expense_series', db.expense_series, workspaceId)
         }
     }, [isOnline, workspaceId])
@@ -1951,7 +1964,7 @@ export function useExpenseItems(workspaceId: string | undefined, month: string |
     )
 
     useEffect(() => {
-        if (isOnline && workspaceId) {
+        if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
             fetchTableFromSupabase('expense_items', db.expense_items, workspaceId)
         }
     }, [isOnline, workspaceId])
@@ -2061,7 +2074,7 @@ export function usePayrollStatuses(workspaceId: string | undefined) {
     )
 
     useEffect(() => {
-        if (isOnline && workspaceId) {
+        if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
             fetchTableFromSupabase('payroll_statuses', db.payroll_statuses, workspaceId)
         }
     }, [isOnline, workspaceId])
@@ -2077,7 +2090,7 @@ export function useDividendStatuses(workspaceId: string | undefined) {
     )
 
     useEffect(() => {
-        if (isOnline && workspaceId) {
+        if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
             fetchTableFromSupabase('dividend_statuses', db.dividend_statuses, workspaceId)
         }
     }, [isOnline, workspaceId])
@@ -2160,7 +2173,7 @@ export function useWorkspaceContacts(workspaceId: string | undefined) {
 
     useEffect(() => {
         async function fetchFromSupabase() {
-            if (isOnline && workspaceId) {
+            if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
                 const { data, error } = await supabase
                     .from('workspace_contacts')
                     .select('*')
@@ -2539,7 +2552,7 @@ export function useLoans(workspaceId: string | undefined) {
     )
 
     useEffect(() => {
-        if (online && workspaceId) {
+            if (online && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
             fetchTableFromSupabase('loans', db.loans, workspaceId)
         }
     }, [online, workspaceId])
@@ -2565,7 +2578,7 @@ export function useLoanBySaleId(saleId: string | undefined, workspaceId?: string
     )
 
     useEffect(() => {
-        if (online && workspaceId) {
+            if (online && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
             fetchTableFromSupabase('loans', db.loans, workspaceId)
         }
     }, [online, workspaceId])
@@ -2584,7 +2597,7 @@ export function useLoanInstallments(loanId: string | undefined, workspaceId?: st
     )
 
     useEffect(() => {
-        if (online && workspaceId) {
+        if (online && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
             fetchTableFromSupabase('loan_installments', db.loan_installments, workspaceId)
         }
     }, [online, workspaceId])
@@ -2605,7 +2618,7 @@ export function useLoanPayments(loanId: string | undefined, workspaceId?: string
     )
 
     useEffect(() => {
-        if (online && workspaceId) {
+        if (online && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
             fetchTableFromSupabase('loan_payments', db.loan_payments, workspaceId)
         }
     }, [online, workspaceId])

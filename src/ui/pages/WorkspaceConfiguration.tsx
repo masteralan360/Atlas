@@ -10,6 +10,12 @@ import {
     CardHeader,
     CardTitle,
     CardDescription,
+    Label,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
     Button,
     useToast
 } from '@/ui/components'
@@ -29,6 +35,7 @@ import { isTauri as isTauriCheck } from '@/lib/platform'
 import { platformService } from '@/services/platformService'
 import { assetManager } from '@/lib/assetManager'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
+import type { WorkspaceDataMode } from '@/local-db/models'
 
 interface FeatureToggle {
     key: 'allow_pos' | 'allow_customers' | 'allow_orders' | 'allow_invoices'
@@ -48,6 +55,7 @@ export function WorkspaceConfiguration() {
     const [isLocationSaving, setIsLocationSaving] = useState(false)
     const [logoUrl, setLogoUrl] = useState(currentFeatures.logo_url || '')
     const [coordination, setCoordination] = useState(currentFeatures.coordination || '')
+    const [dataMode, setDataMode] = useState<WorkspaceDataMode>(currentFeatures.data_mode)
     const isTauri = isTauriCheck()
     const workspaceId = user?.workspaceId || ''
 
@@ -187,6 +195,7 @@ export function WorkspaceConfiguration() {
         try {
             const { error } = await runSupabaseAction('workspace.configure', () =>
                 supabase.rpc('configure_workspace', {
+                    p_data_mode: dataMode,
                     p_allow_pos: features.allow_pos,
                     p_allow_customers: features.allow_customers,
                     p_allow_orders: features.allow_orders,
@@ -319,6 +328,29 @@ export function WorkspaceConfiguration() {
                                     ? (t('workspaceConfig.location.savedCta') || 'Location saved')
                                     : (t('workspaceConfig.location.cta') || 'Share Location')}
                             </Button>
+                        </div>
+
+                        <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-6">
+                            <div className="space-y-1">
+                                <Label>{t('workspaceConfig.mode.title') || 'Workspace Mode'}</Label>
+                                <p className="text-sm text-muted-foreground">
+                                    {t('workspaceConfig.mode.description') || 'Choose how this workspace stores business data. This choice is permanent after setup.'}
+                                </p>
+                            </div>
+                            <Select value={dataMode} onValueChange={(value) => setDataMode(value as WorkspaceDataMode)}>
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="cloud">{t('workspaceConfig.mode.cloud') || 'Cloud Mode'}</SelectItem>
+                                    <SelectItem value="local">{t('workspaceConfig.mode.local') || 'Local Mode'}</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <p className="text-xs text-muted-foreground">
+                                {dataMode === 'local'
+                                    ? (t('workspaceConfig.mode.localHint') || 'Local Mode keeps business data on the device and does not use cloud business-data sync.')
+                                    : (t('workspaceConfig.mode.cloudHint') || 'Cloud Mode keeps business data in the cloud and uses the existing sync flow.')}
+                            </p>
                         </div>
 
                         {/* Feature Toggles */}

@@ -436,7 +436,7 @@ export function InstantPOS() {
     const { t } = useTranslation()
     const { toast } = useToast()
     const { user } = useAuth()
-    const { features, updateSettings } = useWorkspace()
+    const { features, updateSettings, isLocalMode } = useWorkspace()
     const products = useProducts(user?.workspaceId)
     const categories = useCategories(user?.workspaceId)
 
@@ -780,6 +780,10 @@ export function InstantPOS() {
         }
 
         try {
+            if (isLocalMode) {
+                throw new Error('local_workspace_sale')
+            }
+
             const { data, error } = await runSupabaseAction('instantPos.completeSale', () =>
                 supabase.rpc('complete_sale', { payload: checkoutPayload })
             )
@@ -829,7 +833,7 @@ export function InstantPOS() {
             const normalized = normalizeSupabaseActionError(err)
             console.error('[Instant POS] Checkout failed, saving offline:', normalized)
 
-            if (!navigator.onLine) {
+            if (!navigator.onLine || isLocalMode) {
                 try {
                     await db.sales.add({
                         id: saleId,
@@ -906,8 +910,12 @@ export function InstantPOS() {
                     closeTicket(activeTicket.id)
 
                     toast({
-                        title: t('instantPos.offlineSaved') || 'Saved offline',
-                        description: t('instantPos.offlineSavedDesc') || 'Ticket closed and will sync when online.'
+                        title: isLocalMode
+                            ? (t('instantPos.savedLocally') || 'Saved locally')
+                            : (t('instantPos.offlineSaved') || 'Saved offline'),
+                        description: isLocalMode
+                            ? (t('instantPos.savedLocallyDesc') || 'Ticket closed and stored only on this device for this workspace.')
+                            : (t('instantPos.offlineSavedDesc') || 'Ticket closed and will sync when online.')
                     })
                 } catch (offlineErr) {
                     const offlineNormalized = normalizeSupabaseActionError(offlineErr)

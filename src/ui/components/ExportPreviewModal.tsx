@@ -4,6 +4,7 @@ import { FileSpreadsheet, Download, X, Loader2 } from 'lucide-react'
 import Spreadsheet from "react-spreadsheet"
 import { cn } from '@/lib/utils'
 import { useWorkspace } from '@/workspace'
+import { db } from '@/local-db'
 import {
     Dialog,
     DialogContent,
@@ -33,7 +34,7 @@ export function ExportPreviewModal({
     type = 'sales'
 }: ExportPreviewModalProps) {
     const { t } = useTranslation()
-    const { activeWorkspace } = useWorkspace()
+    const { activeWorkspace, isLocalMode } = useWorkspace()
     const [isExporting, setIsExporting] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
     const [data, setData] = useState<any[]>([])
@@ -44,11 +45,100 @@ export function ExportPreviewModal({
         } else if (!isOpen) {
             setData([]) // Clear data on close
         }
-    }, [isOpen, filters])
+    }, [activeWorkspace?.id, filters, isLocalMode, isOpen])
 
     const fetchExportData = async () => {
         setIsLoading(true)
         try {
+            if (isLocalMode && activeWorkspace?.id) {
+                const localSales = await db.sales.where('workspaceId').equals(activeWorkspace.id).toArray()
+                const localUsers = await db.users.where('workspaceId').equals(activeWorkspace.id).toArray()
+                const localSaleIds = localSales.map((sale) => sale.id)
+                const localSaleItems = localSaleIds.length > 0
+                    ? await db.sale_items.where('saleId').anyOf(localSaleIds).toArray()
+                    : []
+                const saleItemsBySaleId = localSaleItems.reduce<Record<string, typeof localSaleItems>>((acc, item) => {
+                    if (!acc[item.saleId]) {
+                        acc[item.saleId] = []
+                    }
+                    acc[item.saleId].push(item)
+                    return acc
+                }, {})
+                const profilesMap = localUsers.reduce<Record<string, string>>((acc, member) => {
+                    acc[member.id] = member.name
+                    return acc
+                }, {})
+
+                const now = new Date()
+                const { dateRange, customDates, selectedCashier } = filters || {
+                    dateRange: 'today',
+                    customDates: { start: null, end: null },
+                    selectedCashier: 'all'
+                }
+
+                const filteredSales = localSales.filter((sale) => {
+                    const saleDate = new Date(sale.createdAt)
+
+                    if (dateRange === 'today') {
+                        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+                        if (saleDate < startOfDay) return false
+                    } else if (dateRange === 'month') {
+                        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+                        if (saleDate < startOfMonth) return false
+                    } else if (dateRange === 'custom' && customDates.start && customDates.end) {
+                        const start = new Date(customDates.start)
+                        start.setHours(0, 0, 0, 0)
+                        const end = new Date(customDates.end)
+                        end.setHours(23, 59, 59, 999)
+                        if (saleDate < start || saleDate > end) return false
+                    }
+
+                    if (selectedCashier && selectedCashier !== 'all' && sale.cashierId !== selectedCashier) {
+                        return false
+                    }
+
+                    return true
+                })
+
+                const formattedSales = filteredSales
+                    .filter((sale: any) => !sale.isReturned)
+                    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+                    .map((sale: any) => {
+                        const saleItems = saleItemsBySaleId[sale.id] || []
+                        const saleRevenue = sale.totalAmount || 0
+                        const saleCost = saleItems.reduce((acc: number, item: any) => {
+                            const costPrice = item.convertedCostPrice || item.costPrice || 0
+                            const quantity = item.quantity || 0
+                            const returnedQuantity = item.returnedQuantity || 0
+                            const netQuantity = Math.max(0, quantity - returnedQuantity)
+                            return acc + (costPrice * netQuantity)
+                        }, 0)
+
+                        return {
+                            ...sale,
+                            sequenceId: sale.sequenceId,
+                            cashier_name: profilesMap[sale.cashierId] || 'Staff',
+                            revenue: saleRevenue,
+                            cost: saleCost,
+                            profit: saleRevenue - saleCost,
+                            margin: saleRevenue > 0 ? ((saleRevenue - saleCost) / saleRevenue) * 100 : 0,
+                            date: sale.createdAt,
+                            cashier: profilesMap[sale.cashierId] || 'Staff',
+                            currency: sale.settlementCurrency || 'usd',
+                            total_amount: sale.totalAmount,
+                            settlement_currency: sale.settlementCurrency,
+                            items: saleItems.map((item: any) => ({
+                                ...item,
+                                product_name: item.productName || 'Unknown Product',
+                                product_sku: item.productSku || ''
+                            }))
+                        }
+                    })
+
+                setData(formattedSales)
+                return
+            }
+
             let query = supabase
                 .from('sales')
                 .select(`

@@ -106,7 +106,7 @@ export function Sales() {
     const { user } = useAuth()
     const { t, i18n } = useTranslation()
     const [, setLocation] = useLocation()
-    const { features, workspaceName, activeWorkspace } = useWorkspace()
+    const { features, workspaceName, activeWorkspace, isLocalMode } = useWorkspace()
     const { style } = useTheme()
     const { toast } = useToast()
     const rawSales = useSales(user?.workspaceId)
@@ -415,10 +415,12 @@ export function Sales() {
     const confirmDeleteSale = async () => {
         if (!saleToDelete) return
         try {
-            const { error } = await runSupabaseAction('sales.delete', () =>
-                supabase.rpc('delete_sale', { p_sale_id: saleToDelete.id })
-            )
-            if (error) throw normalizeSupabaseActionError(error)
+            if (!isLocalMode) {
+                const { error } = await runSupabaseAction('sales.delete', () =>
+                    supabase.rpc('delete_sale', { p_sale_id: saleToDelete.id })
+                )
+                if (error) throw normalizeSupabaseActionError(error)
+            }
 
             // Update local-db immediately for instant UI feedback
             await db.sales.delete(saleToDelete.id)
@@ -540,6 +542,112 @@ export function Sales() {
             let error
             const isPartialReturn = (saleToReturn as any)._isPartialReturn
             const isIndividualItemReturn = saleToReturn?.items?.length === 1 && !(saleToReturn as any)._isWholeSaleReturn && !isPartialReturn
+
+            if (isLocalMode) {
+                if (isIndividualItemReturn || isPartialReturn) {
+                    const itemsToReturn = saleToReturn.items || []
+                    if (itemsToReturn.length === 0) return
+
+                    const itemIds = itemsToReturn.map(i => i.id)
+                    const quantities = itemsToReturn.map(i =>
+                        quantity && itemsToReturn.length === 1 ? quantity : (i.quantity - (i.returned_quantity || 0))
+                    )
+                    const returnValue = itemsToReturn.reduce((sum, item, index) => {
+                        const unitPrice = item.converted_unit_price || item.unit_price || 0
+                        return sum + (unitPrice * quantities[index])
+                    }, 0)
+
+                    const updateSale = (s: Sale) => {
+                        if (s.id !== saleToReturn.id) return s
+                        const updatedItems = s.items?.map(i => {
+                            const returnedIdx = itemIds.indexOf(i.id)
+                            if (returnedIdx === -1) return i
+
+                            const q = quantities[returnedIdx]
+                            const newReturnedQty = (i.returned_quantity || 0) + q
+                            return {
+                                ...i,
+                                returned_quantity: newReturnedQty,
+                                is_returned: newReturnedQty >= i.quantity,
+                                return_reason: reason,
+                                returned_at: new Date().toISOString()
+                            }
+                        })
+
+                        return {
+                            ...s,
+                            total_amount: s.total_amount - returnValue,
+                            is_returned: updatedItems?.every(i => i.is_returned) || false,
+                            items: updatedItems
+                        }
+                    }
+
+                    const existingLocal = await db.sales.get(saleToReturn.id)
+                    if (existingLocal) {
+                        const updatedSale = updateSale({ ...existingLocal, items: (existingLocal as any)._enrichedItems } as any)
+                        ; (existingLocal as any)._enrichedItems = updatedSale.items
+                        ; (existingLocal as any).totalAmount = updatedSale.total_amount
+                        ; (existingLocal as any).isReturned = updatedSale.is_returned
+                        await db.sales.put(existingLocal)
+                    }
+                    await Promise.all(itemsToReturn.map((item, index) => {
+                        const newReturnedQty = (item.returned_quantity || 0) + quantities[index]
+                        return db.sale_items.update(item.id, {
+                            returnedQuantity: newReturnedQty
+                        } as any)
+                    }))
+                    if (selectedSale?.id === saleToReturn.id) {
+                        setSelectedSale(updateSale(selectedSale))
+                    }
+                } else {
+                    const updateSale = (s: Sale) => {
+                        if (s.id !== saleToReturn.id) return s
+                        return {
+                            ...s,
+                            is_returned: true,
+                            total_amount: 0,
+                            return_reason: reason,
+                            returned_at: new Date().toISOString(),
+                            items: s.items?.map(i => ({
+                                ...i,
+                                is_returned: true,
+                                returned_quantity: i.quantity,
+                                return_reason: reason,
+                                returned_at: new Date().toISOString()
+                            }))
+                        }
+                    }
+
+                    const existingLocal = await db.sales.get(saleToReturn.id)
+                    if (existingLocal) {
+                        ; (existingLocal as any).isReturned = true
+                        ; (existingLocal as any).totalAmount = 0
+                        ; (existingLocal as any).returnReason = reason
+                        ; (existingLocal as any).returnedAt = new Date().toISOString()
+                        const updatedItems = ((existingLocal as any)._enrichedItems || []).map((i: any) => ({
+                            ...i,
+                            is_returned: true,
+                            returned_quantity: i.quantity,
+                            return_reason: reason,
+                            returned_at: new Date().toISOString()
+                        }))
+                        ; (existingLocal as any)._enrichedItems = updatedItems
+                        await db.sales.put(existingLocal)
+                    }
+                    if (selectedSale?.id === saleToReturn.id) {
+                        setSelectedSale(updateSale(selectedSale))
+                    }
+                    await Promise.all((saleToReturn.items || []).map((item) =>
+                        db.sale_items.update(item.id, {
+                            returnedQuantity: item.quantity
+                        } as any)
+                    ))
+                }
+
+                setReturnModalOpen(false)
+                setSaleToReturn(null)
+                return
+            }
 
             if (isIndividualItemReturn || isPartialReturn) {
                 // Partial or Individual Item Return
@@ -683,7 +791,7 @@ export function Sales() {
         if (!selectedSaleForNote) return
 
         const now = new Date().toISOString()
-        const isCurrentlyOnline = navigator.onLine
+        const isCurrentlyOnline = navigator.onLine && !isLocalMode
         const existingLocal = await db.sales.get(selectedSaleForNote.id)
 
         try {
@@ -693,6 +801,14 @@ export function Sales() {
                 updatedAt: now,
                 syncStatus: 'pending'
             })
+
+            if (isLocalMode) {
+                toast({
+                    title: t('sales.notes.saved') || 'Note Saved',
+                    description: t('sales.notes.savedLocalOnly') || 'Note saved locally for this workspace.',
+                })
+                return
+            }
 
             if (isCurrentlyOnline) {
                 // 2. ONLINE: Write to Supabase first
@@ -773,7 +889,9 @@ export function Sales() {
 
                 toast({
                     title: t('sales.notes.saved') || 'Note Saved',
-                    description: t('sales.notes.savedOffline') || 'Note saved locally and will sync when online.',
+                    description: isLocalMode
+                        ? (t('sales.notes.savedLocalOnly') || 'Note saved locally for this workspace.')
+                        : (t('sales.notes.savedOffline') || 'Note saved locally and will sync when online.'),
                 })
             }
         } catch (error) {

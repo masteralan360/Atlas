@@ -6,6 +6,7 @@ export type SyncStatus = 'pending' | 'synced' | 'conflict'
 export type UserRole = 'admin' | 'staff' | 'viewer'
 
 export type CurrencyCode = 'usd' | 'eur' | 'iqd' | 'try'
+export type WorkspaceDataMode = 'cloud' | 'local'
 
 export type PaymentMethod = 'cash' | 'fib' | 'qicard' | 'zaincash' | 'fastpay' | 'loan'
 export type LoanPaymentMethod = PaymentMethod | 'loan_adjustment'
@@ -410,6 +411,7 @@ export type MutationStatus = 'pending' | 'syncing' | 'failed' | 'synced'
 export interface Workspace extends BaseEntity {
     name: string
     code: string
+    data_mode: WorkspaceDataMode
     is_configured?: boolean
     default_currency: CurrencyCode
     iqd_display_preference: IQDDisplayPreference

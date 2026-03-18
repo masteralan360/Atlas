@@ -16,7 +16,7 @@ import { Checkbox } from '@/ui/components'
 
 export default function InventoryTransfer() {
     const { t } = useTranslation()
-    const { activeWorkspace } = useWorkspace()
+    const { activeWorkspace, isLocalMode } = useWorkspace()
     const storages = useStorages(activeWorkspace?.id)
     const { toast } = useToast()
 
@@ -73,7 +73,7 @@ export default function InventoryTransfer() {
                     syncStatus: 'pending'
                 })
 
-                if (isOnline()) {
+                if (!isLocalMode && isOnline(activeWorkspace?.id)) {
                     const { error } = await supabase
                         .from('products')
                         .update({ storage_id: targetStorageId, updated_at: now })

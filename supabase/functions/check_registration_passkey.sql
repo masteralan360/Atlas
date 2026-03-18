@@ -1,6 +1,8 @@
 CREATE OR REPLACE FUNCTION public.check_registration_passkey()
  RETURNS trigger
  LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
 AS $function$
 declare
     provided_key text;

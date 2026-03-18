@@ -1,7 +1,12 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { supabase, isSupabaseConfigured } from '@/auth/supabase'
 import { useAuth } from '@/auth/AuthContext'
-import type { CurrencyCode, IQDDisplayPreference, Workspace } from '@/local-db/models'
+import type {
+    CurrencyCode,
+    IQDDisplayPreference,
+    Workspace,
+    WorkspaceDataMode
+} from '@/local-db/models'
 import { db } from '@/local-db/database'
 import { addToOfflineMutations } from '@/local-db/hooks'
 import { isMobile } from '@/lib/platform'
@@ -11,9 +16,11 @@ import {
     writeWorkspaceCache,
     type WorkspaceCacheSnapshot
 } from './workspaceCache'
+import { writeWorkspaceModeSnapshot } from './workspaceMode'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
 
 export interface WorkspaceFeatures {
+    data_mode: WorkspaceDataMode
     allow_pos: boolean
     allow_customers: boolean
     allow_suppliers: boolean
@@ -53,6 +60,8 @@ interface WorkspaceContextType {
     setPendingUpdate: (update: UpdateInfo | null) => void
     isFullscreen: boolean
     isLocked: boolean
+    isLocalMode: boolean
+    isCloudMode: boolean
     hasFeature: (feature: 'allow_pos' | 'allow_customers' | 'allow_suppliers' | 'allow_orders' | 'allow_invoices' | 'allow_whatsapp') => boolean
     refreshFeatures: () => Promise<void>
     updateSettings: (settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'iqd_display_preference' | 'eur_conversion_enabled' | 'try_conversion_enabled' | 'allow_whatsapp' | 'kds_enabled' | 'logo_url' | 'coordination' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'print_quality' | 'thermal_printing'>> & { name?: string }) => Promise<void>
@@ -60,6 +69,7 @@ interface WorkspaceContextType {
 }
 
 const defaultFeatures: WorkspaceFeatures = {
+    data_mode: 'cloud',
     allow_pos: true,
     allow_customers: true,
     allow_suppliers: true,
@@ -95,6 +105,7 @@ function getFeaturesFromLocalWorkspace(localWorkspace: Workspace): WorkspaceFeat
     }
 
     return mergeWorkspaceFeatures({
+        data_mode: localWorkspace.data_mode ?? 'cloud',
         allow_pos: localWorkspace.allow_pos ?? true,
         allow_customers: localWorkspace.allow_customers ?? true,
         allow_suppliers: localWorkspace.allow_suppliers ?? true,
@@ -201,6 +212,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             workspaceId,
             name: nextWorkspaceName || existing?.name || user?.workspaceName || 'My Workspace',
             code: existing?.code || user?.workspaceCode || 'LOADED',
+            data_mode: nextFeatures.data_mode,
             is_configured: nextFeatures.is_configured,
             default_currency: nextFeatures.default_currency,
             iqd_display_preference: nextFeatures.iqd_display_preference,
@@ -320,6 +332,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 ?? featuresRef.current.thermal_printing
                 ?? false
             const fetchedFeatures = mergeWorkspaceFeatures({
+                data_mode: featureData.data_mode === 'local' ? 'local' : 'cloud',
                 allow_pos: featureData.allow_pos ?? true,
                 allow_customers: featureData.allow_customers ?? true,
                 allow_suppliers: featureData.allow_suppliers ?? true,
@@ -414,6 +427,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                         const currentFeatures = featuresRef.current
                         const updatedFeatures = mergeWorkspaceFeatures({
                             ...currentFeatures,
+                            data_mode: data.data_mode === 'local' ? 'local' : currentFeatures.data_mode,
                             allow_pos: data.allow_pos ?? currentFeatures.allow_pos,
                             allow_customers: data.allow_customers ?? currentFeatures.allow_customers,
                             allow_suppliers: data.allow_suppliers ?? currentFeatures.allow_suppliers,
@@ -538,6 +552,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 workspaceId,
                 name: nextWorkspaceName,
                 code: user?.workspaceCode || 'LOCAL',
+                data_mode: newFeatures.data_mode,
                 is_configured: newFeatures.is_configured,
                 default_currency: newFeatures.default_currency,
                 iqd_display_preference: newFeatures.iqd_display_preference,
@@ -594,7 +609,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
     }
 
-    const isLocked = features.locked_workspace || (features.subscription_expires_at ? new Date(features.subscription_expires_at) < new Date() : false)
+    useEffect(() => {
+        if (!user?.workspaceId) {
+            return
+        }
+
+        writeWorkspaceModeSnapshot({
+            workspaceId: user.workspaceId,
+            dataMode: features.data_mode
+        })
+    }, [
+        features.data_mode,
+        user?.workspaceId
+    ])
+
+    const isLocalMode = features.data_mode === 'local'
+    const isCloudMode = features.data_mode === 'cloud'
+    const isLocked = features.locked_workspace
+        || (features.subscription_expires_at ? new Date(features.subscription_expires_at) < new Date() : false)
 
     return (
         <WorkspaceContext.Provider value={{
@@ -604,6 +636,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             pendingUpdate,
             setPendingUpdate,
             isLocked,
+            isLocalMode,
+            isCloudMode,
             hasFeature,
             isFullscreen,
             refreshFeatures,

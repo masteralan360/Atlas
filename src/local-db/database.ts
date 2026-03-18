@@ -27,6 +27,7 @@ import type {
     PayrollStatus,
     DividendStatus
 } from './models'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 // Asaas Database using Dexie.js for IndexedDB
 export class AsaasDatabase extends Dexie {
@@ -134,6 +135,79 @@ export class AsaasDatabase extends Dexie {
                 }
             }
         })
+
+        this.registerLocalModeSyncHooks()
+    }
+
+    private registerLocalModeSyncHooks() {
+        const syncAwareTables = [
+            'products',
+            'categories',
+            'suppliers',
+            'customers',
+            'purchaseOrders',
+            'salesOrders',
+            'invoices',
+            'users',
+            'sales',
+            'workspaces',
+            'storages',
+            'employees',
+            'workspace_contacts',
+            'loans',
+            'loan_installments',
+            'loan_payments',
+            'budget_settings',
+            'budget_allocations',
+            'expense_series',
+            'expense_items',
+            'payroll_statuses',
+            'dividend_statuses'
+        ] as const
+
+        const normalizeSyncMetadata = (workspaceId?: string | null) => {
+            if (!workspaceId || !isLocalWorkspaceMode(workspaceId)) {
+                return null
+            }
+
+            return {
+                syncStatus: 'synced',
+                lastSyncedAt: new Date().toISOString()
+            }
+        }
+
+        for (const tableName of syncAwareTables) {
+            const table = this.table(tableName)
+
+            table.hook('creating', (_primaryKey, obj) => {
+                if (!obj || typeof obj !== 'object') {
+                    return
+                }
+
+                const normalized = normalizeSyncMetadata((obj as { workspaceId?: string }).workspaceId)
+                if (normalized) {
+                    Object.assign(obj, normalized)
+                }
+            })
+
+            table.hook('updating', (mods, _primaryKey, obj) => {
+                const nextWorkspaceId = (mods as { workspaceId?: unknown }).workspaceId
+                const normalized = normalizeSyncMetadata(
+                    typeof nextWorkspaceId === 'string'
+                        ? nextWorkspaceId
+                        : (obj as { workspaceId?: string } | undefined)?.workspaceId
+                )
+
+                if (!normalized) {
+                    return mods
+                }
+
+                return {
+                    ...mods,
+                    ...normalized
+                }
+            })
+        }
     }
 }
 

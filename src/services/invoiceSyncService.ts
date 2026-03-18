@@ -4,6 +4,7 @@ import { assetManager } from '@/lib/assetManager'
 import { isOnline } from '@/lib/network'
 import { generateInvoicePdf } from './pdfGenerator'
 import { toast } from '@/ui/components/use-toast'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 interface SyncInvoiceOptions {
     saleData: any
@@ -27,6 +28,7 @@ interface SyncInvoiceOptions {
 export async function triggerInvoiceSync(options: SyncInvoiceOptions): Promise<void> {
     const { saleData, features, workspaceName, user } = options;
     const invoiceId = saleData.id;
+    const isLocalMode = isLocalWorkspaceMode(options.workspaceId);
 
     if (!invoiceId) {
         console.error('[InvoiceSyncService] No ID provided for sync');
@@ -50,6 +52,28 @@ export async function triggerInvoiceSync(options: SyncInvoiceOptions): Promise<v
             workspaceName: workspaceName || 'Asaas',
             workspaceId: options.workspaceId
         });
+
+        if (isLocalMode) {
+            const dbUpdate: any = {
+                syncStatus: 'synced',
+                lastSyncedAt: new Date().toISOString()
+            };
+
+            if (format === 'a4') {
+                dbUpdate.pdfBlobA4 = pdfBlob;
+            } else {
+                dbUpdate.pdfBlobReceipt = pdfBlob;
+            }
+
+            await db.invoices.update(invoiceId, dbUpdate);
+
+            toast({
+                title: "Receipt saved",
+                description: "Invoice snapshot was stored locally for this workspace.",
+                variant: "default",
+            });
+            return;
+        }
 
         let r2Path: string | undefined;
 

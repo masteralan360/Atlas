@@ -1,0 +1,1 @@
+{"applied":true,"verification":{"rotate_signup_safe_app_permissions_keys_exists":true,"trigger_rotate_keys_on_register_calls_rotate_signup_safe_app_permissions_keys":true,"on_auth_user_created_rotate_keys_trigger_exists":true},"error":null,"note":"Applied via Supabase MCP migration tool and verified from Postgres metadata on project eboispangcayxxheoufy."}

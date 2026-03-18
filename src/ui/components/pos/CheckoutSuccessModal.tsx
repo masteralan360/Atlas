@@ -36,7 +36,7 @@ export function CheckoutSuccessModal({
 }: CheckoutSuccessModalProps) {
     const { t } = useTranslation()
     const { user } = useAuth()
-    const { workspaceName, activeWorkspace } = useWorkspace()
+    const { workspaceName, activeWorkspace, isLocalMode } = useWorkspace()
     const { toast } = useToast()
 
     const [timeLeft, setTimeLeft] = useState(15)
@@ -85,6 +85,10 @@ export function CheckoutSuccessModal({
                 // Update Local DB
                 await db.sales.update(saleData.id, { notes: debouncedNote })
 
+                if (isLocalMode) {
+                    return
+                }
+
                 // Update Supabase
                 const { error } = await runSupabaseAction('checkoutSuccess.saveNote', () =>
                     supabase
@@ -102,7 +106,7 @@ export function CheckoutSuccessModal({
         }
 
         saveNote()
-    }, [debouncedNote, saleData?.id])
+    }, [debouncedNote, isLocalMode, saleData?.id])
 
     const handlePrintAndUpload = async () => {
         if (isProcessing || !saleData || !user) {

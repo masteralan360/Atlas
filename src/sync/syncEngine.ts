@@ -2,6 +2,7 @@ import { supabase, isSupabaseConfigured } from '@/auth/supabase'
 import { db } from '@/local-db'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 // import { getPendingItems, removeFromQueue, incrementRetry } from './syncQueue'
 
 export type SyncState = 'idle' | 'syncing' | 'error' | 'offline'
@@ -166,6 +167,10 @@ export async function pushChanges(_userId: string, _workspaceId: string): Promis
 
 // Pull changes from Supabase
 export async function pullChanges(workspaceId: string, lastSyncTime: string | null): Promise<{ pulled: number }> {
+    if (isLocalWorkspaceMode(workspaceId)) {
+        return { pulled: 0 }
+    }
+
     if (!isSupabaseConfigured) {
         console.log('[Sync] pullChanges: Supabase not configured')
         return { pulled: 0 }
@@ -262,6 +267,15 @@ export async function pullChanges(workspaceId: string, lastSyncTime: string | nu
 
 // Full sync - Process queue then pull
 export async function fullSync(userId: string, workspaceId: string, lastSyncTime: string | null): Promise<SyncResult> {
+    if (isLocalWorkspaceMode(workspaceId)) {
+        return {
+            success: true,
+            pushed: 0,
+            pulled: 0,
+            errors: []
+        }
+    }
+
     console.log(`[Sync] fullSync START for User ${userId}, Workspace ${workspaceId}`)
 
     // 1. Process Offline Mutations

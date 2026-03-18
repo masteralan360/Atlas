@@ -70,7 +70,7 @@ interface StaffPerformance {
 export function TeamPerformance() {
     const { user } = useAuth()
     const { t, i18n } = useTranslation()
-    const { features, workspaceName } = useWorkspace()
+    const { features, workspaceName, isLocalMode } = useWorkspace()
     const [sales, setSales] = useState<Sale[]>([])
     const [members, setMembers] = useState<User[]>([])
     const [isLoading, setIsLoading] = useState(true)
@@ -94,6 +94,81 @@ export function TeamPerformance() {
             const localProfiles = await db.users.where('workspaceId').equals(workspaceId).toArray()
             if (localProfiles.length > 0 && members.length === 0) {
                 setMembers(localProfiles)
+            }
+
+            if (isLocalMode) {
+                const fallbackMembers = localProfiles.length > 0
+                    ? localProfiles
+                    : (user ? [{
+                        id: user.id,
+                        workspaceId,
+                        email: user.email,
+                        name: user.name,
+                        role: user.role,
+                        createdAt: new Date().toISOString(),
+                        updatedAt: new Date().toISOString(),
+                        syncStatus: 'synced' as const,
+                        lastSyncedAt: null,
+                        version: 1,
+                        isDeleted: false
+                    } as User] : [])
+
+                const localSales = await db.sales.where('workspaceId').equals(workspaceId).toArray()
+                const filteredLocalSales = localSales.filter((sale) => {
+                    const saleDate = new Date(sale.createdAt)
+                    const now = new Date()
+
+                    if (dateRange === 'today') {
+                        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+                        return saleDate >= startOfDay
+                    }
+
+                    if (dateRange === 'month') {
+                        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+                        return saleDate >= startOfMonth
+                    }
+
+                    if (dateRange === 'custom' && customDates.start && customDates.end) {
+                        const start = new Date(customDates.start)
+                        start.setHours(0, 0, 0, 0)
+                        const end = new Date(customDates.end)
+                        end.setHours(23, 59, 59, 999)
+                        return saleDate >= start && saleDate <= end
+                    }
+
+                    return true
+                })
+
+                const saleIds = filteredLocalSales.map((sale) => sale.id)
+                const localSaleItems = saleIds.length > 0
+                    ? await db.sale_items.where('saleId').anyOf(saleIds).toArray()
+                    : []
+                const saleItemsBySaleId = localSaleItems.reduce<Record<string, typeof localSaleItems>>((acc, item) => {
+                    if (!acc[item.saleId]) {
+                        acc[item.saleId] = []
+                    }
+                    acc[item.saleId].push(item)
+                    return acc
+                }, {})
+
+                setMembers(fallbackMembers)
+                setSales(filteredLocalSales
+                    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+                    .map((sale) => ({
+                        ...sale,
+                        cashier_id: sale.cashierId,
+                        total_amount: sale.totalAmount,
+                        settlement_currency: sale.settlementCurrency,
+                        created_at: sale.createdAt,
+                        exchange_rate: sale.exchangeRate,
+                        is_returned: sale.isReturned,
+                        sale_items: (saleItemsBySaleId[sale.id] || []).map((item) => ({
+                            ...item,
+                            converted_unit_price: item.convertedUnitPrice,
+                            returned_quantity: item.returnedQuantity
+                        }))
+                    })) as unknown as Sale[])
+                return
             }
 
             // Fetch members from Supabase
@@ -161,7 +236,7 @@ export function TeamPerformance() {
         if (user?.workspaceId) {
             fetchData()
         }
-    }, [user?.workspaceId, dateRange, customDates])
+    }, [customDates, dateRange, isLocalMode, user?.workspaceId])
 
     const calculatePerformance = () => {
         const perfMap: Record<string, StaffPerformance> = {}
@@ -354,12 +429,14 @@ export function TeamPerformance() {
         if (isNaN(targetValue)) return
 
         try {
-            const { error } = await supabase
-                .from('profiles')
-                .update({ monthly_target: targetValue })
-                .eq('id', selectedMember.id)
+            if (!isLocalMode) {
+                const { error } = await supabase
+                    .from('profiles')
+                    .update({ monthly_target: targetValue })
+                    .eq('id', selectedMember.id)
 
-            if (error) throw error
+                if (error) throw error
+            }
 
             // Update local Dexie
             await db.users.update(selectedMember.id, {

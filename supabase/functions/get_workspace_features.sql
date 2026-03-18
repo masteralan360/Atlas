@@ -27,11 +27,12 @@ BEGIN
     END IF;
 
     SELECT jsonb_build_object(
-        'workspace_id', id,
-        'workspace_name', name,
-        'allow_pos', COALESCE(allow_pos, false),
-        'allow_customers', COALESCE(allow_customers, false),
-        'allow_suppliers', COALESCE(allow_suppliers, false),
+        'workspace_id', id,
+        'workspace_name', name,
+        'data_mode', COALESCE(data_mode, 'cloud'),
+        'allow_pos', COALESCE(allow_pos, false),
+        'allow_customers', COALESCE(allow_customers, false),
+        'allow_suppliers', COALESCE(allow_suppliers, false),
         'allow_orders', COALESCE(allow_orders, false),
         'allow_invoices', COALESCE(allow_invoices, false),
         'is_configured', COALESCE(is_configured, false),

@@ -58,6 +58,7 @@ interface AdminWorkspace {
     name: string
     code: string
     created_at: string
+    data_mode: 'cloud' | 'local'
     allow_pos: boolean
     allow_customers: boolean
     allow_orders: boolean
@@ -226,7 +227,11 @@ export function Admin() {
         }
     }
 
-    const handleToggleWorkspaceFeature = async (workspaceId: string, feature: keyof AdminWorkspace, currentValue: boolean) => {
+    const handleToggleWorkspaceFeature = async (
+        workspaceId: string,
+        feature: 'allow_pos' | 'allow_customers' | 'allow_orders' | 'allow_invoices' | 'locked_workspace',
+        currentValue: boolean
+    ) => {
         // Optimistic update
         setWorkspaces(prev => prev.map(ws =>
             ws.id === workspaceId ? { ...ws, [feature]: !currentValue } : ws
@@ -568,6 +573,11 @@ export function Admin() {
                                                                     Deleted
                                                                 </span>
                                                             )}
+                                                        </div>
+                                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${ws.data_mode === 'local' ? 'border-sky-500/20 bg-sky-500/10 text-sky-700' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700'}`}>
+                                                                {ws.data_mode === 'local' ? 'Local' : 'Cloud'}
+                                                            </span>
                                                         </div>
                                                         <div className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
                                                             <Calendar className="w-3 h-3" />

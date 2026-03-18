@@ -1,0 +1,1 @@
+{"accessible":true,"project_ref":"eboispangcayxxheoufy","executable_sql_tool":"mcp__supabase__execute_sql","note":"Project `ERP` with ref `eboispangcayxxheoufy` is accessible via the configured Supabase MCP server, and SQL execution was verified with `select 1 as ok;`."}

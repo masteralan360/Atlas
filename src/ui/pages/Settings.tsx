@@ -35,7 +35,7 @@ export function Settings() {
     const { user, signOut, isSupabaseConfigured, updateUser } = useAuth()
     const { syncState, pendingCount, lastSyncTime, sync, isSyncing, isOnline } = useSyncStatus()
     const { theme, setTheme, style, setStyle } = useTheme()
-    const { features, updateSettings, workspaceName, isLocked } = useWorkspace()
+    const { features, updateSettings, workspaceName, isLocked, isLocalMode } = useWorkspace()
     const { streamUrl, status: kdsStatus, startStream } = useKdsStream(true)
 
     useEffect(() => {
@@ -1219,9 +1219,13 @@ export function Settings() {
                             <CardHeader>
                                 <CardTitle className="flex items-center gap-2">
                                     <Cloud className="w-5 h-5" />
-                                    {t('settings.syncStatus')}
+                                    {isLocalMode ? (t('settings.localMode') || 'Local Mode') : t('settings.syncStatus')}
                                 </CardTitle>
-                                <CardDescription>{t('settings.syncDesc')}</CardDescription>
+                                <CardDescription>
+                                    {isLocalMode
+                                        ? (t('settings.localModeDesc') || 'This workspace stores business data locally on this device and does not use cloud sync.')
+                                        : t('settings.syncDesc')}
+                                </CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 <div className="grid gap-4 md:grid-cols-2">
@@ -1232,17 +1236,17 @@ export function Settings() {
                                         </p>
                                     </div>
                                     <div>
-                                        <Label className="text-muted-foreground">{t('settings.syncState')}</Label>
-                                        <p className="font-medium capitalize">{syncState}</p>
+                                        <Label className="text-muted-foreground">{isLocalMode ? (t('settings.storageMode') || 'Storage Mode') : t('settings.syncState')}</Label>
+                                        <p className="font-medium capitalize">{isLocalMode ? 'local-only' : syncState}</p>
                                     </div>
                                     <div>
-                                        <Label className="text-muted-foreground">{t('settings.pendingChanges')}</Label>
-                                        <p className="font-medium">{pendingCount} items</p>
+                                        <Label className="text-muted-foreground">{isLocalMode ? (t('settings.workspaceMode') || 'Workspace Mode') : t('settings.pendingChanges')}</Label>
+                                        <p className="font-medium">{isLocalMode ? 'local' : `${pendingCount} items`}</p>
                                     </div>
                                     <div>
-                                        <Label className="text-muted-foreground">{t('settings.lastSynced')}</Label>
+                                        <Label className="text-muted-foreground">{isLocalMode ? (t('settings.cloudSync') || 'Cloud Sync') : t('settings.lastSynced')}</Label>
                                         <p className="font-medium">
-                                            {lastSyncTime ? formatDateTime(lastSyncTime) : t('settings.never')}
+                                            {isLocalMode ? (t('settings.disabled') || 'Disabled') : (lastSyncTime ? formatDateTime(lastSyncTime) : t('settings.never'))}
                                         </p>
                                     </div>
                                 </div>
@@ -1256,11 +1260,13 @@ export function Settings() {
                                 )}
 
                                 <div className="flex gap-2">
-                                    <Button onClick={sync} disabled={isSyncing || !isOnline || !isSupabaseConfigured}>
-                                        <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-                                        {isSyncing ? t('settings.syncing') : t('settings.syncNow')}
-                                    </Button>
-                                    {isElectron && (
+                                    {!isLocalMode && (
+                                        <Button onClick={sync} disabled={isSyncing || !isOnline || !isSupabaseConfigured}>
+                                            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                                            {isSyncing ? t('settings.syncing') : t('settings.syncNow')}
+                                        </Button>
+                                    )}
+                                    {!isLocalMode && isElectron && (
                                         <>
                                             <Button
                                                 variant="outline"
@@ -1288,7 +1294,7 @@ export function Settings() {
                                             </Button>
                                         </>
                                     )}
-                                    {pendingCount > 0 && (
+                                    {!isLocalMode && pendingCount > 0 && (
                                         <Button variant="outline" onClick={handleClearSyncQueue}>
                                             {t('settings.clearQueue')}
                                         </Button>

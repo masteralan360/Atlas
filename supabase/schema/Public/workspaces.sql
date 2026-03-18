@@ -3,6 +3,7 @@ CREATE TABLE public.workspaces (
   name text NOT NULL,
   code text NOT NULL DEFAULT generate_workspace_code(),
   created_at timestamp with time zone NULL DEFAULT now(),
+  data_mode text NOT NULL DEFAULT 'cloud'::text,
   allow_pos boolean NOT NULL DEFAULT false,
   allow_customers boolean NOT NULL DEFAULT false,
   allow_orders boolean NOT NULL DEFAULT false,
@@ -27,5 +28,26 @@ CREATE TABLE public.workspaces (
   print_quality text NULL DEFAULT 'low'::text,
   coordination text NULL,
   kds_enabled boolean NOT NULL DEFAULT false,
+  CONSTRAINT workspaces_data_mode_check CHECK (data_mode = ANY (ARRAY['cloud'::text, 'local'::text])),
   PRIMARY KEY (id)
 );
+
+CREATE OR REPLACE FUNCTION public.prevent_workspace_mode_switch()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.data_mode IS DISTINCT FROM OLD.data_mode AND COALESCE(OLD.is_configured, false) THEN
+    RAISE EXCEPTION 'Workspace mode cannot be changed after initial configuration';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS prevent_workspace_mode_switch_on_workspaces ON public.workspaces;
+
+CREATE TRIGGER prevent_workspace_mode_switch_on_workspaces
+BEFORE UPDATE ON public.workspaces
+FOR EACH ROW
+EXECUTE FUNCTION public.prevent_workspace_mode_switch();
