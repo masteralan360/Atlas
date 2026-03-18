@@ -886,24 +886,26 @@ export function InstantPOS() {
                         }
                     }))
 
-                    await db.invoices.add({
-                        id: saleId,
-                        invoiceid: `#${saleId.slice(0, 8)}`,
-                        workspaceId: user.workspaceId,
-                        customerId: '',
-                        status: 'paid',
-                        totalAmount: totalAmount,
-                        settlementCurrency: settlementCurrency,
-                        origin: 'instant_pos',
-                        cashierName: user?.name || 'System',
-                        createdByName: user?.name || 'System',
-                        createdAt: snapshotTimestamp,
-                        updatedAt: snapshotTimestamp,
-                        syncStatus: 'pending',
-                        lastSyncedAt: null,
-                        version: 1,
-                        isDeleted: false
-                    })
+                    if (!isLocalMode) {
+                        await db.invoices.add({
+                            id: saleId,
+                            invoiceid: `#${saleId.slice(0, 8)}`,
+                            workspaceId: user.workspaceId,
+                            customerId: '',
+                            status: 'paid',
+                            totalAmount: totalAmount,
+                            settlementCurrency: settlementCurrency,
+                            origin: 'instant_pos',
+                            cashierName: user?.name || 'System',
+                            createdByName: user?.name || 'System',
+                            createdAt: snapshotTimestamp,
+                            updatedAt: snapshotTimestamp,
+                            syncStatus: 'pending',
+                            lastSyncedAt: null,
+                            version: 1,
+                            isDeleted: false
+                        })
+                    }
 
                     await addToOfflineMutations('sales', saleId, 'create', checkoutPayload, user.workspaceId)
 

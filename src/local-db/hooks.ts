@@ -91,6 +91,10 @@ export function useCategories(workspaceId: string | undefined) {
                     .eq('workspace_id', workspaceId)
                     .eq('is_deleted', false)
 
+                if (!data || error || !shouldUseCloudBusinessData(workspaceId)) {
+                    return
+                }
+
                 if (data && !error) {
                     await db.transaction('rw', db.categories, async () => {
                         const remoteIds = new Set(data.map(d => d.id))
@@ -245,6 +249,10 @@ export function useProducts(workspaceId: string | undefined) {
                     .eq('workspace_id', workspaceId)
                     .eq('is_deleted', false)
 
+                if (!data || error || !shouldUseCloudBusinessData(workspaceId)) {
+                    return
+                }
+
                 if (data && !error) {
                     await db.transaction('rw', db.products, async () => {
                         const remoteIds = new Set(data.map(d => d.id))
@@ -392,6 +400,10 @@ export function useSuppliers(workspaceId: string | undefined) {
                     .eq('workspace_id', workspaceId)
                     .eq('is_deleted', false)
 
+                if (!data || error || !shouldUseCloudBusinessData(workspaceId)) {
+                    return
+                }
+
                 if (data && !error) {
                     await db.transaction('rw', db.suppliers, async () => {
                         const remoteIds = new Set(data.map(d => d.id))
@@ -523,6 +535,10 @@ export function useCustomers(workspaceId: string | undefined) {
                     .select('*')
                     .eq('workspace_id', workspaceId)
                     .eq('is_deleted', false)
+
+                if (!data || error || !shouldUseCloudBusinessData(workspaceId)) {
+                    return
+                }
 
                 if (data && !error) {
                     await db.transaction('rw', db.customers, async () => {
@@ -799,6 +815,10 @@ export async function fetchTableFromSupabase<T extends { id: string, syncStatus:
 
     const { data, error } = await query
 
+    if (!data || error || !shouldUseCloudBusinessData(workspaceId)) {
+        return
+    }
+
     if (data && !error) {
         await db.transaction('rw', table, async () => {
             const remoteIds = new Set(data.map(d => d.id))
@@ -882,6 +902,10 @@ export function useInvoices(workspaceId: string | undefined) {
                     .select('*')
                     .eq('workspace_id', workspaceId)
                     .eq('is_deleted', false)
+
+                if (!data || error || !shouldUseCloudBusinessData(workspaceId)) {
+                    return
+                }
 
                 if (data && !error) {
                     await db.transaction('rw', db.invoices, async () => {
@@ -1081,11 +1105,134 @@ export async function deleteInvoice(id: string): Promise<void> {
 // SALES HOOKS
 // ===================
 
+async function enrichSalesForUiRows(workspaceId: string, sales: Sale[]) {
+    if (sales.length === 0) {
+        return sales
+    }
+
+    const saleIds = sales.map((sale) => sale.id)
+    const localItems = saleIds.length > 0
+        ? await db.sale_items.where('saleId').anyOf(saleIds).toArray()
+        : []
+
+    const productIds = Array.from(new Set(
+        localItems
+            .map((item) => item.productId)
+            .filter((productId): productId is string => typeof productId === 'string' && productId.length > 0)
+    ))
+    const products = productIds.length > 0
+        ? await db.products.bulkGet(productIds)
+        : []
+    const productById = new Map(
+        products
+            .filter((product): product is Product => !!product)
+            .map((product) => [product.id, product] as const)
+    )
+
+    const categoryIds = Array.from(new Set(
+        products
+            .map((product) => product?.categoryId)
+            .filter((categoryId): categoryId is string => typeof categoryId === 'string' && categoryId.length > 0)
+    ))
+    const categories = categoryIds.length > 0
+        ? await db.categories.bulkGet(categoryIds)
+        : []
+    const categoryById = new Map(
+        categories
+            .filter((category): category is Category => !!category)
+            .map((category) => [category.id, category] as const)
+    )
+
+    const cashierIds = Array.from(new Set(
+        sales
+            .map((sale) => sale.cashierId)
+            .filter((cashierId): cashierId is string => typeof cashierId === 'string' && cashierId.length > 0)
+    ))
+    const cashierUsers = cashierIds.length > 0
+        ? await db.users.bulkGet(cashierIds)
+        : []
+    const cashierNameById = new Map(
+        cashierUsers
+            .filter((user): user is User => !!user)
+            .map((user) => [user.id, user.name || user.email || 'Staff'] as const)
+    )
+
+    const itemsBySaleId = new Map<string, Record<string, unknown>[]>()
+    for (const item of localItems) {
+        const product = productById.get(item.productId)
+        const categoryName = product?.categoryId
+            ? (categoryById.get(product.categoryId)?.name || '')
+            : ''
+
+        const enrichedItem: Record<string, unknown> = {
+            id: item.id,
+            sale_id: item.saleId,
+            product_id: item.productId,
+            quantity: item.quantity,
+            unit_price: item.unitPrice,
+            total_price: item.totalPrice,
+            cost_price: item.costPrice,
+            converted_cost_price: item.convertedCostPrice,
+            product_name: product?.name || 'Unknown Product',
+            product_sku: product?.sku || '',
+            original_currency: item.originalCurrency,
+            original_unit_price: item.originalUnitPrice,
+            converted_unit_price: item.convertedUnitPrice,
+            settlement_currency: item.settlementCurrency,
+            negotiated_price: item.negotiatedPrice,
+            inventory_snapshot: item.inventorySnapshot,
+            returned_quantity: item.returnedQuantity,
+            is_returned: (item as SaleItem & { isReturned?: boolean }).isReturned,
+            return_reason: (item as SaleItem & { returnReason?: string }).returnReason,
+            returned_at: (item as SaleItem & { returnedAt?: string }).returnedAt,
+            returned_by: (item as SaleItem & { returnedBy?: string }).returnedBy,
+            product_category: categoryName,
+            product: {
+                name: product?.name || 'Unknown Product',
+                sku: product?.sku || '',
+                category: categoryName || undefined,
+                can_be_returned: product?.canBeReturned ?? true,
+                return_rules: product?.returnRules
+            }
+        }
+
+        const existing = itemsBySaleId.get(item.saleId) ?? []
+        existing.push(enrichedItem)
+        itemsBySaleId.set(item.saleId, existing)
+    }
+
+    return sales.map((sale) => {
+        const existingItems = Array.isArray((sale as Sale & { _enrichedItems?: unknown[] })._enrichedItems)
+            ? ((sale as Sale & { _enrichedItems?: Record<string, unknown>[] })._enrichedItems ?? [])
+            : []
+        const enrichedItems = existingItems.length > 0
+            ? existingItems
+            : (itemsBySaleId.get(sale.id) ?? [])
+        const cashierName = (sale as Sale & { _cashierName?: string })._cashierName
+            || cashierNameById.get(sale.cashierId)
+            || 'Staff'
+
+        return {
+            ...sale,
+            workspaceId,
+            _cashierName: cashierName,
+            _enrichedItems: enrichedItems
+        }
+    })
+}
+
 export function useSales(workspaceId: string | undefined) {
     const isOnline = useNetworkStatus()
 
     const sales = useLiveQuery(
-        () => workspaceId ? db.sales.where('workspaceId').equals(workspaceId).toArray() : [],
+        async () => {
+            if (!workspaceId) {
+                return []
+            }
+
+            const rows = await db.sales.where('workspaceId').equals(workspaceId).toArray()
+            return enrichSalesForUiRows(workspaceId, rows)
+        },
         [workspaceId]
     )
 
@@ -1103,6 +1250,10 @@ export function useSales(workspaceId: string | undefined) {
                     `)
                     .eq('workspace_id', workspaceId)
 
+                if (!data || error || !shouldUseCloudBusinessData(workspaceId)) {
+                    return
+                }
+
                 if (data && !error) {
                     // Fetch cashier profiles
                     const cashierIds = Array.from(new Set(data.map((s: any) => s.cashier_id).filter(Boolean)))
@@ -1115,6 +1266,10 @@ export function useSales(workspaceId: string | undefined) {
                         if (profiles) {
                             profilesMap = profiles.reduce((acc: any, p: any) => ({ ...acc, [p.id]: p.name }), {})
                         }
+                    }
+
+                    if (!shouldUseCloudBusinessData(workspaceId)) {
+                        return
                     }
 
                     await db.transaction('rw', [db.sales, db.sale_items], async () => {
@@ -1433,6 +1588,10 @@ export function useStorages(workspaceId: string | undefined) {
                     .eq('workspace_id', workspaceId)
                     .eq('is_deleted', false)
 
+                if (!data || error || !shouldUseCloudBusinessData(workspaceId)) {
+                    return
+                }
+
                 if (data && !error) {
                     await db.transaction('rw', db.storages, async () => {
                         const remoteIds = new Set(data.map(d => d.id))
@@ -1738,6 +1897,10 @@ export function useWorkspaceUsers(workspaceId: string | undefined) {
                     .from('profiles')
                     .select('*')
                     .eq('workspace_id', workspaceId)
+
+                if (!data || error || !shouldUseCloudBusinessData(workspaceId)) {
+                    return
+                }
 
                 if (data && !error) {
                     await db.transaction('rw', db.users, async () => {
@@ -2178,6 +2341,10 @@ export function useWorkspaceContacts(workspaceId: string | undefined) {
                     .from('workspace_contacts')
                     .select('*')
                     .eq('workspace_id', workspaceId)
+
+                if (!data || error || !shouldUseCloudBusinessData(workspaceId)) {
+                    return
+                }
 
                 if (data && !error) {
                     await db.transaction('rw', db.workspace_contacts, async () => {

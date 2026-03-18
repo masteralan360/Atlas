@@ -28,6 +28,11 @@ import type {
     DividendStatus
 } from './models'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import {
+    LOCAL_MODE_SQLITE_TABLES,
+    queueLocalModeSqliteDelete,
+    queueLocalModeSqliteUpsert
+} from './localModeSqlite'
 
 // Asaas Database using Dexie.js for IndexedDB
 export class AsaasDatabase extends Dexie {
@@ -140,6 +145,7 @@ export class AsaasDatabase extends Dexie {
     }
 
     private registerLocalModeSyncHooks() {
+        const database = this
         const syncAwareTables = [
             'products',
             'categories',
@@ -179,7 +185,7 @@ export class AsaasDatabase extends Dexie {
         for (const tableName of syncAwareTables) {
             const table = this.table(tableName)
 
-            table.hook('creating', (_primaryKey, obj) => {
+            table.hook('creating', function (_primaryKey, obj) {
                 if (!obj || typeof obj !== 'object') {
                     return
                 }
@@ -188,15 +194,23 @@ export class AsaasDatabase extends Dexie {
                 if (normalized) {
                     Object.assign(obj, normalized)
                 }
+
+                this.onsuccess = () => {
+                    queueLocalModeSqliteUpsert(database, tableName, obj as Record<string, unknown>)
+                }
             })
 
-            table.hook('updating', (mods, _primaryKey, obj) => {
+            table.hook('updating', function (mods, _primaryKey, obj) {
                 const nextWorkspaceId = (mods as { workspaceId?: unknown }).workspaceId
                 const normalized = normalizeSyncMetadata(
                     typeof nextWorkspaceId === 'string'
                         ? nextWorkspaceId
                         : (obj as { workspaceId?: string } | undefined)?.workspaceId
                 )
+
+                this.onsuccess = (updatedObj) => {
+                    queueLocalModeSqliteUpsert(database, tableName, updatedObj as Record<string, unknown>)
+                }
 
                 if (!normalized) {
                     return mods
@@ -205,6 +219,50 @@ export class AsaasDatabase extends Dexie {
                 return {
                     ...mods,
                     ...normalized
+                }
+            })
+
+            table.hook('deleting', function (_primaryKey, obj) {
+                if (!obj || typeof obj !== 'object') {
+                    return
+                }
+
+                this.onsuccess = () => {
+                    queueLocalModeSqliteDelete(database, tableName, obj as Record<string, unknown>)
+                }
+            })
+        }
+
+        for (const tableName of LOCAL_MODE_SQLITE_TABLES) {
+            if (syncAwareTables.includes(tableName as (typeof syncAwareTables)[number])) {
+                continue
+            }
+
+            const table = this.table(tableName)
+
+            table.hook('creating', function (_primaryKey, obj) {
+                if (!obj || typeof obj !== 'object') {
+                    return
+                }
+
+                this.onsuccess = () => {
+                    queueLocalModeSqliteUpsert(database, tableName, obj as Record<string, unknown>)
+                }
+            })
+
+            table.hook('updating', function (_mods, _primaryKey, _obj) {
+                this.onsuccess = (updatedObj) => {
+                    queueLocalModeSqliteUpsert(database, tableName, updatedObj as Record<string, unknown>)
+                }
+            })
+
+            table.hook('deleting', function (_primaryKey, obj) {
+                if (!obj || typeof obj !== 'object') {
+                    return
+                }
+
+                this.onsuccess = () => {
+                    queueLocalModeSqliteDelete(database, tableName, obj as Record<string, unknown>)
                 }
             })
         }

@@ -86,6 +86,8 @@
     },
     "shell:default",
     "shell:allow-stdin-write",
+    "sql:default",
+    "sql:allow-execute",
     "dialog:default",
     "dialog:allow-open",
     "dialog:allow-ask",

@@ -43,6 +43,7 @@ export async function triggerInvoiceSync(options: SyncInvoiceOptions): Promise<v
 
     try {
         const format = options.format || 'receipt';
+        const now = new Date().toISOString()
 
         // 1. Generate PDF for the specific format
         const pdfBlob = await generateInvoicePdf({
@@ -54,9 +55,36 @@ export async function triggerInvoiceSync(options: SyncInvoiceOptions): Promise<v
         });
 
         if (isLocalMode) {
+            const existingInvoice = await db.invoices.get(invoiceId)
+            if (!existingInvoice) {
+                await db.invoices.put({
+                    id: invoiceId,
+                    invoiceid: saleData.invoiceid || `#${invoiceId.slice(0, 8)}`,
+                    sequenceId: saleData.sequenceId ?? saleData.sequence_id,
+                    workspaceId: options.workspaceId,
+                    customerId: saleData.customer_id || '',
+                    status: 'paid',
+                    totalAmount: saleData.total_amount ?? saleData.totalAmount ?? 0,
+                    settlementCurrency: saleData.settlement_currency ?? saleData.settlementCurrency ?? features.default_currency ?? 'usd',
+                    origin: saleData.origin || 'pos',
+                    createdBy: user.id,
+                    cashierName: saleData.cashier_name || user.name,
+                    createdByName: saleData.created_by_name || user.name,
+                    printFormat: format,
+                    createdAt: saleData.created_at || now,
+                    updatedAt: now,
+                    syncStatus: 'synced',
+                    lastSyncedAt: now,
+                    version: 1,
+                    isDeleted: false
+                })
+            }
+
             const dbUpdate: any = {
+                printFormat: format,
                 syncStatus: 'synced',
-                lastSyncedAt: new Date().toISOString()
+                lastSyncedAt: now,
+                updatedAt: now
             };
 
             if (format === 'a4') {

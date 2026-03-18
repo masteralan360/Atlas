@@ -1382,25 +1382,27 @@ export function POS() {
                         cashier_name: user?.name || ''
                     } as any)
 
-                    // 6. Add to Local Invoice History
-                    await db.invoices.add({
-                        id: saleId,
-                        invoiceid: `#${saleId.slice(0, 8)}`,
-                        workspaceId: user?.workspaceId || '',
-                        customerId: '',
-                        status: 'paid',
-                        totalAmount: totalAmount,
-                        settlementCurrency: settlementCurrency,
-                        origin: 'pos',
-                        cashierName: user?.name || 'System',
-                        createdByName: user?.name || 'System',
-                        createdAt: snapshotTimestamp,
-                        updatedAt: snapshotTimestamp,
-                        syncStatus: 'pending', // Will be synced by AssetManager
-                        lastSyncedAt: null,
-                        version: 1,
-                        isDeleted: false
-                    })
+                    if (!isLocalMode) {
+                        // Cloud/offline mode keeps the existing invoice-history behavior.
+                        await db.invoices.add({
+                            id: saleId,
+                            invoiceid: `#${saleId.slice(0, 8)}`,
+                            workspaceId: user?.workspaceId || '',
+                            customerId: '',
+                            status: 'paid',
+                            totalAmount: totalAmount,
+                            settlementCurrency: settlementCurrency,
+                            origin: 'pos',
+                            cashierName: user?.name || 'System',
+                            createdByName: user?.name || 'System',
+                            createdAt: snapshotTimestamp,
+                            updatedAt: snapshotTimestamp,
+                            syncStatus: 'pending', // Will be synced by AssetManager
+                            lastSyncedAt: null,
+                            version: 1,
+                            isDeleted: false
+                        })
+                    }
 
                     // 5. Add to Sync Queue (include verification fields)
                     await addToOfflineMutations('sales', saleId, 'create', {

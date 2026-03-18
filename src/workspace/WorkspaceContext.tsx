@@ -9,6 +9,7 @@ import type {
 } from '@/local-db/models'
 import { db } from '@/local-db/database'
 import { addToOfflineMutations } from '@/local-db/hooks'
+import { hydrateLocalModeCacheFromSqlite } from '@/local-db/localModeSqlite'
 import { isMobile } from '@/lib/platform'
 import { connectionManager } from '@/lib/connectionManager'
 import {
@@ -243,6 +244,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             createdAt: existing?.createdAt ?? timestamp,
             updatedAt: timestamp
         })
+
+        if (nextFeatures.data_mode === 'local') {
+            await hydrateLocalModeCacheFromSqlite(db, workspaceId)
+        }
     }
 
     const resolveTrustedFallback = async (

@@ -11,6 +11,8 @@
     "biometric:default",
     "core:default",
     "shell:default",
+    "sql:default",
+    "sql:allow-execute",
     "dialog:default",
     "http:default",
     "updater:default"

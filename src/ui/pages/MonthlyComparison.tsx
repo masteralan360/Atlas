@@ -279,6 +279,13 @@ function buildAvailableMonths(
         entry.hasExpenses = true
     })
 
+    if (monthMap.size === 1) {
+        const onlyMonth = Array.from(monthMap.keys())[0]
+        const previousMonthDate = monthDateFromKey(onlyMonth)
+        previousMonthDate.setMonth(previousMonthDate.getMonth() - 1)
+        ensureMonth(monthKeyFromDate(previousMonthDate))
+    }
+
     return Array.from(monthMap.values()).sort((a, b) => b.value.localeCompare(a.value))
 }
 

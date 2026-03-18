@@ -10,6 +10,8 @@ import { setActiveBusinessWorkspace } from '@/lib/network'
 import { clearWorkspaceCache } from '@/workspace/workspaceCache'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
+import { db } from '@/local-db/database'
+import { hydrateLocalModeCacheFromSqlite } from '@/local-db/localModeSqlite'
 
 interface AuthUser {
     id: string
@@ -82,12 +84,15 @@ function parseUserFromSupabase(user: User): AuthUser {
 async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
     if (!parsedUser.workspaceId) return parsedUser
 
-    const [wsResult, profileResult] = await Promise.allSettled([
-        supabase
-            .from('workspaces')
-            .select('code, name, is_configured, data_mode')
-            .eq('id', parsedUser.workspaceId)
-            .single(),
+    type WorkspaceFeatureBootstrap = {
+        error?: string
+        workspace_name?: string
+        is_configured?: boolean
+        data_mode?: WorkspaceDataMode | null
+    }
+
+    const [featuresResult, profileResult] = await Promise.allSettled([
+        supabase.rpc('get_workspace_features').single(),
         supabase
             .from('profiles')
             .select('profile_url')
@@ -95,16 +100,42 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
             .single()
     ])
 
-    if (wsResult.status === 'fulfilled' && wsResult.value.data) {
-        parsedUser.workspaceCode = wsResult.value.data.code
-        parsedUser.workspaceName = wsResult.value.data.name
-        parsedUser.isConfigured = wsResult.value.data.is_configured
-        parsedUser.workspaceMode = wsResult.value.data.data_mode === 'local' ? 'local' : 'cloud'
+    const featureData = featuresResult.status === 'fulfilled'
+        ? (featuresResult.value.data as WorkspaceFeatureBootstrap | null)
+        : null
+
+    const resolvedWorkspaceFeatures = featureData && !featureData.error
+        ? featureData
+        : null
+
+    if (resolvedWorkspaceFeatures) {
+        parsedUser.workspaceName = resolvedWorkspaceFeatures.workspace_name || parsedUser.workspaceName
+        parsedUser.isConfigured = resolvedWorkspaceFeatures.is_configured
+        parsedUser.workspaceMode = resolvedWorkspaceFeatures.data_mode === 'local' ? 'local' : 'cloud'
         writeWorkspaceModeSnapshot({
             workspaceId: parsedUser.workspaceId,
             dataMode: parsedUser.workspaceMode
         })
+        if (parsedUser.workspaceMode === 'local') {
+            await hydrateLocalModeCacheFromSqlite(db, parsedUser.workspaceId)
+        }
+    } else {
+        const localWorkspace = await db.workspaces.get(parsedUser.workspaceId)
+        if (localWorkspace) {
+            parsedUser.workspaceCode = localWorkspace.code || parsedUser.workspaceCode
+            parsedUser.workspaceName = localWorkspace.name || parsedUser.workspaceName
+            parsedUser.isConfigured = localWorkspace.is_configured
+            parsedUser.workspaceMode = localWorkspace.data_mode === 'local' ? 'local' : parsedUser.workspaceMode
+            writeWorkspaceModeSnapshot({
+                workspaceId: parsedUser.workspaceId,
+                dataMode: parsedUser.workspaceMode
+            })
+            if (parsedUser.workspaceMode === 'local') {
+                await hydrateLocalModeCacheFromSqlite(db, parsedUser.workspaceId)
+            }
+        }
     }
+
     if (profileResult.status === 'fulfilled' && profileResult.value.data?.profile_url) {
         parsedUser.profileUrl = profileResult.value.data.profile_url
     }
