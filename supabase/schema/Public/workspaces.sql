@@ -5,6 +5,7 @@ CREATE TABLE public.workspaces (
   created_at timestamp with time zone NULL DEFAULT now(),
   data_mode text NOT NULL DEFAULT 'cloud'::text,
   allow_pos boolean NOT NULL DEFAULT false,
+  allow_crm boolean NOT NULL DEFAULT true,
   allow_customers boolean NOT NULL DEFAULT false,
   allow_orders boolean NOT NULL DEFAULT false,
   allow_invoices boolean NOT NULL DEFAULT false,

@@ -68,6 +68,118 @@ export interface Storage extends BaseEntity {
     isProtected: boolean
 }
 
+export interface Supplier extends BaseEntity {
+    name: string
+    contactName?: string
+    email?: string
+    phone?: string
+    address?: string
+    city?: string
+    country?: string
+    defaultCurrency: CurrencyCode
+    notes?: string
+    totalPurchases: number
+    totalSpent: number
+    creditLimit: number
+}
+
+export interface Customer extends BaseEntity {
+    name: string
+    email?: string
+    phone?: string
+    address?: string
+    city?: string
+    country?: string
+    defaultCurrency: CurrencyCode
+    notes?: string
+    totalOrders: number
+    totalSpent: number
+    outstandingBalance: number
+    creditLimit: number
+}
+
+export type SalesOrderStatus = 'draft' | 'pending' | 'completed' | 'cancelled'
+export type PurchaseOrderStatus = 'draft' | 'ordered' | 'received' | 'completed' | 'cancelled'
+export type OrderPaymentMethod = PaymentMethod | 'credit' | 'bank_transfer'
+
+export interface ExchangeRateSnapshot {
+    pair: string
+    rate: number
+    source: string
+    timestamp: string
+}
+
+export interface OrderLineItem {
+    id: string
+    productId: string
+    productName: string
+    productSku: string
+    quantity: number
+    lineTotal: number
+    originalCurrency: CurrencyCode
+    originalUnitPrice: number
+    convertedUnitPrice: number
+    settlementCurrency: CurrencyCode
+}
+
+export interface SalesOrderItem extends OrderLineItem {
+    costPrice: number
+    convertedCostPrice: number
+    reservedQuantity?: number
+    fulfilledQuantity?: number
+}
+
+export interface PurchaseOrderItem extends OrderLineItem {
+    receivedQuantity?: number
+}
+
+export interface SalesOrder extends BaseEntity {
+    orderNumber: string
+    customerId: string
+    customerName: string
+    items: SalesOrderItem[]
+    subtotal: number
+    discount: number
+    tax: number
+    total: number
+    currency: CurrencyCode
+    exchangeRate: number
+    exchangeRateSource: string
+    exchangeRateTimestamp: string
+    exchangeRates?: ExchangeRateSnapshot[]
+    status: SalesOrderStatus
+    expectedDeliveryDate?: string | null
+    actualDeliveryDate?: string | null
+    isPaid: boolean
+    paidAt?: string | null
+    paymentMethod?: OrderPaymentMethod
+    reservedAt?: string | null
+    shippingAddress?: string
+    notes?: string
+}
+
+export interface PurchaseOrder extends BaseEntity {
+    orderNumber: string
+    supplierId: string
+    supplierName: string
+    items: PurchaseOrderItem[]
+    subtotal: number
+    discount: number
+    total: number
+    currency: CurrencyCode
+    exchangeRate: number
+    exchangeRateSource: string
+    exchangeRateTimestamp: string
+    exchangeRates?: ExchangeRateSnapshot[]
+    status: PurchaseOrderStatus
+    expectedDeliveryDate?: string | null
+    actualDeliveryDate?: string | null
+    isPaid: boolean
+    paidAt?: string | null
+    paymentMethod?: OrderPaymentMethod
+    notes?: string
+}
+
 
 export interface Employee extends BaseEntity {
     name: string
@@ -285,7 +397,7 @@ export interface LoanPayment extends BaseEntity {
 // Sync Queue Item for tracking pending changes
 export interface SyncQueueItem {
     id: string
-    entityType: 'products' | 'invoices' | 'users' | 'sales' | 'categories' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments' | 'budget_settings' | 'budget_allocations' | 'expense_series' | 'expense_items' | 'payroll_statuses' | 'dividend_statuses'
+    entityType: 'products' | 'invoices' | 'users' | 'sales' | 'categories' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments' | 'budget_settings' | 'budget_allocations' | 'expense_series' | 'expense_items' | 'payroll_statuses' | 'dividend_statuses' | 'customers' | 'suppliers' | 'sales_orders' | 'purchase_orders'
     entityId: string
     operation: 'create' | 'update' | 'delete'
     data: Record<string, unknown>
@@ -301,6 +413,10 @@ export interface Workspace extends BaseEntity {
     code: string
     data_mode: WorkspaceDataMode
     is_configured?: boolean
+    allow_crm?: boolean
+    allow_customers?: boolean
+    allow_orders?: boolean
+    allow_suppliers?: boolean
     default_currency: CurrencyCode
     iqd_display_preference: IQDDisplayPreference
     eur_conversion_enabled?: boolean
@@ -334,7 +450,7 @@ export interface WorkspaceContact extends Omit<BaseEntity, 'isDeleted'> {
 export interface OfflineMutation {
     id: string
     workspaceId: string
-    entityType: 'products' | 'invoices' | 'users' | 'sales' | 'categories' | 'workspaces' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments' | 'budget_settings' | 'budget_allocations' | 'expense_series' | 'expense_items' | 'payroll_statuses' | 'dividend_statuses'
+    entityType: 'products' | 'invoices' | 'users' | 'sales' | 'categories' | 'workspaces' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments' | 'budget_settings' | 'budget_allocations' | 'expense_series' | 'expense_items' | 'payroll_statuses' | 'dividend_statuses' | 'customers' | 'suppliers' | 'sales_orders' | 'purchase_orders'
     entityId: string
     operation: 'create' | 'update' | 'delete'
     payload: Record<string, unknown>

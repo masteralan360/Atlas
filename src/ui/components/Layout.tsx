@@ -34,6 +34,7 @@ import {
     UsersRound,
     CreditCard,
     Receipt,
+    ShoppingCart,
     Zap,
     TrendingUp,
     ChevronLeft,
@@ -50,7 +51,8 @@ import {
     AlertCircle,
     PanelRightOpen,
     PanelRightClose,
-    Monitor
+    Monitor,
+    Truck
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from './button'
@@ -73,6 +75,9 @@ const routePrefetchMap: Record<string, () => Promise<unknown>> = {
     '/instant-pos': () => import('@/ui/pages/InstantPOS'),
     '/kds': () => import('@/ui/pages/KDSDashboard'),
     '/sales': () => import('@/ui/pages/Sales'),
+    '/customers': () => import('@/ui/pages/Customers'),
+    '/suppliers': () => import('@/ui/pages/Suppliers'),
+    '/orders': () => import('@/ui/pages/Orders'),
     '/loans': () => import('@/ui/pages/Loans'),
     '/revenue': () => import('@/ui/pages/Revenue'),
     '/budget': () => import('@/ui/pages/Budget'),
@@ -236,6 +241,11 @@ export function Layout({ children }: LayoutProps) {
         ] : []),
         // Sales - always visible (history of transactions)
         { name: t('nav.sales') || 'Sales', href: '/sales', icon: Receipt },
+        ...((user?.role === 'admin' || user?.role === 'staff') && hasFeature('allow_crm') ? [
+            { name: t('nav.customers') || 'Customers', href: '/customers', icon: Users },
+            { name: t('nav.suppliers') || 'Suppliers', href: '/suppliers', icon: Truck },
+            { name: t('nav.orders') || 'Orders', href: '/orders', icon: ShoppingCart }
+        ] : []),
         { name: t('nav.loans') || 'Loans', href: '/loans', icon: HandCoins },
         // Revenue - admin only
         ...(user?.role === 'admin' ? [

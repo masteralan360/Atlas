@@ -1,0 +1,30 @@
+CREATE SCHEMA IF NOT EXISTS crm;
+
+REVOKE ALL ON SCHEMA crm FROM anon;
+GRANT USAGE ON SCHEMA crm TO authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA crm TO authenticated, service_role;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA crm TO authenticated, service_role;
+GRANT EXECUTE ON ALL ROUTINES IN SCHEMA crm TO authenticated, service_role;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA crm REVOKE ALL ON TABLES FROM anon;
+ALTER DEFAULT PRIVILEGES IN SCHEMA crm REVOKE ALL ON SEQUENCES FROM anon;
+ALTER DEFAULT PRIVILEGES IN SCHEMA crm REVOKE ALL ON ROUTINES FROM anon;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA crm GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA crm GRANT USAGE, SELECT ON SEQUENCES TO authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA crm GRANT EXECUTE ON ROUTINES TO authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.current_workspace_id()
+RETURNS uuid
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $function$
+    SELECT workspace_id
+    FROM public.profiles
+    WHERE id = auth.uid();
+$function$;
+
+REVOKE ALL ON FUNCTION public.current_workspace_id() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.current_workspace_id() TO authenticated, service_role;

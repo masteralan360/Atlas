@@ -184,9 +184,13 @@ export async function pullChanges(workspaceId: string, lastSyncTime: string | nu
     const tables = [
         'products',
         'categories',
+        'customers',
+        'suppliers',
         'invoices',
         'workspaces',
         'sales',
+        'sales_orders',
+        'purchase_orders',
         'budget_settings',
         'budget_allocations',
         'expense_series',

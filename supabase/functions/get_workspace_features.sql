@@ -12,15 +12,13 @@ BEGIN
     WHERE id = auth.uid();
 
     IF v_workspace_id IS NULL THEN
-        RETURN jsonb_build_object(
-            'error', 'User does not belong to a workspace',
-            'allow_pos', false,
-            'allow_customers', false,
-            'allow_suppliers', false,
-            'allow_orders', false,
-            'allow_invoices', false,
-            'is_configured', false,
-            'coordination', null,
+        RETURN jsonb_build_object(
+            'error', 'User does not belong to a workspace',
+            'allow_pos', false,
+            'allow_crm', true,
+            'allow_invoices', false,
+            'is_configured', false,
+            'coordination', null,
             'print_quality', 'low',
             'kds_enabled', false
         );
@@ -31,10 +29,8 @@ BEGIN
         'workspace_name', name,
         'data_mode', COALESCE(data_mode, 'cloud'),
         'allow_pos', COALESCE(allow_pos, false),
-        'allow_customers', COALESCE(allow_customers, false),
-        'allow_suppliers', COALESCE(allow_suppliers, false),
-        'allow_orders', COALESCE(allow_orders, false),
-        'allow_invoices', COALESCE(allow_invoices, false),
+        'allow_crm', COALESCE(allow_crm, true),
+        'allow_invoices', COALESCE(allow_invoices, false),
         'is_configured', COALESCE(is_configured, false),
         'default_currency', COALESCE(default_currency, 'usd'),
         'iqd_display_preference', COALESCE(iqd_display_preference, 'IQD'),

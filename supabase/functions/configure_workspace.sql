@@ -1,9 +1,7 @@
 CREATE OR REPLACE FUNCTION public.configure_workspace(
     p_data_mode text DEFAULT 'cloud',
     p_allow_pos boolean DEFAULT false,
-    p_allow_customers boolean DEFAULT false,
-    p_allow_suppliers boolean DEFAULT false,
-    p_allow_orders boolean DEFAULT false,
+    p_allow_crm boolean DEFAULT true,
     p_allow_invoices boolean DEFAULT false,
     p_logo_url text DEFAULT NULL
 )
@@ -48,9 +46,10 @@ BEGIN
     SET 
         data_mode = normalized_mode,
         allow_pos = p_allow_pos,
-        allow_customers = p_allow_customers,
-        allow_suppliers = p_allow_suppliers,
-        allow_orders = p_allow_orders,
+        allow_crm = p_allow_crm,
+        allow_customers = p_allow_crm,
+        allow_suppliers = p_allow_crm,
+        allow_orders = p_allow_crm,
         allow_invoices = p_allow_invoices,
         logo_url = p_logo_url,
         is_configured = true
@@ -60,9 +59,7 @@ BEGIN
         'success', true,
         'data_mode', normalized_mode,
         'allow_pos', p_allow_pos,
-        'allow_customers', p_allow_customers,
-        'allow_suppliers', p_allow_suppliers,
-        'allow_orders', p_allow_orders,
+        'allow_crm', p_allow_crm,
         'allow_invoices', p_allow_invoices,
         'logo_url', p_logo_url
     );
