@@ -19,6 +19,7 @@ import { LoanPaymentModalProvider } from './loans/LoanPaymentModalProvider'
 import { UnifiedSnoozeProvider } from '@/context/UnifiedSnoozeContext'
 import { GlobalExchangeRateReminders } from './exchange/GlobalExchangeRateReminders'
 import { UnifiedSnoozedRemindersBell } from './reminders/UnifiedSnoozedRemindersBell'
+import { ThemeAwareLogo } from './ThemeAwareLogo'
 
 import {
     LayoutDashboard,
@@ -317,7 +318,7 @@ export function Layout({ children }: LayoutProps) {
                         mobileSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full rtl:translate-x-full',
                     )}
                 >
-                    {/* Logo */}
+                        {/* Logo */}
                     <div className={cn(
                         "flex items-center gap-3 px-6 py-5 border-b border-border transition-all duration-300",
                         isMini && !mobileSidebarOpen ? "justify-center px-2 flex-col gap-2" : ""
@@ -330,12 +331,7 @@ export function Layout({ children }: LayoutProps) {
                                 onError={() => setLogoError(true)}
                             />
                         ) : !logoError ? (
-                            <img
-                                src="/logo.png"
-                                alt="Logo"
-                                className="w-10 h-10 object-contain rounded-sm"
-                                onError={() => setLogoError(true)}
-                            />
+                            <ThemeAwareLogo className="w-10 h-10 object-contain" />
                         ) : (
                             <Boxes className="w-8 h-8 text-primary" />
                         )}
@@ -354,7 +350,6 @@ export function Layout({ children }: LayoutProps) {
                             <X className="w-5 h-5" />
                         </button>
 
-                        {/* Mini Toggle Button (Desktop Only) */}
                         <button
                             onClick={() => {
                                 toggleMini()

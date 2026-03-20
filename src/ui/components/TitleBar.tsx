@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { GlobalSearch } from './GlobalSearch'
 import { NotificationCenter } from './NotificationCenter'
+import { ThemeAwareTitleLogo } from './ThemeAwareTitleLogo'
 
 
 export function TitleBar() {
@@ -102,7 +103,7 @@ export function TitleBar() {
             isFullscreen && "opacity-0 pointer-events-none -translate-y-full"
         )}>
             <div data-tauri-drag-region className="flex items-center gap-3 w-1/3">
-                <img src="/logo.png" alt="Logo" className="w-8 h-8 opacity-90 rounded-sm" onError={(e) => e.currentTarget.style.display = 'none'} />
+                <ThemeAwareTitleLogo className="w-10 h-10 opacity-90" />
                 <span data-tauri-drag-region className="text-sm font-medium opacity-80 truncate">
                     {workspaceName || t('auth.titleName')}
                 </span>
