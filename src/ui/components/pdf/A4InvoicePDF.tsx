@@ -383,7 +383,7 @@ export function A4InvoicePDF({ data, features, translations: t }: A4InvoicePDFPr
 
                 {/* Site Footer */}
                 <Text style={styles.siteFooter}>
-                    {data.origin === 'pos' ? t.posSystem : 'Asaas'} | {t.generated}
+                    {data.origin === 'pos' ? t.posSystem : 'Atlas'} | {t.generated}
                 </Text>
             </Page>
         </Document>

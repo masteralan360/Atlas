@@ -3,7 +3,7 @@ import type Dexie from 'dexie'
 import { isTauri } from '@/lib/platform'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
-const LOCAL_MODE_SQLITE_PATH = 'sqlite:asaas-local-mode.db'
+const LOCAL_MODE_SQLITE_PATH = 'sqlite:atlas-local-mode.db'
 
 export const LOCAL_MODE_SQLITE_TABLES = [
     'products',
@@ -61,10 +61,10 @@ function isMirroredTableName(tableName: string): tableName is LocalModeSqliteTab
     return (LOCAL_MODE_SQLITE_TABLES as readonly string[]).includes(tableName)
 }
 
-function isBlobMarker(value: unknown): value is { __asaasType: 'blob'; mimeType: string; data: string } {
+function isBlobMarker(value: unknown): value is { __atlasType: 'blob'; mimeType: string; data: string } {
     return !!value
         && typeof value === 'object'
-        && (value as { __asaasType?: string }).__asaasType === 'blob'
+        && (value as { __atlasType?: string }).__atlasType === 'blob'
         && typeof (value as { data?: unknown }).data === 'string'
 }
 
@@ -98,7 +98,7 @@ function base64ToBlob(base64: string, mimeType: string) {
 async function serializeValue(value: unknown): Promise<unknown> {
     if (value instanceof Blob) {
         return {
-            __asaasType: 'blob' as const,
+            __atlasType: 'blob' as const,
             mimeType: value.type,
             data: arrayBufferToBase64(await value.arrayBuffer())
         }

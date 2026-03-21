@@ -1,6 +1,6 @@
 # Database Architecture
 
-The data architecture in Asaas is designed to support multi-tenancy (workspaces), offline-first availability, and robust transaction integrity. It operates simultaneously across **IndexedDB (Local)** and **PostgreSQL (Remote)**.
+The data architecture in Atlas is designed to support multi-tenancy (workspaces), offline-first availability, and robust transaction integrity. It operates simultaneously across **IndexedDB (Local)** and **PostgreSQL (Remote)**.
 
 ## Core Principles
 1. **Workspace Isolation**: Every major entity is tied to a `workspace_id`. Cross-workspace data bleed is prevented heavily via Supabase Row-Level Security (RLS).

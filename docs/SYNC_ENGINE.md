@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Asaas sync engine enables **offline-first operation**. It ensures that data is always available locally in IndexedDB and is lazily synchronized with the Supabase cloud.
+The Atlas sync engine enables **offline-first operation**. It ensures that data is always available locally in IndexedDB and is lazily synchronized with the Supabase cloud.
 
 Location: `src/sync/`
 
@@ -47,7 +47,7 @@ A unified hook that subscribes to the `ConnectionManager` to provide a single so
 
 ## Conflict Resolution
 
-Asaas uses a **Last-Write-Wins (LWW)** strategy by default. 
+Atlas uses a **Last-Write-Wins (LWW)** strategy by default. 
 - Records have a `version` number.
 - Remote updates with a higher version number or more recent `updated_at` timestamp will overwrite local changes unless the local change is still in the `pending` mutation queue.
 - If a mutation fails due to a conflict, it is flagged for manual review or automatic retry depending on the error code.

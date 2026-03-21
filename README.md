@@ -1,6 +1,6 @@
-# Asaas - Offline-First ERP & Point of Sale
+# Atlas - Offline-First ERP & Point of Sale
 
-[![Version](https://img.shields.io/badge/version-1.6.6-blue.svg)](https://github.com/masteralan360/Asaas/releases)
+[![Version](https://img.shields.io/badge/version-1.6.6-blue.svg)](https://github.com/masteralan360/Atlas/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android%20%7C%20Web-lightgrey.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -29,8 +29,8 @@ A modern, **offline-first** Enterprise Resource Planning and Point-of-Sale syste
 
 ```bash
 # Clone repository
-git clone https://github.com/masteralan360/Asaas.git
-cd Asaas
+git clone https://github.com/masteralan360/Atlas.git
+cd Atlas
 
 # Install dependencies
 npm install
@@ -69,7 +69,7 @@ npm run android:build:release
 ## 📁 Project Structure
 
 ```
-asaas/
+atlas/
 ├── src/                    # React application
 │   ├── auth/               # Authentication (Supabase)
 │   ├── local-db/           # IndexedDB layer (Dexie)

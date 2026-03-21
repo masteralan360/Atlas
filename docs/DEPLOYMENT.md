@@ -2,7 +2,7 @@
 
 ## Overview
 
-Asaas can be deployed to multiple platforms:
+Atlas can be deployed to multiple platforms:
 
 | Platform | Method | Notes |
 |----------|--------|-------|
@@ -41,8 +41,8 @@ cargo install tauri-cli
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/masteralan360/Asaas.git
-cd Asaas
+git clone https://github.com/masteralan360/Atlas.git
+cd Atlas
 ```
 
 ### 2. Install Dependencies
@@ -111,8 +111,8 @@ npm run tauri build
 ```
 
 Produces:
-- `Asaas_x.x.x_x64-setup.exe` (NSIS installer)
-- `Asaas_x.x.x_x64_en-US.msi` (MSI package)
+- `Atlas_x.x.x_x64-setup.exe` (NSIS installer)
+- `Atlas_x.x.x_x64_en-US.msi` (MSI package)
 
 ### Desktop Build (macOS)
 
@@ -122,8 +122,8 @@ npm run tauri build
 ```
 
 Produces:
-- `Asaas.app` (Application bundle)
-- `Asaas_x.x.x_x64.dmg` (Disk image)
+- `Atlas.app` (Application bundle)
+- `Atlas_x.x.x_x64.dmg` (Disk image)
 
 **Note**: For distribution, code signing is required.
 
@@ -134,8 +134,8 @@ npm run tauri build
 ```
 
 Produces:
-- `asaas_x.x.x_amd64.AppImage`
-- `asaas_x.x.x_amd64.deb`
+- `atlas_x.x.x_amd64.AppImage`
+- `atlas_x.x.x_amd64.deb`
 
 ### Android Build
 
@@ -163,7 +163,7 @@ Location: `src-tauri/tauri.conf.json`
     "updater": {
       "active": true,
       "endpoints": [
-        "https://github.com/masteralan360/Asaas/releases/latest/download/latest.json"
+        "https://github.com/masteralan360/Atlas/releases/latest/download/latest.json"
       ],
       "dialog": true,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6..."
@@ -184,12 +184,12 @@ Location: `src-tauri/tauri.conf.json`
 Generate update signing keys:
 
 ```bash
-tauri signer generate -w ~/.tauri/asaas.key
+tauri signer generate -w ~/.tauri/atlas.key
 ```
 
 Set in environment for builds:
 ```bash
-export TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/asaas.key)
+export TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/atlas.key)
 ```
 
 ---
@@ -305,8 +305,8 @@ server {
 ### Build & Run
 
 ```bash
-docker build -t asaas .
-docker run -p 80:80 asaas
+docker build -t atlas .
+docker run -p 80:80 atlas
 ```
 
 ---
@@ -335,9 +335,9 @@ Features:
 ### Tauri Logs
 
 Desktop apps log to:
-- Windows: `%APPDATA%/com.asaas.app/logs/`
-- macOS: `~/Library/Logs/com.asaas.app/`
-- Linux: `~/.local/share/com.asaas.app/logs/`
+- Windows: `%APPDATA%/com.atlas.app/logs/`
+- macOS: `~/Library/Logs/com.atlas.app/`
+- Linux: `~/.local/share/com.atlas.app/logs/`
 
 ### Supabase Logs
 

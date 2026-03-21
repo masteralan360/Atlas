@@ -204,7 +204,7 @@ export const ModernA4InvoiceTemplate = forwardRef<HTMLDivElement, ModernA4Invoic
                         )}
                     </div>
                     <div className="flex-1 text-center px-4 pt-1">
-                        <h1 className="text-2xl font-extrabold text-primary tracking-tight mb-1">{workspaceName || 'Asaas'}</h1>
+                        <h1 className="text-2xl font-extrabold text-primary tracking-tight mb-1">{workspaceName || 'Atlas'}</h1>
                         <p className="text-slate-500 text-[10px] font-medium">Providing Quality Solutions Since 1995</p>
                         <div className="mt-1 text-[9px] text-slate-400 flex flex-col gap-0.5">
                             {/* In a real app, these would come from workspace settings */}
@@ -404,7 +404,7 @@ export const ModernA4InvoiceTemplate = forwardRef<HTMLDivElement, ModernA4Invoic
                         </div>
 
                         <div className={cn("mt-4 text-center text-[8px] text-slate-400 font-bold", !isRTL && "uppercase tracking-widest")}>
-                            {data.origin === 'pos' ? tr('invoice.posSystem', 'POS System') : 'Asaas'} | {tr('invoice.generated', 'Generated Automatically')}
+                            {data.origin === 'pos' ? tr('invoice.posSystem', 'POS System') : 'Atlas'} | {tr('invoice.generated', 'Generated Automatically')}
                         </div>
                     </div>
                 </div>

@@ -27,7 +27,7 @@ This hook **auto-refetches** when the count changes (via Novu's WebSocket), givi
 
 ## Proposed Changes
 
-### [MODIFY] [NotificationCenter.tsx](file:///e:/ERP%20System/Asaas/src/ui/components/NotificationCenter.tsx)
+### [MODIFY] [NotificationCenter.tsx](file:///e:/ERP%20System/Atlas/src/ui/components/NotificationCenter.tsx)
 
 1. **Add `useCounts` import** from `@novu/react/hooks`
 2. **Create inner component** `InboxWithBadge` that lives inside `<NovuProvider>` so the hook has context

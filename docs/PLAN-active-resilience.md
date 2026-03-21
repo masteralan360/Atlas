@@ -6,7 +6,7 @@
 
 ## Problem Statement
 
-After long idle periods (screen off, system sleep, tab backgrounded), the Asaas ERP app enters a "zombie state" where:
+After long idle periods (screen off, system sleep, tab backgrounded), the Atlas ERP app enters a "zombie state" where:
 - Supabase access tokens expire silently (default: 1hr)
 - WebSocket connections (Novu, Supabase Realtime) die without detection
 - The app UI shows stale data and interactions fail with 401/network errors
@@ -40,7 +40,7 @@ These should be unified into a single source of truth.
 
 ### Phase 1: Core Resilience Engine (NEW)
 
-#### [NEW] [connectionManager.ts](file:///e:/ERP%20System/Asaas/src/lib/connectionManager.ts)
+#### [NEW] [connectionManager.ts](file:///e:/ERP%20System/Atlas/src/lib/connectionManager.ts)
 
 A centralized, singleton "Connection Manager" that all layers subscribe to. This replaces the scattered, disconnected approach.
 
@@ -57,7 +57,7 @@ A centralized, singleton "Connection Manager" that all layers subscribe to. This
 
 ### Phase 2: Auth Layer Hardening
 
-#### [MODIFY] [AuthContext.tsx](file:///e:/ERP%20System/Asaas/src/auth/AuthContext.tsx)
+#### [MODIFY] [AuthContext.tsx](file:///e:/ERP%20System/Atlas/src/auth/AuthContext.tsx)
 
 1. **Add `visibilitychange` listener**: When the user returns to the tab/app, immediately call `supabase.auth.getSession()` to verify the token is still valid. If not, attempt `supabase.auth.refreshSession()`.
 
@@ -65,13 +65,13 @@ A centralized, singleton "Connection Manager" that all layers subscribe to. This
 
 3. **Add "stale session" detection**: If `refreshSession()` fails (e.g., refresh token expired after 7 days), gracefully sign the user out with a toast explaining "Session expired, please sign in again" instead of leaving the app in zombie state.
 
-4. **Recovery Bridge improvement**: The current `asaas_session_recovery` only stores user metadata. Add a `recoveredAt` timestamp so the app can distinguish between "recovered 5 seconds ago" (probably still valid) and "recovered 3 days ago" (definitely stale).
+4. **Recovery Bridge improvement**: The current `atlas_session_recovery` only stores user metadata. Add a `recoveredAt` timestamp so the app can distinguish between "recovered 5 seconds ago" (probably still valid) and "recovered 3 days ago" (definitely stale).
 
 ---
 
 ### Phase 3: Workspace Layer Hardening
 
-#### [MODIFY] [WorkspaceContext.tsx](file:///e:/ERP%20System/Asaas/src/workspace/WorkspaceContext.tsx)
+#### [MODIFY] [WorkspaceContext.tsx](file:///e:/ERP%20System/Atlas/src/workspace/WorkspaceContext.tsx)
 
 1. **Subscribe to Connection Manager `'wake'` event**: When the user returns from idle, re-fetch workspace features. This ensures locked-workspace, currency changes, and feature toggles are picked up without hard refresh.
 
@@ -83,7 +83,7 @@ A centralized, singleton "Connection Manager" that all layers subscribe to. This
 
 ### Phase 4: Sync Layer Auto-Recovery
 
-#### [MODIFY] [useSyncStatus.ts](file:///e:/ERP%20System/Asaas/src/sync/useSyncStatus.ts)
+#### [MODIFY] [useSyncStatus.ts](file:///e:/ERP%20System/Atlas/src/sync/useSyncStatus.ts)
 
 1. **Auto-sync on reconnect**: When the Connection Manager emits `'online'` after being `'offline'`, and there are pending mutations, automatically trigger `sync()` after a 3-second delay (to let the network stabilize).
 
@@ -95,7 +95,7 @@ A centralized, singleton "Connection Manager" that all layers subscribe to. This
 
 ### Phase 5: Notification Reconnection
 
-#### [MODIFY] [NotificationCenter.tsx](file:///e:/ERP%20System/Asaas/src/ui/components/NotificationCenter.tsx)
+#### [MODIFY] [NotificationCenter.tsx](file:///e:/ERP%20System/Atlas/src/ui/components/NotificationCenter.tsx)
 
 1. **Add `key` prop driven by a reconnect counter**: When the Connection Manager detects a `'wake'` or `'online'` event, increment a counter. Pass this counter as the `key` to `NovuProvider`, forcing it to remount and re-establish its WebSocket connection.
 
@@ -105,17 +105,17 @@ A centralized, singleton "Connection Manager" that all layers subscribe to. This
 
 ### Phase 6: Unify Network Hooks
 
-#### [DELETE] [useOnlineStatus.ts](file:///e:/ERP%20System/Asaas/src/sync/useOnlineStatus.ts)
+#### [DELETE] [useOnlineStatus.ts](file:///e:/ERP%20System/Atlas/src/sync/useOnlineStatus.ts)
 
 This hook is a simpler duplicate of `useNetworkStatus.ts`. Remove it and update `useSyncStatus.ts` to use `useNetworkStatus` instead.
 
-#### [MODIFY] [useNetworkStatus.ts](file:///e:/ERP%20System/Asaas/src/hooks/useNetworkStatus.ts)
+#### [MODIFY] [useNetworkStatus.ts](file:///e:/ERP%20System/Atlas/src/hooks/useNetworkStatus.ts)
 
 - Refactor to use the centralized Connection Manager instead of its own listeners
 - Keep the toast notification behavior
 - Export both `isOnline` boolean and the full status object for different consumers
 
-#### [MODIFY] [useSyncStatus.ts](file:///e:/ERP%20System/Asaas/src/sync/useSyncStatus.ts)
+#### [MODIFY] [useSyncStatus.ts](file:///e:/ERP%20System/Atlas/src/sync/useSyncStatus.ts)
 
 - Replace `import { useOnlineStatus } from './useOnlineStatus'` with `import { useNetworkStatus } from '@/hooks/useNetworkStatus'`
 - Adapt to the slightly different return signature
@@ -127,7 +127,7 @@ This hook is a simpler duplicate of `useNetworkStatus.ts`. Remove it and update 
 > [!CAUTION]
 > The encryption key `iraqcore-supabase-key` is hardcoded in `encryption.ts`. This is a **critical security vulnerability** — anyone who reads the source code can decrypt all stored sessions. This should be moved to an environment variable.
 
-#### [MODIFY] [encryption.ts](file:///e:/ERP%20System/Asaas/src/lib/encryption.ts)
+#### [MODIFY] [encryption.ts](file:///e:/ERP%20System/Atlas/src/lib/encryption.ts)
 
 - Change `const KEY = 'iraqcore-supabase-key'` to read from `import.meta.env.VITE_ENCRYPTION_KEY` with the hardcoded value as a fallback for backwards compatibility.
 - Add the key to `.env.example`.

@@ -248,7 +248,7 @@ export const A4InvoiceTemplate = forwardRef<HTMLDivElement, A4InvoiceTemplatePro
 
                     {/* Site Footer */}
                     <div className="mt-8 border-t border-gray-200 pt-3 text-center text-xs text-neutral-500">
-                        {data.origin === 'pos' ? t('invoice.posSystem') : 'Asaas'}
+                        {data.origin === 'pos' ? t('invoice.posSystem') : 'Atlas'}
                         <span className="text-slate-300 px-2">|</span>
                         {t('invoice.generated')}
                     </div>

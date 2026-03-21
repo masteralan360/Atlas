@@ -2,7 +2,7 @@
 
 ## Overview
 
-Asaas uses **Supabase Auth** for authentication with a custom workspace-based authorization model. The system is hardened with an **Active Resilience** layer to ensure session stability even during network drops or long idle periods.
+Atlas uses **Supabase Auth** for authentication with a custom workspace-based authorization model. The system is hardened with an **Active Resilience** layer to ensure session stability even during network drops or long idle periods.
 
 ---
 

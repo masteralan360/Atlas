@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Asaas Active Resilience System is a multi-layered self-healing architecture designed to eliminate the need for hard refreshes after idle periods or network interruptions. It proactively monitors connection state and application health to ensure a seamless experience.
+The Atlas Active Resilience System is a multi-layered self-healing architecture designed to eliminate the need for hard refreshes after idle periods or network interruptions. It proactively monitors connection state and application health to ensure a seamless experience.
 
 ---
 

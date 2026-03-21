@@ -198,7 +198,7 @@ export function PrintPreviewModal({
                     <SaleReceiptBase
                         data={pdfData}
                         features={printableFeatures}
-                        workspaceName={workspaceName || workspaceId || 'Asaas'}
+                        workspaceName={workspaceName || workspaceId || 'Atlas'}
                         workspaceId={workspaceId || undefined}
                     />
                 </div>
@@ -209,14 +209,14 @@ export function PrintPreviewModal({
                             data={pdfData}
                             features={printableFeatures}
                             workspaceId={workspaceId || undefined}
-                            workspaceName={workspaceName || workspaceId || 'Asaas'}
+                            workspaceName={workspaceName || workspaceId || 'Atlas'}
                         />
                     ) : (
                         <RefundPrimaryA4InvoiceTemplate
                             data={pdfData}
                             features={printableFeatures}
                             workspaceId={workspaceId || undefined}
-                            workspaceName={workspaceName || workspaceId || 'Asaas'}
+                            workspaceName={workspaceName || workspaceId || 'Atlas'}
                         />
                     )
                 ) : printableFeatures?.a4_template === 'modern' ? (
@@ -224,7 +224,7 @@ export function PrintPreviewModal({
                         data={pdfData}
                         features={printableFeatures}
                         workspaceId={workspaceId || undefined}
-                        workspaceName={workspaceName || workspaceId || 'Asaas'}
+                        workspaceName={workspaceName || workspaceId || 'Atlas'}
                         workspaceFooterContacts={workspaceFooterContacts}
                     />
                 ) : (
@@ -232,7 +232,7 @@ export function PrintPreviewModal({
                         data={pdfData}
                         features={printableFeatures}
                         workspaceId={workspaceId || undefined}
-                        workspaceName={workspaceName || workspaceId || 'Asaas'}
+                        workspaceName={workspaceName || workspaceId || 'Atlas'}
                     />
                 )
             )

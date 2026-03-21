@@ -283,7 +283,7 @@ export async function generateInvoicePdf(options: PDFGeneratorOptions): Promise<
                 createElement(SaleReceiptBase, {
                     data,
                     features: processedFeatures,
-                    workspaceName: workspaceName || workspaceId || 'Asaas',
+                    workspaceName: workspaceName || workspaceId || 'Atlas',
                     workspaceId: workspaceId || ''
                 })
             )
@@ -303,27 +303,27 @@ export async function generateInvoicePdf(options: PDFGeneratorOptions): Promise<
                     data,
                     features: processedFeatures,
                     workspaceId,
-                    workspaceName: workspaceName || workspaceId || 'Asaas'
+                    workspaceName: workspaceName || workspaceId || 'Atlas'
                 })
                 : createElement(RefundPrimaryA4InvoiceTemplate, {
                     data,
                     features: processedFeatures,
                     workspaceId,
-                    workspaceName: workspaceName || workspaceId || 'Asaas'
+                    workspaceName: workspaceName || workspaceId || 'Atlas'
                 }))
             : isModernA4
             ? createElement(ModernA4InvoiceTemplate, {
                 data,
                 features: processedFeatures,
                 workspaceId,
-                workspaceName: workspaceName || workspaceId || 'Asaas',
+                workspaceName: workspaceName || workspaceId || 'Atlas',
                 workspaceFooterContacts
             })
             : createElement(A4InvoiceTemplate, {
                 data,
                 features: processedFeatures,
                 workspaceId,
-                workspaceName: workspaceName || workspaceId || 'Asaas'
+                workspaceName: workspaceName || workspaceId || 'Atlas'
             })
     )
     const renderResult = await renderToCanvas(element, A4_WIDTH_MM, features?.print_quality)

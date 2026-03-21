@@ -810,7 +810,7 @@ export function TeamPerformance() {
                     <div className="flex justify-between items-start border-b-2 border-black pb-4">
                         <div>
                             <h1 className="text-3xl font-black uppercase tracking-tighter">{t('performance.report.title')}</h1>
-                            <p className="text-sm opacity-70 italic">{workspaceName || 'Asaas'}</p>
+                            <p className="text-sm opacity-70 italic">{workspaceName || 'Atlas'}</p>
                         </div>
                         <div className="text-right">
                             <p className="text-xs uppercase font-bold text-gray-500">{t('performance.report.period')}</p>

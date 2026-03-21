@@ -94,7 +94,7 @@ jobs:
           VITE_NOVU_SOCKET_URL: ${{ secrets.VITE_NOVU_SOCKET_URL }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "Asaas ${{ github.ref_name }}"
+          releaseName: "Atlas ${{ github.ref_name }}"
           includeUpdaterJson: true
           releaseBody: "See the assets to download this version and install."
 
@@ -137,7 +137,7 @@ jobs:
           ${ANDROID_HOME}/build-tools/34.0.0/apksigner sign --ks release.jks \
             --ks-pass pass:${{ secrets.ANDROID_KEY_PASSWORD }} \
             --ks-key-alias ${{ secrets.ANDROID_KEY_ALIAS }} \
-            --out src-tauri/gen/android/app/build/outputs/apk/universal/release/Asaas_${{ github.ref_name }}.apk \
+            --out src-tauri/gen/android/app/build/outputs/apk/universal/release/Atlas_${{ github.ref_name }}.apk \
             "$unsigned_apk"
 
       - name: List APKs (Debug)
@@ -151,10 +151,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            src-tauri/gen/android/app/build/outputs/apk/universal/release/Asaas_${{ github.ref_name }}.apk
+            src-tauri/gen/android/app/build/outputs/apk/universal/release/Atlas_${{ github.ref_name }}.apk
             src-tauri/gen/android/app/build/outputs/apk/debug/*.apk
           tag_name: ${{ github.ref_name }}
-          name: "Asaas ${{ github.ref_name }}"
+          name: "Atlas ${{ github.ref_name }}"
           token: ${{ secrets.GITHUB_TOKEN }}
           fail_on_unmatched_files: false
 

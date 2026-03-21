@@ -281,7 +281,7 @@ export const RefundPrimaryA4InvoiceTemplate = forwardRef<HTMLDivElement, RefundP
                     </div>
 
                     <div className="mt-8 border-t border-gray-200 pt-3 text-center text-xs text-neutral-500">
-                        {data.origin === 'pos' ? (t('invoice.posSystem') || 'Issued via Asaas ERP System') : 'Asaas'}
+                        {data.origin === 'pos' ? (t('invoice.posSystem') || 'Issued via Atlas ERP System') : 'Atlas'}
                         <span className="text-slate-300 px-2">|</span>
                         {t('invoice.generated') || 'Generated Automatically'}
                     </div>

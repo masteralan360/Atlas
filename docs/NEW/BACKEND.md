@@ -1,6 +1,6 @@
 # Backend Architecture
 
-Asaas uses a hybrid backend approach, combining **Supabase** (BaaS) for cloud operations and **Tauri** (Rust) for native desktop capabilities.
+Atlas uses a hybrid backend approach, combining **Supabase** (BaaS) for cloud operations and **Tauri** (Rust) for native desktop capabilities.
 
 ## Supabase (Cloud Backend)
 Supabase acts as the central source of truth for the application. It handles:

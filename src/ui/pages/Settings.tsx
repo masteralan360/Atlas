@@ -311,7 +311,7 @@ export function Settings() {
 
                 const currentVersion = await getVersion()
 
-                const response = await fetch('https://asaas-r2-proxy.alanepic360.workers.dev/asaas-updates/latest.json', { cache: 'no-store' })
+                const response = await fetch('https://asaas-r2-proxy.alanepic360.workers.dev/atlas-updates/latest.json', { cache: 'no-store' })
 
                 if (response.ok) {
                     const data = await response.json()
@@ -1160,7 +1160,7 @@ export function Settings() {
                                     <div className="space-y-0.5">
                                         <Label className="text-sm font-medium">Enable App Lock</Label>
                                         <p className="text-xs text-muted-foreground">
-                                            Require biometric authentication to open Asaas.
+                                            Require biometric authentication to open Atlas.
                                         </p>
                                     </div>
                                     <Switch

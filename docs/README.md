@@ -1,6 +1,6 @@
-# Asaas Documentation
+# Atlas Documentation
 
-> Comprehensive documentation for the Asaas offline-first ERP/POS system.
+> Comprehensive documentation for the Atlas offline-first ERP/POS system.
 
 ## Quick Navigation
 
@@ -18,7 +18,7 @@
 
 ## Project Summary
 
-**Asaas** is a multi-platform, offline-first Enterprise Resource Planning and Point-of-Sale system built with:
+**Atlas** is a multi-platform, offline-first Enterprise Resource Planning and Point-of-Sale system built with:
 
 - **Frontend**: React 18 + TypeScript + Vite
 - **Desktop**: Tauri 2.x (Windows/macOS/Linux)

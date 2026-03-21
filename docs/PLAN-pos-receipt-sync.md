@@ -18,7 +18,7 @@ Optimize the checkout success modal by restricting printing to the Receipt forma
 
 ### [Component] POS Success UI
 
-#### [MODIFY] [CheckoutSuccessModal.tsx](file:///e:/ERP%20System/Asaas/src/ui/components/pos/CheckoutSuccessModal.tsx)
+#### [MODIFY] [CheckoutSuccessModal.tsx](file:///e:/ERP%20System/Atlas/src/ui/components/pos/CheckoutSuccessModal.tsx)
 - Remove logic for generating `pdfBlobA4`.
 - Remove `assetManager.uploadInvoicePdf` call for 'a4'.
 - Change `supabase.from('invoices').update` to `upsert`.

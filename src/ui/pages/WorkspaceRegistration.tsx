@@ -84,7 +84,7 @@ export function WorkspaceRegistration() {
                         <div className="p-3 bg-primary/10 rounded-2xl">
                             <Boxes className="w-10 h-10 text-primary" />
                         </div>
-                        <h1 className="text-2xl font-bold gradient-text">Asaas</h1>
+                        <h1 className="text-2xl font-bold gradient-text">Atlas</h1>
                         <p className="text-sm text-muted-foreground">{t('workspaceRegistration.title')}</p>
                     </div>
 

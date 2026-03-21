@@ -9,7 +9,7 @@ import { isSupabaseConfigured } from '@/auth/supabase'
 import { connectionManager } from '@/lib/connectionManager'
 import { toast } from '@/ui/components/use-toast'
 
-const LAST_SYNC_KEY = 'asaas_last_sync_time'
+const LAST_SYNC_KEY = 'atlas_last_sync_time'
 
 export interface UseSyncStatusResult {
     syncState: SyncState

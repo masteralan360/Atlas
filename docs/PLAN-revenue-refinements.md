@@ -12,7 +12,7 @@ This plan outlines the steps to refine the Revenue dashboard by removing target-
 ## Proposed Changes
 
 ### Revenue Dashboard
-#### [MODIFY] [Revenue.tsx](file:///e:/ERP%20System/Asaas/src/ui/pages/Revenue.tsx)
+#### [MODIFY] [Revenue.tsx](file:///e:/ERP%20System/Atlas/src/ui/pages/Revenue.tsx)
 -   **Dynamic Trend Logic**:
     -   Update `calculateStats` or add a new `useMemo` to compute growth percentages for Revenue, Cost, and Profit.
     -   Formula: `((Current7DaySum - Previous7DaySum) / Previous7DaySum) * 100`.

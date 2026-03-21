@@ -129,7 +129,7 @@ class PlatformService implements PlatformAPI {
     async initialize() {
         if (isTauri()) {
             // Priority 1: Hydrate from cache immediately
-            const cachedPath = localStorage.getItem('asaas_app_data_path');
+            const cachedPath = localStorage.getItem('atlas_app_data_path');
             if (cachedPath) {
                 this.appDataPath = cachedPath;
                 console.log('[PlatformService] Hydrated AppData path from cache:', this.appDataPath);
@@ -144,7 +144,7 @@ class PlatformService implements PlatformAPI {
                     this.tauriConvert = convertFileSrc;
                     this.appDataPath = await appDataDir();
 
-                    localStorage.setItem('asaas_app_data_path', this.appDataPath);
+                    localStorage.setItem('atlas_app_data_path', this.appDataPath);
                     console.log('[PlatformService] Initialized AppData path:', this.appDataPath);
                 })();
 
@@ -290,7 +290,7 @@ class PlatformService implements PlatformAPI {
         if (isTauri()) {
             const { message: tauriMessage } = await import('@tauri-apps/plugin-dialog');
             await tauriMessage(message, {
-                title: options?.title || 'Asaas',
+                title: options?.title || 'Atlas',
                 kind: options?.type as any || 'info'
             });
             return;
@@ -302,7 +302,7 @@ class PlatformService implements PlatformAPI {
         if (isTauri()) {
             const { ask } = await import('@tauri-apps/plugin-dialog');
             return ask(message, {
-                title: options?.title || 'Asaas',
+                title: options?.title || 'Atlas',
                 kind: options?.type as any || 'info'
             });
         }

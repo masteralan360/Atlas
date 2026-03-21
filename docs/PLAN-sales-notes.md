@@ -6,13 +6,13 @@ Add a "Notes" feature to each sale to allow internal staff to record specific de
 ## Proposed Changes
 
 ### 1. Database Schema
-#### [MODIFY] [types.ts](file:///e:/ERP%20System/Asaas/src/types.ts)
+#### [MODIFY] [types.ts](file:///e:/ERP%20System/Atlas/src/types.ts)
 - Add `notes?: string` to the `Sale` interface.
 
-#### [MODIFY] [models.ts](file:///e:/ERP%20System/Asaas/src/local-db/models.ts)
+#### [MODIFY] [models.ts](file:///e:/ERP%20System/Atlas/src/local-db/models.ts)
 - Add `notes?: string` to the `Sale` interface.
 
-#### [MODIFY] [database.ts](file:///e:/ERP%20System/Asaas/src/local-db/database.ts)
+#### [MODIFY] [database.ts](file:///e:/ERP%20System/Atlas/src/local-db/database.ts)
 - Increment database version to 27.
 - Add `notes` to the `sales` store schema.
 
@@ -21,7 +21,7 @@ Add a "Notes" feature to each sale to allow internal staff to record specific de
 - Add a check constraint: `length(notes) <= 250`.
 
 ### 2. UI Components
-#### [MODIFY] [Sales.tsx](file:///e:/ERP%20System/Asaas/src/ui/pages/Sales.tsx)
+#### [MODIFY] [Sales.tsx](file:///e:/ERP%20System/Atlas/src/ui/pages/Sales.tsx)
 - Update "Recent Sales" table header to include a "Notes" column between "Origin" and "Total".
 - Add cell logic:
     - `sale.notes` exists -> "View Note.."
@@ -29,7 +29,7 @@ Add a "Notes" feature to each sale to allow internal staff to record specific de
 - Implement `SalesNoteModal` for direct read/write editing.
 
 ### 3. Synchronization
-#### [VERIFY] [syncEngine.ts](file:///e:/ERP%20System/Asaas/src/sync/syncEngine.ts)
+#### [VERIFY] [syncEngine.ts](file:///e:/ERP%20System/Atlas/src/sync/syncEngine.ts)
 - Verify `toSnakeCase` and `toCamelCase` correctly handle the `notes` field.
 
 ## Verification Plan

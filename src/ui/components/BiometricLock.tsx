@@ -41,7 +41,7 @@ export function BiometricLock({ children }: BiometricLockProps) {
         setError(null)
         try {
             const { authenticate } = await import('@tauri-apps/plugin-biometric')
-            await authenticate('Unlock Asaas')
+            await authenticate('Unlock Atlas')
             localStorage.setItem('biometric_last_auth', Date.now().toString())
             setIsLocked(false)
         } catch (err: any) {

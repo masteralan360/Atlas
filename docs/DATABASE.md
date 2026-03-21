@@ -2,7 +2,7 @@
 
 ## Overview
 
-Asaas uses a **dual-database architecture**:
+Atlas uses a **dual-database architecture**:
 
 1. **Local**: Dexie.js (IndexedDB wrapper) for offline-first data access
 2. **Cloud**: Supabase PostgreSQL for persistence and sync
@@ -18,7 +18,7 @@ Both databases share the same schema structure, with local tables including sync
 Location: `src/local-db/database.ts`
 
 ```typescript
-class AsaasDatabase extends Dexie {
+class AtlasDatabase extends Dexie {
   products!: Table<Product>
   categories!: Table<Category>
   customers!: Table<Customer>     // Legacy - removed in v1.6.6+
@@ -32,7 +32,7 @@ class AsaasDatabase extends Dexie {
   settings!: Table<AppSetting>
 
   constructor() {
-    super('asaas-db')
+    super('atlas-db')
     this.version(1).stores({
       products: 'id, workspaceId, sku, barcode, categoryId, syncStatus',
       categories: 'id, workspaceId, name, syncStatus',

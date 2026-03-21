@@ -53,7 +53,7 @@ export function ConnectionConfiguration() {
                     </div>
                     <CardTitle className="text-3xl font-bold tracking-tight">Backend Configuration</CardTitle>
                     <CardDescription className="text-base">
-                        Setup your Supabase connection to start using Asaas.
+                        Setup your Supabase connection to start using Atlas.
                     </CardDescription>
                 </CardHeader>
                 <CardContent>

@@ -55,7 +55,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 // Demo user for offline/non-configured mode
 const DEMO_USER: AuthUser = {
     id: 'demo-user',
-    email: 'demo@asaas.local',
+    email: 'demo@atlas.local',
     name: 'Demo User',
     role: 'admin',
     workspaceId: 'demo-workspace',
@@ -145,7 +145,7 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
 
 // Recovery bridge helpers
 function saveRecovery(user: AuthUser) {
-    localStorage.setItem('asaas_session_recovery', JSON.stringify({
+    localStorage.setItem('atlas_session_recovery', JSON.stringify({
         ...user,
         recoveredAt: Date.now()
     }))
@@ -153,13 +153,13 @@ function saveRecovery(user: AuthUser) {
 
 function getRecoveredUser(): (AuthUser & { recoveredAt?: number }) | null {
     try {
-        const recovered = localStorage.getItem('asaas_session_recovery')
+        const recovered = localStorage.getItem('atlas_session_recovery')
         return recovered ? JSON.parse(recovered) : null
     } catch { return null }
 }
 
 function clearRecovery() {
-    localStorage.removeItem('asaas_session_recovery')
+    localStorage.removeItem('atlas_session_recovery')
 }
 
 function isRecoveryEligibleError(error: unknown) {

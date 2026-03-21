@@ -115,7 +115,7 @@ function LoanPrintHeader({
                 </div>
 
                 <div className={`w-1/3 flex flex-col ${isRtl ? 'items-center text-center' : 'items-center text-center'}`}>
-                    <h1 className="text-xl font-bold">{workspaceName || 'Asaas'}</h1>
+                    <h1 className="text-xl font-bold">{workspaceName || 'Atlas'}</h1>
                     <p className="text-sm font-semibold">{title}</p>
                     {subtitle ? (
                         <p className="text-[11px] text-slate-600">{subtitle}</p>
@@ -436,7 +436,7 @@ export function LoanReceiptPrintTemplate({
                         ) : null}
                     </div>
                 </div>
-                <div className="text-lg font-bold">{workspaceName || 'Asaas'}</div>
+                <div className="text-lg font-bold">{workspaceName || 'Atlas'}</div>
                 <div className="text-[10px] font-semibold">{t('nav.loans') || 'Loans'}</div>
                 <div className="text-[10px] text-gray-500 mt-1 flex items-center justify-center gap-1">
                     <LoanNoDisplay loanNo={loan.loanNo} suffixClassName="text-slate-500" plain />

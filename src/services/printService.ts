@@ -162,7 +162,7 @@ function buildReceiptSections(
     const t = i18n.getFixedT(printLang)
     const align = getTextAlign(features)
     const sections: PrintSections[] = [
-        { Title: { text: workspaceName || 'Asaas' } },
+        { Title: { text: workspaceName || 'Atlas' } },
         { Subtitle: { text: saleData.invoiceid || `#${saleData.id.slice(0, 8)}` } },
         { Text: { text: `${t('sales.date', { defaultValue: 'Date' })}: ${formatDateTime(saleData.created_at)}`, styles: { align } } },
         { Text: { text: `${t('sales.cashier', { defaultValue: 'Cashier' })}: ${saleData.cashier_name || 'System'}`, styles: { align } } },

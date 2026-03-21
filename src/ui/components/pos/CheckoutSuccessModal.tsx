@@ -126,7 +126,7 @@ export function CheckoutSuccessModal({
             triggerInvoiceSync({
                 saleData,
                 features: printFeatures,
-                workspaceName: workspaceName || user?.workspaceId || 'Asaas',
+                workspaceName: workspaceName || user?.workspaceId || 'Atlas',
                 workspaceId: activeWorkspace?.id || user.workspaceId,
                 user: {
                     id: user.id,
@@ -142,7 +142,7 @@ export function CheckoutSuccessModal({
                     handledByThermalPrinter = await printService.silentPrintReceipt({
                         saleData,
                         features: printFeatures,
-                        workspaceName: workspaceName || user?.workspaceId || 'Asaas',
+                        workspaceName: workspaceName || user?.workspaceId || 'Atlas',
                         workspaceId: activeWorkspace?.id || user.workspaceId
                     })
                 } catch (thermalError) {
@@ -282,7 +282,7 @@ export function CheckoutSuccessModal({
                             <SaleReceiptBase
                                 data={saleData}
                                 features={printFeatures}
-                                workspaceName={workspaceName || user?.workspaceId || 'Asaas'}
+                                workspaceName={workspaceName || user?.workspaceId || 'Atlas'}
                                 workspaceId={activeWorkspace?.id || user?.workspaceId}
                             />
                         )}

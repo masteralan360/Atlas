@@ -1,7 +1,7 @@
-# Asaas Project Overview
+# Atlas Project Overview
 
 ## Introduction
-Asaas is a modern, **offline-first** Enterprise Resource Planning (ERP) and Point-of-Sale (POS) system. It is designed to work seamlessly without internet connectivity while ensuring data is synchronized when back online. It targets multiple platforms including Windows, macOS, Linux, Android, and Web.
+Atlas is a modern, **offline-first** Enterprise Resource Planning (ERP) and Point-of-Sale (POS) system. It is designed to work seamlessly without internet connectivity while ensuring data is synchronized when back online. It targets multiple platforms including Windows, macOS, Linux, Android, and Web.
 
 ## Key Features
 - **Offline-First Point of Sale**: Lightning-fast checkout, barcode scanning, keyboard navigation.
@@ -13,7 +13,7 @@ Asaas is a modern, **offline-first** Enterprise Resource Planning (ERP) and Poin
 
 ## Architecture
 
-Asaas uses a robust offline-first architecture to provide high availability and fast performance:
+Atlas uses a robust offline-first architecture to provide high availability and fast performance:
 
 - **Local Database (IndexedDB)**: The application reads and writes primarily to a local Dexie.js database. This ensures zero latency for operations like scanning items or creating sales.
 - **Sync Engine**: A custom built synchronization engine (`src/sync/`) manages communication between the local IndexedDB and the remote Supabase PostgreSQL database. It queues offline mutations and pushes them when connectivity is restored.

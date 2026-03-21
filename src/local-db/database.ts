@@ -34,8 +34,8 @@ import {
     queueLocalModeSqliteUpsert
 } from './localModeSqlite'
 
-// Asaas Database using Dexie.js for IndexedDB
-export class AsaasDatabase extends Dexie {
+// Atlas Database using Dexie.js for IndexedDB
+export class AtlasDatabase extends Dexie {
     products!: EntityTable<Product, 'id'>
     categories!: EntityTable<Category, 'id'>
     invoices!: EntityTable<Invoice, 'id'>
@@ -64,7 +64,7 @@ export class AsaasDatabase extends Dexie {
     purchase_orders!: EntityTable<PurchaseOrder, 'id'>
 
     constructor() {
-        super('AsaasDatabase')
+        super('AtlasDatabase')
 
         this.version(37).stores({
             products: 'id, sku, name, categoryId, storageId, workspaceId, currency, syncStatus, updatedAt, isDeleted, canBeReturned',
@@ -292,7 +292,7 @@ export class AsaasDatabase extends Dexie {
 
 
 // Singleton database instance
-export const db = new AsaasDatabase()
+export const db = new AtlasDatabase()
 
 // Database utility functions
 export async function clearDatabase(): Promise<void> {

@@ -1,6 +1,6 @@
 # Frontend Architecture
 
-The Asaas frontend is built as a Single Page Application (SPA) using React 18 and Vite. It serves as the core user interface for all platforms (Web, Desktop via Tauri, and Android). 
+The Atlas frontend is built as a Single Page Application (SPA) using React 18 and Vite. It serves as the core user interface for all platforms (Web, Desktop via Tauri, and Android). 
 
 ## Core Technologies
 - **UI library**: React 18

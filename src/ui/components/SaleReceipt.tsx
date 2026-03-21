@@ -75,7 +75,7 @@ export const SaleReceiptBase = forwardRef<HTMLDivElement, SaleReceiptBaseProps>(
                         </div>
                     </div>
                     <h1 className="text-2xl font-bold mb-4">
-                        {workspaceName || 'Asaas'}
+                        {workspaceName || 'Atlas'}
                     </h1>
                     <div className="flex justify-between items-start text-xs text-gray-600 mb-4 border-b border-gray-200 pb-4">
                         <div className="text-start space-y-1">

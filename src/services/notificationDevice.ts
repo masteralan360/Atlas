@@ -2,7 +2,7 @@ import { supabase, isSupabaseConfigured } from '@/auth/supabase'
 import { isMobile, isTauri } from '@/lib/platform'
 import { requestFirebaseTokenSync } from '@/lib/firebase'
 
-const TOKEN_STORAGE_KEY_PREFIX = 'asaas_device_token'
+const TOKEN_STORAGE_KEY_PREFIX = 'atlas_device_token'
 
 async function readAndroidFcmToken(): Promise<string | null> {
     if (!isTauri() || !isMobile()) {

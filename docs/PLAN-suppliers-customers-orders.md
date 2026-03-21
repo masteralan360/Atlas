@@ -9,7 +9,7 @@
 
 ## Overview
 
-Implement three new interconnected modules for the Asaas ERP system:
+Implement three new interconnected modules for the Atlas ERP system:
 
 1. **Suppliers** - Manage vendors who supply products to restock inventory
 2. **Customers** - Manage customer accounts with order history and credit tracking

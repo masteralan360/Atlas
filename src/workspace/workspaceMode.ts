@@ -1,6 +1,6 @@
 import type { WorkspaceDataMode } from '@/local-db/models'
 
-const WORKSPACE_MODE_PREFIX = 'asaas_workspace_mode:'
+const WORKSPACE_MODE_PREFIX = 'atlas_workspace_mode:'
 
 export interface WorkspaceModeSnapshot {
     workspaceId: string

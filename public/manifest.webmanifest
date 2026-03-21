@@ -1,7 +1,7 @@
 {
-    "name": "Asaas",
-    "short_name": "Asaas",
-    "description": "Asaas Enterprise Resource Planning System",
+    "name": "Atlas",
+    "short_name": "Atlas",
+    "description": "Atlas Enterprise Resource Planning System",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0f172a",

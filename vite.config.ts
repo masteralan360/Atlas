@@ -27,8 +27,8 @@ export default defineConfig(({ mode }) => {
                 registerType: 'autoUpdate',
                 includeAssets: ['logo.ico', 'logo.png'],
                 manifest: {
-                    name: 'Asaas',
-                    short_name: 'Asaas',
+                    name: 'Atlas',
+                    short_name: 'Atlas',
                     description: 'Offline-first Enterprise Resource Planning System',
                     theme_color: '#0f172a',
                     background_color: '#0f172a',

@@ -2,7 +2,7 @@
 
 ## Core Feature Modules
 
-This document covers the main feature modules in Asaas.
+This document covers the main feature modules in Atlas.
 
 ---
 

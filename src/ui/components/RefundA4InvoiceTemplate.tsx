@@ -143,7 +143,7 @@ export const RefundA4InvoiceTemplate = forwardRef<HTMLDivElement, RefundA4Invoic
                                 )}
                             </div>
                             <div className="pt-1">
-                                <h1 className="text-2xl font-black text-slate-900">{workspaceName || 'Asaas'}</h1>
+                                <h1 className="text-2xl font-black text-slate-900">{workspaceName || 'Atlas'}</h1>
                                 <p className="text-sm font-bold text-red-700 mt-1">{t('invoice.refund.title') || 'Refund Invoice'}</p>
                                 <p className="text-xs text-slate-500">{t('invoice.refund.subtitle') || 'Return and refund details'}</p>
                             </div>
@@ -258,7 +258,7 @@ export const RefundA4InvoiceTemplate = forwardRef<HTMLDivElement, RefundA4Invoic
                     </div>
 
                     <div className="mt-6 text-center text-[10px] text-slate-500">
-                        {data.origin === 'pos' ? (t('invoice.posSystem') || 'Issued via Asaas ERP System') : 'Asaas'}
+                        {data.origin === 'pos' ? (t('invoice.posSystem') || 'Issued via Atlas ERP System') : 'Atlas'}
                         <span className="px-2 text-slate-300">|</span>
                         {t('invoice.generated') || 'Generated Automatically'}
                     </div>

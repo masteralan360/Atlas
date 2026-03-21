@@ -1,6 +1,6 @@
 # Deployment and Build Guide
 
-Asaas is a cross-platform application that leverages web technologies to ship to multiple targets from a single codebase.
+Atlas is a cross-platform application that leverages web technologies to ship to multiple targets from a single codebase.
 
 ## Prerequisites
 - **Node.js**: v18 or later.

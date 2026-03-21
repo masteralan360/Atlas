@@ -20,7 +20,7 @@ Optimize the POS checkout experience by backgrounding the printing and synchroni
 
 ### [Component] POS Success Modal
 
-#### [MODIFY] [CheckoutSuccessModal.tsx](file:///e:/ERP%20System/Asaas/src/ui/components/pos/CheckoutSuccessModal.tsx)
+#### [MODIFY] [CheckoutSuccessModal.tsx](file:///e:/ERP%20System/Atlas/src/ui/components/pos/CheckoutSuccessModal.tsx)
 - Remove `useReactToPrint`, `handlePrint`, and the hidden print `ref`.
 - Import `triggerInvoiceSync` from `invoiceSyncService`.
 - Update `handlePrintAndUpload`:
@@ -30,7 +30,7 @@ Optimize the POS checkout experience by backgrounding the printing and synchroni
 
 ### [New Service] Invoice Sync Service
 
-#### [NEW] [invoiceSyncService.ts](file:///e:/ERP%20System/Asaas/src/services/invoiceSyncService.ts)
+#### [NEW] [invoiceSyncService.ts](file:///e:/ERP%20System/Atlas/src/services/invoiceSyncService.ts)
 - A function `triggerInvoiceSync` that:
     - Captures the current `user` and `workspace` context.
     - Runs the PDF generation (`generateInvoicePdf`).
@@ -41,7 +41,7 @@ Optimize the POS checkout experience by backgrounding the printing and synchroni
 
 ### [New Service] Silent Print Structure
 
-#### [NEW] [printService.ts](file:///e:/ERP%20System/Asaas/src/services/printService.ts)
+#### [NEW] [printService.ts](file:///e:/ERP%20System/Atlas/src/services/printService.ts)
 - A utility for silent printing.
 - Current Implementation: Placeholder/Stub.
 - Future Implementation: Integration with `tauri-plugin-printer` or custom OS-level commands.

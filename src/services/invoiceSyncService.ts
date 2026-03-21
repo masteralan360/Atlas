@@ -55,7 +55,7 @@ export async function triggerInvoiceSync(options: SyncInvoiceOptions): Promise<v
             data: saleData,
             format: format,
             features: printableFeatures,
-            workspaceName: workspaceName || 'Asaas',
+            workspaceName: workspaceName || 'Atlas',
             workspaceId: options.workspaceId
         });
 

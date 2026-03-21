@@ -591,8 +591,8 @@
         }
     },
     "auth": {
-        "systemName": "Asaas System",
-        "titleName": "Asaas System ┃ The Foundation of Your Business",
+        "systemName": "Atlas System",
+        "titleName": "Atlas System ┃ The Foundation of Your Business",
         "systemSubtitle": "The Foundation of Your Business Excellence",
         "login": "Login",
         "register": "Register",
@@ -660,7 +660,7 @@
         "downloadMedia": "Download Workspace Media",
         "updater": {
             "title": "Application Updates",
-            "description": "Check for the latest version of Asaas.",
+            "description": "Check for the latest version of Atlas.",
             "status": "Update Status",
             "checking": "Checking for updates...",
             "available": "Update available! Downloading...",
@@ -1030,7 +1030,7 @@
         "terms": "Terms & Conditions",
         "exchangeRates": "Exchange Rates",
         "generated": "Generated Automatically",
-        "posSystem": "Issued via Asaas ERP System",
+        "posSystem": "Issued via Atlas ERP System",
         "refund": {
             "title": "Refund Invoice",
             "subtitle": "Return and refund details",

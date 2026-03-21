@@ -332,7 +332,7 @@ export function ExportPreviewModal({
                             <div className="inline-block min-w-full">
                                 <Spreadsheet
                                     data={spreadsheetData}
-                                    className="asaas-spreadsheet text-sm font-medium"
+                                    className="atlas-spreadsheet text-sm font-medium"
                                 />
                             </div>
                         ) : (

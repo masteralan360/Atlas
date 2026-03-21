@@ -212,7 +212,7 @@ export function ReceiptPDF({ data, features, workspaceName, translations: t }: R
                     {features.logo_url && (
                         <Image src={features.logo_url} style={styles.logo} />
                     )}
-                    <Text style={styles.storeName}>{workspaceName || 'Asaas'}</Text>
+                    <Text style={styles.storeName}>{workspaceName || 'Atlas'}</Text>
                 </View>
 
                 {/* Info Row */}

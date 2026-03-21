@@ -152,7 +152,7 @@ function UpdateHandler() {
                 const { getVersion } = await import('@tauri-apps/api/app')
                 const currentVersion = await getVersion()
 
-                const res = await fetch('https://asaas-r2-proxy.alanepic360.workers.dev/asaas-updates/latest.json', { cache: 'no-store' })
+                const res = await fetch('https://asaas-r2-proxy.alanepic360.workers.dev/atlas-updates/latest.json', { cache: 'no-store' })
                 if (res.ok) {
                     const remoteConfig = await res.json()
 
@@ -196,7 +196,7 @@ function UpdateHandler() {
 
                 const currentVersion = await getVersion()
 
-                const response = await fetch('https://asaas-r2-proxy.alanepic360.workers.dev/asaas-updates/latest.json', { cache: 'no-store' })
+                const response = await fetch('https://asaas-r2-proxy.alanepic360.workers.dev/atlas-updates/latest.json', { cache: 'no-store' })
 
                 if (response.ok) {
                     const data = await response.json()
@@ -365,7 +365,7 @@ function UpdateHandler() {
                     <div className="space-y-3">
                         <h1 className="text-2xl font-bold tracking-tight text-foreground">Update Required</h1>
                         <p className="text-muted-foreground text-sm leading-relaxed">
-                            Your application version is critically outdated and no longer supported. You must update to the latest version to continue using Asaas.
+                            Your application version is critically outdated and no longer supported. You must update to the latest version to continue using Atlas.
                         </p>
                     </div>
                     <button

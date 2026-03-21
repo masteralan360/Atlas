@@ -1,8 +1,8 @@
-# Asaas Overview
+# Atlas Overview
 
-## What is Asaas?
+## What is Atlas?
 
-Asaas is an **offline-first Enterprise Resource Planning (ERP) and Point-of-Sale (POS) system** designed for retail businesses. It works fully offline with local data storage and automatically handles synchronization and session recovery via an **Active Resilience** system.
+Atlas is an **offline-first Enterprise Resource Planning (ERP) and Point-of-Sale (POS) system** designed for retail businesses. It works fully offline with local data storage and automatically handles synchronization and session recovery via an **Active Resilience** system.
 
 ---
 
