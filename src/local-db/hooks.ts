@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
 
 import { db } from './database'
+import { createInventoryTransferTransactions } from './inventoryTransferTransactions'
 import { addToOfflineMutations } from './offlineMutations'
 import {
     deleteInventoryForProduct,
@@ -1377,6 +1378,7 @@ export async function transferInventoryBetweenStorages(
 ): Promise<{ movedCount: number }> {
     const completedTransfers: Array<{ productId: string; quantity: number }> = []
     const updatedProducts: Product[] = []
+    const affectedProductIds = new Set<string>()
     const now = new Date().toISOString()
 
     try {
@@ -1397,16 +1399,37 @@ export async function transferInventoryBetweenStorages(
                 sourceStorageId,
                 targetStorageId,
                 quantity,
-                timestamp: now
+                timestamp: now,
+                skipReorderCheck: true
             })
 
             completedTransfers.push({ productId: item.productId, quantity })
+            affectedProductIds.add(item.productId)
             if (updatedProduct) {
                 updatedProducts.push(updatedProduct)
             }
         }
 
         await syncUpdatedProductsBestEffort(updatedProducts, workspaceId)
+        if (affectedProductIds.size > 0) {
+            const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')
+            await Promise.all(Array.from(affectedProductIds).map((productId) =>
+                evaluateReorderTransferRulesForProduct(workspaceId, productId)
+            ))
+        }
+
+        await createInventoryTransferTransactions(
+            workspaceId,
+            completedTransfers.map((transfer) => ({
+                productId: transfer.productId,
+                sourceStorageId,
+                destinationStorageId: targetStorageId,
+                quantity: transfer.quantity,
+                transferType: 'manual' as const
+            })),
+            { timestamp: now }
+        )
+
         return { movedCount: completedTransfers.length }
     } catch (error) {
         for (const transfer of [...completedTransfers].reverse()) {
@@ -1417,7 +1440,8 @@ export async function transferInventoryBetweenStorages(
                     sourceStorageId: targetStorageId,
                     targetStorageId: sourceStorageId,
                     quantity: transfer.quantity,
-                    timestamp: now
+                    timestamp: now,
+                    skipReorderCheck: true
                 })
             } catch (rollbackError) {
                 console.error('[InventoryTransfer] Failed to rollback transfer:', rollbackError)
@@ -1451,7 +1475,8 @@ export async function deleteStorage(id: string, moveProductsToStorageId: string)
                 sourceStorageId: id,
                 targetStorageId: moveProductsToStorageId,
                 quantity: row.quantity,
-                timestamp: now
+                timestamp: now,
+                skipReorderCheck: true
             })
 
             completedMoves.push({ productId: row.productId, quantity: row.quantity })
@@ -1493,7 +1518,8 @@ export async function deleteStorage(id: string, moveProductsToStorageId: string)
                         sourceStorageId: moveProductsToStorageId,
                         targetStorageId: id,
                         quantity: move.quantity,
-                        timestamp: now
+                        timestamp: now,
+                        skipReorderCheck: true
                     })
                 }
                 throw normalizeSupabaseActionError(error)

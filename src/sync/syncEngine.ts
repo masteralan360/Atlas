@@ -213,6 +213,8 @@ export async function pullChanges(workspaceId: string, lastSyncTime: string | nu
     const tables = [
         'products',
         'inventory',
+        'inventory_transfer_transactions',
+        'reorder_transfer_rules',
         'categories',
         'customers',
         'suppliers',
@@ -293,8 +295,10 @@ export async function pullChanges(workspaceId: string, lastSyncTime: string | nu
                 }
 
                 if (table === 'inventory' && affectedInventoryProducts.size > 0) {
+                    const { evaluateReorderTransferRulesForProduct } = await import('@/local-db/reorderTransferRules')
                     await Promise.all(Array.from(affectedInventoryProducts).map((productId) =>
                         syncProductStockSnapshot(productId, new Date().toISOString(), 'remote')
+                            .then(() => evaluateReorderTransferRulesForProduct(workspaceId, productId))
                     ))
                 }
             }

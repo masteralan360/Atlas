@@ -217,6 +217,20 @@ async function syncInventoryRowsBestEffort(rows: Array<Inventory | null>, worksp
     ))
 }
 
+async function evaluateReorderRulesIfNeeded(input: {
+    workspaceId: string
+    productId: string
+    syncSource: InventorySyncSource
+    skipReorderCheck?: boolean
+}) {
+    if (input.syncSource !== 'local' || input.skipReorderCheck) {
+        return
+    }
+
+    const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')
+    await evaluateReorderTransferRulesForProduct(input.workspaceId, input.productId)
+}
+
 async function fetchInventoryWorkspaceFromSupabase(workspaceId: string) {
     if (!shouldUseCloudBusinessData(workspaceId)) {
         return
@@ -289,6 +303,13 @@ async function fetchInventoryWorkspaceFromSupabase(workspaceId: string) {
     await Promise.all(Array.from(affectedProductIds).map((productId) =>
         syncProductStockSnapshot(productId, fetchedAt, 'remote')
     ))
+
+    if (affectedProductIds.size > 0) {
+        const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')
+        await Promise.all(Array.from(affectedProductIds).map((productId) =>
+            evaluateReorderTransferRulesForProduct(workspaceId, productId)
+        ))
+    }
 }
 
 function useInventoryCloudSync(workspaceId: string | undefined) {
@@ -445,6 +466,7 @@ export async function setProductInventoryFromLegacyInput(input: {
     timestamp?: string
     syncSource?: InventorySyncSource
     skipRemoteSync?: boolean
+    skipReorderCheck?: boolean
 }) {
     const timestamp = input.timestamp || new Date().toISOString()
     const syncSource = input.syncSource || 'local'
@@ -520,6 +542,13 @@ export async function setProductInventoryFromLegacyInput(input: {
         await syncInventoryRowsBestEffort(changedRows, input.workspaceId)
     }
 
+    await evaluateReorderRulesIfNeeded({
+        workspaceId: input.workspaceId,
+        productId: input.productId,
+        syncSource,
+        skipReorderCheck: input.skipReorderCheck
+    })
+
     return updatedProduct
 }
 
@@ -531,6 +560,7 @@ export async function adjustInventoryQuantity(input: {
     timestamp?: string
     syncSource?: InventorySyncSource
     skipRemoteSync?: boolean
+    skipReorderCheck?: boolean
 }) {
     const timestamp = input.timestamp || new Date().toISOString()
     const syncSource = input.syncSource || 'local'
@@ -564,6 +594,13 @@ export async function adjustInventoryQuantity(input: {
         await syncInventoryRowsBestEffort([changedRow], input.workspaceId)
     }
 
+    await evaluateReorderRulesIfNeeded({
+        workspaceId: input.workspaceId,
+        productId: input.productId,
+        syncSource,
+        skipReorderCheck: input.skipReorderCheck
+    })
+
     return updatedProduct
 }
 
@@ -576,6 +613,7 @@ export async function transferInventoryQuantity(input: {
     timestamp?: string
     syncSource?: InventorySyncSource
     skipRemoteSync?: boolean
+    skipReorderCheck?: boolean
 }) {
     if (input.sourceStorageId === input.targetStorageId) {
         throw new Error('Source and target storages must be different')
@@ -629,6 +667,13 @@ export async function transferInventoryQuantity(input: {
     if (!input.skipRemoteSync && syncSource !== 'remote') {
         await syncInventoryRowsBestEffort([sourceRow, targetRow], input.workspaceId)
     }
+
+    await evaluateReorderRulesIfNeeded({
+        workspaceId: input.workspaceId,
+        productId: input.productId,
+        syncSource,
+        skipReorderCheck: input.skipReorderCheck
+    })
 
     return updatedProduct
 }
