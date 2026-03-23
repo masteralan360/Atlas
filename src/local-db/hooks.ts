@@ -1,5 +1,6 @@
 ﻿import { useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { useState } from 'react'
 
 import { db } from './database'
 import { addToOfflineMutations } from './offlineMutations'
@@ -30,6 +31,7 @@ import type {
     CurrencyCode,
     InstallmentFrequency,
     InstallmentStatus,
+    LoanLinkedPartyType,
     LoanPaymentMethod,
     LoanStatus
 } from './models'
@@ -1625,6 +1627,10 @@ export function useWorkspaceUsers(workspaceId: string | undefined) {
 
 export function useBudgetSettings(workspaceId: string | undefined) {
     const isOnline = useNetworkStatus()
+    const usesCloudBusinessData = shouldUseCloudBusinessData(workspaceId)
+    const [hasCompletedInitialCloudSync, setHasCompletedInitialCloudSync] = useState(
+        () => !workspaceId || !usesCloudBusinessData || !isOnline
+    )
 
     // 1. Local Cache
     const settings = useLiveQuery(
@@ -1634,10 +1640,35 @@ export function useBudgetSettings(workspaceId: string | undefined) {
 
     // 2. Online Sync
     useEffect(() => {
-        if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
-            void fetchTableFromSupabase('budget_settings', db.budget_settings, workspaceId)
+        if (!workspaceId || !usesCloudBusinessData || !isOnline) {
+            setHasCompletedInitialCloudSync(true)
+            return
         }
-    }, [isOnline, workspaceId])
+
+        let isCancelled = false
+        setHasCompletedInitialCloudSync(false)
+
+        void fetchTableFromSupabase('budget_settings', db.budget_settings, workspaceId).finally(() => {
+            if (!isCancelled) {
+                setHasCompletedInitialCloudSync(true)
+            }
+        })
+
+        return () => {
+            isCancelled = true
+        }
+    }, [isOnline, usesCloudBusinessData, workspaceId])
+
+    if (
+        settings !== undefined &&
+        settings.length === 0 &&
+        workspaceId &&
+        usesCloudBusinessData &&
+        isOnline &&
+        !hasCompletedInitialCloudSync
+    ) {
+        return undefined
+    }
 
     return settings
 }
@@ -2252,6 +2283,9 @@ async function enqueueLoanCreateMutations(workspaceId: string, loan: Loan, insta
 interface LoanCreateInput {
     saleId?: string | null
     source: 'pos' | 'manual'
+    linkedPartyType?: LoanLinkedPartyType | null
+    linkedPartyId?: string | null
+    linkedPartyName?: string | null
     borrowerName: string
     borrowerPhone: string
     borrowerAddress: string
@@ -2279,6 +2313,11 @@ async function createLoanAggregate(workspaceId: string, input: LoanCreateInput):
     const loanId = generateId()
     const firstDueDate = normalizeDueDate(input.firstDueDate)
     const principalAmount = roundLoanAmount(Math.max(0, Number(input.principalAmount || 0)), input.settlementCurrency)
+    const linkedPartyType = input.linkedPartyType === 'customer'
+        ? input.linkedPartyType
+        : null
+    const linkedPartyId = typeof input.linkedPartyId === 'string' ? input.linkedPartyId.trim() : ''
+    const linkedPartyName = typeof input.linkedPartyName === 'string' ? input.linkedPartyName.trim() : ''
     const borrowerName = typeof input.borrowerName === 'string' ? input.borrowerName.trim() : ''
     const borrowerPhone = typeof input.borrowerPhone === 'string' ? input.borrowerPhone.trim() : ''
     const borrowerAddress = typeof input.borrowerAddress === 'string' ? input.borrowerAddress.trim() : ''
@@ -2328,6 +2367,9 @@ async function createLoanAggregate(workspaceId: string, input: LoanCreateInput):
         saleId: input.saleId ?? null,
         loanNo: generateLoanNo(loanId),
         source: input.source,
+        linkedPartyType: linkedPartyType && linkedPartyId && linkedPartyName ? linkedPartyType : null,
+        linkedPartyId: linkedPartyType && linkedPartyId && linkedPartyName ? linkedPartyId : null,
+        linkedPartyName: linkedPartyType && linkedPartyId && linkedPartyName ? linkedPartyName : null,
         borrowerName,
         borrowerPhone,
         borrowerAddress,

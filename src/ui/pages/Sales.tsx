@@ -5,6 +5,7 @@ import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
 import { Sale } from '@/types'
 import { mapSaleToUniversal } from '@/lib/mappings'
+import { clearPendingSaleDetailsId, readPendingSaleDetailsId } from '@/lib/saleNavigation'
 import { formatCurrency, formatDateTime, formatCompactDateTime, formatDate, formatOriginLabel, cn } from '@/lib/utils'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
@@ -133,6 +134,21 @@ export function Sales() {
     useEffect(() => {
         localStorage.setItem('sales_view_mode', viewMode)
     }, [viewMode])
+
+    useEffect(() => {
+        const pendingSaleId = readPendingSaleDetailsId()
+        if (!pendingSaleId) {
+            return
+        }
+
+        const saleToOpen = allSales.find((sale) => sale.id === pendingSaleId)
+        if (!saleToOpen) {
+            return
+        }
+
+        setSelectedSale(saleToOpen)
+        clearPendingSaleDetailsId()
+    }, [allSales])
 
     // Client-side filtering: date range + cashier
     const filteredSales = useMemo(() => {

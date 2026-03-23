@@ -215,6 +215,75 @@ export class AtlasDatabase extends Dexie {
             }
         })
 
+        this.version(43).stores({
+            products: 'id, sku, name, categoryId, storageId, workspaceId, currency, syncStatus, updatedAt, isDeleted, canBeReturned',
+            categories: 'id, name, workspaceId, syncStatus, updatedAt, isDeleted',
+            invoices: 'id, invoiceid, orderId, customerId, status, workspaceId, syncStatus, updatedAt, isDeleted, origin, createdBy, cashierName, createdByName, sequenceId, printFormat, r2PathA4, r2PathReceipt',
+            users: 'id, email, role, workspaceId, syncStatus, updatedAt, isDeleted, monthlyTarget',
+            sales: 'id, cashierId, workspaceId, settlementCurrency, syncStatus, createdAt, updatedAt, notes',
+            sale_items: 'id, saleId, productId',
+            workspaces: 'id, name, code, syncStatus, updatedAt, isDeleted, print_lang, print_qr',
+            storages: 'id, name, workspaceId, isSystem, isProtected, syncStatus, updatedAt, isDeleted',
+            inventory: 'id, workspaceId, productId, storageId, quantity, syncStatus, updatedAt, isDeleted, [workspaceId+storageId], [workspaceId+productId], [productId+storageId]',
+            suppliers: 'id, name, workspaceId, phone, email, defaultCurrency, updatedAt, isDeleted, syncStatus',
+            customers: 'id, name, workspaceId, phone, email, defaultCurrency, updatedAt, isDeleted, syncStatus',
+            employees: 'id, name, workspaceId, linkedUserId, syncStatus, updatedAt, isDeleted',
+            budget_settings: 'id, workspaceId',
+            budget_allocations: 'id, workspaceId, month, [workspaceId+month]',
+            expense_series: 'id, workspaceId, recurrence, startMonth, endMonth, isDeleted',
+            expense_items: 'id, workspaceId, seriesId, month, dueDate, status, [seriesId+month], [workspaceId+month]',
+            payroll_statuses: 'id, workspaceId, employeeId, month, status, [employeeId+month], [workspaceId+month]',
+            dividend_statuses: 'id, workspaceId, employeeId, month, status, [employeeId+month], [workspaceId+month]',
+            syncQueue: 'id, entityType, entityId, operation, timestamp',
+            offline_mutations: 'id, workspaceId, entityType, entityId, status, createdAt, [entityType+entityId+status]',
+            workspace_contacts: 'id, workspaceId, type, value, syncStatus, updatedAt',
+            loans: 'id, workspaceId, saleId, status, nextDueDate, borrowerName, loanNo, linkedPartyType, linkedPartyId, syncStatus, updatedAt, isDeleted',
+            loan_installments: 'id, loanId, workspaceId, dueDate, status, syncStatus, updatedAt, isDeleted, [loanId+installmentNo]',
+            loan_payments: 'id, loanId, workspaceId, paidAt, syncStatus, updatedAt, isDeleted',
+            sales_orders: 'id, orderNumber, customerId, workspaceId, status, currency, createdAt, updatedAt, isDeleted, syncStatus',
+            purchase_orders: 'id, orderNumber, supplierId, workspaceId, status, currency, createdAt, updatedAt, isDeleted, syncStatus',
+            app_settings: 'key'
+        })
+
+        this.version(44).stores({
+            products: 'id, sku, name, categoryId, storageId, workspaceId, currency, syncStatus, updatedAt, isDeleted, canBeReturned',
+            categories: 'id, name, workspaceId, syncStatus, updatedAt, isDeleted',
+            invoices: 'id, invoiceid, orderId, customerId, status, workspaceId, syncStatus, updatedAt, isDeleted, origin, createdBy, cashierName, createdByName, sequenceId, printFormat, r2PathA4, r2PathReceipt',
+            users: 'id, email, role, workspaceId, syncStatus, updatedAt, isDeleted, monthlyTarget',
+            sales: 'id, cashierId, workspaceId, settlementCurrency, syncStatus, createdAt, updatedAt, notes',
+            sale_items: 'id, saleId, productId',
+            workspaces: 'id, name, code, syncStatus, updatedAt, isDeleted, print_lang, print_qr',
+            storages: 'id, name, workspaceId, isSystem, isProtected, syncStatus, updatedAt, isDeleted',
+            inventory: 'id, workspaceId, productId, storageId, quantity, syncStatus, updatedAt, isDeleted, [workspaceId+storageId], [workspaceId+productId], [productId+storageId]',
+            suppliers: 'id, name, workspaceId, phone, email, defaultCurrency, updatedAt, isDeleted, syncStatus',
+            customers: 'id, name, workspaceId, phone, email, defaultCurrency, updatedAt, isDeleted, syncStatus',
+            employees: 'id, name, workspaceId, linkedUserId, syncStatus, updatedAt, isDeleted',
+            budget_settings: 'id, workspaceId',
+            budget_allocations: 'id, workspaceId, month, [workspaceId+month]',
+            expense_series: 'id, workspaceId, recurrence, startMonth, endMonth, isDeleted',
+            expense_items: 'id, workspaceId, seriesId, month, dueDate, status, [seriesId+month], [workspaceId+month]',
+            payroll_statuses: 'id, workspaceId, employeeId, month, status, [employeeId+month], [workspaceId+month]',
+            dividend_statuses: 'id, workspaceId, employeeId, month, status, [employeeId+month], [workspaceId+month]',
+            syncQueue: 'id, entityType, entityId, operation, timestamp',
+            offline_mutations: 'id, workspaceId, entityType, entityId, status, createdAt, [entityType+entityId+status]',
+            workspace_contacts: 'id, workspaceId, type, value, syncStatus, updatedAt',
+            loans: 'id, workspaceId, saleId, status, nextDueDate, borrowerName, loanNo, linkedPartyType, linkedPartyId, syncStatus, updatedAt, isDeleted',
+            loan_installments: 'id, loanId, workspaceId, dueDate, status, syncStatus, updatedAt, isDeleted, [loanId+installmentNo]',
+            loan_payments: 'id, loanId, workspaceId, paidAt, syncStatus, updatedAt, isDeleted',
+            sales_orders: 'id, orderNumber, customerId, workspaceId, status, currency, createdAt, updatedAt, isDeleted, syncStatus',
+            purchase_orders: 'id, orderNumber, supplierId, workspaceId, status, currency, createdAt, updatedAt, isDeleted, syncStatus',
+            app_settings: 'key'
+        }).upgrade(async tx => {
+            await tx.table('loans')
+                .where('linkedPartyType')
+                .equals('supplier')
+                .modify({
+                    linkedPartyType: null,
+                    linkedPartyId: null,
+                    linkedPartyName: null
+                })
+        })
+
         this.registerLocalModeSyncHooks()
     }
 

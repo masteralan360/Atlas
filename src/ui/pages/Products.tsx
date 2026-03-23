@@ -837,7 +837,7 @@ export function Products() {
                                 </div>
                                 <div className="grid gap-6 md:grid-cols-2">
                                     <div className="space-y-2">
-                                        <Label htmlFor="sku" className="flex items-center gap-2 font-bold text-muted-foreground ml-1">
+                                        <Label htmlFor="sku" className="flex items-center gap-2 font-bold">
                                             <Barcode className="w-4 h-4 text-primary/60" />
                                             {t('products.table.sku')}
                                         </Label>
@@ -851,7 +851,7 @@ export function Products() {
                                         />
                                     </div>
                                     <div className="space-y-2">
-                                        <Label htmlFor="name" className="flex items-center gap-2 font-bold text-muted-foreground ml-1">
+                                        <Label htmlFor="name" className="flex items-center gap-2 font-bold">
                                             <Type className="w-4 h-4 text-primary/60" />
                                             {t('products.table.name')}
                                         </Label>
@@ -867,7 +867,7 @@ export function Products() {
                                 </div>
 
                                 <div className="space-y-2">
-                                    <Label htmlFor="description" className="flex items-center gap-2 font-bold text-muted-foreground ml-1">
+                                    <Label htmlFor="description" className="flex items-center gap-2 font-bold">
                                         <FileText className="w-4 h-4 text-primary/60" />
                                         {t('products.form.description')}
                                     </Label>
@@ -890,7 +890,7 @@ export function Products() {
                                 </div>
                                 <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                                     <div className="space-y-2">
-                                        <Label htmlFor="category" className="flex items-center gap-2 font-bold text-muted-foreground ml-1">
+                                        <Label htmlFor="category" className="flex items-center gap-2 font-bold">
                                             <Tag className="w-4 h-4 text-primary/60" />
                                             {t('products.table.category')}
                                         </Label>
@@ -907,7 +907,7 @@ export function Products() {
                                         </Select>
                                     </div>
                                     <div className="space-y-2">
-                                        <Label htmlFor="unit" className="flex items-center gap-2 font-bold text-muted-foreground ml-1">
+                                        <Label htmlFor="unit" className="flex items-center gap-2 font-bold">
                                             <Ruler className="w-4 h-4 text-primary/60" />
                                             {t('products.form.unit')}
                                         </Label>
@@ -925,7 +925,7 @@ export function Products() {
                                         </Select>
                                     </div>
                                     <div className="space-y-2 md:col-span-2 lg:col-span-1">
-                                        <Label htmlFor="storage" className="flex items-center gap-2 font-bold text-muted-foreground ml-1">
+                                        <Label htmlFor="storage" className="flex items-center gap-2 font-bold">
                                             <Warehouse className="w-4 h-4 text-primary/60" />
                                             {t('storages.title') || 'Storage'}
                                         </Label>
@@ -954,8 +954,8 @@ export function Products() {
 
                             {/* Section: Pricing */}
                             <div className="space-y-4 p-5 rounded-xl bg-gradient-to-br from-primary/5 via-transparent to-transparent border border-primary/10 shadow-sm relative overflow-hidden group">
-                                <div className="absolute top-0 right-0 p-4 opacity-[0.03] group-hover:opacity-[0.08] transition-opacity">
-                                    <Wallet className="w-24 h-24" />
+                                <div className="absolute top-0 right-0 p-4 opacity-[0.08] group-hover:opacity-[0.18] transition-opacity">
+                                    <Wallet className="w-20 h-20 text-primary/60" />
                                 </div>
                                 <div className="flex items-center gap-2 mb-2">
                                     <div className="h-4 w-1 bg-primary rounded-full transition-all group-hover:h-6" />
@@ -963,7 +963,7 @@ export function Products() {
                                 </div>
                                 <div className="grid gap-6 md:grid-cols-3">
                                     <div className="space-y-2">
-                                        <Label htmlFor="price" className="flex items-center gap-2 font-bold text-muted-foreground ml-1">
+                                        <Label htmlFor="price" className="flex items-center gap-2 font-bold">
                                             <DollarSign className="w-4 h-4 text-primary/60" />
                                             {t('products.table.price')}
                                         </Label>
@@ -988,7 +988,7 @@ export function Products() {
                                         />
                                     </div>
                                     <div className="space-y-2">
-                                        <Label htmlFor="costPrice" className="flex items-center gap-2 font-bold text-muted-foreground ml-1">
+                                        <Label htmlFor="costPrice" className="flex items-center gap-2 font-bold">
                                             <Wallet className="w-4 h-4 text-primary/60" />
                                             {t('products.form.cost')}
                                         </Label>
@@ -1015,7 +1015,7 @@ export function Products() {
                                 </div>
                                 <div className="grid gap-6 md:grid-cols-2">
                                     <div className="space-y-2">
-                                        <Label htmlFor="quantity" className="flex items-center gap-2 font-bold text-muted-foreground ml-1">
+                                        <Label htmlFor="quantity" className="flex items-center gap-2 font-bold">
                                             <Boxes className="w-4 h-4 text-primary/60" />
                                             {t('products.form.stock')}
                                         </Label>
@@ -1031,7 +1031,7 @@ export function Products() {
                                         />
                                     </div>
                                     <div className="space-y-2">
-                                        <Label htmlFor="minStockLevel" className="flex items-center gap-2 font-bold text-muted-foreground ml-1">
+                                        <Label htmlFor="minStockLevel" className="flex items-center gap-2 font-bold">
                                             <Info className="w-4 h-4 text-primary/60" />
                                             {t('products.form.minStock')}
                                         </Label>
@@ -1134,7 +1134,7 @@ export function Products() {
 
                                     <div className="flex-1 space-y-4 w-full">
                                         <div className="flex flex-col gap-3">
-                                            <Label htmlFor="imageUrl" className="flex items-center gap-2 font-bold text-muted-foreground ml-1">
+                                            <Label htmlFor="imageUrl" className="flex items-center gap-2 font-bold">
                                                 <Info className="w-4 h-4 text-primary/60" />
                                                 {t('products.form.imageUrl') || 'Image Source'}
                                             </Label>
@@ -1171,7 +1171,7 @@ export function Products() {
                                                 </div>
                                             </div>
                                         </div>
-                                        
+
                                         <div className="p-4 rounded-xl bg-muted/30 border border-border/40 flex items-start gap-3">
                                             <Info className="w-4 h-4 text-primary mt-0.5 shrink-0" />
                                             <p className="text-[11px] text-muted-foreground/80 leading-relaxed font-medium">

@@ -1193,6 +1193,16 @@
         "borrowerPhone": "Borrower Phone",
         "borrowerAddress": "Borrower Address",
         "borrowerNationalId": "Borrower National ID",
+        "selectParty": "Customer",
+        "selectPartyHint": "You can link this loan to an existing customer and still edit the borrower fields manually.",
+        "selectPartyDescription": "Choose an existing customer to fill the borrower details and mark who this loan belongs to.",
+        "searchPartyPlaceholder": "Search customers...",
+        "noPartyResults": "No matching customers found.",
+        "clearParty": "Clear Link",
+        "belongsTo": "Belongs to",
+        "partyTypes": {
+            "customer": "Customer"
+        },
         "principal": "Principal",
         "paid": "Paid",
         "balance": "Balance",

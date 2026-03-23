@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
-import { addToOfflineMutations, adjustInventoryQuantity, useCategories, useProducts } from '@/local-db'
+import { addToOfflineMutations, adjustInventoryQuantity, useCategories, useInventoryProducts, useStorages } from '@/local-db'
 import { db } from '@/local-db/database'
 import type { CurrencyCode } from '@/local-db/models'
 import { useWorkspace } from '@/workspace'
 import { formatCompactDateTime, formatCurrency, generateId, cn, stylizeText } from '@/lib/utils'
-import { Button, Input, Switch, useToast, Textarea, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/ui/components'
+import { Button, Input, useToast, Textarea, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, StorageSelector } from '@/ui/components'
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Loader2, Menu, Minus, Plus, Receipt, Search, StickyNote, Trash2 } from 'lucide-react'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { platformService } from '@/services/platformService'
@@ -24,6 +24,7 @@ type InstantPosStatus = 'pending' | 'preparing' | 'ready' | 'served' | 'paid'
 
 type InstantPosItem = {
     productId: string
+    storageId?: string
     name: string
     sku: string
     unitPrice: number
@@ -43,6 +44,10 @@ type InstantPosTicket = {
 }
 
 const STATUS_FLOW: InstantPosStatus[] = ['pending', 'preparing', 'ready', 'served', 'paid']
+
+function buildInstantPosItemKey(productId: string, storageId?: string | null) {
+    return `${productId}:${storageId ?? ''}`
+}
 
 
 function loadTickets(): InstantPosTicket[] {
@@ -117,20 +122,21 @@ interface MobileTicketPanelProps {
     statusAction: { label: string, status: InstantPosStatus } | null
     activePendingTimeLeftMs: number | null
     isCheckoutLoading: boolean
+    getStorageLabel: (storageId?: string | null) => string | null
     checkoutTicket: () => void
     setTicketStatus: (status: InstantPosStatus) => void
     extendPendingExpiry: (id: string) => void
     clearActiveTicket: () => void
-    updateItemQuantity: (id: string, delta: number) => void
-    removeItem: (id: string) => void
-    setNoteItem: (item: { productId: string, name: string, note: string } | null) => void
+    updateItemQuantity: (productId: string, storageId: string | undefined, delta: number) => void
+    removeItem: (productId: string, storageId: string | undefined) => void
+    setNoteItem: (item: { productId: string, storageId?: string, name: string, note: string } | null) => void
     closeTicket: (id: string) => void
 }
 
 function MobileTicketPanel({
     activeTicket, activeTicketTotals, settlementCurrency, features, t,
     statusLabels, statusAction, activePendingTimeLeftMs, isCheckoutLoading,
-    checkoutTicket, setTicketStatus, extendPendingExpiry, clearActiveTicket,
+    getStorageLabel, checkoutTicket, setTicketStatus, extendPendingExpiry, clearActiveTicket,
     updateItemQuantity, removeItem, setNoteItem, closeTicket
 }: MobileTicketPanelProps) {
     const [isExpanded, setIsExpanded] = useState(false)
@@ -340,7 +346,7 @@ function MobileTicketPanel({
                                     </div>
                                 ) : (
                                     activeTicket.items.map(item => (
-                                        <div key={item.productId} className="rounded-2xl border border-border/60 bg-muted/30 p-4">
+                                        <div key={buildInstantPosItemKey(item.productId, item.storageId)} className="rounded-2xl border border-border/60 bg-muted/30 p-4">
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="flex items-start gap-3">
                                                     <div className="rounded-lg bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">
@@ -354,6 +360,11 @@ function MobileTicketPanel({
                                                             </div>
                                                         )}
                                                         <div className="text-xs text-muted-foreground">{item.sku || '---'}</div>
+                                                        {getStorageLabel(item.storageId) && (
+                                                            <div className="mt-1 inline-flex rounded-full border border-border/60 bg-background px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                                                {getStorageLabel(item.storageId)}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
                                                 <div className="text-sm font-semibold text-foreground">
@@ -362,16 +373,16 @@ function MobileTicketPanel({
                                             </div>
                                             <div className="mt-4 flex items-center justify-between">
                                                 <div className="flex items-center gap-3">
-                                                    <button onClick={() => updateItemQuantity(item.productId, -1)} className="p-2 bg-background rounded-full border border-border/60"><Minus className="w-3 h-3" /></button>
-                                                    <button onClick={() => updateItemQuantity(item.productId, 1)} className="p-2 bg-background rounded-full border border-border/60"><Plus className="w-3 h-3" /></button>
+                                                    <button onClick={() => updateItemQuantity(item.productId, item.storageId, -1)} className="p-2 bg-background rounded-full border border-border/60"><Minus className="w-3 h-3" /></button>
+                                                    <button onClick={() => updateItemQuantity(item.productId, item.storageId, 1)} className="p-2 bg-background rounded-full border border-border/60"><Plus className="w-3 h-3" /></button>
                                                     <button
-                                                        onClick={() => setNoteItem({ productId: item.productId, name: item.name, note: item.note || '' })}
+                                                        onClick={() => setNoteItem({ productId: item.productId, storageId: item.storageId, name: item.name, note: item.note || '' })}
                                                         className={cn("h-8 px-3 rounded-full border border-border/60 text-[10px] font-bold uppercase flex items-center gap-1.5", item.note ? "bg-primary/10 text-primary border-primary/40" : "bg-background")}
                                                     >
                                                         <StickyNote className="w-3.5 h-3.5" /> {t('common.note')}
                                                     </button>
                                                 </div>
-                                                <button onClick={() => removeItem(item.productId)} className="text-destructive p-2"><Trash2 className="w-4 h-4" /></button>
+                                                <button onClick={() => removeItem(item.productId, item.storageId)} className="text-destructive p-2"><Trash2 className="w-4 h-4" /></button>
                                             </div>
                                         </div>
                                     ))
@@ -436,8 +447,9 @@ export function InstantPOS() {
     const { t } = useTranslation()
     const { toast } = useToast()
     const { user } = useAuth()
-    const { features, updateSettings, isLocalMode } = useWorkspace()
-    const products = useProducts(user?.workspaceId)
+    const { features, isLocalMode } = useWorkspace()
+    const products = useInventoryProducts(user?.workspaceId)
+    const storages = useStorages(user?.workspaceId)
     const categories = useCategories(user?.workspaceId)
 
     // KDS Streaming
@@ -451,14 +463,31 @@ export function InstantPOS() {
 
     const [tickets, setTickets] = useState<InstantPosTicket[]>(() => loadTickets())
     const [activeTicketId, setActiveTicketId] = useState<string | null>(null)
+    const [selectedStorageId, setSelectedStorageId] = useState<string>(() => {
+        return localStorage.getItem('instant_pos_selected_storage') || ''
+    })
     const [search, setSearch] = useState('')
     const [selectedCategory, setSelectedCategory] = useState<string>('all')
-    const [isKdsSaving, setIsKdsSaving] = useState(false)
     const [isCheckoutLoading, setIsCheckoutLoading] = useState(false)
     const [now, setNow] = useState(() => Date.now())
-    const [noteItem, setNoteItem] = useState<{ productId: string, name: string, note: string } | null>(null)
+    const [noteItem, setNoteItem] = useState<{ productId: string, storageId?: string, name: string, note: string } | null>(null)
 
     const settlementCurrency = features.default_currency || 'usd'
+
+    useEffect(() => {
+        if (selectedStorageId) {
+            localStorage.setItem('instant_pos_selected_storage', selectedStorageId)
+        }
+    }, [selectedStorageId])
+
+    useEffect(() => {
+        if (storages.length > 0 && (!selectedStorageId || !storages.find(storage => storage.id === selectedStorageId))) {
+            const mainStorage = storages.find(storage => storage.isSystem && storage.name === 'Main') || storages[0]
+            if (mainStorage) {
+                setSelectedStorageId(mainStorage.id)
+            }
+        }
+    }, [storages, selectedStorageId])
 
     useEffect(() => {
         saveTickets(tickets)
@@ -530,11 +559,35 @@ export function InstantPOS() {
         [tickets, activeTicketId]
     )
 
+    const getStorageLabel = useCallback((storageId?: string | null) => {
+        if (!storageId) {
+            return null
+        }
+
+        const storage = storages.find(item => item.id === storageId)
+        if (!storage) {
+            return null
+        }
+
+        return storage.isSystem
+            ? (t(`storages.${storage.name.toLowerCase()}`) || storage.name)
+            : storage.name
+    }, [storages, t])
+
+    const resolveTicketProduct = useCallback((item: Pick<InstantPosItem, 'productId' | 'storageId'>) => {
+        if (item.storageId) {
+            return products.find(product => product.id === item.productId && product.storageId === item.storageId)
+        }
+
+        const matches = products.filter(product => product.id === item.productId)
+        return matches.length === 1 ? matches[0] : undefined
+    }, [products])
+
     const filteredProducts = useMemo(() => {
         const term = search.trim().toLowerCase()
         const normalizedSettlement = settlementCurrency?.toLowerCase()
         return products.filter(product => {
-            if (!product.storageId) return false
+            if (!product.storageId || !selectedStorageId || product.storageId !== selectedStorageId) return false
             const matchesSearch = !term
                 || (product.name || '').toLowerCase().includes(term)
                 || (product.sku || '').toLowerCase().includes(term)
@@ -547,7 +600,7 @@ export function InstantPOS() {
             if (selectedCategory === 'none') return !product.categoryId
             return product.categoryId === selectedCategory
         })
-    }, [products, search, selectedCategory, settlementCurrency])
+    }, [products, search, selectedCategory, selectedStorageId, settlementCurrency])
 
     const activeTicketTotals = useMemo(() => {
         if (!activeTicket) {
@@ -586,16 +639,17 @@ export function InstantPOS() {
     }
 
     const addItemToTicket = (productId: string) => {
-        const product = products.find(item => item.id === productId)
-        if (!product) return
-        if (!product.storageId) {
+        if (!selectedStorageId) {
             toast({
                 title: t('common.error') || 'Error',
-                description: t('instantPos.storageRequired') || 'This product is stocked in multiple storages. Use the full POS flow to choose a storage.',
+                description: t('storages.selectStorage') || 'Select a storage first.',
                 variant: 'destructive'
             })
             return
         }
+
+        const product = products.find(item => item.id === productId && item.storageId === selectedStorageId)
+        if (!product) return
         if (product.quantity <= 0) {
             toast({
                 title: t('common.error') || 'Error',
@@ -614,6 +668,7 @@ export function InstantPOS() {
                 status: 'pending',
                 items: [{
                     productId: product.id,
+                    storageId: product.storageId,
                     name: product.name,
                     sku: product.sku,
                     unitPrice: product.price,
@@ -628,13 +683,20 @@ export function InstantPOS() {
         }
 
         updateTicket(activeTicket.id, ticket => {
-            const existing = ticket.items.find(item => item.productId === product.id)
+            const existing = ticket.items.find(item =>
+                item.productId === product.id && item.storageId === product.storageId
+            )
             if (existing) {
                 if (existing.quantity >= product.quantity) {
+                    toast({
+                        title: t('common.error') || 'Error',
+                        description: t('instantPos.outOfStock') || 'This product is out of stock.',
+                        variant: 'destructive'
+                    })
                     return ticket
                 }
                 const items = ticket.items.map(item =>
-                    item.productId === product.id
+                    item.productId === product.id && item.storageId === product.storageId
                         ? { ...item, quantity: item.quantity + 1 }
                         : item
                 )
@@ -643,6 +705,7 @@ export function InstantPOS() {
 
             const newItem: InstantPosItem = {
                 productId: product.id,
+                storageId: product.storageId,
                 name: product.name,
                 sku: product.sku,
                 unitPrice: product.price,
@@ -654,13 +717,13 @@ export function InstantPOS() {
         })
     }
 
-    const updateItemQuantity = (productId: string, delta: number) => {
+    const updateItemQuantity = (productId: string, storageId: string | undefined, delta: number) => {
         if (!activeTicket) return
         updateTicket(activeTicket.id, ticket => {
-            const product = products.find(item => item.id === productId)
+            const product = resolveTicketProduct({ productId, storageId })
             const items = ticket.items
                 .map(item => {
-                    if (item.productId !== productId) return item
+                    if (item.productId !== productId || item.storageId !== storageId) return item
                     const nextQuantity = Math.max(1, item.quantity + delta)
                     const maxStock = product?.quantity ?? nextQuantity
                     const boundedQuantity = maxStock > 0 ? Math.min(nextQuantity, maxStock) : 1
@@ -673,20 +736,20 @@ export function InstantPOS() {
         })
     }
 
-    const removeItem = (productId: string) => {
+    const removeItem = (productId: string, storageId: string | undefined) => {
         if (!activeTicket) return
         updateTicket(activeTicket.id, ticket => ({
             ...ticket,
-            items: ticket.items.filter(item => item.productId !== productId)
+            items: ticket.items.filter(item => item.productId !== productId || item.storageId !== storageId)
         }))
     }
 
-    const updateItemNote = (productId: string, note: string) => {
+    const updateItemNote = (productId: string, storageId: string | undefined, note: string) => {
         if (!activeTicket) return
         updateTicket(activeTicket.id, ticket => ({
             ...ticket,
             items: ticket.items.map(item =>
-                item.productId === productId ? { ...item, note } : item
+                item.productId === productId && item.storageId === storageId ? { ...item, note } : item
             )
         }))
         setNoteItem(null)
@@ -710,29 +773,6 @@ export function InstantPOS() {
                 title: t('common.success') || 'Sent to Kitchen',
                 description: t('instantPos.kdsToast') || 'Ticket routed to KDS for preparation.'
             })
-        }
-    }
-
-    const handleKdsToggle = async (nextValue: boolean) => {
-        if (isKdsSaving) return
-        setIsKdsSaving(true)
-        try {
-            await updateSettings({ kds_enabled: nextValue })
-            toast({
-                title: t('common.success') || 'Success',
-                description: nextValue
-                    ? (t('instantPos.kdsEnabled') || 'Kitchen routing enabled for Instant POS.')
-                    : (t('instantPos.kdsDisabled') || 'Kitchen routing disabled. Cashier handles preparation.')
-            })
-        } catch (error) {
-            const normalized = normalizeSupabaseActionError(error)
-            toast({
-                title: t('common.error') || 'Error',
-                description: normalized.message || (t('instantPos.kdsToggleError') || 'Failed to update kitchen routing.'),
-                variant: 'destructive'
-            })
-        } finally {
-            setIsKdsSaving(false)
         }
     }
 
@@ -760,8 +800,9 @@ export function InstantPOS() {
         const snapshotTimestamp = new Date().toISOString()
 
         for (const item of activeTicket.items) {
-            const product = products.find(p => p.id === item.productId)
-            if (!product?.storageId) {
+            const product = resolveTicketProduct(item)
+            const resolvedStorageId = item.storageId || product?.storageId
+            if (!product || !resolvedStorageId) {
                 toast({
                     title: t('common.error') || 'Error',
                     description: t('instantPos.storageRequired') || 'This product is stocked in multiple storages. Use the full POS flow to choose a storage.',
@@ -783,12 +824,12 @@ export function InstantPOS() {
         }
 
         const itemsWithMetadata = activeTicket.items.map(item => {
-            const product = products.find(p => p.id === item.productId)
+            const product = resolveTicketProduct(item)
             const costPrice = product?.costPrice || 0
             const inventorySnapshot = product?.quantity ?? 0
             return {
                 product_id: item.productId,
-                storage_id: product?.storageId || null,
+                storage_id: item.storageId,
                 product_name: item.name,
                 product_sku: item.sku,
                 quantity: item.quantity,
@@ -846,12 +887,12 @@ export function InstantPOS() {
             const formattedInvoiceId = sequenceId ? `#${String(sequenceId).padStart(5, '0')}` : `#${saleId.slice(0, 8)}`
 
             await Promise.all(activeTicket.items.map(async (item) => {
-                const product = products.find(p => p.id === item.productId)
-                if (product?.storageId) {
+                const resolvedStorageId = item.storageId || resolveTicketProduct(item)?.storageId
+                if (resolvedStorageId) {
                     await adjustInventoryQuantity({
                         workspaceId: user.workspaceId,
                         productId: item.productId,
-                        storageId: product.storageId,
+                        storageId: resolvedStorageId,
                         quantityDelta: -item.quantity,
                         timestamp: snapshotTimestamp,
                         syncSource: 'remote',
@@ -936,12 +977,12 @@ export function InstantPOS() {
                     ))
 
                     await Promise.all(activeTicket.items.map(async (item) => {
-                        const product = products.find(p => p.id === item.productId)
-                        if (product?.storageId) {
+                        const resolvedStorageId = item.storageId || resolveTicketProduct(item)?.storageId
+                        if (resolvedStorageId) {
                             await adjustInventoryQuantity({
                                 workspaceId: user.workspaceId,
                                 productId: item.productId,
-                                storageId: product.storageId,
+                                storageId: resolvedStorageId,
                                 quantityDelta: -item.quantity,
                                 timestamp: snapshotTimestamp
                             })
@@ -1065,15 +1106,12 @@ export function InstantPOS() {
                     </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center gap-2 rounded-full border border-border/60 bg-muted/40 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                        {t('instantPos.kdsLabel') || 'KDS'}
-                        <Switch
-                            checked={features.kds_enabled}
-                            onCheckedChange={handleKdsToggle}
-                            disabled={isKdsSaving}
-                            className="scale-75"
-                        />
-                    </div>
+                    <StorageSelector
+                        storages={storages}
+                        selectedStorageId={selectedStorageId}
+                        onSelect={setSelectedStorageId}
+                        className="h-11 w-full bg-background/80 sm:w-[220px]"
+                    />
                     <Button
                         onClick={createTicket}
                         variant="secondary"
@@ -1171,14 +1209,16 @@ export function InstantPOS() {
                         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                             {filteredProducts.length === 0 ? (
                                 <div className="col-span-full text-sm text-muted-foreground">
-                                    {t('instantPos.noProducts') || 'No products match your search.'}
+                                    {!selectedStorageId
+                                        ? (t('storages.selectStorage') || 'Select a storage')
+                                        : (t('instantPos.noProducts') || 'No products match your search.')}
                                 </div>
                             ) : (
                                 filteredProducts.map(product => {
                                     const imageUrl = getDisplayImageUrl(product.imageUrl)
                                     return (
                                         <button
-                                            key={product.id}
+                                            key={buildInstantPosItemKey(product.id, product.storageId)}
                                             onClick={() => addItemToTicket(product.id)}
                                             className="group flex flex-col overflow-hidden rounded-2xl border border-border/60 bg-card/80 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/60 hover:shadow-md"
                                         >
@@ -1217,6 +1257,7 @@ export function InstantPOS() {
                             statusAction={statusAction}
                             activePendingTimeLeftMs={activePendingTimeLeftMs}
                             isCheckoutLoading={isCheckoutLoading}
+                            getStorageLabel={getStorageLabel}
                             checkoutTicket={checkoutTicket}
                             setTicketStatus={setTicketStatus}
                             extendPendingExpiry={extendPendingExpiry}
@@ -1304,7 +1345,7 @@ export function InstantPOS() {
                                     </div>
                                 ) : (
                                     activeTicket.items.map(item => (
-                                        <div key={item.productId} className="rounded-2xl border border-border/60 bg-muted/30 p-3">
+                                        <div key={buildInstantPosItemKey(item.productId, item.storageId)} className="rounded-2xl border border-border/60 bg-muted/30 p-3">
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="flex items-start gap-3">
                                                     <div className="rounded-lg bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">
@@ -1318,6 +1359,11 @@ export function InstantPOS() {
                                                             </div>
                                                         )}
                                                         <div className="text-xs text-muted-foreground">{item.sku || '---'}</div>
+                                                        {getStorageLabel(item.storageId) && (
+                                                            <div className="mt-1 inline-flex rounded-full border border-border/60 bg-background px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                                                {getStorageLabel(item.storageId)}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
                                                 <div className="text-sm font-semibold text-foreground">
@@ -1327,19 +1373,19 @@ export function InstantPOS() {
                                             <div className="mt-3 flex items-center justify-between">
                                                 <div className="flex items-center gap-2">
                                                     <button
-                                                        onClick={() => updateItemQuantity(item.productId, -1)}
+                                                        onClick={() => updateItemQuantity(item.productId, item.storageId, -1)}
                                                         className="flex h-7 w-7 items-center justify-center rounded-full border border-border/60 bg-background text-foreground hover:bg-muted/60"
                                                     >
                                                         <Minus className="h-3 w-3" />
                                                     </button>
                                                     <button
-                                                        onClick={() => updateItemQuantity(item.productId, 1)}
+                                                        onClick={() => updateItemQuantity(item.productId, item.storageId, 1)}
                                                         className="flex h-7 w-7 items-center justify-center rounded-full border border-border/60 bg-background text-foreground hover:bg-muted/60"
                                                     >
                                                         <Plus className="h-3 w-3" />
                                                     </button>
                                                     <button
-                                                        onClick={() => setNoteItem({ productId: item.productId, name: item.name, note: item.note || '' })}
+                                                        onClick={() => setNoteItem({ productId: item.productId, storageId: item.storageId, name: item.name, note: item.note || '' })}
                                                         className={cn(
                                                             "flex h-7 px-2 items-center justify-center rounded-full border border-border/60 text-[10px] font-bold uppercase transition",
                                                             item.note ? "bg-primary/10 border-primary/40 text-primary" : "bg-background text-muted-foreground hover:bg-muted/60"
@@ -1350,7 +1396,7 @@ export function InstantPOS() {
                                                     </button>
                                                 </div>
                                                 <button
-                                                    onClick={() => removeItem(item.productId)}
+                                                    onClick={() => removeItem(item.productId, item.storageId)}
                                                     className="text-xs text-destructive hover:text-destructive/80"
                                                 >
                                                     <Trash2 className="h-4 w-4" />
@@ -1441,7 +1487,7 @@ export function InstantPOS() {
                         <Button variant="outline" onClick={() => setNoteItem(null)}>
                             {t('common.cancel') || 'Cancel'}
                         </Button>
-                        <Button onClick={() => noteItem && updateItemNote(noteItem.productId, noteItem.note)}>
+                        <Button onClick={() => noteItem && updateItemNote(noteItem.productId, noteItem.storageId, noteItem.note)}>
                             {t('common.save') || 'Save Note'}
                         </Button>
                     </DialogFooter>

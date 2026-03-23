@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { getLoanLinkedPartySummary } from '@/lib/loanParties'
 
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs))
@@ -182,11 +183,16 @@ export function formatSaleDetailsForWhatsApp(sale: any, t: (key: string) => stri
 export function formatLoanDetailsForWhatsApp(loan: any, t: (key: string) => string): string {
     const date = formatDateTime(loan.createdAt)
     const id = loan.loanNo
+    const linkedPartySummary = getLoanLinkedPartySummary(loan, t)
+    const belongsToLabel = t('loans.belongsTo') === 'loans.belongsTo' ? 'Belongs to' : t('loans.belongsTo')
 
     // Header
     let text = `*${t('loans.details') || 'Loan Details'}*\n`
     text += `*${t('loans.loanNo') || 'Loan No'}:* ${id}\n`
     text += `*${t('loans.borrower') || 'Borrower'}:* ${loan.borrowerName}\n`
+    if (linkedPartySummary) {
+        text += `*${belongsToLabel}:* ${linkedPartySummary.replace(`${belongsToLabel}: `, '')}\n`
+    }
     text += `*${t('loans.date') || 'Disbursed Date'}:* ${date}\n`
 
     // Summary

@@ -74,6 +74,11 @@ function isLoanRegistrationData(value: unknown): value is LoanRegistrationData {
     if (!value || typeof value !== 'object') return false
     const payload = value as Partial<LoanRegistrationData>
     return (
+        (payload.linkedPartyType === undefined ||
+            payload.linkedPartyType === null ||
+            payload.linkedPartyType === 'customer') &&
+        (payload.linkedPartyId === undefined || payload.linkedPartyId === null || typeof payload.linkedPartyId === 'string') &&
+        (payload.linkedPartyName === undefined || payload.linkedPartyName === null || typeof payload.linkedPartyName === 'string') &&
         typeof payload.borrowerName === 'string' &&
         typeof payload.borrowerPhone === 'string' &&
         typeof payload.borrowerAddress === 'string' &&
@@ -1362,6 +1367,9 @@ export function POS() {
                 try {
                     await createLoanFromPosSale(user.workspaceId, {
                         saleId,
+                        linkedPartyType: validLoanRegistrationData.linkedPartyType || null,
+                        linkedPartyId: validLoanRegistrationData.linkedPartyId || null,
+                        linkedPartyName: validLoanRegistrationData.linkedPartyName || null,
                         borrowerName: validLoanRegistrationData.borrowerName,
                         borrowerPhone: validLoanRegistrationData.borrowerPhone,
                         borrowerAddress: validLoanRegistrationData.borrowerAddress,
@@ -1512,6 +1520,9 @@ export function POS() {
                         try {
                             await createLoanFromPosSale(user.workspaceId, {
                                 saleId,
+                                linkedPartyType: validLoanRegistrationData.linkedPartyType || null,
+                                linkedPartyId: validLoanRegistrationData.linkedPartyId || null,
+                                linkedPartyName: validLoanRegistrationData.linkedPartyName || null,
                                 borrowerName: validLoanRegistrationData.borrowerName,
                                 borrowerPhone: validLoanRegistrationData.borrowerPhone,
                                 borrowerAddress: validLoanRegistrationData.borrowerAddress,
@@ -2402,6 +2413,7 @@ export function POS() {
             <LoanRegistrationModal
                 isOpen={isLoanRegistrationModalOpen}
                 onOpenChange={setIsLoanRegistrationModalOpen}
+                workspaceId={user?.workspaceId ?? ''}
                 settlementCurrency={settlementCurrency as CurrencyCode}
                 isSubmitting={isLoading}
                 onSubmit={(data) => handleCheckout(data)}

@@ -1,4 +1,5 @@
 import { Loan, LoanInstallment, LoanPayment, type IQDDisplayPreference } from '@/local-db'
+import { getLoanLinkedPartySummary } from '@/lib/loanParties'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { platformService } from '@/services/platformService'
 import { useTranslation } from 'react-i18next'
@@ -222,6 +223,9 @@ export function LoanListPrintTemplate({
                             </td>
                             <td className="border border-slate-300 p-2">
                                 <p className="font-medium">{loan.borrowerName}</p>
+                                {getLoanLinkedPartySummary(loan, t) ? (
+                                    <p className="text-[10px] font-medium text-slate-600">{getLoanLinkedPartySummary(loan, t)}</p>
+                                ) : null}
                                 <p className="text-[10px] text-slate-500">{loan.borrowerNationalId}</p>
                             </td>
                             <td className="border border-slate-300 p-2 text-end">{formatCurrency(loan.principalAmount, loan.settlementCurrency, iqdPreference)}</td>
@@ -286,6 +290,9 @@ export function LoanDetailsPrintTemplate({
             <div className="grid grid-cols-2 gap-4 mb-4 text-xs text-center">
                 <div className="border border-slate-300 rounded-md p-3">
                     <h2 className="font-semibold mb-2">{t('loans.borrowerIdentity') || 'Borrower Identity'}</h2>
+                    {getLoanLinkedPartySummary(loan, t) ? (
+                        <p className="mb-1 text-slate-600">{getLoanLinkedPartySummary(loan, t)}</p>
+                    ) : null}
                     <p>{loan.borrowerName}</p>
                     <p>{loan.borrowerPhone}</p>
                     <p>{loan.borrowerAddress}</p>
@@ -451,6 +458,9 @@ export function LoanReceiptPrintTemplate({
 
             <div className="border-b border-gray-200 pb-3 mb-3 text-xs">
                 <div className="font-semibold text-[10px] text-gray-500 mb-1">{t('loans.borrower') || 'Borrower'}</div>
+                {getLoanLinkedPartySummary(loan, t) ? (
+                    <div className="text-[10px] font-semibold text-primary mb-1">{getLoanLinkedPartySummary(loan, t)}</div>
+                ) : null}
                 <div className="font-bold text-sm">{loan.borrowerName}</div>
                 <div className="text-[10px] text-gray-500">{loan.borrowerPhone}</div>
                 <div className="text-[10px] text-gray-500">{loan.borrowerAddress}</div>

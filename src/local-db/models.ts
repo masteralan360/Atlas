@@ -359,11 +359,15 @@ export type LoanSource = 'pos' | 'manual'
 export type LoanStatus = 'active' | 'overdue' | 'completed'
 export type InstallmentStatus = 'unpaid' | 'partial' | 'paid' | 'overdue'
 export type InstallmentFrequency = 'weekly' | 'biweekly' | 'monthly'
+export type LoanLinkedPartyType = 'customer'
 
 export interface Loan extends BaseEntity {
     saleId?: string | null
     loanNo: string
     source: LoanSource
+    linkedPartyType?: LoanLinkedPartyType | null
+    linkedPartyId?: string | null
+    linkedPartyName?: string | null
     borrowerName: string
     borrowerPhone: string
     borrowerAddress: string

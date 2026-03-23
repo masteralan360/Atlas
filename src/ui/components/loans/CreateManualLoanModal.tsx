@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Users, X } from 'lucide-react'
 import { useAuth } from '@/auth'
 import { createManualLoan, type CurrencyCode, type InstallmentFrequency } from '@/local-db'
+import { getLoanLinkedPartyTypeLabel, type LoanPartySelection } from '@/lib/loanParties'
 import {
     Dialog,
     DialogContent,
@@ -18,6 +20,7 @@ import {
     SelectValue,
     useToast
 } from '@/ui/components'
+import { LoanPartyPickerDialog } from './LoanPartyPickerDialog'
 
 interface CreateManualLoanModalProps {
     isOpen: boolean
@@ -42,6 +45,8 @@ export function CreateManualLoanModal({
     const [borrowerPhone, setBorrowerPhone] = useState('')
     const [borrowerAddress, setBorrowerAddress] = useState('')
     const [borrowerNationalId, setBorrowerNationalId] = useState('')
+    const [selectedParty, setSelectedParty] = useState<LoanPartySelection | null>(null)
+    const [isPartyPickerOpen, setIsPartyPickerOpen] = useState(false)
     const [principalAmount, setPrincipalAmount] = useState('')
     const [installmentCount, setInstallmentCount] = useState(1)
     const [installmentFrequency, setInstallmentFrequency] = useState<InstallmentFrequency>('monthly')
@@ -54,6 +59,8 @@ export function CreateManualLoanModal({
         setBorrowerPhone('')
         setBorrowerAddress('')
         setBorrowerNationalId('')
+        setSelectedParty(null)
+        setIsPartyPickerOpen(false)
         setPrincipalAmount('')
         setInstallmentCount(1)
         setInstallmentFrequency('monthly')
@@ -69,12 +76,22 @@ export function CreateManualLoanModal({
         installmentCount > 0 &&
         firstDueDate
 
+    const handlePartySelect = (selection: LoanPartySelection) => {
+        setSelectedParty(selection)
+        setBorrowerName(selection.borrowerName)
+        setBorrowerPhone(selection.borrowerPhone)
+        setBorrowerAddress(selection.borrowerAddress)
+    }
+
     const handleCreate = async () => {
         if (!canSubmit || isSaving) return
         setIsSaving(true)
         try {
             const result = await createManualLoan(workspaceId, {
                 saleId: null,
+                linkedPartyType: selectedParty?.linkedPartyType || null,
+                linkedPartyId: selectedParty?.linkedPartyId || null,
+                linkedPartyName: selectedParty?.linkedPartyName || null,
                 borrowerName: borrowerName.trim(),
                 borrowerPhone: borrowerPhone.trim(),
                 borrowerAddress: borrowerAddress.trim(),
@@ -115,7 +132,35 @@ export function CreateManualLoanModal({
                 <div className="grid gap-4">
                     <div className="grid gap-2">
                         <Label>{t('loans.borrowerName') || 'Borrower Name'}</Label>
-                        <Input value={borrowerName} onChange={e => setBorrowerName(e.target.value)} />
+                        <div className="flex items-center gap-2">
+                            <Input value={borrowerName} onChange={e => setBorrowerName(e.target.value)} className="flex-1" />
+                            <Button type="button" variant="outline" className="shrink-0 gap-2" onClick={() => setIsPartyPickerOpen(true)}>
+                                <Users className="h-4 w-4" />
+                                {t('loans.selectParty', { defaultValue: 'Customer' })}
+                            </Button>
+                        </div>
+                        {selectedParty ? (
+                            <div className="flex items-start justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2">
+                                <div className="min-w-0">
+                                    <div className="text-[11px] font-bold uppercase tracking-wide text-primary">
+                                        {t('loans.belongsTo', { defaultValue: 'Belongs to' })}
+                                    </div>
+                                    <div className="text-sm font-semibold">
+                                        {getLoanLinkedPartyTypeLabel(selectedParty.linkedPartyType, t)} - {selectedParty.linkedPartyName}
+                                    </div>
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 shrink-0 px-2 text-muted-foreground"
+                                    onClick={() => setSelectedParty(null)}
+                                >
+                                    <X className="h-4 w-4" />
+                                    {t('loans.clearParty', { defaultValue: 'Clear Link' })}
+                                </Button>
+                            </div>
+                        ) : null}
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -185,7 +230,14 @@ export function CreateManualLoanModal({
                     </Button>
                 </DialogFooter>
             </DialogContent>
+
+            <LoanPartyPickerDialog
+                isOpen={isPartyPickerOpen}
+                onOpenChange={setIsPartyPickerOpen}
+                workspaceId={workspaceId}
+                selectedPartyId={selectedParty?.linkedPartyId}
+                onSelect={handlePartySelect}
+            />
         </Dialog>
     )
 }
-

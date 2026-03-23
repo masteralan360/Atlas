@@ -15,6 +15,8 @@ import {
     type LoanInstallment
 } from '@/local-db'
 import { useWorkspace } from '@/workspace'
+import { getLoanLinkedPartySummary } from '@/lib/loanParties'
+import { setPendingSaleDetailsId } from '@/lib/saleNavigation'
 import { formatCurrency, formatDate, cn, formatLoanDetailsForWhatsApp } from '@/lib/utils'
 import { WhatsAppNumberInputModal } from '@/ui/components/modals/WhatsAppNumberInputModal'
 import { isMobile } from '@/lib/platform'
@@ -37,7 +39,7 @@ import {
     PrintPreviewModal,
     useToast
 } from '@/ui/components'
-import { Search, Plus, ArrowLeft, Printer, Trash2, List, LayoutGrid, MessageCircle } from 'lucide-react'
+import { Search, Plus, ArrowLeft, Printer, Trash2, List, LayoutGrid, MessageCircle, Receipt } from 'lucide-react'
 import { CreateManualLoanModal } from '@/ui/components/loans/CreateManualLoanModal'
 import { LoanDetailsPrintTemplate, LoanListPrintTemplate } from '@/ui/components/loans/LoanPrintTemplates'
 import { LoanNoDisplay } from '@/ui/components/loans/LoanNoDisplay'
@@ -127,6 +129,7 @@ function LoanListView({
 
             return (
                 loan.borrowerName.toLowerCase().includes(query) ||
+                (loan.linkedPartyName?.toLowerCase().includes(query) ?? false) ||
                 loan.loanNo.toLowerCase().includes(query)
             )
         })
@@ -329,6 +332,7 @@ function LoanListView({
                                     </div>
                                 ) : paginated.map(loan => {
                                     const overdue = isLoanOverdue(loan)
+                                    const linkedPartySummary = getLoanLinkedPartySummary(loan, t)
                                     return (
                                         <div
                                             key={loan.id}
@@ -351,6 +355,11 @@ function LoanListView({
                                                     <div className="text-base font-bold text-foreground">
                                                         {loan.borrowerName}
                                                     </div>
+                                                    {linkedPartySummary ? (
+                                                        <div className="text-xs font-medium text-primary">
+                                                            {linkedPartySummary}
+                                                        </div>
+                                                    ) : null}
                                                     <div className="text-xs text-muted-foreground">
                                                         {loan.borrowerNationalId}
                                                     </div>
@@ -433,6 +442,9 @@ function LoanListView({
                                             </TableCell>
                                             <TableCell>
                                                 <div className="font-medium">{loan.borrowerName}</div>
+                                                {getLoanLinkedPartySummary(loan, t) ? (
+                                                    <div className="text-xs font-medium text-primary">{getLoanLinkedPartySummary(loan, t)}</div>
+                                                ) : null}
                                                 <div className="text-xs text-muted-foreground">{loan.borrowerNationalId}</div>
                                             </TableCell>
                                             <TableCell>
@@ -685,6 +697,17 @@ function LoanDetailsView({
         }
     ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
+    const canOpenLinkedSale = !!loan.saleId && linkedSaleMissingOrDeleted !== true
+
+    const openLinkedSaleDetails = () => {
+        if (!loan.saleId) {
+            return
+        }
+
+        setPendingSaleDetailsId(loan.saleId)
+        navigate('/sales')
+    }
+
     return (
         <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -697,6 +720,12 @@ function LoanDetailsView({
                     <LoanNoDisplay loanNo={loan.loanNo} className="text-foreground" />
                 </div>
                 <div className="flex items-center gap-2">
+                    {canOpenLinkedSale && (
+                        <Button variant="outline" onClick={openLinkedSaleDetails} className="gap-2 print:hidden">
+                            <Receipt className="w-4 h-4" />
+                            {t('loans.openLinkedSale', { defaultValue: 'Open Sale Details' })}
+                        </Button>
+                    )}
                     <Button variant="outline" onClick={() => setShowWhatsAppModal(true)} className="gap-2 text-emerald-600 border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 dark:border-emerald-800 dark:hover:bg-emerald-500/10">
                         <MessageCircle className="w-4 h-4" />
                     </Button>
@@ -726,6 +755,9 @@ function LoanDetailsView({
                         </CardHeader>
                         <CardContent className="space-y-2 text-sm">
                             <div className="font-semibold text-lg">{loan.borrowerName}</div>
+                            {getLoanLinkedPartySummary(loan, t) ? (
+                                <div className="text-xs font-bold uppercase tracking-wide text-primary">{getLoanLinkedPartySummary(loan, t)}</div>
+                            ) : null}
                             <div>{loan.borrowerPhone}</div>
                             <div>{loan.borrowerAddress}</div>
                             <div className="text-muted-foreground">{loan.borrowerNationalId}</div>
