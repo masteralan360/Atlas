@@ -164,6 +164,7 @@ export interface SalesOrder extends BaseEntity {
     reservedAt?: string | null
     shippingAddress?: string
     notes?: string
+    isLocked?: boolean
 }
 
 export interface PurchaseOrder extends BaseEntity {
@@ -187,6 +188,7 @@ export interface PurchaseOrder extends BaseEntity {
     paidAt?: string | null
     paymentMethod?: OrderPaymentMethod
     notes?: string
+    isLocked?: boolean
 }
 
 

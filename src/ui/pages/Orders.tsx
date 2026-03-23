@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { CalendarDays, CreditCard, Eye, LayoutGrid, List, PackagePlus, Pencil, Plus, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse } from 'lucide-react'
+import { CalendarDays, CreditCard, Eye, LayoutGrid, List, Lock, PackagePlus, Pencil, Plus, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useRoute } from 'wouter'
 
@@ -12,6 +12,8 @@ import {
     createSalesOrder,
     deletePurchaseOrder,
     deleteSalesOrder,
+    lockPurchaseOrder,
+    lockSalesOrder,
     setPurchaseOrderPaymentStatus,
     setSalesOrderPaymentStatus,
     updatePurchaseOrder,
@@ -174,6 +176,11 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
     const [editingPurchaseOrder, setEditingPurchaseOrder] = useState<PurchaseOrder | null>(null)
     const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
     const [isSaving, setIsSaving] = useState(false)
+    const [lockConfirm, setLockConfirm] = useState<{ isOpen: boolean; orderId: string; type: 'sales' | 'purchase' | null }>({
+        isOpen: false,
+        orderId: '',
+        type: null
+    })
 
     const [salesForm, setSalesForm] = useState<SalesFormState>({
         customerId: '',
@@ -681,6 +688,14 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
         setDeleteTarget(null)
     }
 
+    async function handleLockConfirm() {
+        if (!lockConfirm.orderId || !lockConfirm.type) return
+        
+        const action = lockConfirm.type === 'sales' ? () => lockSalesOrder(lockConfirm.orderId) : () => lockPurchaseOrder(lockConfirm.orderId)
+        await runAction(action, t('orders.lockedSuccess') || 'Order locked successfully')
+        setLockConfirm({ isOpen: false, orderId: '', type: null })
+    }
+
     function renderOrderTable() {
         const rows = activeTab === 'sales' ? filteredSalesOrders : filteredPurchaseOrders
 
@@ -726,9 +741,12 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                                     <TableCell>{formatCurrency(row.total, row.currency, features.iqd_display_preference)}</TableCell>
                                     <TableCell>{new Date(row.updatedAt).toLocaleDateString()}</TableCell>
                                     <TableCell>
-                                        <span className={row.isPaid ? 'font-semibold text-emerald-600' : 'text-amber-600'}>
-                                            {row.isPaid ? (t('budget.status.paid') || 'Paid') : (t('budget.status.pending') || 'Pending')}
-                                        </span>
+                                        <div className="flex items-center gap-1.5">
+                                            <span className={row.isPaid ? 'font-semibold text-emerald-600' : 'text-amber-600'}>
+                                                {row.isPaid ? (t('budget.status.paid') || 'Paid') : (t('budget.status.pending') || 'Pending')}
+                                            </span>
+                                            {row.isLocked && <Lock className="h-3.5 w-3.5 text-muted-foreground" />}
+                                        </div>
                                     </TableCell>
                                     <TableCell className="text-right">
                                         <div className="flex flex-wrap justify-end gap-2">
@@ -739,7 +757,8 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                                                     {canManageOrders && row.status === 'draft' && <Button size="sm" onClick={() => runAction(() => updateSalesOrderStatus(row.id, 'pending'), 'Sales order reserved')}>{t('orders.actions.reserve') || 'Reserve'}</Button>}
                                                     {canManageOrders && row.status === 'pending' && <Button size="sm" onClick={() => runAction(() => updateSalesOrderStatus(row.id, 'completed'), 'Sales order completed')}>{t('orders.actions.complete') || 'Complete'}</Button>}
                                                     {canManageOrders && (row.status === 'draft' || row.status === 'pending') && <Button variant="outline" size="sm" onClick={() => runAction(() => updateSalesOrderStatus(row.id, 'cancelled'), 'Sales order cancelled')}>{t('orders.actions.cancel') || 'Cancel'}</Button>}
-                                                    {canManageOrders && <Button variant="outline" size="sm" onClick={() => runAction(() => setSalesOrderPaymentStatus(row.id, { isPaid: !row.isPaid, paymentMethod: (row.paymentMethod || 'cash') as SalesOrder['paymentMethod'] }), row.isPaid ? 'Marked unpaid' : 'Marked paid')}>{row.isPaid ? 'Unpay' : 'Pay'}</Button>}
+                                                    {canManageOrders && !row.isLocked && <Button variant="outline" size="sm" onClick={() => runAction(() => setSalesOrderPaymentStatus(row.id, { isPaid: !row.isPaid, paymentMethod: (row.paymentMethod || 'cash') as SalesOrder['paymentMethod'] }), row.isPaid ? 'Marked unpaid' : 'Marked paid')}>{row.isPaid ? 'Unpay' : 'Pay'}</Button>}
+                                                    {canManageOrders && row.isPaid && !row.isLocked && <Button variant="outline" size="sm" onClick={() => setLockConfirm({ isOpen: true, orderId: row.id, type: 'sales' })}><Lock className="h-3.5 w-3.5" /></Button>}
                                                     {canDelete && <Button variant="ghost" size="icon" className="text-destructive" onClick={() => setDeleteTarget({ type: 'sales', order: row as SalesOrder })}><Trash2 className="h-4 w-4" /></Button>}
                                                 </>
                                             ) : (
@@ -750,7 +769,8 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                                                     {canManageOrders && row.status === 'ordered' && <Button size="sm" onClick={() => runAction(() => updatePurchaseOrderStatus(row.id, 'received'), 'Purchase order received')}>{t('orders.actions.receive') || 'Receive'}</Button>}
                                                     {canManageOrders && row.status === 'received' && <Button size="sm" onClick={() => runAction(() => updatePurchaseOrderStatus(row.id, 'completed'), 'Purchase order completed')}>{t('orders.actions.complete') || 'Complete'}</Button>}
                                                     {canManageOrders && (row.status === 'draft' || row.status === 'ordered') && <Button variant="outline" size="sm" onClick={() => runAction(() => updatePurchaseOrderStatus(row.id, 'cancelled'), 'Purchase order cancelled')}>{t('orders.actions.cancel') || 'Cancel'}</Button>}
-                                                    {canManageOrders && <Button variant="outline" size="sm" onClick={() => runAction(() => setPurchaseOrderPaymentStatus(row.id, { isPaid: !row.isPaid, paymentMethod: (row.paymentMethod || 'cash') as PurchaseOrder['paymentMethod'] }), row.isPaid ? 'Marked unpaid' : 'Marked paid')}>{row.isPaid ? 'Unpay' : 'Pay'}</Button>}
+                                                    {canManageOrders && !row.isLocked && <Button variant="outline" size="sm" onClick={() => runAction(() => setPurchaseOrderPaymentStatus(row.id, { isPaid: !row.isPaid, paymentMethod: (row.paymentMethod || 'cash') as PurchaseOrder['paymentMethod'] }), row.isPaid ? 'Marked unpaid' : 'Marked paid')}>{row.isPaid ? 'Unpay' : 'Pay'}</Button>}
+                                                    {canManageOrders && row.isPaid && !row.isLocked && <Button variant="outline" size="sm" onClick={() => setLockConfirm({ isOpen: true, orderId: row.id, type: 'purchase' })}><Lock className="h-3.5 w-3.5" /></Button>}
                                                     {canDelete && <Button variant="ghost" size="icon" className="text-destructive" onClick={() => setDeleteTarget({ type: 'purchase', order: row as PurchaseOrder })}><Trash2 className="h-4 w-4" /></Button>}
                                                 </>
                                             )}
@@ -823,10 +843,11 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                                 <div className="text-center border-l border-border/50">
                                     <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-tight">{t('pos.paymentMethod') || 'Payment'}</div>
                                     <div className={cn(
-                                        "text-[11px] font-bold",
+                                        "text-[11px] font-bold flex items-center justify-center gap-1",
                                         row.isPaid ? "text-emerald-600" : "text-amber-600"
                                     )}>
                                         {row.isPaid ? (t('budget.status.paid') || 'Paid') : (t('budget.status.pending') || 'Pending')}
+                                        {row.isLocked && <Lock className="h-2.5 w-2.5 text-muted-foreground" />}
                                     </div>
                                 </div>
                             </div>
@@ -842,7 +863,8 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                                         {canManageOrders && row.status === 'pending' && <Button size="sm" className="h-9 rounded-xl px-3 text-[10px] font-bold uppercase shadow-sm ring-1 ring-primary/20" onClick={() => runAction(() => updateSalesOrderStatus(row.id, 'completed'), 'Sales order completed')}>{t('orders.actions.complete') || 'Complete'}</Button>}
                                         {canManageOrders && (row.status === 'draft' || row.status === 'pending') && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3 text-[10px] font-bold uppercase" onClick={() => runAction(() => updateSalesOrderStatus(row.id, 'cancelled'), 'Sales order cancelled')}>{t('orders.actions.cancel') || 'Cancel'}</Button>}
                                         {canEdit && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3" onClick={() => openSalesEdit(row as SalesOrder)}><Pencil className="h-3.5 w-3.5" /></Button>}
-                                        {canManageOrders && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3 text-[10px] font-bold uppercase" onClick={() => runAction(() => setSalesOrderPaymentStatus(row.id, { isPaid: !row.isPaid, paymentMethod: (row.paymentMethod || 'cash') as SalesOrder['paymentMethod'] }), row.isPaid ? 'Marked unpaid' : 'Marked paid')}>{row.isPaid ? 'Unpay' : 'Pay'}</Button>}
+                                        {canManageOrders && !row.isLocked && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3 text-[10px] font-bold uppercase" onClick={() => runAction(() => setSalesOrderPaymentStatus(row.id, { isPaid: !row.isPaid, paymentMethod: (row.paymentMethod || 'cash') as SalesOrder['paymentMethod'] }), row.isPaid ? 'Marked unpaid' : 'Marked paid')}>{row.isPaid ? 'Unpay' : 'Pay'}</Button>}
+                                        {canManageOrders && row.isPaid && !row.isLocked && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3" onClick={() => setLockConfirm({ isOpen: true, orderId: row.id, type: 'sales' })}><Lock className="h-3.5 w-3.5" /></Button>}
                                         {canDelete && <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-destructive" onClick={() => setDeleteTarget({ type: 'sales', order: row as SalesOrder })}><Trash2 className="h-4 w-4" /></Button>}
                                     </>
                                 ) : (
@@ -852,7 +874,8 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                                         {canManageOrders && row.status === 'received' && <Button size="sm" className="h-9 rounded-xl px-3 text-[10px] font-bold uppercase shadow-sm ring-1 ring-primary/20" onClick={() => runAction(() => updatePurchaseOrderStatus(row.id, 'completed'), 'Purchase order completed')}>{t('orders.actions.complete') || 'Complete'}</Button>}
                                         {canManageOrders && (row.status === 'draft' || row.status === 'ordered') && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3 text-[10px] font-bold uppercase" onClick={() => runAction(() => updatePurchaseOrderStatus(row.id, 'cancelled'), 'Purchase order cancelled')}>{t('orders.actions.cancel') || 'Cancel'}</Button>}
                                         {canEdit && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3" onClick={() => openPurchaseEdit(row as PurchaseOrder)}><Pencil className="h-3.5 w-3.5" /></Button>}
-                                        {canManageOrders && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3 text-[10px] font-bold uppercase" onClick={() => runAction(() => setPurchaseOrderPaymentStatus(row.id, { isPaid: !row.isPaid, paymentMethod: (row.paymentMethod || 'cash') as PurchaseOrder['paymentMethod'] }), row.isPaid ? 'Marked unpaid' : 'Marked paid')}>{row.isPaid ? 'Unpay' : 'Pay'}</Button>}
+                                        {canManageOrders && !row.isLocked && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3 text-[10px] font-bold uppercase" onClick={() => runAction(() => setPurchaseOrderPaymentStatus(row.id, { isPaid: !row.isPaid, paymentMethod: (row.paymentMethod || 'cash') as PurchaseOrder['paymentMethod'] }), row.isPaid ? 'Marked unpaid' : 'Marked paid')}>{row.isPaid ? 'Unpay' : 'Pay'}</Button>}
+                                        {canManageOrders && row.isPaid && !row.isLocked && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3" onClick={() => setLockConfirm({ isOpen: true, orderId: row.id, type: 'purchase' })}><Lock className="h-3.5 w-3.5" /></Button>}
                                         {canDelete && <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-destructive" onClick={() => setDeleteTarget({ type: 'purchase', order: row as PurchaseOrder })}><Trash2 className="h-4 w-4" /></Button>}
                                     </>
                                 )}
@@ -1525,6 +1548,37 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                 title={t('orders.confirmDelete') || 'Delete Order'}
                 description={t('orders.deleteWarning') || 'This will permanently remove the order record. Associated invoices should be checked.'}
             />
+
+            <Dialog open={lockConfirm.isOpen} onOpenChange={(open) => !open && setLockConfirm({ isOpen: false, orderId: '', type: null })}>
+                <DialogContent className="max-w-[400px] rounded-3xl p-0 overflow-hidden border-none shadow-2xl">
+                    <div className="bg-gradient-to-b from-amber-500/10 to-transparent p-8 text-center space-y-4">
+                        <div className="mx-auto w-16 h-16 bg-amber-500/20 rounded-2xl flex items-center justify-center mb-2">
+                            <Lock className="w-8 h-8 text-amber-600" />
+                        </div>
+                        <DialogHeader>
+                            <DialogTitle className="text-2xl font-black text-center">{t('orders.lockTitle') || 'Lock Order?'}</DialogTitle>
+                        </DialogHeader>
+                        <p className="text-muted-foreground text-sm font-medium leading-relaxed">
+                            {t('orders.lockDescription') || 'Locking this order will prevent any changes to its payment status. This action cannot be undone.'}
+                        </p>
+                    </div>
+                    <DialogFooter className="p-6 pt-2 grid grid-cols-2 gap-3 sm:justify-start">
+                        <Button
+                            variant="outline"
+                            className="rounded-xl h-12 font-bold border-2"
+                            onClick={() => setLockConfirm({ isOpen: false, orderId: '', type: null })}
+                        >
+                            {t('common.cancel')}
+                        </Button>
+                        <Button
+                            className="rounded-xl h-12 font-bold bg-amber-600 hover:bg-amber-700 shadow-lg shadow-amber-600/20"
+                            onClick={handleLockConfirm}
+                        >
+                            {t('orders.actions.lock') || 'Lock Now'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

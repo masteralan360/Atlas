@@ -294,6 +294,7 @@ function buildBaseEntity<T extends Record<string, unknown>>(workspaceId: string,
         updatedAt: now,
         version: 1,
         isDeleted: false,
+        isLocked: false,
         ...getSyncMetadata(workspaceId, now)
     }
 }
@@ -831,6 +832,10 @@ export async function setSalesOrderPaymentStatus(
         ...getSyncMetadata(existing.workspaceId, now)
     }
 
+    if (existing.isLocked) {
+        throw new Error('locked_order_immutable')
+    }
+
     if ((updated.status === 'pending' || updated.status === 'completed') && !updated.isPaid) {
         await assertSalesCreditLimit(updated, existing.id)
     }
@@ -838,6 +843,30 @@ export async function setSalesOrderPaymentStatus(
     await db.sales_orders.put(updated)
     await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
     await recalculateCustomerSummary(existing.workspaceId, existing.customerId)
+    return updated
+}
+
+export async function lockSalesOrder(id: string) {
+    const existing = await db.sales_orders.get(id)
+    if (!existing || existing.isDeleted) {
+        throw new Error('Sales order not found')
+    }
+
+    if (!existing.isPaid) {
+        throw new Error('only_paid_orders_can_be_locked')
+    }
+
+    const now = new Date().toISOString()
+    const updated: SalesOrder = {
+        ...existing,
+        isLocked: true,
+        updatedAt: now,
+        version: existing.version + 1,
+        ...getSyncMetadata(existing.workspaceId, now)
+    }
+
+    await db.sales_orders.put(updated)
+    await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
     return updated
 }
 
@@ -982,9 +1011,37 @@ export async function setPurchaseOrderPaymentStatus(
         ...getSyncMetadata(existing.workspaceId, now)
     }
 
+    if (existing.isLocked) {
+        throw new Error('locked_order_immutable')
+    }
+
     await db.purchase_orders.put(updated)
     await syncUpsertEntities('purchase_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
     await recalculateSupplierSummary(existing.workspaceId, existing.supplierId)
+    return updated
+}
+
+export async function lockPurchaseOrder(id: string) {
+    const existing = await db.purchase_orders.get(id)
+    if (!existing || existing.isDeleted) {
+        throw new Error('Purchase order not found')
+    }
+
+    if (!existing.isPaid) {
+        throw new Error('only_paid_orders_can_be_locked')
+    }
+
+    const now = new Date().toISOString()
+    const updated: PurchaseOrder = {
+        ...existing,
+        isLocked: true,
+        updatedAt: now,
+        version: existing.version + 1,
+        ...getSyncMetadata(existing.workspaceId, now)
+    }
+
+    await db.purchase_orders.put(updated)
+    await syncUpsertEntities('purchase_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
     return updated
 }
 
