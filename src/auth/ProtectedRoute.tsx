@@ -2,7 +2,7 @@ import { type ReactNode } from 'react'
 import { useAuth } from './AuthContext'
 import { Redirect, useLocation, Link } from 'wouter'
 import type { UserRole } from '@/local-db/models'
-import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { useWorkspace, type ModuleFeatureKey } from '@/workspace/WorkspaceContext'
 import { BiometricLock } from '@/ui/components'
 
 interface ProtectedRouteProps {
@@ -10,7 +10,7 @@ interface ProtectedRouteProps {
     allowedRoles?: UserRole[]
     redirectTo?: string
     allowKicked?: boolean
-    requiredFeature?: 'allow_pos' | 'allow_crm' | 'allow_invoices' | 'allow_whatsapp'
+    requiredFeature?: ModuleFeatureKey
 }
 
 export function ProtectedRoute({

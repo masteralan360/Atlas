@@ -504,21 +504,21 @@ function App() {
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/pos">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="allow_pos">
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="pos">
                                                     <Layout>
                                                         <POS />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/instant-pos">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="allow_pos">
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="instant_pos">
                                                     <Layout>
                                                         <InstantPOS />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/kds">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="allow_pos">
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="pos">
                                                     <Layout>
                                                         <KDSDashboard />
                                                     </Layout>
@@ -530,105 +530,105 @@ function App() {
                                                 </div>
                                             </Route>
                                             <Route path="/sales">
-                                                <ProtectedRoute>
+                                                <ProtectedRoute requiredFeature="sales_history">
                                                     <Layout>
                                                         <Sales />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/customers">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="allow_crm">
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="crm">
                                                     <Layout>
                                                         <Customers />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/customers/:customerId">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="allow_crm">
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="crm">
                                                     <Layout>
                                                         <CustomerDetails />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/suppliers">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="allow_crm">
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="crm">
                                                     <Layout>
                                                         <Suppliers />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/suppliers/:supplierId">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="allow_crm">
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="crm">
                                                     <Layout>
                                                         <SupplierDetails />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/orders">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="allow_crm">
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="crm">
                                                     <Layout>
                                                         <Orders />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/orders/:orderId">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="allow_crm">
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="crm">
                                                     <Layout>
                                                         <Orders />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/travel-agency">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff']}>
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="travel_agency">
                                                     <Layout>
                                                         <TravelAgency />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/travel-agency/new">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff']}>
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="travel_agency">
                                                     <Layout>
                                                         <TravelAgencySaleCreate />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/travel-agency/:saleId/view">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff']}>
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="travel_agency">
                                                     <Layout>
                                                         <TravelAgencySaleView />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/travel-agency/:saleId">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff']}>
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="travel_agency">
                                                     <Layout>
                                                         <TravelAgencySaleEdit />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/revenue">
-                                                <ProtectedRoute allowedRoles={['admin']}>
+                                                <ProtectedRoute allowedRoles={['admin']} requiredFeature="net_revenue">
                                                     <Layout>
                                                         <Revenue />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/budget">
-                                                <ProtectedRoute allowedRoles={['admin']}>
+                                                <ProtectedRoute allowedRoles={['admin']} requiredFeature="budget">
                                                     <Layout>
                                                         <Budget />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/monthly-comparison">
-                                                <ProtectedRoute allowedRoles={['admin']}>
+                                                <ProtectedRoute allowedRoles={['admin']} requiredFeature="monthly_comparison">
                                                     <Layout>
                                                         <MonthlyComparison />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/performance">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff', 'viewer']}>
+                                                <ProtectedRoute allowedRoles={['admin', 'staff', 'viewer']} requiredFeature="team_performance">
                                                     <Layout>
                                                         <TeamPerformance />
                                                     </Layout>
@@ -642,7 +642,7 @@ function App() {
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/products">
-                                                <ProtectedRoute>
+                                                <ProtectedRoute requiredFeature="products">
                                                     <Layout>
                                                         <Products />
                                                     </Layout>
@@ -650,35 +650,35 @@ function App() {
                                             </Route>
 
                                             <Route path="/storages">
-                                                <ProtectedRoute>
+                                                <ProtectedRoute requiredFeature="storages">
                                                     <Layout>
                                                         <Storages />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/inventory-transfer">
-                                                <ProtectedRoute>
+                                                <ProtectedRoute requiredFeature="inventory_transfer">
                                                     <Layout>
                                                         <InventoryTransfer />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/hr">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff']}>
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="hr">
                                                     <Layout>
                                                         <HR />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/loans">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff', 'viewer']}>
+                                                <ProtectedRoute allowedRoles={['admin', 'staff', 'viewer']} requiredFeature="loans">
                                                     <Layout>
                                                         <Loans />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/loans/:loanId">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff', 'viewer']}>
+                                                <ProtectedRoute allowedRoles={['admin', 'staff', 'viewer']} requiredFeature="loans">
                                                     <Layout>
                                                         <Loans />
                                                     </Layout>
@@ -686,7 +686,7 @@ function App() {
                                             </Route>
 
                                             <Route path="/invoices-history">
-                                                <ProtectedRoute requiredFeature="allow_invoices">
+                                                <ProtectedRoute requiredFeature="invoices_history">
                                                     <Layout>
                                                         <InvoicesHistory />
                                                     </Layout>
@@ -707,7 +707,7 @@ function App() {
                                                 </ProtectedRoute>
                                             </Route>
                                             <Route path="/members">
-                                                <ProtectedRoute allowedRoles={['admin', 'staff']}>
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="members">
                                                     <Layout>
                                                         <Members />
                                                     </Layout>

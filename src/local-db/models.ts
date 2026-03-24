@@ -498,23 +498,34 @@ export interface Workspace extends BaseEntity {
     code: string
     data_mode: WorkspaceDataMode
     is_configured?: boolean
-    allow_crm?: boolean
-    allow_customers?: boolean
-    allow_orders?: boolean
-    allow_suppliers?: boolean
+    // Module toggles
+    pos: boolean
+    instant_pos?: boolean
+    sales_history?: boolean
+    crm?: boolean
+    travel_agency?: boolean
+    loans?: boolean
+    net_revenue?: boolean
+    budget?: boolean
+    monthly_comparison?: boolean
+    team_performance?: boolean
+    products?: boolean
+    storages?: boolean
+    inventory_transfer?: boolean
+    invoices_history: boolean
+    hr?: boolean
+    members?: boolean
+    // Settings
     default_currency: CurrencyCode
     iqd_display_preference: IQDDisplayPreference
     eur_conversion_enabled?: boolean
     try_conversion_enabled?: boolean
     locked_workspace: boolean
-    allow_pos: boolean
-    allow_invoices: boolean
     allow_whatsapp?: boolean
     kds_enabled?: boolean
     logo_url?: string | null
     coordination?: string | null
     syncStatus: SyncStatus
-    // Negotiated price limit (0-100 percentage)
     max_discount_percent?: number
     print_lang?: 'auto' | 'en' | 'ar' | 'ku'
     print_qr?: boolean

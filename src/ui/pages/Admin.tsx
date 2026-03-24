@@ -59,9 +59,9 @@ interface AdminWorkspace {
     code: string
     created_at: string
     data_mode: 'cloud' | 'local'
-    allow_pos: boolean
-    allow_crm: boolean
-    allow_invoices: boolean
+    pos: boolean
+    crm: boolean
+    invoices_history: boolean
     is_configured: boolean
     locked_workspace: boolean
     subscription_expires_at: string | null
@@ -228,7 +228,7 @@ export function Admin() {
 
     const handleToggleWorkspaceFeature = async (
         workspaceId: string,
-        feature: 'allow_pos' | 'allow_crm' | 'allow_invoices' | 'locked_workspace',
+        feature: 'pos' | 'crm' | 'invoices_history' | 'locked_workspace',
         currentValue: boolean
     ) => {
         // Optimistic update
@@ -241,9 +241,9 @@ export function Admin() {
 
         // Prepare new values (toggling the specific feature)
         const newValues = {
-            allow_pos: feature === 'allow_pos' ? !workspace.allow_pos : workspace.allow_pos,
-            allow_crm: feature === 'allow_crm' ? !workspace.allow_crm : workspace.allow_crm,
-            allow_invoices: feature === 'allow_invoices' ? !workspace.allow_invoices : workspace.allow_invoices,
+            pos: feature === 'pos' ? !workspace.pos : workspace.pos,
+            crm: feature === 'crm' ? !workspace.crm : workspace.crm,
+            invoices_history: feature === 'invoices_history' ? !workspace.invoices_history : workspace.invoices_history,
             locked_workspace: feature === 'locked_workspace' ? !workspace.locked_workspace : workspace.locked_workspace,
         }
 
@@ -252,9 +252,9 @@ export function Admin() {
                 supabase.rpc('admin_update_workspace_features', {
                     provided_key: passkey,
                     target_workspace_id: workspaceId,
-                    new_allow_pos: newValues.allow_pos,
-                    new_allow_crm: newValues.allow_crm,
-                    new_allow_invoices: newValues.allow_invoices,
+                    new_pos: newValues.pos,
+                    new_crm: newValues.crm,
+                    new_invoices_history: newValues.invoices_history,
                     new_locked_workspace: newValues.locked_workspace
                 })
             )
@@ -584,8 +584,8 @@ export function Admin() {
                                                 <td className="px-6 py-4">
                                                     <div className="flex justify-center">
                                                         <Switch
-                                                            checked={ws.allow_pos}
-                                                            onCheckedChange={() => handleToggleWorkspaceFeature(ws.id, 'allow_pos', ws.allow_pos)}
+                                                            checked={ws.pos}
+                                                            onCheckedChange={() => handleToggleWorkspaceFeature(ws.id, 'pos', ws.pos)}
                                                             disabled={!!ws.deleted_at}
                                                         />
                                                     </div>
@@ -593,8 +593,8 @@ export function Admin() {
                                                 <td className="px-6 py-4">
                                                     <div className="flex justify-center">
                                                         <Switch
-                                                            checked={ws.allow_crm}
-                                                            onCheckedChange={() => handleToggleWorkspaceFeature(ws.id, 'allow_crm', ws.allow_crm)}
+                                                            checked={ws.crm}
+                                                            onCheckedChange={() => handleToggleWorkspaceFeature(ws.id, 'crm', ws.crm)}
                                                             disabled={!!ws.deleted_at}
                                                         />
                                                     </div>
@@ -602,8 +602,8 @@ export function Admin() {
                                                 <td className="px-6 py-4">
                                                     <div className="flex justify-center">
                                                         <Switch
-                                                            checked={ws.allow_invoices}
-                                                            onCheckedChange={() => handleToggleWorkspaceFeature(ws.id, 'allow_invoices', ws.allow_invoices)}
+                                                            checked={ws.invoices_history}
+                                                            onCheckedChange={() => handleToggleWorkspaceFeature(ws.id, 'invoices_history', ws.invoices_history)}
                                                             disabled={!!ws.deleted_at}
                                                         />
                                                     </div>

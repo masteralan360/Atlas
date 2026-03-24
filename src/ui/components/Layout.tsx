@@ -234,7 +234,7 @@ export function Layout({ children }: LayoutProps) {
     const navigation: Array<{ name: string; href: string; icon: any; status?: string; alert?: boolean; children?: Array<{ name: string; href: string; icon?: any }> }> = [
         { name: t('nav.dashboard'), href: '/', icon: LayoutDashboard },
         // POS - requires feature flag AND role
-        ...((user?.role === 'admin' || user?.role === 'staff') && hasFeature('allow_pos') ? [
+        ...((user?.role === 'admin' || user?.role === 'staff') && hasFeature('pos') ? [
             { name: t('nav.pos') || 'POS', href: '/pos', icon: CreditCard },
             {
                 name: t('nav.instantPos') || 'Instant POS',
@@ -247,7 +247,7 @@ export function Layout({ children }: LayoutProps) {
         ] : []),
         // Sales - always visible (history of transactions)
         { name: t('nav.sales') || 'Sales', href: '/sales', icon: Receipt },
-        ...((user?.role === 'admin' || user?.role === 'staff') && hasFeature('allow_crm') ? [
+        ...((user?.role === 'admin' || user?.role === 'staff') && hasFeature('crm') ? [
             { name: t('nav.customers') || 'Customers', href: '/customers', icon: Users },
             { name: t('nav.suppliers') || 'Suppliers', href: '/suppliers', icon: Truck },
             { name: t('nav.orders') || 'Orders', href: '/orders', icon: ShoppingCart }
@@ -274,7 +274,7 @@ export function Layout({ children }: LayoutProps) {
         // Inventory Transfer
         { name: t('nav.inventoryTransfer') || 'Transfer', href: '/inventory-transfer', icon: ArrowRightLeft },
         // Invoices - requires feature flag
-        ...(hasFeature('allow_invoices') ? [
+        ...(hasFeature('invoices_history') ? [
             { name: t('nav.invoicesHistory') || 'Invoices History', href: '/invoices-history', icon: FileText }
         ] : []),
         // Admin/Staff routes

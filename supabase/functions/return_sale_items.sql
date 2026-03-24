@@ -11,7 +11,7 @@ DECLARE
     item_record RECORD;
     p_workspace_id UUID;
     v_user_role TEXT;
-    v_allow_pos BOOLEAN;
+    v_pos BOOLEAN;
     v_sale_id UUID;
     v_requested_quantity INTEGER;
     v_return_quantity INTEGER;
@@ -42,11 +42,12 @@ BEGIN
     p_workspace_id := item_record.workspace_id;
     v_sale_id := item_record.sale_id;
 
-    SELECT allow_pos INTO v_allow_pos
+    -- Check if POS feature is enabled for this workspace
+    SELECT pos INTO v_pos
     FROM public.workspaces
     WHERE id = p_workspace_id;
 
-    IF NOT COALESCE(v_allow_pos, false) THEN
+    IF NOT COALESCE(v_pos, false) THEN
         RAISE EXCEPTION 'POS feature is not enabled for this workspace';
     END IF;
 

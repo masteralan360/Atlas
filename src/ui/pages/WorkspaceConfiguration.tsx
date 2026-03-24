@@ -36,7 +36,7 @@ import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseA
 import type { WorkspaceDataMode } from '@/local-db/models'
 
 interface FeatureToggle {
-    key: 'allow_pos' | 'allow_invoices'
+    key: 'pos' | 'invoices_history'
     label: string
     description: string
     icon: React.ElementType
@@ -68,19 +68,19 @@ export function WorkspaceConfiguration() {
     }, [currentFeatures.coordination])
 
     const [features, setFeatures] = useState({
-        allow_pos: currentFeatures.allow_pos,
-        allow_invoices: currentFeatures.allow_invoices
+        pos: currentFeatures.pos,
+        invoices_history: currentFeatures.invoices_history
     })
 
     const featureToggles: FeatureToggle[] = [
         {
-            key: 'allow_pos',
+            key: 'pos',
             label: t('workspaceConfig.features.pos') || 'Point of Sale (POS)',
             description: t('workspaceConfig.features.posDesc') || 'Enable quick sales and checkout functionality',
             icon: CreditCard
         },
         {
-            key: 'allow_invoices',
+            key: 'invoices_history',
             label: t('workspaceConfig.features.invoices') || 'Invoicing',
             description: t('workspaceConfig.features.invoicesDesc') || 'Generate and manage invoices',
             icon: FileText
@@ -180,8 +180,8 @@ export function WorkspaceConfiguration() {
             const { error } = await runSupabaseAction('workspace.configure', () =>
                 supabase.rpc('configure_workspace', {
                     p_data_mode: dataMode,
-                    p_allow_pos: features.allow_pos,
-                    p_allow_invoices: features.allow_invoices,
+                    p_pos: features.pos,
+                    p_invoices_history: features.invoices_history,
                     p_logo_url: logoUrl || null
                 })
             )

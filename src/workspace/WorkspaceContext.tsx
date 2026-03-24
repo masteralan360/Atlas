@@ -20,14 +20,45 @@ import {
 import { writeWorkspaceModeSnapshot } from './workspaceMode'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
 
+export type ModuleFeatureKey =
+    | 'pos'
+    | 'instant_pos'
+    | 'sales_history'
+    | 'crm'
+    | 'travel_agency'
+    | 'loans'
+    | 'net_revenue'
+    | 'budget'
+    | 'monthly_comparison'
+    | 'team_performance'
+    | 'products'
+    | 'storages'
+    | 'inventory_transfer'
+    | 'invoices_history'
+    | 'hr'
+    | 'members'
+    | 'allow_whatsapp'
+
 export interface WorkspaceFeatures {
     data_mode: WorkspaceDataMode
-    allow_pos: boolean
-    allow_crm: boolean
-    allow_customers: boolean
-    allow_orders: boolean
-    allow_suppliers: boolean
-    allow_invoices: boolean
+    // Module toggles
+    pos: boolean
+    instant_pos: boolean
+    sales_history: boolean
+    crm: boolean
+    travel_agency: boolean
+    loans: boolean
+    net_revenue: boolean
+    budget: boolean
+    monthly_comparison: boolean
+    team_performance: boolean
+    products: boolean
+    storages: boolean
+    inventory_transfer: boolean
+    invoices_history: boolean
+    hr: boolean
+    members: boolean
+    // Other settings
     is_configured: boolean
     default_currency: CurrencyCode
     iqd_display_preference: IQDDisplayPreference
@@ -64,7 +95,7 @@ interface WorkspaceContextType {
     isLocked: boolean
     isLocalMode: boolean
     isCloudMode: boolean
-    hasFeature: (feature: 'allow_pos' | 'allow_crm' | 'allow_invoices' | 'allow_whatsapp') => boolean
+    hasFeature: (feature: ModuleFeatureKey) => boolean
     refreshFeatures: () => Promise<void>
     updateSettings: (settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'iqd_display_preference' | 'eur_conversion_enabled' | 'try_conversion_enabled' | 'allow_whatsapp' | 'kds_enabled' | 'logo_url' | 'coordination' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'print_quality' | 'thermal_printing'>> & { name?: string }) => Promise<void>
     activeWorkspace: { id: string } | undefined
@@ -72,12 +103,22 @@ interface WorkspaceContextType {
 
 const defaultFeatures: WorkspaceFeatures = {
     data_mode: 'cloud',
-    allow_pos: true,
-    allow_crm: true,
-    allow_customers: false,
-    allow_orders: false,
-    allow_suppliers: false,
-    allow_invoices: true,
+    pos: true,
+    instant_pos: true,
+    sales_history: true,
+    crm: true,
+    travel_agency: true,
+    loans: true,
+    net_revenue: true,
+    budget: true,
+    monthly_comparison: true,
+    team_performance: true,
+    products: true,
+    storages: true,
+    inventory_transfer: true,
+    invoices_history: true,
+    hr: true,
+    members: true,
     is_configured: true,
     default_currency: 'usd',
     iqd_display_preference: 'IQD',
@@ -102,16 +143,6 @@ function mergeWorkspaceFeatures(features?: Partial<WorkspaceFeatures> | null): W
     return { ...defaultFeatures, ...(features ?? {}) }
 }
 
-function resolveCrmFeature(
-    features?: Partial<Pick<WorkspaceFeatures, 'allow_crm' | 'allow_customers' | 'allow_orders' | 'allow_suppliers'>> | null
-) {
-    if (typeof features?.allow_crm === 'boolean') {
-        return features.allow_crm
-    }
-
-    return true
-}
-
 function getFeaturesFromLocalWorkspace(localWorkspace: Workspace): WorkspaceFeatures | null {
     if (typeof localWorkspace.is_configured !== 'boolean') {
         return null
@@ -119,12 +150,22 @@ function getFeaturesFromLocalWorkspace(localWorkspace: Workspace): WorkspaceFeat
 
     return mergeWorkspaceFeatures({
         data_mode: localWorkspace.data_mode ?? 'cloud',
-        allow_pos: localWorkspace.allow_pos ?? true,
-        allow_crm: resolveCrmFeature(localWorkspace),
-        allow_customers: localWorkspace.allow_customers ?? false,
-        allow_orders: localWorkspace.allow_orders ?? false,
-        allow_suppliers: localWorkspace.allow_suppliers ?? false,
-        allow_invoices: localWorkspace.allow_invoices ?? true,
+        pos: localWorkspace.pos ?? true,
+        instant_pos: localWorkspace.instant_pos ?? true,
+        sales_history: localWorkspace.sales_history ?? true,
+        crm: localWorkspace.crm ?? true,
+        travel_agency: localWorkspace.travel_agency ?? true,
+        loans: localWorkspace.loans ?? true,
+        net_revenue: localWorkspace.net_revenue ?? true,
+        budget: localWorkspace.budget ?? true,
+        monthly_comparison: localWorkspace.monthly_comparison ?? true,
+        team_performance: localWorkspace.team_performance ?? true,
+        products: localWorkspace.products ?? true,
+        storages: localWorkspace.storages ?? true,
+        inventory_transfer: localWorkspace.inventory_transfer ?? true,
+        invoices_history: localWorkspace.invoices_history ?? true,
+        hr: localWorkspace.hr ?? true,
+        members: localWorkspace.members ?? true,
         is_configured: localWorkspace.is_configured,
         default_currency: localWorkspace.default_currency,
         iqd_display_preference: localWorkspace.iqd_display_preference,
@@ -228,17 +269,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             code: existing?.code || user?.workspaceCode || 'LOADED',
             data_mode: nextFeatures.data_mode,
             is_configured: nextFeatures.is_configured,
-            allow_crm: nextFeatures.allow_crm,
-            allow_customers: nextFeatures.allow_crm,
-            allow_orders: nextFeatures.allow_crm,
-            allow_suppliers: nextFeatures.allow_crm,
+            pos: nextFeatures.pos,
+            instant_pos: nextFeatures.instant_pos,
+            sales_history: nextFeatures.sales_history,
+            crm: nextFeatures.crm,
+            travel_agency: nextFeatures.travel_agency,
+            loans: nextFeatures.loans,
+            net_revenue: nextFeatures.net_revenue,
+            budget: nextFeatures.budget,
+            monthly_comparison: nextFeatures.monthly_comparison,
+            team_performance: nextFeatures.team_performance,
+            products: nextFeatures.products,
+            storages: nextFeatures.storages,
+            inventory_transfer: nextFeatures.inventory_transfer,
+            invoices_history: nextFeatures.invoices_history,
+            hr: nextFeatures.hr,
+            members: nextFeatures.members,
             default_currency: nextFeatures.default_currency,
             iqd_display_preference: nextFeatures.iqd_display_preference,
             eur_conversion_enabled: nextFeatures.eur_conversion_enabled,
             try_conversion_enabled: nextFeatures.try_conversion_enabled,
             locked_workspace: nextFeatures.locked_workspace,
-            allow_pos: nextFeatures.allow_pos,
-            allow_invoices: nextFeatures.allow_invoices,
             allow_whatsapp: nextFeatures.allow_whatsapp,
             kds_enabled: nextFeatures.kds_enabled,
             logo_url: nextFeatures.logo_url,
@@ -352,12 +403,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 ?? false
             const fetchedFeatures = mergeWorkspaceFeatures({
                 data_mode: featureData.data_mode,
-                allow_pos: featureData.allow_pos ?? true,
-                allow_crm: resolveCrmFeature(featureData),
-                allow_customers: featureData.allow_customers ?? false,
-                allow_orders: featureData.allow_orders ?? false,
-                allow_suppliers: featureData.allow_suppliers ?? false,
-                allow_invoices: featureData.allow_invoices ?? true,
+                pos: featureData.pos ?? true,
+                instant_pos: featureData.instant_pos ?? true,
+                sales_history: featureData.sales_history ?? true,
+                crm: featureData.crm ?? true,
+                travel_agency: featureData.travel_agency ?? true,
+                loans: featureData.loans ?? true,
+                net_revenue: featureData.net_revenue ?? true,
+                budget: featureData.budget ?? true,
+                monthly_comparison: featureData.monthly_comparison ?? true,
+                team_performance: featureData.team_performance ?? true,
+                products: featureData.products ?? true,
+                storages: featureData.storages ?? true,
+                inventory_transfer: featureData.inventory_transfer ?? true,
+                invoices_history: featureData.invoices_history ?? true,
+                hr: featureData.hr ?? true,
+                members: featureData.members ?? true,
                 is_configured: featureData.is_configured ?? true,
                 default_currency: featureData.default_currency,
                 iqd_display_preference: featureData.iqd_display_preference,
@@ -448,17 +509,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                         const updatedFeatures = mergeWorkspaceFeatures({
                             ...currentFeatures,
                             data_mode: data.data_mode ?? currentFeatures.data_mode,
-                            allow_pos: data.allow_pos ?? currentFeatures.allow_pos,
-                            allow_crm: resolveCrmFeature({
-                                allow_crm: data.allow_crm,
-                                allow_customers: data.allow_customers,
-                                allow_orders: data.allow_orders,
-                                allow_suppliers: data.allow_suppliers
-                            }),
-                            allow_customers: data.allow_customers ?? currentFeatures.allow_customers,
-                            allow_orders: data.allow_orders ?? currentFeatures.allow_orders,
-                            allow_suppliers: data.allow_suppliers ?? currentFeatures.allow_suppliers,
-                            allow_invoices: data.allow_invoices ?? currentFeatures.allow_invoices,
+                            pos: data.pos ?? currentFeatures.pos,
+                            instant_pos: data.instant_pos ?? currentFeatures.instant_pos,
+                            sales_history: data.sales_history ?? currentFeatures.sales_history,
+                            crm: data.crm ?? currentFeatures.crm,
+                            travel_agency: data.travel_agency ?? currentFeatures.travel_agency,
+                            loans: data.loans ?? currentFeatures.loans,
+                            net_revenue: data.net_revenue ?? currentFeatures.net_revenue,
+                            budget: data.budget ?? currentFeatures.budget,
+                            monthly_comparison: data.monthly_comparison ?? currentFeatures.monthly_comparison,
+                            team_performance: data.team_performance ?? currentFeatures.team_performance,
+                            products: data.products ?? currentFeatures.products,
+                            storages: data.storages ?? currentFeatures.storages,
+                            inventory_transfer: data.inventory_transfer ?? currentFeatures.inventory_transfer,
+                            invoices_history: data.invoices_history ?? currentFeatures.invoices_history,
+                            hr: data.hr ?? currentFeatures.hr,
+                            members: data.members ?? currentFeatures.members,
                             is_configured: data.is_configured ?? currentFeatures.is_configured,
                             default_currency: data.default_currency || currentFeatures.default_currency,
                             iqd_display_preference: data.iqd_display_preference || currentFeatures.iqd_display_preference,
@@ -518,7 +584,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         return unsubscribe
     }, [isAuthenticated, user?.workspaceId])
 
-    const hasFeature = (feature: 'allow_pos' | 'allow_crm' | 'allow_invoices' | 'allow_whatsapp'): boolean => {
+    const hasFeature = (feature: ModuleFeatureKey): boolean => {
         return features[feature] === true
     }
 
@@ -566,10 +632,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             ...featureSettings,
             ...(name !== undefined && { name }),
             is_configured: newFeatures.is_configured,
-            allow_crm: newFeatures.allow_crm,
-            allow_customers: newFeatures.allow_crm,
-            allow_orders: newFeatures.allow_crm,
-            allow_suppliers: newFeatures.allow_crm,
+            crm: newFeatures.crm,
             updatedAt: now,
             ...(shouldSync ? { syncStatus: 'pending' as const } : {})
         }
@@ -584,17 +647,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 code: user?.workspaceCode || 'LOCAL',
                 data_mode: newFeatures.data_mode,
                 is_configured: newFeatures.is_configured,
-                allow_crm: newFeatures.allow_crm,
-                allow_customers: newFeatures.allow_crm,
-                allow_orders: newFeatures.allow_crm,
-                allow_suppliers: newFeatures.allow_crm,
+                pos: newFeatures.pos,
+                instant_pos: newFeatures.instant_pos,
+                sales_history: newFeatures.sales_history,
+                crm: newFeatures.crm,
+                travel_agency: newFeatures.travel_agency,
+                loans: newFeatures.loans,
+                net_revenue: newFeatures.net_revenue,
+                budget: newFeatures.budget,
+                monthly_comparison: newFeatures.monthly_comparison,
+                team_performance: newFeatures.team_performance,
+                products: newFeatures.products,
+                storages: newFeatures.storages,
+                inventory_transfer: newFeatures.inventory_transfer,
+                invoices_history: newFeatures.invoices_history,
+                hr: newFeatures.hr,
+                members: newFeatures.members,
                 default_currency: newFeatures.default_currency,
                 iqd_display_preference: newFeatures.iqd_display_preference,
                 eur_conversion_enabled: newFeatures.eur_conversion_enabled,
                 try_conversion_enabled: newFeatures.try_conversion_enabled,
                 locked_workspace: newFeatures.locked_workspace,
-                allow_pos: newFeatures.allow_pos,
-                allow_invoices: newFeatures.allow_invoices,
                 allow_whatsapp: newFeatures.allow_whatsapp,
                 kds_enabled: newFeatures.kds_enabled,
                 logo_url: newFeatures.logo_url,

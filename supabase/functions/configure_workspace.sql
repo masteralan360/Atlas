@@ -1,8 +1,8 @@
 CREATE OR REPLACE FUNCTION public.configure_workspace(
     p_data_mode text DEFAULT 'cloud',
-    p_allow_pos boolean DEFAULT false,
-    p_allow_crm boolean DEFAULT true,
-    p_allow_invoices boolean DEFAULT false,
+    p_pos boolean DEFAULT false,
+    p_crm boolean DEFAULT true,
+    p_invoices_history boolean DEFAULT false,
     p_logo_url text DEFAULT NULL
 )
  RETURNS jsonb
@@ -43,14 +43,11 @@ BEGIN
     END IF;
 
     UPDATE public.workspaces
-    SET 
+    SET
         data_mode = normalized_mode,
-        allow_pos = p_allow_pos,
-        allow_crm = p_allow_crm,
-        allow_customers = p_allow_crm,
-        allow_suppliers = p_allow_crm,
-        allow_orders = p_allow_crm,
-        allow_invoices = p_allow_invoices,
+        pos = p_pos,
+        crm = p_crm,
+        invoices_history = p_invoices_history,
         logo_url = p_logo_url,
         is_configured = true
     WHERE id = v_workspace_id;
@@ -58,9 +55,9 @@ BEGIN
     RETURN jsonb_build_object(
         'success', true,
         'data_mode', normalized_mode,
-        'allow_pos', p_allow_pos,
-        'allow_crm', p_allow_crm,
-        'allow_invoices', p_allow_invoices,
+        'pos', p_pos,
+        'crm', p_crm,
+        'invoices_history', p_invoices_history,
         'logo_url', p_logo_url
     );
 END;
