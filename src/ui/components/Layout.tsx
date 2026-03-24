@@ -245,42 +245,42 @@ export function Layout({ children }: LayoutProps) {
                 ]
             }
         ] : []),
-        // Sales - always visible (history of transactions)
-        { name: t('nav.sales') || 'Sales', href: '/sales', icon: Receipt },
+        // Sales
+        ...(hasFeature('sales_history') ? [{ name: t('nav.sales') || 'Sales', href: '/sales', icon: Receipt }] : []),
         ...((user?.role === 'admin' || user?.role === 'staff') && hasFeature('crm') ? [
             { name: t('nav.customers') || 'Customers', href: '/customers', icon: Users },
             { name: t('nav.suppliers') || 'Suppliers', href: '/suppliers', icon: Truck },
             { name: t('nav.orders') || 'Orders', href: '/orders', icon: ShoppingCart }
         ] : []),
-        ...((user?.role === 'admin' || user?.role === 'staff') ? [
+        ...((user?.role === 'admin' || user?.role === 'staff') && hasFeature('travel_agency') ? [
             { name: t('nav.travelAgency', { defaultValue: 'Travel Agency' }), href: '/travel-agency', icon: Plane }
         ] : []),
-        { name: t('nav.loans') || 'Loans', href: '/loans', icon: HandCoins },
+        ...(hasFeature('loans') ? [{ name: t('nav.loans') || 'Loans', href: '/loans', icon: HandCoins }] : []),
         // Revenue - admin only
         ...(user?.role === 'admin' ? [
-            { name: t('nav.revenue') || 'Net Revenue', href: '/revenue', icon: BarChart3 },
-            { name: t('nav.budget') || 'Budget', href: '/budget', icon: Wallet },
-            { name: t('monthlyComparison.title'), href: '/monthly-comparison', icon: ArrowRightLeft },
-            { name: t('nav.performance') || 'Team Performance', href: '/performance', icon: TrendingUp }
+            ...(hasFeature('net_revenue') ? [{ name: t('nav.revenue') || 'Net Revenue', href: '/revenue', icon: BarChart3 }] : []),
+            ...(hasFeature('budget') ? [{ name: t('nav.budget') || 'Budget', href: '/budget', icon: Wallet }] : []),
+            ...(hasFeature('monthly_comparison') ? [{ name: t('monthlyComparison.title'), href: '/monthly-comparison', icon: ArrowRightLeft }] : []),
+            ...(hasFeature('team_performance') ? [{ name: t('nav.performance') || 'Team Performance', href: '/performance', icon: TrendingUp }] : [])
         ] : []),
         // WhatsApp - requires feature flag AND role AND desktop platform
         ...((user?.role === 'admin' || user?.role === 'staff') && hasFeature('allow_whatsapp') && isDesktop() ? [
             { name: t('nav.whatsapp'), href: '/whatsapp', icon: MessageSquare, status: whatsappStatus }
         ] : []),
-        // Products - always visible
-        { name: t('nav.products'), href: '/products', icon: Package },
-        // Storages - always visible
-        { name: t('nav.storages') || 'Storages', href: '/storages', icon: Warehouse },
+        // Products
+        ...(hasFeature('products') ? [{ name: t('nav.products'), href: '/products', icon: Package }] : []),
+        // Storages
+        ...(hasFeature('storages') ? [{ name: t('nav.storages') || 'Storages', href: '/storages', icon: Warehouse }] : []),
         // Inventory Transfer
-        { name: t('nav.inventoryTransfer') || 'Transfer', href: '/inventory-transfer', icon: ArrowRightLeft },
+        ...(hasFeature('inventory_transfer') ? [{ name: t('nav.inventoryTransfer') || 'Transfer', href: '/inventory-transfer', icon: ArrowRightLeft }] : []),
         // Invoices - requires feature flag
         ...(hasFeature('invoices_history') ? [
             { name: t('nav.invoicesHistory') || 'Invoices History', href: '/invoices-history', icon: FileText }
         ] : []),
         // Admin/Staff routes
         ...((user?.role === 'admin' || user?.role === 'staff') ? [
-            { name: t('nav.hr') || 'HR', href: '/hr', icon: UsersRound },
-            { name: t('members.title'), href: '/members', icon: Users },
+            ...(hasFeature('hr') ? [{ name: t('nav.hr') || 'HR', href: '/hr', icon: UsersRound }] : []),
+            ...(hasFeature('members') ? [{ name: t('members.title'), href: '/members', icon: Users }] : []),
         ] : []),
         ...((user?.role === 'admin' || user?.role === 'staff') ? [
             { name: t('nav.settings'), href: '/settings', icon: Settings }

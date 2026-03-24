@@ -44,7 +44,7 @@ BEGIN
 
     UPDATE public.workspaces
     SET
-        data_mode = normalized_mode,
+        data_mode = normalized_mode::workspace_data_mode,
         pos = p_pos,
         crm = p_crm,
         invoices_history = p_invoices_history,
