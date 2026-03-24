@@ -192,13 +192,21 @@ export function useTravelAgencySale(saleId: string | undefined) {
     return useLiveQuery(() => saleId ? db.travel_agency_sales.get(saleId) : undefined, [saleId])
 }
 
+function computeSnapshots(data: { groupRevenue: number; supplierCost: number; tourists: Array<{ revenue: number }> }) {
+    const revenue = data.groupRevenue + data.tourists.reduce((sum, t) => sum + t.revenue, 0)
+    const cost = data.supplierCost
+    return { snapshotRevenue: revenue, snapshotCost: cost, snapshotProfit: revenue - cost }
+}
+
 export async function createTravelAgencySale(
     workspaceId: string,
     data: Omit<TravelAgencySale, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted' | 'saleNumber'>
 ) {
     const saleNumber = await generateSaleNumber(workspaceId, data.saleDate)
+    const snapshots = computeSnapshots(data)
     const sale = buildBaseEntity(workspaceId, {
         ...data,
+        ...snapshots,
         saleNumber
     }) as TravelAgencySale
 
@@ -215,9 +223,15 @@ export async function updateTravelAgencySale(id: string, data: Partial<TravelAge
 
     const now = new Date().toISOString()
     const nextIsPaid = data.isPaid ?? existing.isPaid
+    const merged = { ...existing, ...data }
+    const snapshots = computeSnapshots({
+        groupRevenue: merged.groupRevenue,
+        supplierCost: merged.supplierCost,
+        tourists: merged.tourists
+    })
     const updated: TravelAgencySale = {
-        ...existing,
-        ...data,
+        ...merged,
+        ...snapshots,
         paidAt: nextIsPaid
             ? (data.paidAt ?? existing.paidAt ?? now)
             : null,

@@ -21,6 +21,7 @@ import {
     type TravelAgencyTripType
 } from '@/local-db'
 import { travelMethodOptions, travelPaymentMethodOptions, travelReceiverOptions, travelStatusOptions } from '@/lib/travelAgency'
+import { fetchUSDToIQDRate } from '@/lib/exchangeRate'
 import { cn, formatCurrency, formatNumberWithCommas, generateId, parseFormattedNumber } from '@/lib/utils'
 import { TouristMrzScanDialog, type TouristMrzScanMode, type TouristMrzScanResult } from '@/ui/components/travel/TouristMrzScanDialog'
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard'
@@ -85,6 +86,9 @@ type TravelAgencyFormState = {
     notes: string
     isPaid: boolean
     status: TravelAgencySaleStatus
+    exchangeRatePair: string
+    exchangeRateValue: string
+    exchangeRateSource: string
 }
 
 type SupplierQuickCreateState = {
@@ -132,6 +136,10 @@ function normalizeTourists(count: number, tourists: TouristFormState[]) {
     return nextTourists
 }
 
+function getDefaultExchangePair(currency: CurrencyCode) {
+    return currency === 'iqd' ? 'IQD/USD' : 'USD/IQD'
+}
+
 function createEmptyTravelAgencyForm(defaultCurrency: CurrencyCode): TravelAgencyFormState {
     return {
         saleDate: new Date().toISOString().split('T')[0],
@@ -148,7 +156,10 @@ function createEmptyTravelAgencyForm(defaultCurrency: CurrencyCode): TravelAgenc
         receiver: 'office',
         notes: '',
         isPaid: false,
-        status: 'completed'
+        status: 'completed',
+        exchangeRatePair: getDefaultExchangePair(defaultCurrency),
+        exchangeRateValue: '',
+        exchangeRateSource: ''
     }
 }
 
@@ -209,7 +220,10 @@ function mapSaleToForm(sale: TravelAgencySale): TravelAgencyFormState {
         receiver: sale.receiver,
         notes: sale.notes || '',
         isPaid: sale.isPaid,
-        status: sale.status || 'completed'
+        status: sale.status || 'completed',
+        exchangeRatePair: sale.exchangeRateSnapshot?.pair || getDefaultExchangePair(sale.currency),
+        exchangeRateValue: sale.exchangeRateSnapshot?.rate != null ? formatNumberWithCommas(sale.exchangeRateSnapshot.rate) : '',
+        exchangeRateSource: sale.exchangeRateSnapshot?.source || ''
     }
 }
 
@@ -586,6 +600,28 @@ function TravelAgencySaleEditor({ saleId, readOnly = false }: { saleId?: string;
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
+    // Fetch live exchange rate once on mount for new sales
+    const liveRateFetched = useRef(false)
+    useEffect(() => {
+        if (isEditing || liveRateFetched.current) return
+        liveRateFetched.current = true
+
+        fetchUSDToIQDRate().then((result) => {
+            setFormState((current) => {
+                // Only set if user hasn't already typed a value
+                if (current.exchangeRateValue) return current
+                return {
+                    ...current,
+                    exchangeRateValue: formatNumberWithCommas(result.rate),
+                    exchangeRateSource: result.source === 'manual' ? 'manual' : 'live'
+                }
+            })
+        }).catch(() => {
+            // Silently fail — user can enter manually
+        })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
     const [sidebarWidth, setSidebarWidth] = useState(() => {
         const saved = localStorage.getItem('travel-sale-sidebar-width')
         return saved ? Number(saved) : 380
@@ -777,7 +813,15 @@ function TravelAgencySaleEditor({ saleId, readOnly = false }: { saleId?: string;
                 notes: formState.notes.trim() || undefined,
                 isPaid: formState.isPaid,
                 status: statusToSave,
-                paidAt: formState.isPaid ? (sale?.paidAt || new Date().toISOString()) : null
+                paidAt: formState.isPaid ? (sale?.paidAt || new Date().toISOString()) : null,
+                exchangeRateSnapshot: parseFormattedNumber(formState.exchangeRateValue)
+                    ? {
+                        pair: formState.exchangeRatePair,
+                        rate: parseFormattedNumber(formState.exchangeRateValue) || 0,
+                        source: formState.exchangeRateSource || 'manual',
+                        timestamp: sale?.exchangeRateSnapshot?.timestamp || new Date().toISOString()
+                    }
+                    : null
             }
 
             if (isEditing && saleId) {
@@ -1118,6 +1162,55 @@ function TravelAgencySaleEditor({ saleId, readOnly = false }: { saleId?: string;
                                 <div className="space-y-2">
                                     <Label>Sale Notes</Label>
                                     <Textarea rows={4} value={formState.notes} onChange={(event) => setFormState((current) => ({ ...current, notes: event.target.value }))} placeholder="Optional notes about this sale" />
+                                </div>
+
+                                {/* Exchange Rate Section */}
+                                <div className="space-y-3 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+                                    <div className="flex items-center justify-between">
+                                        <div className="text-sm font-semibold">Exchange Rate</div>
+                                        {formState.exchangeRateSource && (
+                                            <span className={cn(
+                                                'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
+                                                formState.exchangeRateSource === 'live'
+                                                    ? 'bg-emerald-100 text-emerald-700'
+                                                    : formState.exchangeRateSource === 'manual'
+                                                        ? 'bg-amber-100 text-amber-700'
+                                                        : 'bg-blue-100 text-blue-700'
+                                            )}>
+                                                {formState.exchangeRateSource === 'live' ? 'Live' : formState.exchangeRateSource === 'manual' ? 'Manual' : 'From Sale'}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                        <div className="space-y-1">
+                                            <Label className="text-xs text-muted-foreground">Pair</Label>
+                                            <Select
+                                                value={formState.exchangeRatePair}
+                                                onValueChange={(value) => setFormState((current) => ({ ...current, exchangeRatePair: value }))}
+                                            >
+                                                <SelectTrigger className="h-9">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="IQD/USD">IQD / USD</SelectItem>
+                                                    <SelectItem value="USD/IQD">USD / IQD</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label className="text-xs text-muted-foreground">Rate</Label>
+                                            <Input
+                                                className="h-9"
+                                                value={formState.exchangeRateValue}
+                                                onChange={(event) => setFormState((current) => ({
+                                                    ...current,
+                                                    exchangeRateValue: formatNumberWithCommas(event.target.value),
+                                                    exchangeRateSource: 'manual'
+                                                }))}
+                                                placeholder="e.g. 148,500"
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
                             </CardContent>
                         </Card>

@@ -258,6 +258,17 @@ export interface TravelAgencySale extends BaseEntity {
     isPaid: boolean
     paidAt?: string | null
     isLocked?: boolean
+    // Financial snapshot — locked at save time
+    snapshotRevenue?: number | null
+    snapshotCost?: number | null
+    snapshotProfit?: number | null
+    // Exchange rate snapshot
+    exchangeRateSnapshot?: {
+        pair: string
+        rate: number
+        source: string
+        timestamp: string
+    } | null
 }
 
 

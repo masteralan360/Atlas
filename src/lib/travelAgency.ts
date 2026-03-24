@@ -51,9 +51,16 @@ export function getTravelStatusLabel(status: TravelAgencySaleStatus) {
 }
 
 export function getTravelSaleRevenue(sale: TravelAgencySale) {
+    if (sale.snapshotRevenue != null) return sale.snapshotRevenue
     return sale.groupRevenue + sale.tourists.reduce((sum, tourist) => sum + tourist.revenue, 0)
 }
 
+export function getTravelSaleCost(sale: TravelAgencySale) {
+    if (sale.snapshotCost != null) return sale.snapshotCost
+    return sale.supplierCost
+}
+
 export function getTravelSaleNet(sale: TravelAgencySale) {
-    return getTravelSaleRevenue(sale) - sale.supplierCost
+    if (sale.snapshotProfit != null) return sale.snapshotProfit
+    return getTravelSaleRevenue(sale) - getTravelSaleCost(sale)
 }
