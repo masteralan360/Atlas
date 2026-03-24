@@ -351,7 +351,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 ?? featuresRef.current.thermal_printing
                 ?? false
             const fetchedFeatures = mergeWorkspaceFeatures({
-                data_mode: featureData.data_mode === 'local' ? 'local' : 'cloud',
+                data_mode: featureData.data_mode,
                 allow_pos: featureData.allow_pos ?? true,
                 allow_crm: resolveCrmFeature(featureData),
                 allow_customers: featureData.allow_customers ?? false,
@@ -447,7 +447,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                         const currentFeatures = featuresRef.current
                         const updatedFeatures = mergeWorkspaceFeatures({
                             ...currentFeatures,
-                            data_mode: data.data_mode === 'local' ? 'local' : currentFeatures.data_mode,
+                            data_mode: data.data_mode ?? currentFeatures.data_mode,
                             allow_pos: data.allow_pos ?? currentFeatures.allow_pos,
                             allow_crm: resolveCrmFeature({
                                 allow_crm: data.allow_crm,
