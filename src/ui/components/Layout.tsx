@@ -2,6 +2,7 @@ import { type ReactNode, Suspense } from 'react'
 import { Link, useLocation } from 'wouter'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/auth'
+import { useReorderTransferRules } from '@/local-db'
 import { useWorkspace } from '@/workspace'
 import { SyncStatusIndicator } from './SyncStatusIndicator'
 import { ExchangeRateIndicator } from './ExchangeRateIndicator'
@@ -50,6 +51,7 @@ import {
     HandCoins,
     Wallet,
     AlertCircle,
+    Bot,
     PanelRightOpen,
     PanelRightClose,
     Monitor,
@@ -108,8 +110,9 @@ function prefetchRoute(href: string) {
 export function Layout({ children }: LayoutProps) {
     const [location, setLocation] = useLocation()
     const { user, signOut } = useAuth()
-    const { hasFeature, workspaceName, isFullscreen, features } = useWorkspace()
+    const { hasFeature, workspaceName, isFullscreen, features, activeWorkspace } = useWorkspace()
     const { trigger: triggerHaptic } = useWebHaptics({ debug: true })
+    const reorderRules = useReorderTransferRules(activeWorkspace?.id)
 
     const { t } = useTranslation()
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
@@ -279,7 +282,39 @@ export function Layout({ children }: LayoutProps) {
         ] : []),
     ]
 
+    const today = new Date().toISOString().slice(0, 10)
+    const reorderAutomationCount = reorderRules.filter((rule) =>
+        rule.isIndefinite || !rule.expiresOn || rule.expiresOn >= today
+    ).length
+    const reorderAutomationCountLabel = reorderAutomationCount > 99 ? '99+' : reorderAutomationCount
+    const inventoryTransferAutomationLabel = t('inventoryTransfer.tabs.automation', 'Reorder Automation')
+
     const isPosLikeRoute = location === '/pos' || location === '/instant-pos'
+
+    const openInventoryTransferAutomationTab = (event: { preventDefault: () => void; stopPropagation: () => void }) => {
+        event.preventDefault()
+        event.stopPropagation()
+
+        const isInventoryTransferRoute = location === '/inventory-transfer' || location.startsWith('/inventory-transfer')
+
+        if (typeof window !== 'undefined') {
+            if (isInventoryTransferRoute) {
+                window.sessionStorage.removeItem('inventory-transfer.pending-tab')
+                window.dispatchEvent(new CustomEvent('inventory-transfer:open-tab', {
+                    detail: { tab: 'automation' }
+                }))
+            } else {
+                window.sessionStorage.setItem('inventory-transfer.pending-tab', 'automation')
+            }
+        }
+
+        setMobileSidebarOpen(false)
+        triggerHaptic('selection')
+
+        if (!isInventoryTransferRoute) {
+            setLocation('/inventory-transfer')
+        }
+    }
 
     return (
         <UnifiedSnoozeProvider>
@@ -370,6 +405,7 @@ export function Layout({ children }: LayoutProps) {
                         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto custom-scrollbar">
                             {navigation.map((item) => {
                                 const isInstantPosGroup = item.href === '/instant-pos' && item.children?.length
+                                const showReorderAutomationBadge = item.href === '/inventory-transfer' && reorderAutomationCount > 0
                                 const isChildActive = isInstantPosGroup
                                     ? item.children!.some(child => location === child.href || (child.href !== '/' && location.startsWith(child.href)))
                                     : false
@@ -382,7 +418,7 @@ export function Layout({ children }: LayoutProps) {
                                 const parentContent = (
                                     <span
                                         className={cn(
-                                            'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-300',
+                                            'relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-300',
                                             isActive
                                                 ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/30 scale-[1.02]'
                                                 : 'text-muted-foreground hover:bg-primary/5 hover:text-primary',
@@ -400,6 +436,38 @@ export function Layout({ children }: LayoutProps) {
                                                         isOpen && "rotate-180"
                                                     )} />
                                                 )}
+                                                {!isInstantPosGroup && showReorderAutomationBadge && (
+                                                    <span
+                                                        role="button"
+                                                        tabIndex={0}
+                                                        aria-label={inventoryTransferAutomationLabel}
+                                                        title={inventoryTransferAutomationLabel}
+                                                        onClick={openInventoryTransferAutomationTab}
+                                                        onKeyDown={(event) => {
+                                                            if (event.key === 'Enter' || event.key === ' ') {
+                                                                openInventoryTransferAutomationTab(event)
+                                                            }
+                                                        }}
+                                                        className={cn(
+                                                            "ms-auto relative flex h-7 w-7 cursor-pointer items-center justify-center rounded-xl transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:focus-visible:ring-sky-200/80",
+                                                            isActive
+                                                                ? "bg-sky-950/20 text-white ring-1 ring-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_10px_24px_rgba(8,47,73,0.22)] backdrop-blur-md"
+                                                                : "bg-sky-500/12 text-sky-700 ring-1 ring-sky-500/20 shadow-[0_10px_24px_rgba(14,165,233,0.12)] dark:bg-sky-400/14 dark:text-sky-200 dark:ring-sky-300/18 dark:shadow-[0_10px_24px_rgba(14,165,233,0.16)]"
+                                                        )}
+                                                    >
+                                                        <Bot className="h-4 w-4" />
+                                                        <span
+                                                            className={cn(
+                                                                "absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border px-1 text-[9px] font-semibold leading-none shadow-sm backdrop-blur-sm",
+                                                                isActive
+                                                                    ? "border-white/15 bg-sky-950/85 text-white"
+                                                                    : "border-white/80 bg-sky-600 text-white dark:border-sky-100/70 dark:bg-sky-300 dark:text-slate-950"
+                                                            )}
+                                                        >
+                                                            {reorderAutomationCountLabel}
+                                                        </span>
+                                                    </span>
+                                                )}
                                                 {!isInstantPosGroup && item.alert && (
                                                     <div className="ms-auto flex items-center justify-center w-5 h-5 rounded-full bg-red-500 text-white">
                                                         <AlertCircle className="w-3.5 h-3.5" />
@@ -415,6 +483,38 @@ export function Layout({ children }: LayoutProps) {
                                         )}
                                         {(isMini && !mobileSidebarOpen) && item.alert && (
                                             <div className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border border-background shadow-sm" />
+                                        )}
+                                        {(isMini && !mobileSidebarOpen) && showReorderAutomationBadge && (
+                                            <span
+                                                role="button"
+                                                tabIndex={0}
+                                                aria-label={inventoryTransferAutomationLabel}
+                                                title={inventoryTransferAutomationLabel}
+                                                onClick={openInventoryTransferAutomationTab}
+                                                onKeyDown={(event) => {
+                                                    if (event.key === 'Enter' || event.key === ' ') {
+                                                        openInventoryTransferAutomationTab(event)
+                                                    }
+                                                }}
+                                                className={cn(
+                                                    "absolute right-1.5 top-1.5 flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:focus-visible:ring-sky-200/80",
+                                                    isActive
+                                                        ? "bg-sky-950/25 text-white ring-1 ring-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_8px_18px_rgba(8,47,73,0.22)] backdrop-blur-md"
+                                                        : "bg-sky-600 text-white shadow-[0_8px_18px_rgba(14,165,233,0.22)] dark:bg-sky-300 dark:text-slate-950"
+                                                )}
+                                            >
+                                                <Bot className="h-3 w-3" />
+                                                <span
+                                                    className={cn(
+                                                        "absolute -right-1 -top-1 flex h-3.5 min-w-[14px] items-center justify-center rounded-full border px-1 text-[8px] font-semibold leading-none shadow-sm",
+                                                        isActive
+                                                            ? "border-white/15 bg-sky-950/90 text-white"
+                                                            : "border-white/80 bg-sky-700 text-white dark:border-sky-100/75 dark:bg-sky-950 dark:text-sky-100"
+                                                    )}
+                                                >
+                                                    {reorderAutomationCountLabel}
+                                                </span>
+                                            </span>
                                         )}
                                         {(isMini && !mobileSidebarOpen) && item.status && (
                                             <div className={cn(

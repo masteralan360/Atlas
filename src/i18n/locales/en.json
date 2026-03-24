@@ -1646,7 +1646,8 @@
         "subtitle": "Move products between storage locations and keep key shelves automatically replenished.",
         "tabs": {
             "manual": "Manual Transfer",
-            "automation": "Reorder Automation"
+            "automation": "Reorder Automation",
+            "transactions": "Inventory Transactions"
         },
         "selectSource": "Select Source",
         "sourceDescription": "Choose storage to transfer from",
@@ -1701,6 +1702,9 @@
             "productSearchPlaceholder": "Search SKU or product name...",
             "noMatchingProducts": "No matching products",
             "sourceStorage": "Source Storage",
+            "selectProductFromStorage": "Product From Source Storage",
+            "selectSourceFirst": "Select a source storage first to view its products.",
+            "noProductsInSource": "No products are currently available in this storage.",
             "destinationStorage": "Destination Storage",
             "minStockLevel": "Minimum Stock Level",
             "transferQuantity": "Transfer Quantity",
@@ -1723,6 +1727,30 @@
             "ruleSaveError": "Failed to save reorder rule",
             "ruleDeleteError": "Failed to delete reorder rule",
             "deleteConfirm": "Delete this reorder rule?"
+        },
+        "transactions": {
+            "title": "Inventory Transactions",
+            "subtitle": "Every manual transfer and automation move is recorded here. These records are permanent and cannot be deleted.",
+            "emptyTitle": "No transfer transactions yet",
+            "emptyDescription": "Transfer products manually or let an automation rule trigger, and the records will appear here.",
+            "columns": {
+                "time": "Time",
+                "product": "Product",
+                "pathway": "Movement Pathway",
+                "quantity": "Quantity",
+                "source": "Type"
+            },
+            "unknownProduct": "Unknown product",
+            "automationLabel": "Automation",
+            "manualLabel": "Manual",
+            "summaryTitle": "Transfer Summary",
+            "summaryDescription": "A live count of permanent inventory transfer records for this workspace.",
+            "totalTransactions": "Total Transactions",
+            "manualCount": "Manual",
+            "automationCount": "Automation",
+            "totalUnits": "Units Moved",
+            "permanentTitle": "Permanent Log",
+            "permanentDescription": "Inventory transaction records are append-only. You can review them here, but they are intentionally not editable or deletable."
         }
     },
     "budget": {

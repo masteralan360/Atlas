@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
     createReorderTransferRule,
     deleteReorderTransferRule,
@@ -64,6 +64,29 @@ interface RuleFormState {
     transferQuantity: string
     expiresOn: string
     isIndefinite: boolean
+}
+
+type InventoryTransferTab = 'manual' | 'automation' | 'transactions'
+
+const INVENTORY_TRANSFER_PENDING_TAB_KEY = 'inventory-transfer.pending-tab'
+const INVENTORY_TRANSFER_TAB_EVENT = 'inventory-transfer:open-tab'
+
+function isInventoryTransferTab(value: string | null | undefined): value is InventoryTransferTab {
+    return value === 'manual' || value === 'automation' || value === 'transactions'
+}
+
+function consumePendingInventoryTransferTab(): InventoryTransferTab | null {
+    if (typeof window === 'undefined') {
+        return null
+    }
+
+    const pendingTab = window.sessionStorage.getItem(INVENTORY_TRANSFER_PENDING_TAB_KEY)
+    if (!isInventoryTransferTab(pendingTab)) {
+        return null
+    }
+
+    window.sessionStorage.removeItem(INVENTORY_TRANSFER_PENDING_TAB_KEY)
+    return pendingTab
 }
 
 function getDefaultRuleExpiryDate() {
@@ -170,6 +193,7 @@ export default function InventoryTransfer() {
     const reorderRules = useReorderTransferRules(activeWorkspace?.id)
     const transferTransactions = useInventoryTransferTransactions(activeWorkspace?.id)
     const { toast } = useToast()
+    const [activeTab, setActiveTab] = useState<InventoryTransferTab>(() => consumePendingInventoryTransferTab() ?? 'manual')
 
     const [sourceStorageId, setSourceStorageId] = useState<string>('')
     const [targetStorageId, setTargetStorageId] = useState<string>('')
@@ -285,6 +309,25 @@ export default function InventoryTransfer() {
             totalUnits
         }
     }, [transferTransactions])
+
+    const automationTabCountLabel = automationStats.activeCount > 99 ? '99+' : String(automationStats.activeCount)
+
+    useEffect(() => {
+        const pendingTab = consumePendingInventoryTransferTab()
+        if (pendingTab) {
+            setActiveTab(pendingTab)
+        }
+
+        const handleOpenTab = (event: Event) => {
+            const requestedTab = (event as CustomEvent<{ tab?: string }>).detail?.tab
+            if (isInventoryTransferTab(requestedTab)) {
+                setActiveTab(requestedTab)
+            }
+        }
+
+        window.addEventListener(INVENTORY_TRANSFER_TAB_EVENT, handleOpenTab as EventListener)
+        return () => window.removeEventListener(INVENTORY_TRANSFER_TAB_EVENT, handleOpenTab as EventListener)
+    }, [])
 
     const resetRuleDialog = () => {
         setEditingRuleId(null)
@@ -501,11 +544,38 @@ export default function InventoryTransfer() {
                 </p>
             </div>
 
-            <Tabs defaultValue="manual" className="space-y-6">
-                <TabsList className="grid w-full max-w-2xl grid-cols-3 rounded-2xl">
-                    <TabsTrigger value="manual">{t('inventoryTransfer.tabs.manual', 'Manual Transfer')}</TabsTrigger>
-                    <TabsTrigger value="automation">{t('inventoryTransfer.tabs.automation', 'Reorder Automation')}</TabsTrigger>
-                    <TabsTrigger value="transactions">{t('inventoryTransfer.tabs.transactions', 'Inventory Transactions')}</TabsTrigger>
+            <Tabs
+                value={activeTab}
+                onValueChange={(value) => {
+                    if (isInventoryTransferTab(value)) {
+                        setActiveTab(value)
+                    }
+                }}
+                className="space-y-6"
+            >
+                <TabsList className="grid h-auto min-h-12 w-full max-w-2xl grid-cols-3 rounded-2xl items-stretch">
+                    <TabsTrigger value="manual" className="min-h-10">
+                        {t('inventoryTransfer.tabs.manual', 'Manual Transfer')}
+                    </TabsTrigger>
+                    <TabsTrigger value="automation" className="group min-h-10 gap-2 px-2 sm:px-3">
+                        <span className="truncate">{t('inventoryTransfer.tabs.automation', 'Reorder Automation')}</span>
+                        {automationStats.activeCount > 0 && (
+                            <>
+                                <span className="inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-sky-500/12 px-1.5 text-[11px] font-semibold text-sky-700 ring-1 ring-sky-500/15 dark:bg-sky-400/15 dark:text-sky-200 dark:ring-sky-300/15 md:hidden group-data-[state=active]:bg-sky-600/12 group-data-[state=active]:text-sky-700 group-data-[state=active]:ring-sky-500/20 dark:group-data-[state=active]:bg-sky-400/20 dark:group-data-[state=active]:text-sky-100">
+                                    {automationTabCountLabel}
+                                </span>
+                                <span className="hidden shrink-0 items-center gap-1 rounded-full bg-sky-500/12 px-2 py-1 text-[11px] font-semibold text-sky-700 ring-1 ring-sky-500/15 shadow-[0_8px_18px_rgba(14,165,233,0.10)] dark:bg-sky-400/15 dark:text-sky-200 dark:ring-sky-300/15 dark:shadow-[0_8px_18px_rgba(14,165,233,0.14)] md:inline-flex group-data-[state=active]:bg-sky-600/12 group-data-[state=active]:text-sky-700 group-data-[state=active]:ring-sky-500/20 dark:group-data-[state=active]:bg-sky-400/20 dark:group-data-[state=active]:text-sky-100">
+                                    <Bot className="h-3.5 w-3.5" />
+                                    <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full border border-white/80 bg-sky-600 px-1 text-[9px] font-semibold leading-none text-white shadow-sm dark:border-sky-100/70 dark:bg-sky-300 dark:text-slate-950 group-data-[state=active]:bg-sky-600 group-data-[state=active]:text-white dark:group-data-[state=active]:bg-sky-300 dark:group-data-[state=active]:text-slate-950">
+                                        {automationTabCountLabel}
+                                    </span>
+                                </span>
+                            </>
+                        )}
+                    </TabsTrigger>
+                    <TabsTrigger value="transactions" className="min-h-10">
+                        {t('inventoryTransfer.tabs.transactions', 'Inventory Transactions')}
+                    </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="manual" className="space-y-6">
