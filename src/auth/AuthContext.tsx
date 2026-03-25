@@ -12,6 +12,7 @@ import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/worksp
 import { runSupabaseAction } from '@/lib/supabaseRequest'
 import { db } from '@/local-db/database'
 import { hydrateLocalModeCacheFromSqlite } from '@/local-db/localModeSqlite'
+import { runDailyBackupIfNeeded } from '@/local-db/sqliteBackup'
 
 interface AuthUser {
     id: string
@@ -76,7 +77,7 @@ function parseUserFromSupabase(user: User): AuthUser {
         workspaceName: user.user_metadata?.workspace_name,
         profileUrl: user.user_metadata?.profile_url,
         isConfigured: user.user_metadata?.is_configured,
-        workspaceMode: user.user_metadata?.data_mode === 'local' ? 'local' : 'cloud'
+        workspaceMode: user.user_metadata?.data_mode === 'local' ? 'local' : user.user_metadata?.data_mode === 'hybrid' ? 'hybrid' : 'cloud'
     }
 }
 
@@ -111,13 +112,14 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
     if (resolvedWorkspaceFeatures) {
         parsedUser.workspaceName = resolvedWorkspaceFeatures.workspace_name || parsedUser.workspaceName
         parsedUser.isConfigured = resolvedWorkspaceFeatures.is_configured
-        parsedUser.workspaceMode = resolvedWorkspaceFeatures.data_mode === 'local' ? 'local' : 'cloud'
+        parsedUser.workspaceMode = resolvedWorkspaceFeatures.data_mode === 'local' ? 'local' : resolvedWorkspaceFeatures.data_mode === 'hybrid' ? 'hybrid' : 'cloud'
         writeWorkspaceModeSnapshot({
             workspaceId: parsedUser.workspaceId,
             dataMode: parsedUser.workspaceMode
         })
-        if (parsedUser.workspaceMode === 'local') {
+        if (parsedUser.workspaceMode === 'local' || parsedUser.workspaceMode === 'hybrid') {
             await hydrateLocalModeCacheFromSqlite(db, parsedUser.workspaceId)
+            void runDailyBackupIfNeeded(parsedUser.workspaceId)
         }
     } else {
         const localWorkspace = await db.workspaces.get(parsedUser.workspaceId)
@@ -125,13 +127,14 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
             parsedUser.workspaceCode = localWorkspace.code || parsedUser.workspaceCode
             parsedUser.workspaceName = localWorkspace.name || parsedUser.workspaceName
             parsedUser.isConfigured = localWorkspace.is_configured
-            parsedUser.workspaceMode = localWorkspace.data_mode === 'local' ? 'local' : parsedUser.workspaceMode
+            parsedUser.workspaceMode = localWorkspace.data_mode === 'local' ? 'local' : localWorkspace.data_mode === 'hybrid' ? 'hybrid' : parsedUser.workspaceMode
             writeWorkspaceModeSnapshot({
                 workspaceId: parsedUser.workspaceId,
                 dataMode: parsedUser.workspaceMode
             })
-            if (parsedUser.workspaceMode === 'local') {
+            if (parsedUser.workspaceMode === 'local' || parsedUser.workspaceMode === 'hybrid') {
                 await hydrateLocalModeCacheFromSqlite(db, parsedUser.workspaceId)
+                void runDailyBackupIfNeeded(parsedUser.workspaceId)
             }
         }
     }
