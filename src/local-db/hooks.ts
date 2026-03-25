@@ -42,7 +42,7 @@ import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { isOnline } from '@/lib/network'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
-import { isCloudWorkspaceMode } from '@/workspace/workspaceMode'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 export { addToOfflineMutations } from './offlineMutations'
 
@@ -72,7 +72,7 @@ function shouldUseOfflineMutationFallback(error: unknown): boolean {
 }
 
 function shouldUseCloudBusinessData(workspaceId?: string | null): boolean {
-    return !!workspaceId && isCloudWorkspaceMode(workspaceId)
+    return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
 }
 
 async function syncUpdatedProductsBestEffort(products: Product[], workspaceId: string): Promise<void> {

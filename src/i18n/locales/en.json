@@ -31,6 +31,8 @@
         "error": "Error",
         "success": "Success",
         "invoice": "Invoice",
+        "table": "Table",
+        "grid": "Grid",
         "currency": "Currency",
         "date": "Date",
         "time": "Time",
@@ -526,7 +528,9 @@
             "receive": "Receive",
             "complete": "Complete",
             "cancel": "Cancel",
-            "lock": "Lock"
+            "lock": "Lock",
+            "pay": "Pay",
+            "unpay": "Unpay"
         },
         "table": {
             "orderNumber": "Order #",
@@ -545,7 +549,9 @@
             "completed": "Completed",
             "draft": "Draft",
             "ordered": "Ordered",
-            "received": "Received"
+            "received": "Received",
+            "paid": "Paid",
+            "unpaid": "Unpaid"
         },
         "tabs": {
             "sales": "Sales Orders",

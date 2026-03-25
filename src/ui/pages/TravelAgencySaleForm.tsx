@@ -597,7 +597,7 @@ function TravelAgencySaleEditor({ saleId, readOnly = false }: { saleId?: string;
         if (!isEditing && !initialFormSnapshot.current) {
             initialFormSnapshot.current = JSON.stringify(formState)
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     // Fetch live exchange rate once on mount for new sales
@@ -619,7 +619,7 @@ function TravelAgencySaleEditor({ saleId, readOnly = false }: { saleId?: string;
         }).catch(() => {
             // Silently fail — user can enter manually
         })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     const [sidebarWidth, setSidebarWidth] = useState(() => {
@@ -895,128 +895,128 @@ function TravelAgencySaleEditor({ saleId, readOnly = false }: { saleId?: string;
             <form onSubmit={readOnly ? (e) => e.preventDefault() : handleSubmit} className="space-y-6" id="travel-sale-form-container">
                 <div className="flex flex-col gap-6 xl:flex-row">
                     <div className="min-w-0 flex-1">
-                    <Card className="border-border/60 shadow-sm">
-                        <CardHeader className="space-y-1">
-                            <CardTitle className="flex items-center gap-2">
-                                <UsersRound className="h-5 w-5 text-primary" />
-                                Tourists
-                            </CardTitle>
-                            <p className="text-sm text-muted-foreground">When tourist count is above one, the sale becomes a group and gets its own travel plan and revenue.</p>
-                        </CardHeader>
-                        <CardContent className="space-y-6">
-                            <div className="grid gap-4 sm:grid-cols-2">
-                                <div className="space-y-2">
-                                    <Label htmlFor="travel-sale-date" className="flex items-center gap-2">
-                                        <CalendarDays className="h-4 w-4 text-muted-foreground" />
-                                        Sale Date
-                                    </Label>
-                                    <Input
-                                        id="travel-sale-date"
-                                        type="date"
-                                        value={formState.saleDate}
-                                        onChange={(event) => setFormState((current) => ({ ...current, saleDate: event.target.value }))}
-                                        required
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="travel-tourist-count">Tourists Number</Label>
-                                    <Input
-                                        id="travel-tourist-count"
-                                        type="number"
-                                        min="1"
-                                        step="1"
-                                        value={formState.tourists.length}
-                                        onChange={(event) => handleTouristCountChange(event.target.value)}
-                                    />
-                                </div>
-                            </div>
-
-                            {formState.tourists.length > 1 && (
-                                <TravelPlanEditor
-                                    title="Group Travel Plan"
-                                    description="Apply a common plan to all tourists in this group"
-                                    value={formState.groupTravelPlans}
-                                    onChange={(nextPlans) => setFormState((current) => ({ ...current, groupTravelPlans: nextPlans }))}
-                                    action={
-                                        <Button type="button" variant="outline" size="sm" onClick={syncGroupTravelPlanToTourists}>
-                                            <UsersRound className="mr-2 h-4 w-4" />
-                                            Apply to all
-                                        </Button>
-                                    }
-                                />
-                            )}
-
-                            {formState.tourists.map((tourist, index) => (
-                                <div key={tourist.id} className="space-y-4 rounded-3xl border border-primary/20 bg-background p-6 shadow-sm transition-shadow hover:shadow-md">
-                                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                                        <div>
-                                            <div className="flex items-center gap-2 text-lg font-semibold">
-                                                <UserRound className="h-5 w-5 text-primary" />
-                                                Tourist {index + 1}
-                                            </div>
-                                            <p className="text-sm text-muted-foreground">Fields can stay empty. You can add tourists now and complete their details later.</p>
-                                        </div>
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                size="sm"
-                                                className="gap-2"
-                                                onClick={() => openMrzDialog(index, 'upload')}
-                                            >
-                                                <Upload className="h-4 w-4" />
-                                                Upload
-                                            </Button>
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                size="sm"
-                                                className="gap-2"
-                                                onClick={() => openMrzDialog(index, 'camera')}
-                                            >
-                                                <Camera className="h-4 w-4" />
-                                                Camera
-                                            </Button>
-                                            <div className="rounded-2xl bg-muted px-3 py-2 text-sm font-medium">
-                                                Revenue {formatCurrency(parseFormattedNumber(tourist.revenue) || 0, formState.currency, features.iqd_display_preference)}
-                                            </div>
-                                        </div>
+                        <Card className="border-border/60 shadow-sm">
+                            <CardHeader className="space-y-1">
+                                <CardTitle className="flex items-center gap-2">
+                                    <UsersRound className="h-5 w-5 text-primary" />
+                                    Tourists
+                                </CardTitle>
+                                <p className="text-sm text-muted-foreground">When tourist count is above one, the sale becomes a group and gets its own travel plan and revenue.</p>
+                            </CardHeader>
+                            <CardContent className="space-y-6">
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="travel-sale-date" className="flex items-center gap-2">
+                                            <CalendarDays className="h-4 w-4 text-muted-foreground" />
+                                            Sale Date
+                                        </Label>
+                                        <Input
+                                            id="travel-sale-date"
+                                            type="date"
+                                            value={formState.saleDate}
+                                            onChange={(event) => setFormState((current) => ({ ...current, saleDate: event.target.value }))}
+                                            required
+                                        />
                                     </div>
-
-                                    <div className="grid gap-4 md:grid-cols-2">
-                                        <div className="space-y-2">
-                                            <Label>Full Name</Label>
-                                            <Input value={tourist.fullName} onChange={(event) => updateTourist(index, (current) => ({ ...current, fullName: event.target.value }))} placeholder="Given names" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label>Surname</Label>
-                                            <Input value={tourist.surname} onChange={(event) => updateTourist(index, (current) => ({ ...current, surname: event.target.value }))} placeholder="Family name" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label>Date of Birth</Label>
-                                            <Input type="date" value={tourist.dateOfBirth} onChange={(event) => updateTourist(index, (current) => ({ ...current, dateOfBirth: event.target.value }))} />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label>Revenue</Label>
-                                            <Input value={tourist.revenue} onChange={(event) => updateTourist(index, (current) => ({ ...current, revenue: formatNumberWithCommas(event.target.value) }))} placeholder="0" />
-                                        </div>
-                                        <div className="space-y-2 md:col-span-2">
-                                            <Label>Notes</Label>
-                                            <Textarea rows={2} value={tourist.notes} onChange={(event) => updateTourist(index, (current) => ({ ...current, notes: event.target.value }))} placeholder="Anything specific about this tourist" />
-                                        </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="travel-tourist-count">Tourists Number</Label>
+                                        <Input
+                                            id="travel-tourist-count"
+                                            type="number"
+                                            min="1"
+                                            step="1"
+                                            value={formState.tourists.length}
+                                            onChange={(event) => handleTouristCountChange(event.target.value)}
+                                        />
                                     </div>
+                                </div>
 
+                                {formState.tourists.length > 1 && (
                                     <TravelPlanEditor
-                                        title="Individual Travel Plan"
-                                        description="Custom plan for this tourist"
-                                        value={tourist.travelPlans}
-                                        onChange={(nextPlans) => updateTourist(index, (current) => ({ ...current, travelPlans: nextPlans }))}
+                                        title="Group Travel Plan"
+                                        description="Apply a common plan to all tourists in this group"
+                                        value={formState.groupTravelPlans}
+                                        onChange={(nextPlans) => setFormState((current) => ({ ...current, groupTravelPlans: nextPlans }))}
+                                        action={
+                                            <Button type="button" variant="outline" size="sm" onClick={syncGroupTravelPlanToTourists}>
+                                                <UsersRound className="mr-2 h-4 w-4" />
+                                                Apply to all
+                                            </Button>
+                                        }
                                     />
-                                </div>
-                            ))}
-                        </CardContent>
-                    </Card>
-                </div>
+                                )}
+
+                                {formState.tourists.map((tourist, index) => (
+                                    <div key={tourist.id} className="space-y-4 rounded-3xl border border-primary/20 bg-background p-6 shadow-sm transition-shadow hover:shadow-md">
+                                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                            <div>
+                                                <div className="flex items-center gap-2 text-lg font-semibold">
+                                                    <UserRound className="h-5 w-5 text-primary" />
+                                                    Tourist {index + 1}
+                                                </div>
+                                                <p className="text-sm text-muted-foreground">Fields can stay empty. You can add tourists now and complete their details later.</p>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="gap-2"
+                                                    onClick={() => openMrzDialog(index, 'upload')}
+                                                >
+                                                    <Upload className="h-4 w-4" />
+                                                    Upload
+                                                </Button>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="gap-2"
+                                                    onClick={() => openMrzDialog(index, 'camera')}
+                                                >
+                                                    <Camera className="h-4 w-4" />
+                                                    Camera
+                                                </Button>
+                                                <div className="rounded-2xl bg-muted px-3 py-2 text-sm font-medium">
+                                                    Revenue {formatCurrency(parseFormattedNumber(tourist.revenue) || 0, formState.currency, features.iqd_display_preference)}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="grid gap-4 md:grid-cols-2">
+                                            <div className="space-y-2">
+                                                <Label>Full Name</Label>
+                                                <Input value={tourist.fullName} onChange={(event) => updateTourist(index, (current) => ({ ...current, fullName: event.target.value }))} placeholder="Given names" />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>Surname</Label>
+                                                <Input value={tourist.surname} onChange={(event) => updateTourist(index, (current) => ({ ...current, surname: event.target.value }))} placeholder="Family name" />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>Date of Birth</Label>
+                                                <Input type="date" value={tourist.dateOfBirth} onChange={(event) => updateTourist(index, (current) => ({ ...current, dateOfBirth: event.target.value }))} />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>Revenue</Label>
+                                                <Input value={tourist.revenue} onChange={(event) => updateTourist(index, (current) => ({ ...current, revenue: formatNumberWithCommas(event.target.value) }))} placeholder="0" />
+                                            </div>
+                                            <div className="space-y-2 md:col-span-2">
+                                                <Label>Notes</Label>
+                                                <Textarea rows={2} value={tourist.notes} onChange={(event) => updateTourist(index, (current) => ({ ...current, notes: event.target.value }))} placeholder="Anything specific about this tourist" />
+                                            </div>
+                                        </div>
+
+                                        <TravelPlanEditor
+                                            title="Individual Travel Plan"
+                                            description="Custom plan for this tourist"
+                                            value={tourist.travelPlans}
+                                            onChange={(nextPlans) => updateTourist(index, (current) => ({ ...current, travelPlans: nextPlans }))}
+                                        />
+                                    </div>
+                                ))}
+                            </CardContent>
+                        </Card>
+                    </div>
 
                     <div
                         className={cn(
@@ -1055,7 +1055,7 @@ function TravelAgencySaleEditor({ saleId, readOnly = false }: { saleId?: string;
                                         <Input value={formState.groupName} onChange={(event) => setFormState((current) => ({ ...current, groupName: event.target.value }))} placeholder="Optional group name" />
                                     </div>
                                     <div className="space-y-2">
-                                        <Label>Group Revenue</Label>
+                                        <Label>Group Sale</Label>
                                         <Input value={formState.groupRevenue} onChange={(event) => setFormState((current) => ({ ...current, groupRevenue: formatNumberWithCommas(event.target.value) }))} placeholder="0" />
                                     </div>
                                     <div className="space-y-2">
@@ -1159,11 +1159,6 @@ function TravelAgencySaleEditor({ saleId, readOnly = false }: { saleId?: string;
                                     <Switch checked={formState.isPaid} onCheckedChange={(checked) => setFormState((current) => ({ ...current, isPaid: checked }))} />
                                 </div>
 
-                                <div className="space-y-2">
-                                    <Label>Sale Notes</Label>
-                                    <Textarea rows={4} value={formState.notes} onChange={(event) => setFormState((current) => ({ ...current, notes: event.target.value }))} placeholder="Optional notes about this sale" />
-                                </div>
-
                                 {/* Exchange Rate Section */}
                                 <div className="space-y-3 rounded-2xl border border-primary/20 bg-primary/5 p-4">
                                     <div className="flex items-center justify-between">
@@ -1212,6 +1207,13 @@ function TravelAgencySaleEditor({ saleId, readOnly = false }: { saleId?: string;
                                         </div>
                                     </div>
                                 </div>
+
+                                <div className="space-y-2">
+                                    <Label>Sale Notes</Label>
+                                    <Textarea rows={4} value={formState.notes} onChange={(event) => setFormState((current) => ({ ...current, notes: event.target.value }))} placeholder="Optional notes about this sale" />
+                                </div>
+
+
                             </CardContent>
                         </Card>
 
@@ -1224,7 +1226,7 @@ function TravelAgencySaleEditor({ saleId, readOnly = false }: { saleId?: string;
                             </CardHeader>
                             <CardContent className="space-y-3">
                                 <div className="flex items-center justify-between text-sm"><span>Tourist Revenue</span><span className="font-semibold">{formatCurrency(computedTotals.touristRevenue, formState.currency, features.iqd_display_preference)}</span></div>
-                                <div className="flex items-center justify-between text-sm"><span>Group Revenue</span><span className="font-semibold">{formatCurrency(computedTotals.groupRevenue, formState.currency, features.iqd_display_preference)}</span></div>
+                                <div className="flex items-center justify-between text-sm"><span>Group Sale</span><span className="font-semibold">{formatCurrency(computedTotals.groupRevenue, formState.currency, features.iqd_display_preference)}</span></div>
                                 <div className="flex items-center justify-between text-sm"><span>Supplier Cost</span><span className="font-semibold">{formatCurrency(computedTotals.supplierCost, formState.currency, features.iqd_display_preference)}</span></div>
                                 <div className="border-t pt-3">
                                     <div className="flex items-center justify-between">

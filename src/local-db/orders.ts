@@ -7,7 +7,7 @@ import { isOnline } from '@/lib/network'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
 import { generateId } from '@/lib/utils'
-import { isCloudWorkspaceMode } from '@/workspace/workspaceMode'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
 import {
@@ -55,7 +55,7 @@ type ProductLike = {
 }
 
 function shouldUseCloudBusinessData(workspaceId?: string | null) {
-    return !!workspaceId && isCloudWorkspaceMode(workspaceId)
+    return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
 }
 
 function roundAmount(amount: number, currency: CurrencyCode) {

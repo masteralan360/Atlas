@@ -6,7 +6,7 @@ import { isOnline } from '@/lib/network'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
 import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
-import { isCloudWorkspaceMode } from '@/workspace/workspaceMode'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
 import { addToOfflineMutations } from './offlineMutations'
@@ -21,7 +21,7 @@ export type InventoryProduct = Product & {
 }
 
 function shouldUseCloudBusinessData(workspaceId?: string | null) {
-    return !!workspaceId && isCloudWorkspaceMode(workspaceId)
+    return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
 }
 
 function getSyncMetadata(

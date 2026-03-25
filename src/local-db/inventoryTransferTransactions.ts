@@ -7,7 +7,7 @@ import { isOnline } from '@/lib/network'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
-import { isCloudWorkspaceMode } from '@/workspace/workspaceMode'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
 import { addToOfflineMutations } from './offlineMutations'
@@ -26,7 +26,7 @@ export interface InventoryTransferTransactionInput {
 }
 
 function shouldUseCloudBusinessData(workspaceId?: string | null) {
-    return !!workspaceId && isCloudWorkspaceMode(workspaceId)
+    return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
 }
 
 function getSyncMetadata(workspaceId: string, timestamp: string) {
