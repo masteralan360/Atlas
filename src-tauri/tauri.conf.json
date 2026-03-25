@@ -1,11 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Atlas",
-<<<<<<< HEAD
-  "version": "0.1.21",
-=======
-  "version": "0.1.20",
->>>>>>> 9c4f89eae482241c2c38c1e4db951367c414384d
+  "version": "0.1.22",
   "identifier": "com.atlas.app",
   "build": {
     "frontendDist": "../dist",
