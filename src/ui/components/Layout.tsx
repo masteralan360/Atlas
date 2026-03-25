@@ -731,6 +731,7 @@ export function Layout({ children }: LayoutProps) {
                                 <Button
                                     variant="ghost"
                                     size="icon"
+                                    allowViewer={true}
                                     onClick={() => {
                                         setIsSignOutModalOpen(true)
                                         triggerHaptic('warning')
@@ -862,10 +863,10 @@ export function Layout({ children }: LayoutProps) {
                                 </DialogDescription>
                             </DialogHeader>
                             <DialogFooter>
-                                <Button variant="ghost" onClick={() => setIsSignOutModalOpen(false)}>
+                                <Button variant="ghost" allowViewer={true} onClick={() => setIsSignOutModalOpen(false)}>
                                     {t('common.cancel') || 'Cancel'}
                                 </Button>
-                                <Button variant="destructive" onClick={() => {
+                                <Button variant="destructive" allowViewer={true} onClick={() => {
                                     setIsSignOutModalOpen(false)
                                     signOut()
                                 }}>
