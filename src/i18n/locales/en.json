@@ -523,7 +523,7 @@
         "lockDescription": "Locking this order will prevent any changes to its payment status. This action cannot be undone.",
         "lockedSuccess": "Order locked successfully",
         "actions": {
-            "order": "Order",
+            "order": "Order ",
             "reserve": "Reserve",
             "receive": "Receive",
             "complete": "Complete",
