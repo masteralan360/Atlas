@@ -5,7 +5,15 @@ import {
     getLoanDirection,
     getLoanDirectionLabel,
     getLoanIdentityTitle,
+    getLoanModuleTitle,
     getLoanPaymentActivityLabel,
+    getLoanScheduleAmountLabel,
+    getLoanScheduleIndexLabel,
+    getLoanScheduleItemLabel,
+    getLoanScheduleTitle,
+    getSimpleLoanModuleTitle,
+    getStandardLoanModuleTitle,
+    getLoanSummaryTitle,
     isSimpleLoan
 } from '@/lib/loanPresentation'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
@@ -14,20 +22,25 @@ import { useTranslation } from 'react-i18next'
 import { ReactQRCode } from '@lglab/react-qr-code'
 import { LoanNoDisplay } from './LoanNoDisplay'
 
-type LoanFilter = 'all' | 'active' | 'overdue' | 'completed'
+type LoanFilter = 'all' | 'active' | 'overdue' | 'completed' | 'lent' | 'borrowed'
 
 interface LoanListPrintTemplateProps {
     workspaceName?: string | null
     printLang: string
     loans: Loan[]
     filter: LoanFilter
+    variant?: 'standard' | 'simple'
     displayCurrency: string
     iqdPreference?: IQDDisplayPreference
     metrics: {
-        totalOutstanding: number
-        activeLoans: number
-        overdueLoans: number
-        dueToday: number
+        totalOutstanding?: number
+        activeLoans?: number
+        overdueLoans?: number
+        dueToday?: number
+        totalLent?: number
+        totalBorrowed?: number
+        activeEntries?: number
+        settledEntries?: number
     }
     logoUrl?: string | null
     qrValue?: string | null
@@ -151,6 +164,7 @@ export function LoanListPrintTemplate({
     printLang,
     loans,
     filter,
+    variant = 'standard',
     displayCurrency,
     iqdPreference = 'IQD',
     metrics,
@@ -159,7 +173,8 @@ export function LoanListPrintTemplate({
 }: LoanListPrintTemplateProps) {
     const { i18n } = useTranslation()
     const t = i18n.getFixedT(printLang)
-    const counterpartyColumnLabel = loans.some((loan) => isSimpleLoan(loan))
+    const isSimpleVariant = variant === 'simple'
+    const counterpartyColumnLabel = isSimpleVariant || loans.some((loan) => isSimpleLoan(loan))
         ? (t('loans.counterparty') || 'Counterparty')
         : (t('loans.borrower') || 'Borrower')
 
@@ -183,7 +198,7 @@ export function LoanListPrintTemplate({
             <LoanPrintHeader
                 workspaceName={workspaceName}
                 printLang={printLang}
-                title={t('nav.loans') || 'Loans'}
+                title={isSimpleVariant ? getSimpleLoanModuleTitle(t) : getStandardLoanModuleTitle(t)}
                 subtitle={`${t(`loans.filters.${filter}`) || filter} • ${formatDateTime(new Date().toISOString())}`}
                 logoUrl={logoUrl}
                 qrValue={qrValue}
@@ -191,20 +206,40 @@ export function LoanListPrintTemplate({
 
             <div className="grid grid-cols-2 gap-3 mb-4 text-xs">
                 <div className="border border-slate-300 rounded-md p-2">
-                    <p className="text-slate-500 text-center">{t('loans.totalOutstanding') || 'Total Outstanding'}</p>
-                    <p className="font-bold text-center">{formatCurrency(metrics.totalOutstanding, displayCurrency as any, iqdPreference)}</p>
+                    <p className="text-slate-500 text-center">
+                        {isSimpleVariant
+                            ? t('loans.totalLent', { defaultValue: 'Total Lent' })
+                            : (t('loans.totalOutstanding') || 'Total Outstanding')}
+                    </p>
+                    <p className="font-bold text-center">
+                        {formatCurrency(isSimpleVariant ? (metrics.totalLent || 0) : (metrics.totalOutstanding || 0), displayCurrency as any, iqdPreference)}
+                    </p>
                 </div>
                 <div className="border border-slate-300 rounded-md p-2">
-                    <p className="text-slate-500 text-center">{t('loans.dueToday') || 'Due Today'}</p>
-                    <p className="font-bold text-center">{formatCurrency(metrics.dueToday, displayCurrency as any, iqdPreference)}</p>
+                    <p className="text-slate-500 text-center">
+                        {isSimpleVariant
+                            ? t('loans.totalBorrowed', { defaultValue: 'Total Borrowed' })
+                            : (t('loans.dueToday') || 'Due Today')}
+                    </p>
+                    <p className="font-bold text-center">
+                        {formatCurrency(isSimpleVariant ? (metrics.totalBorrowed || 0) : (metrics.dueToday || 0), displayCurrency as any, iqdPreference)}
+                    </p>
                 </div>
                 <div className="border border-slate-300 rounded-md p-2">
-                    <p className="text-slate-500 text-center">{t('loans.activeLoans') || 'Active Loans'}</p>
-                    <p className="font-bold text-center">{metrics.activeLoans}</p>
+                    <p className="text-slate-500 text-center">
+                        {isSimpleVariant
+                            ? t('loans.activeEntries', { defaultValue: 'Active Entries' })
+                            : (t('loans.activeLoans') || 'Active Loans')}
+                    </p>
+                    <p className="font-bold text-center">{isSimpleVariant ? (metrics.activeEntries || 0) : (metrics.activeLoans || 0)}</p>
                 </div>
                 <div className="border border-slate-300 rounded-md p-2">
-                    <p className="text-slate-500 text-center">{t('loans.overdueLoans') || 'Overdue Loans'}</p>
-                    <p className="font-bold text-center">{metrics.overdueLoans}</p>
+                    <p className="text-slate-500 text-center">
+                        {isSimpleVariant
+                            ? t('loans.settledEntries', { defaultValue: 'Settled Entries' })
+                            : (t('loans.overdueLoans') || 'Overdue Loans')}
+                    </p>
+                    <p className="font-bold text-center">{isSimpleVariant ? (metrics.settledEntries || 0) : (metrics.overdueLoans || 0)}</p>
                 </div>
             </div>
 
@@ -270,6 +305,10 @@ export function LoanDetailsPrintTemplate({
     const { i18n } = useTranslation()
     const t = i18n.getFixedT(printLang)
     const noteValue = loan.notes?.trim()
+    const loanSummaryTitle = getLoanSummaryTitle(loan, t)
+    const loanScheduleTitle = getLoanScheduleTitle(loan, t)
+    const loanScheduleIndexLabel = getLoanScheduleIndexLabel(loan, t)
+    const loanScheduleAmountLabel = getLoanScheduleAmountLabel(loan, t)
 
     return (
         <div
@@ -291,7 +330,7 @@ export function LoanDetailsPrintTemplate({
             <LoanPrintHeader
                 workspaceName={workspaceName}
                 printLang={printLang}
-                title={t('nav.loans') || 'Loans'}
+                title={getLoanModuleTitle(loan, t)}
                 subtitle={
                     <span className="flex items-center justify-center gap-1">
                         <LoanNoDisplay loanNo={loan.loanNo} className="text-slate-600" plain />
@@ -318,7 +357,7 @@ export function LoanDetailsPrintTemplate({
                     <p className="text-slate-600">{loan.borrowerNationalId}</p>
                 </div>
                 <div className="border border-slate-300 rounded-md p-3 text-center">
-                    <h2 className="font-semibold mb-2">{t('loans.summary') || 'Loan Summary'}</h2>
+                    <h2 className="font-semibold mb-2">{loanSummaryTitle}</h2>
                     <p>{t('loans.principal') || 'Principal'}: {formatCurrency(loan.principalAmount, loan.settlementCurrency, iqdPreference)}</p>
                     <p>{t('loans.paid') || 'Paid'}: {formatCurrency(loan.totalPaidAmount, loan.settlementCurrency, iqdPreference)}</p>
                     <p>{t('loans.balance') || 'Balance'}: {formatCurrency(loan.balanceAmount, loan.settlementCurrency, iqdPreference)}</p>
@@ -327,13 +366,13 @@ export function LoanDetailsPrintTemplate({
                 </div>
             </div>
 
-            <h3 className="font-semibold mb-2 text-sm">{t('loans.installmentSchedule') || 'Installment Schedule'}</h3>
+            <h3 className="font-semibold mb-2 text-sm">{loanScheduleTitle}</h3>
             <table className="w-full border-collapse text-xs mb-5">
                 <thead>
                     <tr className="bg-slate-100">
-                        <th className="border border-slate-300 p-2 text-start">#</th>
+                        <th className="border border-slate-300 p-2 text-start">{loanScheduleIndexLabel}</th>
                         <th className="border border-slate-300 p-2 text-start">{t('loans.dueDate') || 'Due Date'}</th>
-                        <th className="border border-slate-300 p-2 text-start">{t('loans.planned') || 'Planned'}</th>
+                        <th className="border border-slate-300 p-2 text-start">{loanScheduleAmountLabel}</th>
                         <th className="border border-slate-300 p-2 text-start">{t('loans.paid') || 'Paid'}</th>
                         <th className="border border-slate-300 p-2 text-start">{t('loans.balance') || 'Balance'}</th>
                         <th className="border border-slate-300 p-2 text-start">{t('loans.status') || 'Status'}</th>
@@ -348,7 +387,7 @@ export function LoanDetailsPrintTemplate({
                         </tr>
                     ) : installments.map((item) => (
                         <tr key={item.id}>
-                            <td className="border border-slate-300 p-2">{String(item.installmentNo).padStart(2, '0')}</td>
+                            <td className="border border-slate-300 p-2">{getLoanScheduleItemLabel(loan, item.installmentNo, t)}</td>
                             <td className="border border-slate-300 p-2">{formatDate(item.dueDate)}</td>
                             <td className="border border-slate-300 p-2 text-start">{formatCurrency(item.plannedAmount, loan.settlementCurrency, iqdPreference)}</td>
                             <td className="border border-slate-300 p-2 text-start">{formatCurrency(item.paidAmount, loan.settlementCurrency, iqdPreference)}</td>
@@ -422,6 +461,9 @@ export function LoanReceiptPrintTemplate({
     const noteValue = loan.notes?.trim()
     const logoSrc = resolveLogoSrc(logoUrl)
     const isRtl = isRTL(printLang)
+    const loanScheduleTitle = getLoanScheduleTitle(loan, t)
+    const loanScheduleIndexLabel = getLoanScheduleIndexLabel(loan, t)
+    const loanScheduleAmountLabel = getLoanScheduleAmountLabel(loan, t)
 
     return (
         <div
@@ -467,7 +509,9 @@ export function LoanReceiptPrintTemplate({
                     </div>
                 </div>
                 <div className="text-lg font-bold">{workspaceName || 'Atlas'}</div>
-                <div className="text-[10px] font-semibold">{t('nav.loans') || 'Loans'}</div>
+                <div className="text-[10px] font-semibold">
+                    {getLoanModuleTitle(loan, t)}
+                </div>
                 <div className="text-[10px] text-gray-500 mt-1 flex items-center justify-center gap-1">
                     <LoanNoDisplay loanNo={loan.loanNo} suffixClassName="text-slate-500" plain />
                     <span>•</span>
@@ -513,13 +557,13 @@ export function LoanReceiptPrintTemplate({
             </div>
 
             <div className="mb-3">
-                <div className="text-[10px] font-semibold text-gray-500 mb-2">{t('loans.installmentSchedule') || 'Installment Schedule'}</div>
+                <div className="text-[10px] font-semibold text-gray-500 mb-2">{loanScheduleTitle}</div>
                 <table className="w-full border-collapse text-[9px]">
                     <thead>
                         <tr className="text-gray-400 border-b border-gray-200">
-                            <th className="py-1 text-start">#</th>
+                            <th className="py-1 text-start">{loanScheduleIndexLabel}</th>
                             <th className="py-1 text-start">{t('loans.dueDate') || 'Due'}</th>
-                            <th className="py-1 text-start">{t('loans.planned') || 'Planned'}</th>
+                            <th className="py-1 text-start">{loanScheduleAmountLabel}</th>
                             <th className="py-1 text-start">{t('loans.paid') || 'Paid'}</th>
                         </tr>
                     </thead>
@@ -532,7 +576,7 @@ export function LoanReceiptPrintTemplate({
                             </tr>
                         ) : installments.map(item => (
                             <tr key={item.id}>
-                                <td className="py-1">{String(item.installmentNo).padStart(2, '0')}</td>
+                                <td className="py-1">{getLoanScheduleItemLabel(loan, item.installmentNo, t)}</td>
                                 <td className="py-1">{formatDate(item.dueDate)}</td>
                                 <td className="py-1">{formatCurrency(item.plannedAmount, loan.settlementCurrency, iqdPreference)}</td>
                                 <td className="py-1">{formatCurrency(item.paidAmount, loan.settlementCurrency, iqdPreference)}</td>

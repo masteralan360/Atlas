@@ -144,6 +144,7 @@
         "kdsDashboard": "KDS Dashboard",
         "sales": "Sales History",
         "loans": "Loans",
+        "installments": "Installments",
         "storages": "Storages",
         "inventoryTransfer": "Inventory Transfer",
         "suppliers": "Suppliers",
@@ -1282,8 +1283,12 @@
         "loanPendingMessage": "Loan record pending sync/link."
     },
     "loans": {
-        "title": "Loans",
-        "details": "Loan Details",
+        "title": "Installments",
+        "details": "Installment Loan Details",
+        "simpleLoanDetails": "Simple Loan Details",
+        "simpleLoanSummary": "Simple Loan Summary",
+        "installmentLoan": "Installment Loan",
+        "installmentLoanSummary": "Installment Loan Summary",
         "date": "Date",
         "view": {
             "table": "Loans Details",
@@ -1291,10 +1296,10 @@
         },
         "searchPlaceholder": "Search by borrower name or loan number...",
         "simpleSearchPlaceholder": "Search by counterparty, partner, or loan number...",
-        "registerFromPos": "Register Loan",
-        "createManualLoan": "Create Manual Loan",
+        "registerFromPos": "Register Installment Loan",
+        "createManualLoan": "Create Installment Loan",
         "createSimpleLoan": "Create Simple Loan",
-        "simpleTab": "Simple Loans",
+        "simpleTab": "Loans",
         "simpleLoanDescription": "Add a manual lending or borrowing entry and optionally link it to a business partner.",
         "confirmDelete": "Delete Loan",
         "deleteWarning": "Deleting this loan will permanently remove the loan, its installment schedule, and its payment history. This cannot be undone.",
@@ -1378,7 +1383,9 @@
             "all": "All",
             "active": "Active",
             "overdue": "Overdue",
-            "completed": "Completed"
+            "completed": "Completed",
+            "lent": "Lent",
+            "borrowed": "Borrowed"
         },
         "statuses": {
             "active": "Active",

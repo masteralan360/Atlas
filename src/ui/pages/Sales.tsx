@@ -8,6 +8,7 @@ import { mapSaleToUniversal } from '@/lib/mappings'
 import { clearPendingSaleDetailsId, readPendingSaleDetailsId } from '@/lib/saleNavigation'
 import { formatCurrency, formatDateTime, formatCompactDateTime, formatDate, formatOriginLabel, cn } from '@/lib/utils'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
+import { getLoanDetailsPath } from '@/lib/loanPresentation'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
 import { db, useLoanBySaleId, useLoanInstallments, useLoanPayments, useLoans, useSales, useSalesOrders, useTravelAgencySales, toUISale, toUISaleFromOrder, toUISaleFromTravelAgency, type Loan } from '@/local-db'
@@ -1186,7 +1187,7 @@ export function Sales() {
                                                                                 type="button"
                                                                                 onClick={(e) => {
                                                                                     e.stopPropagation()
-                                                                                    setLocation(`/loans/${loanIndicator.loan!.id}`)
+                                                                                    setLocation(getLoanDetailsPath(loanIndicator.loan!, loanIndicator.loan!.id))
                                                                                 }}
                                                                                 className={cn(
                                                                                     "px-2 py-0.5 text-[9px] font-bold uppercase transition-colors hover:brightness-95",
@@ -1392,7 +1393,7 @@ export function Sales() {
                                                                                 type="button"
                                                                                 onClick={(e) => {
                                                                                     e.stopPropagation()
-                                                                                    setLocation(`/loans/${loanIndicator.loan!.id}`)
+                                                                                    setLocation(getLoanDetailsPath(loanIndicator.loan!, loanIndicator.loan!.id))
                                                                                 }}
                                                                                 className={cn(
                                                                                     "px-2 py-0.5 text-[10px] font-bold uppercase transition-colors hover:brightness-95",

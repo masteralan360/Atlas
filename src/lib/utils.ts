@@ -1,7 +1,7 @@
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
 import { getLoanLinkedPartySummary } from '@/lib/loanParties'
-import { getLoanCounterpartyLabel, getLoanDirection, getLoanDirectionLabel, isSimpleLoan } from '@/lib/loanPresentation'
+import { getLoanCounterpartyLabel, getLoanDetailsTitle, getLoanDirection, getLoanDirectionLabel, getLoanScheduleTitle, getLoanSummaryTitle, isSimpleLoan } from '@/lib/loanPresentation'
 
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs))
@@ -111,6 +111,57 @@ export function parseFormattedNumber(val: string): number {
     return Number(val.replace(/,/g, ''))
 }
 
+export function sanitizeNumericInput(
+    value: string,
+    options?: {
+        allowDecimal?: boolean
+        maxFractionDigits?: number
+    }
+): string {
+    const {
+        allowDecimal = true,
+        maxFractionDigits = 2
+    } = options || {}
+
+    const normalized = value
+        .replace(/,/g, '')
+        .replace(allowDecimal ? /[^\d.]/g : /\D/g, '')
+
+    if (!normalized) {
+        return ''
+    }
+
+    const [rawWhole = '', ...rawFractionParts] = normalized.split('.')
+    const hasDecimal = allowDecimal && normalized.includes('.')
+    const whole = rawWhole === '' ? '' : String(Number(rawWhole))
+
+    if (!allowDecimal) {
+        return rawWhole === '' ? '' : whole
+    }
+
+    const fraction = rawFractionParts.join('').slice(0, maxFractionDigits)
+    if (!hasDecimal) {
+        return rawWhole === '' ? '' : whole
+    }
+
+    return `${whole || '0'}.${fraction}`
+}
+
+export function formatNumericInput(value: string): string {
+    if (!value) {
+        return ''
+    }
+
+    const hasDecimal = value.includes('.')
+    const [whole = '', fraction = ''] = value.split('.')
+    const formattedWhole = whole ? formatNumberWithCommas(whole) : '0'
+
+    if (!hasDecimal) {
+        return formattedWhole
+    }
+
+    return `${formattedWhole}.${fraction}`
+}
 
 export function formatNumberWithCommas(val: number | string): string {
     const num = typeof val === 'string' ? val.replace(/,/g, '') : val.toString()
@@ -187,9 +238,11 @@ export function formatLoanDetailsForWhatsApp(loan: any, t: (key: string) => stri
     const linkedPartySummary = getLoanLinkedPartySummary(loan, t)
     const belongsToLabel = t('loans.belongsTo') === 'loans.belongsTo' ? 'Belongs to' : t('loans.belongsTo')
     const counterpartyLabel = getLoanCounterpartyLabel(loan, t)
+    const loanDetailsTitle = getLoanDetailsTitle(loan, t)
+    const loanSummaryTitle = getLoanSummaryTitle(loan, t)
 
     // Header
-    let text = `*${t('loans.details') || 'Loan Details'}*\n`
+    let text = `*${loanDetailsTitle}*\n`
     text += `*${t('loans.loanNo') || 'Loan No'}:* ${id}\n`
     text += `*${counterpartyLabel}:* ${loan.borrowerName}\n`
     if (isSimpleLoan(loan)) {
@@ -206,10 +259,13 @@ export function formatLoanDetailsForWhatsApp(loan: any, t: (key: string) => stri
     const paid = formatCurrency(loan.totalPaidAmount, currency, 'IQD')
     const balance = formatCurrency(loan.balanceAmount, currency, 'IQD')
 
-    text += `\n*${t('loans.summary') || 'Summary'}:*\n`
+    text += `\n*${loanSummaryTitle}:*\n`
     text += `*${t('loans.totalPrincipal') || 'Total Principal'}:* ${principal}\n`
     text += `*${t('loans.totalRepaid') || 'Total Repaid'}:* ${paid}\n`
     text += `*${t('loans.balanceDue') || 'Balance Due'}:* ${balance}\n`
+    if (isSimpleLoan(loan)) {
+        text += `*${getLoanScheduleTitle(loan, t)}:* ${loan.installmentCount || 0}\n`
+    }
 
     // Next Due
     if (loan.nextDueDate) {

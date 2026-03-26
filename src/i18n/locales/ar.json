@@ -138,6 +138,7 @@
         "kdsDashboard": "لوحة تحكم KDS",
         "sales": "سجل المبيعات",
         "loans": "القروض",
+        "installments": "الأقساط",
         "storages": "المخازن",
         "inventoryTransfer": "نقل المخزون",
         "suppliers": "الموردين",
@@ -1236,8 +1237,12 @@
         "loanPendingMessage": "سجل القرض معلق في انتظار المزامنة/الربط."
     },
     "loans": {
-        "title": "القروض",
-        "details": "تفاصيل القرض",
+        "title": "الأقساط",
+        "details": "تفاصيل قرض التقسيط",
+        "simpleLoanDetails": "تفاصيل القرض البسيط",
+        "simpleLoanSummary": "ملخص القرض البسيط",
+        "installmentLoan": "قرض تقسيط",
+        "installmentLoanSummary": "ملخص قرض التقسيط",
         "date": "التاريخ",
         "view": {
             "table": "تفاصيل القروض",
@@ -1245,10 +1250,10 @@
         },
         "searchPlaceholder": "البحث باسم المقترض أو رقم القرض...",
         "simpleSearchPlaceholder": "ابحث باسم الطرف أو الشريك أو رقم القرض...",
-        "registerFromPos": "تسجيل قرض",
-        "createManualLoan": "إنشاء قرض يدوي",
+        "registerFromPos": "تسجيل قرض تقسيط",
+        "createManualLoan": "إنشاء قرض تقسيط",
         "createSimpleLoan": "إنشاء قرض بسيط",
-        "simpleTab": "القروض البسيطة",
+        "simpleTab": "القروض",
         "simpleLoanDescription": "أضف قيد إقراض أو اقتراض يدوي مع إمكانية ربطه بشريك أعمال.",
         "confirmDelete": "حذف القرض",
         "deleteWarning": "سيؤدي حذف هذا القرض إلى إزالة القرض وجدول أقساطه وسجل مدفوعاته بشكل دائم. لا يمكن التراجع عن هذا.",
@@ -1321,7 +1326,9 @@
             "all": "الكل",
             "active": "نشط",
             "overdue": "متأخر",
-            "completed": "مكتمل"
+            "completed": "مكتمل",
+            "lent": "إقراض",
+            "borrowed": "اقتراض"
         },
         "statuses": {
             "active": "نشط",

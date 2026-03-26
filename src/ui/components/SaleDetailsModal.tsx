@@ -3,6 +3,7 @@ import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 import { Sale, SaleItem } from '@/types'
 import { formatCurrency, formatDate, formatDateTime, formatSnapshotTime, cn, formatSaleDetailsForWhatsApp } from '@/lib/utils'
+import { getLoanDetailsPath } from '@/lib/loanPresentation'
 import { localizeReturnReason } from '@/lib/returnReasons'
 import { whatsappManager } from '@/lib/whatsappWebviewManager'
 import { WhatsAppNumberInputModal } from '@/ui/components/modals/WhatsAppNumberInputModal'
@@ -263,7 +264,7 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onReturn
                                         className="h-7 px-2 text-[10px] font-semibold"
                                         onClick={() => {
                                             onClose()
-                                            setLocation(`/loans/${linkedLoan.id}`)
+                                            setLocation(getLoanDetailsPath(linkedLoan, linkedLoan.id))
                                         }}
                                     >
                                         {t('sales.openLoan') || 'Open Loan'}

@@ -85,6 +85,7 @@ const routePrefetchMap: Record<string, () => Promise<unknown>> = {
     '/orders': () => import('@/ui/pages/Orders'),
     '/travel-agency': () => import('@/ui/pages/TravelAgency'),
     '/loans': () => import('@/ui/pages/Loans'),
+    '/installments': () => import('@/ui/pages/Loans'),
     '/revenue': () => import('@/ui/pages/Revenue'),
     '/budget': () => import('@/ui/pages/Budget'),
     '/monthly-comparison': () => import('@/ui/pages/MonthlyComparison'),
@@ -257,7 +258,10 @@ export function Layout({ children }: LayoutProps) {
         ...((user?.role === 'admin' || user?.role === 'staff' || user?.role === 'viewer') && hasFeature('travel_agency') ? [
             { name: t('nav.travelAgency', { defaultValue: 'Travel Agency' }), href: '/travel-agency', icon: Plane }
         ] : []),
-        ...(hasFeature('loans') ? [{ name: t('nav.loans') || 'Loans', href: '/loans', icon: HandCoins }] : []),
+        ...(hasFeature('loans') ? [
+            { name: t('nav.loans', { defaultValue: 'Loans' }), href: '/loans', icon: HandCoins },
+            { name: t('nav.installments', { defaultValue: t('loans.title', { defaultValue: 'Installments' }) }), href: '/installments', icon: Copy }
+        ] : []),
         // Revenue - allow all roles for the menu item if feature is on (restriction is handled in route/page)
         ...((user?.role === 'admin' || user?.role === 'staff' || user?.role === 'viewer') ? [
             ...(hasFeature('net_revenue') ? [{ name: t('nav.revenue') || 'Net Revenue', href: '/revenue', icon: BarChart3 }] : []),

@@ -17,10 +17,21 @@ import {
 import { useWorkspace } from '@/workspace'
 import { getLoanLinkedPartySummary } from '@/lib/loanParties'
 import {
+    getLoanDeleteWarning,
+    getLoanDetailsPath,
+    getLoanDetailsTitle,
     getLoanDisbursementActivityLabel,
     getLoanIdentityTitle,
+    getLoanListPath,
+    getLoanModuleTitle,
     getLoanPaymentActivityLabel,
-    getLoanRecordPaymentLabel
+    getLoanRecordPaymentLabel,
+    getLoanScheduleAmountLabel,
+    getLoanScheduleIndexLabel,
+    getLoanScheduleItemLabel,
+    getLoanScheduleTitle,
+    getStandardLoanModuleTitle,
+    getLoanSummaryTitle,
 } from '@/lib/loanPresentation'
 import { setPendingSaleDetailsId } from '@/lib/saleNavigation'
 import { formatCurrency, formatDate, cn, formatLoanDetailsForWhatsApp } from '@/lib/utils'
@@ -40,10 +51,6 @@ import {
     TableHead,
     TableHeader,
     TableRow,
-    Tabs,
-    TabsContent,
-    TabsList,
-    TabsTrigger,
     AppPagination,
     DeleteConfirmationModal,
     PrintPreviewModal,
@@ -58,7 +65,6 @@ import { SimpleLoanListView } from '@/ui/components/loans/SimpleLoanListView'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 type LoanFilter = 'all' | 'active' | 'overdue' | 'completed'
-type LoanModuleTab = 'standard' | 'simple'
 
 function statusClass(status: string) {
     if (status === 'completed') return 'bg-blue-500/15 text-blue-600 dark:text-blue-300'
@@ -417,7 +423,7 @@ function LoanListView({
                                                     variant="secondary"
                                                     allowViewer={true}
                                                     className="flex-1 h-9 rounded-xl font-bold gap-2 text-xs"
-                                                    onClick={() => navigate(`/loans/${loan.id}`)}
+                                                    onClick={() => navigate(getLoanDetailsPath(loan, loan.id))}
                                                 >
                                                     <Search className="w-3.5 h-3.5" />
                                                     {t('common.view') || 'View'}
@@ -487,7 +493,7 @@ function LoanListView({
                                             </TableCell>
                                             <TableCell className="text-end print:hidden">
                                                 <div className="flex items-center justify-end gap-1">
-                                                    <Button variant="ghost" size="sm" allowViewer={true} onClick={() => navigate(`/loans/${loan.id}`)}>
+                                                    <Button variant="ghost" size="sm" allowViewer={true} onClick={() => navigate(getLoanDetailsPath(loan, loan.id))}>
                                                         {t('common.view') || 'View'}
                                                     </Button>
                                                     {!isReadOnly && canDeleteLoanRecord(loan) && (
@@ -526,7 +532,7 @@ function LoanListView({
                     onOpenChange={setCreateOpen}
                     workspaceId={workspaceId}
                     settlementCurrency={currency}
-                    onCreated={(loanId) => navigate(`/loans/${loanId}`)}
+                    onCreated={(loanId) => navigate(getLoanDetailsPath('standard', loanId))}
                 />
             )}
 
@@ -546,7 +552,7 @@ function LoanListView({
                 isOpen={showPrintPreview}
                 onClose={() => setShowPrintPreview(false)}
                 onConfirm={() => setShowPrintPreview(false)}
-                title={t('loans.printList') || 'Print Loans List'}
+                title={getStandardLoanModuleTitle(t)}
                 features={features}
                 workspaceName={workspaceName}
                 invoiceData={loanListInvoiceData}
@@ -687,7 +693,7 @@ function LoanDetailsView({
                 description: t('loans.messages.loanDeleted')
             })
             setDeleteOpen(false)
-            navigate('/loans')
+            navigate(getLoanListPath(loan))
         } catch (error: any) {
             const message = error?.message === 'loan_delete_not_allowed'
                 ? t('loans.messages.loanDeleteBlocked')
@@ -722,6 +728,13 @@ function LoanDetailsView({
     ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
     const canOpenLinkedSale = !!loan.saleId && linkedSaleMissingOrDeleted !== true
+    const moduleTitle = getLoanModuleTitle(loan, t)
+    const modulePath = getLoanListPath(loan)
+    const loanDetailsTitle = getLoanDetailsTitle(loan, t)
+    const loanSummaryTitle = getLoanSummaryTitle(loan, t)
+    const loanScheduleTitle = getLoanScheduleTitle(loan, t)
+    const loanScheduleIndexLabel = getLoanScheduleIndexLabel(loan, t)
+    const loanScheduleAmountLabel = getLoanScheduleAmountLabel(loan, t)
 
     const openLinkedSaleDetails = () => {
         if (!loan.saleId) {
@@ -736,9 +749,9 @@ function LoanDetailsView({
         <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Link href="/loans" className="hover:text-foreground inline-flex items-center gap-1">
+                    <Link href={modulePath} className="hover:text-foreground inline-flex items-center gap-1">
                         <ArrowLeft className="w-4 h-4" />
-                        {t('nav.loans') || 'Loans'}
+                        {moduleTitle}
                     </Link>
                     <span>/</span>
                     <LoanNoDisplay loanNo={loan.loanNo} className="text-foreground" />
@@ -790,7 +803,7 @@ function LoanDetailsView({
 
                     <Card className="overflow-hidden border-none shadow-none bg-transparent">
                         <CardHeader className="flex flex-row items-center justify-between pb-2">
-                            <CardTitle className="text-xl font-bold">{t('loans.summary') || 'Loan Summary'}</CardTitle>
+                            <CardTitle className="text-xl font-bold">{loanSummaryTitle}</CardTitle>
                             <span className="px-2 py-0.5 rounded-md bg-primary/10 text-primary text-[10px] font-bold uppercase tracking-wider">
                                 {t('loans.principalOnly') || 'Principal Only'}
                             </span>
@@ -875,7 +888,7 @@ function LoanDetailsView({
 
                 <Card className="lg:col-span-2">
                     <CardHeader className="flex flex-row items-center justify-between pb-2">
-                        <CardTitle>{t('loans.installmentSchedule') || 'Installment Schedule'}</CardTitle>
+                        <CardTitle>{loanScheduleTitle}</CardTitle>
                         <div className="hidden md:flex items-center bg-muted/30 p-1 rounded-lg border border-border/40">
                             <Button
                                 variant="ghost"
@@ -926,7 +939,7 @@ function LoanDetailsView({
                                             <div className="flex justify-between items-center">
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-                                                        #{String(item.installmentNo).padStart(2, '0')}
+                                                        {getLoanScheduleItemLabel(loan, item.installmentNo, t)}
                                                     </span>
                                                     <span className="text-sm font-bold text-foreground">
                                                         {formatDate(item.dueDate)}
@@ -939,7 +952,7 @@ function LoanDetailsView({
 
                                             <div className="grid grid-cols-3 gap-2 py-3 border-y border-border/50">
                                                 <div className="text-center">
-                                                    <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-tight">{t('loans.planned') || 'Planned'}</div>
+                                                    <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-tight">{loanScheduleAmountLabel}</div>
                                                     <div className="text-[11px] font-bold">{formatCurrency(item.plannedAmount, loan.settlementCurrency, features.iqd_display_preference)}</div>
                                                 </div>
                                                 <div className="text-center border-x border-border/50">
@@ -970,9 +983,9 @@ function LoanDetailsView({
                                 <Table>
                                     <TableHeader>
                                         <TableRow>
-                                            <TableHead className="text-start">#</TableHead>
+                                            <TableHead className="text-start">{loanScheduleIndexLabel}</TableHead>
                                             <TableHead>{t('loans.dueDate') || 'Due Date'}</TableHead>
-                                            <TableHead className="text-end">{t('loans.planned') || 'Planned'}</TableHead>
+                                            <TableHead className="text-end">{loanScheduleAmountLabel}</TableHead>
                                             <TableHead className="text-end">{t('loans.paid') || 'Paid'}</TableHead>
                                             <TableHead className="text-end">{t('loans.balance') || 'Balance'}</TableHead>
                                             <TableHead>{t('loans.status') || 'Status'}</TableHead>
@@ -988,7 +1001,7 @@ function LoanDetailsView({
                                             </TableRow>
                                         ) : installments.map((item: LoanInstallment) => (
                                             <TableRow key={item.id}>
-                                                <TableCell>{String(item.installmentNo).padStart(2, '0')}</TableCell>
+                                                <TableCell>{getLoanScheduleItemLabel(loan, item.installmentNo, t)}</TableCell>
                                                 <TableCell>{formatDate(item.dueDate)}</TableCell>
                                                 <TableCell className="text-end">{formatCurrency(item.plannedAmount, loan.settlementCurrency, features.iqd_display_preference)}</TableCell>
                                                 <TableCell className="text-end text-emerald-500">{formatCurrency(item.paidAmount, loan.settlementCurrency, features.iqd_display_preference)}</TableCell>
@@ -1025,13 +1038,13 @@ function LoanDetailsView({
                 itemName={loan.loanNo}
                 isLoading={isDeletingLoan}
                 title={t('loans.confirmDelete')}
-                description={t('loans.deleteWarning')}
+                description={getLoanDeleteWarning(loan, t)}
             />
             <PrintPreviewModal
                 isOpen={showPrintPreview}
                 onClose={() => setShowPrintPreview(false)}
                 onConfirm={() => setShowPrintPreview(false)}
-                title={t('loans.printDetails') || 'Loan Details'}
+                title={loanDetailsTitle}
                 features={features}
                 workspaceName={workspaceName}
                 invoiceData={loanDetailsInvoiceData || undefined}
@@ -1049,19 +1062,10 @@ function LoanDetailsView({
 }
 
 export function Loans() {
-    const { t } = useTranslation()
     const { user } = useAuth()
     const [detailMatch, params] = useRoute('/loans/:loanId')
     const { openLoanPayment } = useLoanPaymentModal()
     const workspaceId = user?.workspaceId
-    const [activeTab, setActiveTab] = useState<LoanModuleTab>(() => {
-        const storedValue = localStorage.getItem('loans_module_tab')
-        return storedValue === 'simple' ? 'simple' : 'standard'
-    })
-
-    useEffect(() => {
-        localStorage.setItem('loans_module_tab', activeTab)
-    }, [activeTab])
 
     const openPaymentForLoan = (loan: Loan, installment?: LoanInstallment | null) => {
         openLoanPayment(loan.id, {
@@ -1083,22 +1087,34 @@ export function Loans() {
         )
     }
 
-    return (
-        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as LoanModuleTab)} className="space-y-4">
-            <TabsList className="grid w-full max-w-[360px] grid-cols-2 rounded-2xl bg-secondary/50 p-1">
-                <TabsTrigger value="standard" className="rounded-xl">
-                    {t('loans.title') || 'Loans'}
-                </TabsTrigger>
-                <TabsTrigger value="simple" className="rounded-xl">
-                    {t('loans.simpleTab') || 'Simple Loans'}
-                </TabsTrigger>
-            </TabsList>
-            <TabsContent value="standard" className="mt-0">
-                <LoanListView workspaceId={workspaceId} />
-            </TabsContent>
-            <TabsContent value="simple" className="mt-0">
-                <SimpleLoanListView workspaceId={workspaceId} />
-            </TabsContent>
-        </Tabs>
-    )
+    return <SimpleLoanListView workspaceId={workspaceId} />
+}
+
+export function Installments() {
+    const { user } = useAuth()
+    const [detailMatch, params] = useRoute('/installments/:loanId')
+    const { openLoanPayment } = useLoanPaymentModal()
+    const workspaceId = user?.workspaceId
+
+    const openPaymentForLoan = (loan: Loan, installment?: LoanInstallment | null) => {
+        openLoanPayment(loan.id, {
+            installmentId: installment?.id ?? null
+        })
+    }
+
+    if (!workspaceId) {
+        return null
+    }
+
+    if (detailMatch && params?.loanId) {
+        return (
+            <LoanDetailsView
+                workspaceId={workspaceId}
+                loanId={params.loanId}
+                onOpenPayment={openPaymentForLoan}
+            />
+        )
+    }
+
+    return <LoanListView workspaceId={workspaceId} />
 }

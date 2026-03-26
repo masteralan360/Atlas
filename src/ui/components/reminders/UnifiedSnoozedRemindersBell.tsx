@@ -80,7 +80,7 @@ export function UnifiedSnoozedRemindersBell() {
                                     {t('common.all') || 'All'} ({counts.all})
                                 </TabsTrigger>
                                 <TabsTrigger value="loan" className="rounded-lg font-bold text-[10px] uppercase tracking-tighter">
-                                    {t('nav.loans') || 'Loans'} ({counts.loan})
+                                    {t('nav.installments', { defaultValue: 'Installments' })} ({counts.loan})
                                 </TabsTrigger>
                                 <TabsTrigger value="budget" className="rounded-lg font-bold text-[10px] uppercase tracking-tighter">
                                     {t('nav.budget') || 'Budget'} ({counts.budget})

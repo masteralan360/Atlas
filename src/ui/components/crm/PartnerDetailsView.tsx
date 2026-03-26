@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'wouter'
 
 import { convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
-import { getLoanDirection, getLoanDirectionLabel, isSimpleLoan } from '@/lib/loanPresentation'
+import { getLoanDetailsPath, getLoanDirection, getLoanDirectionLabel, isSimpleLoan } from '@/lib/loanPresentation'
 import { getTravelSaleCost, getTravelStatusLabel } from '@/lib/travelAgency'
 import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import {
@@ -37,7 +37,7 @@ type PartnerKind = 'customer' | 'supplier' | 'business_partner'
 type RelatedProductOrder = SalesOrder | PurchaseOrder
 type RelatedTransaction = {
     id: string
-    source: 'sales_order' | 'purchase_order' | 'travel_sale' | 'loan'
+    source: 'sales_order' | 'purchase_order' | 'travel_sale' | 'loan' | 'simple_loan'
     reference: string
     displayDate: string
     sortDate: string
@@ -84,8 +84,10 @@ function sourceLabel(source: RelatedTransaction['source'], t: TranslationFn) {
             return t('orders.tabs.purchase', { defaultValue: 'Purchase Order' })
         case 'travel_sale':
             return t('travelAgency.title', { defaultValue: 'Travel Sale' })
+        case 'simple_loan':
+            return t('loans.simpleTab', { defaultValue: 'Loans' })
         default:
-            return t('loans.title', { defaultValue: 'Loan' })
+            return t('loans.installmentLoan', { defaultValue: 'Installment Loan' })
     }
 }
 
@@ -230,7 +232,7 @@ function normalizeLoan(loan: Loan, currency: SalesOrder['currency'], t: Translat
     const directionLabel = getLoanDirectionLabel(direction, t)
     return {
         id: loan.id,
-        source: 'loan',
+        source: isSimpleLoan(loan) ? 'simple_loan' : 'loan',
         reference: loan.loanNo,
         displayDate: loan.createdAt,
         sortDate: loan.updatedAt || loan.createdAt,
@@ -243,7 +245,7 @@ function normalizeLoan(loan: Loan, currency: SalesOrder['currency'], t: Translat
         currency: loan.settlementCurrency,
         totalInPartnerCurrency: convertCurrencyAmountWithSnapshot(loan.balanceAmount, loan.settlementCurrency, currency),
         units: 0,
-        viewHref: `/loans/${loan.id}`,
+        viewHref: getLoanDetailsPath(loan, loan.id),
         isActive: loan.status !== 'completed',
         isCompleted: loan.status === 'completed',
         isOutstanding: loan.balanceAmount > 0
@@ -702,6 +704,41 @@ export function PartnerDetailsView({
                                         <div className="mt-2 text-xl font-black">
                                             {earliestTransaction ? formatDate(earliestTransaction.displayDate) : 'N/A'}
                                         </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                <div className="rounded-2xl border bg-background/70 p-4">
+                                    <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                                        {t('businessPartners.receivable', { defaultValue: 'Receivable' })}
+                                    </div>
+                                    <div className="mt-2 text-2xl font-black text-emerald-600">
+                                        {formatCurrency(partner.receivableBalance || 0, defaultCurrency, iqdPreference)}
+                                    </div>
+                                </div>
+                                <div className="rounded-2xl border bg-background/70 p-4">
+                                    <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                                        {t('businessPartners.payable', { defaultValue: 'Payable' })}
+                                    </div>
+                                    <div className="mt-2 text-2xl font-black text-amber-600">
+                                        {formatCurrency(partner.payableBalance || 0, defaultCurrency, iqdPreference)}
+                                    </div>
+                                </div>
+                                <div className="rounded-2xl border bg-background/70 p-4">
+                                    <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                                        {t('businessPartners.loans', { defaultValue: 'Loans' })}
+                                    </div>
+                                    <div className="mt-2 text-2xl font-black text-sky-600">
+                                        {formatCurrency(partner.loanOutstandingBalance || 0, defaultCurrency, iqdPreference)}
+                                    </div>
+                                </div>
+                                <div className="rounded-2xl border bg-background/70 p-4">
+                                    <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                                        {t('businessPartners.netExposure', { defaultValue: 'Net Exposure' })}
+                                    </div>
+                                    <div className="mt-2 text-2xl font-black text-primary">
+                                        {formatCurrency(partner.netExposure || 0, defaultCurrency, iqdPreference)}
                                     </div>
                                 </div>
                             </div>

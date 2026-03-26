@@ -1,13 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
-import { ArrowLeftRight, Eye, Plus, Search, Trash2 } from 'lucide-react'
+import { Eye, LayoutGrid, List, Plus, Printer, Search, Trash2 } from 'lucide-react'
 
 import { useAuth } from '@/auth'
 import { getLoanLinkedPartySummary } from '@/lib/loanParties'
-import { getLoanDirection, getLoanDirectionLabel } from '@/lib/loanPresentation'
+import { isMobile } from '@/lib/platform'
+import { getLoanDeleteWarning, getLoanDirection, getLoanDirectionLabel, getSimpleLoanModuleTitle } from '@/lib/loanPresentation'
 import { cn, formatCurrency, formatDate } from '@/lib/utils'
 import { deleteLoan, type Loan, useLoans } from '@/local-db'
+import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import {
     AppPagination,
     Button,
@@ -15,6 +17,7 @@ import {
     CardContent,
     DeleteConfirmationModal,
     Input,
+    PrintPreviewModal,
     Table,
     TableBody,
     TableCell,
@@ -24,7 +27,9 @@ import {
     useToast
 } from '@/ui/components'
 import { useWorkspace } from '@/workspace'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { CreateSimpleLoanModal } from './CreateSimpleLoanModal'
+import { LoanListPrintTemplate } from './LoanPrintTemplates'
 import { LoanNoDisplay } from './LoanNoDisplay'
 
 type SimpleLoanFilter = 'all' | 'lent' | 'borrowed' | 'completed'
@@ -53,19 +58,27 @@ export function SimpleLoanListView({
 }: {
     workspaceId: string
 }) {
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const [, navigate] = useLocation()
-    const { features } = useWorkspace()
+    const { features, workspaceName } = useWorkspace()
     const { user } = useAuth()
     const { toast } = useToast()
     const isReadOnly = user?.role === 'viewer'
     const [search, setSearch] = useState('')
     const [filter, setFilter] = useState<SimpleLoanFilter>('all')
     const [currentPage, setCurrentPage] = useState(1)
+    const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => {
+        return (localStorage.getItem('simple_loans_view_mode') as 'table' | 'grid') || 'table'
+    })
     const [createOpen, setCreateOpen] = useState(false)
     const [loanToDelete, setLoanToDelete] = useState<Loan | null>(null)
     const [isDeletingLoan, setIsDeletingLoan] = useState(false)
+    const [showPrintPreview, setShowPrintPreview] = useState(false)
     const pageSize = 10
+
+    useEffect(() => {
+        localStorage.setItem('simple_loans_view_mode', viewMode)
+    }, [viewMode])
 
     const loans = useLoans(workspaceId)
     const simpleLoans = useMemo(
@@ -111,6 +124,46 @@ export function SimpleLoanListView({
         const from = (currentPage - 1) * pageSize
         return filtered.slice(from, from + pageSize)
     }, [filtered, currentPage])
+    const printLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
+    const buildQrValue = useCallback((effectiveId: string) => {
+        if (!features.print_qr || !workspaceId || isLocalWorkspaceMode(workspaceId)) return undefined
+        return `https://asaas-r2-proxy.alanepic360.workers.dev/${workspaceId}/printed-invoices/A4/${effectiveId}.pdf`
+    }, [features.print_qr, workspaceId])
+    const renderSimpleLoanListTemplate = useCallback((effectiveId?: string) => (
+        <LoanListPrintTemplate
+            workspaceName={workspaceName}
+            printLang={printLang}
+            loans={filtered}
+            filter={filter}
+            variant="simple"
+            displayCurrency={features.default_currency}
+            iqdPreference={features.iqd_display_preference}
+            metrics={{
+                totalLent: metrics.totalLent,
+                totalBorrowed: metrics.totalBorrowed,
+                activeEntries: metrics.activeCount,
+                settledEntries: metrics.settledCount
+            }}
+            logoUrl={features.logo_url}
+            qrValue={effectiveId ? buildQrValue(effectiveId) : undefined}
+        />
+    ), [buildQrValue, features.default_currency, features.iqd_display_preference, features.logo_url, filter, filtered, metrics.activeCount, metrics.settledCount, metrics.totalBorrowed, metrics.totalLent, printLang, workspaceName])
+    const buildSimpleLoanListPdf = useCallback(async ({ format, effectiveId }: { format: PrintFormat; effectiveId: string }) => {
+        return generateTemplatePdf({
+            element: renderSimpleLoanListTemplate(effectiveId),
+            format,
+            printLang,
+            printQuality: features.print_quality
+        })
+    }, [features.print_quality, printLang, renderSimpleLoanListTemplate])
+    const simpleLoanListInvoiceData = useMemo(() => ({
+        totalAmount: metrics.totalLent + metrics.totalBorrowed,
+        settlementCurrency: features.default_currency,
+        origin: 'Loans' as const,
+        createdByName: user?.name || 'Unknown',
+        cashierName: user?.name || 'Unknown',
+        printFormat: 'a4' as const
+    }), [features.default_currency, metrics.totalBorrowed, metrics.totalLent, user?.name])
 
     const confirmDeleteLoan = async () => {
         if (!loanToDelete) {
@@ -181,6 +234,38 @@ export function SimpleLoanListView({
                                 placeholder={t('loans.simpleSearchPlaceholder', { defaultValue: 'Search by counterparty, partner, or loan number...' })}
                             />
                         </div>
+                        <div className="hidden md:flex items-center bg-muted/30 p-1 rounded-lg border border-border/40">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                allowViewer={true}
+                                onClick={() => setViewMode('table')}
+                                className={cn(
+                                    "h-7 px-3 font-bold uppercase text-[9px] flex items-center gap-1.5 transition-all",
+                                    viewMode === 'table'
+                                        ? "bg-primary text-primary-foreground shadow-sm"
+                                        : "text-muted-foreground hover:bg-background/50"
+                                )}
+                            >
+                                <List className="w-3 h-3" />
+                                {t('loans.view.table') || 'Loans Details'}
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                allowViewer={true}
+                                onClick={() => setViewMode('grid')}
+                                className={cn(
+                                    "h-7 px-3 font-bold uppercase text-[9px] flex items-center gap-1.5 transition-all",
+                                    viewMode === 'grid'
+                                        ? "bg-primary text-primary-foreground shadow-sm"
+                                        : "text-muted-foreground hover:bg-background/50"
+                                )}
+                            >
+                                <LayoutGrid className="w-3 h-3" />
+                                {t('loans.view.grid') || 'Loans Grid'}
+                            </Button>
+                        </div>
                         <div className="flex items-center gap-1 rounded-md bg-muted/30 p-1">
                             {(['all', 'lent', 'borrowed', 'completed'] as SimpleLoanFilter[]).map((value) => (
                                 <button
@@ -201,8 +286,12 @@ export function SimpleLoanListView({
                                 </button>
                             ))}
                         </div>
+                        <Button variant="outline" allowViewer={true} onClick={() => setShowPrintPreview(true)} className="gap-2 print:hidden">
+                            <Printer className="h-4 w-4" />
+                            {t('common.print') || 'Print'}
+                        </Button>
                         {!isReadOnly ? (
-                            <Button onClick={() => setCreateOpen(true)} className="gap-2">
+                            <Button onClick={() => setCreateOpen(true)} className="gap-2 print:hidden">
                                 <Plus className="h-4 w-4" />
                                 {t('loans.createSimpleLoan', { defaultValue: 'Create Simple Loan' })}
                             </Button>
@@ -210,7 +299,11 @@ export function SimpleLoanListView({
                     </div>
 
                     <div className="overflow-hidden rounded-lg border">
-                        <div className="grid gap-4 bg-muted/5 p-4 md:hidden">
+                        {(isMobile() || viewMode === 'grid') ? (
+                            <div className={cn(
+                                "grid gap-4 bg-muted/5 p-4",
+                                viewMode === 'grid' && !isMobile() ? "md:grid-cols-2 xl:grid-cols-3" : "grid-cols-1"
+                            )}>
                             {paginated.length === 0 ? (
                                 <div className="rounded-lg border bg-background py-10 text-center text-muted-foreground">
                                     {t('common.noData') || 'No data'}
@@ -283,9 +376,9 @@ export function SimpleLoanListView({
                                     </div>
                                 )
                             })}
-                        </div>
-
-                        <div className="hidden md:block">
+                            </div>
+                        ) : (
+                            <div>
                             <Table>
                                 <TableHeader>
                                     <TableRow>
@@ -361,7 +454,8 @@ export function SimpleLoanListView({
                                     })}
                                 </TableBody>
                             </Table>
-                        </div>
+                            </div>
+                        )}
                     </div>
 
                     <AppPagination
@@ -383,6 +477,18 @@ export function SimpleLoanListView({
                 />
             ) : null}
 
+            <PrintPreviewModal
+                isOpen={showPrintPreview}
+                onClose={() => setShowPrintPreview(false)}
+                onConfirm={() => setShowPrintPreview(false)}
+                title={getSimpleLoanModuleTitle(t)}
+                features={features}
+                workspaceName={workspaceName}
+                invoiceData={simpleLoanListInvoiceData}
+                pdfBuilder={buildSimpleLoanListPdf}
+                printTemplate={({ effectiveId }) => renderSimpleLoanListTemplate(effectiveId)}
+            />
+
             <DeleteConfirmationModal
                 isOpen={!!loanToDelete}
                 onClose={() => {
@@ -393,7 +499,7 @@ export function SimpleLoanListView({
                 itemName={loanToDelete?.loanNo || ''}
                 isLoading={isDeletingLoan}
                 title={t('loans.confirmDelete') || 'Delete Loan'}
-                description={t('loans.deleteWarning') || 'Deleting this loan will permanently remove the loan, its installment schedule, and its payment history. This cannot be undone.'}
+                description={getLoanDeleteWarning(loanToDelete, t)}
             />
         </div>
     )

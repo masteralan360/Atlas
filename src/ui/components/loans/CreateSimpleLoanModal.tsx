@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Users, X } from 'lucide-react'
 
@@ -21,10 +21,12 @@ import {
     SelectItem,
     SelectTrigger,
     SelectValue,
+    Textarea,
     useToast
 } from '@/ui/components'
 import { useWorkspace } from '@/workspace'
 import { LoanPartyPickerDialog } from './LoanPartyPickerDialog'
+import { formatNumericInput, parseFormattedNumber, sanitizeNumericInput } from '@/lib/utils'
 
 interface CreateSimpleLoanModalProps {
     isOpen: boolean
@@ -73,9 +75,15 @@ export function CreateSimpleLoanModal({
         setPrincipalAmount('')
         setDueDate(new Date().toISOString().slice(0, 10))
         setNotes('')
-    }, [isOpen])
+    }, [isOpen, settlementCurrency])
 
-    const canSubmit = borrowerName.trim() && Number(principalAmount) > 0 && dueDate
+    useEffect(() => {
+        setPrincipalAmount((current) => sanitizeNumericInput(current, {
+            allowDecimal: selectedCurrency !== 'iqd'
+        }))
+    }, [selectedCurrency])
+
+    const canSubmit = borrowerName.trim() && parseFormattedNumber(principalAmount || '0') > 0 && dueDate
 
     const counterpartyNameLabel = useMemo(
         () => getLoanCounterpartyNameLabel({ loanCategory: 'simple', direction }, t),
@@ -112,7 +120,7 @@ export function CreateSimpleLoanModal({
                 borrowerPhone: borrowerPhone.trim(),
                 borrowerAddress: borrowerAddress.trim(),
                 borrowerNationalId: borrowerNationalId.trim(),
-                principalAmount: Number(principalAmount),
+                principalAmount: parseFormattedNumber(principalAmount || '0'),
                 settlementCurrency: selectedCurrency,
                 installmentCount: 1,
                 installmentFrequency: 'monthly',
@@ -138,126 +146,138 @@ export function CreateSimpleLoanModal({
         }
     }
 
+    const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault()
+        void handleCreate()
+    }
+
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-2xl">
-                <DialogHeader>
+            <DialogContent className="top-[calc(50%+var(--titlebar-height)/2+var(--safe-area-top)/2)] flex max-h-[calc(100dvh-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-0.75rem)] w-[calc(100vw-0.75rem)] max-w-3xl flex-col overflow-hidden rounded-[1.25rem] border-border/60 p-0 sm:w-full sm:max-h-[min(calc(100dvh-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-2rem),820px)] sm:rounded-[1.75rem]">
+                <DialogHeader className="border-b bg-muted/30 px-4 py-4 pr-14 text-left sm:px-6 sm:py-5">
                     <DialogTitle>{t('loans.createSimpleLoan', { defaultValue: 'Create Simple Loan' })}</DialogTitle>
                     <DialogDescription>
                         {t('loans.simpleLoanDescription', { defaultValue: 'Add a manual lending or borrowing entry and optionally link it to a business partner.' })}
                     </DialogDescription>
                 </DialogHeader>
 
-                <div className="grid gap-4">
-                    <div className="grid gap-2 md:grid-cols-2">
-                        <div className="grid gap-2">
-                            <Label>{t('loans.direction', { defaultValue: 'Direction' })}</Label>
-                            <Select value={direction} onValueChange={(value: LoanDirection) => setDirection(value)}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="lent">{getLoanDirectionLabel('lent', t)}</SelectItem>
-                                    <SelectItem value="borrowed">{getLoanDirectionLabel('borrowed', t)}</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="grid gap-2">
-                            <Label>{t('loans.currencyHint', { defaultValue: 'Settlement Currency' })}</Label>
-                            <Select value={selectedCurrency} onValueChange={(value: CurrencyCode) => setSelectedCurrency(value)}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {availableCurrencies.map((currency) => (
-                                        <SelectItem key={currency} value={currency}>
-                                            {currency.toUpperCase()}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-
-                    <div className="grid gap-2">
-                        <Label>{counterpartyNameLabel}</Label>
-                        <div className="flex items-center gap-2">
-                            <Input value={borrowerName} onChange={e => setBorrowerName(e.target.value)} className="flex-1" />
-                            <Button type="button" variant="outline" className="shrink-0 gap-2" onClick={() => setIsPartyPickerOpen(true)}>
-                                <Users className="h-4 w-4" />
-                                {t('loans.selectParty', { defaultValue: 'Business Partner' })}
-                            </Button>
-                        </div>
-                        {selectedParty ? (
-                            <div className="flex items-start justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2">
-                                <div className="min-w-0">
-                                    <div className="text-[11px] font-bold uppercase tracking-wide text-primary">
-                                        {t('loans.belongsTo', { defaultValue: 'Belongs to' })}
-                                    </div>
-                                    <div className="text-sm font-semibold">
-                                        {getLoanLinkedPartyTypeLabel(selectedParty.linkedPartyType, t)} - {selectedParty.linkedPartyName}
-                                    </div>
+                <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+                    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
+                        <div className="grid gap-4">
+                            <div className="grid gap-4 md:grid-cols-2">
+                                <div className="grid gap-2">
+                                    <Label>{t('loans.direction', { defaultValue: 'Direction' })}</Label>
+                                    <Select value={direction} onValueChange={(value: LoanDirection) => setDirection(value)}>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="lent">{getLoanDirectionLabel('lent', t)}</SelectItem>
+                                            <SelectItem value="borrowed">{getLoanDirectionLabel('borrowed', t)}</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                 </div>
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 shrink-0 px-2 text-muted-foreground"
-                                    onClick={() => setSelectedParty(null)}
-                                >
-                                    <X className="h-4 w-4" />
-                                    {t('loans.clearParty', { defaultValue: 'Clear Link' })}
-                                </Button>
+                                <div className="grid gap-2">
+                                    <Label>{t('loans.currencyHint', { defaultValue: 'Settlement Currency' })}</Label>
+                                    <Select value={selectedCurrency} onValueChange={(value: CurrencyCode) => setSelectedCurrency(value)}>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {availableCurrencies.map((currency) => (
+                                                <SelectItem key={currency} value={currency}>
+                                                    {currency.toUpperCase()}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
                             </div>
-                        ) : null}
-                    </div>
 
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                        <div className="grid gap-2">
-                            <Label>{t('loans.contactPhone', { defaultValue: 'Phone' })}</Label>
-                            <Input value={borrowerPhone} onChange={e => setBorrowerPhone(e.target.value)} />
+                            <div className="grid gap-2">
+                                <Label>{counterpartyNameLabel}</Label>
+                                <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                                    <Input value={borrowerName} onChange={e => setBorrowerName(e.target.value)} className="flex-1" />
+                                    <Button type="button" variant="outline" className="w-full shrink-0 gap-2 md:w-auto" onClick={() => setIsPartyPickerOpen(true)}>
+                                        <Users className="h-4 w-4" />
+                                        {t('loans.selectParty', { defaultValue: 'Business Partner' })}
+                                    </Button>
+                                </div>
+                                {selectedParty ? (
+                                    <div className="flex flex-col gap-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 sm:flex-row sm:items-start sm:justify-between">
+                                        <div className="min-w-0">
+                                            <div className="text-[11px] font-bold uppercase tracking-wide text-primary">
+                                                {t('loans.belongsTo', { defaultValue: 'Belongs to' })}
+                                            </div>
+                                            <div className="text-sm font-semibold">
+                                                {getLoanLinkedPartyTypeLabel(selectedParty.linkedPartyType, t)} - {selectedParty.linkedPartyName}
+                                            </div>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-8 shrink-0 px-2 text-muted-foreground"
+                                            onClick={() => setSelectedParty(null)}
+                                        >
+                                            <X className="h-4 w-4" />
+                                            {t('loans.clearParty', { defaultValue: 'Clear Link' })}
+                                        </Button>
+                                    </div>
+                                ) : null}
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                <div className="grid gap-2">
+                                    <Label>{t('loans.contactPhone', { defaultValue: 'Phone' })}</Label>
+                                    <Input value={borrowerPhone} onChange={e => setBorrowerPhone(e.target.value)} />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label>{t('loans.referenceId', { defaultValue: 'Reference / ID' })}</Label>
+                                    <Input value={borrowerNationalId} onChange={e => setBorrowerNationalId(e.target.value)} />
+                                </div>
+                            </div>
+
+                            <div className="grid gap-2">
+                                <Label>{t('loans.contactAddress', { defaultValue: 'Address' })}</Label>
+                                <Input value={borrowerAddress} onChange={e => setBorrowerAddress(e.target.value)} />
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                <div className="grid gap-2">
+                                    <Label>{t('loans.principal', { defaultValue: 'Principal' })}</Label>
+                                    <Input
+                                        type="text"
+                                        inputMode={selectedCurrency === 'iqd' ? 'numeric' : 'decimal'}
+                                        placeholder="0"
+                                        value={formatNumericInput(principalAmount)}
+                                        onChange={e => setPrincipalAmount(sanitizeNumericInput(e.target.value, {
+                                            allowDecimal: selectedCurrency !== 'iqd'
+                                        }))}
+                                    />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label>{t('loans.dueDate', { defaultValue: 'Due Date' })}</Label>
+                                    <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
+                                </div>
+                            </div>
+
+                            <div className="grid gap-2">
+                                <Label>{t('loans.notes', { defaultValue: 'Notes' })}</Label>
+                                <Textarea rows={4} value={notes} onChange={e => setNotes(e.target.value)} />
+                            </div>
                         </div>
-                        <div className="grid gap-2">
-                            <Label>{t('loans.referenceId', { defaultValue: 'Reference / ID' })}</Label>
-                            <Input value={borrowerNationalId} onChange={e => setBorrowerNationalId(e.target.value)} />
-                        </div>
                     </div>
 
-                    <div className="grid gap-2">
-                        <Label>{t('loans.contactAddress', { defaultValue: 'Address' })}</Label>
-                        <Input value={borrowerAddress} onChange={e => setBorrowerAddress(e.target.value)} />
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                        <div className="grid gap-2">
-                            <Label>{t('loans.principal', { defaultValue: 'Principal' })}</Label>
-                            <Input
-                                type="number"
-                                min={0}
-                                value={principalAmount}
-                                onChange={e => setPrincipalAmount(e.target.value)}
-                            />
-                        </div>
-                        <div className="grid gap-2">
-                            <Label>{t('loans.dueDate', { defaultValue: 'Due Date' })}</Label>
-                            <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
-                        </div>
-                    </div>
-
-                    <div className="grid gap-2">
-                        <Label>{t('loans.notes', { defaultValue: 'Notes' })}</Label>
-                        <Input value={notes} onChange={e => setNotes(e.target.value)} />
-                    </div>
-                </div>
-
-                <DialogFooter>
-                    <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
-                        {t('common.cancel') || 'Cancel'}
-                    </Button>
-                    <Button onClick={handleCreate} disabled={!canSubmit || isSaving}>
-                        {t('common.create') || 'Create'}
-                    </Button>
-                </DialogFooter>
+                    <DialogFooter className="border-t bg-muted/20 px-4 py-4 pb-[calc(1rem+var(--safe-area-bottom))] sm:justify-between sm:px-6">
+                        <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)} disabled={isSaving}>
+                            {t('common.cancel') || 'Cancel'}
+                        </Button>
+                        <Button type="submit" className="w-full sm:w-auto" disabled={!canSubmit || isSaving}>
+                            {t('common.create') || 'Create'}
+                        </Button>
+                    </DialogFooter>
+                </form>
             </DialogContent>
 
             <LoanPartyPickerDialog

@@ -84,3 +84,96 @@ export function getLoanRecordPaymentLabel(loan: Pick<Loan, 'loanCategory' | 'dir
         ? translate(t, 'loans.recordRepayment', 'Record Repayment')
         : translate(t, 'loans.recordCollection', 'Record Collection')
 }
+
+export function getLoanDetailsTitle(loan: Pick<Loan, 'loanCategory'> | null | undefined, t: Translate) {
+    if (isSimpleLoan(loan)) {
+        return translate(t, 'loans.simpleLoanDetails', 'Simple Loan Details')
+    }
+
+    return translate(t, 'loans.details', 'Installment Loan Details')
+}
+
+export function getLoanSummaryTitle(loan: Pick<Loan, 'loanCategory'> | null | undefined, t: Translate) {
+    if (isSimpleLoan(loan)) {
+        return translate(t, 'loans.simpleLoanSummary', 'Simple Loan Summary')
+    }
+
+    return translate(t, 'loans.installmentLoanSummary', 'Installment Loan Summary')
+}
+
+export function getSimpleLoanModuleTitle(t: Translate) {
+    return translate(t, 'nav.loans', translate(t, 'loans.simpleTab', 'Loans'))
+}
+
+export function getStandardLoanModuleTitle(t: Translate) {
+    return translate(t, 'nav.installments', translate(t, 'loans.title', 'Installments'))
+}
+
+export function getLoanModuleTitle(loan: Pick<Loan, 'loanCategory'> | null | undefined, t: Translate) {
+    return isSimpleLoan(loan) ? getSimpleLoanModuleTitle(t) : getStandardLoanModuleTitle(t)
+}
+
+export function getLoanListPath(loan: Pick<Loan, 'loanCategory'> | LoanCategory | null | undefined) {
+    return getLoanCategory(loan) === 'simple' ? '/loans' : '/installments'
+}
+
+export function getLoanDetailsPath(
+    loan: Pick<Loan, 'loanCategory'> | LoanCategory | null | undefined,
+    loanId: string
+) {
+    return `${getLoanListPath(loan)}/${loanId}`
+}
+
+export function getLoanScheduleTitle(loan: Pick<Loan, 'loanCategory'> | null | undefined, t: Translate) {
+    if (isSimpleLoan(loan)) {
+        return translate(t, 'loans.loanEntries', 'Loans')
+    }
+
+    return translate(t, 'loans.installmentSchedule', 'Installment Schedule')
+}
+
+export function getLoanScheduleIndexLabel(loan: Pick<Loan, 'loanCategory'> | null | undefined, t: Translate) {
+    if (isSimpleLoan(loan)) {
+        return translate(t, 'loans.loanEntry', 'Loan')
+    }
+
+    return '#'
+}
+
+export function getLoanScheduleAmountLabel(loan: Pick<Loan, 'loanCategory'> | null | undefined, t: Translate) {
+    if (isSimpleLoan(loan)) {
+        return translate(t, 'common.amount', 'Amount')
+    }
+
+    return translate(t, 'loans.planned', 'Planned')
+}
+
+export function getLoanScheduleItemLabel(
+    loan: Pick<Loan, 'loanCategory'> | null | undefined,
+    installmentNo: number,
+    t: Translate
+) {
+    const paddedInstallmentNo = String(installmentNo).padStart(2, '0')
+
+    if (isSimpleLoan(loan)) {
+        return `${getLoanScheduleIndexLabel(loan, t)} ${paddedInstallmentNo}`
+    }
+
+    return `#${paddedInstallmentNo}`
+}
+
+export function getLoanDeleteWarning(loan: Pick<Loan, 'loanCategory'> | null | undefined, t: Translate) {
+    if (isSimpleLoan(loan)) {
+        return translate(
+            t,
+            'loans.simpleDeleteWarning',
+            'Deleting this loan will permanently remove the loan, its loan entries, and its payment history. This cannot be undone.'
+        )
+    }
+
+    return translate(
+        t,
+        'loans.deleteWarning',
+        'Deleting this loan will permanently remove the loan, its installment schedule, and its payment history. This cannot be undone.'
+    )
+}

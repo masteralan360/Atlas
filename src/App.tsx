@@ -57,6 +57,7 @@ const Storages = lazy(() => import('@/ui/pages/Storages').then(m => ({ default: 
 const InventoryTransfer = lazy(() => import('@/ui/pages/InventoryTransfer').then(m => ({ default: m.default })))
 const HR = lazy(() => import('@/ui/pages/HR').then(m => ({ default: m.default })))
 const Loans = lazy(() => import('@/ui/pages/Loans').then(m => ({ default: m.Loans })))
+const Installments = lazy(() => import('@/ui/pages/Loans').then(m => ({ default: m.Installments })))
 const BusinessPartners = lazy(() => import('@/ui/pages/BusinessPartners').then(m => ({ default: m.BusinessPartners })))
 const BusinessPartnerDetails = lazy(() => import('@/ui/pages/BusinessPartnerDetails').then(m => ({ default: m.BusinessPartnerDetails })))
 const Customers = lazy(() => import('@/ui/pages/Customers').then(m => ({ default: m.Customers })))
@@ -696,6 +697,20 @@ function App() {
                                                 <ProtectedRoute allowedRoles={['admin', 'staff', 'viewer']} requiredFeature="loans">
                                                     <Layout>
                                                         <Loans />
+                                                    </Layout>
+                                                </ProtectedRoute>
+                                            </Route>
+                                            <Route path="/installments">
+                                                <ProtectedRoute allowedRoles={['admin', 'staff', 'viewer']} requiredFeature="loans">
+                                                    <Layout>
+                                                        <Installments />
+                                                    </Layout>
+                                                </ProtectedRoute>
+                                            </Route>
+                                            <Route path="/installments/:loanId">
+                                                <ProtectedRoute allowedRoles={['admin', 'staff', 'viewer']} requiredFeature="loans">
+                                                    <Layout>
+                                                        <Installments />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
