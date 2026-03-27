@@ -833,7 +833,30 @@ export async function createSalesOrder(
         await syncUpsertEntities('products', updatedProducts as unknown as Array<Record<string, unknown> & { id: string; version: number }>, workspaceId)
     }
     await recalculateCustomerAndPartnerSummaries(workspaceId, order.customerId, order.businessPartnerId)
-    return (await db.sales_orders.get(order.id)) as SalesOrder
+    const createdOrder = (await db.sales_orders.get(order.id)) as SalesOrder
+
+    if (createdOrder.isPaid) {
+        const { appendPaymentTransaction } = await import('./payments')
+        await appendPaymentTransaction(workspaceId, {
+            sourceModule: 'orders',
+            sourceType: 'sales_order',
+            sourceRecordId: createdOrder.id,
+            sourceSubrecordId: null,
+            direction: 'incoming',
+            amount: createdOrder.total,
+            currency: createdOrder.currency,
+            paymentMethod: createdOrder.paymentMethod || 'unknown',
+            paidAt: createdOrder.paidAt || createdOrder.updatedAt,
+            counterpartyName: createdOrder.customerName,
+            referenceLabel: createdOrder.orderNumber,
+            note: createdOrder.notes || null,
+            metadata: {
+                orderStatus: createdOrder.status
+            }
+        })
+    }
+
+    return createdOrder
 }
 
 export async function updateSalesOrder(id: string, data: Partial<SalesOrder>) {
@@ -964,7 +987,7 @@ export async function setSalesOrderPaymentStatus(
         ...existing,
         ...counterparty,
         isPaid: input.isPaid,
-        paymentMethod: input.isPaid ? input.paymentMethod || existing.paymentMethod : existing.paymentMethod,
+        paymentMethod: input.isPaid ? input.paymentMethod || existing.paymentMethod : 'credit',
         paidAt: input.isPaid ? (input.paidAt || now) : null,
         updatedAt: now,
         version: existing.version + 1,
@@ -1069,7 +1092,30 @@ export async function createPurchaseOrder(
         await syncUpsertEntities('products', updatedProducts as unknown as Array<Record<string, unknown> & { id: string; version: number }>, workspaceId)
     }
     await recalculateSupplierAndPartnerSummaries(workspaceId, order.supplierId, order.businessPartnerId)
-    return (await db.purchase_orders.get(order.id)) as PurchaseOrder
+    const createdOrder = (await db.purchase_orders.get(order.id)) as PurchaseOrder
+
+    if (createdOrder.isPaid) {
+        const { appendPaymentTransaction } = await import('./payments')
+        await appendPaymentTransaction(workspaceId, {
+            sourceModule: 'orders',
+            sourceType: 'purchase_order',
+            sourceRecordId: createdOrder.id,
+            sourceSubrecordId: null,
+            direction: 'outgoing',
+            amount: createdOrder.total,
+            currency: createdOrder.currency,
+            paymentMethod: createdOrder.paymentMethod || 'unknown',
+            paidAt: createdOrder.paidAt || createdOrder.updatedAt,
+            counterpartyName: createdOrder.supplierName,
+            referenceLabel: createdOrder.orderNumber,
+            note: createdOrder.notes || null,
+            metadata: {
+                orderStatus: createdOrder.status
+            }
+        })
+    }
+
+    return createdOrder
 }
 
 export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrder>) {
@@ -1196,7 +1242,7 @@ export async function setPurchaseOrderPaymentStatus(
         ...existing,
         ...counterparty,
         isPaid: input.isPaid,
-        paymentMethod: input.isPaid ? input.paymentMethod || existing.paymentMethod : existing.paymentMethod,
+        paymentMethod: input.isPaid ? input.paymentMethod || existing.paymentMethod : 'credit',
         paidAt: input.isPaid ? (input.paidAt || now) : null,
         updatedAt: now,
         version: existing.version + 1,

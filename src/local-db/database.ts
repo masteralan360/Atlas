@@ -23,6 +23,7 @@ import type {
     Loan,
     LoanInstallment,
     LoanPayment,
+    PaymentTransaction,
     BudgetSettings,
     BudgetAllocation,
     ExpenseSeries,
@@ -71,6 +72,7 @@ export class AtlasDatabase extends Dexie {
     loans!: EntityTable<Loan, 'id'>
     loan_installments!: EntityTable<LoanInstallment, 'id'>
     loan_payments!: EntityTable<LoanPayment, 'id'>
+    payment_transactions!: EntityTable<PaymentTransaction, 'id'>
     sales_orders!: EntityTable<SalesOrder, 'id'>
     purchase_orders!: EntityTable<PurchaseOrder, 'id'>
     travel_agency_sales!: EntityTable<TravelAgencySale, 'id'>
@@ -658,6 +660,255 @@ export class AtlasDatabase extends Dexie {
             await tx.table('loans').bulkPut(loans)
         })
 
+        this.version(50).stores({
+            products: 'id, sku, name, categoryId, storageId, workspaceId, currency, syncStatus, updatedAt, isDeleted, canBeReturned',
+            categories: 'id, name, workspaceId, syncStatus, updatedAt, isDeleted',
+            invoices: 'id, invoiceid, orderId, customerId, status, workspaceId, syncStatus, updatedAt, isDeleted, origin, createdBy, cashierName, createdByName, sequenceId, printFormat, r2PathA4, r2PathReceipt',
+            users: 'id, email, role, workspaceId, syncStatus, updatedAt, isDeleted, monthlyTarget',
+            sales: 'id, cashierId, workspaceId, settlementCurrency, syncStatus, createdAt, updatedAt, notes',
+            sale_items: 'id, saleId, productId',
+            workspaces: 'id, name, code, syncStatus, updatedAt, isDeleted, print_lang, print_qr',
+            storages: 'id, name, workspaceId, isSystem, isProtected, syncStatus, updatedAt, isDeleted',
+            inventory: 'id, workspaceId, productId, storageId, quantity, syncStatus, updatedAt, isDeleted, [workspaceId+storageId], [workspaceId+productId], [productId+storageId]',
+            inventory_transfer_transactions: 'id, workspaceId, productId, sourceStorageId, destinationStorageId, transferType, createdAt, isDeleted, [workspaceId+createdAt], [workspaceId+productId], [workspaceId+transferType]',
+            reorder_transfer_rules: 'id, workspaceId, productId, sourceStorageId, destinationStorageId, isIndefinite, expiresOn, updatedAt, isDeleted, [workspaceId+productId], [workspaceId+destinationStorageId], [workspaceId+expiresOn]',
+            suppliers: 'id, name, workspaceId, businessPartnerId, phone, email, defaultCurrency, updatedAt, isDeleted, syncStatus',
+            customers: 'id, name, workspaceId, businessPartnerId, phone, email, defaultCurrency, updatedAt, isDeleted, syncStatus',
+            business_partners: 'id, name, workspaceId, role, customerFacetId, supplierFacetId, defaultCurrency, updatedAt, isDeleted, syncStatus, mergedIntoBusinessPartnerId',
+            business_partner_merge_candidates: 'id, workspaceId, primaryPartnerId, secondaryPartnerId, status, confidence, updatedAt, syncStatus, isDeleted',
+            employees: 'id, name, workspaceId, linkedUserId, syncStatus, updatedAt, isDeleted',
+            budget_settings: 'id, workspaceId',
+            budget_allocations: 'id, workspaceId, month, [workspaceId+month]',
+            expense_series: 'id, workspaceId, recurrence, startMonth, endMonth, isDeleted',
+            expense_items: 'id, workspaceId, seriesId, month, dueDate, status, [seriesId+month], [workspaceId+month]',
+            payroll_statuses: 'id, workspaceId, employeeId, month, status, [employeeId+month], [workspaceId+month]',
+            dividend_statuses: 'id, workspaceId, employeeId, month, status, [employeeId+month], [workspaceId+month]',
+            syncQueue: 'id, entityType, entityId, operation, timestamp',
+            offline_mutations: 'id, workspaceId, entityType, entityId, status, createdAt, [entityType+entityId+status]',
+            workspace_contacts: 'id, workspaceId, type, value, syncStatus, updatedAt',
+            loans: 'id, workspaceId, saleId, loanCategory, direction, status, nextDueDate, borrowerName, loanNo, linkedPartyType, linkedPartyId, syncStatus, updatedAt, isDeleted, [workspaceId+loanCategory], [workspaceId+direction]',
+            loan_installments: 'id, loanId, workspaceId, dueDate, status, syncStatus, updatedAt, isDeleted, [loanId+installmentNo]',
+            loan_payments: 'id, loanId, workspaceId, paidAt, syncStatus, updatedAt, isDeleted',
+            payment_transactions: 'id, workspaceId, paidAt, sourceModule, sourceType, sourceRecordId, sourceSubrecordId, direction, reversalOfTransactionId, updatedAt, isDeleted, syncStatus, [workspaceId+paidAt], [workspaceId+sourceType+sourceRecordId]',
+            sales_orders: 'id, orderNumber, businessPartnerId, customerId, workspaceId, status, currency, createdAt, updatedAt, isDeleted, syncStatus',
+            purchase_orders: 'id, orderNumber, businessPartnerId, supplierId, workspaceId, status, currency, createdAt, updatedAt, isDeleted, syncStatus',
+            travel_agency_sales: 'id, saleNumber, workspaceId, saleDate, businessPartnerId, supplierId, isPaid, updatedAt, isDeleted, syncStatus, [workspaceId+saleDate], [workspaceId+isPaid]',
+            app_settings: 'key'
+        }).upgrade(async tx => {
+            const paymentTransactionsTable = tx.table('payment_transactions')
+            const existingCount = await paymentTransactionsTable.count()
+            if (existingCount > 0) {
+                return
+            }
+
+            const now = new Date().toISOString()
+            const [
+                loans,
+                loanPayments,
+                salesOrders,
+                purchaseOrders,
+                expenseItems,
+                expenseSeries,
+                payrollStatuses,
+                employees
+            ] = await Promise.all([
+                tx.table('loans').toArray() as Promise<Array<Record<string, unknown>>>,
+                tx.table('loan_payments').toArray() as Promise<Array<Record<string, unknown>>>,
+                tx.table('sales_orders').toArray() as Promise<Array<Record<string, unknown>>>,
+                tx.table('purchase_orders').toArray() as Promise<Array<Record<string, unknown>>>,
+                tx.table('expense_items').toArray() as Promise<Array<Record<string, unknown>>>,
+                tx.table('expense_series').toArray() as Promise<Array<Record<string, unknown>>>,
+                tx.table('payroll_statuses').toArray() as Promise<Array<Record<string, unknown>>>,
+                tx.table('employees').toArray() as Promise<Array<Record<string, unknown>>>
+            ])
+
+            const loanById = new Map(loans.map((loan) => [String(loan.id), loan]))
+            const expenseSeriesById = new Map(expenseSeries.map((series) => [String(series.id), series]))
+            const employeeById = new Map(employees.map((employee) => [String(employee.id), employee]))
+            const rows: Array<Record<string, unknown>> = []
+
+            const createRow = (input: Record<string, unknown>) => ({
+                syncStatus: 'synced',
+                lastSyncedAt: now,
+                version: 1,
+                isDeleted: false,
+                createdAt: input.createdAt ?? now,
+                updatedAt: input.updatedAt ?? input.createdAt ?? now,
+                metadata: {
+                    backfilled: true,
+                    ...(typeof input.metadata === 'object' && input.metadata !== null ? input.metadata as Record<string, unknown> : {})
+                },
+                ...input
+            })
+
+            for (const payment of loanPayments) {
+                if (payment.isDeleted) {
+                    continue
+                }
+
+                const loan = loanById.get(String(payment.loanId))
+                if (!loan) {
+                    continue
+                }
+
+                rows.push(createRow({
+                    id: payment.id,
+                    workspaceId: payment.workspaceId,
+                    sourceModule: 'loans',
+                    sourceType: loan.loanCategory === 'simple' ? 'simple_loan' : 'loan_payment',
+                    sourceRecordId: loan.id,
+                    sourceSubrecordId: payment.id,
+                    direction: loan.direction === 'borrowed' ? 'outgoing' : 'incoming',
+                    amount: payment.amount,
+                    currency: loan.settlementCurrency ?? 'usd',
+                    paymentMethod: payment.paymentMethod ?? 'unknown',
+                    paidAt: payment.paidAt,
+                    counterpartyName: loan.borrowerName ?? null,
+                    referenceLabel: loan.loanNo ?? null,
+                    note: payment.note ?? null,
+                    createdBy: payment.createdBy ?? null,
+                    reversalOfTransactionId: null,
+                    createdAt: payment.createdAt ?? payment.paidAt ?? now,
+                    updatedAt: payment.updatedAt ?? payment.createdAt ?? payment.paidAt ?? now,
+                    metadata: {
+                        loanPaymentId: payment.id,
+                        loanCategory: loan.loanCategory ?? 'standard',
+                        loanDirection: loan.direction ?? 'lent'
+                    }
+                }))
+            }
+
+            for (const order of salesOrders) {
+                if (order.isDeleted || !order.isPaid) {
+                    continue
+                }
+
+                rows.push(createRow({
+                    id: crypto.randomUUID(),
+                    workspaceId: order.workspaceId,
+                    sourceModule: 'orders',
+                    sourceType: 'sales_order',
+                    sourceRecordId: order.id,
+                    sourceSubrecordId: null,
+                    direction: 'incoming',
+                    amount: order.total ?? 0,
+                    currency: order.currency ?? 'usd',
+                    paymentMethod: order.paymentMethod ?? 'unknown',
+                    paidAt: order.paidAt ?? order.updatedAt ?? order.createdAt ?? now,
+                    counterpartyName: order.customerName ?? null,
+                    referenceLabel: order.orderNumber ?? null,
+                    note: null,
+                    createdBy: null,
+                    reversalOfTransactionId: null,
+                    createdAt: order.paidAt ?? order.updatedAt ?? order.createdAt ?? now,
+                    updatedAt: order.updatedAt ?? order.paidAt ?? order.createdAt ?? now,
+                    metadata: {
+                        orderStatus: order.status ?? 'draft'
+                    }
+                }))
+            }
+
+            for (const order of purchaseOrders) {
+                if (order.isDeleted || !order.isPaid) {
+                    continue
+                }
+
+                rows.push(createRow({
+                    id: crypto.randomUUID(),
+                    workspaceId: order.workspaceId,
+                    sourceModule: 'orders',
+                    sourceType: 'purchase_order',
+                    sourceRecordId: order.id,
+                    sourceSubrecordId: null,
+                    direction: 'outgoing',
+                    amount: order.total ?? 0,
+                    currency: order.currency ?? 'usd',
+                    paymentMethod: order.paymentMethod ?? 'unknown',
+                    paidAt: order.paidAt ?? order.updatedAt ?? order.createdAt ?? now,
+                    counterpartyName: order.supplierName ?? null,
+                    referenceLabel: order.orderNumber ?? null,
+                    note: null,
+                    createdBy: null,
+                    reversalOfTransactionId: null,
+                    createdAt: order.paidAt ?? order.updatedAt ?? order.createdAt ?? now,
+                    updatedAt: order.updatedAt ?? order.paidAt ?? order.createdAt ?? now,
+                    metadata: {
+                        orderStatus: order.status ?? 'draft'
+                    }
+                }))
+            }
+
+            for (const item of expenseItems) {
+                if (item.isDeleted || item.status !== 'paid') {
+                    continue
+                }
+
+                const series = expenseSeriesById.get(String(item.seriesId))
+                rows.push(createRow({
+                    id: crypto.randomUUID(),
+                    workspaceId: item.workspaceId,
+                    sourceModule: 'budget',
+                    sourceType: 'expense_item',
+                    sourceRecordId: item.id,
+                    sourceSubrecordId: item.seriesId ?? null,
+                    direction: 'outgoing',
+                    amount: item.amount ?? 0,
+                    currency: item.currency ?? 'usd',
+                    paymentMethod: 'unknown',
+                    paidAt: item.paidAt ?? item.updatedAt ?? item.createdAt ?? now,
+                    counterpartyName: null,
+                    referenceLabel: series?.name ? String(series.name) : 'Expense',
+                    note: null,
+                    createdBy: null,
+                    reversalOfTransactionId: null,
+                    createdAt: item.paidAt ?? item.updatedAt ?? item.createdAt ?? now,
+                    updatedAt: item.updatedAt ?? item.paidAt ?? item.createdAt ?? now,
+                    metadata: {
+                        month: item.month ?? null,
+                        seriesId: item.seriesId ?? null,
+                        category: series?.category ?? null,
+                        subcategory: series?.subcategory ?? null
+                    }
+                }))
+            }
+
+            for (const status of payrollStatuses) {
+                if (status.isDeleted || status.status !== 'paid') {
+                    continue
+                }
+
+                const employee = employeeById.get(String(status.employeeId))
+                rows.push(createRow({
+                    id: crypto.randomUUID(),
+                    workspaceId: status.workspaceId,
+                    sourceModule: 'budget',
+                    sourceType: 'payroll_status',
+                    sourceRecordId: status.id,
+                    sourceSubrecordId: status.employeeId ?? null,
+                    direction: 'outgoing',
+                    amount: employee?.salary ?? 0,
+                    currency: employee?.salaryCurrency ?? 'usd',
+                    paymentMethod: 'unknown',
+                    paidAt: status.paidAt ?? status.updatedAt ?? status.createdAt ?? now,
+                    counterpartyName: employee?.name ?? null,
+                    referenceLabel: employee?.name ? `${employee.name} • ${String(status.month ?? '')}` : String(status.month ?? 'Payroll'),
+                    note: null,
+                    createdBy: null,
+                    reversalOfTransactionId: null,
+                    createdAt: status.paidAt ?? status.updatedAt ?? status.createdAt ?? now,
+                    updatedAt: status.updatedAt ?? status.paidAt ?? status.createdAt ?? now,
+                    metadata: {
+                        employeeId: status.employeeId ?? null,
+                        month: status.month ?? null
+                    }
+                }))
+            }
+
+            if (rows.length > 0) {
+                await paymentTransactionsTable.bulkPut(rows)
+            }
+        })
+
         this.registerLocalModeSyncHooks()
     }
 
@@ -683,6 +934,7 @@ export class AtlasDatabase extends Dexie {
             'loans',
             'loan_installments',
             'loan_payments',
+            'payment_transactions',
             'sales_orders',
             'purchase_orders',
             'travel_agency_sales',
@@ -798,7 +1050,7 @@ export const db = new AtlasDatabase()
 
 // Database utility functions
 export async function clearDatabase(): Promise<void> {
-    await db.transaction('rw', [db.products, db.inventory, db.inventory_transfer_transactions, db.reorder_transfer_rules, db.categories, db.invoices, db.travel_agency_sales, db.syncQueue], async () => {
+    await db.transaction('rw', [db.products, db.inventory, db.inventory_transfer_transactions, db.reorder_transfer_rules, db.categories, db.invoices, db.travel_agency_sales, db.payment_transactions, db.syncQueue], async () => {
         await db.products.clear()
         await db.inventory.clear()
         await db.inventory_transfer_transactions.clear()
@@ -806,6 +1058,7 @@ export async function clearDatabase(): Promise<void> {
         await db.categories.clear()
         await db.invoices.clear()
         await db.travel_agency_sales.clear()
+        await db.payment_transactions.clear()
         await db.syncQueue.clear()
     })
 }

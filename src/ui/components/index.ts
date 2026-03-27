@@ -89,6 +89,7 @@ export { WorkspaceContactsManager } from './workspace/WorkspaceContactsManager'
 export { RegisterWorkspaceContactsModal } from './modals/RegisterWorkspaceContactsModal'
 export type { AdminContact } from './modals/RegisterWorkspaceContactsModal'
 export { PatchNoteModal } from './modals/PatchNoteModal'
+export { SettlementDialog } from './payments/SettlementDialog'
 export {
     DropdownMenu,
     DropdownMenuTrigger,

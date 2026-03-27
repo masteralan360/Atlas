@@ -33,6 +33,7 @@ export function GlobalSearch({ className, placeholder }: GlobalSearchProps) {
     const inputRef = useRef<HTMLInputElement>(null)
     const containerRef = useRef<HTMLDivElement>(null)
     const hasFinanceAnalytics = features.net_revenue || features.budget || features.loans || features.crm || features.travel_agency || features.hr
+    const hasPaymentsSurface = features.loans || features.crm || features.budget || features.hr
 
     const commands: CommandItem[] = [
         // Navigation (Matches Layout.tsx paths)
@@ -43,6 +44,7 @@ export function GlobalSearch({ className, placeholder }: GlobalSearchProps) {
         { id: 'nav-sales', title: t('nav.sales'), category: 'Navigation', icon: ListOrdered, action: () => setLocation('/sales') },
         { id: 'nav-settings', title: t('nav.settings'), category: 'Navigation', icon: SettingsIcon, action: () => setLocation('/settings') },
         ...(hasFinanceAnalytics ? [{ id: 'nav-finance', title: t('nav.finance', { defaultValue: 'Finance' }), category: 'Navigation' as const, icon: TrendingUp, action: () => setLocation('/finance') }] : []),
+        ...(hasPaymentsSurface ? [{ id: 'nav-payments', title: t('nav.payments', { defaultValue: 'Payments' }), category: 'Navigation' as const, icon: Wallet, action: () => setLocation('/payments') }] : []),
         { id: 'nav-revenue', title: t('nav.revenue'), category: 'Navigation', icon: BarChart3, action: () => setLocation('/revenue') },
         { id: 'nav-budget', title: t('nav.budget'), category: 'Navigation', icon: Wallet, action: () => setLocation('/budget') },
         { id: 'nav-monthly-comparison', title: t('monthlyComparison.title'), category: 'Navigation', icon: ArrowRightLeft, action: () => setLocation('/monthly-comparison') },

@@ -18,6 +18,9 @@ import { useAuth } from '@/auth'
 import { useWorkspace } from '@/workspace'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import {
+    findLatestUnreversedPaymentTransaction,
+    recordObligationSettlement,
+    reversePaymentTransaction,
     useBudgetSettings,
     setBudgetSettings,
     useBudgetAllocations,
@@ -42,11 +45,12 @@ import {
     toUISaleFromTravelAgency
 } from '@/local-db'
 import { db } from '@/local-db/database'
-import type { BudgetStatus, CurrencyCode, ExpenseItem, ExpenseRecurrence, ExpenseSeries, IQDDisplayPreference } from '@/local-db/models'
+import type { BudgetStatus, CurrencyCode, ExpenseItem, ExpenseRecurrence, ExpenseSeries, IQDDisplayPreference, PaymentObligation, WorkspacePaymentMethod } from '@/local-db/models'
 import {
     buildConversionRates,
     buildPayrollItems,
     buildDividendItems,
+    type PayrollItem,
     monthKeyFromDate,
     addMonths,
     formatMonthLabel,
@@ -82,7 +86,8 @@ import {
     useToast,
     Progress,
     CurrencySelector,
-    DeleteConfirmationModal
+    DeleteConfirmationModal,
+    SettlementDialog
 } from '@/ui/components'
 import { BudgetSnoozeModal, type BudgetSnoozeOption } from '@/ui/components/budget/BudgetSnoozeModal'
 import { BudgetLockPromptModal } from '@/ui/components/budget/BudgetLockPromptModal'
@@ -101,6 +106,61 @@ interface SnoozeTarget {
 interface LockTarget {
     type: 'expense' | 'payroll' | 'dividend'
     item: ExpenseItem | ReturnType<typeof buildPayrollItems>[number] | ReturnType<typeof buildDividendItems>['items'][number]
+}
+
+function buildExpensePaymentObligation(item: ExpenseItem, series: ExpenseSeries | null): PaymentObligation {
+    return {
+        id: `expense-item:${item.id}`,
+        workspaceId: item.workspaceId,
+        sourceModule: 'budget',
+        sourceType: 'expense_item',
+        sourceRecordId: item.id,
+        sourceSubrecordId: item.seriesId,
+        direction: 'outgoing',
+        amount: item.amount,
+        currency: item.currency,
+        dueDate: item.dueDate,
+        counterpartyName: null,
+        referenceLabel: series?.name || 'Expense',
+        title: series?.name || 'Expense',
+        subtitle: series?.category || item.month,
+        status: 'open',
+        routePath: '/budget',
+        metadata: {
+            month: item.month,
+            seriesId: item.seriesId
+        }
+    }
+}
+
+function buildPayrollPaymentObligation(
+    workspaceId: string,
+    month: string,
+    item: PayrollItem,
+    existingStatusId?: string | null
+): PaymentObligation {
+    return {
+        id: `payroll-status:${item.employee.id}:${month}`,
+        workspaceId,
+        sourceModule: 'budget',
+        sourceType: 'payroll_status',
+        sourceRecordId: existingStatusId || `${item.employee.id}:${month}`,
+        sourceSubrecordId: item.employee.id,
+        direction: 'outgoing',
+        amount: item.amount,
+        currency: item.currency,
+        dueDate: item.dueDate,
+        counterpartyName: item.employee.name,
+        referenceLabel: `Payroll ${month}`,
+        title: item.employee.name,
+        subtitle: item.employee.role,
+        status: 'open',
+        routePath: '/budget',
+        metadata: {
+            employeeId: item.employee.id,
+            month
+        }
+    }
 }
 
 
@@ -433,6 +493,8 @@ export function Budget() {
 
     const [snoozeTarget, setSnoozeTarget] = useState<SnoozeTarget | null>(null)
     const [lockTarget, setLockTarget] = useState<LockTarget | null>(null)
+    const [settlementTarget, setSettlementTarget] = useState<PaymentObligation | null>(null)
+    const [isSubmittingSettlement, setIsSubmittingSettlement] = useState(false)
 
     const expenseItems = useExpenseItems(workspaceId, selectedMonth)
 
@@ -694,26 +756,54 @@ export function Budget() {
         }
     }
 
+    const handleBudgetSettlement = async (input: { paymentMethod: WorkspacePaymentMethod; paidAt: string; note?: string }) => {
+        if (!workspaceId || !settlementTarget) {
+            return
+        }
+
+        setIsSubmittingSettlement(true)
+        try {
+            await recordObligationSettlement(workspaceId, settlementTarget, {
+                paymentMethod: input.paymentMethod,
+                paidAt: input.paidAt,
+                note: input.note,
+                createdBy: user?.id || null
+            })
+            toast({
+                title: t('common.success') || 'Success',
+                description: settlementTarget.sourceType === 'payroll_status'
+                    ? 'Payroll payment recorded.'
+                    : 'Expense payment recorded.'
+            })
+            setSettlementTarget(null)
+        } catch (error: any) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: error?.message || 'Failed to record settlement.',
+                variant: 'destructive'
+            })
+        } finally {
+            setIsSubmittingSettlement(false)
+        }
+    }
+
     const handleMarkPaid = async (target: LockTarget) => {
         try {
             if (!workspaceId) return
-            const now = new Date().toISOString()
             if (target.type === 'expense') {
-                await updateExpenseItem((target.item as ExpenseItem).id, {
-                    status: 'paid',
-                    paidAt: now,
-                    snoozedUntil: null,
-                    snoozedIndefinite: false
-                })
+                const item = target.item as ExpenseItem
+                const series = expenseSeries.find((entry) => entry.id === item.seriesId) || null
+                setSettlementTarget(buildExpensePaymentObligation(item, series))
+                return
             } else if (target.type === 'payroll') {
                 const item = target.item as ReturnType<typeof buildPayrollItems>[number]
-                await upsertPayrollStatus(workspaceId, item.employee.id, selectedMonth, {
-                    status: 'paid',
-                    paidAt: now,
-                    snoozedUntil: null,
-                    snoozedIndefinite: false
-                })
+                const existingStatus = payrollStatuses.find(
+                    (entry) => entry.employeeId === item.employee.id && entry.month === selectedMonth && !entry.isDeleted
+                )
+                setSettlementTarget(buildPayrollPaymentObligation(workspaceId, selectedMonth, item, existingStatus?.id))
+                return
             } else if (target.type === 'dividend') {
+                const now = new Date().toISOString()
                 const item = target.item as ReturnType<typeof buildDividendItems>['items'][number]
                 await upsertDividendStatus(workspaceId, item.employee.id, selectedMonth, {
                     status: 'paid',
@@ -743,19 +833,33 @@ export function Budget() {
                 return
             }
             if (target.type === 'expense') {
-                await updateExpenseItem((target.item as ExpenseItem).id, {
-                    status: 'pending',
-                    paidAt: null,
-                    snoozedUntil: null,
-                    snoozedIndefinite: false
+                const item = target.item as ExpenseItem
+                const transaction = await findLatestUnreversedPaymentTransaction(workspaceId, {
+                    sourceType: 'expense_item',
+                    sourceRecordId: item.id,
+                    sourceSubrecordId: item.seriesId
+                })
+                if (!transaction) {
+                    throw new Error('No posted payment was found for this expense.')
+                }
+                await reversePaymentTransaction(workspaceId, transaction.id, {
+                    createdBy: user?.id || null
                 })
             } else if (target.type === 'payroll') {
                 const item = target.item as ReturnType<typeof buildPayrollItems>[number]
-                await upsertPayrollStatus(workspaceId, item.employee.id, selectedMonth, {
-                    status: 'pending',
-                    paidAt: null,
-                    snoozedUntil: null,
-                    snoozedIndefinite: false
+                const existingStatus = payrollStatuses.find(
+                    (entry) => entry.employeeId === item.employee.id && entry.month === selectedMonth && !entry.isDeleted
+                )
+                const transaction = await findLatestUnreversedPaymentTransaction(workspaceId, {
+                    sourceType: 'payroll_status',
+                    sourceRecordId: existingStatus?.id || `${item.employee.id}:${selectedMonth}`,
+                    sourceSubrecordId: item.employee.id
+                })
+                if (!transaction) {
+                    throw new Error('No posted payment was found for this payroll entry.')
+                }
+                await reversePaymentTransaction(workspaceId, transaction.id, {
+                    createdBy: user?.id || null
                 })
             } else if (target.type === 'dividend') {
                 const item = target.item as ReturnType<typeof buildDividendItems>['items'][number]
@@ -1195,6 +1299,18 @@ export function Budget() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <SettlementDialog
+                open={!!settlementTarget}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setSettlementTarget(null)
+                    }
+                }}
+                obligation={settlementTarget}
+                isSubmitting={isSubmittingSettlement}
+                onSubmit={handleBudgetSettlement}
+            />
 
             <DeleteConfirmationModal
                 isOpen={!!deleteTarget}

@@ -258,7 +258,8 @@ export async function pullChanges(workspaceId: string, lastSyncTime: string | nu
         'dividend_statuses',
         'loans',
         'loan_installments',
-        'loan_payments'
+        'loan_payments',
+        'payment_transactions'
     ]
 
     for (const table of tables) {

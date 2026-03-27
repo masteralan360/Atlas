@@ -32,6 +32,7 @@ export const LOCAL_MODE_SQLITE_TABLES = [
     'loans',
     'loan_installments',
     'loan_payments',
+    'payment_transactions',
     'sales_orders',
     'purchase_orders',
     'travel_agency_sales'

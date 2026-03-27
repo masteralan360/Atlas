@@ -12,10 +12,11 @@ import {
     createSalesOrder,
     deletePurchaseOrder,
     deleteSalesOrder,
+    findLatestUnreversedPaymentTransaction,
     lockPurchaseOrder,
     lockSalesOrder,
-    setPurchaseOrderPaymentStatus,
-    setSalesOrderPaymentStatus,
+    recordObligationSettlement,
+    reversePaymentTransaction,
     updatePurchaseOrder,
     updatePurchaseOrderStatus,
     updateSalesOrder,
@@ -28,12 +29,14 @@ import {
     useStorages,
     useSuppliers,
     type CurrencyCode,
+    type PaymentObligation,
     type PurchaseOrder,
     type PurchaseOrderItem,
     type PurchaseOrderStatus,
     type SalesOrder,
     type SalesOrderItem,
-    type SalesOrderStatus
+    type SalesOrderStatus,
+    type WorkspacePaymentMethod
 } from '@/local-db'
 import { useWorkspace } from '@/workspace'
 import { isMobile } from '@/lib/platform'
@@ -67,6 +70,7 @@ import {
     TabsContent,
     TabsList,
     TabsTrigger,
+    SettlementDialog,
     Textarea,
     useToast
 } from '@/ui/components'
@@ -146,6 +150,54 @@ function getCommonStorageId(items: Array<{ storageId?: string | null }>, fallbac
     return storageIds.length === 1 ? storageIds[0] : null
 }
 
+function buildSalesOrderPaymentObligation(order: SalesOrder): PaymentObligation {
+    return {
+        id: `sales-order:${order.id}`,
+        workspaceId: order.workspaceId,
+        sourceModule: 'orders',
+        sourceType: 'sales_order',
+        sourceRecordId: order.id,
+        sourceSubrecordId: null,
+        direction: 'incoming',
+        amount: order.total,
+        currency: order.currency,
+        dueDate: (order.expectedDeliveryDate || order.actualDeliveryDate || order.updatedAt).slice(0, 10),
+        counterpartyName: order.customerName,
+        referenceLabel: order.orderNumber,
+        title: order.customerName,
+        subtitle: order.status,
+        status: 'open',
+        routePath: `/orders/${order.id}`,
+        metadata: {
+            orderStatus: order.status
+        }
+    }
+}
+
+function buildPurchaseOrderPaymentObligation(order: PurchaseOrder): PaymentObligation {
+    return {
+        id: `purchase-order:${order.id}`,
+        workspaceId: order.workspaceId,
+        sourceModule: 'orders',
+        sourceType: 'purchase_order',
+        sourceRecordId: order.id,
+        sourceSubrecordId: null,
+        direction: 'outgoing',
+        amount: order.total,
+        currency: order.currency,
+        dueDate: (order.expectedDeliveryDate || order.actualDeliveryDate || order.updatedAt).slice(0, 10),
+        counterpartyName: order.supplierName,
+        referenceLabel: order.orderNumber,
+        title: order.supplierName,
+        subtitle: order.status,
+        status: 'open',
+        routePath: `/orders/${order.id}`,
+        metadata: {
+            orderStatus: order.status
+        }
+    }
+}
+
 function OrdersListView({ workspaceId }: { workspaceId: string }) {
     const { t } = useTranslation()
     const { user } = useAuth()
@@ -181,6 +233,8 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
         orderId: '',
         type: null
     })
+    const [settlementTarget, setSettlementTarget] = useState<PaymentObligation | null>(null)
+    const [isSubmittingSettlement, setIsSubmittingSettlement] = useState(false)
 
     const [salesForm, setSalesForm] = useState<SalesFormState>({
         customerId: '',
@@ -455,6 +509,60 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
         setDialogOpen(true)
     }
 
+    async function handleOrderSettlement(input: { paymentMethod: WorkspacePaymentMethod; paidAt: string; note?: string }) {
+        if (!workspaceId || !settlementTarget) {
+            return
+        }
+
+        setIsSubmittingSettlement(true)
+        try {
+            await recordObligationSettlement(workspaceId, settlementTarget, {
+                paymentMethod: input.paymentMethod,
+                paidAt: input.paidAt,
+                note: input.note,
+                createdBy: user?.id || null
+            })
+            toast({ title: settlementTarget.direction === 'incoming' ? 'Collection recorded' : 'Payment recorded' })
+            setSettlementTarget(null)
+        } catch (error: any) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: error?.message || 'Failed to record settlement',
+                variant: 'destructive'
+            })
+        } finally {
+            setIsSubmittingSettlement(false)
+        }
+    }
+
+    async function handleOrderUnpay(order: SalesOrder | PurchaseOrder, type: 'sales' | 'purchase') {
+        if (!workspaceId) {
+            return
+        }
+
+        const sourceType = type === 'sales' ? 'sales_order' : 'purchase_order'
+        try {
+            const transaction = await findLatestUnreversedPaymentTransaction(workspaceId, {
+                sourceType,
+                sourceRecordId: order.id
+            })
+            if (!transaction) {
+                throw new Error('No posted payment was found for this order.')
+            }
+
+            await reversePaymentTransaction(workspaceId, transaction.id, {
+                createdBy: user?.id || null
+            })
+            toast({ title: 'Payment reversed' })
+        } catch (error: any) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: error?.message || 'Failed to reverse payment',
+                variant: 'destructive'
+            })
+        }
+    }
+
     function applyDefaultItemPrice(tab: OrderTab, productId: string, partnerCurrency: CurrencyCode) {
         const product = products.find((entry) => entry.id === productId)
         if (!product) return ''
@@ -562,6 +670,10 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
             toast({ title: t('common.error') || 'Error', description: t('orders.noCustomers') || 'Add customers before creating orders.', variant: 'destructive' })
             return
         }
+        if (salesForm.isPaid && salesForm.paymentMethod === 'credit') {
+            toast({ title: t('common.error') || 'Error', description: 'Select an actual payment method for paid orders.', variant: 'destructive' })
+            return
+        }
 
         setIsSaving(true)
         try {
@@ -621,6 +733,10 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
         const supplier = suppliers.find((entry) => entry.id === purchaseForm.supplierId)
         if (!supplier) {
             toast({ title: t('common.error') || 'Error', description: 'Add suppliers before creating purchase orders.', variant: 'destructive' })
+            return
+        }
+        if (purchaseForm.isPaid && purchaseForm.paymentMethod === 'credit') {
+            toast({ title: t('common.error') || 'Error', description: 'Select an actual payment method for paid orders.', variant: 'destructive' })
             return
         }
 
@@ -759,7 +875,18 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                                                     {canManageOrders && row.status === 'draft' && <Button size="sm" onClick={() => runAction(() => updateSalesOrderStatus(row.id, 'pending'), 'Sales order reserved')}>{t('orders.actions.reserve') || 'Reserve'}</Button>}
                                                     {canManageOrders && row.status === 'pending' && <Button size="sm" onClick={() => runAction(() => updateSalesOrderStatus(row.id, 'completed'), 'Sales order completed')}>{t('orders.actions.complete') || 'Complete'}</Button>}
                                                     {canManageOrders && (row.status === 'draft' || row.status === 'pending') && <Button variant="outline" size="sm" onClick={() => runAction(() => updateSalesOrderStatus(row.id, 'cancelled'), 'Sales order cancelled')}>{t('orders.actions.cancel') || 'Cancel'}</Button>}
-                                                    {canManageOrders && !row.isLocked && <Button variant="outline" size="sm" onClick={() => runAction(() => setSalesOrderPaymentStatus(row.id, { isPaid: !row.isPaid, paymentMethod: (row.paymentMethod || 'cash') as SalesOrder['paymentMethod'] }), row.isPaid ? 'Marked unpaid' : 'Marked paid')}>{row.isPaid ? 'Unpay' : 'Pay'}</Button>}
+                                                    {canManageOrders && !row.isLocked && (
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => row.isPaid
+                                                                ? handleOrderUnpay(row as SalesOrder, 'sales')
+                                                                : setSettlementTarget(buildSalesOrderPaymentObligation(row as SalesOrder))
+                                                            }
+                                                        >
+                                                            {row.isPaid ? 'Unpay' : 'Pay'}
+                                                        </Button>
+                                                    )}
                                                     {canManageOrders && row.isPaid && !row.isLocked && <Button variant="outline" size="sm" onClick={() => setLockConfirm({ isOpen: true, orderId: row.id, type: 'sales' })}><Lock className="h-3.5 w-3.5" /></Button>}
                                                     {canDelete && <Button variant="ghost" size="icon" className="text-destructive" onClick={() => setDeleteTarget({ type: 'sales', order: row as SalesOrder })}><Trash2 className="h-4 w-4" /></Button>}
                                                 </>
@@ -771,7 +898,18 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                                                     {canManageOrders && row.status === 'ordered' && <Button size="sm" onClick={() => runAction(() => updatePurchaseOrderStatus(row.id, 'received'), 'Purchase order received')}>{t('orders.actions.receive') || 'Receive'}</Button>}
                                                     {canManageOrders && row.status === 'received' && <Button size="sm" onClick={() => runAction(() => updatePurchaseOrderStatus(row.id, 'completed'), 'Purchase order completed')}>{t('orders.actions.complete') || 'Complete'}</Button>}
                                                     {canManageOrders && (row.status === 'draft' || row.status === 'ordered') && <Button variant="outline" size="sm" onClick={() => runAction(() => updatePurchaseOrderStatus(row.id, 'cancelled'), 'Purchase order cancelled')}>{t('orders.actions.cancel') || 'Cancel'}</Button>}
-                                                    {canManageOrders && !row.isLocked && <Button variant="outline" size="sm" onClick={() => runAction(() => setPurchaseOrderPaymentStatus(row.id, { isPaid: !row.isPaid, paymentMethod: (row.paymentMethod || 'cash') as PurchaseOrder['paymentMethod'] }), row.isPaid ? 'Marked unpaid' : 'Marked paid')}>{row.isPaid ? 'Unpay' : 'Pay'}</Button>}
+                                                    {canManageOrders && !row.isLocked && (
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => row.isPaid
+                                                                ? handleOrderUnpay(row as PurchaseOrder, 'purchase')
+                                                                : setSettlementTarget(buildPurchaseOrderPaymentObligation(row as PurchaseOrder))
+                                                            }
+                                                        >
+                                                            {row.isPaid ? 'Unpay' : 'Pay'}
+                                                        </Button>
+                                                    )}
                                                     {canManageOrders && row.isPaid && !row.isLocked && <Button variant="outline" size="sm" onClick={() => setLockConfirm({ isOpen: true, orderId: row.id, type: 'purchase' })}><Lock className="h-3.5 w-3.5" /></Button>}
                                                     {canDelete && <Button variant="ghost" size="icon" className="text-destructive" onClick={() => setDeleteTarget({ type: 'purchase', order: row as PurchaseOrder })}><Trash2 className="h-4 w-4" /></Button>}
                                                 </>
@@ -865,7 +1003,19 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                                         {canManageOrders && row.status === 'pending' && <Button size="sm" className="h-9 rounded-xl px-3 text-[10px] font-bold uppercase shadow-sm ring-1 ring-primary/20" onClick={() => runAction(() => updateSalesOrderStatus(row.id, 'completed'), 'Sales order completed')}>{t('orders.actions.complete') || 'Complete'}</Button>}
                                         {canManageOrders && (row.status === 'draft' || row.status === 'pending') && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3 text-[10px] font-bold uppercase" onClick={() => runAction(() => updateSalesOrderStatus(row.id, 'cancelled'), 'Sales order cancelled')}>{t('orders.actions.cancel') || 'Cancel'}</Button>}
                                         {canEdit && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3" onClick={() => openSalesEdit(row as SalesOrder)}><Pencil className="h-3.5 w-3.5" /></Button>}
-                                        {canManageOrders && !row.isLocked && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3 text-[10px] font-bold uppercase" onClick={() => runAction(() => setSalesOrderPaymentStatus(row.id, { isPaid: !row.isPaid, paymentMethod: (row.paymentMethod || 'cash') as SalesOrder['paymentMethod'] }), row.isPaid ? 'Marked unpaid' : 'Marked paid')}>{row.isPaid ? 'Unpay' : 'Pay'}</Button>}
+                                        {canManageOrders && !row.isLocked && (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-9 rounded-xl px-3 text-[10px] font-bold uppercase"
+                                                onClick={() => row.isPaid
+                                                    ? handleOrderUnpay(row as SalesOrder, 'sales')
+                                                    : setSettlementTarget(buildSalesOrderPaymentObligation(row as SalesOrder))
+                                                }
+                                            >
+                                                {row.isPaid ? 'Unpay' : 'Pay'}
+                                            </Button>
+                                        )}
                                         {canManageOrders && row.isPaid && !row.isLocked && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3" onClick={() => setLockConfirm({ isOpen: true, orderId: row.id, type: 'sales' })}><Lock className="h-3.5 w-3.5" /></Button>}
                                         {canDelete && <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-destructive" onClick={() => setDeleteTarget({ type: 'sales', order: row as SalesOrder })}><Trash2 className="h-4 w-4" /></Button>}
                                     </>
@@ -876,7 +1026,19 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                                         {canManageOrders && row.status === 'received' && <Button size="sm" className="h-9 rounded-xl px-3 text-[10px] font-bold uppercase shadow-sm ring-1 ring-primary/20" onClick={() => runAction(() => updatePurchaseOrderStatus(row.id, 'completed'), 'Purchase order completed')}>{t('orders.actions.complete') || 'Complete'}</Button>}
                                         {canManageOrders && (row.status === 'draft' || row.status === 'ordered') && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3 text-[10px] font-bold uppercase" onClick={() => runAction(() => updatePurchaseOrderStatus(row.id, 'cancelled'), 'Purchase order cancelled')}>{t('orders.actions.cancel') || 'Cancel'}</Button>}
                                         {canEdit && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3" onClick={() => openPurchaseEdit(row as PurchaseOrder)}><Pencil className="h-3.5 w-3.5" /></Button>}
-                                        {canManageOrders && !row.isLocked && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3 text-[10px] font-bold uppercase" onClick={() => runAction(() => setPurchaseOrderPaymentStatus(row.id, { isPaid: !row.isPaid, paymentMethod: (row.paymentMethod || 'cash') as PurchaseOrder['paymentMethod'] }), row.isPaid ? 'Marked unpaid' : 'Marked paid')}>{row.isPaid ? 'Unpay' : 'Pay'}</Button>}
+                                        {canManageOrders && !row.isLocked && (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-9 rounded-xl px-3 text-[10px] font-bold uppercase"
+                                                onClick={() => row.isPaid
+                                                    ? handleOrderUnpay(row as PurchaseOrder, 'purchase')
+                                                    : setSettlementTarget(buildPurchaseOrderPaymentObligation(row as PurchaseOrder))
+                                                }
+                                            >
+                                                {row.isPaid ? 'Unpay' : 'Pay'}
+                                            </Button>
+                                        )}
                                         {canManageOrders && row.isPaid && !row.isLocked && <Button variant="outline" size="sm" className="h-9 rounded-xl px-3" onClick={() => setLockConfirm({ isOpen: true, orderId: row.id, type: 'purchase' })}><Lock className="h-3.5 w-3.5" /></Button>}
                                         {canDelete && <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-destructive" onClick={() => setDeleteTarget({ type: 'purchase', order: row as PurchaseOrder })}><Trash2 className="h-4 w-4" /></Button>}
                                     </>
@@ -1544,6 +1706,18 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                     )}
                 </DialogContent>
             </Dialog>
+
+            <SettlementDialog
+                open={!!settlementTarget}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setSettlementTarget(null)
+                    }
+                }}
+                obligation={settlementTarget}
+                isSubmitting={isSubmittingSettlement}
+                onSubmit={handleOrderSettlement}
+            />
 
             <DeleteConfirmationModal
                 isOpen={!!deleteTarget}

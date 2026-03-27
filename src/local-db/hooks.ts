@@ -2936,6 +2936,7 @@ export async function deleteLoan(loanId: string): Promise<void> {
 
 interface LoanPaymentInput {
     loanId: string
+    installmentId?: string
     amount: number
     paymentMethod: LoanPaymentMethod
     note?: string
@@ -2974,7 +2975,21 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
     const now = new Date().toISOString()
 
     const updatedInstallments: LoanInstallment[] = installmentRows.map(item => ({ ...item }))
-    for (const installment of updatedInstallments) {
+    const installmentsById = new Map(updatedInstallments.map(item => [item.id, item]))
+    const paymentOrder = input.installmentId
+        ? [
+            ...installmentRows.filter(item => item.id === input.installmentId),
+            ...installmentRows.filter(item => item.id !== input.installmentId)
+        ]
+        : installmentRows
+    const touchedInstallmentIds = new Set<string>()
+
+    for (const originalInstallment of paymentOrder) {
+        const installment = installmentsById.get(originalInstallment.id)
+        if (!installment) {
+            continue
+        }
+
         if (remaining <= 0) break
         if (installment.balanceAmount <= 0) continue
 
@@ -2989,6 +3004,7 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
         installment.version = installment.version + 1
         installment.syncStatus = 'pending'
         installment.lastSyncedAt = null
+        touchedInstallmentIds.add(installment.id)
         remaining = roundLoanAmount(Math.max(remaining - applied, 0), loan.settlementCurrency)
     }
 
@@ -3077,8 +3093,36 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
         await addToOfflineMutations('loan_payments', payment.id, 'create', payment as unknown as Record<string, unknown>, workspaceId)
     }
 
+    const appendLedger = async () => {
+        const { appendPaymentTransaction } = await import('./payments')
+        await appendPaymentTransaction(workspaceId, {
+            sourceModule: 'loans',
+            sourceType: (loan.loanCategory || 'standard') === 'simple'
+                ? 'simple_loan'
+                : (input.installmentId ? 'loan_installment' : 'loan_payment'),
+            sourceRecordId: loan.id,
+            sourceSubrecordId: input.installmentId || payment.id,
+            direction: (loan.direction || 'lent') === 'borrowed' ? 'outgoing' : 'incoming',
+            amount: payableAmount,
+            currency: loan.settlementCurrency,
+            paymentMethod: input.paymentMethod,
+            paidAt,
+            counterpartyName: loan.borrowerName,
+            referenceLabel: updatedLoan.loanNo || loan.loanNo,
+            note: input.note?.trim() || null,
+            createdBy: input.createdBy || null,
+            metadata: {
+                loanPaymentId: payment.id,
+                loanCategory: loan.loanCategory || 'standard',
+                loanDirection: loan.direction || 'lent',
+                touchedInstallmentIds: Array.from(touchedInstallmentIds)
+            }
+        })
+    }
+
     if (!isOnline()) {
         await enqueueMutations()
+        await appendLedger()
         await recalculateLoanLinkedBusinessPartnerSummary(workspaceId, updatedLoan.linkedPartyType, updatedLoan.linkedPartyId)
         return { loan: updatedLoan, payment, installments: updatedInstallments }
     }
@@ -3127,6 +3171,7 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
             await db.loan_payments.update(payment.id, { syncStatus: 'synced', lastSyncedAt: syncedAt })
         })
 
+        await appendLedger()
         await recalculateLoanLinkedBusinessPartnerSummary(workspaceId, updatedLoan.linkedPartyType, updatedLoan.linkedPartyId)
 
         return {
@@ -3138,6 +3183,7 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
         if (shouldUseOfflineMutationFallback(error)) {
             console.error('[Loans] Payment sync failed, queued offline mutation:', error)
             await enqueueMutations()
+            await appendLedger()
             await recalculateLoanLinkedBusinessPartnerSummary(workspaceId, updatedLoan.linkedPartyType, updatedLoan.linkedPartyId)
             return { loan: updatedLoan, payment, installments: updatedInstallments }
         }

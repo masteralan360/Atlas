@@ -9,7 +9,8 @@ export type CurrencyCode = 'usd' | 'eur' | 'iqd' | 'try'
 export type WorkspaceDataMode = 'cloud' | 'local' | 'hybrid'
 
 export type PaymentMethod = 'cash' | 'fib' | 'qicard' | 'zaincash' | 'fastpay' | 'loan'
-export type LoanPaymentMethod = PaymentMethod | 'loan_adjustment'
+export type LoanPaymentMethod = PaymentMethod | 'loan_adjustment' | 'bank_transfer'
+export type WorkspacePaymentMethod = LoanPaymentMethod | 'credit' | 'bank_transfer' | 'unknown'
 
 export type IQDDisplayPreference = 'IQD' | 'د.ع'
 
@@ -538,11 +539,60 @@ export interface LoanPayment extends BaseEntity {
     createdBy?: string
 }
 
+export type PaymentTransactionSourceModule = 'loans' | 'orders' | 'budget'
+export type PaymentTransactionSourceType =
+    | 'loan_payment'
+    | 'simple_loan'
+    | 'loan_installment'
+    | 'sales_order'
+    | 'purchase_order'
+    | 'expense_item'
+    | 'payroll_status'
+export type PaymentTransactionDirection = 'incoming' | 'outgoing'
+
+export interface PaymentTransaction extends BaseEntity {
+    sourceModule: PaymentTransactionSourceModule
+    sourceType: PaymentTransactionSourceType
+    sourceRecordId: string
+    sourceSubrecordId?: string | null
+    direction: PaymentTransactionDirection
+    amount: number
+    currency: CurrencyCode
+    paymentMethod: WorkspacePaymentMethod
+    paidAt: string
+    counterpartyName?: string | null
+    referenceLabel?: string | null
+    note?: string | null
+    createdBy?: string | null
+    reversalOfTransactionId?: string | null
+    metadata?: Record<string, unknown> | null
+}
+
+export interface PaymentObligation {
+    id: string
+    workspaceId: string
+    sourceModule: PaymentTransactionSourceModule
+    sourceType: PaymentTransactionSourceType
+    sourceRecordId: string
+    sourceSubrecordId?: string | null
+    direction: PaymentTransactionDirection
+    amount: number
+    currency: CurrencyCode
+    dueDate: string
+    counterpartyName?: string | null
+    referenceLabel?: string | null
+    title: string
+    subtitle?: string | null
+    status: 'open' | 'overdue'
+    routePath: string
+    metadata?: Record<string, unknown> | null
+}
+
 
 // Sync Queue Item for tracking pending changes
 export interface SyncQueueItem {
     id: string
-    entityType: 'products' | 'inventory' | 'reorder_transfer_rules' | 'inventory_transfer_transactions' | 'invoices' | 'users' | 'sales' | 'categories' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments' | 'budget_settings' | 'budget_allocations' | 'expense_series' | 'expense_items' | 'payroll_statuses' | 'dividend_statuses' | 'customers' | 'suppliers' | 'business_partners' | 'business_partner_merge_candidates' | 'sales_orders' | 'purchase_orders' | 'travel_agency_sales'
+    entityType: 'products' | 'inventory' | 'reorder_transfer_rules' | 'inventory_transfer_transactions' | 'invoices' | 'users' | 'sales' | 'categories' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments' | 'payment_transactions' | 'budget_settings' | 'budget_allocations' | 'expense_series' | 'expense_items' | 'payroll_statuses' | 'dividend_statuses' | 'customers' | 'suppliers' | 'business_partners' | 'business_partner_merge_candidates' | 'sales_orders' | 'purchase_orders' | 'travel_agency_sales'
     entityId: string
     operation: 'create' | 'update' | 'delete'
     data: Record<string, unknown>
@@ -606,7 +656,7 @@ export interface WorkspaceContact extends Omit<BaseEntity, 'isDeleted'> {
 export interface OfflineMutation {
     id: string
     workspaceId: string
-    entityType: 'products' | 'inventory' | 'reorder_transfer_rules' | 'inventory_transfer_transactions' | 'invoices' | 'users' | 'sales' | 'categories' | 'workspaces' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments' | 'budget_settings' | 'budget_allocations' | 'expense_series' | 'expense_items' | 'payroll_statuses' | 'dividend_statuses' | 'customers' | 'suppliers' | 'business_partners' | 'business_partner_merge_candidates' | 'sales_orders' | 'purchase_orders' | 'travel_agency_sales'
+    entityType: 'products' | 'inventory' | 'reorder_transfer_rules' | 'inventory_transfer_transactions' | 'invoices' | 'users' | 'sales' | 'categories' | 'workspaces' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments' | 'payment_transactions' | 'budget_settings' | 'budget_allocations' | 'expense_series' | 'expense_items' | 'payroll_statuses' | 'dividend_statuses' | 'customers' | 'suppliers' | 'business_partners' | 'business_partner_merge_candidates' | 'sales_orders' | 'purchase_orders' | 'travel_agency_sales'
     entityId: string
     operation: 'create' | 'update' | 'delete'
     payload: Record<string, unknown>

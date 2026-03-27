@@ -107,6 +107,7 @@ export function RecordLoanPaymentModal({
         try {
             await recordLoanPayment(workspaceId, {
                 loanId: loan.id,
+                installmentId: selectedInstallment?.id || undefined,
                 amount: numericAmount,
                 paymentMethod: method,
                 note: note.trim() || undefined,
@@ -186,6 +187,7 @@ export function RecordLoanPaymentModal({
                                 <SelectItem value="qicard">QiCard</SelectItem>
                                 <SelectItem value="zaincash">ZainCash</SelectItem>
                                 <SelectItem value="fastpay">FastPay</SelectItem>
+                                <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
                                 <SelectItem value="loan_adjustment">{t('loans.adjustment') || 'Loan Adjustment'}</SelectItem>
                             </SelectContent>
                         </Select>
