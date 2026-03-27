@@ -853,7 +853,11 @@ export function Budget() {
                 const transaction = await findLatestUnreversedPaymentTransaction(workspaceId, {
                     sourceType: 'payroll_status',
                     sourceRecordId: existingStatus?.id || `${item.employee.id}:${selectedMonth}`,
-                    sourceSubrecordId: item.employee.id
+                    sourceSubrecordId: item.employee.id,
+                    metadata: {
+                        employeeId: item.employee.id,
+                        month: selectedMonth
+                    }
                 })
                 if (!transaction) {
                     throw new Error('No posted payment was found for this payroll entry.')

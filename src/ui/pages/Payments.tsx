@@ -91,6 +91,20 @@ function paymentMethodLabel(value: PaymentTransaction['paymentMethod']) {
     }
 }
 
+function collapseTransactionsBySource(items: PaymentTransaction[]) {
+    const seen = new Set<string>()
+
+    return items.filter((item) => {
+        const key = getPaymentSourceKey(item)
+        if (seen.has(key)) {
+            return false
+        }
+
+        seen.add(key)
+        return true
+    })
+}
+
 function formatAmountSummary(
     rows: Array<{ amount: number; currency: string }>,
     iqdPreference: 'IQD' | 'د.ع'
@@ -170,6 +184,8 @@ export function Payments() {
             })
             .sort((left, right) => right.paidAt.localeCompare(left.paidAt) || right.createdAt.localeCompare(left.createdAt))
     }, [allTransactions, directionFilter, search])
+    const visibleTransactions = useMemo(() => collapseTransactionsBySource(transactions), [transactions])
+    const visibleDirectTransactions = useMemo(() => collapseTransactionsBySource(directTransactions), [directTransactions])
 
     const reversedIds = useMemo(
         () => new Set(allTransactions.filter((item) => !!item.reversalOfTransactionId).map((item) => item.reversalOfTransactionId as string)),
@@ -498,18 +514,19 @@ export function Payments() {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {transactions.length === 0 ? (
+                                    {visibleTransactions.length === 0 ? (
                                         <TableRow>
                                             <TableCell colSpan={10} className="py-12 text-center text-muted-foreground">
                                                 No transactions match the current filters.
                                             </TableCell>
                                         </TableRow>
-                                    ) : transactions.map((item) => {
+                                    ) : visibleTransactions.map((item) => {
                                         const isReversal = !!item.reversalOfTransactionId
                                         const isReversed = reversedIds.has(item.id)
                                         const isLockedSource = lockedSourceKeys.has(getPaymentSourceKey(item))
                                         const isLatestUnreversed = latestUnreversedBySource.get(getPaymentSourceKey(item))?.id === item.id
                                         const canReverse = !isReversal && !isReversed && !isLockedSource && isLatestUnreversed && isReversiblePaymentSourceType(item.sourceType)
+                                        const displayAmount = isReversal ? 0 : item.amount
 
                                         return (
                                             <TableRow key={item.id}>
@@ -529,8 +546,8 @@ export function Payments() {
                                                     </span>
                                                 </TableCell>
                                                 <TableCell>
-                                                    {item.amount < 0 ? '-' : ''}
-                                                    {formatCurrency(Math.abs(item.amount), item.currency, features.iqd_display_preference)}
+                                                    {displayAmount < 0 ? '-' : ''}
+                                                    {formatCurrency(Math.abs(displayAmount), item.currency, features.iqd_display_preference)}
                                                 </TableCell>
                                                 <TableCell>{paymentMethodLabel(item.paymentMethod)}</TableCell>
                                                 <TableCell className="max-w-[240px] truncate">{item.note || '—'}</TableCell>
@@ -606,17 +623,18 @@ export function Payments() {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {directTransactions.length === 0 ? (
+                                    {visibleDirectTransactions.length === 0 ? (
                                         <TableRow>
                                             <TableCell colSpan={10} className="py-12 text-center text-muted-foreground">
                                                 No direct transactions match the current filters.
                                             </TableCell>
                                         </TableRow>
-                                    ) : directTransactions.map((item) => {
+                                    ) : visibleDirectTransactions.map((item) => {
                                         const isReversal = !!item.reversalOfTransactionId
                                         const isReversed = reversedIds.has(item.id)
                                         const isLatestUnreversed = latestUnreversedBySource.get(getPaymentSourceKey(item))?.id === item.id
                                         const canReverse = !isReversal && !isReversed && isLatestUnreversed
+                                        const displayAmount = isReversal ? 0 : item.amount
 
                                         return (
                                             <TableRow key={item.id}>
@@ -638,8 +656,8 @@ export function Payments() {
                                                     </span>
                                                 </TableCell>
                                                 <TableCell>
-                                                    {item.amount < 0 ? '-' : ''}
-                                                    {formatCurrency(Math.abs(item.amount), item.currency, features.iqd_display_preference)}
+                                                    {displayAmount < 0 ? '-' : ''}
+                                                    {formatCurrency(Math.abs(displayAmount), item.currency, features.iqd_display_preference)}
                                                 </TableCell>
                                                 <TableCell>{paymentMethodLabel(item.paymentMethod)}</TableCell>
                                                 <TableCell className="max-w-[240px] truncate">{item.note || '-'}</TableCell>

@@ -89,12 +89,14 @@ type SourceLocator = {
     sourceType: PaymentTransactionSourceType
     sourceRecordId: string
     sourceSubrecordId?: string | null
+    metadata?: Record<string, unknown> | null
 }
 
 type PaymentSourceKeyInput = {
     sourceType: PaymentTransactionSourceType
     sourceRecordId: string
     sourceSubrecordId?: string | null
+    metadata?: Record<string, unknown> | null
 }
 
 function shouldUseCloudBusinessData(workspaceId?: string | null) {
@@ -190,6 +192,19 @@ function getTransactionRoutePath(transaction: Pick<PaymentTransaction, 'sourceMo
 }
 
 export function getPaymentSourceKey(source: PaymentSourceKeyInput) {
+    if (source.sourceType === 'payroll_status') {
+        const employeeId = typeof source.metadata?.employeeId === 'string' && source.metadata.employeeId
+            ? source.metadata.employeeId
+            : source.sourceSubrecordId || null
+        const month = typeof source.metadata?.month === 'string' && source.metadata.month
+            ? source.metadata.month
+            : null
+
+        if (employeeId && month) {
+            return `${source.sourceType}:${employeeId}:${month}`
+        }
+    }
+
     return `${source.sourceType}:${source.sourceRecordId}:${source.sourceSubrecordId || ''}`
 }
 
@@ -741,7 +756,11 @@ export function useLockedPaymentSourceKeys(workspaceId: string | undefined) {
                     .map((item) => getPaymentSourceKey({
                         sourceType: 'payroll_status',
                         sourceRecordId: item.id,
-                        sourceSubrecordId: item.employeeId
+                        sourceSubrecordId: item.employeeId,
+                        metadata: {
+                            employeeId: item.employeeId,
+                            month: item.month
+                        }
                     }))
             ]
         },
@@ -773,6 +792,34 @@ export function isReversiblePaymentSourceType(sourceType: PaymentTransactionSour
         || sourceType === 'expense_item'
         || sourceType === 'payroll_status'
         || sourceType === 'direct_transaction'
+}
+
+async function listPaymentTransactionsForSource(
+    workspaceId: string,
+    locator: SourceLocator
+) {
+    if (locator.sourceType === 'payroll_status') {
+        const sourceKey = getPaymentSourceKey(locator)
+        const items = await db.payment_transactions
+            .where('workspaceId')
+            .equals(workspaceId)
+            .toArray()
+
+        return items.filter((item) => getPaymentSourceKey(item) === sourceKey)
+    }
+
+    const items = await db.payment_transactions
+        .where('[workspaceId+sourceType+sourceRecordId]')
+        .equals([workspaceId, locator.sourceType, locator.sourceRecordId])
+        .toArray()
+
+    return items.filter((item) => {
+        if (locator.sourceSubrecordId !== undefined && item.sourceSubrecordId !== locator.sourceSubrecordId) {
+            return false
+        }
+
+        return true
+    })
 }
 
 export async function appendPaymentTransaction(
@@ -860,6 +907,99 @@ export async function appendPaymentTransaction(
     }
 }
 
+async function softDeletePaymentTransaction(transaction: PaymentTransaction) {
+    if (transaction.isDeleted) {
+        return
+    }
+
+    const now = new Date().toISOString()
+    const deletedTransaction: PaymentTransaction = {
+        ...transaction,
+        isDeleted: true,
+        updatedAt: now,
+        version: transaction.version + 1,
+        ...getSyncMetadata(transaction.workspaceId, now)
+    }
+
+    if (!shouldUseCloudBusinessData(transaction.workspaceId)) {
+        await db.payment_transactions.put(deletedTransaction)
+        return
+    }
+
+    if (!isOnline()) {
+        await db.payment_transactions.put(deletedTransaction)
+        await addToOfflineMutations(
+            'payment_transactions',
+            transaction.id,
+            'delete',
+            { id: transaction.id },
+            transaction.workspaceId
+        )
+        return
+    }
+
+    try {
+        const client = getSupabaseClientForTable('payment_transactions')
+        const { error } = await runMutation('payment_transactions.delete', () =>
+            client
+                .from('payment_transactions')
+                .update({ is_deleted: true, updated_at: now })
+                .eq('id', transaction.id)
+        )
+
+        if (error) {
+            throw error
+        }
+
+        await db.payment_transactions.put({
+            ...deletedTransaction,
+            syncStatus: 'synced',
+            lastSyncedAt: now
+        })
+    } catch (error) {
+        if (shouldUseOfflineMutationFallback(error)) {
+            console.error('[Payments] Payment transaction delete failed, queued offline mutation:', error)
+            await db.payment_transactions.put(deletedTransaction)
+            await addToOfflineMutations(
+                'payment_transactions',
+                transaction.id,
+                'delete',
+                { id: transaction.id },
+                transaction.workspaceId
+            )
+            return
+        }
+
+        throw normalizeSupabaseActionError(error)
+    }
+}
+
+async function replacePaymentTransactionForSource(
+    workspaceId: string,
+    locator: SourceLocator,
+    input: AppendPaymentTransactionInput
+) {
+    const next = await appendPaymentTransaction(workspaceId, input)
+    const relatedTransactions = await listPaymentTransactionsForSource(workspaceId, {
+        ...locator,
+        metadata: locator.metadata ?? input.metadata ?? null
+    })
+
+    for (const item of relatedTransactions) {
+        if (item.isDeleted || item.id === next.id) {
+            continue
+        }
+
+        try {
+            await softDeletePaymentTransaction(item)
+        } catch (error) {
+            console.error('[Payments] Failed to hide replaced transaction row:', error)
+        }
+    }
+
+    return next
+}
+
 export async function recordDirectTransaction(
     workspaceId: string,
     input: RecordDirectTransactionInput
@@ -918,17 +1058,8 @@ export async function findLatestUnreversedPaymentTransaction(
     workspaceId: string,
     locator: SourceLocator
 ) {
-    const items = await db.payment_transactions
-        .where('[workspaceId+sourceType+sourceRecordId]')
-        .equals([workspaceId, locator.sourceType, locator.sourceRecordId])
-        .toArray()
-
-    const relevant = items.filter((item) => {
+    const relevant = (await listPaymentTransactionsForSource(workspaceId, locator)).filter((item) => {
         if (item.isDeleted) {
-            return false
-        }
-
-        if (locator.sourceSubrecordId !== undefined && item.sourceSubrecordId !== locator.sourceSubrecordId) {
             return false
         }
 
@@ -1004,7 +1135,11 @@ export async function recordObligationSettlement(
                 paymentMethod: input.paymentMethod as OrderPaymentMethod,
                 paidAt
             })
-            await appendPaymentTransaction(workspaceId, {
+            await replacePaymentTransactionForSource(workspaceId, {
+                sourceType: 'sales_order',
+                sourceRecordId: order.id,
+                sourceSubrecordId: null
+            }, {
                 sourceModule: 'orders',
                 sourceType: 'sales_order',
                 sourceRecordId: order.id,
@@ -1033,7 +1168,11 @@ export async function recordObligationSettlement(
                 paymentMethod: input.paymentMethod as OrderPaymentMethod,
                 paidAt
             })
-            await appendPaymentTransaction(workspaceId, {
+            await replacePaymentTransactionForSource(workspaceId, {
+                sourceType: 'purchase_order',
+                sourceRecordId: order.id,
+                sourceSubrecordId: null
+            }, {
                 sourceModule: 'orders',
                 sourceType: 'purchase_order',
                 sourceRecordId: order.id,
@@ -1070,7 +1209,11 @@ export async function recordObligationSettlement(
                 snoozedIndefinite: false
             })
 
-            await appendPaymentTransaction(workspaceId, {
+            await replacePaymentTransactionForSource(workspaceId, {
+                sourceType: 'expense_item',
+                sourceRecordId: item.id,
+                sourceSubrecordId: item.seriesId
+            }, {
                 sourceModule: 'budget',
                 sourceType: 'expense_item',
                 sourceRecordId: item.id,
@@ -1116,7 +1259,15 @@ export async function recordObligationSettlement(
             })
 
             const sourceRecordId = await resolvePayrollSourceRecordId(employeeId, month)
-            await appendPaymentTransaction(workspaceId, {
+            await replacePaymentTransactionForSource(workspaceId, {
+                sourceType: 'payroll_status',
+                sourceRecordId,
+                sourceSubrecordId: employee.id,
+                metadata: {
+                    employeeId: employee.id,
+                    month
+                }
+            }, {
                 sourceModule: 'budget',
                 sourceType: 'payroll_status',
                 sourceRecordId,
@@ -1170,7 +1321,8 @@ export async function reversePaymentTransaction(
     const latest = await findLatestUnreversedPaymentTransaction(workspaceId, {
         sourceType: transaction.sourceType,
         sourceRecordId: transaction.sourceRecordId,
-        sourceSubrecordId: transaction.sourceSubrecordId ?? undefined
+        sourceSubrecordId: transaction.sourceSubrecordId ?? undefined,
+        metadata: transaction.metadata
     })
 
     if (!latest || latest.id !== transaction.id) {
@@ -1245,7 +1397,12 @@ export async function reversePaymentTransaction(
     }
 
     const note = input.note?.trim() || `Reversal of ${transaction.referenceLabel || transaction.sourceType}`
-    return appendPaymentTransaction(workspaceId, {
+    return replacePaymentTransactionForSource(workspaceId, {
+        sourceType: transaction.sourceType,
+        sourceRecordId: transaction.sourceRecordId,
+        sourceSubrecordId: transaction.sourceSubrecordId ?? null,
+        metadata: transaction.metadata
+    }, {
         sourceModule: transaction.sourceModule,
         sourceType: transaction.sourceType,
         sourceRecordId: transaction.sourceRecordId,

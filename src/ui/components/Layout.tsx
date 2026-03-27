@@ -270,7 +270,8 @@ export function Layout({ children }: LayoutProps) {
         ] : []),
         // Revenue - allow all roles for the menu item if feature is on (restriction is handled in route/page)
         ...((user?.role === 'admin' || user?.role === 'staff' || user?.role === 'viewer') ? [
-            ...(hasFinanceAnalytics ? [{ name: t('nav.finance', { defaultValue: 'Finance' }), href: '/finance', icon: TrendingUp }] : []),
+            // Finance Tab - Hidden by request. Uncomment to restore.
+            // ...(hasFinanceAnalytics ? [{ name: t('nav.finance', { defaultValue: 'Finance' }), href: '/finance', icon: TrendingUp }] : []),
             ...(hasPaymentsSurface ? [{ name: t('nav.payments', { defaultValue: 'Payments' }), href: '/payments', icon: CreditCard }] : []),
             ...(hasFeature('net_revenue') ? [{ name: t('nav.revenue') || 'Net Revenue', href: '/revenue', icon: BarChart3 }] : []),
             ...(hasFeature('budget') ? [{ name: t('nav.budget', { defaultValue: 'Accounting' }), href: '/budget', icon: FileSpreadsheet }] : []),

@@ -9,6 +9,7 @@ import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { db } from '@/local-db/database'
 import {
     fetchTableFromSupabase,
+    recordObligationSettlement,
     useEmployees,
     usePayrollStatuses,
     useDividendStatuses,
@@ -18,7 +19,7 @@ import {
     upsertPayrollStatus,
     upsertDividendStatus
 } from '@/local-db'
-import type { CurrencyCode, ExpenseItem } from '@/local-db/models'
+import type { CurrencyCode, ExpenseItem, PaymentObligation, WorkspacePaymentMethod } from '@/local-db/models'
 import { convertToStoreBase } from '@/lib/currency'
 import {
     buildConversionRates,
@@ -32,6 +33,7 @@ import { BudgetReminderModal } from './BudgetReminderModal'
 import { BudgetSnoozeModal, type BudgetSnoozeOption } from './BudgetSnoozeModal'
 import { BudgetLockPromptModal } from './BudgetLockPromptModal'
 import { useUnifiedSnooze, type SnoozedItem } from '@/context/UnifiedSnoozeContext'
+import { SettlementDialog } from '@/ui/components'
 
 function isCurrentlySnoozed(item: BudgetReminderItem, now: Date) {
     if (item.status !== 'snoozed') return false
@@ -42,6 +44,60 @@ function isCurrentlySnoozed(item: BudgetReminderItem, now: Date) {
 
 function isDue(item: { dueDate: string }, todayKey: string) {
     return item.dueDate <= todayKey
+}
+
+function buildExpenseReminderObligation(workspaceId: string, item: BudgetReminderItem): PaymentObligation {
+    return {
+        id: `expense-item:${item.sourceId}`,
+        workspaceId,
+        sourceModule: 'budget',
+        sourceType: 'expense_item',
+        sourceRecordId: item.sourceId,
+        sourceSubrecordId: item.seriesId || null,
+        direction: 'outgoing',
+        amount: item.amount,
+        currency: item.currency,
+        dueDate: item.dueDate,
+        counterpartyName: null,
+        referenceLabel: item.title,
+        title: item.title,
+        subtitle: item.subtitle,
+        status: 'open',
+        routePath: '/budget',
+        metadata: {
+            month: item.month,
+            seriesId: item.seriesId || null
+        }
+    }
+}
+
+function buildPayrollReminderObligation(
+    workspaceId: string,
+    item: BudgetReminderItem,
+    existingStatusId?: string | null
+): PaymentObligation {
+    return {
+        id: `payroll-status:${item.employeeId}:${item.month}`,
+        workspaceId,
+        sourceModule: 'budget',
+        sourceType: 'payroll_status',
+        sourceRecordId: existingStatusId || `${item.employeeId}:${item.month}`,
+        sourceSubrecordId: item.employeeId || null,
+        direction: 'outgoing',
+        amount: item.amount,
+        currency: item.currency,
+        dueDate: item.dueDate,
+        counterpartyName: item.title,
+        referenceLabel: `Payroll ${item.month}`,
+        title: item.title,
+        subtitle: item.subtitle,
+        status: 'open',
+        routePath: '/budget',
+        metadata: {
+            employeeId: item.employeeId,
+            month: item.month
+        }
+    }
 }
 
 export function GlobalBudgetReminders() {
@@ -81,6 +137,9 @@ export function GlobalBudgetReminders() {
     const [isReminderActionLoading, setIsReminderActionLoading] = useState(false)
     const [snoozeTarget, setSnoozeTarget] = useState<BudgetReminderItem | null>(null)
     const [lockTarget, setLockTarget] = useState<BudgetReminderItem | null>(null)
+    const [settlementTarget, setSettlementTarget] = useState<PaymentObligation | null>(null)
+    const [settlementSourceItem, setSettlementSourceItem] = useState<BudgetReminderItem | null>(null)
+    const [isSubmittingSettlement, setIsSubmittingSettlement] = useState(false)
 
     const rates = useMemo(() => buildConversionRates(exchangeData, eurRates, tryRates), [exchangeData, eurRates, tryRates])
 
@@ -311,7 +370,7 @@ export function GlobalBudgetReminders() {
     }, [currentReminderId, reminderItems])
 
     useEffect(() => {
-        if (!isAdmin || isReminderActionLoading) return
+        if (!isAdmin || isReminderActionLoading || settlementTarget || isSubmittingSettlement) return
 
         if (activeReminderItems.length === 0) {
             if (currentReminderId) setCurrentReminderId(null)
@@ -325,7 +384,7 @@ export function GlobalBudgetReminders() {
         if (!stillValid) {
             setCurrentReminderId(activeReminderItems[0].id)
         }
-    }, [activeReminderItems, currentReminderId, isAdmin, isReminderActionLoading])
+    }, [activeReminderItems, currentReminderId, isAdmin, isReminderActionLoading, settlementTarget, isSubmittingSettlement])
 
     const markReminderHandledForSession = (id: string) => {
         setSessionHandledIds(prev => (prev.includes(id) ? prev : [...prev, id]))
@@ -405,11 +464,33 @@ export function GlobalBudgetReminders() {
     }
 
     const handleMarkPaid = async (item: BudgetReminderItem) => {
+        if (!workspaceId) {
+            return
+        }
+
+        if (item.type === 'expense') {
+            setCurrentReminderId(null)
+            setSettlementSourceItem(item)
+            setSettlementTarget(buildExpenseReminderObligation(workspaceId, item))
+            return
+        }
+
+        if (item.type === 'payroll') {
+            const existingStatus = payrollStatuses.find(
+                (entry) => entry.employeeId === item.employeeId && entry.month === item.month && !entry.isDeleted
+            )
+            setCurrentReminderId(null)
+            setSettlementSourceItem(item)
+            setSettlementTarget(buildPayrollReminderObligation(workspaceId, item, existingStatus?.id))
+            return
+        }
+
         setIsReminderActionLoading(true)
         try {
+            const paidAt = new Date().toISOString()
             await applyStatusUpdate(item, {
                 status: 'paid',
-                paidAt: new Date().toISOString(),
+                paidAt,
                 snoozedUntil: null,
                 snoozedIndefinite: false
             })
@@ -428,6 +509,44 @@ export function GlobalBudgetReminders() {
             })
         } finally {
             setIsReminderActionLoading(false)
+        }
+    }
+
+    const handleReminderSettlement = async (input: { paymentMethod: WorkspacePaymentMethod; paidAt: string; note?: string }) => {
+        if (!workspaceId || !settlementTarget) {
+            return
+        }
+
+        setIsSubmittingSettlement(true)
+        try {
+            await recordObligationSettlement(workspaceId, settlementTarget, {
+                paymentMethod: input.paymentMethod,
+                paidAt: input.paidAt,
+                note: input.note,
+                createdBy: user?.id || null
+            })
+
+            if (settlementSourceItem) {
+                markReminderHandledForSession(settlementSourceItem.id)
+                setLockTarget(settlementSourceItem)
+            }
+
+            toast({
+                title: t('common.success') || 'Success',
+                description: settlementTarget.sourceType === 'payroll_status'
+                    ? 'Payroll payment recorded.'
+                    : 'Expense payment recorded.'
+            })
+            setSettlementTarget(null)
+            setSettlementSourceItem(null)
+        } catch (error: any) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: error?.message || 'Failed to record settlement.',
+                variant: 'destructive'
+            })
+        } finally {
+            setIsSubmittingSettlement(false)
         }
     }
 
@@ -506,6 +625,19 @@ export function GlobalBudgetReminders() {
                     if (!open && currentReminder) {
                         markReminderHandledForSession(currentReminder.id)
                         setCurrentReminderId(null)
+                    }
+                }}
+            />
+
+            <SettlementDialog
+                open={!!settlementTarget}
+                obligation={settlementTarget}
+                isSubmitting={isSubmittingSettlement}
+                onSubmit={handleReminderSettlement}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setSettlementTarget(null)
+                        setSettlementSourceItem(null)
                     }
                 }}
             />
