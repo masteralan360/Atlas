@@ -56,7 +56,8 @@ import {
     PanelRightClose,
     Monitor,
     Truck,
-    Plane
+    Plane,
+    Calculator
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from './button'
@@ -233,7 +234,7 @@ export function Layout({ children }: LayoutProps) {
         }
     }, [isLocked, location])
 
-    const navigation: Array<{ name: string; href: string; icon: any; status?: string; alert?: boolean; children?: Array<{ name: string; href: string; icon?: any }> }> = [
+    const navigation: Array<{ name: string; href: string; icon: any; status?: string; alert?: boolean; mobileOnly?: boolean; children?: Array<{ name: string; href: string; icon?: any }> }> = [
         { name: t('nav.dashboard'), href: '/', icon: LayoutDashboard },
         // POS - requires feature flag AND role
         ...((user?.role === 'admin' || user?.role === 'staff' || user?.role === 'viewer') && hasFeature('pos') ? [
@@ -269,6 +270,7 @@ export function Layout({ children }: LayoutProps) {
             ...(hasFeature('monthly_comparison') ? [{ name: t('monthlyComparison.title'), href: '/monthly-comparison', icon: ArrowRightLeft }] : []),
             ...(hasFeature('team_performance') ? [{ name: t('nav.performance') || 'Team Performance', href: '/performance', icon: TrendingUp }] : [])
         ] : []),
+        { name: t('nav.currencyConverter') || 'Currency Converter', href: '/currency-converter', icon: Calculator, mobileOnly: true },
         // WhatsApp - requires feature flag AND role AND desktop platform
         ...((user?.role === 'admin' || user?.role === 'staff' || user?.role === 'viewer') && hasFeature('allow_whatsapp') && isDesktop() ? [
             { name: t('nav.whatsapp'), href: '/whatsapp', icon: MessageSquare, status: whatsappStatus }
@@ -537,7 +539,7 @@ export function Layout({ children }: LayoutProps) {
                                 )
 
                                 return (
-                                    <div key={item.href} className="space-y-1">
+                                    <div key={item.href} className={cn("space-y-1", item.mobileOnly && "lg:hidden")}>
                                         <Link
                                             href={item.href}
                                             onClick={() => {

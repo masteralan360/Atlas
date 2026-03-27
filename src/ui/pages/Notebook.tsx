@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/auth'
 import { Button, Input } from '@/ui/components'
 import { useTheme } from '@/ui/components/theme-provider'
-import { getNotebookDocument, getNotebookStorageKey, saveNotebookDocument, type NotebookDocument } from '@/local-db/notebook'
+import { getNotebookDocument, getNotebookStorageKey, isNotebookStarterContent, saveNotebookDocument, type NotebookDocument } from '@/local-db/notebook'
 import '@lyfie/luthor/styles.css'
 
 const AUTOSAVE_INTERVAL_MS = 1500
@@ -29,10 +29,12 @@ export function Notebook() {
     const storageKeyRef = useRef<string | null>(null)
     const titleRef = useRef('')
     const lastSavedRef = useRef<NotebookDocument | null>(null)
+    const shouldSanitizeStarterContentRef = useRef(false)
 
     const [title, setTitle] = useState('')
     const [initialContent, setInitialContent] = useState<string | undefined>(undefined)
     const [isLoading, setIsLoading] = useState(true)
+    const [isEditorReady, setIsEditorReady] = useState(false)
     const [loadError, setLoadError] = useState<string | null>(null)
     const [saveStatus, setSaveStatus] = useState<'loading' | 'saving' | 'saved' | 'error'>('loading')
     const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
@@ -120,7 +122,10 @@ export function Notebook() {
 
         async function loadNotebook() {
             setIsLoading(true)
+            setIsEditorReady(false)
             setLoadError(null)
+            shouldSanitizeStarterContentRef.current = false
+            editorRef.current = null
 
             try {
                 const document = await getNotebookDocument(storageKey)
@@ -130,11 +135,17 @@ export function Notebook() {
                 }
 
                 const nextTitle = document?.title || ''
+                const hasStarterContent = isNotebookStarterContent(document?.content)
+                const nextContent = hasStarterContent
+                    ? undefined
+                    : (document?.content || undefined)
+
                 titleRef.current = nextTitle
                 setTitle(nextTitle)
-                setInitialContent(document?.content || undefined)
+                setInitialContent(nextContent)
                 lastSavedRef.current = document
-                setLastSavedAt(document?.updatedAt || null)
+                shouldSanitizeStarterContentRef.current = hasStarterContent
+                setLastSavedAt(hasStarterContent ? null : (document?.updatedAt || null))
                 setSaveStatus('saved')
             } catch (error) {
                 console.error('[Notebook] Failed to load notebook:', error)
@@ -160,7 +171,7 @@ export function Notebook() {
     }, [t, user])
 
     useEffect(() => {
-        if (isLoading) {
+        if (isLoading || !isEditorReady) {
             return
         }
 
@@ -171,10 +182,10 @@ export function Notebook() {
         return () => {
             window.clearInterval(interval)
         }
-    }, [isLoading, persistDocument])
+    }, [isEditorReady, isLoading, persistDocument])
 
     useEffect(() => {
-        if (isLoading) {
+        if (isLoading || !isEditorReady) {
             return
         }
 
@@ -196,7 +207,16 @@ export function Notebook() {
             window.removeEventListener('beforeunload', handleBeforeUnload)
             void persistDocument(true)
         }
-    }, [isLoading, persistDocument])
+    }, [isEditorReady, isLoading, persistDocument])
+
+    useEffect(() => {
+        if (isLoading || !isEditorReady || !shouldSanitizeStarterContentRef.current) {
+            return
+        }
+
+        shouldSanitizeStarterContentRef.current = false
+        void persistDocument(true)
+    }, [isEditorReady, isLoading, persistDocument])
 
     const handleBack = () => {
         if (window.history.length > 1) {
@@ -279,7 +299,7 @@ export function Notebook() {
                                 onClick={() => {
                                     void persistDocument(true)
                                 }}
-                                disabled={isLoading}
+                                disabled={isLoading || !isEditorReady}
                             >
                                 <Save className="w-3.5 h-3.5" />
                                 {t('notebook.actions.saveNow') || 'Save now'}
@@ -310,11 +330,13 @@ export function Notebook() {
                                     <NotionLikeEditor
                                         className="[&_.luthor-editor]:min-h-[60vh] [&_.luthor-editor]:rounded-[20px] [&_.luthor-editor]:border [&_.luthor-editor]:border-border/70 [&_.luthor-editor]:bg-card [&_.luthor-editor-header]:mb-4 [&_.luthor-richtext-container]:min-h-[52vh]"
                                         defaultContent={initialContent}
+                                        showDefaultContent={false}
                                         initialTheme={resolveEditorTheme(theme)}
                                         availableModes={['visual']}
                                         isToolbarEnabled
                                         onReady={(methods) => {
                                             editorRef.current = methods
+                                            setIsEditorReady(true)
                                         }}
                                         placeholder={t('notebook.fields.editorPlaceholder') || "Start writing, or type '/' for commands..."}
                                         toolbarAlignment="left"

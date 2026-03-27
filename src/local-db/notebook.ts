@@ -7,6 +7,10 @@ export interface NotebookDocument {
 }
 
 const NOTEBOOK_DOCUMENT_PREFIX = 'notebook_document'
+const NOTEBOOK_STARTER_MARKERS = [
+    'Extensive Preset: JSON-First Feature Showcase',
+    'Use the toolbar, floating toolbar, slash commands (/), and command palette (Ctrl/Cmd+Shift+P) to explore the full preset.'
+]
 
 export function getNotebookStorageKey(params: { workspaceId?: string; userId?: string }) {
     const workspaceId = params.workspaceId || 'global'
@@ -45,4 +49,12 @@ export async function saveNotebookDocument(key: string, document: NotebookDocume
         key,
         value: JSON.stringify(document)
     })
+}
+
+export function isNotebookStarterContent(content: string | null | undefined): boolean {
+    if (typeof content !== 'string' || content.trim().length === 0) {
+        return false
+    }
+
+    return NOTEBOOK_STARTER_MARKERS.every((marker) => content.includes(marker))
 }

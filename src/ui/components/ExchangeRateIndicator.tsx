@@ -305,7 +305,7 @@ export function ExchangeRateIndicator() {
                 </div>
 
                 {/* Mobile View */}
-                <div className="md:hidden">
+                <div className="md:hidden flex items-center gap-2">
                     <DialogTrigger asChild>
                         <Button
                             variant="outline"
@@ -323,6 +323,24 @@ export function ExchangeRateIndicator() {
                             <span className="text-xs font-bold uppercase tracking-tight">Live Rate</span>
                         </Button>
                     </DialogTrigger>
+
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        className={cn(
+                            "h-9 w-9 rounded-full transition-all",
+                            style === 'neo-orange'
+                                ? "rounded-[var(--radius)] border-black dark:border-white bg-white dark:bg-black"
+                                : cn(
+                                    "border-border/70 bg-background text-muted-foreground hover:bg-secondary hover:text-foreground",
+                                    isNotebookPage && "border-primary/20 bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                                )
+                        )}
+                        onClick={() => setLocation('/notebook')}
+                        title={t('notebook.label') || 'Notebook'}
+                    >
+                        <NotebookPen className="w-4 h-4" />
+                    </Button>
                 </div>
             </div>
 
