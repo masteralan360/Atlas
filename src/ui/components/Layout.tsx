@@ -57,7 +57,8 @@ import {
     Monitor,
     Truck,
     Plane,
-    Calculator
+    Calculator,
+    Wallet
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from './button'
@@ -86,6 +87,7 @@ const routePrefetchMap: Record<string, () => Promise<unknown>> = {
     '/orders': () => import('@/ui/pages/Orders'),
     '/travel-agency': () => import('@/ui/pages/TravelAgency'),
     '/finance': () => import('@/ui/pages/Finance'),
+    '/ledger': () => import('@/ui/pages/Ledger'),
     '/payments': () => import('@/ui/pages/Payments'),
     '/loans': () => import('@/ui/pages/Loans'),
     '/installments': () => import('@/ui/pages/Loans'),
@@ -236,7 +238,7 @@ export function Layout({ children }: LayoutProps) {
         }
     }, [isLocked, location])
 
-    const hasFinanceAnalytics = features.net_revenue || features.budget || features.loans || features.crm || features.travel_agency || features.hr
+    const hasLedgerSurface = features.pos || features.instant_pos || features.sales_history || features.crm || features.budget || features.hr || features.loans
     const hasPaymentsSurface = features.loans || features.crm || features.budget || features.hr
 
     const navigation: Array<{ name: string; href: string; icon: any; status?: string; alert?: boolean; mobileOnly?: boolean; children?: Array<{ name: string; href: string; icon?: any }> }> = [
@@ -272,6 +274,7 @@ export function Layout({ children }: LayoutProps) {
         ...((user?.role === 'admin' || user?.role === 'staff' || user?.role === 'viewer') ? [
             // Finance Tab - Hidden by request. Uncomment to restore.
             // ...(hasFinanceAnalytics ? [{ name: t('nav.finance', { defaultValue: 'Finance' }), href: '/finance', icon: TrendingUp }] : []),
+            ...(hasLedgerSurface ? [{ name: t('nav.ledger', { defaultValue: 'Ledger' }), href: '/ledger', icon: Wallet }] : []),
             ...(hasPaymentsSurface ? [{ name: t('nav.payments', { defaultValue: 'Payments' }), href: '/payments', icon: CreditCard }] : []),
             ...(hasFeature('net_revenue') ? [{ name: t('nav.revenue') || 'Net Revenue', href: '/revenue', icon: BarChart3 }] : []),
             ...(hasFeature('budget') ? [{ name: t('nav.budget', { defaultValue: 'Accounting' }), href: '/budget', icon: FileSpreadsheet }] : []),
