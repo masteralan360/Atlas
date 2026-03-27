@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Bell, BellOff, RotateCcw, ArrowUpRight, TrendingUp, HandCoins, Wallet, Inbox } from 'lucide-react'
+import { Bell, BellOff, RotateCcw, ArrowUpRight, TrendingUp, HandCoins, FileSpreadsheet, Inbox } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/ui/components'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/ui/components/dialog'
@@ -83,7 +83,7 @@ export function UnifiedSnoozedRemindersBell() {
                                     {t('nav.installments', { defaultValue: 'Installments' })} ({counts.loan})
                                 </TabsTrigger>
                                 <TabsTrigger value="budget" className="rounded-lg font-bold text-[10px] uppercase tracking-tighter">
-                                    {t('nav.budget') || 'Budget'} ({counts.budget})
+                                    {t('nav.budget', { defaultValue: 'Accounting' })} ({counts.budget})
                                 </TabsTrigger>
                                 <TabsTrigger value="exchange" className="rounded-lg font-bold text-[10px] uppercase tracking-tighter">
                                     {t('exchange.rates') || 'Rates'} ({counts.exchange})
@@ -136,7 +136,7 @@ function ReminderCard({ item, iqdPreference, t, closeDialog }: { item: SnoozedIt
                         "bg-amber-500/10 text-amber-600 dark:text-amber-400"
                     )}>
                         {item.type === 'loan' && <HandCoins className="h-4.5 w-4.5" />}
-                        {item.type === 'budget' && <Wallet className="h-4.5 w-4.5" />}
+                        {item.type === 'budget' && <FileSpreadsheet className="h-4.5 w-4.5" />}
                         {item.type === 'exchange' && <TrendingUp className="h-4.5 w-4.5" />}
                     </div>
                     <div className="min-w-0">

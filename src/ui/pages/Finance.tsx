@@ -765,7 +765,7 @@ export function Finance() {
             href: '/revenue'
         } : null,
         features.budget ? {
-            label: t('nav.budget', { defaultValue: 'Budget' }),
+            label: t('nav.budget', { defaultValue: 'Accounting' }),
             href: '/budget'
         } : null,
         features.loans ? {
@@ -945,7 +945,7 @@ export function Finance() {
                     <h1 className="text-3xl font-bold tracking-tight">{t('finance.title', { defaultValue: 'Finance Analytics Hub' })}</h1>
                     <p className="text-muted-foreground">
                         {t('finance.subtitle', {
-                            defaultValue: 'A read-only hub for finance analysis across revenue, budget, loans, partners, and travel activity.'
+                            defaultValue: 'A read-only hub for finance analysis across revenue, accounting, loans, partners, and travel activity.'
                         })}
                     </p>
                 </div>
@@ -990,7 +990,7 @@ export function Finance() {
                     </div>
                     <p className="max-w-3xl text-muted-foreground">
                         {t('finance.subtitle', {
-                            defaultValue: 'A read-only hub for finance analysis across revenue, budget, loans, partners, and travel activity.'
+                            defaultValue: 'A read-only hub for finance analysis across revenue, accounting, loans, partners, and travel activity.'
                         })}
                     </p>
                 </div>
@@ -1449,7 +1449,7 @@ export function Finance() {
                         {features.budget && (
                             <Button variant="outline" onClick={() => navigate('/budget')}>
                                 <ArrowUpRight className="mr-2 h-4 w-4" />
-                                {t('nav.budget', { defaultValue: 'Budget' })}
+                                {t('nav.budget', { defaultValue: 'Accounting' })}
                             </Button>
                         )}
                         {features.hr && (

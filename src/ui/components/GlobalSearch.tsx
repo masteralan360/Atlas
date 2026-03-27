@@ -1,4 +1,4 @@
-import { Search, Command, LayoutDashboard, ShoppingCart, Package, ListOrdered, Settings as SettingsIcon, BarChart3, Users2, Globe, MessageSquare, Moon, Sun, LogOut, ChevronRight, ArrowRightLeft, NotebookPen, Wallet, Zap, TrendingUp } from 'lucide-react'
+import { Search, Command, LayoutDashboard, ShoppingCart, Package, ListOrdered, Settings as SettingsIcon, BarChart3, Users2, Globe, MessageSquare, Moon, Sun, LogOut, ChevronRight, ArrowRightLeft, NotebookPen, Wallet, Zap, TrendingUp, FileSpreadsheet } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState, useEffect, useRef } from 'react'
 import { useHashLocation } from '@/hooks/useHashLocation'
@@ -46,7 +46,7 @@ export function GlobalSearch({ className, placeholder }: GlobalSearchProps) {
         ...(hasFinanceAnalytics ? [{ id: 'nav-finance', title: t('nav.finance', { defaultValue: 'Finance' }), category: 'Navigation' as const, icon: TrendingUp, action: () => setLocation('/finance') }] : []),
         ...(hasPaymentsSurface ? [{ id: 'nav-payments', title: t('nav.payments', { defaultValue: 'Payments' }), category: 'Navigation' as const, icon: Wallet, action: () => setLocation('/payments') }] : []),
         { id: 'nav-revenue', title: t('nav.revenue'), category: 'Navigation', icon: BarChart3, action: () => setLocation('/revenue') },
-        { id: 'nav-budget', title: t('nav.budget'), category: 'Navigation', icon: Wallet, action: () => setLocation('/budget') },
+        { id: 'nav-budget', title: t('nav.budget', { defaultValue: 'Accounting' }), category: 'Navigation', icon: FileSpreadsheet, action: () => setLocation('/budget') },
         { id: 'nav-monthly-comparison', title: t('monthlyComparison.title'), category: 'Navigation', icon: ArrowRightLeft, action: () => setLocation('/monthly-comparison') },
         { id: 'nav-performance', title: t('nav.performance'), category: 'Navigation', icon: Users2, action: () => setLocation('/performance') },
 

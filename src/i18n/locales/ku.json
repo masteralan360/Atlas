@@ -145,7 +145,7 @@
         "revenue": "پوختەی داهات",
         "performance": "ئاستی تیم",
         "hr": "سەرچاوە مرۆییەکان",
-        "budget": "بودجە",
+        "budget": "ژمێریاری",
         "invoicesHistory": "مێژووی پسوڵەکان",
         "settings": "ڕێکخستنەکان",
         "whatsapp": "واتساپ",
@@ -1771,7 +1771,7 @@
         }
     },
     "budget": {
-        "title": "بەڕێوەبردنی بودجە",
+        "title": "ژمێریاری",
         "subtitle": "چاودێری و بەڕێوەبردنی خەرجییەکانت بکە",
         "setBudgetSubtitle": "سنووری خەرجییەکانت بۆ ئەم مانگە دیاری بکە",
         "addExpenseSubtitle": "تێچوویەکی دەستی بۆ تۆمارە مانگانەکانت زیاد بکە",
@@ -1988,7 +1988,7 @@
     },
     "finance": {
         "title": "Finance Analytics Hub",
-        "subtitle": "A read-only hub for finance analysis across revenue, budget, loans, partners, and travel activity.",
+        "subtitle": "A read-only hub for finance analysis across revenue, accounting, loans, partners, and travel activity.",
         "tabs": {
             "overview": "Overview",
             "sales": "Sales",

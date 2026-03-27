@@ -1006,7 +1006,7 @@ export function Budget() {
         <div className="space-y-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="text-4xl font-bold tracking-tight">{t('budget.title') || 'Budget Management'}</h1>
+                    <h1 className="text-4xl font-bold tracking-tight">{t('budget.title') || 'Accounting'}</h1>
                     <p className="text-base font-medium text-muted-foreground">{t('budget.subtitle') || 'Track and manage your expenses'}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">

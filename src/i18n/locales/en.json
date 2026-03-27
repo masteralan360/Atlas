@@ -151,7 +151,7 @@
         "revenue": "Net Revenue",
         "performance": "Team Performance",
         "hr": "HR",
-        "budget": "Budget",
+        "budget": "Accounting",
         "finance": "Finance",
         "invoicesHistory": "Invoices History",
         "settings": "Settings",
@@ -1829,7 +1829,7 @@
         }
     },
     "budget": {
-        "title": "Budget Management",
+        "title": "Accounting",
         "subtitle": "Track and manage your expenses",
         "setBudgetSubtitle": "Define your spending limits for this month",
         "addExpenseSubtitle": "Add a manual cost to your monthly tracks",
@@ -2046,7 +2046,7 @@
     },
     "finance": {
         "title": "Finance Analytics Hub",
-        "subtitle": "A read-only hub for finance analysis across revenue, budget, loans, partners, and travel activity.",
+        "subtitle": "A read-only hub for finance analysis across revenue, accounting, loans, partners, and travel activity.",
         "tabs": {
             "overview": "Overview",
             "sales": "Sales",

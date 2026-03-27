@@ -289,7 +289,7 @@ export function Payments() {
                         <CardTitle>Payments is not available in this workspace</CardTitle>
                     </CardHeader>
                     <CardContent className="text-sm text-muted-foreground">
-                        Enable Loans, CRM, Budget, or HR to use the central payments surface.
+                        Enable Loans, CRM, Accounting, or HR to use the central payments surface.
                     </CardContent>
                 </Card>
             </div>
@@ -368,7 +368,7 @@ export function Payments() {
                                 <SelectItem value="all">All Sources</SelectItem>
                                 <SelectItem value="loans">Loans</SelectItem>
                                 <SelectItem value="orders">Orders</SelectItem>
-                                <SelectItem value="budget">Budget / HR</SelectItem>
+                                <SelectItem value="budget">Accounting / HR</SelectItem>
                                 <SelectItem value="payments">Direct / Manual</SelectItem>
                             </SelectContent>
                         </Select>

@@ -145,7 +145,7 @@
         "revenue": "صافي الإيرادات",
         "performance": "أداء الفريق",
         "hr": "الموارد البشرية",
-        "budget": "الميزانية",
+        "budget": "المحاسبة",
         "finance": "Finance",
         "invoicesHistory": "سجل الفواتير",
         "settings": "الإعدادات",
@@ -1772,7 +1772,7 @@
         }
     },
     "budget": {
-        "title": "إدارة الميزانية",
+        "title": "المحاسبة",
         "subtitle": "تتبع وإدارة نفقاتك",
         "setBudgetSubtitle": "حدد حدود إنفاقك لهذا الشهر",
         "addExpenseSubtitle": "أضف تكلفة يدوية لتتبعاتك الشهرية",
@@ -1989,7 +1989,7 @@
     },
     "finance": {
         "title": "Finance Analytics Hub",
-        "subtitle": "A read-only hub for finance analysis across revenue, budget, loans, partners, and travel activity.",
+        "subtitle": "A read-only hub for finance analysis across revenue, accounting, loans, partners, and travel activity.",
         "tabs": {
             "overview": "Overview",
             "sales": "Sales",
