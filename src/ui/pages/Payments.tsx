@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowDownLeft, ArrowUpRight, Plus, RotateCcw, Search } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, RotateCcw, Search } from 'lucide-react'
 import { useLocation } from 'wouter'
 
 import { useAuth } from '@/auth'
@@ -7,7 +7,6 @@ import {
     getPaymentSourceKey,
     getPaymentTransactionRoutePath,
     isReversiblePaymentSourceType,
-    recordDirectTransaction,
     recordObligationSettlement,
     reversePaymentTransaction,
     useLockedPaymentSourceKeys,
@@ -41,7 +40,6 @@ import {
     TabsTrigger,
     useToast
 } from '@/ui/components'
-import { DirectTransactionDialog } from '@/ui/components/payments/DirectTransactionDialog'
 import { SettlementDialog } from '@/ui/components/payments/SettlementDialog'
 import { useWorkspace } from '@/workspace'
 
@@ -132,7 +130,7 @@ export function Payments() {
     const workspaceId = user?.workspaceId
     const hasPaymentsSurface = features.loans || features.crm || features.budget || features.hr
 
-    const [activeTab, setActiveTab] = useState<'open-items' | 'transactions' | 'direct-transactions'>('open-items')
+    const [activeTab, setActiveTab] = useState<'open-items' | 'transactions'>('open-items')
     const [search, setSearch] = useState('')
     const [directionFilter, setDirectionFilter] = useState<DirectionFilter>('all')
     const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
@@ -140,8 +138,6 @@ export function Payments() {
     const [selectedObligation, setSelectedObligation] = useState<PaymentObligation | null>(null)
     const [isSubmittingSettlement, setIsSubmittingSettlement] = useState(false)
     const [reversingTransactionId, setReversingTransactionId] = useState<string | null>(null)
-    const [isDirectDialogOpen, setIsDirectDialogOpen] = useState(false)
-    const [isSubmittingDirectTransaction, setIsSubmittingDirectTransaction] = useState(false)
 
     const obligations = usePaymentObligations(workspaceId, {
         direction: directionFilter,
@@ -158,34 +154,7 @@ export function Payments() {
         search,
         includeReversals: true
     })
-    const directTransactions = useMemo(() => {
-        const normalizedSearch = search.trim().toLowerCase()
-
-        return allTransactions
-            .filter((item) => {
-                if (item.sourceType !== 'direct_transaction') {
-                    return false
-                }
-
-                if (directionFilter !== 'all' && item.direction !== directionFilter) {
-                    return false
-                }
-
-                if (!normalizedSearch) {
-                    return true
-                }
-
-                return [
-                    item.referenceLabel,
-                    item.counterpartyName,
-                    item.note,
-                    item.paymentMethod
-                ].some((value) => value?.toLowerCase().includes(normalizedSearch))
-            })
-            .sort((left, right) => right.paidAt.localeCompare(left.paidAt) || right.createdAt.localeCompare(left.createdAt))
-    }, [allTransactions, directionFilter, search])
     const visibleTransactions = useMemo(() => collapseTransactionsBySource(transactions), [transactions])
-    const visibleDirectTransactions = useMemo(() => collapseTransactionsBySource(directTransactions), [directTransactions])
 
     const reversedIds = useMemo(
         () => new Set(allTransactions.filter((item) => !!item.reversalOfTransactionId).map((item) => item.reversalOfTransactionId as string)),
@@ -241,40 +210,6 @@ export function Payments() {
         }
     }
 
-    const handleCreateDirectTransaction = async (input: {
-        direction: 'incoming' | 'outgoing'
-        amount: number
-        currency: 'usd' | 'iqd' | 'eur' | 'try'
-        paymentMethod: PaymentTransaction['paymentMethod']
-        paidAt: string
-        reason: string
-        note?: string
-        counterpartyName?: string
-        businessPartnerId?: string | null
-    }) => {
-        if (!workspaceId) {
-            return
-        }
-
-        setIsSubmittingDirectTransaction(true)
-        try {
-            await recordDirectTransaction(workspaceId, {
-                ...input,
-                createdBy: user?.id || null
-            })
-            toast({ title: 'Direct transaction recorded' })
-            setIsDirectDialogOpen(false)
-        } catch (error: any) {
-            toast({
-                title: 'Error',
-                description: error?.message || 'Failed to record direct transaction.',
-                variant: 'destructive'
-            })
-        } finally {
-            setIsSubmittingDirectTransaction(false)
-        }
-    }
-
     const handleReverse = async (transaction: PaymentTransaction) => {
         if (!workspaceId) {
             return
@@ -320,9 +255,8 @@ export function Payments() {
                     <p className="text-sm text-muted-foreground">
                         Unified open obligations and central transaction history across loans, orders, payroll, and expenses.
                     </p>
-                    <Button type="button" onClick={() => setIsDirectDialogOpen(true)} className="w-fit">
-                        <Plus className="mr-2 h-4 w-4" />
-                        New Direct Transaction
+                    <Button type="button" variant="outline" onClick={() => setLocation('/direct-transactions')} className="w-fit">
+                        Direct Transactions
                     </Button>
                 </div>
 
@@ -402,11 +336,10 @@ export function Payments() {
                 </CardContent>
             </Card>
 
-            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'open-items' | 'transactions' | 'direct-transactions')}>
+            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'open-items' | 'transactions')}>
                 <TabsList>
                     <TabsTrigger value="open-items">Open Items</TabsTrigger>
                     <TabsTrigger value="transactions">Transactions</TabsTrigger>
-                    <TabsTrigger value="direct-transactions">Direct Transactions</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="open-items">
@@ -592,113 +525,6 @@ export function Payments() {
                     </Card>
                 </TabsContent>
 
-                <TabsContent value="direct-transactions">
-                    <Card>
-                        <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                            <div className="space-y-1">
-                                <CardTitle>Direct Transactions</CardTitle>
-                                <p className="text-sm text-muted-foreground">
-                                    Manual incoming and outgoing money for activity outside the tracked modules. Payroll stays out of this tab.
-                                </p>
-                            </div>
-                            <Button type="button" onClick={() => setIsDirectDialogOpen(true)}>
-                                <Plus className="mr-2 h-4 w-4" />
-                                New Direct Transaction
-                            </Button>
-                        </CardHeader>
-                        <CardContent className="overflow-x-auto">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Time</TableHead>
-                                        <TableHead>Reason</TableHead>
-                                        <TableHead>Counterparty</TableHead>
-                                        <TableHead>Linked</TableHead>
-                                        <TableHead>Direction</TableHead>
-                                        <TableHead>Amount</TableHead>
-                                        <TableHead>Method</TableHead>
-                                        <TableHead>Note</TableHead>
-                                        <TableHead>Status</TableHead>
-                                        <TableHead className="text-right">Actions</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {visibleDirectTransactions.length === 0 ? (
-                                        <TableRow>
-                                            <TableCell colSpan={10} className="py-12 text-center text-muted-foreground">
-                                                No direct transactions match the current filters.
-                                            </TableCell>
-                                        </TableRow>
-                                    ) : visibleDirectTransactions.map((item) => {
-                                        const isReversal = !!item.reversalOfTransactionId
-                                        const isReversed = reversedIds.has(item.id)
-                                        const isLatestUnreversed = latestUnreversedBySource.get(getPaymentSourceKey(item))?.id === item.id
-                                        const canReverse = !isReversal && !isReversed && isLatestUnreversed
-                                        const displayAmount = isReversal ? 0 : item.amount
-
-                                        return (
-                                            <TableRow key={item.id}>
-                                                <TableCell>{formatDateTime(item.paidAt)}</TableCell>
-                                                <TableCell className="font-medium">{item.referenceLabel || 'Direct transaction'}</TableCell>
-                                                <TableCell>{item.counterpartyName || '-'}</TableCell>
-                                                <TableCell>
-                                                    {typeof item.metadata?.businessPartnerId === 'string' && item.metadata.businessPartnerId ? 'Business Partner' : 'External'}
-                                                </TableCell>
-                                                <TableCell>
-                                                    <span className={cn(
-                                                        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                                                        item.direction === 'incoming'
-                                                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                                            : 'border-amber-200 bg-amber-50 text-amber-700'
-                                                    )}>
-                                                        {item.direction === 'incoming' ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
-                                                        {item.direction}
-                                                    </span>
-                                                </TableCell>
-                                                <TableCell>
-                                                    {displayAmount < 0 ? '-' : ''}
-                                                    {formatCurrency(Math.abs(displayAmount), item.currency, features.iqd_display_preference)}
-                                                </TableCell>
-                                                <TableCell>{paymentMethodLabel(item.paymentMethod)}</TableCell>
-                                                <TableCell className="max-w-[240px] truncate">{item.note || '-'}</TableCell>
-                                                <TableCell>
-                                                    <span className={cn(
-                                                        'inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                                                        isReversal
-                                                            ? 'border-amber-200 bg-amber-50 text-amber-700'
-                                                            : isReversed
-                                                                ? 'border-slate-200 bg-slate-50 text-slate-700'
-                                                                : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                                    )}>
-                                                        {isReversal ? 'Reversal' : isReversed ? 'Reversed' : 'Posted'}
-                                                    </span>
-                                                </TableCell>
-                                                <TableCell className="text-right">
-                                                    <div className="flex justify-end gap-2">
-                                                        <Button variant="outline" size="sm" onClick={() => setLocation(getPaymentTransactionRoutePath(item))}>
-                                                            View
-                                                        </Button>
-                                                        {canReverse ? (
-                                                            <Button
-                                                                variant="outline"
-                                                                size="sm"
-                                                                onClick={() => handleReverse(item)}
-                                                                disabled={reversingTransactionId === item.id}
-                                                            >
-                                                                <RotateCcw className="mr-1 h-3.5 w-3.5" />
-                                                                Reverse
-                                                            </Button>
-                                                        ) : null}
-                                                    </div>
-                                                </TableCell>
-                                            </TableRow>
-                                        )
-                                    })}
-                                </TableBody>
-                            </Table>
-                        </CardContent>
-                    </Card>
-                </TabsContent>
             </Tabs>
 
             <SettlementDialog
@@ -713,15 +539,6 @@ export function Payments() {
                 isSubmitting={isSubmittingSettlement}
                 onSubmit={handleSettle}
             />
-            {workspaceId ? (
-                <DirectTransactionDialog
-                    open={isDirectDialogOpen}
-                    onOpenChange={setIsDirectDialogOpen}
-                    workspaceId={workspaceId}
-                    isSubmitting={isSubmittingDirectTransaction}
-                    onSubmit={handleCreateDirectTransaction}
-                />
-            ) : null}
         </div>
     )
 }

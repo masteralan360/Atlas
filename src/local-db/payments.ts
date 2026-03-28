@@ -177,7 +177,7 @@ function getTransactionRoutePath(transaction: Pick<PaymentTransaction, 'sourceMo
             return `/business-partners/${businessPartnerId}`
         }
 
-        return '/payments'
+        return transaction.sourceType === 'direct_transaction' ? '/direct-transactions' : '/payments'
     }
 
     if (transaction.sourceType === 'simple_loan') {

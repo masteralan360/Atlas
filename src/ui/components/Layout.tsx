@@ -89,6 +89,7 @@ const routePrefetchMap: Record<string, () => Promise<unknown>> = {
     '/finance': () => import('@/ui/pages/Finance'),
     '/ledger': () => import('@/ui/pages/Ledger'),
     '/payments': () => import('@/ui/pages/Payments'),
+    '/direct-transactions': () => import('@/ui/pages/DirectTransactions'),
     '/loans': () => import('@/ui/pages/Loans'),
     '/installments': () => import('@/ui/pages/Loans'),
     '/revenue': () => import('@/ui/pages/Revenue'),
@@ -276,7 +277,8 @@ export function Layout({ children }: LayoutProps) {
             // ...(hasFinanceAnalytics ? [{ name: t('nav.finance', { defaultValue: 'Finance' }), href: '/finance', icon: TrendingUp }] : []),
             ...(hasLedgerSurface ? [{ name: t('nav.ledger', { defaultValue: 'Ledger' }), href: '/ledger', icon: Wallet }] : []),
             ...(hasPaymentsSurface ? [{ name: t('nav.payments', { defaultValue: 'Payments' }), href: '/payments', icon: CreditCard }] : []),
-            ...(hasFeature('net_revenue') ? [{ name: t('nav.revenue') || 'Net Revenue', href: '/revenue', icon: BarChart3 }] : []),
+            ...(hasPaymentsSurface ? [{ name: t('nav.directTransactions', { defaultValue: 'Direct Transactions' }), href: '/direct-transactions', icon: ArrowRightLeft }] : []),
+            ...(hasFeature('net_revenue') ? [{ name: t('nav.revenue') || 'Revenue Analytics', href: '/revenue', icon: BarChart3 }] : []),
             ...(hasFeature('budget') ? [{ name: t('nav.budget', { defaultValue: 'Accounting' }), href: '/budget', icon: FileSpreadsheet }] : []),
             ...(hasFeature('monthly_comparison') ? [{ name: t('monthlyComparison.title'), href: '/monthly-comparison', icon: ArrowRightLeft }] : []),
             ...(hasFeature('team_performance') ? [{ name: t('nav.performance') || 'Team Performance', href: '/performance', icon: TrendingUp }] : [])
