@@ -37,10 +37,10 @@ export interface Sale {
     cashier_id: string
     total_amount: number
     settlement_currency: string
-    exchange_source: string
-    exchange_rate: number
-    exchange_rate_timestamp: string
-    exchange_rates?: any[]
+    exchange_source: string | null
+    exchange_rate: number | null
+    exchange_rate_timestamp: string | null
+    exchange_rates?: any[] | null
     created_at: string
     origin: 'pos' | 'manual' | 'instant_pos' | 'sales_order' | 'travel_agency'
     payment_method?: 'cash' | 'fib' | 'qicard' | 'zaincash' | 'fastpay' | 'loan'
@@ -109,10 +109,10 @@ export interface UniversalInvoice {
     discount_amount?: number
     settlement_currency: string
     payment_method?: string
-    exchange_rates?: any[]
-    exchange_rate?: number
-    exchange_source?: string
-    exchange_rate_timestamp?: string
+    exchange_rates?: any[] | null
+    exchange_rate?: number | null
+    exchange_source?: string | null
+    exchange_rate_timestamp?: string | null
     origin?: string
     created_by_name?: string
     status?: string

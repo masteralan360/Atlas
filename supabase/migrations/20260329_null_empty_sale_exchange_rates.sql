@@ -1,3 +1,12 @@
+ALTER TABLE public.sales
+  ALTER COLUMN exchange_source DROP DEFAULT,
+  ALTER COLUMN exchange_source DROP NOT NULL,
+  ALTER COLUMN exchange_rate DROP DEFAULT,
+  ALTER COLUMN exchange_rate DROP NOT NULL,
+  ALTER COLUMN exchange_rate_timestamp DROP DEFAULT,
+  ALTER COLUMN exchange_rate_timestamp DROP NOT NULL,
+  ALTER COLUMN exchange_rates DROP DEFAULT;
+
 CREATE OR REPLACE FUNCTION public.complete_sale(payload jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -163,4 +172,4 @@ BEGIN
         'sequence_id', v_sequence_id
     );
 END;
-$function$
+$function$;

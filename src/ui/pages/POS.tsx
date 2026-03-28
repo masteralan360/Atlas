@@ -1234,6 +1234,8 @@ export function POS() {
         const snapshotRate = exchangeData?.rate || 0
         const snapshotSource = exchangeData?.source || 'none'
         const snapshotTimestamp = new Date().toISOString()
+        const hasExchangeSnapshot = exchangeRatesSnapshot.length > 0
+        const exchangeRatesPayload = hasExchangeSnapshot ? exchangeRatesSnapshot : null
 
         const itemsWithMetadata = cart.map((item) => {
             const product = findStockProduct(item.product_id, item.storageId)
@@ -1281,10 +1283,10 @@ export function POS() {
             items: itemsWithMetadata,
             total_amount: totalAmount,
             settlement_currency: settlementCurrency,
-            exchange_source: exchangeRatesSnapshot.length > 1 ? 'mixed' : snapshotSource,
-            exchange_rate: snapshotRate,
-            exchange_rate_timestamp: snapshotTimestamp,
-            exchange_rates: exchangeRatesSnapshot,
+            exchange_source: hasExchangeSnapshot ? (exchangeRatesSnapshot.length > 1 ? 'mixed' : snapshotSource) : null,
+            exchange_rate: hasExchangeSnapshot ? snapshotRate : null,
+            exchange_rate_timestamp: hasExchangeSnapshot ? snapshotTimestamp : null,
+            exchange_rates: exchangeRatesPayload,
             origin: 'pos',
             payment_method: (paymentType === 'cash'
                 ? 'cash'
@@ -1425,9 +1427,9 @@ export function POS() {
                         cashierId: user.id,
                         totalAmount: totalAmount,
                         settlementCurrency: settlementCurrency,
-                        exchangeSource: snapshotSource,
-                        exchangeRate: snapshotRate,
-                        exchangeRateTimestamp: snapshotTimestamp,
+                        exchangeSource: checkoutPayload.exchange_source,
+                        exchangeRate: checkoutPayload.exchange_rate,
+                        exchangeRateTimestamp: checkoutPayload.exchange_rate_timestamp,
                         exchangeRates: checkoutPayload.exchange_rates,
                         origin: 'pos',
                         payment_method: checkoutPayload.payment_method,

@@ -55,10 +55,17 @@ BEGIN
         auth.uid(),
         total_sale_amount,
         COALESCE(payload->>'settlement_currency', 'usd'),
-        COALESCE(payload->>'exchange_source', 'xeiqd'),
-        COALESCE((payload->>'exchange_rate')::NUMERIC, 0),
-        COALESCE((payload->>'exchange_rate_timestamp')::TIMESTAMPTZ, NOW()),
-        COALESCE((payload->'exchange_rates'), '[]'::jsonb),
+        NULLIF(payload->>'exchange_source', ''),
+        (payload->>'exchange_rate')::NUMERIC,
+        (payload->>'exchange_rate_timestamp')::TIMESTAMPTZ,
+        CASE
+            WHEN jsonb_typeof(payload->'exchange_rates') = 'array' THEN
+                CASE
+                    WHEN jsonb_array_length(payload->'exchange_rates') > 0 THEN payload->'exchange_rates'
+                    ELSE NULL
+                END
+            ELSE NULL
+        END,
         COALESCE(payload->>'origin', 'pos'),
         COALESCE(payload->>'payment_method', 'cash'),
         COALESCE((payload->>'system_verified')::BOOLEAN, true),

@@ -3370,7 +3370,7 @@ export function toUISaleFromTravelAgency(sale: any): any {
         exchange_source: sale.exchangeRateSnapshot?.source || sale.exchange_rate_snapshot?.source || 'Manual (Travel Agency)',
         exchange_rate: sale.exchangeRateSnapshot?.rate || sale.exchange_rate_snapshot?.rate || 1,
         exchange_rate_timestamp: sale.exchangeRateSnapshot?.timestamp || sale.exchange_rate_snapshot?.timestamp || sale.createdAt || sale.created_at || new Date().toISOString(),
-        exchange_rates: [],
+        exchange_rates: null,
         created_at: sale.paidAt || sale.paid_at || sale.saleDate || sale.sale_date || sale.createdAt || sale.created_at,
         updated_at: sale.updatedAt || sale.updated_at,
         origin: 'travel_agency',

@@ -1,3 +1,24 @@
+ALTER TABLE public.sales
+  ALTER COLUMN exchange_source DROP DEFAULT,
+  ALTER COLUMN exchange_source DROP NOT NULL,
+  ALTER COLUMN exchange_rate DROP DEFAULT,
+  ALTER COLUMN exchange_rate DROP NOT NULL,
+  ALTER COLUMN exchange_rate_timestamp DROP DEFAULT,
+  ALTER COLUMN exchange_rate_timestamp DROP NOT NULL,
+  ALTER COLUMN exchange_rates DROP DEFAULT;
+
+UPDATE public.sales
+SET exchange_rates = NULL
+WHERE exchange_rates = 'null'::jsonb
+   OR exchange_rates = '[]'::jsonb;
+
+UPDATE public.sales
+SET
+  exchange_source = NULL,
+  exchange_rate = NULL,
+  exchange_rate_timestamp = NULL
+WHERE exchange_rates IS NULL;
+
 CREATE OR REPLACE FUNCTION public.complete_sale(payload jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -22,7 +43,6 @@ BEGIN
         RAISE EXCEPTION 'User does not belong to a workspace';
     END IF;
 
-    -- Check if POS feature is enabled for this workspace
     SELECT pos INTO v_pos
     FROM public.workspaces
     WHERE id = p_workspace_id;
@@ -163,4 +183,4 @@ BEGIN
         'sequence_id', v_sequence_id
     );
 END;
-$function$
+$function$;
