@@ -9,7 +9,7 @@ import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseA
 
 export function WorkspaceRegistration() {
     const [, setLocation] = useLocation()
-    const { user, refreshUser, signOut, updateUser } = useAuth()
+    const { user, session, refreshUser, signOut, updateUser } = useAuth()
     const { t } = useTranslation()
     const [workspaceCode, setWorkspaceCode] = useState('')
     const [error, setError] = useState('')
@@ -21,11 +21,26 @@ export function WorkspaceRegistration() {
         setIsLoading(true)
 
         try {
-            const { data, error: rpcError } = await runSupabaseAction('workspace.join', () =>
-                supabase.rpc('join_workspace', {
-                    workspace_code_input: workspaceCode.toUpperCase()
-                })
-            )
+            const { data: sessionData } = await supabase.auth.getSession()
+            const accessToken = sessionData.session?.access_token ?? session?.access_token
+
+            if (!accessToken) {
+                throw new Error('Authentication required')
+            }
+
+            const { data, error: rpcError } = await runSupabaseAction(
+                'workspace.join',
+                () => supabase.functions.invoke('workspace-access', {
+                    headers: {
+                        Authorization: `Bearer ${accessToken}`
+                    },
+                    body: {
+                        action: 'join',
+                        workspaceCode: workspaceCode.toUpperCase()
+                    }
+                }),
+                { timeoutMs: 12000, platform: 'all' }
+            ) as any
 
             if (rpcError) {
                 const normalizedRpcError = normalizeSupabaseActionError(rpcError)
@@ -42,7 +57,8 @@ export function WorkspaceRegistration() {
                 updateUser({
                     workspaceId: data.workspace_id,
                     workspaceCode: data.workspace_code,
-                    workspaceName: data.workspace_name
+                    workspaceName: data.workspace_name,
+                    workspaceMode: data.data_mode === 'local' ? 'local' : data.data_mode === 'hybrid' ? 'hybrid' : 'cloud'
                 })
             }
 
@@ -71,7 +87,7 @@ export function WorkspaceRegistration() {
             <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
                 <LanguageSwitcher />
                 <ThemeToggle />
-                <Button variant="ghost" size="icon" onClick={() => signOut()} title={t('auth.signOut')}>
+                <Button variant="ghost" size="icon" allowViewer onClick={() => signOut()} title={t('auth.signOut')}>
                     <LogOut className="h-[1.2rem] w-[1.2rem]" />
                     <span className="sr-only">{t('auth.signOut')}</span>
                 </Button>
@@ -114,7 +130,7 @@ export function WorkspaceRegistration() {
                                                 {t(`auth.roles.${user.role}`)}
                                             </p>
                                         </div>
-                                        <Button variant="ghost" size="icon" onClick={() => signOut()} className="text-muted-foreground hover:text-destructive" title={t('auth.signOut')}>
+                                        <Button variant="ghost" size="icon" allowViewer onClick={() => signOut()} className="text-muted-foreground hover:text-destructive" title={t('auth.signOut')}>
                                             <LogOut className="w-4 h-4" />
                                         </Button>
                                     </div>
@@ -133,6 +149,7 @@ export function WorkspaceRegistration() {
                                             value={workspaceCode}
                                             onChange={(e) => setWorkspaceCode(e.target.value.toUpperCase())}
                                             className="pl-10 uppercase"
+                                            allowViewer
                                             required
                                         />
                                     </div>
@@ -145,7 +162,7 @@ export function WorkspaceRegistration() {
                                     <p className="text-sm text-destructive">{error}</p>
                                 )}
 
-                                <Button type="submit" className="w-full" disabled={isLoading || !workspaceCode}>
+                                <Button type="submit" className="w-full" allowViewer disabled={isLoading || !workspaceCode}>
                                     {isLoading ? (
                                         <>
                                             <Loader2 className="w-4 h-4 animate-spin" />

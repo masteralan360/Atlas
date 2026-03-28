@@ -13,6 +13,7 @@ import { hydrateLocalModeCacheFromSqlite, clearWorkspaceSqliteData } from '@/loc
 import { isMobile } from '@/lib/platform'
 import { connectionManager } from '@/lib/connectionManager'
 import {
+    clearWorkspaceCache,
     readWorkspaceCache,
     writeWorkspaceCache,
     type WorkspaceCacheSnapshot
@@ -390,57 +391,74 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         try {
             const { data, error } = await runSupabaseAction(
                 'workspace.getFeatures',
-                () => supabase.rpc('get_workspace_features').single(),
+                () => supabase.from('workspaces').select('*').eq('id', workspaceId).maybeSingle(),
                 { timeoutMs: 12000, platform: 'all' }
             ) as any
 
-            if (error || !data || data.error) {
-                throw error ?? new Error(data?.error || 'Workspace features fetch returned no data')
+            if (error) {
+                throw error
             }
 
-            const featureData = data as any
+            if (!data) {
+                if (isCurrentWorkspaceRequest(workspaceId, requestId)) {
+                    clearWorkspaceCache(workspaceId)
+                    setFeatures(defaultFeatures)
+                    setWorkspaceName(null)
+                    updateUser({
+                        workspaceId: '',
+                        workspaceCode: '',
+                        workspaceName: undefined,
+                        isConfigured: undefined,
+                        workspaceMode: 'cloud'
+                    })
+                }
+                return
+            }
+
+            const workspaceRow = data as any
+            const currentFeatures = featuresRef.current
             const localThermalPrinting = cachedSnapshot?.features?.thermal_printing
                 ?? (await db.workspaces.get(workspaceId))?.thermal_printing
-                ?? featuresRef.current.thermal_printing
+                ?? currentFeatures.thermal_printing
                 ?? false
             const fetchedFeatures = mergeWorkspaceFeatures({
-                data_mode: featureData.data_mode,
-                pos: featureData.pos ?? true,
-                instant_pos: featureData.instant_pos ?? true,
-                sales_history: featureData.sales_history ?? true,
-                crm: featureData.crm ?? true,
-                travel_agency: featureData.travel_agency ?? true,
-                loans: featureData.loans ?? true,
-                net_revenue: featureData.net_revenue ?? true,
-                budget: featureData.budget ?? true,
-                monthly_comparison: featureData.monthly_comparison ?? true,
-                team_performance: featureData.team_performance ?? true,
-                products: featureData.products ?? true,
-                storages: featureData.storages ?? true,
-                inventory_transfer: featureData.inventory_transfer ?? true,
-                invoices_history: featureData.invoices_history ?? true,
-                hr: featureData.hr ?? true,
-                members: featureData.members ?? true,
-                is_configured: featureData.is_configured ?? true,
-                default_currency: featureData.default_currency,
-                iqd_display_preference: featureData.iqd_display_preference,
-                eur_conversion_enabled: featureData.eur_conversion_enabled,
-                try_conversion_enabled: featureData.try_conversion_enabled,
-                locked_workspace: featureData.locked_workspace,
-                logo_url: featureData.logo_url ?? null,
-                coordination: featureData.coordination ?? null,
-                max_discount_percent: featureData.max_discount_percent ?? 100,
-                allow_whatsapp: featureData.allow_whatsapp,
-                kds_enabled: featureData.kds_enabled ?? false,
-                print_lang: featureData.print_lang,
-                print_qr: featureData.print_qr,
-                receipt_template: featureData.receipt_template,
-                a4_template: featureData.a4_template,
-                print_quality: featureData.print_quality,
+                data_mode: workspaceRow.data_mode ?? currentFeatures.data_mode,
+                pos: workspaceRow.pos ?? currentFeatures.pos,
+                instant_pos: workspaceRow.instant_pos ?? currentFeatures.instant_pos,
+                sales_history: workspaceRow.sales_history ?? currentFeatures.sales_history,
+                crm: workspaceRow.crm ?? currentFeatures.crm,
+                travel_agency: workspaceRow.travel_agency ?? currentFeatures.travel_agency,
+                loans: workspaceRow.loans ?? currentFeatures.loans,
+                net_revenue: workspaceRow.net_revenue ?? currentFeatures.net_revenue,
+                budget: workspaceRow.budget ?? currentFeatures.budget,
+                monthly_comparison: workspaceRow.monthly_comparison ?? currentFeatures.monthly_comparison,
+                team_performance: workspaceRow.team_performance ?? currentFeatures.team_performance,
+                products: workspaceRow.products ?? currentFeatures.products,
+                storages: workspaceRow.storages ?? currentFeatures.storages,
+                inventory_transfer: workspaceRow.inventory_transfer ?? currentFeatures.inventory_transfer,
+                invoices_history: workspaceRow.invoices_history ?? currentFeatures.invoices_history,
+                hr: workspaceRow.hr ?? currentFeatures.hr,
+                members: workspaceRow.members ?? currentFeatures.members,
+                is_configured: workspaceRow.is_configured ?? currentFeatures.is_configured,
+                default_currency: workspaceRow.default_currency ?? currentFeatures.default_currency,
+                iqd_display_preference: workspaceRow.iqd_display_preference ?? currentFeatures.iqd_display_preference,
+                eur_conversion_enabled: workspaceRow.eur_conversion_enabled ?? currentFeatures.eur_conversion_enabled,
+                try_conversion_enabled: workspaceRow.try_conversion_enabled ?? currentFeatures.try_conversion_enabled,
+                locked_workspace: workspaceRow.locked_workspace ?? currentFeatures.locked_workspace,
+                logo_url: workspaceRow.logo_url ?? null,
+                coordination: workspaceRow.coordination ?? null,
+                max_discount_percent: workspaceRow.max_discount_percent ?? currentFeatures.max_discount_percent,
+                allow_whatsapp: workspaceRow.allow_whatsapp ?? currentFeatures.allow_whatsapp,
+                kds_enabled: workspaceRow.kds_enabled ?? false,
+                print_lang: workspaceRow.print_lang ?? currentFeatures.print_lang,
+                print_qr: workspaceRow.print_qr ?? currentFeatures.print_qr,
+                receipt_template: workspaceRow.receipt_template ?? currentFeatures.receipt_template,
+                a4_template: workspaceRow.a4_template ?? currentFeatures.a4_template,
+                print_quality: workspaceRow.print_quality ?? currentFeatures.print_quality,
                 thermal_printing: localThermalPrinting,
-                subscription_expires_at: featureData.subscription_expires_at ?? null
+                subscription_expires_at: workspaceRow.subscription_expires_at ?? null
             })
-            const nextWorkspaceName = featureData.workspace_name || user?.workspaceName || 'My Workspace'
+            const nextWorkspaceName = workspaceRow.name || user?.workspaceName || 'My Workspace'
 
             if (!isCurrentWorkspaceRequest(workspaceId, requestId)) {
                 return
@@ -724,16 +742,32 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (currentMode === newMode) return { error: null }
 
         try {
-            const { error: rpcError } = await runSupabaseAction(
+            const { error: updateError } = await runSupabaseAction(
                 'workspace.switchDataMode',
-                () => supabase.rpc('switch_workspace_data_mode', {
-                    p_new_mode: newMode
-                })
-            )
+                () => supabase
+                    .from('workspaces')
+                    .update({ data_mode: newMode })
+                    .eq('id', workspaceId),
+                { timeoutMs: 12000, platform: 'all' }
+            ) as any
 
-            if (rpcError) {
-                const normalized = normalizeSupabaseActionError(rpcError)
+            if (updateError) {
+                const normalized = normalizeSupabaseActionError(updateError)
                 return { error: normalized.message }
+            }
+
+            const { error: authError } = await runSupabaseAction(
+                'auth.updateWorkspaceMode',
+                () => supabase.auth.updateUser({
+                    data: {
+                        data_mode: newMode
+                    }
+                }),
+                { timeoutMs: 8000, platform: 'all' }
+            ) as any
+
+            if (authError) {
+                console.warn('[Workspace] Failed to persist workspace mode in auth metadata:', authError)
             }
 
             // Update local state

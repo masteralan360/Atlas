@@ -178,13 +178,19 @@ export function WorkspaceConfiguration() {
         setIsLoading(true)
         try {
             const { error } = await runSupabaseAction('workspace.configure', () =>
-                supabase.rpc('configure_workspace', {
-                    p_data_mode: dataMode,
-                    p_pos: features.pos,
-                    p_invoices_history: features.invoices_history,
-                    p_logo_url: logoUrl || null
-                })
-            )
+                supabase
+                    .from('workspaces')
+                    .update({
+                        data_mode: dataMode,
+                        pos: features.pos,
+                        crm: currentFeatures.crm,
+                        invoices_history: features.invoices_history,
+                        logo_url: logoUrl || null,
+                        is_configured: true
+                    })
+                    .eq('id', workspaceId),
+                { timeoutMs: 12000, platform: 'all' }
+            ) as any
 
             if (error) throw normalizeSupabaseActionError(error)
 

@@ -73,7 +73,6 @@ interface AdminWorkspace {
 
 export function Admin() {
     const { user } = useAuth()
-    const canEdit = user?.role === 'admin'
     const [,] = useLocation()
     const { toast } = useToast()
     const { t } = useTranslation()
@@ -94,6 +93,7 @@ export function Admin() {
     const [userToDelete, setUserToDelete] = useState<AdminUser | null>(null)
     const [searchTerm, setSearchTerm] = useState('')
     const [customExpiries, setCustomExpiries] = useState<Record<string, string>>({})
+    const canEdit = isAuthenticated
 
     const showActionError = (err: unknown, fallbackTitle: string) => {
         const normalized = normalizeSupabaseActionError(err)
@@ -113,6 +113,26 @@ export function Admin() {
             description: normalized.message
         })
         return normalized.message
+    }
+
+    const invokeAdminAction = async <T,>(action: string, payload: Record<string, unknown> = {}): Promise<T> => {
+        const { data, error } = await runSupabaseAction(
+            `admin.${action}`,
+            () => supabase.functions.invoke('admin-console', {
+                body: {
+                    action,
+                    passkey,
+                    ...payload
+                }
+            }),
+            { timeoutMs: 15000, platform: 'all' }
+        ) as any
+
+        if (error) {
+            throw normalizeSupabaseActionError(error)
+        }
+
+        return data as T
     }
 
     // Handle session timeout
@@ -136,17 +156,12 @@ export function Admin() {
         setIsLoading(true)
         setError('')
         try {
-            const { data: isValid, error: rpcError } = await runSupabaseAction(
-                'admin.verifyPasskey',
-                () => supabase.rpc('verify_admin_passkey', { provided_key: passkey })
-            )
+            const data = await invokeAdminAction<{ valid: boolean }>('verify')
 
-            if (rpcError) throw normalizeSupabaseActionError(rpcError)
-
-            if (isValid) {
+            if (data?.valid) {
                 setIsAuthenticated(true)
                 setTimeLeft(SESSION_DURATION)
-                fetchData()
+                await fetchData()
             } else {
                 setError('Invalid passkey. Access denied.')
             }
@@ -175,23 +190,14 @@ export function Admin() {
         }
 
         setIsLoading(true)
-        // Fetch both users and workspaces
         try {
-            // 1. Fetch Users
-            const { data: userData, error: userError } = await runSupabaseAction(
-                'admin.getUsers',
-                () => supabase.rpc('get_all_users', { provided_key: passkey })
-            )
-            if (userError) throw normalizeSupabaseActionError(userError)
-            setUsers(userData as AdminUser[])
+            const [userData, wsData] = await Promise.all([
+                invokeAdminAction<AdminUser[]>('listUsers'),
+                invokeAdminAction<AdminWorkspace[]>('listWorkspaces')
+            ])
 
-            // 2. Fetch Workspaces
-            const { data: wsData, error: wsError } = await runSupabaseAction(
-                'admin.getWorkspaces',
-                () => supabase.rpc('get_all_workspaces', { provided_key: passkey })
-            )
-            if (wsError) throw normalizeSupabaseActionError(wsError)
-            setWorkspaces(wsData as AdminWorkspace[])
+            setUsers(userData)
+            setWorkspaces(wsData)
 
         } catch (err: any) {
             console.error('[Admin] fetchData FAILED:', err)
@@ -211,14 +217,12 @@ export function Admin() {
         if (!userToDelete) return
         setIsLoading(true)
         try {
-            const { error } = await runSupabaseAction(
-                'admin.deleteUser',
-                () => supabase.rpc('delete_user_account', { target_user_id: userToDelete.id })
-            )
-            if (error) throw normalizeSupabaseActionError(error)
+            await invokeAdminAction<{ success: boolean }>('deleteUser', {
+                targetUserId: userToDelete.id
+            })
 
             setUsers(users.filter(u => u.id !== userToDelete.id))
-            fetchData()
+            await fetchData()
             setDeleteModalOpen(false)
             setUserToDelete(null)
             toast({ title: "User deleted successfully" })
@@ -251,18 +255,13 @@ export function Admin() {
         }
 
         try {
-            const { error } = await runSupabaseAction('admin.updateWorkspaceFeatures', () =>
-                supabase.rpc('admin_update_workspace_features', {
-                    provided_key: passkey,
-                    target_workspace_id: workspaceId,
-                    new_pos: newValues.pos,
-                    new_crm: newValues.crm,
-                    new_invoices_history: newValues.invoices_history,
-                    new_locked_workspace: newValues.locked_workspace
-                })
-            )
-
-            if (error) throw normalizeSupabaseActionError(error)
+            await invokeAdminAction<{ success: boolean }>('updateWorkspaceFeatures', {
+                workspaceId,
+                pos: newValues.pos,
+                crm: newValues.crm,
+                invoices_history: newValues.invoices_history,
+                locked_workspace: newValues.locked_workspace
+            })
 
             // Success toast optional to avoid spamming, but good for confirmation
             // toast({ title: "Workspace updated" })
@@ -296,21 +295,16 @@ export function Admin() {
                 newExpiry.setMonth(newExpiry.getMonth() + 1)
             }
 
-            const { error } = await runSupabaseAction('admin.updateWorkspaceSubscription', () =>
-                supabase.rpc('admin_update_workspace_subscription', {
-                    provided_key: passkey,
-                    target_workspace_id: workspaceId,
-                    new_expiry: newExpiry.toISOString()
-                })
-            )
-
-            if (error) throw normalizeSupabaseActionError(error)
+            await invokeAdminAction<{ success: boolean }>('updateWorkspaceSubscription', {
+                workspaceId,
+                newExpiry: newExpiry.toISOString()
+            })
 
             toast({
                 title: t('common.success') || "Subscription Updated",
                 description: customDate ? t('admin.expiryUpdated') || "New expiry date set." : t('admin.subscriptionExtended') || "Workspace extended by 1 month."
             })
-            fetchData()
+            await fetchData()
         } catch (err: any) {
             showActionError(err, t('common.error') || 'Update Failed')
         } finally {
@@ -608,7 +602,7 @@ export function Admin() {
                                                         <Switch
                                                             checked={ws.invoices_history}
                                                             onCheckedChange={() => handleToggleWorkspaceFeature(ws.id, 'invoices_history', ws.invoices_history)}
-                                                            disabled={!!ws.deleted_at}
+                                                            disabled={!!ws.deleted_at || !canEdit}
                                                         />
                                                     </div>
                                                 </td>
@@ -617,7 +611,7 @@ export function Admin() {
                                                         <Switch
                                                             checked={ws.locked_workspace}
                                                             onCheckedChange={() => handleToggleWorkspaceFeature(ws.id, 'locked_workspace', ws.locked_workspace)}
-                                                            disabled={!!ws.deleted_at}
+                                                            disabled={!!ws.deleted_at || !canEdit}
                                                         />
                                                     </div>
                                                 </td>

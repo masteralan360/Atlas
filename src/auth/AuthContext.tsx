@@ -9,7 +9,7 @@ import { connectionManager } from '@/lib/connectionManager'
 import { setActiveBusinessWorkspace } from '@/lib/network'
 import { clearWorkspaceCache } from '@/workspace/workspaceCache'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
-import { runSupabaseAction } from '@/lib/supabaseRequest'
+import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { db } from '@/local-db/database'
 import { hydrateLocalModeCacheFromSqlite } from '@/local-db/localModeSqlite'
 import { runDailyBackupIfNeeded } from '@/local-db/sqliteBackup'
@@ -81,53 +81,104 @@ function parseUserFromSupabase(user: User): AuthUser {
     }
 }
 
+function clearPreviousWorkspaceArtifacts(previousWorkspaceId?: string | null, nextWorkspaceId?: string | null) {
+    if (!previousWorkspaceId || previousWorkspaceId === nextWorkspaceId) {
+        return
+    }
+
+    clearWorkspaceCache(previousWorkspaceId)
+    clearWorkspaceModeSnapshot(previousWorkspaceId)
+}
+
+function resetWorkspaceAssignment(user: AuthUser, previousWorkspaceId?: string | null): AuthUser {
+    clearPreviousWorkspaceArtifacts(previousWorkspaceId ?? user.workspaceId, null)
+
+    return {
+        ...user,
+        workspaceId: '',
+        workspaceCode: '',
+        workspaceName: undefined,
+        isConfigured: undefined,
+        workspaceMode: 'cloud'
+    }
+}
+
 // Helper: fetch workspace + profile data for a parsed user
 async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
-    if (!parsedUser.workspaceId) return parsedUser
-
-    type WorkspaceFeatureBootstrap = {
-        error?: string
-        workspace_name?: string
-        is_configured?: boolean
+    type WorkspaceBootstrapRow = {
+        name?: string | null
+        code?: string | null
+        is_configured?: boolean | null
         data_mode?: WorkspaceDataMode | null
     }
 
-    const [featuresResult, profileResult] = await Promise.allSettled([
-        supabase.rpc('get_workspace_features').single(),
-        supabase
-            .from('profiles')
-            .select('profile_url, role')
-            .eq('id', parsedUser.id)
-            .single()
-    ])
+    type ProfileBootstrapRow = {
+        profile_url?: string | null
+        role?: UserRole | null
+        workspace_id?: string | null
+    }
 
-    const featureData = featuresResult.status === 'fulfilled'
-        ? (featuresResult.value.data as WorkspaceFeatureBootstrap | null)
-        : null
+    const originalWorkspaceId = parsedUser.workspaceId || ''
+    let canonicalWorkspaceId = originalWorkspaceId
 
-    const resolvedWorkspaceFeatures = featureData && !featureData.error
-        ? featureData
-        : null
+    try {
+        const { data: profileRow, error: profileError } = await runSupabaseAction(
+            'auth.profileBootstrap',
+            () => supabase
+                .from('profiles')
+                .select('profile_url, role, workspace_id')
+                .eq('id', parsedUser.id)
+                .maybeSingle(),
+            { timeoutMs: 8000, platform: 'all' }
+        ) as { data: ProfileBootstrapRow | null; error?: unknown }
 
-    if (resolvedWorkspaceFeatures) {
-        parsedUser.workspaceName = resolvedWorkspaceFeatures.workspace_name || parsedUser.workspaceName
-        parsedUser.isConfigured = resolvedWorkspaceFeatures.is_configured
-        parsedUser.workspaceMode = resolvedWorkspaceFeatures.data_mode === 'local' ? 'local' : resolvedWorkspaceFeatures.data_mode === 'hybrid' ? 'hybrid' : 'cloud'
-        writeWorkspaceModeSnapshot({
-            workspaceId: parsedUser.workspaceId,
-            dataMode: parsedUser.workspaceMode
-        })
-        if (parsedUser.workspaceMode === 'local' || parsedUser.workspaceMode === 'hybrid') {
-            await hydrateLocalModeCacheFromSqlite(db, parsedUser.workspaceId)
-            void runDailyBackupIfNeeded(parsedUser.workspaceId)
+        if (profileError) {
+            throw profileError
         }
-    } else {
-        const localWorkspace = await db.workspaces.get(parsedUser.workspaceId)
-        if (localWorkspace) {
-            parsedUser.workspaceCode = localWorkspace.code || parsedUser.workspaceCode
-            parsedUser.workspaceName = localWorkspace.name || parsedUser.workspaceName
-            parsedUser.isConfigured = localWorkspace.is_configured
-            parsedUser.workspaceMode = localWorkspace.data_mode === 'local' ? 'local' : localWorkspace.data_mode === 'hybrid' ? 'hybrid' : parsedUser.workspaceMode
+
+        if (profileRow) {
+            if (profileRow.profile_url) {
+                parsedUser.profileUrl = profileRow.profile_url
+            }
+            if (profileRow.role) {
+                parsedUser.role = profileRow.role
+            }
+            canonicalWorkspaceId = profileRow.workspace_id ?? ''
+        }
+    } catch (error) {
+        console.warn('[Auth] Failed to fetch profile bootstrap:', error)
+    }
+
+    if (originalWorkspaceId !== canonicalWorkspaceId) {
+        clearPreviousWorkspaceArtifacts(originalWorkspaceId, canonicalWorkspaceId)
+        parsedUser.workspaceCode = ''
+        parsedUser.workspaceName = undefined
+        parsedUser.isConfigured = undefined
+        parsedUser.workspaceMode = 'cloud'
+    }
+
+    if (!canonicalWorkspaceId) {
+        return resetWorkspaceAssignment(parsedUser, originalWorkspaceId)
+    }
+
+    parsedUser.workspaceId = canonicalWorkspaceId
+
+    try {
+        const { data: workspaceRow, error: workspaceError } = await runSupabaseAction(
+            'auth.workspaceBootstrap',
+            () => supabase.from('workspaces').select('*').eq('id', parsedUser.workspaceId).maybeSingle(),
+            { timeoutMs: 8000, platform: 'all' }
+        ) as { data: WorkspaceBootstrapRow | null; error?: unknown }
+
+        if (workspaceError) {
+            throw workspaceError
+        }
+
+        if (workspaceRow) {
+            parsedUser.workspaceName = workspaceRow.name || parsedUser.workspaceName
+            parsedUser.workspaceCode = workspaceRow.code || parsedUser.workspaceCode
+            parsedUser.isConfigured = workspaceRow.is_configured ?? parsedUser.isConfigured
+            parsedUser.workspaceMode = workspaceRow.data_mode === 'local' ? 'local' : workspaceRow.data_mode === 'hybrid' ? 'hybrid' : 'cloud'
             writeWorkspaceModeSnapshot({
                 workspaceId: parsedUser.workspaceId,
                 dataMode: parsedUser.workspaceMode
@@ -136,15 +187,25 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
                 await hydrateLocalModeCacheFromSqlite(db, parsedUser.workspaceId)
                 void runDailyBackupIfNeeded(parsedUser.workspaceId)
             }
+            return parsedUser
         }
+    } catch (error) {
+        console.warn('[Auth] Failed to fetch workspace bootstrap:', error)
     }
 
-    if (profileResult.status === 'fulfilled' && profileResult.value.data) {
-        if (profileResult.value.data.profile_url) {
-            parsedUser.profileUrl = profileResult.value.data.profile_url
-        }
-        if (profileResult.value.data.role) {
-            parsedUser.role = profileResult.value.data.role as UserRole
+    const localWorkspace = await db.workspaces.get(parsedUser.workspaceId)
+    if (localWorkspace) {
+        parsedUser.workspaceCode = localWorkspace.code || parsedUser.workspaceCode
+        parsedUser.workspaceName = localWorkspace.name || parsedUser.workspaceName
+        parsedUser.isConfigured = localWorkspace.is_configured
+        parsedUser.workspaceMode = localWorkspace.data_mode === 'local' ? 'local' : localWorkspace.data_mode === 'hybrid' ? 'hybrid' : parsedUser.workspaceMode
+        writeWorkspaceModeSnapshot({
+            workspaceId: parsedUser.workspaceId,
+            dataMode: parsedUser.workspaceMode
+        })
+        if (parsedUser.workspaceMode === 'local' || parsedUser.workspaceMode === 'hybrid') {
+            await hydrateLocalModeCacheFromSqlite(db, parsedUser.workspaceId)
+            void runDailyBackupIfNeeded(parsedUser.workspaceId)
         }
     }
 
@@ -231,34 +292,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const parsedUser = session?.user ? parseUserFromSupabase(session.user) : null
 
             if (!parsedUser) {
-                clearWorkspaceModeSnapshot(user?.workspaceId)
+                clearWorkspaceCache()
+                clearWorkspaceModeSnapshot()
                 setUser(null)
                 clearRecovery()
                 setIsLoading(false)
                 return
             }
 
-            if (parsedUser.workspaceId) {
-                const enriched = await enrichUser(parsedUser)
+            const enriched = await enrichUser(parsedUser)
 
-                if (!isMounted || taskId !== authStateTaskRef.current) return
+            if (!isMounted || taskId !== authStateTaskRef.current) return
 
-                // Final verify to ensure we haven't logged out during enrichment
-                const { data: { session: currentSession } } = await runSupabaseAction(
-                    'auth.verifyStateChangeSession',
-                    () => supabase.auth.getSession(),
-                    { timeoutMs: 5000, platform: 'all' }
-                ) as any
+            // Final verify to ensure we haven't logged out during enrichment
+            const { data: { session: currentSession } } = await runSupabaseAction(
+                'auth.verifyStateChangeSession',
+                () => supabase.auth.getSession(),
+                { timeoutMs: 5000, platform: 'all' }
+            ) as any
 
-                if (!isMounted || taskId !== authStateTaskRef.current) return
+            if (!isMounted || taskId !== authStateTaskRef.current) return
 
-                if (currentSession?.user?.id === parsedUser.id) {
-                    setUser({ ...enriched })
-                    saveRecovery(enriched)
-                }
-            } else {
-                setUser(parsedUser)
-                saveRecovery(parsedUser)
+            if (currentSession?.user?.id === parsedUser.id) {
+                setUser({ ...enriched })
+                saveRecovery(enriched)
             }
 
             if (!isMounted || taskId !== authStateTaskRef.current) return
@@ -503,23 +560,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (role === 'admin') {
                 if (!workspaceName) throw new Error('Workspace name is required for Admins')
 
-                const { data: wsData, error: wsError } = await supabase.rpc('create_workspace', {
-                    w_name: workspaceName
-                })
-                if (wsError) throw wsError
+                const { data: wsData, error: wsError } = await runSupabaseAction(
+                    'auth.createWorkspace',
+                    () => supabase.functions.invoke('workspace-access', {
+                        body: {
+                            action: 'create',
+                            workspaceName,
+                            passkey
+                        }
+                    }),
+                    { timeoutMs: 12000, platform: 'all' }
+                ) as any
 
-                workspaceId = wsData?.id || (Array.isArray(wsData) ? wsData[0]?.id : (wsData?.create_workspace?.id || ''))
-                resolvedWorkspaceName = wsData?.name || (Array.isArray(wsData) ? wsData[0]?.name : (wsData?.create_workspace?.name || workspaceName))
+                if (wsError || !wsData?.id) {
+                    throw normalizeSupabaseActionError(wsError ?? new Error('Workspace creation failed'))
+                }
 
+                workspaceId = wsData.id
+                workspaceCode = wsData.code || workspaceCode
+                resolvedWorkspaceName = wsData.name || workspaceName
 
             } else {
                 if (!workspaceCode) throw new Error('Workspace code is required to join')
 
-                const { data: wsData, error: wsError } = await supabase
-                    .from('workspaces')
-                    .select('id, name')
-                    .eq('code', workspaceCode.toUpperCase())
-                    .single()
+                const { data: wsData, error: wsError } = await runSupabaseAction(
+                    'auth.lookupWorkspaceByCode',
+                    () => supabase.rpc('lookup_workspace_by_code', { p_code: workspaceCode }).maybeSingle(),
+                    { timeoutMs: 8000, platform: 'all' }
+                ) as any
 
                 if (wsError || !wsData) throw new Error('Invalid workspace code')
 
@@ -527,11 +595,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 resolvedWorkspaceName = wsData.name
             }
 
-            let resolvedWorkspaceCode = workspaceCode
-            if (role === 'admin' && !resolvedWorkspaceCode) {
-                const { data: wsData } = await supabase.from('workspaces').select('code').eq('id', workspaceId).single()
-                if (wsData) resolvedWorkspaceCode = wsData.code
-            }
+            const resolvedWorkspaceCode = workspaceCode
 
             const { error } = await supabase.auth.signUp({
                 email,
@@ -619,13 +683,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const parsedUser = parseUserFromSupabase(session.user)
             const enriched = await enrichUser(parsedUser)
             setUser(enriched)
+            saveRecovery(enriched)
         }
     }
 
     const updateUser = (updates: Partial<AuthUser>) => {
         if (!user) return
         const nextUser = { ...user, ...updates }
+
+        if (!nextUser.workspaceId) {
+            const resetUser = resetWorkspaceAssignment(nextUser, user.workspaceId)
+            setUser(resetUser)
+            saveRecovery(resetUser)
+            return
+        }
+
+        clearPreviousWorkspaceArtifacts(user.workspaceId, nextUser.workspaceId)
         setUser(nextUser)
+        saveRecovery(nextUser)
 
         if (nextUser.workspaceId) {
             writeWorkspaceModeSnapshot({

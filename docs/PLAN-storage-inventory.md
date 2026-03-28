@@ -21,7 +21,7 @@
 ## Phase 2: Seed & Backend
 - migration to create table.
 - Seed "Main" and "Reserve" for existing workspaces.
-- Update `get_workspace_features` or similar RPCs if needed.
+- Update direct `workspaces` reads if additional workspace feature flags are needed.
 
 ## Phase 3: UI - Storage Management
 - **Page**: `/settings/storages` or similar.

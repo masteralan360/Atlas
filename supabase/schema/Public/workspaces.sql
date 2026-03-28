@@ -29,7 +29,7 @@ CREATE TABLE public.workspaces (
   print_quality text NULL DEFAULT 'low'::text,
   coordination text NULL,
   kds_enabled boolean NOT NULL DEFAULT false,
-  CONSTRAINT workspaces_data_mode_check CHECK (data_mode = ANY (ARRAY['cloud'::text, 'local'::text])),
+  CONSTRAINT workspaces_data_mode_check CHECK ((data_mode::text) = ANY (ARRAY['cloud'::text, 'local'::text, 'hybrid'::text])),
   PRIMARY KEY (id)
 );
 
@@ -39,7 +39,9 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
   IF NEW.data_mode IS DISTINCT FROM OLD.data_mode AND COALESCE(OLD.is_configured, false) THEN
-    RAISE EXCEPTION 'Workspace mode cannot be changed after initial configuration';
+    IF COALESCE(OLD.data_mode::text, 'cloud') = 'local' OR COALESCE(NEW.data_mode::text, 'cloud') = 'local' THEN
+      RAISE EXCEPTION 'Workspace mode cannot enter or leave local mode after initial configuration';
+    END IF;
   END IF;
 
   RETURN NEW;

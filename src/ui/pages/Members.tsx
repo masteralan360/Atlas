@@ -47,7 +47,7 @@ const roleColors: Record<string, string> = {
 }
 
 export function Members() {
-    const { user } = useAuth()
+    const { user, session } = useAuth()
     const { t } = useTranslation()
     const [members, setMembers] = useState<Member[]>([])
     const [isLoading, setIsLoading] = useState(true)
@@ -97,11 +97,26 @@ export function Members() {
         setError(null)
 
         try {
-            const { error } = await runSupabaseAction('members.kick', () =>
-                supabase.rpc('kick_member', {
-                    target_user_id: memberToKick.id
-                })
-            )
+            const { data: sessionData } = await supabase.auth.getSession()
+            const accessToken = sessionData.session?.access_token ?? session?.access_token
+
+            if (!accessToken) {
+                throw new Error('Authentication required')
+            }
+
+            const { error } = await runSupabaseAction(
+                'members.kick',
+                () => supabase.functions.invoke('workspace-access', {
+                    headers: {
+                        Authorization: `Bearer ${accessToken}`
+                    },
+                    body: {
+                        action: 'kick',
+                        targetUserId: memberToKick.id
+                    }
+                }),
+                { timeoutMs: 12000, platform: 'all' }
+            ) as any
 
             if (error) throw normalizeSupabaseActionError(error)
 
