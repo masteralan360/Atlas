@@ -36,7 +36,6 @@ import {
 import { supabase, isSupabaseConfigured } from '@/auth/supabase'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
-import { useAuth } from '@/auth'
 import { formatDate } from '@/lib/utils'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { r2Service } from '@/services/r2Service'
@@ -72,7 +71,6 @@ interface AdminWorkspace {
 }
 
 export function Admin() {
-    const { user } = useAuth()
     const [,] = useLocation()
     const { toast } = useToast()
     const { t } = useTranslation()
