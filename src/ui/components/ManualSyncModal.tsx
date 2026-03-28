@@ -10,10 +10,10 @@ import {
 import { Button } from '@/ui/components/button'
 import { Loader2, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { useAuth } from '@/auth/AuthContext'
-import { fullSync } from '@/sync/syncEngine'
 import { useToast } from '@/ui/components/use-toast'
 import { usePendingSyncCount, clearOfflineMutations } from '@/local-db/hooks'
 import { useTranslation } from 'react-i18next'
+import { runManagedFullSync } from '@/sync/syncCoordinator'
 
 interface ManualSyncModalProps {
     open: boolean
@@ -40,7 +40,7 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete }: ManualSy
         setErrorMessage(null)
 
         try {
-            const result = await fullSync(user.id, user.workspaceId, null)
+            const result = await runManagedFullSync(user.id, user.workspaceId, null)
 
             if (result.success) {
                 setStatus('success')

@@ -4,12 +4,12 @@ import { db } from '@/local-db/database'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { useAuth } from '@/auth/AuthContext'
 import { useWorkspace } from '@/workspace'
-import { fullSync, type SyncState } from './syncEngine'
+import { type SyncState } from './syncEngine'
 import { isSupabaseConfigured } from '@/auth/supabase'
 import { connectionManager } from '@/lib/connectionManager'
 import { toast } from '@/ui/components/use-toast'
-
-const LAST_SYNC_KEY = 'atlas_last_sync_time'
+import { LAST_SYNC_KEY } from './constants'
+import { runManagedFullSync } from './syncCoordinator'
 
 export interface UseSyncStatusResult {
     syncState: SyncState
@@ -67,7 +67,7 @@ export function useSyncStatus(): UseSyncStatusResult {
 
         try {
             console.log('[SyncHook] Starting sync execution...')
-            const result = await fullSync(user.id, user.workspaceId, lastSyncTimeRef.current)
+            const result = await runManagedFullSync(user.id, user.workspaceId, lastSyncTimeRef.current)
             console.log('[SyncHook] Sync finished with result:', result)
 
             const now = new Date().toISOString()

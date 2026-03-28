@@ -24,7 +24,8 @@ Implemented on 2026-03-28:
 Implemented on 2026-03-29:
 
 - cleanup migration drops the abandoned workspace/admin RPCs and low-value workspace access wrappers
-- only the intentionally kept SQL RPCs remain: `lookup_workspace_by_code`, `complete_sale`, `delete_sale`, `return_sale_items`, and `return_whole_sale`
+- sales history deletion was removed; finalized sales now stay immutable and use return flows only
+- only the intentionally kept SQL RPCs remain: `lookup_workspace_by_code`, `complete_sale`, `return_sale_items`, and `return_whole_sale`
 
 ## Hard Prerequisite
 
@@ -94,7 +95,6 @@ These functions are not fundamentally wrong, but they do not need to remain as d
 | --- | --- | --- | --- |
 | `get_workspace_features` | Replace after RLS | Mostly a convenience wrapper around current workspace settings. | Replace with direct `workspaces` reads or a security-invoker view. |
 | `configure_workspace` | Replace after RLS | Single-workspace setup update can be enforced by RLS plus existing DB constraints/triggers. | Keep mode-switch protection in the trigger, not in the client. |
-| `delete_sale` | Replace after RLS | This is a simple authorized delete, not a complex transaction. | Consider whether this should become soft-delete instead of hard-delete. |
 | `check_feature_enabled` | Replace after RLS | Can be replaced with a direct read of the workspace feature flags already loaded by the app. | Low value as a standalone function. |
 | `check_workspace_access` | Replace after RLS | Can be replaced with a direct read of the target workspace status. | Merge with normal workspace reads if still needed. |
 | `is_workspace_active` | Replace after RLS | Overlaps heavily with `check_workspace_access`. | Keep one concept only if still needed. |

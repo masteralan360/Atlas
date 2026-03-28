@@ -66,10 +66,6 @@ These still run through `supabase.rpc()` because they are transactional or inten
 
 - use: atomic sale creation plus inventory deduction
 
-### `delete_sale`
-
-- use: admin-only server-side sale deletion path
-
 ### `return_sale_items`
 
 - use: partial or full item returns with inventory restoration

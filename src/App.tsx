@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next'
 import { useWorkspace } from '@/workspace'
 import { ExchangeRateProvider } from '@/context/ExchangeRateContext'
 import { DateRangeProvider } from '@/context/DateRangeContext'
+import { AutoSyncOverlay } from '@/ui/components/AutoSyncOverlay'
 import { isBackendConfigurationRequired, isSupabaseConfigured } from '@/auth/supabase'
 import { isMobile, isDesktop } from './lib/platform'
 import { useFavicon } from '@/hooks/useFavicon'
@@ -464,6 +465,7 @@ function App() {
                     <KdsStreamAutostart />
                     <UpdateHandler />
                     <FaviconHandler />
+                    <AutoSyncOverlay />
                     {(!isMobile()) && <TitleBar />}
                     {isTauri && isBackendConfigurationRequired && !isSupabaseConfigured ? (
                         <Suspense fallback={<LoadingState />}>

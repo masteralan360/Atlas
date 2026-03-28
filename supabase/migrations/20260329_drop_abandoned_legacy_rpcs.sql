@@ -2,7 +2,7 @@
 -- direct table access and Edge Functions.
 --
 -- Intentionally kept SQL functions such as lookup_workspace_by_code,
--- complete_sale, delete_sale, return_sale_items, and return_whole_sale
+-- complete_sale, return_sale_items, and return_whole_sale
 -- are not touched here.
 
 DROP FUNCTION IF EXISTS public.admin_update_workspace_features(text, uuid, boolean, boolean, boolean, boolean);

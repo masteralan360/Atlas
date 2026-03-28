@@ -90,21 +90,42 @@ export async function processMutationQueue(_userId: string): Promise<{ success: 
 
             if (operation === 'create' || operation === 'update') {
                 if (entityType === 'sales') {
-                    const { data: serverResult, error } = await supabase.rpc('complete_sale', { payload: dbPayload })
-                    if (error) throw error
+                    const rpcAction = typeof dbPayload.__rpc_action === 'string' ? String(dbPayload.__rpc_action) : null
+                    delete dbPayload.__rpc_action
 
-                    // Capture sequence_id and update local records
-                    const result = serverResult as any
-                    if (result?.sequence_id) {
-                        const sequenceId = result.sequence_id
-                        const formattedInvoiceId = `#${String(sequenceId).padStart(5, '0')}`
+                    if (operation === 'create') {
+                        const { data: serverResult, error } = await supabase.rpc('complete_sale', { payload: dbPayload })
+                        if (error) throw error
 
-                        // Update both sales and invoices tables locally
-                        await db.sales.update(entityId, { sequenceId })
-                        await db.invoices.update(entityId, {
-                            sequenceId,
-                            invoiceid: formattedInvoiceId
+                        // Capture sequence_id and update local records
+                        const result = serverResult as any
+                        if (result?.sequence_id) {
+                            const sequenceId = result.sequence_id
+                            const formattedInvoiceId = `#${String(sequenceId).padStart(5, '0')}`
+
+                            // Update both sales and invoices tables locally
+                            await db.sales.update(entityId, { sequenceId })
+                            await db.invoices.update(entityId, {
+                                sequenceId,
+                                invoiceid: formattedInvoiceId
+                            })
+                        }
+                    } else if (rpcAction === 'return_sale_items') {
+                        const { error } = await supabase.rpc('return_sale_items', {
+                            p_sale_item_ids: dbPayload.p_sale_item_ids,
+                            p_return_quantities: dbPayload.p_return_quantities,
+                            p_return_reason: dbPayload.p_return_reason
                         })
+                        if (error) throw error
+                    } else if (rpcAction === 'return_whole_sale') {
+                        const { error } = await supabase.rpc('return_whole_sale', {
+                            p_sale_id: dbPayload.p_sale_id,
+                            p_return_reason: dbPayload.p_return_reason
+                        })
+                        if (error) throw error
+                    } else {
+                        const { error } = await client.from(tableName).update(dbPayload).eq('id', entityId)
+                        if (error) throw error
                     }
                 } else if (entityType === 'workspaces') {
                     // Remove workspace_id from payload for workspace table update itself
@@ -269,7 +290,9 @@ export async function pullChanges(workspaceId: string, lastSyncTime: string | nu
             // console.log(`[Sync] pullChanges: Fetching ${table}...`)
             const { data, error } = (await withTimeout(
                 table === 'workspaces'
-                    ? client.from(table).select('*').eq('id', workspaceId).gt('updated_at', since)
+                    // Workspaces syncs a single current row, and some live schemas still do not
+                    // expose updated_at on this table. Pull it directly instead of filtering by timestamp.
+                    ? client.from(table).select('*').eq('id', workspaceId)
                     : client.from(table).select('*').eq('workspace_id', workspaceId).gt('updated_at', since) as any,
                 30000
             )) as any

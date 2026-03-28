@@ -1217,8 +1217,6 @@
                 "other": "أخرى"
             }
         },
-        "confirmDelete": "حذف البيع",
-        "deleteWarning": "سيؤدي حذف هذا البيع إلى إزالة السجل بشكل دائم وإعادة العناصر إلى المخزون. لا يمكن التراجع عن هذا.",
         "multiCurrencyTransaction": "معاملة متعددة العملات",
         "marketRatesSnapshot": "لقطة لأسعار السوق",
         "ratesLockedAt": "تم قفل الأسعار في",

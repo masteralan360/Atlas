@@ -39,7 +39,6 @@ import {
     SelectTrigger,
     SelectValue,
     PrintSelectionModal,
-    DeleteConfirmationModal,
     PrintPreviewModal,
     SalesNoteModal,
     ExportPreviewModal,
@@ -57,7 +56,6 @@ import {
     Receipt,
     Eye,
     Loader2,
-    Trash2,
     Printer,
     RotateCcw,
     Filter,
@@ -137,8 +135,6 @@ export function Sales() {
     const [selectedCashier, setSelectedCashier] = useState<string>(() => {
         return localStorage.getItem('sales_selected_cashier') || 'all'
     })
-    const [deleteModalOpen, setDeleteModalOpen] = useState(false)
-    const [saleToDelete, setSaleToDelete] = useState<Sale | null>(null)
     const [currentPage, setCurrentPage] = useState(1)
     const pageSize = 20
 
@@ -442,48 +438,6 @@ export function Sales() {
         setA4Variant('standard')
     }
 
-    const handleDeleteSale = (sale: Sale) => {
-        setSaleToDelete(sale)
-        setDeleteModalOpen(true)
-    }
-
-    const confirmDeleteSale = async () => {
-        if (!saleToDelete) return
-        try {
-            if (!isLocalMode) {
-                const { error } = await runSupabaseAction('sales.delete', () =>
-                    supabase.rpc('delete_sale', { p_sale_id: saleToDelete.id })
-                )
-                if (error) throw normalizeSupabaseActionError(error)
-            }
-
-            // Update local-db immediately for instant UI feedback
-            await db.sales.delete(saleToDelete.id)
-            await db.sale_items.where('saleId').equals(saleToDelete.id).delete()
-
-            if (selectedSale?.id === saleToDelete.id) setSelectedSale(null)
-            setDeleteModalOpen(false)
-            setSaleToDelete(null)
-        } catch (err: any) {
-            console.error('Error deleting sale:', err)
-            const normalized = normalizeSupabaseActionError(err)
-            if (isRetriableWebRequestError(normalized)) {
-                const message = getRetriableActionToast(normalized)
-                toast({
-                    title: message.title,
-                    description: message.description,
-                    variant: 'destructive'
-                })
-            } else {
-                toast({
-                    title: t('common.error') || 'Error',
-                    description: `Failed to delete sale: ${normalized.message || 'Unknown error'}`,
-                    variant: 'destructive'
-                })
-            }
-        }
-    }
-
     const [isWholeSaleReturn, setIsWholeSaleReturn] = useState(false)
 
     const finalizeReturn = (sale: Sale, items: SaleItem[], isWholeSale: boolean, isPartial: boolean = false) => {
@@ -577,8 +531,23 @@ export function Sales() {
             let error
             const isPartialReturn = (saleToReturn as any)._isPartialReturn
             const isIndividualItemReturn = saleToReturn?.items?.length === 1 && !(saleToReturn as any)._isWholeSaleReturn && !isPartialReturn
+            const isCurrentlyOnline = typeof navigator === 'undefined' ? true : navigator.onLine
+            const shouldQueueOfflineReturn = !isLocalMode && !isCurrentlyOnline
 
-            if (isLocalMode) {
+            const queueOfflineReturnMutation = async (payload: Record<string, unknown>) => {
+                await db.offline_mutations.add({
+                    id: crypto.randomUUID(),
+                    workspaceId: activeWorkspace?.id || saleToReturn.workspace_id,
+                    entityType: 'sales',
+                    entityId: saleToReturn.id,
+                    operation: 'update',
+                    payload,
+                    status: 'pending',
+                    createdAt: new Date().toISOString()
+                })
+            }
+
+            if (isLocalMode || shouldQueueOfflineReturn) {
                 if (isIndividualItemReturn || isPartialReturn) {
                     const itemsToReturn = saleToReturn.items || []
                     if (itemsToReturn.length === 0) return
@@ -623,6 +592,11 @@ export function Sales() {
                             ; (existingLocal as any)._enrichedItems = updatedSale.items
                             ; (existingLocal as any).totalAmount = updatedSale.total_amount
                             ; (existingLocal as any).isReturned = updatedSale.is_returned
+                        ; (existingLocal as any).updatedAt = new Date().toISOString()
+                        if (shouldQueueOfflineReturn) {
+                            ; (existingLocal as any).syncStatus = 'pending'
+                            ; (existingLocal as any).lastSyncedAt = null
+                        }
                         await db.sales.put(existingLocal)
                     }
                     await Promise.all(itemsToReturn.map((item, index) => {
@@ -633,6 +607,18 @@ export function Sales() {
                     }))
                     if (selectedSale?.id === saleToReturn.id) {
                         setSelectedSale(updateSale(selectedSale))
+                    }
+                    if (shouldQueueOfflineReturn) {
+                        await queueOfflineReturnMutation({
+                            __rpc_action: 'return_sale_items',
+                            p_sale_item_ids: itemIds,
+                            p_return_quantities: quantities,
+                            p_return_reason: reason
+                        })
+                        toast({
+                            title: t('sales.return.confirmTitle') || 'Return Sale',
+                            description: t('pos.offlineDesc') || 'Sale saved locally and will sync when online.',
+                        })
                     }
                 } else {
                     const updateSale = (s: Sale) => {
@@ -659,6 +645,7 @@ export function Sales() {
                             ; (existingLocal as any).totalAmount = 0
                             ; (existingLocal as any).returnReason = reason
                             ; (existingLocal as any).returnedAt = new Date().toISOString()
+                            ; (existingLocal as any).updatedAt = new Date().toISOString()
                         const updatedItems = ((existingLocal as any)._enrichedItems || []).map((i: any) => ({
                             ...i,
                             is_returned: true,
@@ -667,6 +654,10 @@ export function Sales() {
                             returned_at: new Date().toISOString()
                         }))
                             ; (existingLocal as any)._enrichedItems = updatedItems
+                        if (shouldQueueOfflineReturn) {
+                            ; (existingLocal as any).syncStatus = 'pending'
+                            ; (existingLocal as any).lastSyncedAt = null
+                        }
                         await db.sales.put(existingLocal)
                     }
                     if (selectedSale?.id === saleToReturn.id) {
@@ -677,6 +668,17 @@ export function Sales() {
                             returnedQuantity: item.quantity
                         } as any)
                     ))
+                    if (shouldQueueOfflineReturn) {
+                        await queueOfflineReturnMutation({
+                            __rpc_action: 'return_whole_sale',
+                            p_sale_id: saleToReturn.id,
+                            p_return_reason: reason
+                        })
+                        toast({
+                            title: t('sales.return.confirmTitle') || 'Return Sale',
+                            description: t('pos.offlineDesc') || 'Sale saved locally and will sync when online.',
+                        })
+                    }
                 }
 
                 setReturnModalOpen(false)
@@ -1296,19 +1298,6 @@ export function Sales() {
                                                             <RotateCcw className="w-4 h-4" />
                                                         </Button>
                                                     )}
-                                                    {user?.role === 'admin' && sale.origin !== 'sales_order' && sale.origin !== 'travel_agency' && (
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            className={cn(
-                                                                "h-10 w-10 text-destructive hover:bg-destructive/5",
-                                                                style === 'neo-orange' ? "rounded-[var(--radius)] border-2 border-destructive shadow-[2px_2px_0px_0px_rgba(0,0,0,0.2)]" : "rounded-xl"
-                                                            )}
-                                                            onClick={() => handleDeleteSale(sale)}
-                                                        >
-                                                            <Trash2 className="w-4 h-4" />
-                                                        </Button>
-                                                    )}
                                                 </div>
                                             </div>
                                         </div>
@@ -1496,16 +1485,6 @@ export function Sales() {
                                                                     <RotateCcw className="w-4 h-4" />
                                                                 </Button>
                                                             )}
-                                                            {user?.role === 'admin' && (
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                                                    onClick={() => handleDeleteSale(sale)}
-                                                                >
-                                                                    <Trash2 className="w-4 h-4" />
-                                                                </Button>
-                                                            )}
                                                         </>
                                                     )}
                                                     {/* Return badge moved to date cell */}
@@ -1598,19 +1577,6 @@ export function Sales() {
                     onClose={() => setShowPrintModal(false)}
                     onSelect={handlePrintSelection}
                     a4Variant={saleToPrintSelection && saleHasAnyReturnActivity(saleToPrintSelection) ? 'refund' : 'standard'}
-                />
-
-                <DeleteConfirmationModal
-                    isOpen={deleteModalOpen}
-                    onClose={() => {
-                        setDeleteModalOpen(false)
-                        setSaleToDelete(null)
-                    }}
-                    onConfirm={confirmDeleteSale}
-                    itemName={saleToDelete ? (saleToDelete.sequenceId ? `#${String(saleToDelete.sequenceId).padStart(5, '0')}` : `#${saleToDelete.id.slice(0, 8)}`) : ''}
-                    isLoading={isLoading}
-                    title={t('sales.confirmDelete')}
-                    description={t('sales.deleteWarning')}
                 />
 
                 {/* Print Preview Modal */}
