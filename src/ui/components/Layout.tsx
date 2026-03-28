@@ -58,7 +58,8 @@ import {
     Truck,
     Plane,
     Calculator,
-    Wallet
+    Wallet,
+    LayoutGrid
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from './button'
@@ -90,6 +91,7 @@ const routePrefetchMap: Record<string, () => Promise<unknown>> = {
     '/ledger': () => import('@/ui/pages/Ledger'),
     '/payments': () => import('@/ui/pages/Payments'),
     '/direct-transactions': () => import('@/ui/pages/DirectTransactions'),
+    '/modules': () => import('@/ui/pages/ModuleLauncher'),
     '/loans': () => import('@/ui/pages/Loans'),
     '/installments': () => import('@/ui/pages/Loans'),
     '/revenue': () => import('@/ui/pages/Revenue'),
@@ -316,6 +318,7 @@ export function Layout({ children }: LayoutProps) {
     const inventoryTransferAutomationLabel = t('inventoryTransfer.tabs.automation', 'Reorder Automation')
 
     const isPosLikeRoute = location === '/pos' || location === '/instant-pos'
+    const isModuleLauncherRoute = location === '/modules'
 
     const openInventoryTransferAutomationTab = (event: { preventDefault: () => void; stopPropagation: () => void }) => {
         event.preventDefault()
@@ -821,6 +824,36 @@ export function Layout({ children }: LayoutProps) {
                             </div>
 
                             <div className="flex items-center gap-1.5 md:gap-3 ml-auto">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (location !== '/modules') {
+                                            setLocation('/modules')
+                                        }
+                                        triggerHaptic('selection')
+                                    }}
+                                    onMouseEnter={() => !isMobile() && prefetchRoute('/modules')}
+                                    className={cn(
+                                        "relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border transition-all duration-300",
+                                        isModuleLauncherRoute
+                                            ? "border-primary/30 bg-primary/10 shadow-[0_16px_36px_rgba(79,70,229,0.18)]"
+                                            : "border-border/60 bg-background/75 hover:-translate-y-0.5 hover:border-primary/20 hover:bg-primary/5 hover:shadow-[0_14px_30px_rgba(15,23,42,0.08)]"
+                                    )}
+                                    title={t('nav.modulesLauncher', { defaultValue: 'Open module launcher' })}
+                                    aria-label={t('nav.modulesLauncher', { defaultValue: 'Open module launcher' })}
+                                >
+                                    <div className={cn(
+                                        "absolute inset-[1px] rounded-[calc(1rem-1px)] bg-gradient-to-br transition-opacity duration-300",
+                                        isModuleLauncherRoute
+                                            ? "from-primary/18 via-primary/8 to-transparent opacity-100"
+                                            : "from-emerald-500/14 via-sky-500/8 to-transparent opacity-80"
+                                    )} />
+                                    <ThemeAwareLogo className="relative z-10 h-6 w-6" />
+                                    <LayoutGrid className={cn(
+                                        "absolute bottom-1.5 right-1.5 h-3.5 w-3.5 rounded-md bg-background/80 p-[2px] text-muted-foreground shadow-sm",
+                                        isModuleLauncherRoute && "text-primary"
+                                    )} />
+                                </button>
                                 {isTauri && location === '/whatsapp' && (
                                     <Button
                                         variant="outline"

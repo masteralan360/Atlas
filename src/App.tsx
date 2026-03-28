@@ -73,6 +73,7 @@ const Finance = lazy(() => import('@/ui/pages/Finance').then(m => ({ default: m.
 const Ledger = lazy(() => import('@/ui/pages/Ledger').then(m => ({ default: m.Ledger })))
 const Payments = lazy(() => import('@/ui/pages/Payments').then(m => ({ default: m.Payments })))
 const DirectTransactions = lazy(() => import('@/ui/pages/DirectTransactions').then(m => ({ default: m.DirectTransactions })))
+const ModuleLauncher = lazy(() => import('@/ui/pages/ModuleLauncher').then(m => ({ default: m.ModuleLauncher })))
 
 function LoadingState() {
     const [isSlow, setIsSlow] = useState(false)
@@ -652,6 +653,13 @@ function App() {
                                                 <ProtectedRoute allowedRoles={['admin', 'staff', 'viewer']}>
                                                     <Layout>
                                                         <DirectTransactions />
+                                                    </Layout>
+                                                </ProtectedRoute>
+                                            </Route>
+                                            <Route path="/modules">
+                                                <ProtectedRoute>
+                                                    <Layout>
+                                                        <ModuleLauncher />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
