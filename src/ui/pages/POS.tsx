@@ -1266,19 +1266,6 @@ export function POS() {
             }
         })
 
-        // Run local verification immediately (offline-safe)
-        const verificationSale = createVerificationSale(
-            totalAmount,
-            settlementCurrency,
-            hasExchangeSnapshot ? snapshotRate : null,
-            hasExchangeSnapshot ? snapshotSource : null,
-            itemsWithMetadata,
-            exchangeRatesPayload
-        )
-        const verificationResult = verifySale(verificationSale, {
-            maxDiscountPercent: features.max_discount_percent
-        })
-
         const checkoutPayload = {
             id: saleId,
             items: itemsWithMetadata,

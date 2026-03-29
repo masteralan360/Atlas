@@ -25,7 +25,7 @@ export interface VerificationItem {
     totalPrice: number
     convertedTotalPrice: number
     originalUnitPrice: number
-    negotiatedPrice?: number
+    negotiatedPrice?: number | null
     inventorySnapshot: number
     originalCurrency: string
     settlementCurrency: string
@@ -76,7 +76,7 @@ export function verifySale(
     // 3. Negotiated Price Integrity
     for (let i = 0; i < sale.items.length; i++) {
         const item = sale.items[i]
-        if (item.negotiatedPrice !== undefined) {
+        if (item.negotiatedPrice != null) {
             // Check for negative negotiated price
             if (item.negotiatedPrice < 0) {
                 flags.push(`Item ${i + 1}: Negative negotiated price`)
@@ -149,7 +149,7 @@ export function createVerificationSale(
         total_price: number
         total: number // Converted total in settlement currency
         original_unit_price: number
-        negotiated_price?: number
+        negotiated_price?: number | null
         inventory_snapshot: number
         original_currency: string
         settlement_currency: string

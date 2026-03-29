@@ -423,17 +423,17 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onReturn
                                     </span>
                                 </div>
                                 <span className="text-[10px] text-muted-foreground italic">
-                                    {formatSnapshotTime(sale.exchange_rate_timestamp)}
+                                    {sale.exchange_rate_timestamp ? formatSnapshotTime(sale.exchange_rate_timestamp) : ''}
                                 </span>
                             </div>
                             <div className="mt-3 bg-card border border-primary/10 shadow-sm rounded-sm p-3 inline-flex flex-col gap-1">
                                 <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                                    USD/IQD ({sale.exchange_source})
+                                    USD/IQD ({sale.exchange_source || 'Unknown'})
                                 </div>
                                 <div className="flex items-baseline gap-2">
                                     <span className="text-base font-black">100 USD</span>
                                     <span className="text-sm text-muted-foreground font-medium">
-                                        {formatCurrency(sale.exchange_rate, 'iqd', features.iqd_display_preference)}
+                                        {formatCurrency(sale.exchange_rate ?? 0, 'iqd', features.iqd_display_preference)}
                                     </span>
                                 </div>
                             </div>
