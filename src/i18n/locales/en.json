@@ -969,7 +969,7 @@
             "private": "Private",
             "public": "Public",
             "slug": "Store URL Slug",
-            "slugDesc": "Your store will be available at /s/your-slug",
+            "slugDesc": "Your store will be available at /marketplace/s/your-slug",
             "slugChecking": "Checking availability...",
             "slugTaken": "This slug is already taken",
             "slugAvailable": "This slug is available",

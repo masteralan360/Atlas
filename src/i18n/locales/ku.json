@@ -922,7 +922,7 @@
             "private": "تایبەت",
             "public": "گشتی",
             "slug": "ناسنامەی بەستەری فرۆشگا",
-            "slugDesc": "فرۆشگاکەت لە /s/your-slug بەردەست دەبێت",
+            "slugDesc": "فرۆشگاکەت لە /marketplace/s/your-slug بەردەست دەبێت",
             "slugChecking": "بەردەستی پشکنین دەکرێت...",
             "slugTaken": "ئەم slug ـە پێشتر گیراوە",
             "slugAvailable": "ئەم slug ـە بەردەستە",

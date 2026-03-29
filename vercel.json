@@ -21,7 +21,7 @@
             "destination": "/marketplace.html"
         },
         {
-            "source": "/s/(.*)",
+            "source": "/marketplace/s/(.*)",
             "destination": "/marketplace.html"
         },
         {

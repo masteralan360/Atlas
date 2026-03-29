@@ -313,7 +313,7 @@ export function Settings() {
         .replace(/-+/g, '-')
         .slice(0, 40)
     const marketplacePreviewUrl = normalizedMarketplaceSlug && marketplaceBaseOrigin
-        ? `${marketplaceBaseOrigin}/s/${normalizedMarketplaceSlug}`
+        ? `${marketplaceBaseOrigin}/marketplace/s/${normalizedMarketplaceSlug}`
         : ''
 
     useEffect(() => {
@@ -1802,7 +1802,7 @@ export function Settings() {
                                                     disabled={isLocalMode}
                                                 />
                                                 <div className="text-xs text-muted-foreground">
-                                                    {marketplacePreviewUrl ? marketplacePreviewUrl : t('settings.marketplace.slugDesc', { defaultValue: 'Your store will be available at /s/your-slug' })}
+                                                    {marketplacePreviewUrl ? marketplacePreviewUrl : t('settings.marketplace.slugDesc', { defaultValue: 'Your store will be available at /marketplace/s/your-slug' })}
                                                 </div>
                                                 {!isLocalMode && normalizedMarketplaceSlug && (
                                                     <div className={cn(

@@ -26,7 +26,7 @@ function contactIcon(type: string) {
 export function StorePage() {
     const { t, i18n } = useTranslation()
     const { toast } = useToast()
-    const [, params] = useRoute('/s/:slug')
+    const [, params] = useRoute('/marketplace/s/:slug')
     const storeSlug = params?.slug || ''
     const { catalog, isLoading, error } = useStoreCatalog(storeSlug)
     const cart = useCart(storeSlug)
