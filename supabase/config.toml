@@ -1,0 +1,10 @@
+project_id = "eboispangcayxxheoufy"
+
+[functions.get-marketplace-stores]
+verify_jwt = false
+
+[functions.get-store-catalog]
+verify_jwt = false
+
+[functions.place-inquiry-order]
+verify_jwt = false

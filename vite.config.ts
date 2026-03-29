@@ -7,6 +7,7 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, __dirname, '')
     const r2WorkerUrl = env.VITE_R2_WORKER_URL || ''
     const r2AuthToken = env.VITE_R2_AUTH_TOKEN || ''
+    const isTauriBuild = Boolean(process.env.TAURI_ENV_PLATFORM)
 
     // Debug: Log env loading during build
     console.log('[Vite Config] Mode:', mode)
@@ -15,7 +16,7 @@ export default defineConfig(({ mode }) => {
     console.log('[Vite Config] R2 Auth Token loaded:', r2AuthToken ? 'YES' : 'NO (empty)')
 
     return {
-        base: './',
+        base: isTauriBuild ? './' : '/',
         define: {
             __R2_WORKER_URL__: JSON.stringify(r2WorkerUrl),
             __R2_AUTH_TOKEN__: JSON.stringify(r2AuthToken)
@@ -102,6 +103,10 @@ export default defineConfig(({ mode }) => {
         },
         build: {
             rollupOptions: {
+                input: {
+                    main: path.resolve(__dirname, 'index.html'),
+                    marketplace: path.resolve(__dirname, 'marketplace.html')
+                },
                 output: {
                     manualChunks: {
                         'vendor-supabase': ['@supabase/supabase-js'],

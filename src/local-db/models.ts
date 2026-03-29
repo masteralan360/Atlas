@@ -172,6 +172,8 @@ export interface BusinessPartnerMergeCandidate extends BaseEntity {
 export type SalesOrderStatus = 'draft' | 'pending' | 'completed' | 'cancelled'
 export type PurchaseOrderStatus = 'draft' | 'ordered' | 'received' | 'completed' | 'cancelled'
 export type OrderPaymentMethod = PaymentMethod | 'credit' | 'bank_transfer'
+export type WorkspaceVisibility = 'private' | 'public'
+export type MarketplaceOrderStatus = 'pending' | 'confirmed' | 'processing' | 'shipped' | 'delivered' | 'cancelled'
 
 export interface ExchangeRateSnapshot {
     pair: string
@@ -256,6 +258,41 @@ export interface PurchaseOrder extends BaseEntity {
     paymentMethod?: OrderPaymentMethod
     notes?: string
     isLocked?: boolean
+}
+
+export interface MarketplaceOrderItem {
+    productId: string
+    storageId?: string | null
+    name: string
+    sku: string
+    unitPrice: number
+    currency: CurrencyCode
+    quantity: number
+    lineTotal: number
+    imageUrl?: string | null
+}
+
+export interface MarketplaceOrder extends BaseEntity {
+    orderNumber: string
+    orderSequence: number
+    customerName: string
+    customerPhone: string
+    customerEmail?: string | null
+    customerAddress?: string | null
+    customerCity?: string | null
+    customerNotes?: string | null
+    items: MarketplaceOrderItem[]
+    subtotal: number
+    total: number
+    currency: CurrencyCode
+    status: MarketplaceOrderStatus
+    confirmedAt?: string | null
+    processingAt?: string | null
+    shippedAt?: string | null
+    deliveredAt?: string | null
+    cancelledAt?: string | null
+    cancelReason?: string | null
+    inventoryDeducted: boolean
 }
 
 export type TravelAgencyTravelMethod = 'bus' | 'plane' | 'train' | 'car' | 'ship' | 'hotel' | 'other'
@@ -626,6 +663,7 @@ export interface Workspace extends BaseEntity {
     invoices_history: boolean
     hr?: boolean
     members?: boolean
+    ecommerce?: boolean
     // Settings
     default_currency: CurrencyCode
     iqd_display_preference: IQDDisplayPreference
@@ -645,6 +683,9 @@ export interface Workspace extends BaseEntity {
     print_quality?: 'low' | 'high'
     thermal_printing?: boolean
     subscription_expires_at?: string | null
+    visibility?: WorkspaceVisibility
+    store_slug?: string | null
+    store_description?: string | null
 }
 
 export interface WorkspaceContact extends Omit<BaseEntity, 'isDeleted'> {

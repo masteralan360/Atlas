@@ -16,6 +16,7 @@ import {
     Plane,
     Receipt,
     Settings,
+    Store,
     ShoppingCart,
     TrendingUp,
     Truck,
@@ -72,6 +73,7 @@ export function buildWorkspaceNavigation({
     const isCoreRole = role === 'admin' || role === 'staff' || role === 'viewer'
     const hasLedgerSurface = features.pos || features.instant_pos || features.sales_history || features.crm || features.budget || features.hr || features.loans
     const hasPaymentsSurface = features.loans || features.crm || features.budget || features.hr
+    const canUseEcommerce = features.data_mode !== 'local' && hasFeature('ecommerce')
 
     return [
         { name: t('nav.dashboard', { defaultValue: 'Dashboard' }), href: '/', icon: LayoutDashboard },
@@ -90,6 +92,9 @@ export function buildWorkspaceNavigation({
             { name: t('nav.customers', { defaultValue: 'Customers' }), href: '/customers', icon: Users },
             { name: t('nav.suppliers', { defaultValue: 'Suppliers' }), href: '/suppliers', icon: Truck },
             { name: t('nav.orders', { defaultValue: 'Orders' }), href: '/orders', icon: ShoppingCart }
+        ] : []),
+        ...(isCoreRole && canUseEcommerce ? [
+            { name: t('nav.ecommerce', { defaultValue: 'E-Commerce' }), href: '/ecommerce', icon: Store }
         ] : []),
         ...(isCoreRole && hasFeature('travel_agency') ? [{ name: t('nav.travelAgency', { defaultValue: 'Travel Agency' }), href: '/travel-agency', icon: Plane }] : []),
         ...(hasFeature('loans') ? [

@@ -2,12 +2,12 @@ import { useAuth } from '@/auth'
 import { isBackendConfigurationRequired, supabase } from '@/auth/supabase'
 import { useSyncStatus, clearQueue } from '@/sync'
 import { db } from '@/local-db'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button, Label, LanguageSwitcher, Input, CurrencySelector, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tabs, TabsList, TabsTrigger, TabsContent, Switch, Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, useToast, RegisterWorkspaceContactsModal } from '@/ui/components'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button, Label, LanguageSwitcher, Input, CurrencySelector, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tabs, TabsList, TabsTrigger, TabsContent, Switch, Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, Textarea, useToast, RegisterWorkspaceContactsModal } from '@/ui/components'
 import { useTranslation } from 'react-i18next'
 import { useWorkspace } from '@/workspace'
 import { Coins } from 'lucide-react'
 import type { IQDDisplayPreference, CurrencyCode } from '@/local-db/models'
-import { Settings as SettingsIcon, Database, Cloud, Trash2, RefreshCw, User, Copy, Check, CreditCard, Globe, Download, AlertCircle, Printer, Contact, Fingerprint } from 'lucide-react'
+import { Settings as SettingsIcon, Database, Cloud, Trash2, RefreshCw, User, Copy, Check, CreditCard, Globe, Download, AlertCircle, Printer, Contact, Fingerprint, Store, ExternalLink } from 'lucide-react'
 import { formatDateTime, cn } from '@/lib/utils'
 import { useTheme } from '@/ui/components/theme-provider'
 import { Moon, Sun, Monitor, Unlock, Server, MessageSquare, Bell, MonitorPlay, Wifi } from 'lucide-react'
@@ -35,7 +35,7 @@ export function Settings() {
     const { user, signOut, isSupabaseConfigured, updateUser } = useAuth()
     const { syncState, pendingCount, lastSyncTime, sync, isSyncing, isOnline } = useSyncStatus()
     const { theme, setTheme, style, setStyle } = useTheme()
-    const { features, updateSettings, workspaceName, isLocked, isLocalMode } = useWorkspace()
+    const { features, updateSettings, refreshFeatures, workspaceName, isLocked, isLocalMode } = useWorkspace()
     const { streamUrl, status: kdsStatus, startStream } = useKdsStream(true)
 
     useEffect(() => {
@@ -91,6 +91,11 @@ export function Settings() {
     const [isThermalActionPending, setIsThermalActionPending] = useState(false)
     const [thermalPrinterMessage, setThermalPrinterMessage] = useState<string | null>(null)
     const [showAllDetectedPrinters, setShowAllDetectedPrinters] = useState(false)
+    const [marketplaceVisibility, setMarketplaceVisibility] = useState<'private' | 'public'>(features.visibility || 'private')
+    const [marketplaceSlug, setMarketplaceSlug] = useState(features.store_slug || '')
+    const [marketplaceDescription, setMarketplaceDescription] = useState(features.store_description || '')
+    const [marketplaceSlugStatus, setMarketplaceSlugStatus] = useState<'idle' | 'checking' | 'available' | 'taken' | 'invalid'>('idle')
+    const [isSavingMarketplace, setIsSavingMarketplace] = useState(false)
 
     const activeSupabaseUrl = isBackendConfigurationRequired
         ? (customUrl || '')
@@ -292,12 +297,87 @@ export function Settings() {
 
     const [updateStatus, setUpdateStatus] = useState<any>(null)
     const [localWorkspaceName, setLocalWorkspaceName] = useState(workspaceName || '')
+    const marketplaceSlugPattern = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/
+    const marketplaceBaseOrigin = (() => {
+        const configuredOrigin = (import.meta.env.VITE_PUBLIC_SITE_URL || '').trim().replace(/\/+$/, '')
+        if (configuredOrigin) return configuredOrigin
+        if (typeof window !== 'undefined' && /^https?:$/i.test(window.location.protocol)) {
+            return window.location.origin
+        }
+        return ''
+    })()
+    const normalizedMarketplaceSlug = marketplaceSlug
+        .toLowerCase()
+        .replace(/[\s_]+/g, '-')
+        .replace(/[^a-z0-9-]/g, '')
+        .replace(/-+/g, '-')
+        .slice(0, 40)
+    const marketplacePreviewUrl = normalizedMarketplaceSlug && marketplaceBaseOrigin
+        ? `${marketplaceBaseOrigin}/s/${normalizedMarketplaceSlug}`
+        : ''
 
     useEffect(() => {
         if (workspaceName !== null) {
             setLocalWorkspaceName(workspaceName)
         }
     }, [workspaceName])
+
+    useEffect(() => {
+        setMarketplaceVisibility(features.visibility || 'private')
+        setMarketplaceSlug(features.store_slug || '')
+        setMarketplaceDescription(features.store_description || '')
+    }, [features.store_description, features.store_slug, features.visibility])
+
+    useEffect(() => {
+        if (user?.role !== 'admin' || isLocalMode || !isSupabaseConfigured) {
+            setMarketplaceSlugStatus('idle')
+            return
+        }
+
+        if (!normalizedMarketplaceSlug) {
+            setMarketplaceSlugStatus('idle')
+            return
+        }
+
+        if (!marketplaceSlugPattern.test(normalizedMarketplaceSlug)) {
+            setMarketplaceSlugStatus('invalid')
+            return
+        }
+
+        if (normalizedMarketplaceSlug === (features.store_slug || '')) {
+            setMarketplaceSlugStatus('available')
+            return
+        }
+
+        let isCancelled = false
+        setMarketplaceSlugStatus('checking')
+
+        const timer = setTimeout(async () => {
+            try {
+                const { data, error } = await runSupabaseAction('settings.checkStoreSlug', () =>
+                    supabase.rpc('check_store_slug_available', { p_slug: normalizedMarketplaceSlug }),
+                    { timeoutMs: 12000, platform: 'all' }
+                ) as { data: boolean | null; error: Error | null }
+
+                if (isCancelled) return
+
+                if (error) {
+                    throw error
+                }
+
+                setMarketplaceSlugStatus(data ? 'available' : 'taken')
+            } catch {
+                if (!isCancelled) {
+                    setMarketplaceSlugStatus('idle')
+                }
+            }
+        }, 350)
+
+        return () => {
+            isCancelled = true
+            clearTimeout(timer)
+        }
+    }, [features.store_slug, isLocalMode, isSupabaseConfigured, normalizedMarketplaceSlug, user?.role])
 
     // Tauri updater doesn't use event listeners for status in the same way, logic is inside handleCheckForUpdates
 
@@ -918,6 +998,96 @@ export function Settings() {
         if (!url) return ''
         if (url.startsWith('http')) return url
         return platformService.convertFileSrc(url)
+    }
+
+    const handleMarketplaceSave = async () => {
+        if (!user?.workspaceId) return
+
+        if (isLocalMode) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: t('settings.marketplace.localUnsupported', {
+                    defaultValue: 'Marketplace publishing is available only for cloud and hybrid workspaces.'
+                }),
+                variant: 'destructive'
+            })
+            return
+        }
+
+        if (marketplaceVisibility === 'public' && !normalizedMarketplaceSlug) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: t('settings.marketplace.slugRequired', {
+                    defaultValue: 'Set a store slug before going public'
+                }),
+                variant: 'destructive'
+            })
+            return
+        }
+
+        if (normalizedMarketplaceSlug && !marketplaceSlugPattern.test(normalizedMarketplaceSlug)) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: t('settings.marketplace.slugInvalid', {
+                    defaultValue: 'Only lowercase letters, numbers, and hyphens allowed'
+                }),
+                variant: 'destructive'
+            })
+            return
+        }
+
+        if (normalizedMarketplaceSlug && marketplaceSlugStatus === 'taken') {
+            toast({
+                title: t('common.error') || 'Error',
+                description: t('settings.marketplace.slugTaken', {
+                    defaultValue: 'This slug is already taken'
+                }),
+                variant: 'destructive'
+            })
+            return
+        }
+
+        setIsSavingMarketplace(true)
+        try {
+            const payload = {
+                visibility: marketplaceVisibility,
+                store_slug: normalizedMarketplaceSlug || null,
+                store_description: marketplaceDescription.trim() || null,
+                ecommerce: marketplaceVisibility === 'public' ? true : features.ecommerce
+            }
+
+            const { error } = await runSupabaseAction('settings.updateMarketplace', () =>
+                supabase
+                    .from('workspaces')
+                    .update(payload)
+                    .eq('id', user.workspaceId),
+                { timeoutMs: 12000, platform: 'all' }
+            ) as { error: Error | null }
+
+            if (error) {
+                throw error
+            }
+
+            await refreshFeatures()
+
+            toast({
+                title: t('common.success') || 'Success',
+                description: t('settings.marketplace.saveSuccess', {
+                    defaultValue: 'Marketplace settings updated successfully.'
+                })
+            })
+        } catch (error) {
+            showActionError(error, t('settings.marketplace.saveError', {
+                defaultValue: 'Failed to update marketplace settings.'
+            }))
+        } finally {
+            setIsSavingMarketplace(false)
+        }
+    }
+
+    const handleMarketplacePreview = () => {
+        if (!marketplacePreviewUrl) return
+        window.open(marketplacePreviewUrl, '_blank', 'noopener,noreferrer')
     }
 
     return (
@@ -1578,6 +1748,119 @@ export function Settings() {
                                                     </Button>
                                                 )}
                                             </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="pt-6 border-t border-border/50 space-y-4">
+                                        <div className="flex flex-col gap-1">
+                                            <Label className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+                                                {t('settings.marketplace.title', { defaultValue: 'Marketplace' })}
+                                            </Label>
+                                            <p className="text-sm text-muted-foreground">
+                                                {t('settings.marketplace.visibilityDesc', {
+                                                    defaultValue: 'When set to Public, your products will appear in the Atlas Marketplace.'
+                                                })}
+                                            </p>
+                                        </div>
+
+                                        {isLocalMode && (
+                                            <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-700 dark:text-amber-300">
+                                                {t('settings.marketplace.localUnsupported', {
+                                                    defaultValue: 'Marketplace publishing is available only for cloud and hybrid workspaces.'
+                                                })}
+                                            </div>
+                                        )}
+
+                                        <div className="grid gap-4 lg:grid-cols-2">
+                                            <div className="space-y-2">
+                                                <Label>{t('settings.marketplace.visibility', { defaultValue: 'Store Visibility' })}</Label>
+                                                <Select
+                                                    value={marketplaceVisibility}
+                                                    onValueChange={(value: 'private' | 'public') => setMarketplaceVisibility(value)}
+                                                    disabled={isLocalMode}
+                                                >
+                                                    <SelectTrigger>
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="private">
+                                                            {t('settings.marketplace.private', { defaultValue: 'Private' })}
+                                                        </SelectItem>
+                                                        <SelectItem value="public">
+                                                            {t('settings.marketplace.public', { defaultValue: 'Public' })}
+                                                        </SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+
+                                            <div className="space-y-2">
+                                                <Label>{t('settings.marketplace.slug', { defaultValue: 'Store URL Slug' })}</Label>
+                                                <Input
+                                                    value={marketplaceSlug}
+                                                    onChange={(event) => setMarketplaceSlug(event.target.value)}
+                                                    placeholder="baghdad-tools"
+                                                    disabled={isLocalMode}
+                                                />
+                                                <div className="text-xs text-muted-foreground">
+                                                    {marketplacePreviewUrl ? marketplacePreviewUrl : t('settings.marketplace.slugDesc', { defaultValue: 'Your store will be available at /s/your-slug' })}
+                                                </div>
+                                                {!isLocalMode && normalizedMarketplaceSlug && (
+                                                    <div className={cn(
+                                                        'text-xs',
+                                                        marketplaceSlugStatus === 'taken' && 'text-destructive',
+                                                        marketplaceSlugStatus === 'invalid' && 'text-destructive',
+                                                        marketplaceSlugStatus === 'available' && 'text-emerald-600 dark:text-emerald-300',
+                                                        marketplaceSlugStatus === 'checking' && 'text-muted-foreground'
+                                                    )}>
+                                                        {marketplaceSlugStatus === 'checking' && (
+                                                            <span className="inline-flex items-center gap-2">
+                                                                <RefreshCw className="h-3 w-3 animate-spin" />
+                                                                {t('settings.marketplace.slugChecking', { defaultValue: 'Checking availability...' })}
+                                                            </span>
+                                                        )}
+                                                        {marketplaceSlugStatus === 'taken' && t('settings.marketplace.slugTaken', { defaultValue: 'This slug is already taken' })}
+                                                        {marketplaceSlugStatus === 'invalid' && t('settings.marketplace.slugInvalid', { defaultValue: 'Only lowercase letters, numbers, and hyphens allowed' })}
+                                                        {marketplaceSlugStatus === 'available' && t('settings.marketplace.slugAvailable', { defaultValue: 'This slug is available' })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <Label>{t('settings.marketplace.description', { defaultValue: 'Store Description' })}</Label>
+                                            <Textarea
+                                                value={marketplaceDescription}
+                                                onChange={(event) => setMarketplaceDescription(event.target.value)}
+                                                placeholder={t('settings.marketplace.descriptionDesc', {
+                                                    defaultValue: 'Shown on the marketplace gallery page.'
+                                                })}
+                                                rows={4}
+                                                disabled={isLocalMode}
+                                            />
+                                        </div>
+
+                                        <div className="flex flex-wrap gap-2">
+                                            <Button
+                                                type="button"
+                                                onClick={handleMarketplaceSave}
+                                                disabled={isLocalMode || isSavingMarketplace || marketplaceSlugStatus === 'checking'}
+                                                className="gap-2"
+                                            >
+                                                <Store className="h-4 w-4" />
+                                                {isSavingMarketplace
+                                                    ? (t('common.loading') || 'Loading...')
+                                                    : (t('common.save') || 'Save')}
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                onClick={handleMarketplacePreview}
+                                                disabled={!marketplacePreviewUrl}
+                                                className="gap-2"
+                                            >
+                                                <ExternalLink className="h-4 w-4" />
+                                                {t('settings.marketplace.preview', { defaultValue: 'Preview Store' })}
+                                            </Button>
                                         </div>
                                     </div>
                                 </div>

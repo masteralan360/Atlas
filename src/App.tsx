@@ -66,6 +66,7 @@ const CustomerDetails = lazy(() => import('@/ui/pages/CustomerDetails').then(m =
 const Suppliers = lazy(() => import('@/ui/pages/Suppliers').then(m => ({ default: m.Suppliers })))
 const SupplierDetails = lazy(() => import('@/ui/pages/SupplierDetails').then(m => ({ default: m.SupplierDetails })))
 const Orders = lazy(() => import('@/ui/pages/Orders').then(m => ({ default: m.Orders })))
+const Ecommerce = lazy(() => import('@/ui/pages/Ecommerce').then(m => ({ default: m.Ecommerce })))
 const TravelAgency = lazy(() => import('@/ui/pages/TravelAgency').then(m => ({ default: m.TravelAgency })))
 const TravelAgencySaleCreate = lazy(() => import('@/ui/pages/TravelAgencySaleForm').then(m => ({ default: m.TravelAgencySaleCreate })))
 const TravelAgencySaleEdit = lazy(() => import('@/ui/pages/TravelAgencySaleForm').then(m => ({ default: m.TravelAgencySaleEdit })))
@@ -599,6 +600,20 @@ function App() {
                                                 <ProtectedRoute allowedRoles={['admin', 'staff', 'viewer']} requiredFeature="crm">
                                                     <Layout>
                                                         <Orders />
+                                                    </Layout>
+                                                </ProtectedRoute>
+                                            </Route>
+                                            <Route path="/ecommerce">
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="ecommerce">
+                                                    <Layout>
+                                                        <Ecommerce />
+                                                    </Layout>
+                                                </ProtectedRoute>
+                                            </Route>
+                                            <Route path="/ecommerce/:orderId">
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="ecommerce">
+                                                    <Layout>
+                                                        <Ecommerce />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>

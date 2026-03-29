@@ -112,6 +112,7 @@ const moduleMetaByHref: Record<string, { section: (typeof launcherSectionOrder)[
     '/customers': { section: 'partners-and-demand', description: 'Track customer records, histories, and engagement context.', badge: 'Demand' },
     '/suppliers': { section: 'partners-and-demand', description: 'Manage supplier relationships and procurement context.', badge: 'Supply' },
     '/orders': { section: 'partners-and-demand', description: 'Open, settle, and review purchase or sales orders.', badge: 'Pipeline' },
+    '/ecommerce': { section: 'partners-and-demand', description: 'Track and manage incoming marketplace orders.', badge: 'Marketplace' },
     '/revenue': { section: 'insights-and-trends', description: 'Analyze revenue behavior, inflows, and reporting trends.', badge: 'Revenue' },
     '/monthly-comparison': { section: 'insights-and-trends', description: 'Compare monthly movement side by side and track change over time.', badge: 'Compare' },
     '/hr': { section: 'people-and-workspace', description: 'Manage HR workflows, records, and team operations.', badge: 'People' },

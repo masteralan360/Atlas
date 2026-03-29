@@ -26,6 +26,7 @@ export type ModuleFeatureKey =
     | 'instant_pos'
     | 'sales_history'
     | 'crm'
+    | 'ecommerce'
     | 'travel_agency'
     | 'loans'
     | 'net_revenue'
@@ -47,6 +48,7 @@ export interface WorkspaceFeatures {
     instant_pos: boolean
     sales_history: boolean
     crm: boolean
+    ecommerce: boolean
     travel_agency: boolean
     loans: boolean
     net_revenue: boolean
@@ -78,6 +80,9 @@ export interface WorkspaceFeatures {
     print_quality: 'low' | 'high'
     thermal_printing: boolean
     subscription_expires_at: string | null
+    visibility: 'private' | 'public'
+    store_slug: string | null
+    store_description: string | null
 }
 
 export interface UpdateInfo {
@@ -99,7 +104,7 @@ interface WorkspaceContextType {
     isHybridMode: boolean
     hasFeature: (feature: ModuleFeatureKey) => boolean
     refreshFeatures: () => Promise<void>
-    updateSettings: (settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'iqd_display_preference' | 'eur_conversion_enabled' | 'try_conversion_enabled' | 'allow_whatsapp' | 'kds_enabled' | 'logo_url' | 'coordination' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'print_quality' | 'thermal_printing'>> & { name?: string }) => Promise<void>
+    updateSettings: (settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'iqd_display_preference' | 'eur_conversion_enabled' | 'try_conversion_enabled' | 'allow_whatsapp' | 'kds_enabled' | 'logo_url' | 'coordination' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'print_quality' | 'thermal_printing' | 'ecommerce' | 'visibility' | 'store_slug' | 'store_description'>> & { name?: string }) => Promise<void>
     switchDataMode: (newMode: 'cloud' | 'hybrid') => Promise<{ error: string | null }>
     activeWorkspace: { id: string } | undefined
 }
@@ -110,6 +115,7 @@ const defaultFeatures: WorkspaceFeatures = {
     instant_pos: true,
     sales_history: true,
     crm: true,
+    ecommerce: false,
     travel_agency: true,
     loans: true,
     net_revenue: true,
@@ -139,7 +145,10 @@ const defaultFeatures: WorkspaceFeatures = {
     a4_template: 'primary',
     print_quality: 'low',
     thermal_printing: false,
-    subscription_expires_at: null
+    subscription_expires_at: null,
+    visibility: 'private',
+    store_slug: null,
+    store_description: null
 }
 
 const WORKSPACE_FEATURE_COLUMNS = [
@@ -149,6 +158,7 @@ const WORKSPACE_FEATURE_COLUMNS = [
     'instant_pos',
     'sales_history',
     'crm',
+    'ecommerce',
     'travel_agency',
     'loans',
     'net_revenue',
@@ -177,7 +187,10 @@ const WORKSPACE_FEATURE_COLUMNS = [
     'receipt_template',
     'a4_template',
     'print_quality',
-    'subscription_expires_at'
+    'subscription_expires_at',
+    'visibility',
+    'store_slug',
+    'store_description'
 ].join(', ')
 
 function mergeWorkspaceFeatures(features?: Partial<WorkspaceFeatures> | null): WorkspaceFeatures {
@@ -195,6 +208,7 @@ function getFeaturesFromLocalWorkspace(localWorkspace: Workspace): WorkspaceFeat
         instant_pos: localWorkspace.instant_pos ?? true,
         sales_history: localWorkspace.sales_history ?? true,
         crm: localWorkspace.crm ?? true,
+        ecommerce: localWorkspace.ecommerce ?? false,
         travel_agency: localWorkspace.travel_agency ?? true,
         loans: localWorkspace.loans ?? true,
         net_revenue: localWorkspace.net_revenue ?? true,
@@ -224,7 +238,10 @@ function getFeaturesFromLocalWorkspace(localWorkspace: Workspace): WorkspaceFeat
         a4_template: localWorkspace.a4_template ?? 'primary',
         print_quality: localWorkspace.print_quality ?? 'low',
         thermal_printing: localWorkspace.thermal_printing ?? false,
-        subscription_expires_at: localWorkspace.subscription_expires_at ?? null
+        subscription_expires_at: localWorkspace.subscription_expires_at ?? null,
+        visibility: localWorkspace.visibility ?? 'private',
+        store_slug: localWorkspace.store_slug ?? null,
+        store_description: localWorkspace.store_description ?? null
     })
 }
 
@@ -314,6 +331,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             instant_pos: nextFeatures.instant_pos,
             sales_history: nextFeatures.sales_history,
             crm: nextFeatures.crm,
+            ecommerce: nextFeatures.ecommerce,
             travel_agency: nextFeatures.travel_agency,
             loans: nextFeatures.loans,
             net_revenue: nextFeatures.net_revenue,
@@ -343,6 +361,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             print_quality: nextFeatures.print_quality,
             thermal_printing: nextFeatures.thermal_printing,
             subscription_expires_at: nextFeatures.subscription_expires_at,
+            visibility: nextFeatures.visibility,
+            store_slug: nextFeatures.store_slug,
+            store_description: nextFeatures.store_description,
             syncStatus: 'synced',
             lastSyncedAt: timestamp,
             version: existing?.version ?? 1,
@@ -465,6 +486,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 instant_pos: workspaceRow.instant_pos ?? currentFeatures.instant_pos,
                 sales_history: workspaceRow.sales_history ?? currentFeatures.sales_history,
                 crm: workspaceRow.crm ?? currentFeatures.crm,
+                ecommerce: workspaceRow.ecommerce ?? currentFeatures.ecommerce,
                 travel_agency: workspaceRow.travel_agency ?? currentFeatures.travel_agency,
                 loans: workspaceRow.loans ?? currentFeatures.loans,
                 net_revenue: workspaceRow.net_revenue ?? currentFeatures.net_revenue,
@@ -494,7 +516,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 a4_template: workspaceRow.a4_template ?? currentFeatures.a4_template,
                 print_quality: workspaceRow.print_quality ?? currentFeatures.print_quality,
                 thermal_printing: localThermalPrinting,
-                subscription_expires_at: workspaceRow.subscription_expires_at ?? null
+                subscription_expires_at: workspaceRow.subscription_expires_at ?? null,
+                visibility: workspaceRow.visibility ?? currentFeatures.visibility,
+                store_slug: workspaceRow.store_slug ?? currentFeatures.store_slug,
+                store_description: workspaceRow.store_description ?? currentFeatures.store_description
             })
             const nextWorkspaceName = workspaceRow.name || user?.workspaceName || 'My Workspace'
 
@@ -571,6 +596,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                             instant_pos: data.instant_pos ?? currentFeatures.instant_pos,
                             sales_history: data.sales_history ?? currentFeatures.sales_history,
                             crm: data.crm ?? currentFeatures.crm,
+                            ecommerce: data.ecommerce ?? currentFeatures.ecommerce,
                             travel_agency: data.travel_agency ?? currentFeatures.travel_agency,
                             loans: data.loans ?? currentFeatures.loans,
                             net_revenue: data.net_revenue ?? currentFeatures.net_revenue,
@@ -600,7 +626,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                             a4_template: data.a4_template ?? currentFeatures.a4_template,
                             print_quality: data.print_quality ?? currentFeatures.print_quality,
                             thermal_printing: currentFeatures.thermal_printing,
-                            subscription_expires_at: data.subscription_expires_at ?? currentFeatures.subscription_expires_at
+                            subscription_expires_at: data.subscription_expires_at ?? currentFeatures.subscription_expires_at,
+                            visibility: data.visibility ?? currentFeatures.visibility,
+                            store_slug: data.store_slug ?? currentFeatures.store_slug,
+                            store_description: data.store_description ?? currentFeatures.store_description
                         })
                         const nextWorkspaceName = data.name || workspaceNameRef.current || user.workspaceName || 'My Workspace'
 
@@ -643,6 +672,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }, [isAuthenticated, user?.workspaceId])
 
     const hasFeature = (feature: ModuleFeatureKey): boolean => {
+        if (feature === 'ecommerce') {
+            return features.data_mode !== 'local' && features[feature] === true
+        }
         return features[feature] === true
     }
 
@@ -655,7 +687,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
 
     const updateSettings = async (
-        settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'iqd_display_preference' | 'eur_conversion_enabled' | 'try_conversion_enabled' | 'allow_whatsapp' | 'kds_enabled' | 'logo_url' | 'coordination' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'print_quality' | 'thermal_printing'>> & { name?: string }
+        settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'iqd_display_preference' | 'eur_conversion_enabled' | 'try_conversion_enabled' | 'allow_whatsapp' | 'kds_enabled' | 'logo_url' | 'coordination' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'print_quality' | 'thermal_printing' | 'ecommerce' | 'visibility' | 'store_slug' | 'store_description'>> & { name?: string }
     ) => {
         const workspaceId = user?.workspaceId
         if (!workspaceId) return
@@ -709,6 +741,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 instant_pos: newFeatures.instant_pos,
                 sales_history: newFeatures.sales_history,
                 crm: newFeatures.crm,
+                ecommerce: newFeatures.ecommerce,
                 travel_agency: newFeatures.travel_agency,
                 loans: newFeatures.loans,
                 net_revenue: newFeatures.net_revenue,
@@ -738,6 +771,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 print_quality: newFeatures.print_quality,
                 thermal_printing: newFeatures.thermal_printing,
                 subscription_expires_at: newFeatures.subscription_expires_at,
+                visibility: newFeatures.visibility,
+                store_slug: newFeatures.store_slug,
+                store_description: newFeatures.store_description,
                 syncStatus: shouldSync ? 'pending' : 'synced',
                 lastSyncedAt: shouldSync ? null : new Date().toISOString(),
                 version: 1,

@@ -17,6 +17,14 @@
             "destination": "/api/forexfy"
         },
         {
+            "source": "/marketplace",
+            "destination": "/marketplace.html"
+        },
+        {
+            "source": "/s/(.*)",
+            "destination": "/marketplace.html"
+        },
+        {
             "source": "/(.*)",
             "destination": "/index.html"
         }

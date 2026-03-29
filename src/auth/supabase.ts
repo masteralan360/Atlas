@@ -30,23 +30,23 @@ const customSupabaseAnonKey = getAppSettingSync('supabase_anon_key') || ''
 
 export const isBackendConfigurationRequired = parseBooleanEnv(import.meta.env.VITE_REQUIRE_BACKEND_CONFIGURATION)
 
-const supabaseUrl = isBackendConfigurationRequired
+export const resolvedSupabaseUrl = isBackendConfigurationRequired
     ? customSupabaseUrl
     : (envSupabaseUrl || customSupabaseUrl || '')
-const supabaseAnonKey = isBackendConfigurationRequired
+export const resolvedSupabaseAnonKey = isBackendConfigurationRequired
     ? customSupabaseAnonKey
     : (envSupabaseAnonKey || customSupabaseAnonKey || '')
 
 // Check if Supabase is configured with valid values
-const isUrlValid = supabaseUrl && supabaseUrl.startsWith('https://') && !supabaseUrl.includes('your_supabase_url')
-const isKeyValid = supabaseAnonKey && supabaseAnonKey.length > 50 && !supabaseAnonKey.includes('your_supabase_anon')
+const isUrlValid = resolvedSupabaseUrl && resolvedSupabaseUrl.startsWith('https://') && !resolvedSupabaseUrl.includes('your_supabase_url')
+const isKeyValid = resolvedSupabaseAnonKey && resolvedSupabaseAnonKey.length > 50 && !resolvedSupabaseAnonKey.includes('your_supabase_anon')
 
 export const isSupabaseConfigured = Boolean(isUrlValid && isKeyValid)
 
 // Create Supabase client with fallbacks to prevent crash if not configured
 // The app will redirect to configuration page if isSupabaseConfigured is false
-const clientUrl = isUrlValid ? supabaseUrl : 'https://placeholder.supabase.co'
-const clientKey = isKeyValid ? supabaseAnonKey : 'placeholder-key'
+const clientUrl = isUrlValid ? resolvedSupabaseUrl : 'https://placeholder.supabase.co'
+const clientKey = isKeyValid ? resolvedSupabaseAnonKey : 'placeholder-key'
 
 export const supabase = createClient(clientUrl, clientKey, {
     auth: {
