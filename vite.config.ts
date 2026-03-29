@@ -55,7 +55,10 @@ export default defineConfig(({ mode }) => {
                 },
                 workbox: {
                     maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5MB limit
-                    globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}']
+                    globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+                    // Keep the public marketplace on its own HTML entrypoint.
+                    // If the service worker serves index.html here, refreshes jump into the ERP shell.
+                    navigateFallbackDenylist: [/^\/marketplace(?:\/.*)?$/]
                 }
             })
         ],
