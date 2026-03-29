@@ -744,3 +744,7 @@ export function useAuth() {
     }
     return context
 }
+
+export function useOptionalAuth() {
+    return useContext(AuthContext)
+}

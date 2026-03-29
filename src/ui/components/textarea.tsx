@@ -1,13 +1,13 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
-import { useAuth } from "@/auth"
+import { useOptionalAuth } from "@/auth"
 
 export interface TextareaProps
     extends React.TextareaHTMLAttributes<HTMLTextAreaElement> { }
 
 const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps & { allowViewer?: boolean }>(
     ({ className, allowViewer = false, disabled, ...props }, ref) => {
-        const { user } = useAuth()
+        const user = useOptionalAuth()?.user
         const isViewer = user?.role === 'viewer'
         const effectiveDisabled = disabled || (isViewer && !allowViewer)
 

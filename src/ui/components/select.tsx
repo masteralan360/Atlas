@@ -2,7 +2,7 @@ import * as React from "react"
 import * as SelectPrimitive from "@radix-ui/react-select"
 import { Check, ChevronDown, ChevronUp } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useAuth } from "@/auth"
+import { useOptionalAuth } from "@/auth"
 
 const Select = SelectPrimitive.Root
 
@@ -14,7 +14,7 @@ const SelectTrigger = React.forwardRef<
     React.ElementRef<typeof SelectPrimitive.Trigger>,
     React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> & { allowViewer?: boolean }
 >(({ className, children, allowViewer = false, disabled, ...props }, ref) => {
-    const { user } = useAuth()
+    const user = useOptionalAuth()?.user
     const isViewer = user?.role === 'viewer'
     const effectiveDisabled = disabled || (isViewer && !allowViewer)
 
