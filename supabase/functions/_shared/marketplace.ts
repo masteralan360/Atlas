@@ -4,6 +4,15 @@ const PUBLIC_ASSET_FOLDERS = new Set([
     'profile-images'
 ])
 
+const LEGACY_PUBLIC_ASSET_FOLDERS = new Set([
+    'workspaces'
+])
+
+const MARKETPLACE_ASSET_FOLDERS = new Set([
+    ...PUBLIC_ASSET_FOLDERS,
+    ...LEGACY_PUBLIC_ASSET_FOLDERS
+])
+
 const ORDER_MESSAGES: Record<'en' | 'ar' | 'ku', string> = {
     en: 'Order submitted successfully. The store will contact you shortly.',
     ar: 'تم إرسال الطلب بنجاح. سيتواصل المتجر معك قريبًا.',
@@ -24,18 +33,45 @@ function normalizeR2Path(path: string) {
         .join('/')
 }
 
-function resolveMarketplaceR2Key(path: string): string | null {
+type ResolvedMarketplaceAsset = {
+    canonicalPath: string
+    r2Key: string
+}
+
+function resolveMarketplaceAsset(path: string): ResolvedMarketplaceAsset | null {
     const segments = path.replace(/\\/g, '/').split('/').filter(Boolean)
     if (segments.length < 3) {
         return null
     }
 
-    if (PUBLIC_ASSET_FOLDERS.has(segments[0])) {
-        return `${segments[1]}/${segments[0]}/${segments.slice(2).join('/')}`
+    for (let index = 0; index <= segments.length - 3; index += 1) {
+        const folder = segments[index]
+        const workspaceId = segments[index + 1]
+        const filePath = segments.slice(index + 2).join('/')
+
+        if (!MARKETPLACE_ASSET_FOLDERS.has(folder) || !workspaceId || !filePath) {
+            continue
+        }
+
+        return {
+            canonicalPath: `${folder}/${workspaceId}/${filePath}`,
+            r2Key: `${workspaceId}/${folder}/${filePath}`
+        }
     }
 
-    if (PUBLIC_ASSET_FOLDERS.has(segments[1])) {
-        return `${segments[0]}/${segments[1]}/${segments.slice(2).join('/')}`
+    for (let index = 0; index <= segments.length - 3; index += 1) {
+        const workspaceId = segments[index]
+        const folder = segments[index + 1]
+        const filePath = segments.slice(index + 2).join('/')
+
+        if (!MARKETPLACE_ASSET_FOLDERS.has(folder) || !workspaceId || !filePath) {
+            continue
+        }
+
+        return {
+            canonicalPath: `${folder}/${workspaceId}/${filePath}`,
+            r2Key: `${workspaceId}/${folder}/${filePath}`
+        }
     }
 
     return null
@@ -93,26 +129,29 @@ export function resolvePublicAssetUrl(rawPath?: string | null): string | null {
         return path
     }
 
-    if (/^(data|blob|asset|file):/i.test(path)) {
+    let normalizedPath = path.replace(/\\/g, '/')
+
+    if (/^file:\/\//i.test(normalizedPath)) {
+        try {
+            normalizedPath = decodeURIComponent(new URL(normalizedPath).pathname)
+        } catch {
+            return null
+        }
+    } else if (/^(data|blob):/i.test(normalizedPath)) {
         return null
     }
 
-    if (/^[a-z]:[\\/]/i.test(path) || path.startsWith('/') || path.startsWith('\\')) {
-        return null
-    }
-
-    const normalizedPath = path.replace(/\\/g, '/')
-    const r2Key = resolveMarketplaceR2Key(normalizedPath)
-    if (!r2Key) {
+    const resolvedAsset = resolveMarketplaceAsset(normalizedPath)
+    if (!resolvedAsset) {
         return null
     }
 
     const baseUrl = getMarketplaceAssetBaseUrl()
     if (!baseUrl) {
-        return normalizedPath
+        return resolvedAsset.canonicalPath
     }
 
-    return `${baseUrl}/${normalizeR2Path(r2Key)}`
+    return `${baseUrl}/${normalizeR2Path(resolvedAsset.r2Key)}`
 }
 
 export function getRequesterIp(req: Request) {
