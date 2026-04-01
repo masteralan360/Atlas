@@ -17,7 +17,7 @@
             "destination": "/api/forexfy"
         },
         {
-            "source": "^/(?!api-xeiqd(?:/|$)|api-forexfy(?:/|$)|assets(?:/|$)|.*\\.[^/]+$).*$",
+            "source": "/((?!api-xeiqd(?:/|$)|api-forexfy(?:/|$)|assets(?:/|$)|.*\\.[^/]+$).*)",
             "has": [
                 {
                     "type": "host",
