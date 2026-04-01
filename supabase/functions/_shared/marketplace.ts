@@ -88,6 +88,86 @@ function getMarketplaceAssetBaseUrl() {
     return ''
 }
 
+function getMarketplaceAssetAuthToken() {
+    for (const key of ['R2_AUTH_TOKEN', 'R2_WORKER_AUTH_TOKEN', 'VITE_R2_AUTH_TOKEN']) {
+        const value = (Deno.env.get(key) ?? '').trim()
+        if (value) {
+            return value
+        }
+    }
+
+    return ''
+}
+
+export function getMarketplaceAssetUrlFromKey(key?: string | null): string | null {
+    const normalizedKey = sanitizeMarketplaceText(key, 4096)
+    if (!normalizedKey) {
+        return null
+    }
+
+    const baseUrl = getMarketplaceAssetBaseUrl()
+    if (!baseUrl) {
+        return null
+    }
+
+    return `${baseUrl}/${normalizeR2Path(normalizedKey.replace(/^\/+/, ''))}`
+}
+
+export async function listMarketplaceAssetKeys(prefix: string): Promise<string[]> {
+    const baseUrl = getMarketplaceAssetBaseUrl()
+    const authToken = getMarketplaceAssetAuthToken()
+    const normalizedPrefix = sanitizeMarketplaceText(prefix, 1024)
+
+    if (!baseUrl || !authToken || !normalizedPrefix) {
+        return []
+    }
+
+    try {
+        const listUrl = new URL(`${baseUrl}/`)
+        listUrl.searchParams.set('list', '1')
+        listUrl.searchParams.set('prefix', normalizedPrefix)
+
+        const response = await fetch(listUrl.toString(), {
+            headers: {
+                Authorization: `Bearer ${authToken}`
+            }
+        })
+
+        if (!response.ok) {
+            console.warn('[marketplace] Failed to list R2 assets', normalizedPrefix, response.status)
+            return []
+        }
+
+        const payload = await response.json() as { keys?: unknown }
+        if (!Array.isArray(payload.keys)) {
+            return []
+        }
+
+        return payload.keys.filter((value): value is string => typeof value === 'string')
+    } catch (error) {
+        console.warn('[marketplace] Failed to list R2 assets', normalizedPrefix, error)
+        return []
+    }
+}
+
+export async function listMarketplaceAssetUrls(prefixes: string[], limit?: number): Promise<string[]> {
+    if (prefixes.length === 0) {
+        return []
+    }
+
+    const keyGroups = await Promise.all(prefixes.map((prefix) => listMarketplaceAssetKeys(prefix)))
+    const keys = Array.from(new Set(keyGroups.flat()))
+        .sort((left, right) => left.localeCompare(right))
+
+    const selectedKeys = typeof limit === 'number' && limit >= 0
+        ? keys.slice(Math.max(keys.length - limit, 0))
+        : keys
+
+    return selectedKeys
+        .map((key) => getMarketplaceAssetUrlFromKey(key))
+        .filter((value): value is string => Boolean(value))
+}
+
 export function normalizeMarketplaceLanguage(value?: string | null): 'en' | 'ar' | 'ku' {
     const normalized = (value ?? '').trim().toLowerCase()
     if (normalized === 'ar' || normalized === 'ku') {

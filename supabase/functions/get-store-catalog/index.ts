@@ -1,6 +1,10 @@
 import { createAdminClient } from '../_shared/supabase.ts'
 import { corsHeaders, errorResponse, jsonResponse } from '../_shared/http.ts'
-import { resolvePublicAssetUrl, sanitizeMarketplaceText } from '../_shared/marketplace.ts'
+import {
+    listMarketplaceAssetUrls,
+    resolvePublicAssetUrl,
+    sanitizeMarketplaceText
+} from '../_shared/marketplace.ts'
 
 type WorkspaceRow = {
     id: string
@@ -120,6 +124,19 @@ Deno.serve(async (req) => {
 
         const primaryContacts = ((contacts ?? []) as ContactRow[]).filter((contact) => contact.is_primary)
         const visibleContacts = (primaryContacts.length > 0 ? primaryContacts : (contacts ?? []) as ContactRow[]).slice(0, 5)
+        const resolvedLogoUrl = resolvePublicAssetUrl(resolvedWorkspace.logo_url)
+            ?? (await listMarketplaceAssetUrls([
+                `${resolvedWorkspace.id}/workspace-logos/`,
+                `${resolvedWorkspace.id}/workspaces/`
+            ], 1))[0]
+            ?? null
+
+        const resolvedProductImageUrls = productRows.map((product) => resolvePublicAssetUrl(product.image_url))
+        const missingProductImageCount = resolvedProductImageUrls.filter((value) => !value).length
+        const fallbackProductImageUrls = missingProductImageCount > 0
+            ? await listMarketplaceAssetUrls([`${resolvedWorkspace.id}/product-images/`], missingProductImageCount)
+            : []
+        let fallbackProductImageIndex = 0
 
         return jsonResponse(
             {
@@ -127,7 +144,7 @@ Deno.serve(async (req) => {
                     name: resolvedWorkspace.name,
                     slug: resolvedWorkspace.store_slug,
                     description: resolvedWorkspace.store_description,
-                    logo_url: resolvePublicAssetUrl(resolvedWorkspace.logo_url),
+                    logo_url: resolvedLogoUrl,
                     currency: resolvedWorkspace.default_currency ?? 'iqd',
                     contacts: visibleContacts.map((contact) => ({
                         type: contact.type,
@@ -142,7 +159,7 @@ Deno.serve(async (req) => {
                         name: categoryNameById.get(categoryId)
                     }))
                     .filter((category): category is { id: string; name: string } => Boolean(category.name)),
-                products: productRows.map((product) => ({
+                products: productRows.map((product, index) => ({
                     id: product.id,
                     name: product.name,
                     sku: product.sku,
@@ -152,7 +169,9 @@ Deno.serve(async (req) => {
                     unit: product.unit ?? 'pcs',
                     category_id: product.category_id,
                     category_name: product.category_id ? (categoryNameById.get(product.category_id) ?? null) : null,
-                    image_url: resolvePublicAssetUrl(product.image_url)
+                    image_url: resolvedProductImageUrls[index]
+                        ?? fallbackProductImageUrls[fallbackProductImageIndex++]
+                        ?? resolvedLogoUrl
                 }))
             },
             {

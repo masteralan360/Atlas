@@ -1,6 +1,6 @@
 import { createAdminClient } from '../_shared/supabase.ts'
 import { errorResponse, jsonResponse, corsHeaders } from '../_shared/http.ts'
-import { resolvePublicAssetUrl } from '../_shared/marketplace.ts'
+import { listMarketplaceAssetUrls, resolvePublicAssetUrl } from '../_shared/marketplace.ts'
 
 type WorkspaceRow = {
     id: string
@@ -69,19 +69,25 @@ Deno.serve(async (req) => {
             }
         }
 
-        const stores = publicWorkspaces.map((workspace) => {
+        const stores = await Promise.all(publicWorkspaces.map(async (workspace) => {
             const counts = countsByWorkspace.get(workspace.id)
+            const logoUrl = resolvePublicAssetUrl(workspace.logo_url)
+                ?? (await listMarketplaceAssetUrls([
+                    `${workspace.id}/workspace-logos/`,
+                    `${workspace.id}/workspaces/`
+                ], 1))[0]
+                ?? null
 
             return {
                 name: workspace.name,
                 slug: workspace.store_slug,
                 description: workspace.store_description,
-                logo_url: resolvePublicAssetUrl(workspace.logo_url),
+                logo_url: logoUrl,
                 default_currency: workspace.default_currency ?? 'iqd',
                 product_count: counts?.productCount ?? 0,
                 category_count: counts?.categoryIds.size ?? 0
             }
-        })
+        }))
 
         return jsonResponse(
             { stores },
