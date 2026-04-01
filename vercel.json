@@ -17,11 +17,23 @@
             "destination": "/api/forexfy"
         },
         {
-            "source": "/marketplace",
+            "source": "/",
+            "has": [
+                {
+                    "type": "host",
+                    "value": "marketplace-atlas.vercel.app"
+                }
+            ],
             "destination": "/marketplace.html"
         },
         {
-            "source": "/marketplace/s/(.*)",
+            "source": "/:path((?!api-xeiqd(?:/|$)|api-forexfy(?:/|$)|assets(?:/|$)|.*\\.[^/]+$).*)",
+            "has": [
+                {
+                    "type": "host",
+                    "value": "marketplace-atlas.vercel.app"
+                }
+            ],
             "destination": "/marketplace.html"
         },
         {

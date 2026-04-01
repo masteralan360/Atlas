@@ -26,7 +26,7 @@ function contactIcon(type: string) {
 export function StorePage() {
     const { t, i18n } = useTranslation()
     const { toast } = useToast()
-    const [, params] = useRoute('/marketplace/s/:slug')
+    const [, params] = useRoute('/s/:slug')
     const storeSlug = params?.slug || ''
     const { catalog, isLoading, error } = useStoreCatalog(storeSlug)
     const cart = useCart(storeSlug)
@@ -138,7 +138,7 @@ export function StorePage() {
         <MarketplaceLayout
             title={catalog?.store.name || t('marketplace.storeTitle', { defaultValue: 'Store' })}
             subtitle={catalog?.store.description || t('marketplace.storeSubtitle', { defaultValue: 'Browse products and send an inquiry order directly to the store.' })}
-            backHref="/marketplace"
+            backHref="/"
             backLabel={t('marketplace.backToMarketplace', { defaultValue: 'Back to Marketplace' })}
             headerActions={(
                 <Button
@@ -183,7 +183,7 @@ export function StorePage() {
                             </h2>
                         </div>
                         <p className="text-sm text-muted-foreground">{error || t('marketplace.storeNotFoundHint', { defaultValue: 'This store may be private or the link may be incorrect.' })}</p>
-                        <Link href="/marketplace" className="inline-flex text-sm font-semibold text-primary hover:underline">
+                        <Link href="/" className="inline-flex text-sm font-semibold text-primary hover:underline">
                             {t('marketplace.backToMarketplace', { defaultValue: 'Back to Marketplace' })}
                         </Link>
                     </CardContent>

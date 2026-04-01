@@ -14,7 +14,7 @@ export function StoreCard({ store, index }: StoreCardProps) {
     const { t } = useTranslation()
 
     return (
-        <Link href={`/marketplace/s/${store.slug}`}>
+        <Link href={`/s/${store.slug}`}>
             <Card
                 className="group h-full overflow-hidden border-border/60 bg-card/85 transition-all duration-300 hover:-translate-y-1 hover:border-primary/40 hover:shadow-[0_24px_60px_rgba(15,23,42,0.12)]"
                 style={{ animationDelay: `${index * 70}ms` }}

@@ -299,12 +299,14 @@ export function Settings() {
     const [localWorkspaceName, setLocalWorkspaceName] = useState(workspaceName || '')
     const marketplaceSlugPattern = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/
     const marketplaceBaseOrigin = (() => {
-        const configuredOrigin = (import.meta.env.VITE_PUBLIC_SITE_URL || '').trim().replace(/\/+$/, '')
+        const configuredOrigin = (import.meta.env.VITE_MARKETPLACE_SITE_URL || '').trim().replace(/\/+$/, '')
         if (configuredOrigin) return configuredOrigin
         if (typeof window !== 'undefined' && /^https?:$/i.test(window.location.protocol)) {
-            return window.location.origin
+            if (window.location.hostname === 'marketplace-atlas.vercel.app') {
+                return window.location.origin
+            }
         }
-        return ''
+        return 'https://marketplace-atlas.vercel.app'
     })()
     const normalizedMarketplaceSlug = marketplaceSlug
         .toLowerCase()
@@ -313,7 +315,7 @@ export function Settings() {
         .replace(/-+/g, '-')
         .slice(0, 40)
     const marketplacePreviewUrl = normalizedMarketplaceSlug && marketplaceBaseOrigin
-        ? `${marketplaceBaseOrigin}/marketplace/s/${normalizedMarketplaceSlug}`
+        ? `${marketplaceBaseOrigin}/s/${normalizedMarketplaceSlug}`
         : ''
 
     useEffect(() => {
@@ -1802,7 +1804,7 @@ export function Settings() {
                                                     disabled={isLocalMode}
                                                 />
                                                 <div className="text-xs text-muted-foreground">
-                                                    {marketplacePreviewUrl ? marketplacePreviewUrl : t('settings.marketplace.slugDesc', { defaultValue: 'Your store will be available at /marketplace/s/your-slug' })}
+                                                    {marketplacePreviewUrl ? marketplacePreviewUrl : t('settings.marketplace.slugDesc', { defaultValue: 'Your store will be available at /s/your-slug' })}
                                                 </div>
                                                 {!isLocalMode && normalizedMarketplaceSlug && (
                                                     <div className={cn(

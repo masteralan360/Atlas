@@ -6,17 +6,14 @@ import { StorePage } from './pages/StorePage'
 export function MarketplaceApp() {
     return (
         <Switch>
-            <Route path="/marketplace/s/:slug">
+            <Route path="/s/:slug">
                 <StorePage />
             </Route>
-            <Route path="/marketplace">
+            <Route path="/">
                 <MarketplaceGallery />
             </Route>
-            <Route path="/">
-                <Redirect to="/marketplace" />
-            </Route>
             <Route>
-                <Redirect to="/marketplace" />
+                <Redirect to="/" />
             </Route>
         </Switch>
     )

@@ -923,7 +923,7 @@
             "private": "خاص",
             "public": "عام",
             "slug": "معرّف رابط المتجر",
-            "slugDesc": "سيكون متجرك متاحًا على /marketplace/s/your-slug",
+            "slugDesc": "سيكون متجرك متاحًا على /s/your-slug",
             "slugChecking": "جارٍ التحقق من التوفر...",
             "slugTaken": "هذا المعرّف مستخدم بالفعل",
             "slugAvailable": "هذا المعرّف متاح",

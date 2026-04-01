@@ -23,8 +23,9 @@ export default defineConfig(({ mode }) => {
         },
         plugins: [
             react(),
-            // Disable PWA in Tauri/Electron environment to prevent stale UI caching
-            !process.env.TAURI_ENV_PLATFORM && VitePWA({
+            VitePWA({
+                disable: isTauriBuild,
+                injectRegister: null,
                 registerType: 'autoUpdate',
                 includeAssets: ['logo.ico', 'logo.png'],
                 manifest: {
@@ -58,7 +59,7 @@ export default defineConfig(({ mode }) => {
                     globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
                     // Keep the public marketplace on its own HTML entrypoint.
                     // If the service worker serves index.html here, refreshes jump into the ERP shell.
-                    navigateFallbackDenylist: [/^\/marketplace(?:\/.*)?$/]
+                    navigateFallbackDenylist: [/^\/marketplace(?:\/.*)?$/, /^\/s(?:\/.*)?$/]
                 }
             })
         ],

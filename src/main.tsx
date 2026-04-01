@@ -11,6 +11,36 @@ import { connectionManager } from '@/lib/connectionManager'
 // Initialize connection manager (visibility, online/offline, heartbeat)
 connectionManager.init()
 
+if (
+    import.meta.env.PROD
+    && typeof window !== 'undefined'
+    && !('__TAURI_INTERNALS__' in window)
+    && 'serviceWorker' in navigator
+) {
+    const isMarketplaceHost = window.location.hostname === 'marketplace-atlas.vercel.app'
+
+    window.addEventListener('load', () => {
+        if (isMarketplaceHost) {
+            navigator.serviceWorker.getRegistrations()
+                .then(async (registrations) => {
+                    const results = await Promise.all(registrations.map((registration) => registration.unregister()))
+                    if (results.some(Boolean)) {
+                        window.location.reload()
+                    }
+                })
+                .catch((error) => {
+                    console.error('Failed to unregister marketplace service workers:', error)
+                })
+
+            return
+        }
+
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((error) => {
+            console.error('Failed to register service worker:', error)
+        })
+    })
+}
+
 // Global error handler for lazy loading failures (chunks)
 window.addEventListener('unhandledrejection', (event) => {
     if (event.reason?.message?.includes('Failed to fetch dynamically imported module') ||
