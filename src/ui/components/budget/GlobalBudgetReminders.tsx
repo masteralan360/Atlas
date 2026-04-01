@@ -140,11 +140,15 @@ export function GlobalBudgetReminders() {
     const [settlementTarget, setSettlementTarget] = useState<PaymentObligation | null>(null)
     const [settlementSourceItem, setSettlementSourceItem] = useState<BudgetReminderItem | null>(null)
     const [isSubmittingSettlement, setIsSubmittingSettlement] = useState(false)
+    const [isHydrating, setIsHydrating] = useState(true)
 
     const rates = useMemo(() => buildConversionRates(exchangeData, eurRates, tryRates), [exchangeData, eurRates, tryRates])
 
     useEffect(() => {
-        if (!isOnline || !workspaceId || !isAdmin) return
+        if (!isOnline || !workspaceId || !isAdmin) {
+            setIsHydrating(false)
+            return
+        }
 
         let cancelled = false
 
@@ -160,6 +164,10 @@ export function GlobalBudgetReminders() {
             } catch (error) {
                 if (!cancelled) {
                     console.error('[GlobalBudgetReminders] Failed to hydrate reminder data:', error)
+                }
+            } finally {
+                if (!cancelled) {
+                    setIsHydrating(false)
                 }
             }
         }
@@ -370,7 +378,7 @@ export function GlobalBudgetReminders() {
     }, [currentReminderId, reminderItems])
 
     useEffect(() => {
-        if (!isAdmin || isReminderActionLoading || settlementTarget || isSubmittingSettlement) return
+        if (!isAdmin || isHydrating || isReminderActionLoading || settlementTarget || isSubmittingSettlement) return
 
         if (activeReminderItems.length === 0) {
             if (currentReminderId) setCurrentReminderId(null)
@@ -384,7 +392,7 @@ export function GlobalBudgetReminders() {
         if (!stillValid) {
             setCurrentReminderId(activeReminderItems[0].id)
         }
-    }, [activeReminderItems, currentReminderId, isAdmin, isReminderActionLoading, settlementTarget, isSubmittingSettlement])
+    }, [activeReminderItems, currentReminderId, isAdmin, isReminderActionLoading, settlementTarget, isSubmittingSettlement, isHydrating])
 
     const markReminderHandledForSession = (id: string) => {
         setSessionHandledIds(prev => (prev.includes(id) ? prev : [...prev, id]))

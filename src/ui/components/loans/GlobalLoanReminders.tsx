@@ -31,6 +31,7 @@ export function GlobalLoanReminders() {
     const [sessionHandledReminderLoanIds, setSessionHandledReminderLoanIds] = useState<string[]>([])
     const [currentReminderLoanId, setCurrentReminderLoanId] = useState<string | null>(null)
     const [isReminderActionLoading, setIsReminderActionLoading] = useState(false)
+    const [isHydrating, setIsHydrating] = useState(true)
 
     const overdueReminderItems = useMemo(
         () => buildOverdueLoanReminderItems(loans, installments),
@@ -62,6 +63,7 @@ export function GlobalLoanReminders() {
 
     useEffect(() => {
         if (!isOnline || !workspaceId || isReadOnly) {
+            setIsHydrating(false)
             return
         }
 
@@ -76,6 +78,10 @@ export function GlobalLoanReminders() {
             } catch (error) {
                 if (!cancelled) {
                     console.error('[GlobalLoanReminders] Failed to hydrate reminder data:', error)
+                }
+            } finally {
+                if (!cancelled) {
+                    setIsHydrating(false)
                 }
             }
         }
@@ -103,7 +109,7 @@ export function GlobalLoanReminders() {
     }, [currentReminderLoanId, overdueReminderItems])
 
     useEffect(() => {
-        if (isReadOnly || isPaymentModalOpen || isReminderActionLoading) {
+        if (isReadOnly || isHydrating || isPaymentModalOpen || isReminderActionLoading) {
             return
         }
 
