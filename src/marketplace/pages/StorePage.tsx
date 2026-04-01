@@ -12,9 +12,11 @@ import { CheckoutForm } from '../components/CheckoutForm'
 import { MarketplaceLayout } from '../components/MarketplaceLayout'
 import { OrderConfirmation } from '../components/OrderConfirmation'
 import { ProductCard } from '../components/ProductCard'
+import { StoreAvatar } from '../components/StoreAvatar'
 import { useCart } from '../hooks/useCart'
 import { usePageMeta } from '../hooks/usePageMeta'
 import { useStoreCatalog } from '../hooks/useStoreCatalog'
+import { getMarketplaceAssetUrl } from '../lib/assets'
 import { placeInquiryOrder } from '../lib/marketplaceApi'
 
 function contactIcon(type: string) {
@@ -140,6 +142,7 @@ export function StorePage() {
             subtitle={catalog?.store.description || t('marketplace.storeSubtitle', { defaultValue: 'Browse products and send an inquiry order directly to the store.' })}
             backHref="/"
             backLabel={t('marketplace.backToMarketplace', { defaultValue: 'Back to Marketplace' })}
+            headerLogoUrl={catalog?.store.logo_url}
             headerActions={(
                 <Button
                     type="button"
@@ -202,13 +205,13 @@ export function StorePage() {
                     <Card className="overflow-hidden border-border/60 bg-card/80 shadow-[0_24px_80px_rgba(15,23,42,0.06)]">
                         <CardContent className="space-y-5 p-5 sm:p-6">
                             <div className="flex flex-col gap-5 md:flex-row md:items-start">
-                                <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-[2rem] bg-primary/10 text-primary ring-1 ring-primary/15">
-                                    {catalog.store.logo_url ? (
-                                        <img src={catalog.store.logo_url} alt={catalog.store.name} className="h-full w-full object-cover" />
-                                    ) : (
-                                        <Store className="h-9 w-9" />
-                                    )}
-                                </div>
+                                <StoreAvatar
+                                    logoUrl={catalog.store.logo_url}
+                                    name={catalog.store.name}
+                                    className="h-24 w-24 rounded-[2rem]"
+                                    imageClassName="p-4"
+                                    iconClassName="h-9 w-9"
+                                />
 
                                 <div className="flex-1 space-y-3">
                                     <div className="space-y-1">
@@ -303,52 +306,56 @@ export function StorePage() {
                                 ) : (
                                     <>
                                         <div className="space-y-3">
-                                            {cart.items.map((item) => (
-                                                <Card key={item.product_id} className="border-border/60 bg-card/70">
-                                                    <CardContent className="space-y-3 p-4">
-                                                        <div className="flex gap-3">
-                                                            <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-muted/40">
-                                                                {item.image_url ? (
-                                                                    <img src={item.image_url} alt={item.name} className="h-full w-full object-cover" />
-                                                                ) : (
-                                                                    <Store className="h-5 w-5 text-muted-foreground" />
-                                                                )}
+                                            {cart.items.map((item) => {
+                                                const itemImageUrl = getMarketplaceAssetUrl(item.image_url)
+
+                                                return (
+                                                    <Card key={item.product_id} className="border-border/60 bg-card/70">
+                                                        <CardContent className="space-y-3 p-4">
+                                                            <div className="flex gap-3">
+                                                                <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-muted/40">
+                                                                    {itemImageUrl ? (
+                                                                        <img src={itemImageUrl} alt={item.name} className="h-full w-full object-cover" loading="lazy" />
+                                                                    ) : (
+                                                                        <Store className="h-5 w-5 text-muted-foreground" />
+                                                                    )}
+                                                                </div>
+                                                                <div className="min-w-0 flex-1">
+                                                                    <h3 className="truncate font-bold">{item.name}</h3>
+                                                                    <p className="text-sm text-muted-foreground">
+                                                                        {formatMoney(item.unit_price * item.quantity, item.currency)}
+                                                                    </p>
+                                                                </div>
+                                                                <Button variant="ghost" size="icon" onClick={() => cart.removeItem(item.product_id)}>
+                                                                    <Minus className="h-4 w-4" />
+                                                                </Button>
                                                             </div>
-                                                            <div className="min-w-0 flex-1">
-                                                                <h3 className="truncate font-bold">{item.name}</h3>
-                                                                <p className="text-sm text-muted-foreground">
-                                                                    {formatMoney(item.unit_price * item.quantity, item.currency)}
-                                                                </p>
+                                                            <div className="flex items-center justify-between gap-3">
+                                                                <div className="inline-flex items-center rounded-full border border-border/60 bg-background/80">
+                                                                    <button
+                                                                        type="button"
+                                                                        className="px-3 py-2 text-sm font-bold"
+                                                                        onClick={() => cart.setQuantity(item.product_id, item.quantity - 1)}
+                                                                    >
+                                                                        -
+                                                                    </button>
+                                                                    <span className="px-3 text-sm font-semibold">{item.quantity}</span>
+                                                                    <button
+                                                                        type="button"
+                                                                        className="px-3 py-2 text-sm font-bold"
+                                                                        onClick={() => cart.setQuantity(item.product_id, item.quantity + 1)}
+                                                                    >
+                                                                        +
+                                                                    </button>
+                                                                </div>
+                                                                <div className="text-sm text-muted-foreground">
+                                                                    {formatMoney(item.unit_price, item.currency)} / {item.unit}
+                                                                </div>
                                                             </div>
-                                                            <Button variant="ghost" size="icon" onClick={() => cart.removeItem(item.product_id)}>
-                                                                <Minus className="h-4 w-4" />
-                                                            </Button>
-                                                        </div>
-                                                        <div className="flex items-center justify-between gap-3">
-                                                            <div className="inline-flex items-center rounded-full border border-border/60 bg-background/80">
-                                                                <button
-                                                                    type="button"
-                                                                    className="px-3 py-2 text-sm font-bold"
-                                                                    onClick={() => cart.setQuantity(item.product_id, item.quantity - 1)}
-                                                                >
-                                                                    -
-                                                                </button>
-                                                                <span className="px-3 text-sm font-semibold">{item.quantity}</span>
-                                                                <button
-                                                                    type="button"
-                                                                    className="px-3 py-2 text-sm font-bold"
-                                                                    onClick={() => cart.setQuantity(item.product_id, item.quantity + 1)}
-                                                                >
-                                                                    +
-                                                                </button>
-                                                            </div>
-                                                            <div className="text-sm text-muted-foreground">
-                                                                {formatMoney(item.unit_price, item.currency)} / {item.unit}
-                                                            </div>
-                                                        </div>
-                                                    </CardContent>
-                                                </Card>
-                                            ))}
+                                                        </CardContent>
+                                                    </Card>
+                                                )
+                                            })}
                                         </div>
 
                                         <Card className="border-border/60 bg-primary/5">

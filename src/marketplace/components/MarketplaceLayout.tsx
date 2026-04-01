@@ -1,16 +1,18 @@
 import type { ReactNode } from 'react'
 import { Link } from 'wouter'
-import { ArrowLeft, Store } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { LanguageSwitcher, ThemeToggle } from '@/ui/components'
 import { cn } from '@/lib/utils'
+import { StoreAvatar } from './StoreAvatar'
 
 type MarketplaceLayoutProps = {
     title: string
     subtitle?: string | null
     backHref?: string
     backLabel?: string
+    headerLogoUrl?: string | null
     headerActions?: ReactNode
     children: ReactNode
 }
@@ -20,6 +22,7 @@ export function MarketplaceLayout({
     subtitle,
     backHref,
     backLabel,
+    headerLogoUrl,
     headerActions,
     children
 }: MarketplaceLayoutProps) {
@@ -42,9 +45,13 @@ export function MarketplaceLayout({
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div className="space-y-3">
                             <div className="flex flex-wrap items-center gap-3">
-                                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                                    <Store className="h-5 w-5" />
-                                </div>
+                                <StoreAvatar
+                                    logoUrl={headerLogoUrl}
+                                    name={title}
+                                    className="h-11 w-11 rounded-2xl"
+                                    imageClassName="p-2.5"
+                                    iconClassName="h-5 w-5"
+                                />
                                 <div>
                                     {backHref && (
                                         <Link href={backHref} className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">

@@ -1,9 +1,10 @@
 import { Link } from 'wouter'
-import { ArrowRight, Package2, Store } from 'lucide-react'
+import { ArrowRight, Package2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Card, CardContent } from '@/ui/components'
 import type { MarketplaceStoreSummary } from '../lib/marketplaceApi'
+import { StoreAvatar } from './StoreAvatar'
 
 type StoreCardProps = {
     store: MarketplaceStoreSummary
@@ -21,13 +22,11 @@ export function StoreCard({ store, index }: StoreCardProps) {
             >
                 <CardContent className="flex h-full flex-col gap-5 p-5">
                     <div className="flex items-start justify-between gap-4">
-                        <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-3xl bg-primary/10 text-primary ring-1 ring-primary/15">
-                            {store.logo_url ? (
-                                <img src={store.logo_url} alt={store.name} className="h-full w-full object-cover" />
-                            ) : (
-                                <Store className="h-7 w-7" />
-                            )}
-                        </div>
+                        <StoreAvatar
+                            logoUrl={store.logo_url}
+                            name={store.name}
+                            className="h-16 w-16"
+                        />
                         <div className="rounded-full border border-border/60 bg-background/80 px-3 py-1 text-xs font-semibold text-muted-foreground">
                             {store.product_count} {t('marketplace.products', { defaultValue: 'products' })}
                         </div>

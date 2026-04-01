@@ -24,6 +24,34 @@ function normalizeR2Path(path: string) {
         .join('/')
 }
 
+function resolveMarketplaceR2Key(path: string): string | null {
+    const segments = path.replace(/\\/g, '/').split('/').filter(Boolean)
+    if (segments.length < 3) {
+        return null
+    }
+
+    if (PUBLIC_ASSET_FOLDERS.has(segments[0])) {
+        return `${segments[1]}/${segments[0]}/${segments.slice(2).join('/')}`
+    }
+
+    if (PUBLIC_ASSET_FOLDERS.has(segments[1])) {
+        return `${segments[0]}/${segments[1]}/${segments.slice(2).join('/')}`
+    }
+
+    return null
+}
+
+function getMarketplaceAssetBaseUrl() {
+    for (const key of ['R2_PUBLIC_BASE_URL', 'R2_WORKER_PUBLIC_BASE_URL', 'R2_WORKER_URL', 'VITE_R2_WORKER_URL']) {
+        const value = (Deno.env.get(key) ?? '').trim().replace(/\/+$/, '')
+        if (value) {
+            return value
+        }
+    }
+
+    return ''
+}
+
 export function normalizeMarketplaceLanguage(value?: string | null): 'en' | 'ar' | 'ku' {
     const normalized = (value ?? '').trim().toLowerCase()
     if (normalized === 'ar' || normalized === 'ku') {
@@ -56,12 +84,12 @@ export function sanitizeNullableMarketplaceText(value: unknown, maxLength = 240)
 }
 
 export function resolvePublicAssetUrl(rawPath?: string | null): string | null {
-    const path = sanitizeMarketplaceText(rawPath, 1024)
+    const path = sanitizeMarketplaceText(rawPath, 4096)
     if (!path) {
         return null
     }
 
-    if (/^https?:\/\//i.test(path)) {
+    if (/^https?:\/\//i.test(path) || /^data:image\//i.test(path)) {
         return path
     }
 
@@ -73,22 +101,15 @@ export function resolvePublicAssetUrl(rawPath?: string | null): string | null {
         return null
     }
 
-    const segments = path.replace(/\\/g, '/').split('/').filter(Boolean)
-    if (segments.length < 3) {
+    const normalizedPath = path.replace(/\\/g, '/')
+    const r2Key = resolveMarketplaceR2Key(normalizedPath)
+    if (!r2Key) {
         return null
     }
 
-    let r2Key: string | null = null
-
-    if (PUBLIC_ASSET_FOLDERS.has(segments[0])) {
-        r2Key = `${segments[1]}/${segments[0]}/${segments.slice(2).join('/')}`
-    } else if (PUBLIC_ASSET_FOLDERS.has(segments[1])) {
-        r2Key = `${segments[0]}/${segments[1]}/${segments.slice(2).join('/')}`
-    }
-
-    const baseUrl = (Deno.env.get('R2_PUBLIC_BASE_URL') ?? '').trim().replace(/\/+$/, '')
-    if (!baseUrl || !r2Key) {
-        return null
+    const baseUrl = getMarketplaceAssetBaseUrl()
+    if (!baseUrl) {
+        return normalizedPath
     }
 
     return `${baseUrl}/${normalizeR2Path(r2Key)}`

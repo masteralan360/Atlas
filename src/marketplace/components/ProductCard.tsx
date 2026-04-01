@@ -1,8 +1,10 @@
+import { useEffect, useState } from 'react'
 import { Package2, Plus } from 'lucide-react'
 
 import { Button, Card, CardContent } from '@/ui/components'
 import { formatCurrency } from '@/lib/utils'
 import type { MarketplaceProduct } from '../lib/marketplaceApi'
+import { getMarketplaceAssetUrl } from '../lib/assets'
 
 type ProductCardProps = {
     product: MarketplaceProduct
@@ -12,16 +14,25 @@ type ProductCardProps = {
 }
 
 export function ProductCard({ product, iqdPreference, addToCartLabel, onAdd }: ProductCardProps) {
+    const resolvedImageUrl = getMarketplaceAssetUrl(product.image_url)
+    const [hasImageError, setHasImageError] = useState(false)
+
+    useEffect(() => {
+        setHasImageError(false)
+    }, [resolvedImageUrl])
+
     return (
         <Card className="group h-full overflow-hidden border-border/60 bg-card/85 transition-all duration-300 hover:-translate-y-1 hover:border-primary/40 hover:shadow-[0_24px_60px_rgba(15,23,42,0.12)]">
             <CardContent className="flex h-full flex-col gap-4 p-4">
                 <div className="relative overflow-hidden rounded-[1.5rem] bg-muted/40">
                     <div className="aspect-[4/3]">
-                        {product.image_url ? (
+                        {resolvedImageUrl && !hasImageError ? (
                             <img
-                                src={product.image_url}
+                                src={resolvedImageUrl}
                                 alt={product.name}
                                 className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+                                loading="lazy"
+                                onError={() => setHasImageError(true)}
                             />
                         ) : (
                             <div className="flex h-full items-center justify-center text-muted-foreground">
