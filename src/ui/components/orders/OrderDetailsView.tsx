@@ -8,21 +8,24 @@ import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import {
     deletePurchaseOrder,
     deleteSalesOrder,
+    findLatestUnreversedPaymentTransaction,
     lockPurchaseOrder,
     lockSalesOrder,
-    setPurchaseOrderPaymentStatus,
-    setSalesOrderPaymentStatus,
+    recordObligationSettlement,
+    reversePaymentTransaction,
     updatePurchaseOrderStatus,
     updateSalesOrderStatus,
     usePurchaseOrder,
     useSalesOrder,
     useStorages,
+    type PaymentObligation,
     type PurchaseOrder,
     type PurchaseOrderItem,
     type PurchaseOrderStatus,
     type SalesOrder,
     type SalesOrderItem,
-    type SalesOrderStatus
+    type SalesOrderStatus,
+    type WorkspacePaymentMethod
 } from '@/local-db'
 import { useWorkspace } from '@/workspace'
 import {
@@ -37,6 +40,7 @@ import {
     DialogFooter,
     DialogHeader,
     DialogTitle,
+    SettlementDialog,
     Table,
     TableBody,
     TableCell,
@@ -78,6 +82,55 @@ function readViewMode() {
     return (localStorage.getItem('order_details_view_mode') as 'table' | 'grid') || 'table'
 }
 
+function buildSalesOrderPaymentObligation(order: SalesOrder): PaymentObligation {
+    return {
+        id: `sales-order:${order.id}`,
+        workspaceId: order.workspaceId,
+        sourceModule: 'orders',
+        sourceType: 'sales_order',
+        sourceRecordId: order.id,
+        sourceSubrecordId: null,
+        direction: 'incoming',
+        amount: order.total,
+        currency: order.currency,
+        dueDate: (order.expectedDeliveryDate || order.actualDeliveryDate || order.updatedAt).slice(0, 10),
+        counterpartyName: order.customerName,
+        referenceLabel: order.orderNumber,
+        title: order.customerName,
+        subtitle: order.status,
+        status: 'open',
+        routePath: `/orders/${order.id}`,
+        metadata: {
+            orderStatus: order.status,
+            sourceChannel: order.sourceChannel || 'manual'
+        }
+    }
+}
+
+function buildPurchaseOrderPaymentObligation(order: PurchaseOrder): PaymentObligation {
+    return {
+        id: `purchase-order:${order.id}`,
+        workspaceId: order.workspaceId,
+        sourceModule: 'orders',
+        sourceType: 'purchase_order',
+        sourceRecordId: order.id,
+        sourceSubrecordId: null,
+        direction: 'outgoing',
+        amount: order.total,
+        currency: order.currency,
+        dueDate: (order.expectedDeliveryDate || order.actualDeliveryDate || order.updatedAt).slice(0, 10),
+        counterpartyName: order.supplierName,
+        referenceLabel: order.orderNumber,
+        title: order.supplierName,
+        subtitle: order.status,
+        status: 'open',
+        routePath: `/orders/${order.id}`,
+        metadata: {
+            orderStatus: order.status
+        }
+    }
+}
+
 export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string; orderId: string }) {
     const { t } = useTranslation()
     const { user } = useAuth()
@@ -92,6 +145,8 @@ export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string
     const [isDeleting, setIsDeleting] = useState(false)
     const [lockConfirm, setLockConfirm] = useState<{ isOpen: boolean }>({ isOpen: false })
     const [isLocking, setIsLocking] = useState(false)
+    const [settlementTarget, setSettlementTarget] = useState<PaymentObligation | null>(null)
+    const [isSubmittingSettlement, setIsSubmittingSettlement] = useState(false)
 
     useEffect(() => {
         localStorage.setItem('order_details_view_mode', viewMode)
@@ -214,6 +269,62 @@ export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string
         }
     }
 
+    const handleOrderSettlement = async (input: { paymentMethod: WorkspacePaymentMethod; paidAt: string; note?: string }) => {
+        if (!settlementTarget) {
+            return
+        }
+
+        setIsSubmittingSettlement(true)
+        try {
+            await recordObligationSettlement(workspaceId, settlementTarget, {
+                paymentMethod: input.paymentMethod,
+                paidAt: input.paidAt,
+                note: input.note,
+                createdBy: user?.id || null
+            })
+
+            toast({
+                title: settlementTarget.direction === 'incoming' ? 'Collection recorded' : 'Payment recorded'
+            })
+            setSettlementTarget(null)
+        } catch (error: any) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: error?.message || 'Failed to record settlement',
+                variant: 'destructive'
+            })
+        } finally {
+            setIsSubmittingSettlement(false)
+        }
+    }
+
+    const handleOrderUnpay = async () => {
+        const sourceType = isSales ? 'sales_order' : 'purchase_order'
+
+        try {
+            const transaction = await findLatestUnreversedPaymentTransaction(workspaceId, {
+                sourceType,
+                sourceRecordId: order.id
+            })
+
+            if (!transaction) {
+                throw new Error('No posted payment was found for this order.')
+            }
+
+            await reversePaymentTransaction(workspaceId, transaction.id, {
+                createdBy: user?.id || null
+            })
+
+            toast({ title: 'Payment reversed' })
+        } catch (error: any) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: error?.message || 'Failed to reverse payment',
+                variant: 'destructive'
+            })
+        }
+    }
+
     return (
         <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -236,15 +347,17 @@ export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string
                             {action.label}
                         </Button>
                     ))}
-                    {canManage && (!order.isLocked || !order.isPaid) && (
+                    {canManage && !order.isLocked && (
                         <Button
                             variant="outline"
-                            onClick={() => runAction(
-                                () => isSales
-                                    ? setSalesOrderPaymentStatus(order.id, { isPaid: !order.isPaid, paymentMethod: (order.paymentMethod || 'cash') as SalesOrder['paymentMethod'] })
-                                    : setPurchaseOrderPaymentStatus(order.id, { isPaid: !order.isPaid, paymentMethod: (order.paymentMethod || 'cash') as PurchaseOrder['paymentMethod'] }),
-                                order.isPaid ? (t('orders.details.messages.markedUnpaid') || 'Marked unpaid') : (t('orders.details.messages.markedPaid') || 'Marked paid')
-                            )}
+                            onClick={() => order.isPaid
+                                ? handleOrderUnpay()
+                                : setSettlementTarget(
+                                    isSales
+                                        ? buildSalesOrderPaymentObligation(order as SalesOrder)
+                                        : buildPurchaseOrderPaymentObligation(order as PurchaseOrder)
+                                )
+                            }
                         >
                             <CreditCard className="mr-2 h-4 w-4" />
                             {order.isPaid ? (t('orders.actions.unpay') || 'Mark Unpaid') : (t('orders.actions.pay') || 'Mark Paid')}
@@ -570,6 +683,18 @@ export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string
                 isLoading={isDeleting}
                 title={t('orders.confirmDelete') || 'Delete Order'}
                 description={t('orders.deleteWarning') || 'This will permanently remove the order record. Associated invoices should be checked.'}
+            />
+
+            <SettlementDialog
+                open={!!settlementTarget}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setSettlementTarget(null)
+                    }
+                }}
+                obligation={settlementTarget}
+                isSubmitting={isSubmittingSettlement}
+                onSubmit={handleOrderSettlement}
             />
 
             <Dialog open={lockConfirm.isOpen} onOpenChange={(open) => !isLocking && setLockConfirm({ isOpen: open })}>
