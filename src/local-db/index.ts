@@ -1,6 +1,7 @@
 export * from './database'
 export * from './models'
 export * from './inventory'
+export * from './storageUtils'
 export * from './offlineMutations'
 export * from './hooks'
 export * from './orders'

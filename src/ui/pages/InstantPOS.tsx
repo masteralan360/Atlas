@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
-import { addToOfflineMutations, adjustInventoryQuantity, useCategories, useInventoryProducts, useStorages } from '@/local-db'
+import { addToOfflineMutations, adjustInventoryQuantity, getPrimaryStorageFromList, useCategories, useInventoryProducts, useStorages } from '@/local-db'
 import { db } from '@/local-db/database'
 import type { CurrencyCode } from '@/local-db/models'
 import { useWorkspace } from '@/workspace'
@@ -483,7 +483,7 @@ export function InstantPOS() {
 
     useEffect(() => {
         if (storages.length > 0 && (!selectedStorageId || !storages.find(storage => storage.id === selectedStorageId))) {
-            const mainStorage = storages.find(storage => storage.isSystem && storage.name === 'Main') || storages[0]
+            const mainStorage = getPrimaryStorageFromList(storages)
             if (mainStorage) {
                 setSelectedStorageId(mainStorage.id)
             }

@@ -909,6 +909,41 @@ export class AtlasDatabase extends Dexie {
             }
         })
 
+        this.version(51).stores({
+            storages: 'id, name, workspaceId, isSystem, isProtected, isPrimary, syncStatus, updatedAt, isDeleted'
+        }).upgrade(async tx => {
+            const storageRows = await tx.table('storages').toArray() as Array<Record<string, unknown>>
+            if (storageRows.length === 0) {
+                return
+            }
+
+            const rowsByWorkspace = new Map<string, Array<Record<string, unknown>>>()
+            for (const row of storageRows) {
+                const workspaceId = String(row.workspaceId || '')
+                if (!workspaceId) {
+                    row.isPrimary = false
+                    continue
+                }
+
+                const workspaceRows = rowsByWorkspace.get(workspaceId) ?? []
+                workspaceRows.push(row)
+                rowsByWorkspace.set(workspaceId, workspaceRows)
+            }
+
+            for (const workspaceRows of rowsByWorkspace.values()) {
+                const activeRows = workspaceRows.filter((row) => !row.isDeleted)
+                const primaryRow = activeRows.find((row) => row.isPrimary === true)
+                    ?? activeRows.find((row) => row.isSystem === true && String(row.name || '').trim().toLowerCase() === 'main')
+                    ?? activeRows[0]
+
+                for (const row of workspaceRows) {
+                    row.isPrimary = !!primaryRow && !row.isDeleted && row.id === primaryRow.id
+                }
+            }
+
+            await tx.table('storages').bulkPut(storageRows)
+        })
+
         this.registerLocalModeSyncHooks()
     }
 

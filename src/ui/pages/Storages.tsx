@@ -1,4 +1,4 @@
-import { useStorages, createStorage, updateStorage, deleteStorage, getReserveStorageId, useInventory, useProducts, useCategories, type Storage, type CurrencyCode } from '@/local-db'
+import { useStorages, createStorage, updateStorage, deleteStorage, getPrimaryStorageId, getPrimaryStorageFromList, isPrimaryStorage, useInventory, useProducts, useCategories, type Storage, type CurrencyCode } from '@/local-db'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { useAuth } from '@/auth'
@@ -118,8 +118,8 @@ export default function Storages() {
 
     useEffect(() => {
         if (storages.length > 0 && (!selectedStorageId || !storages.find(s => s.id === selectedStorageId))) {
-            const mainStorage = storages.find(s => s.name === 'Main' && s.isSystem) || storages[0]
-            if (mainStorage) setSelectedStorageId(mainStorage.id)
+            const primaryStorage = getPrimaryStorageFromList(storages)
+            if (primaryStorage) setSelectedStorageId(primaryStorage.id)
         }
     }, [storages, selectedStorageId])
 
@@ -170,18 +170,26 @@ export default function Storages() {
     const handleDelete = async () => {
         if (!deletingStorage || !activeWorkspace) return
 
-        const reserveId = await getReserveStorageId(activeWorkspace.id)
-        if (!reserveId) {
-            toast({ title: t('storages.noReserve', 'Reserve storage not found'), variant: 'destructive' })
+        const fallbackStorageId = await getPrimaryStorageId(activeWorkspace.id, deletingStorage.id)
+        if (!fallbackStorageId) {
+            toast({ title: t('storages.noPrimary', 'Primary storage not found'), variant: 'destructive' })
             return
         }
 
-        const result = await deleteStorage(deletingStorage.id, reserveId)
+        const fallbackStorage = storages.find((storage) => storage.id === fallbackStorageId)
+        const result = await deleteStorage(deletingStorage.id, fallbackStorageId)
         if (result.success) {
             if (result.movedCount > 0) {
                 toast({
                     title: t('storages.deleted', 'Storage deleted'),
-                    description: t('storages.productsMoved', '{{count}} products moved to Reserve', { count: result.movedCount })
+                    description: t('storages.productsMovedToStorage', '{{count}} products moved to {{storage}}', {
+                        count: result.movedCount,
+                        storage: fallbackStorage
+                            ? (fallbackStorage.isSystem
+                                ? (t(`storages.${fallbackStorage.name.toLowerCase()}`) || fallbackStorage.name)
+                                : fallbackStorage.name)
+                            : (t('storages.primary', 'Primary Storage') || 'Primary Storage')
+                    })
                 })
             } else {
                 toast({ title: t('storages.deleted', 'Storage deleted') })
@@ -274,9 +282,16 @@ export default function Storages() {
                                     ) : (
                                         filteredStorages.map((storage) => (
                                             <TableRow key={storage.id} className="group hover:bg-muted/30 transition-colors border-b last:border-0 text-foreground/80">
-                                                <TableCell className="font-bold pl-6 text-foreground flex items-center gap-2">
+                                                <TableCell className="font-bold pl-6 text-foreground">
+                                                    <div className="flex flex-wrap items-center gap-2">
                                                     {storage.isSystem && <ShieldCheck className="w-4 h-4 text-amber-500" />}
                                                     {storage.isSystem ? (t(`storages.${storage.name.toLowerCase()}`) || storage.name) : storage.name}
+                                                        {isPrimaryStorage(storage) && (
+                                                            <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-primary/10 text-primary">
+                                                                {t('storages.primary', 'Primary')}
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </TableCell>
                                                 <TableCell>
                                                     <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-widest ${storage.isSystem
@@ -503,7 +518,7 @@ export default function Storages() {
                 onClose={() => setDeletingStorage(undefined)}
                 onConfirm={handleDelete}
                 title={t('storages.confirmDelete', 'Delete Storage')}
-                description={t('storages.messages.deleteConfirm', 'Products in this storage will be moved to Reserve. Continue?')}
+                description={t('storages.messages.deleteConfirmPrimary', 'Products in this storage will be moved to the primary storage or next available storage. Continue?')}
             />
         </div>
     )

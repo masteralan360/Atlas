@@ -12,6 +12,7 @@ import {
     createSalesOrder,
     deletePurchaseOrder,
     deleteSalesOrder,
+    getPrimaryStorageFromList,
     findLatestUnreversedPaymentTransaction,
     lockPurchaseOrder,
     lockSalesOrder,
@@ -213,7 +214,7 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
     const suppliers = useSuppliers(workspaceId)
     const salesOrders = useSalesOrders(workspaceId)
     const purchaseOrders = usePurchaseOrders(workspaceId)
-    const defaultStorageId = (storages.find((storage) => storage.name === 'Main' && storage.isSystem) || storages[0])?.id || ''
+    const defaultStorageId = getPrimaryStorageFromList(storages)?.id || ''
 
     const [activeTab, setActiveTab] = useState<OrderTab>('sales')
     const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => (localStorage.getItem('orders_view_mode') as 'table' | 'grid') || 'table')

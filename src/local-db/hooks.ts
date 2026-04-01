@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { db } from './database'
 import { createInventoryTransferTransactions } from './inventoryTransferTransactions'
 import { addToOfflineMutations } from './offlineMutations'
+import { getPrimaryStorageId as getPrimaryStorageIdForWorkspace, normalizeStorageRecord, sortStoragesByPriority } from './storageUtils'
 import {
     deleteInventoryForProduct,
     getInventoryQuantityForProductStorage,
@@ -1234,7 +1235,19 @@ export function useStorages(workspaceId: string | undefined) {
     const online = useNetworkStatus()
 
     const storages = useLiveQuery(
-        () => workspaceId ? db.storages.where('workspaceId').equals(workspaceId).and(s => !s.isDeleted).toArray() : [],
+        async () => {
+            if (!workspaceId) {
+                return []
+            }
+
+            const rows = await db.storages
+                .where('workspaceId')
+                .equals(workspaceId)
+                .and((storage) => !storage.isDeleted)
+                .toArray()
+
+            return sortStoragesByPriority(rows.map(normalizeStorageRecord))
+        },
         [workspaceId]
     )
 
@@ -1263,7 +1276,7 @@ export function useStorages(workspaceId: string | undefined) {
                         }
 
                         for (const remoteItem of data) {
-                            const localItem = toCamelCase(remoteItem as any) as unknown as Storage
+                            const localItem = normalizeStorageRecord(toCamelCase(remoteItem as any) as unknown as Storage)
                             localItem.syncStatus = 'synced'
                             localItem.lastSyncedAt = new Date().toISOString()
                             await db.storages.put(localItem)
@@ -1281,6 +1294,11 @@ export function useStorages(workspaceId: string | undefined) {
 export async function createStorage(workspaceId: string, data: { name: string }): Promise<Storage> {
     const now = new Date().toISOString()
     const id = generateId()
+    const activeStorageCount = await db.storages
+        .where('workspaceId')
+        .equals(workspaceId)
+        .and((storage) => !storage.isDeleted)
+        .count()
 
     const storage: Storage = {
         id,
@@ -1288,6 +1306,7 @@ export async function createStorage(workspaceId: string, data: { name: string })
         name: data.name,
         isSystem: false,
         isProtected: false,
+        isPrimary: activeStorageCount === 0,
         createdAt: now,
         updatedAt: now,
         syncStatus: (isOnline() ? 'synced' : 'pending') as any,
@@ -1548,8 +1567,7 @@ export async function deleteStorage(id: string, moveProductsToStorageId: string)
 }
 
 export async function getReserveStorageId(workspaceId: string): Promise<string | null> {
-    const reserve = await db.storages.where('workspaceId').equals(workspaceId).and(s => s.name === 'Reserve' && !s.isDeleted).first()
-    return reserve?.id ?? null
+    return getPrimaryStorageIdForWorkspace(workspaceId)
 }
 
 // ===================

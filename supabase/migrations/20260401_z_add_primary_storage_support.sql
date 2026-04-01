@@ -1,3 +1,124 @@
+ALTER TABLE public.storages
+  ADD COLUMN IF NOT EXISTS is_primary boolean NOT NULL DEFAULT false;
+
+WITH ranked_storages AS (
+    SELECT
+        s.id,
+        COALESCE(s.is_deleted, false) AS is_deleted,
+        ROW_NUMBER() OVER (
+            PARTITION BY s.workspace_id
+            ORDER BY
+                CASE
+                    WHEN COALESCE(s.is_deleted, false) = false AND COALESCE(s.is_primary, false) = true THEN 0
+                    WHEN COALESCE(s.is_deleted, false) = false AND s.is_system = true AND LOWER(s.name) = 'main' THEN 1
+                    WHEN COALESCE(s.is_deleted, false) = false THEN 2
+                    ELSE 3
+                END,
+                s.is_system DESC,
+                s.is_protected DESC,
+                s.created_at NULLS LAST,
+                s.id
+        ) AS storage_rank
+    FROM public.storages s
+),
+normalized_storages AS (
+    SELECT
+        id,
+        CASE
+            WHEN is_deleted THEN false
+            ELSE storage_rank = 1
+        END AS should_be_primary
+    FROM ranked_storages
+)
+UPDATE public.storages s
+SET is_primary = normalized_storages.should_be_primary
+FROM normalized_storages
+WHERE s.id = normalized_storages.id
+  AND COALESCE(s.is_primary, false) IS DISTINCT FROM normalized_storages.should_be_primary;
+
+CREATE UNIQUE INDEX IF NOT EXISTS storages_workspace_active_primary_key
+  ON public.storages (workspace_id)
+  WHERE is_primary = true AND COALESCE(is_deleted, false) = false;
+
+CREATE OR REPLACE FUNCTION public.ensure_primary_storage(p_workspace_id uuid)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+DECLARE
+    v_primary_storage_id uuid;
+BEGIN
+    SELECT id
+    INTO v_primary_storage_id
+    FROM public.storages
+    WHERE workspace_id = p_workspace_id
+      AND COALESCE(is_deleted, false) = false
+      AND COALESCE(is_primary, false) = true
+    ORDER BY is_system DESC, is_protected DESC, created_at NULLS LAST, id
+    LIMIT 1;
+
+    IF v_primary_storage_id IS NULL THEN
+        SELECT id
+        INTO v_primary_storage_id
+        FROM public.storages
+        WHERE workspace_id = p_workspace_id
+          AND COALESCE(is_deleted, false) = false
+          AND LOWER(name) = 'main'
+        ORDER BY is_system DESC, is_protected DESC, created_at NULLS LAST, id
+        LIMIT 1;
+    END IF;
+
+    IF v_primary_storage_id IS NULL THEN
+        SELECT id
+        INTO v_primary_storage_id
+        FROM public.storages
+        WHERE workspace_id = p_workspace_id
+          AND COALESCE(is_deleted, false) = false
+        ORDER BY is_system DESC, is_protected DESC, created_at NULLS LAST, id
+        LIMIT 1;
+    END IF;
+
+    IF v_primary_storage_id IS NULL THEN
+        INSERT INTO public.storages (
+            workspace_id,
+            name,
+            is_system,
+            is_protected,
+            is_primary,
+            created_at,
+            updated_at,
+            is_deleted
+        )
+        VALUES (
+            p_workspace_id,
+            'Main',
+            true,
+            true,
+            true,
+            timezone('utc', now()),
+            timezone('utc', now()),
+            false
+        )
+        RETURNING id INTO v_primary_storage_id;
+
+        RETURN v_primary_storage_id;
+    END IF;
+
+    UPDATE public.storages
+    SET
+        is_primary = (id = v_primary_storage_id),
+        updated_at = CASE
+            WHEN id = v_primary_storage_id AND COALESCE(is_primary, false) = false THEN timezone('utc', now())
+            ELSE updated_at
+        END
+    WHERE workspace_id = p_workspace_id
+      AND COALESCE(is_deleted, false) = false
+      AND COALESCE(is_primary, false) IS DISTINCT FROM (id = v_primary_storage_id);
+
+    RETURN v_primary_storage_id;
+END;
+$function$;
+
 CREATE OR REPLACE FUNCTION public.return_sale_items(
     p_sale_item_ids uuid[],
     p_return_quantities integer[],
@@ -44,7 +165,6 @@ BEGIN
     p_workspace_id := item_record.workspace_id;
     v_sale_id := item_record.sale_id;
 
-    -- Check if POS feature is enabled for this workspace
     SELECT pos INTO v_pos
     FROM public.workspaces
     WHERE id = p_workspace_id;
@@ -108,7 +228,7 @@ BEGIN
         END IF;
 
         IF v_storage_id IS NULL THEN
-            SELECT CASE WHEN COUNT(*) = 1 THEN MIN(storage_id::text)::uuid ELSE NULL END
+            SELECT CASE WHEN COUNT(*) = 1 THEN MIN(i.storage_id::text)::uuid ELSE NULL END
             INTO v_storage_id
             FROM public.inventory i
             JOIN public.storages st
@@ -211,4 +331,103 @@ BEGIN
         'return_value', v_total_return_value
     );
 END;
-$function$
+$function$;
+
+CREATE OR REPLACE FUNCTION public.migrate_products_to_main_storage(p_workspace_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    v_main_storage_id uuid;
+BEGIN
+    INSERT INTO public.storages (
+        workspace_id,
+        name,
+        is_system,
+        is_protected,
+        is_primary,
+        created_at,
+        updated_at,
+        is_deleted
+    )
+    SELECT
+        p_workspace_id,
+        'Main',
+        true,
+        true,
+        true,
+        timezone('utc', now()),
+        timezone('utc', now()),
+        false
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM public.storages
+        WHERE workspace_id = p_workspace_id
+          AND LOWER(name) = 'main'
+          AND COALESCE(is_deleted, false) = false
+    );
+
+    SELECT id
+    INTO v_main_storage_id
+    FROM public.storages
+    WHERE workspace_id = p_workspace_id
+      AND LOWER(name) = 'main'
+      AND COALESCE(is_deleted, false) = false
+    ORDER BY created_at NULLS LAST, id
+    LIMIT 1;
+
+    UPDATE public.storages
+    SET
+        is_primary = (id = v_main_storage_id),
+        updated_at = CASE
+            WHEN id = v_main_storage_id AND COALESCE(is_primary, false) = false THEN timezone('utc', now())
+            ELSE updated_at
+        END
+    WHERE workspace_id = p_workspace_id
+      AND COALESCE(is_deleted, false) = false
+      AND COALESCE(is_primary, false) IS DISTINCT FROM (id = v_main_storage_id);
+
+    INSERT INTO public.inventory (
+        id,
+        workspace_id,
+        product_id,
+        storage_id,
+        quantity,
+        created_at,
+        updated_at,
+        version,
+        is_deleted
+    )
+    SELECT
+        gen_random_uuid(),
+        p.workspace_id,
+        p.id,
+        COALESCE(p.storage_id, v_main_storage_id),
+        COALESCE(p.quantity, 0),
+        COALESCE(p.created_at, timezone('utc', now())),
+        COALESCE(p.updated_at, timezone('utc', now())),
+        GREATEST(COALESCE(p.version, 1), 1),
+        false
+    FROM public.products p
+    WHERE p.workspace_id = p_workspace_id
+      AND COALESCE(p.is_deleted, false) = false
+      AND COALESCE(p.quantity, 0) > 0
+      AND COALESCE(p.storage_id, v_main_storage_id) IS NOT NULL
+    ON CONFLICT (workspace_id, product_id, storage_id) DO UPDATE
+    SET
+        quantity = EXCLUDED.quantity,
+        updated_at = EXCLUDED.updated_at,
+        version = GREATEST(public.inventory.version, EXCLUDED.version),
+        is_deleted = false;
+
+    UPDATE public.products
+    SET
+        storage_id = COALESCE(storage_id, v_main_storage_id),
+        updated_at = timezone('utc', now())
+    WHERE workspace_id = p_workspace_id
+      AND COALESCE(is_deleted, false) = false
+      AND COALESCE(quantity, 0) > 0
+      AND storage_id IS NULL
+      AND v_main_storage_id IS NOT NULL;
+END;
+$function$;

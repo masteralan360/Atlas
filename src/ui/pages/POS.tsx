@@ -6,6 +6,7 @@ import {
     addToOfflineMutations,
     adjustInventoryQuantity,
     createLoanFromPosSale,
+    getPrimaryStorageFromList,
     useCategories,
     useInventoryProducts,
     useStorages,
@@ -174,7 +175,7 @@ export function POS() {
 
     useEffect(() => {
         if (storages.length > 0 && (!selectedStorageId || !storages.find(s => s.id === selectedStorageId))) {
-            const mainStorage = storages.find(s => s.isSystem && s.name === 'Main') || storages[0]
+            const mainStorage = getPrimaryStorageFromList(storages)
             if (mainStorage) setSelectedStorageId(mainStorage.id)
         }
     }, [storages, selectedStorageId])

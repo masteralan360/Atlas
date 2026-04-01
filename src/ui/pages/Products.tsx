@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { useProducts, createProduct, updateProduct, deleteProduct, useCategories, createCategory, updateCategory, deleteCategory, useStorages, type Product, type Category } from '@/local-db'
+import { useProducts, createProduct, updateProduct, deleteProduct, useCategories, createCategory, updateCategory, deleteCategory, getPrimaryStorageFromList, useStorages, type Product, type Category } from '@/local-db'
 import type { CurrencyCode } from '@/local-db/models'
 import { formatCurrency, cn } from '@/lib/utils'
 import { assetManager } from '@/lib/assetManager'
@@ -140,7 +140,7 @@ export function Products() {
                 storageId: editingProduct.storageId || ''
             };
         } else {
-            const mainStorage = storages.find(s => s.name === 'Main' && s.isSystem) || storages[0];
+            const mainStorage = getPrimaryStorageFromList(storages);
             sourceData = {
                 ...initialFormData,
                 storageId: mainStorage?.id || '',
@@ -385,10 +385,9 @@ export function Products() {
             })
         } else {
             setEditingProduct(null)
-            const mainStorage = storages.find(s => s.name === 'Main' && s.isSystem) || storages[0]
             setFormData({
                 ...initialFormData,
-                storageId: mainStorage?.id || '',
+                storageId: getPrimaryStorageFromList(storages)?.id || '',
                 currency: features.default_currency
             })
         }

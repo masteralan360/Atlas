@@ -11,7 +11,7 @@ import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { getLoanDetailsPath } from '@/lib/loanPresentation'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
-import { db, useLoanBySaleId, useLoanInstallments, useLoanPayments, useLoans, useSales, useSalesOrders, useTravelAgencySales, toUISale, toUISaleFromOrder, toUISaleFromTravelAgency, type Loan } from '@/local-db'
+import { adjustInventoryQuantity, db, resolveReturnStorageId, useLoanBySaleId, useLoanInstallments, useLoanPayments, useLoans, useSales, useSalesOrders, useTravelAgencySales, toUISale, toUISaleFromOrder, toUISaleFromTravelAgency, type Loan } from '@/local-db'
 import { useWorkspace } from '@/workspace'
 import { isMobile } from '@/lib/platform'
 import { useDateRange } from '@/context/DateRangeContext'
@@ -524,6 +524,81 @@ export function Sales() {
         initiateReturn(mockSale, false)
     }
 
+    const restoreInventoryForReturn = useCallback(async (input: {
+        workspaceId: string
+        items: SaleItem[]
+        quantities: number[]
+        timestamp: string
+        syncSource: 'local' | 'remote'
+    }) => {
+        const plans = await Promise.all(input.items.map(async (item, index) => {
+            const quantityToRestore = Math.max(0, input.quantities[index] || 0)
+            const storageId = quantityToRestore > 0
+                ? await resolveReturnStorageId({
+                    workspaceId: input.workspaceId,
+                    productId: item.product_id,
+                    saleStorageId: item.storage_id ?? null
+                })
+                : (item.storage_id ?? null)
+
+            return {
+                item,
+                quantity: quantityToRestore,
+                storageId
+            }
+        }))
+
+        const missingPlan = plans.find((plan) => plan.quantity > 0 && !plan.storageId)
+        if (missingPlan) {
+            throw new Error(`No active storage available for returned item ${missingPlan.item.product_name || missingPlan.item.product_id}`)
+        }
+
+        const appliedPlans: typeof plans = []
+        try {
+            for (const plan of plans) {
+                if (plan.quantity <= 0 || !plan.storageId) {
+                    continue
+                }
+
+                await adjustInventoryQuantity({
+                    workspaceId: input.workspaceId,
+                    productId: plan.item.product_id,
+                    storageId: plan.storageId,
+                    quantityDelta: plan.quantity,
+                    timestamp: input.timestamp,
+                    syncSource: input.syncSource === 'remote' ? 'remote' : undefined,
+                    skipRemoteSync: input.syncSource === 'remote'
+                })
+
+                appliedPlans.push(plan)
+            }
+        } catch (error) {
+            for (const plan of [...appliedPlans].reverse()) {
+                try {
+                    if (!plan.storageId) {
+                        continue
+                    }
+
+                    await adjustInventoryQuantity({
+                        workspaceId: input.workspaceId,
+                        productId: plan.item.product_id,
+                        storageId: plan.storageId,
+                        quantityDelta: -plan.quantity,
+                        timestamp: input.timestamp,
+                        syncSource: input.syncSource === 'remote' ? 'remote' : undefined,
+                        skipRemoteSync: input.syncSource === 'remote'
+                    })
+                } catch (rollbackError) {
+                    console.error('[Sales] Failed to rollback local return inventory:', rollbackError)
+                }
+            }
+
+            throw error
+        }
+
+        return plans.map((plan) => plan.storageId)
+    }, [])
+
     const handleReturnConfirm = async (reason: string, quantity?: number) => {
         if (!saleToReturn) return
 
@@ -556,6 +631,14 @@ export function Sales() {
                     const quantities = itemsToReturn.map(i =>
                         quantity && itemsToReturn.length === 1 ? quantity : (i.quantity - (i.returned_quantity || 0))
                     )
+                    const returnTimestamp = new Date().toISOString()
+                    const restoredStorageIds = await restoreInventoryForReturn({
+                        workspaceId: saleToReturn.workspace_id,
+                        items: itemsToReturn,
+                        quantities,
+                        timestamp: returnTimestamp,
+                        syncSource: 'local'
+                    })
                     const returnValue = itemsToReturn.reduce((sum, item, index) => {
                         const unitPrice = item.converted_unit_price || item.unit_price || 0
                         return sum + (unitPrice * quantities[index])
@@ -571,10 +654,11 @@ export function Sales() {
                             const newReturnedQty = (i.returned_quantity || 0) + q
                             return {
                                 ...i,
+                                storage_id: restoredStorageIds[returnedIdx] || i.storage_id,
                                 returned_quantity: newReturnedQty,
                                 is_returned: newReturnedQty >= i.quantity,
                                 return_reason: reason,
-                                returned_at: new Date().toISOString()
+                                returned_at: returnTimestamp
                             }
                         })
 
@@ -592,7 +676,7 @@ export function Sales() {
                             ; (existingLocal as any)._enrichedItems = updatedSale.items
                             ; (existingLocal as any).totalAmount = updatedSale.total_amount
                             ; (existingLocal as any).isReturned = updatedSale.is_returned
-                        ; (existingLocal as any).updatedAt = new Date().toISOString()
+                        ; (existingLocal as any).updatedAt = returnTimestamp
                         if (shouldQueueOfflineReturn) {
                             ; (existingLocal as any).syncStatus = 'pending'
                             ; (existingLocal as any).lastSyncedAt = null
@@ -602,7 +686,8 @@ export function Sales() {
                     await Promise.all(itemsToReturn.map((item, index) => {
                         const newReturnedQty = (item.returned_quantity || 0) + quantities[index]
                         return db.sale_items.update(item.id, {
-                            returnedQuantity: newReturnedQty
+                            returnedQuantity: newReturnedQty,
+                            storageId: restoredStorageIds[index] || item.storage_id
                         } as any)
                     }))
                     if (selectedSale?.id === saleToReturn.id) {
@@ -621,6 +706,17 @@ export function Sales() {
                         })
                     }
                 } else {
+                    const itemsToReturn = saleToReturn.items || []
+                    const quantities = itemsToReturn.map((item) => item.quantity - (item.returned_quantity || 0))
+                    const returnTimestamp = new Date().toISOString()
+                    const restoredStorageIds = await restoreInventoryForReturn({
+                        workspaceId: saleToReturn.workspace_id,
+                        items: itemsToReturn,
+                        quantities,
+                        timestamp: returnTimestamp,
+                        syncSource: 'local'
+                    })
+
                     const updateSale = (s: Sale) => {
                         if (s.id !== saleToReturn.id) return s
                         return {
@@ -628,13 +724,14 @@ export function Sales() {
                             is_returned: true,
                             total_amount: 0,
                             return_reason: reason,
-                            returned_at: new Date().toISOString(),
-                            items: s.items?.map(i => ({
+                            returned_at: returnTimestamp,
+                            items: s.items?.map((i, index) => ({
                                 ...i,
+                                storage_id: restoredStorageIds[index] || i.storage_id,
                                 is_returned: true,
                                 returned_quantity: i.quantity,
                                 return_reason: reason,
-                                returned_at: new Date().toISOString()
+                                returned_at: returnTimestamp
                             }))
                         }
                     }
@@ -644,14 +741,15 @@ export function Sales() {
                         ; (existingLocal as any).isReturned = true
                             ; (existingLocal as any).totalAmount = 0
                             ; (existingLocal as any).returnReason = reason
-                            ; (existingLocal as any).returnedAt = new Date().toISOString()
-                            ; (existingLocal as any).updatedAt = new Date().toISOString()
-                        const updatedItems = ((existingLocal as any)._enrichedItems || []).map((i: any) => ({
+                            ; (existingLocal as any).returnedAt = returnTimestamp
+                            ; (existingLocal as any).updatedAt = returnTimestamp
+                        const updatedItems = ((existingLocal as any)._enrichedItems || []).map((i: any, index: number) => ({
                             ...i,
+                            storage_id: restoredStorageIds[index] || i.storage_id,
                             is_returned: true,
                             returned_quantity: i.quantity,
                             return_reason: reason,
-                            returned_at: new Date().toISOString()
+                            returned_at: returnTimestamp
                         }))
                             ; (existingLocal as any)._enrichedItems = updatedItems
                         if (shouldQueueOfflineReturn) {
@@ -663,9 +761,10 @@ export function Sales() {
                     if (selectedSale?.id === saleToReturn.id) {
                         setSelectedSale(updateSale(selectedSale))
                     }
-                    await Promise.all((saleToReturn.items || []).map((item) =>
+                    await Promise.all(itemsToReturn.map((item, index) =>
                         db.sale_items.update(item.id, {
-                            returnedQuantity: item.quantity
+                            returnedQuantity: item.quantity,
+                            storageId: restoredStorageIds[index] || item.storage_id
                         } as any)
                     ))
                     if (shouldQueueOfflineReturn) {
@@ -708,6 +807,14 @@ export function Sales() {
 
                 if (!error && data?.success) {
                     const returnValue = data.return_value || 0
+                    const returnTimestamp = new Date().toISOString()
+                    const restoredStorageIds = await restoreInventoryForReturn({
+                        workspaceId: saleToReturn.workspace_id,
+                        items: itemsToReturn,
+                        quantities,
+                        timestamp: returnTimestamp,
+                        syncSource: 'remote'
+                    })
 
                     const updateSale = (s: Sale) => {
                         if (s.id !== saleToReturn.id) return s
@@ -719,10 +826,11 @@ export function Sales() {
                             const newReturnedQty = (i.returned_quantity || 0) + q
                             return {
                                 ...i,
+                                storage_id: restoredStorageIds[returnedIdx] || i.storage_id,
                                 returned_quantity: newReturnedQty,
                                 is_returned: newReturnedQty >= i.quantity,
                                 return_reason: reason,
-                                returned_at: new Date().toISOString()
+                                returned_at: returnTimestamp
                             }
                         })
 
@@ -741,14 +849,24 @@ export function Sales() {
                             ; (existingLocal as any)._enrichedItems = updatedSale.items
                             ; (existingLocal as any).totalAmount = updatedSale.total_amount
                             ; (existingLocal as any).isReturned = updatedSale.is_returned
+                            ; (existingLocal as any).updatedAt = returnTimestamp
                         await db.sales.put(existingLocal)
                     }
+                    await Promise.all(itemsToReturn.map((item, index) => {
+                        const newReturnedQty = (item.returned_quantity || 0) + quantities[index]
+                        return db.sale_items.update(item.id, {
+                            returnedQuantity: newReturnedQty,
+                            storageId: restoredStorageIds[index] || item.storage_id
+                        } as any)
+                    }))
                     if (selectedSale?.id === saleToReturn.id) {
                         setSelectedSale(updateSale(selectedSale))
                     }
                 }
             } else {
                 // Whole Sale Return
+                const itemsToReturn = saleToReturn.items || []
+                const quantities = itemsToReturn.map((item) => item.quantity - (item.returned_quantity || 0))
                 const { data, error: saleError } = await runSupabaseAction('sales.returnWhole', () =>
                     supabase.rpc('return_whole_sale', {
                         p_sale_id: saleToReturn.id,
@@ -758,6 +876,15 @@ export function Sales() {
                 error = saleError
 
                 if (!error && data?.success) {
+                    const returnTimestamp = new Date().toISOString()
+                    const restoredStorageIds = await restoreInventoryForReturn({
+                        workspaceId: saleToReturn.workspace_id,
+                        items: itemsToReturn,
+                        quantities,
+                        timestamp: returnTimestamp,
+                        syncSource: 'remote'
+                    })
+
                     const updateSale = (s: Sale) => {
                         if (s.id !== saleToReturn.id) return s
                         return {
@@ -765,13 +892,14 @@ export function Sales() {
                             is_returned: true,
                             total_amount: 0,
                             return_reason: reason,
-                            returned_at: new Date().toISOString(),
-                            items: s.items?.map(i => ({
+                            returned_at: returnTimestamp,
+                            items: s.items?.map((i, index) => ({
                                 ...i,
+                                storage_id: restoredStorageIds[index] || i.storage_id,
                                 is_returned: true,
                                 returned_quantity: i.quantity,
                                 return_reason: reason,
-                                returned_at: new Date().toISOString()
+                                returned_at: returnTimestamp
                             }))
                         }
                     }
@@ -782,17 +910,25 @@ export function Sales() {
                         ; (existingLocal as any).isReturned = true
                             ; (existingLocal as any).totalAmount = 0
                             ; (existingLocal as any).returnReason = reason
-                            ; (existingLocal as any).returnedAt = new Date().toISOString()
-                        const updatedItems = ((existingLocal as any)._enrichedItems || []).map((i: any) => ({
+                            ; (existingLocal as any).returnedAt = returnTimestamp
+                            ; (existingLocal as any).updatedAt = returnTimestamp
+                        const updatedItems = ((existingLocal as any)._enrichedItems || []).map((i: any, index: number) => ({
                             ...i,
+                            storage_id: restoredStorageIds[index] || i.storage_id,
                             is_returned: true,
                             returned_quantity: i.quantity,
                             return_reason: reason,
-                            returned_at: new Date().toISOString()
+                            returned_at: returnTimestamp
                         }))
                             ; (existingLocal as any)._enrichedItems = updatedItems
                         await db.sales.put(existingLocal)
                     }
+                    await Promise.all(itemsToReturn.map((item, index) =>
+                        db.sale_items.update(item.id, {
+                            returnedQuantity: item.quantity,
+                            storageId: restoredStorageIds[index] || item.storage_id
+                        } as any)
+                    ))
                     if (selectedSale?.id === saleToReturn.id) {
                         setSelectedSale(updateSale(selectedSale))
                     }

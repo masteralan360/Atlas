@@ -10,6 +10,7 @@ BEGIN
         name,
         is_system,
         is_protected,
+        is_primary,
         created_at,
         updated_at,
         is_deleted
@@ -17,6 +18,7 @@ BEGIN
     SELECT
         p_workspace_id,
         'Main',
+        true,
         true,
         true,
         timezone('utc', now()),
@@ -38,6 +40,17 @@ BEGIN
       AND COALESCE(is_deleted, false) = false
     ORDER BY created_at NULLS LAST, id
     LIMIT 1;
+
+    UPDATE public.storages
+    SET
+        is_primary = (id = v_main_storage_id),
+        updated_at = CASE
+            WHEN id = v_main_storage_id AND COALESCE(is_primary, false) = false THEN timezone('utc', now())
+            ELSE updated_at
+        END
+    WHERE workspace_id = p_workspace_id
+      AND COALESCE(is_deleted, false) = false
+      AND COALESCE(is_primary, false) IS DISTINCT FROM (id = v_main_storage_id);
 
     INSERT INTO public.inventory (
         id,
