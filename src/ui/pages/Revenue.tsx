@@ -234,6 +234,7 @@ export function Revenue() {
             margin: number,
             currency: string,
             origin: string,
+            sourceChannel?: string | null,
             cashier: string,
             partyName?: string,
             sequenceId?: number,
@@ -312,6 +313,7 @@ export function Revenue() {
                 margin: totals.margin,
                 currency: currency,
                 origin: record.origin,
+                sourceChannel: record.sourceChannel || null,
                 cashier: record.cashier,
                 partyName: record.partyName,
                 sequenceId: record.sequenceId,
@@ -1121,7 +1123,7 @@ export function Revenue() {
                                                             )}
 
                                                             <span className="px-1.5 py-0.5 rounded-full text-[8px] font-bold bg-secondary uppercase">
-                                                                {formatOriginLabel(sale.origin)}
+                                                                {formatOriginLabel(sale.origin, sale.sourceChannel)}
                                                             </span>
                                                         </div>
                                                         {sale.partyName && (
@@ -1299,7 +1301,7 @@ export function Revenue() {
                                                     </TableCell>
                                                     <TableCell className="text-start">
                                                         <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-secondary uppercase">
-                                                            {formatOriginLabel(sale.origin)}
+                                                            {formatOriginLabel(sale.origin, sale.sourceChannel)}
                                                         </span>
                                                     </TableCell>
                                                     <TableCell className="text-end font-medium">

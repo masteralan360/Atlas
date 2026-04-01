@@ -21,6 +21,7 @@ import {
     CardHeader,
     CardTitle,
     Input,
+    Switch,
     Table,
     TableBody,
     TableCell,
@@ -44,6 +45,7 @@ export function Customers() {
     const [editingPartner, setEditingPartner] = useState<BusinessPartner | null>(null)
     const [deleteTarget, setDeleteTarget] = useState<BusinessPartner | null>(null)
     const [isSaving, setIsSaving] = useState(false)
+    const [showEcommerceCustomers, setShowEcommerceCustomers] = useState(true)
 
     const availableCurrencies = useMemo(() => {
         const currencies: CurrencyCode[] = ['usd', 'iqd']
@@ -52,15 +54,23 @@ export function Customers() {
         return currencies
     }, [features.eur_conversion_enabled, features.try_conversion_enabled])
 
+    const visibleCustomers = useMemo(() => {
+        if (showEcommerceCustomers) {
+            return customers
+        }
+
+        return customers.filter((customer) => !customer.isEcommerce)
+    }, [customers, showEcommerceCustomers])
+
     const filteredCustomers = useMemo(() => {
         const query = search.trim().toLowerCase()
-        if (!query) return customers
-        return customers.filter((customer) =>
+        if (!query) return visibleCustomers
+        return visibleCustomers.filter((customer) =>
             [customer.name, customer.contactName, customer.phone, customer.email, customer.city]
                 .filter((value): value is string => typeof value === 'string' && value.length > 0)
                 .some((value) => value.toLowerCase().includes(query))
         )
-    }, [customers, search])
+    }, [visibleCustomers, search])
 
     const canEdit = user?.role === 'admin' || user?.role === 'staff'
     const canDelete = user?.role === 'admin'
@@ -109,7 +119,7 @@ export function Customers() {
         }
     }
 
-    const totalOutstanding = filteredCustomers.reduce((count, customer) => count + (customer.receivableBalance > 0 ? 1 : 0), 0)
+    const totalOutstanding = visibleCustomers.reduce((count, customer) => count + (customer.receivableBalance > 0 ? 1 : 0), 0)
 
     return (
         <div className="space-y-6">
@@ -135,7 +145,7 @@ export function Customers() {
                         <CardTitle className="text-sm text-muted-foreground">{t('customers.title') || 'Customers'}</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-3xl font-black">{customers.length}</div>
+                        <div className="text-3xl font-black">{visibleCustomers.length}</div>
                     </CardContent>
                 </Card>
                 <Card>
@@ -143,7 +153,7 @@ export function Customers() {
                         <CardTitle className="text-sm text-muted-foreground">{t('orders.table.items') || 'Orders'}</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-3xl font-black">{customers.reduce((sum, customer) => sum + customer.totalSalesOrders, 0)}</div>
+                        <div className="text-3xl font-black">{visibleCustomers.reduce((sum, customer) => sum + customer.totalSalesOrders, 0)}</div>
                     </CardContent>
                 </Card>
                 <Card>
@@ -159,15 +169,34 @@ export function Customers() {
             <Card>
                 <CardHeader className="gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <CardTitle>{t('customers.title') || 'Customers'}</CardTitle>
-                    <div className="relative w-full max-w-sm">
-                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                            value={search}
-                            onChange={(event) => setSearch(event.target.value)}
-                            allowViewer={true}
-                            placeholder={t('customers.searchPlaceholder') || 'Search customers...'}
-                            className="pl-9"
-                        />
+                    <div className="flex w-full flex-col gap-3 lg:max-w-xl lg:flex-row lg:items-center lg:justify-end">
+                        <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-background/60 px-4 py-3">
+                            <div className="space-y-0.5">
+                                <div className="text-sm font-medium">
+                                    {t('customers.showEcommerce', { defaultValue: 'Show E-Commerce buyers' })}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                    {showEcommerceCustomers
+                                        ? t('customers.showEcommerceVisible', { defaultValue: 'E-Commerce buyers are visible in this module.' })
+                                        : t('customers.showEcommerceHidden', { defaultValue: 'E-Commerce buyers are hidden from this module.' })}
+                                </div>
+                            </div>
+                            <Switch
+                                checked={showEcommerceCustomers}
+                                onCheckedChange={setShowEcommerceCustomers}
+                                allowViewer={true}
+                            />
+                        </div>
+                        <div className="relative w-full max-w-sm">
+                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                                value={search}
+                                onChange={(event) => setSearch(event.target.value)}
+                                allowViewer={true}
+                                placeholder={t('customers.searchPlaceholder') || 'Search customers...'}
+                                className="pl-9"
+                            />
+                        </div>
                     </div>
                 </CardHeader>
                 <CardContent>
@@ -201,7 +230,16 @@ export function Customers() {
 
                                         return (
                                             <TableRow key={customer.id}>
-                                                <TableCell className="font-semibold">{customer.name}</TableCell>
+                                                <TableCell className="font-semibold">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <span>{customer.name}</span>
+                                                        {customer.isEcommerce ? (
+                                                            <span className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-sky-700 dark:text-sky-300">
+                                                                {t('ecommerce.title', { defaultValue: 'E-Commerce' })}
+                                                            </span>
+                                                        ) : null}
+                                                    </div>
+                                                </TableCell>
                                                 <TableCell>
                                                     <div className="space-y-1">
                                                         <div>{customer.phone || customer.contactName || 'N/A'}</div>

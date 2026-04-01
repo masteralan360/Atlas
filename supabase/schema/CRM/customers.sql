@@ -19,6 +19,7 @@ CREATE TABLE crm.customers (
   version bigint NULL DEFAULT 1,
   is_deleted boolean NULL DEFAULT false,
   credit_limit numeric NULL DEFAULT 0,
+  is_ecommerce boolean NULL DEFAULT false,
   PRIMARY KEY (id)
 );
 

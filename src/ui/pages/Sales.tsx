@@ -1179,7 +1179,7 @@ export function Sales() {
                                                                 "px-2 py-0.5 text-[9px] font-bold bg-secondary text-secondary-foreground uppercase",
                                                                 style === 'neo-orange' ? "rounded-[var(--radius)] border border-black dark:border-white" : "rounded-full"
                                                             )}>
-                                                                {formatOriginLabel(sale.origin)}
+                                                                {formatOriginLabel(sale.origin, (sale as any)._sourceChannel ?? null)}
                                                             </span>
                                                             {loanIndicator && (
                                                                 <Tooltip>
@@ -1418,7 +1418,7 @@ export function Sales() {
                                                         "px-2 py-1 text-xs font-medium bg-secondary text-secondary-foreground uppercase",
                                                         style === 'neo-orange' ? "rounded-[var(--radius)] border border-black dark:border-white" : "rounded-full"
                                                     )}>
-                                                        {formatOriginLabel(sale.origin)}
+                                                        {formatOriginLabel(sale.origin, (sale as any)._sourceChannel ?? null)}
                                                     </span>
                                                 </TableCell>
                                                 <TableCell className="text-start">

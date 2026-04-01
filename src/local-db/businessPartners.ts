@@ -333,6 +333,7 @@ function partnerToCustomer(partner: BusinessPartner): Customer {
         totalSpent: partner.totalSalesValue,
         outstandingBalance: partner.receivableBalance,
         creditLimit: partner.creditLimit,
+        isEcommerce: partner.isEcommerce ?? false,
         createdAt: partner.createdAt,
         updatedAt: partner.updatedAt,
         syncStatus: partner.syncStatus,
@@ -359,6 +360,7 @@ function partnerToSupplier(partner: BusinessPartner): Supplier {
         totalPurchases: partner.totalPurchaseOrders,
         totalSpent: partner.totalPurchaseValue,
         creditLimit: partner.creditLimit,
+        isEcommerce: partner.isEcommerce ?? false,
         createdAt: partner.createdAt,
         updatedAt: partner.updatedAt,
         syncStatus: partner.syncStatus,
@@ -425,6 +427,7 @@ async function mirrorPartnerToFacets(partner: BusinessPartner) {
                 defaultCurrency: partner.defaultCurrency,
                 notes: partner.notes,
                 creditLimit: partner.creditLimit,
+                isEcommerce: partner.isEcommerce ?? customer.isEcommerce ?? false,
                 updatedAt: partner.updatedAt,
                 version: Math.max(customer.version + 1, partner.version),
                 ...getSyncMetadata(partner.workspaceId, partner.updatedAt)
@@ -449,6 +452,7 @@ async function mirrorPartnerToFacets(partner: BusinessPartner) {
                 defaultCurrency: partner.defaultCurrency,
                 notes: partner.notes,
                 creditLimit: partner.creditLimit,
+                isEcommerce: partner.isEcommerce ?? supplier.isEcommerce ?? false,
                 updatedAt: partner.updatedAt,
                 version: Math.max(supplier.version + 1, partner.version),
                 ...getSyncMetadata(partner.workspaceId, partner.updatedAt)
@@ -701,7 +705,8 @@ async function createFacetFromPartner(partner: BusinessPartner, facetType: Partn
         country: partner.country,
         defaultCurrency: partner.defaultCurrency,
         notes: partner.notes,
-        creditLimit: partner.creditLimit
+        creditLimit: partner.creditLimit,
+        isEcommerce: partner.isEcommerce ?? false
     })
 
     if (facetType === 'customer') {
@@ -953,6 +958,7 @@ export async function createBusinessPartner(
 ) {
     const partner = buildBaseEntity(workspaceId, {
         ...data,
+        isEcommerce: data.isEcommerce ?? false,
         customerFacetId: null,
         supplierFacetId: null,
         totalSalesOrders: 0,
@@ -1145,6 +1151,7 @@ export async function mergeBusinessPartners(primaryPartnerId: string, secondaryP
         creditLimit: Math.max(primary.creditLimit || 0, secondary.creditLimit || 0),
         customerFacetId: primary.customerFacetId || secondary.customerFacetId || null,
         supplierFacetId: primary.supplierFacetId || secondary.supplierFacetId || null,
+        isEcommerce: Boolean(primary.isEcommerce || secondary.isEcommerce),
         updatedAt: now,
         version: primary.version + 1,
         ...getSyncMetadata(primary.workspaceId, now)

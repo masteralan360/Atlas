@@ -111,6 +111,7 @@ export interface Supplier extends BaseEntity {
     totalPurchases: number
     totalSpent: number
     creditLimit: number
+    isEcommerce?: boolean
 }
 
 export interface Customer extends BaseEntity {
@@ -127,6 +128,7 @@ export interface Customer extends BaseEntity {
     totalSpent: number
     outstandingBalance: number
     creditLimit: number
+    isEcommerce?: boolean
 }
 
 export type BusinessPartnerRole = 'customer' | 'supplier' | 'both'
@@ -155,6 +157,7 @@ export interface BusinessPartner extends BaseEntity {
     loanOutstandingBalance: number
     netExposure: number
     mergedIntoBusinessPartnerId?: string | null
+    isEcommerce?: boolean
 }
 
 export type BusinessPartnerMergeType = 'customer_supplier'
@@ -233,6 +236,8 @@ export interface SalesOrder extends BaseEntity {
     shippingAddress?: string
     notes?: string
     isLocked?: boolean
+    sourceChannel?: 'manual' | 'marketplace' | null
+    marketplaceOrderId?: string | null
 }
 
 export interface PurchaseOrder extends BaseEntity {
@@ -293,6 +298,9 @@ export interface MarketplaceOrder extends BaseEntity {
     cancelledAt?: string | null
     cancelReason?: string | null
     inventoryDeducted: boolean
+    businessPartnerId?: string | null
+    customerId?: string | null
+    salesOrderId?: string | null
 }
 
 export type TravelAgencyTravelMethod = 'bus' | 'plane' | 'train' | 'car' | 'ship' | 'hotel' | 'other'

@@ -345,11 +345,14 @@ function buildSalesOrderObligation(order: SalesOrder, todayKey: string): Payment
         counterpartyName: order.customerName,
         referenceLabel: order.orderNumber,
         title: order.customerName,
-        subtitle: order.status === 'completed' ? 'Completed sales order' : 'Pending sales order',
+        subtitle: order.sourceChannel === 'marketplace'
+            ? (order.status === 'completed' ? 'Delivered E-Commerce order' : 'Open E-Commerce order')
+            : (order.status === 'completed' ? 'Completed sales order' : 'Pending sales order'),
         status: isDateOverdue(dueDate, todayKey) ? 'overdue' : 'open',
         routePath: `/orders/${order.id}`,
         metadata: {
-            orderStatus: order.status
+            orderStatus: order.status,
+            sourceChannel: order.sourceChannel || 'manual'
         }
     }
 }
@@ -1154,7 +1157,8 @@ export async function recordObligationSettlement(
                 note,
                 createdBy,
                 metadata: {
-                    orderStatus: order.status
+                    orderStatus: order.status,
+                    sourceChannel: order.sourceChannel || 'manual'
                 }
             })
             return

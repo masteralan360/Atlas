@@ -24,6 +24,7 @@ CREATE TABLE crm.business_partners (
   loan_outstanding_balance numeric NULL DEFAULT 0,
   net_exposure numeric NULL DEFAULT 0,
   merged_into_business_partner_id uuid NULL,
+  is_ecommerce boolean NULL DEFAULT false,
   created_at timestamp with time zone NULL DEFAULT now(),
   updated_at timestamp with time zone NULL DEFAULT now(),
   sync_status text NULL DEFAULT 'synced'::text,

@@ -20,6 +20,7 @@ export interface RevenueAnalysisRecord {
     date: string
     currency: string
     origin: string
+    sourceChannel?: string | null
     cashier: string
     partyName?: string
     sequenceId?: number
@@ -86,6 +87,7 @@ export function toRevenueRecordFromSalesOrder(order: SalesOrder): RevenueAnalysi
         date: getOrderRevenueDate(order),
         currency: order.currency || 'usd',
         origin: 'sales_order',
+        sourceChannel: order.sourceChannel || null,
         cashier: '',
         partyName: order.customerName,
         hasPartialReturn: false,

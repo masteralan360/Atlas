@@ -804,6 +804,8 @@ export async function createSalesOrder(
         ...data,
         ...counterparty,
         orderNumber,
+        sourceChannel: data.sourceChannel ?? 'manual',
+        marketplaceOrderId: data.marketplaceOrderId ?? null,
         status
     }) as SalesOrder
 
@@ -851,7 +853,8 @@ export async function createSalesOrder(
             referenceLabel: createdOrder.orderNumber,
             note: createdOrder.notes || null,
             metadata: {
-                orderStatus: createdOrder.status
+                orderStatus: createdOrder.status,
+                sourceChannel: createdOrder.sourceChannel || 'manual'
             }
         })
     }

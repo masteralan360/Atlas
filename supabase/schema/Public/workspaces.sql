@@ -29,6 +29,10 @@ CREATE TABLE public.workspaces (
   print_quality text NULL DEFAULT 'low'::text,
   coordination text NULL,
   kds_enabled boolean NOT NULL DEFAULT false,
+  visibility text NOT NULL DEFAULT 'private'::text,
+  store_slug text NULL,
+  store_description text NULL,
+  ecommerce boolean NOT NULL DEFAULT false,
   CONSTRAINT workspaces_data_mode_check CHECK ((data_mode::text) = ANY (ARRAY['cloud'::text, 'local'::text, 'hybrid'::text])),
   PRIMARY KEY (id)
 );

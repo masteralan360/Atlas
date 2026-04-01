@@ -7,6 +7,14 @@ import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
+import {
+    db,
+    fetchTableFromSupabase,
+    recordObligationSettlement,
+    type PaymentObligation,
+    type SalesOrder,
+    type WorkspacePaymentMethod
+} from '@/local-db'
 import { useWorkspace } from '@/workspace'
 import {
     Button,
@@ -20,12 +28,20 @@ import {
     DialogHeader,
     DialogTitle,
     Input,
+    SettlementDialog,
     Textarea,
     useToast
 } from '@/ui/components'
 
 type MarketplaceOrderStatus = 'pending' | 'confirmed' | 'processing' | 'shipped' | 'delivered' | 'cancelled'
 type MarketplaceOrderFilter = 'all' | MarketplaceOrderStatus
+
+type MarketplaceTransitionResponse = {
+    warning?: string | null
+    sales_order_id?: string | null
+    customer_id?: string | null
+    business_partner_id?: string | null
+}
 
 type MarketplaceOrderItemRecord = {
     product_id: string
@@ -42,6 +58,9 @@ type MarketplaceOrderItemRecord = {
 type MarketplaceOrderRecord = {
     id: string
     order_number: string
+    business_partner_id: string | null
+    customer_id: string | null
+    sales_order_id: string | null
     customer_name: string
     customer_phone: string
     customer_email: string | null
@@ -67,6 +86,9 @@ type MarketplaceOrderRecord = {
 const MARKETPLACE_ORDER_SELECT = `
     id,
     order_number,
+    business_partner_id,
+    customer_id,
+    sales_order_id,
     customer_name,
     customer_phone,
     customer_email,
@@ -88,6 +110,44 @@ const MARKETPLACE_ORDER_SELECT = `
     created_at,
     updated_at
 `
+
+async function hydrateMarketplaceCollectionDependencies(workspaceId: string, salesOrderId: string) {
+    await Promise.all([
+        fetchTableFromSupabase('sales_orders', db.sales_orders, workspaceId, { includeDeleted: true }),
+        fetchTableFromSupabase('customers', db.customers, workspaceId, { includeDeleted: true }),
+        fetchTableFromSupabase('business_partners', db.business_partners, workspaceId, { includeDeleted: true })
+    ])
+
+    const order = await db.sales_orders.get(salesOrderId)
+    return order as SalesOrder | undefined
+}
+
+function buildMarketplaceCollectionObligation(order: SalesOrder): PaymentObligation {
+    return {
+        id: `sales-order:${order.id}`,
+        workspaceId: order.workspaceId,
+        sourceModule: 'orders',
+        sourceType: 'sales_order',
+        sourceRecordId: order.id,
+        sourceSubrecordId: null,
+        direction: 'incoming',
+        amount: order.total,
+        currency: order.currency,
+        dueDate: (order.actualDeliveryDate || order.expectedDeliveryDate || order.updatedAt).slice(0, 10),
+        counterpartyName: order.customerName,
+        referenceLabel: order.orderNumber,
+        title: order.customerName,
+        subtitle: order.sourceChannel === 'marketplace'
+            ? 'Delivered E-Commerce order'
+            : 'Completed sales order',
+        status: 'open',
+        routePath: `/orders/${order.id}`,
+        metadata: {
+            orderStatus: order.status,
+            sourceChannel: order.sourceChannel || 'marketplace'
+        }
+    }
+}
 
 function EcommerceStatusBadge({ status }: { status: MarketplaceOrderStatus }) {
     const { t } = useTranslation()
@@ -322,16 +382,19 @@ function EcommerceDetailView({
     isSaving,
     onBack,
     onAdvance,
-    onCancel
+    onCancel,
+    onRecordCollection
 }: {
     order: MarketplaceOrderRecord
     isSaving: boolean
     onBack: () => void
     onAdvance: (nextStatus: MarketplaceOrderStatus) => Promise<void>
     onCancel: (reason: string) => Promise<void>
+    onRecordCollection: (salesOrderId: string) => Promise<void>
 }) {
     const { t } = useTranslation()
     const { features } = useWorkspace()
+    const [, navigate] = useLocation()
     const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
     const [cancelReason, setCancelReason] = useState('')
     const nextStatus = nextActionForStatus(order.status)
@@ -447,6 +510,31 @@ function EcommerceDetailView({
                             <CardTitle>{t('common.actions', { defaultValue: 'Actions' })}</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-3">
+                            {order.sales_order_id || order.customer_id || order.business_partner_id ? (
+                                <div className="rounded-2xl border border-sky-500/20 bg-sky-500/5 p-4">
+                                    <div className="mb-3 text-sm font-semibold text-sky-700 dark:text-sky-300">
+                                        {t('ecommerce.erpRegistration', { defaultValue: 'Registered in ERP' })}
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {order.sales_order_id ? (
+                                            <Button variant="outline" className="rounded-xl" onClick={() => navigate(`/orders/${order.sales_order_id}`)}>
+                                                {t('orders.title', { defaultValue: 'Orders' })}
+                                            </Button>
+                                        ) : null}
+                                        {order.customer_id ? (
+                                            <Button variant="outline" className="rounded-xl" onClick={() => navigate(`/customers/${order.customer_id}`)}>
+                                                {t('customers.title', { defaultValue: 'Customers' })}
+                                            </Button>
+                                        ) : null}
+                                        {order.business_partner_id ? (
+                                            <Button variant="outline" className="rounded-xl" onClick={() => navigate(`/business-partners/${order.business_partner_id}`)}>
+                                                {t('businessPartners.title', { defaultValue: 'Business Partners' })}
+                                            </Button>
+                                        ) : null}
+                                    </div>
+                                </div>
+                            ) : null}
+
                             {nextStatus && (
                                 <Button className="w-full rounded-2xl" disabled={isSaving} onClick={() => onAdvance(nextStatus)}>
                                     {isSaving ? (
@@ -470,11 +558,23 @@ function EcommerceDetailView({
                             )}
 
                             {order.status === 'delivered' && (
-                                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 text-sm text-emerald-700 dark:text-emerald-300">
-                                    {order.inventory_deducted
-                                        ? t('ecommerce.inventoryDeducted', { defaultValue: 'Inventory deducted' })
-                                        : t('ecommerce.inventoryWarning', { defaultValue: 'Some products may not have enough stock' })}
-                                </div>
+                                <>
+                                    {order.sales_order_id ? (
+                                        <Button
+                                            variant="outline"
+                                            className="w-full rounded-2xl"
+                                            disabled={isSaving}
+                                            onClick={() => onRecordCollection(order.sales_order_id as string)}
+                                        >
+                                            {t('ecommerce.actions.collect', { defaultValue: 'Record Collection' })}
+                                        </Button>
+                                    ) : null}
+                                    <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 text-sm text-emerald-700 dark:text-emerald-300">
+                                        {order.inventory_deducted
+                                            ? t('ecommerce.inventoryDeducted', { defaultValue: 'Inventory deducted' })
+                                            : t('ecommerce.inventoryWarning', { defaultValue: 'Some products may not have enough stock' })}
+                                    </div>
+                                </>
                             )}
                         </CardContent>
                     </Card>
@@ -515,6 +615,8 @@ export function Ecommerce() {
     const [orders, setOrders] = useState<MarketplaceOrderRecord[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [isSaving, setIsSaving] = useState(false)
+    const [settlementTarget, setSettlementTarget] = useState<PaymentObligation | null>(null)
+    const [isSubmittingSettlement, setIsSubmittingSettlement] = useState(false)
 
     const loadOrders = async () => {
         if (!user?.workspaceId) {
@@ -553,6 +655,73 @@ export function Ecommerce() {
         loadOrders()
     }, [user?.workspaceId])
 
+    const openRecordCollection = async (salesOrderId: string) => {
+        if (!user?.workspaceId) {
+            return
+        }
+
+        try {
+            const salesOrder = await hydrateMarketplaceCollectionDependencies(user.workspaceId, salesOrderId)
+
+            if (!salesOrder || salesOrder.isDeleted) {
+                toast({
+                    title: t('common.error', { defaultValue: 'Error' }),
+                    description: 'The delivered sales order could not be loaded for collection.',
+                    variant: 'destructive'
+                })
+                return
+            }
+
+            if (salesOrder.isPaid) {
+                toast({
+                    title: t('common.success', { defaultValue: 'Success' }),
+                    description: t('orders.details.fullySettled', { defaultValue: 'Fully settled' })
+                })
+                return
+            }
+
+            setSettlementTarget(buildMarketplaceCollectionObligation(salesOrder))
+        } catch (error) {
+            toast({
+                title: t('common.error', { defaultValue: 'Error' }),
+                description: error instanceof Error ? error.message : 'Failed to open collection dialog',
+                variant: 'destructive'
+            })
+        }
+    }
+
+    const handleCollectionSettlement = async (input: { paymentMethod: WorkspacePaymentMethod; paidAt: string; note?: string }) => {
+        if (!user?.workspaceId || !settlementTarget) {
+            return
+        }
+
+        setIsSubmittingSettlement(true)
+        try {
+            await recordObligationSettlement(user.workspaceId, settlementTarget, {
+                paymentMethod: input.paymentMethod,
+                paidAt: input.paidAt,
+                note: input.note,
+                createdBy: user?.id || null
+            })
+
+            toast({
+                title: t('common.success', { defaultValue: 'Success' }),
+                description: t('ecommerce.collectionRecorded', { defaultValue: 'Collection recorded and the order is now marked as paid.' })
+            })
+
+            setSettlementTarget(null)
+            await loadOrders()
+        } catch (error) {
+            toast({
+                title: t('common.error', { defaultValue: 'Error' }),
+                description: error instanceof Error ? error.message : 'Failed to record collection',
+                variant: 'destructive'
+            })
+        } finally {
+            setIsSubmittingSettlement(false)
+        }
+    }
+
     const transitionOrder = async (orderId: string, nextStatus: MarketplaceOrderStatus, cancelReason?: string) => {
         setIsSaving(true)
         try {
@@ -562,13 +731,25 @@ export function Ecommerce() {
                     next_status: nextStatus,
                     cancel_reason: cancelReason || null
                 })
-            ) as { data: { warning?: string | null } | null; error: Error | null }
+            ) as { data: MarketplaceTransitionResponse | null; error: Error | null }
 
             if (error) {
                 throw error
             }
 
             await loadOrders()
+
+            if (nextStatus === 'delivered' && data?.sales_order_id) {
+                if (data.warning) {
+                    toast({
+                        title: t('common.success', { defaultValue: 'Success' }),
+                        description: data.warning
+                    })
+                }
+
+                await openRecordCollection(data.sales_order_id)
+                return
+            }
 
             toast({
                 title: t('common.success', { defaultValue: 'Success' }),
@@ -602,15 +783,30 @@ export function Ecommerce() {
                 onBack={() => navigate('/ecommerce')}
                 onAdvance={(nextStatus) => transitionOrder(activeOrder.id, nextStatus)}
                 onCancel={(reason) => transitionOrder(activeOrder.id, 'cancelled', reason)}
+                onRecordCollection={openRecordCollection}
             />
         )
     }
 
     return (
-        <EcommerceListView
-            orders={orders}
-            isLoading={isLoading}
-            onRefresh={loadOrders}
-        />
+        <>
+            <EcommerceListView
+                orders={orders}
+                isLoading={isLoading}
+                onRefresh={loadOrders}
+            />
+
+            <SettlementDialog
+                open={!!settlementTarget}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setSettlementTarget(null)
+                    }
+                }}
+                obligation={settlementTarget}
+                isSubmitting={isSubmittingSettlement}
+                onSubmit={handleCollectionSettlement}
+            />
+        </>
     )
 }

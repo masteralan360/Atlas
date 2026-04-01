@@ -25,6 +25,9 @@ CREATE TABLE crm.sales_orders (
   shipping_address text NULL,
   notes text NULL,
   items jsonb NULL DEFAULT '[]'::jsonb,
+  is_locked boolean NOT NULL DEFAULT false,
+  source_channel text NOT NULL DEFAULT 'manual'::text,
+  marketplace_order_id uuid NULL,
   created_at timestamp with time zone NULL DEFAULT now(),
   updated_at timestamp with time zone NULL DEFAULT now(),
   sync_status text NULL DEFAULT 'synced'::text,
@@ -50,6 +53,9 @@ CREATE INDEX IF NOT EXISTS idx_crm_sales_orders_customer
 
 CREATE INDEX IF NOT EXISTS idx_crm_sales_orders_business_partner
   ON crm.sales_orders (business_partner_id);
+
+CREATE INDEX IF NOT EXISTS idx_crm_sales_orders_source_channel
+  ON crm.sales_orders (workspace_id, source_channel, updated_at DESC);
 
 ALTER TABLE crm.sales_orders ENABLE ROW LEVEL SECURITY;
 

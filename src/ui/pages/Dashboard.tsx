@@ -125,7 +125,7 @@ export function Dashboard() {
                                                 {formatCurrency(sale.totalAmount, sale.settlementCurrency, features.iqd_display_preference)}
                                             </p>
                                             <p className="text-[10px] font-bold uppercase text-muted-foreground/60 tracking-wider">
-                                                {formatOriginLabel(sale.origin)}
+                                                {formatOriginLabel(sale.origin, (sale as any)._sourceChannel ?? null)}
                                             </p>
                                         </div>
                                     </div>

@@ -224,6 +224,11 @@ export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string
                     </Link>
                     <span>/</span>
                     <span className="font-semibold text-foreground">{order.orderNumber}</span>
+                    {isSales && (order as SalesOrder).sourceChannel === 'marketplace' ? (
+                        <span className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-sky-700 dark:text-sky-300">
+                            {t('ecommerce.title', { defaultValue: 'E-Commerce' })}
+                        </span>
+                    ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                     {actions.map((action) => action && (

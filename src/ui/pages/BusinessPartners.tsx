@@ -25,6 +25,7 @@ import {
     CardHeader,
     CardTitle,
     Input,
+    Switch,
     Table,
     TableBody,
     TableCell,
@@ -66,6 +67,7 @@ export function BusinessPartners() {
     const [deleteTarget, setDeleteTarget] = useState<BusinessPartner | null>(null)
     const [isSaving, setIsSaving] = useState(false)
     const [isMerging, setIsMerging] = useState<string | null>(null)
+    const [showEcommercePartners, setShowEcommercePartners] = useState(true)
 
     const canEdit = user?.role === 'admin' || user?.role === 'staff'
     const canDelete = user?.role === 'admin'
@@ -77,18 +79,26 @@ export function BusinessPartners() {
         return currencies
     }, [features.eur_conversion_enabled, features.try_conversion_enabled])
 
-    const filteredPartners = useMemo(() => {
-        const query = search.trim().toLowerCase()
-        if (!query) {
+    const visiblePartners = useMemo(() => {
+        if (showEcommercePartners) {
             return partners
         }
 
-        return partners.filter((partner) =>
+        return partners.filter((partner) => !partner.isEcommerce)
+    }, [partners, showEcommercePartners])
+
+    const filteredPartners = useMemo(() => {
+        const query = search.trim().toLowerCase()
+        if (!query) {
+            return visiblePartners
+        }
+
+        return visiblePartners.filter((partner) =>
             [partner.name, partner.contactName, partner.email, partner.phone, partner.city, partner.country]
                 .filter((value): value is string => typeof value === 'string' && value.length > 0)
                 .some((value) => value.toLowerCase().includes(query))
         )
-    }, [partners, search])
+    }, [visiblePartners, search])
 
     const partnerMap = useMemo(
         () => new Map(partners.map((partner) => [partner.id, partner])),
@@ -196,13 +206,13 @@ export function BusinessPartners() {
                 ) : null}
             </div>
 
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <Card>
                     <CardHeader className="pb-2">
                         <CardTitle className="text-sm text-muted-foreground">{t('businessPartners.title') || 'Business Partners'}</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-3xl font-black">{partners.length}</div>
+                        <div className="text-3xl font-black">{visiblePartners.length}</div>
                     </CardContent>
                 </Card>
                 <Card>
@@ -212,7 +222,7 @@ export function BusinessPartners() {
                     <CardContent>
                         <div className="text-lg font-black">
                             {formatCurrency(
-                                partners.reduce((sum, partner) => sum + partner.receivableBalance, 0),
+                                visiblePartners.reduce((sum, partner) => sum + partner.receivableBalance, 0),
                                 features.default_currency,
                                 features.iqd_display_preference
                             )}
@@ -226,7 +236,7 @@ export function BusinessPartners() {
                     <CardContent>
                         <div className="text-lg font-black">
                             {formatCurrency(
-                                partners.reduce((sum, partner) => sum + partner.payableBalance, 0),
+                                visiblePartners.reduce((sum, partner) => sum + partner.payableBalance, 0),
                                 features.default_currency,
                                 features.iqd_display_preference
                             )}
@@ -250,15 +260,34 @@ export function BusinessPartners() {
                         <TabsTrigger value="merge-review" className="rounded-xl">{t('businessPartners.mergeReview') || 'Merge Review'}</TabsTrigger>
                     </TabsList>
 
-                    <div className="relative w-full max-w-sm">
-                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                            value={search}
-                            onChange={(event) => setSearch(event.target.value)}
-                            allowViewer={true}
-                            placeholder={t('businessPartners.searchPlaceholder') || 'Search business partners...'}
-                            className="pl-9"
-                        />
+                    <div className="flex w-full flex-col gap-3 lg:max-w-2xl lg:flex-row lg:items-center lg:justify-end">
+                        <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-background/60 px-4 py-3">
+                            <div className="space-y-0.5">
+                                <div className="text-sm font-medium">
+                                    {t('businessPartners.showEcommerce', { defaultValue: 'Show E-Commerce profiles' })}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                    {showEcommercePartners
+                                        ? t('businessPartners.showEcommerceVisible', { defaultValue: 'E-Commerce profiles are visible in this module.' })
+                                        : t('businessPartners.showEcommerceHidden', { defaultValue: 'E-Commerce profiles are hidden from this module.' })}
+                                </div>
+                            </div>
+                            <Switch
+                                checked={showEcommercePartners}
+                                onCheckedChange={setShowEcommercePartners}
+                                allowViewer={true}
+                            />
+                        </div>
+                        <div className="relative w-full max-w-sm">
+                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                                value={search}
+                                onChange={(event) => setSearch(event.target.value)}
+                                allowViewer={true}
+                                placeholder={t('businessPartners.searchPlaceholder') || 'Search business partners...'}
+                                className="pl-9"
+                            />
+                        </div>
                     </div>
                 </div>
 
@@ -293,7 +322,16 @@ export function BusinessPartners() {
                                             </TableRow>
                                         ) : filteredPartners.map((partner) => (
                                             <TableRow key={partner.id}>
-                                                <TableCell className="font-semibold">{partner.name}</TableCell>
+                                                <TableCell className="font-semibold">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <span>{partner.name}</span>
+                                                        {partner.isEcommerce ? (
+                                                            <span className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-sky-700 dark:text-sky-300">
+                                                                {t('ecommerce.title', { defaultValue: 'E-Commerce' })}
+                                                            </span>
+                                                        ) : null}
+                                                    </div>
+                                                </TableCell>
                                                 <TableCell>{partner.contactName || partner.phone || 'N/A'}</TableCell>
                                                 <TableCell>
                                                     <span className={partner.role === 'both'

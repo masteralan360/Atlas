@@ -275,12 +275,16 @@ export function formatLoanDetailsForWhatsApp(loan: any, t: (key: string) => stri
     return text
 }
 
-export function formatOriginLabel(origin?: string | null): string {
+export function formatOriginLabel(origin?: string | null, sourceChannel?: string | null): string {
+    if ((sourceChannel || '').trim().toLowerCase() === 'marketplace') {
+        return 'E-Commerce'
+    }
     if (!origin) return 'POS'
     const normalized = origin.trim().toLowerCase()
     if (normalized === 'pos') return 'POS'
     if (normalized === 'instant_pos' || normalized === 'instant-pos' || normalized === 'instant pos') return 'Instant POS'
     if (normalized === 'sales_order' || normalized === 'sales-order' || normalized === 'sales order') return 'Sales Order'
+    if (normalized === 'ecommerce' || normalized === 'e-commerce' || normalized === 'e commerce') return 'E-Commerce'
     if (normalized === 'travel_agency' || normalized === 'travel-agency' || normalized === 'travel agency') return 'Travel Agency'
     if (normalized === 'manual') return 'Manual'
     if (normalized === 'loans' || normalized === 'loan') return 'Loans'

@@ -59,6 +59,8 @@ type LedgerSourceModule = 'pos' | 'instant_pos' | 'orders' | 'expenses' | 'payro
 type LedgerEntryType =
     | 'pos_sale'
     | 'instant_pos_sale'
+    | 'ecommerce_receivable'
+    | 'ecommerce_payment'
     | 'sales_order_payment'
     | 'purchase_order_payment'
     | 'expense'
@@ -242,6 +244,10 @@ function ledgerTypeLabel(type: LedgerEntryType) {
             return 'POS Sale'
         case 'instant_pos_sale':
             return 'Instant POS Sale'
+        case 'ecommerce_receivable':
+            return 'E-Commerce Receivable'
+        case 'ecommerce_payment':
+            return 'E-Commerce Payment'
         case 'sales_order_payment':
             return 'Sales Order Payment'
         case 'purchase_order_payment':
@@ -591,12 +597,19 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction): LedgerEntry |
     }
 
     switch (transaction.sourceType) {
-        case 'sales_order':
+        case 'sales_order': {
+            const sourceChannel = typeof transaction.metadata?.sourceChannel === 'string'
+                ? transaction.metadata.sourceChannel.trim().toLowerCase()
+                : null
+            const isMarketplace = sourceChannel === 'marketplace'
+            const isReceivable = Boolean(transaction.metadata?.receivable)
             return {
                 id: `payment:${transaction.id}`,
                 transactionId: transaction.id,
                 date: transaction.paidAt,
-                type: 'sales_order_payment',
+                type: isMarketplace
+                    ? (isReceivable ? 'ecommerce_receivable' : 'ecommerce_payment')
+                    : 'sales_order_payment',
                 direction: 'incoming',
                 amount: transaction.amount,
                 currency: transaction.currency,
@@ -608,6 +621,7 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction): LedgerEntry |
                 description: buildTransactionDescription(transaction),
                 routePath: getPaymentTransactionRoutePath(transaction)
             }
+        }
         case 'purchase_order':
             return {
                 id: `payment:${transaction.id}`,
@@ -1486,7 +1500,7 @@ export function Ledger() {
                                 ) : null}
                             </div>
                             <p className="text-xs text-muted-foreground">
-                                Draft orders, unpaid obligations, and manual direct transactions are intentionally excluded from the ledger.
+                                Draft orders and manual direct transactions are intentionally excluded from the ledger. Delivered E-Commerce orders appear as receivables until payment is posted.
                             </p>
                         </div>
 

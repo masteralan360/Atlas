@@ -61,6 +61,7 @@ export interface Sale {
     updated_at?: string
     _orderNumber?: string
     _isOrder?: boolean
+    _sourceChannel?: string | null
 }
 
 export interface CartItem {

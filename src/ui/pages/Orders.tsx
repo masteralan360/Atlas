@@ -169,7 +169,8 @@ function buildSalesOrderPaymentObligation(order: SalesOrder): PaymentObligation 
         status: 'open',
         routePath: `/orders/${order.id}`,
         metadata: {
-            orderStatus: order.status
+            orderStatus: order.status,
+            sourceChannel: order.sourceChannel || 'manual'
         }
     }
 }
@@ -848,7 +849,14 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                             return (
                                 <TableRow key={row.id}>
                                     <TableCell className="font-semibold">
-                                        <div>{row.orderNumber}</div>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span>{row.orderNumber}</span>
+                                            {activeTab === 'sales' && (row as SalesOrder).sourceChannel === 'marketplace' ? (
+                                                <span className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-sky-700 dark:text-sky-300">
+                                                    {t('ecommerce.title', { defaultValue: 'E-Commerce' })}
+                                                </span>
+                                            ) : null}
+                                        </div>
                                         <div className="text-xs text-muted-foreground">{summary}</div>
                                     </TableCell>
                                     <TableCell>{activeTab === 'sales' ? (row as SalesOrder).customerName : (row as PurchaseOrder).supplierName}</TableCell>
@@ -955,6 +963,11 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-primary/10 text-primary">
                                             {activeTab === 'sales' ? t('orders.tabs.sales') : t('orders.tabs.purchase')}
                                         </span>
+                                        {activeTab === 'sales' && (row as SalesOrder).sourceChannel === 'marketplace' ? (
+                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/20">
+                                                {t('ecommerce.title', { defaultValue: 'E-Commerce' })}
+                                            </span>
+                                        ) : null}
                                     </div>
                                     <div className="text-base font-bold text-foreground">
                                         {activeTab === 'sales' ? (row as SalesOrder).customerName : (row as PurchaseOrder).supplierName}

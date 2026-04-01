@@ -3251,7 +3251,8 @@ export function toUISaleFromOrder(order: any): any {
         sequenceId: order.orderNumber || order.order_number,
         notes: order.notes,
         _isOrder: true,
-        _orderNumber: order.orderNumber || order.order_number
+        _orderNumber: order.orderNumber || order.order_number,
+        _sourceChannel: order.sourceChannel || order.source_channel || null
     }
 }
 

@@ -380,7 +380,14 @@ export function LegacyPartnerDetailsView({
                                 </div>
                                 <div className="min-w-0">
                                     <div className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">{typeLabel}</div>
-                                    <div className="truncate text-lg font-semibold">{partner.name}</div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <div className="truncate text-lg font-semibold">{partner.name}</div>
+                                        {partner.isEcommerce ? (
+                                            <span className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-sky-700 dark:text-sky-300">
+                                                {t('ecommerce.title', { defaultValue: 'E-Commerce' })}
+                                            </span>
+                                        ) : null}
+                                    </div>
                                     <div className="mt-1 flex flex-wrap gap-2">
                                         <span className="rounded-full border bg-background/70 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em]">
                                             {partner.defaultCurrency.toUpperCase()}
