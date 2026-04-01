@@ -17,17 +17,7 @@
             "destination": "/api/forexfy"
         },
         {
-            "source": "/",
-            "has": [
-                {
-                    "type": "host",
-                    "value": "marketplace-atlas.vercel.app"
-                }
-            ],
-            "destination": "/marketplace.html"
-        },
-        {
-            "source": "/:path((?!api-xeiqd(?:/|$)|api-forexfy(?:/|$)|assets(?:/|$)|.*\\.[^/]+$).*)",
+            "source": "^/(?!api-xeiqd(?:/|$)|api-forexfy(?:/|$)|assets(?:/|$)|.*\\.[^/]+$).*$",
             "has": [
                 {
                     "type": "host",
