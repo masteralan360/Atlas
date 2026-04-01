@@ -3,13 +3,19 @@ import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import './index.css'
 
+import { Toaster } from '@/ui/components'
 import { ThemeProvider } from '@/ui/components/theme-provider'
 import './i18n/config'
 import { platformService } from '@/services/platformService'
 import { connectionManager } from '@/lib/connectionManager'
+import { MarketplaceApp } from './marketplace/MarketplaceApp'
 
 // Initialize connection manager (visibility, online/offline, heartbeat)
 connectionManager.init()
+
+const isMarketplaceHost =
+    typeof window !== 'undefined'
+    && window.location.hostname === 'marketplace-atlas.vercel.app'
 
 if (
     import.meta.env.PROD
@@ -17,8 +23,6 @@ if (
     && !('__TAURI_INTERNALS__' in window)
     && 'serviceWorker' in navigator
 ) {
-    const isMarketplaceHost = window.location.hostname === 'marketplace-atlas.vercel.app'
-
     window.addEventListener('load', () => {
         if (isMarketplaceHost) {
             navigator.serviceWorker.getRegistrations()
@@ -58,11 +62,24 @@ const init = async () => {
         console.error('Failed to initialize platform service:', e);
     }
 
+    if (isMarketplaceHost && window.location.hash) {
+        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
+    }
+
     createRoot(document.getElementById('root')!).render(
         <StrictMode>
             <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme" defaultStyle="emerald">
-                {/* To set Legacy as default, use: defaultStyle="legacy" */}
-                <App />
+                {isMarketplaceHost ? (
+                    <>
+                        <MarketplaceApp />
+                        <Toaster />
+                    </>
+                ) : (
+                    <>
+                        {/* To set Legacy as default, use: defaultStyle="legacy" */}
+                        <App />
+                    </>
+                )}
             </ThemeProvider>
         </StrictMode>,
     )
