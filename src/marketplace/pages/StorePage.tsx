@@ -12,6 +12,7 @@ import { CheckoutForm } from '../components/CheckoutForm'
 import { MarketplaceLayout } from '../components/MarketplaceLayout'
 import { OrderConfirmation } from '../components/OrderConfirmation'
 import { ProductCard } from '../components/ProductCard'
+import { StoreQrDialog } from '../components/StoreQrDialog'
 import { StoreAvatar } from '../components/StoreAvatar'
 import { useCart } from '../hooks/useCart'
 import { usePageMeta } from '../hooks/usePageMeta'
@@ -144,14 +145,23 @@ export function StorePage() {
             backLabel={t('marketplace.backToMarketplace', { defaultValue: 'Back to Marketplace' })}
             headerLogoUrl={catalog?.store.logo_url}
             headerActions={(
-                <Button
-                    type="button"
-                    className="gap-2 rounded-2xl"
-                    onClick={() => setCartOpen(true)}
-                >
-                    <ShoppingCart className="h-4 w-4" />
-                    <span>{cart.itemCount}</span>
-                </Button>
+                <>
+                    {catalog && (
+                        <StoreQrDialog
+                            name={catalog.store.name}
+                            slug={catalog.store.slug}
+                            logoUrl={catalog.store.logo_url}
+                        />
+                    )}
+                    <Button
+                        type="button"
+                        className="gap-2 rounded-2xl"
+                        onClick={() => setCartOpen(true)}
+                    >
+                        <ShoppingCart className="h-4 w-4" />
+                        <span>{cart.itemCount}</span>
+                    </Button>
+                </>
             )}
         >
             {isLoading ? (
