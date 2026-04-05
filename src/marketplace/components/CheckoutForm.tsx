@@ -2,15 +2,19 @@ import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button, Input, Label, Textarea } from '@/ui/components'
+import { cn } from '@/lib/utils'
 import type { MarketplaceOrderCustomer } from '../lib/marketplaceApi'
+
+import { SwipeToConfirm } from './SwipeToConfirm'
 
 type CheckoutFormProps = {
     submitting: boolean
     onCancel: () => void
     onSubmit: (payload: MarketplaceOrderCustomer) => Promise<void>
+    isMobile?: boolean
 }
 
-export function CheckoutForm({ submitting, onCancel, onSubmit }: CheckoutFormProps) {
+export function CheckoutForm({ submitting, onCancel, onSubmit, isMobile = false }: CheckoutFormProps) {
     const { t } = useTranslation()
     const [name, setName] = useState('')
     const [phone, setPhone] = useState('')
@@ -116,15 +120,37 @@ export function CheckoutForm({ submitting, onCancel, onSubmit }: CheckoutFormPro
                 })}
             </div>
 
-            <div className="flex gap-3">
-                <Button type="button" variant="outline" className="flex-1 rounded-2xl" onClick={onCancel}>
-                    {t('common.back', { defaultValue: 'Back' })}
-                </Button>
-                <Button type="submit" className="flex-1 rounded-2xl" disabled={submitting}>
-                    {submitting
-                        ? t('common.loading', { defaultValue: 'Loading...' })
-                        : t('marketplace.checkout.submit', { defaultValue: 'Submit Order' })}
-                </Button>
+            <div className={cn("flex pt-4", isMobile ? "flex-col gap-4" : "gap-3")}>
+                {isMobile ? (
+                    <>
+                        <SwipeToConfirm
+                            loading={submitting}
+                            label={t('marketplace.checkout.swipsubmit', { defaultValue: 'Swipe to Submit Order' })}
+                            onConfirm={() => {
+                                // Create a synthetic form event since handleSubmit expects one
+                                const form = document.querySelector('form')
+                                if (form) {
+                                    const event = new Event('submit', { cancelable: true }) as unknown as FormEvent<HTMLFormElement>
+                                    handleSubmit(event)
+                                }
+                            }}
+                        />
+                        <Button type="button" variant="ghost" className="w-full h-12 rounded-2xl text-muted-foreground" onClick={onCancel}>
+                            {t('common.back', { defaultValue: 'Back' })}
+                        </Button>
+                    </>
+                ) : (
+                    <>
+                        <Button type="button" variant="outline" className="flex-1 rounded-2xl" onClick={onCancel}>
+                            {t('common.back', { defaultValue: 'Back' })}
+                        </Button>
+                        <Button type="submit" className="flex-1 rounded-2xl" disabled={submitting}>
+                            {submitting
+                                ? t('common.loading', { defaultValue: 'Loading...' })
+                                : t('marketplace.checkout.submit', { defaultValue: 'Submit Order' })}
+                        </Button>
+                    </>
+                )}
             </div>
         </form>
     )

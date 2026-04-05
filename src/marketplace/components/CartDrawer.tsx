@@ -10,11 +10,12 @@ type CartDrawerProps = {
     subtitle?: string
     onClose: () => void
     children: ReactNode
+    className?: string
 }
 
-export function CartDrawer({ open, title, subtitle, onClose, children }: CartDrawerProps) {
+export function CartDrawer({ open, title, subtitle, onClose, children, className }: CartDrawerProps) {
     return (
-        <div className={cn('fixed inset-0 z-50 transition-opacity', open ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0')}>
+        <div className={cn('fixed inset-0 z-[60] transition-opacity', open ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0', className)}>
             <button
                 type="button"
                 className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm"

@@ -14,6 +14,7 @@ import { OrderConfirmation } from '../components/OrderConfirmation'
 import { ProductCard } from '../components/ProductCard'
 import { StoreQrDialog } from '../components/StoreQrDialog'
 import { StoreAvatar } from '../components/StoreAvatar'
+import { MobileStoreCart } from '../components/MobileStoreCart'
 import { useCart } from '../hooks/useCart'
 import { usePageMeta } from '../hooks/usePageMeta'
 import { useStoreCatalog } from '../hooks/useStoreCatalog'
@@ -202,7 +203,7 @@ export function StorePage() {
                     </CardContent>
                 </Card>
             ) : (
-                <div className="space-y-6">
+                <div className="space-y-6 max-sm:pb-40">
                     {confirmation && (
                         <OrderConfirmation
                             orderNumber={confirmation.orderNumber}
@@ -290,17 +291,21 @@ export function StorePage() {
                         </div>
                     )}
 
-                    <Button
-                        type="button"
-                        className="fixed bottom-5 end-5 z-30 h-14 rounded-full px-5 shadow-[0_18px_48px_rgba(15,23,42,0.18)] sm:hidden"
-                        onClick={() => setCartOpen(true)}
-                    >
-                        <ShoppingCart className="me-2 h-4 w-4" />
-                        {cart.itemCount}
-                    </Button>
+                    <MobileStoreCart
+                        cart={cart}
+                        items={cart.items}
+                        total={cart.total}
+                        currency={cart.currency || catalog.store.currency}
+                        iqdPreference={iqdPreference}
+                        checkoutMode={checkoutMode}
+                        submitting={submitting}
+                        setCheckoutMode={setCheckoutMode}
+                        onSubmit={handleSubmitOrder}
+                    />
 
                     <CartDrawer
-                        open={cartOpen}
+                        className="max-sm:hidden"
+                        open={cartOpen || checkoutMode}
                         title={t('marketplace.cart.title', { defaultValue: 'Your Order' })}
                         subtitle={`${cart.itemCount} ${t('marketplace.cart.items', { defaultValue: 'items' })}`}
                         onClose={closeCart}

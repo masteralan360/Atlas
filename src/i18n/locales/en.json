@@ -192,6 +192,7 @@
             "address": "Delivery Address",
             "notes": "Notes",
             "submit": "Submit Order",
+            "swipsubmit": "Swipe to Submit",
             "inquiryNotice": "This is an inquiry order. The store will contact you to confirm and arrange delivery."
         },
         "confirmation": {
