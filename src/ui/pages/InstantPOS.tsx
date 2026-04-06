@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
-import { addToOfflineMutations, adjustInventoryQuantity, getPrimaryStorageFromList, useCategories, useInventoryProducts, useStorages } from '@/local-db'
+import { addToOfflineMutations, adjustInventoryQuantity, getPrimaryStorageFromList, useActiveDiscountMap, useCategories, useInventoryProducts, useStorages } from '@/local-db'
 import { db } from '@/local-db/database'
 import type { CurrencyCode } from '@/local-db/models'
 import { useWorkspace } from '@/workspace'
@@ -28,9 +28,14 @@ type InstantPosItem = {
     storageId?: string
     name: string
     sku: string
+    baseUnitPrice: number
     unitPrice: number
     quantity: number
     currency: string
+    discountType?: 'percentage' | 'fixed_amount'
+    discountValue?: number
+    discountSource?: 'product' | 'category'
+    discountEndsAt?: string
     note?: string
 }
 
@@ -50,6 +55,18 @@ function buildInstantPosItemKey(productId: string, storageId?: string | null) {
     return `${productId}:${storageId ?? ''}`
 }
 
+function formatDiscountBadge(
+    discount: { discountType: 'percentage' | 'fixed_amount'; discountValue: number },
+    currency: CurrencyCode,
+    iqdPreference: 'IQD' | 'د.ع'
+) {
+    if (discount.discountType === 'percentage') {
+        return `-${Number(discount.discountValue)}%`
+    }
+
+    return `-${formatCurrency(discount.discountValue, currency, iqdPreference)}`
+}
+
 
 function loadTickets(): InstantPosTicket[] {
     if (typeof window === 'undefined') return []
@@ -59,12 +76,20 @@ function loadTickets(): InstantPosTicket[] {
         const parsed = JSON.parse(raw)
         if (!Array.isArray(parsed)) return []
         return parsed.map((ticket: InstantPosTicket) => {
-            if (ticket.expiresAt) return ticket
-            if (!ticket.createdAt) return ticket
-            const createdAt = new Date(ticket.createdAt)
-            if (Number.isNaN(createdAt.getTime())) return ticket
-            return {
+            const normalizedItems = (ticket.items || []).map((item) => ({
+                ...item,
+                baseUnitPrice: Number.isFinite(item.baseUnitPrice) ? item.baseUnitPrice : item.unitPrice
+            }))
+            const normalizedTicket = {
                 ...ticket,
+                items: normalizedItems
+            }
+            if (ticket.expiresAt) return normalizedTicket
+            if (!ticket.createdAt) return normalizedTicket
+            const createdAt = new Date(ticket.createdAt)
+            if (Number.isNaN(createdAt.getTime())) return normalizedTicket
+            return {
+                ...normalizedTicket,
                 expiresAt: new Date(createdAt.getTime() + PENDING_TICKET_TTL_MS).toISOString()
             }
         })
@@ -368,8 +393,15 @@ function MobileTicketPanel({
                                                         )}
                                                     </div>
                                                 </div>
-                                                <div className="text-sm font-semibold text-foreground">
-                                                    {formatCurrency(item.unitPrice * item.quantity, item.currency, features.iqd_display_preference)}
+                                                <div className="text-right">
+                                                    {item.unitPrice < item.baseUnitPrice && (
+                                                        <div className="text-[10px] font-medium text-muted-foreground line-through">
+                                                            {formatCurrency(item.baseUnitPrice * item.quantity, item.currency, features.iqd_display_preference)}
+                                                        </div>
+                                                    )}
+                                                    <div className="text-sm font-semibold text-foreground">
+                                                        {formatCurrency(item.unitPrice * item.quantity, item.currency, features.iqd_display_preference)}
+                                                    </div>
                                                 </div>
                                             </div>
                                             <div className="mt-4 flex items-center justify-between">
@@ -450,6 +482,7 @@ export function InstantPOS() {
     const { user } = useAuth()
     const { features, isLocalMode } = useWorkspace()
     const products = useInventoryProducts(user?.workspaceId)
+    const activeDiscountMap = useActiveDiscountMap(user?.workspaceId)
     const storages = useStorages(user?.workspaceId)
     const categories = useCategories(user?.workspaceId)
 
@@ -650,6 +683,7 @@ export function InstantPOS() {
         }
 
         const product = products.find(item => item.id === productId && item.storageId === selectedStorageId)
+        const activeDiscount = activeDiscountMap.get(productId)
         if (!product) return
         if (product.quantity <= 0) {
             toast({
@@ -672,9 +706,14 @@ export function InstantPOS() {
                     storageId: product.storageId,
                     name: product.name,
                     sku: product.sku,
-                    unitPrice: product.price,
+                    baseUnitPrice: product.price,
+                    unitPrice: activeDiscount?.discountPrice ?? product.price,
                     quantity: 1,
-                    currency: product.currency
+                    currency: product.currency,
+                    discountType: activeDiscount?.discountType,
+                    discountValue: activeDiscount?.discountValue,
+                    discountSource: activeDiscount?.source,
+                    discountEndsAt: activeDiscount?.endsAt
                 }],
                 expiresAt: new Date(createdAt.getTime() + PENDING_TICKET_TTL_MS).toISOString()
             }
@@ -709,9 +748,14 @@ export function InstantPOS() {
                 storageId: product.storageId,
                 name: product.name,
                 sku: product.sku,
-                unitPrice: product.price,
+                baseUnitPrice: product.price,
+                unitPrice: activeDiscount?.discountPrice ?? product.price,
                 quantity: 1,
-                currency: product.currency
+                currency: product.currency,
+                discountType: activeDiscount?.discountType,
+                discountValue: activeDiscount?.discountValue,
+                discountSource: activeDiscount?.source,
+                discountEndsAt: activeDiscount?.endsAt
             }
 
             return { ...ticket, items: [...ticket.items, newItem] }
@@ -839,7 +883,7 @@ export function InstantPOS() {
                 cost_price: costPrice,
                 converted_cost_price: costPrice,
                 original_currency: item.currency,
-                original_unit_price: item.unitPrice,
+                original_unit_price: item.baseUnitPrice,
                 converted_unit_price: item.unitPrice,
                 settlement_currency: settlementCurrency,
                 negotiated_price: null,
@@ -1225,6 +1269,8 @@ export function InstantPOS() {
                             ) : (
                                 filteredProducts.map(product => {
                                     const imageUrl = getDisplayImageUrl(product.imageUrl)
+                                    const activeDiscount = activeDiscountMap.get(product.id)
+                                    const displayPrice = activeDiscount?.discountPrice ?? product.price
                                     return (
                                         <button
                                             key={buildInstantPosItemKey(product.id, product.storageId)}
@@ -1241,12 +1287,28 @@ export function InstantPOS() {
                                                 ) : (
                                                     <div className="h-full w-full bg-muted/60" />
                                                 )}
+                                                {activeDiscount && (
+                                                    <div className="absolute left-3 top-3 rounded-full bg-emerald-500 px-3 py-1 text-[11px] font-black text-white shadow-md">
+                                                        {formatDiscountBadge(activeDiscount, product.currency, features.iqd_display_preference)}
+                                                    </div>
+                                                )}
                                             </div>
                                             <div className="flex flex-1 flex-col gap-1 p-3">
                                                 <div className="text-sm font-semibold text-foreground line-clamp-1">{product.name}</div>
-                                                <div className="text-xs font-semibold text-primary">
-                                                    {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
-                                                </div>
+                                                {activeDiscount ? (
+                                                    <div className="space-y-0.5">
+                                                        <div className="text-[11px] font-semibold text-muted-foreground line-through">
+                                                            {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
+                                                        </div>
+                                                        <div className="text-xs font-semibold text-emerald-600">
+                                                            {formatCurrency(displayPrice, product.currency, features.iqd_display_preference)}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-xs font-semibold text-primary">
+                                                        {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
+                                                    </div>
+                                                )}
                                             </div>
                                         </button>
                                     )
@@ -1375,8 +1437,15 @@ export function InstantPOS() {
                                                         )}
                                                     </div>
                                                 </div>
-                                                <div className="text-sm font-semibold text-foreground">
-                                                    {formatCurrency(item.unitPrice * item.quantity, item.currency, features.iqd_display_preference)}
+                                                <div className="text-right">
+                                                    {item.unitPrice < item.baseUnitPrice && (
+                                                        <div className="text-[10px] font-medium text-muted-foreground line-through">
+                                                            {formatCurrency(item.baseUnitPrice * item.quantity, item.currency, features.iqd_display_preference)}
+                                                        </div>
+                                                    )}
+                                                    <div className="text-sm font-semibold text-foreground">
+                                                        {formatCurrency(item.unitPrice * item.quantity, item.currency, features.iqd_display_preference)}
+                                                    </div>
                                                 </div>
                                             </div>
                                             <div className="mt-3 flex items-center justify-between">

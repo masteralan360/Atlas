@@ -72,6 +72,8 @@
         "snoozedItems": "Snoozed Items",
         "snoozedItemsDesc": "Items that have been snoozed",
         "unsnooze": "Un-snooze",
+        "am": "AM",
+        "pm": "PM",
         "pagination": {
             "previous": "Previous",
             "next": "Next",
@@ -140,6 +142,7 @@
         "orders": "Orders",
         "invoices": "Invoices",
         "pos": "Point of Sale",
+        "discounts": "Discounts",
         "instantPos": "Instant POS",
         "kdsDashboard": "KDS Dashboard",
         "sales": "Sales History",

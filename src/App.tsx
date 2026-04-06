@@ -54,6 +54,7 @@ const ConnectionConfiguration = lazy(() => import('@/ui/pages/ConnectionConfigur
 const WhatsApp = lazy(() => import('@/ui/pages/WhatsAppWeb').then(m => ({ default: m.default })))
 const InstantPOS = lazy(() => import('@/ui/pages/InstantPOS').then(m => ({ default: m.InstantPOS })))
 const KDSDashboard = lazy(() => import('@/ui/pages/KDSDashboard').then(m => ({ default: m.KDSDashboard })))
+const Discounts = lazy(() => import('@/ui/pages/Discounts').then(m => ({ default: m.Discounts })))
 const Storages = lazy(() => import('@/ui/pages/Storages').then(m => ({ default: m.default })))
 const InventoryTransfer = lazy(() => import('@/ui/pages/InventoryTransfer').then(m => ({ default: m.default })))
 const HR = lazy(() => import('@/ui/pages/HR').then(m => ({ default: m.default })))
@@ -719,6 +720,13 @@ function App() {
                                                 <ProtectedRoute requiredFeature="products">
                                                     <Layout>
                                                         <Products />
+                                                    </Layout>
+                                                </ProtectedRoute>
+                                            </Route>
+                                            <Route path="/discounts">
+                                                <ProtectedRoute allowedRoles={['admin', 'staff']} requiredFeature="discounts">
+                                                    <Layout>
+                                                        <Discounts />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>

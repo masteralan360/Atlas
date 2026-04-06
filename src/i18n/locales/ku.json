@@ -67,6 +67,8 @@
         "view": "بینین",
         "all": "هەموو",
         "print": "چاپکردن",
+        "am": "بەیانی (AM)",
+        "pm": "ئێوارە (PM)",
         "pagination": {
             "previous": "پێشتر",
             "next": "دواتر",
@@ -86,21 +88,6 @@
         },
         "exchangeRates": "نرخی گۆڕینەوەی ڕاستەوخۆ",
         "sales": "فرۆشتنەکان",
-        "revenue": "داهات",
-        "newUpdate": "نوێکردنەوەی نوێ دامەزرا!",
-        "whatsNew": "چی نوێیە",
-        "highlights": "گرنگترینەکان",
-        "getStarted": "با دەست پێبکەین!",
-        "badge_new": "نوێ",
-        "badge_improved": "باشترکراو",
-        "badge_fixed": "چاککراو",
-        "fromTeam": "لە تیمەکەوە"
-    },
-    "messages": {
-        "saleCompleted": "فرۆشتن بە سەرکەوتوویی تەواوبوو",
-        "success": "سەرکەوتوو"
-    },
-    "exchange": {
         "manual": "دەستی",
         "marketAverage": "تێکڕای بازاڕ",
         "manualEntryTitle": "تۆمارکردنی نرخی گۆڕینەوەی دەستی",
@@ -134,6 +121,7 @@
         "orders": "داواکارییەکان",
         "invoices": "پسوڵەکان",
         "pos": "خاڵی فرۆشتن",
+        "discounts": "داشکاندنەکان",
         "instantPos": "خاڵی فرۆشتنی خێرا",
         "kdsDashboard": "داشبۆردی KDS",
         "sales": "مێژووی فرۆشتن",

@@ -16,6 +16,17 @@ type ProductCardProps = {
 export function ProductCard({ product, iqdPreference, addToCartLabel, onAdd }: ProductCardProps) {
     const resolvedImageUrl = getMarketplaceAssetUrl(product.image_url)
     const [hasImageError, setHasImageError] = useState(false)
+    const hasDiscount = typeof product.discount_price === 'number' && product.discount_price < product.price
+    const endsAt = product.discount_ends_at ? new Date(product.discount_ends_at) : null
+    const endsSoon = !!endsAt
+        && Number.isFinite(endsAt.getTime())
+        && endsAt.getTime() > Date.now()
+        && endsAt.getTime() - Date.now() <= 7 * 24 * 60 * 60 * 1000
+    const discountBadge = hasDiscount
+        ? (product.discount_type === 'percentage'
+            ? `-${Number(product.discount_value ?? 0)}%`
+            : `-${formatCurrency(Number(product.discount_value ?? 0), product.currency, iqdPreference)}`)
+        : null
 
     useEffect(() => {
         setHasImageError(false)
@@ -40,6 +51,11 @@ export function ProductCard({ product, iqdPreference, addToCartLabel, onAdd }: P
                             </div>
                         )}
                     </div>
+                    {discountBadge && (
+                        <div className="absolute left-3 top-3 rounded-full bg-emerald-500 px-3 py-1 text-xs font-black text-white shadow-md">
+                            {discountBadge}
+                        </div>
+                    )}
                 </div>
 
                 <div className="space-y-2">
@@ -57,10 +73,26 @@ export function ProductCard({ product, iqdPreference, addToCartLabel, onAdd }: P
 
                 <div className="mt-auto flex items-center justify-between gap-3">
                     <div>
-                        <div className="text-xl font-black">
-                            {formatCurrency(product.price, product.currency, iqdPreference)}
-                        </div>
+                        {hasDiscount ? (
+                            <>
+                                <div className="text-xs font-semibold text-muted-foreground line-through">
+                                    {formatCurrency(product.price, product.currency, iqdPreference)}
+                                </div>
+                                <div className="text-xl font-black text-emerald-600">
+                                    {formatCurrency(product.discount_price!, product.currency, iqdPreference)}
+                                </div>
+                            </>
+                        ) : (
+                            <div className="text-xl font-black">
+                                {formatCurrency(product.price, product.currency, iqdPreference)}
+                            </div>
+                        )}
                         <div className="text-xs text-muted-foreground">{product.unit}</div>
+                        {endsSoon && endsAt && (
+                            <div className="mt-1 text-[11px] font-medium text-amber-600">
+                                Ends {endsAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                            </div>
+                        )}
                     </div>
                     <Button className="gap-2 rounded-2xl" onClick={() => onAdd(product)}>
                         <Plus className="h-4 w-4" />

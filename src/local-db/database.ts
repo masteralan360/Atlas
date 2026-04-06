@@ -30,6 +30,8 @@ import type {
     ExpenseItem,
     PayrollStatus,
     DividendStatus,
+    ProductDiscount,
+    CategoryDiscount,
     SalesOrder,
     PurchaseOrder,
     TravelAgencySale
@@ -52,6 +54,8 @@ export class AtlasDatabase extends Dexie {
     workspaces!: EntityTable<Workspace, 'id'>
     storages!: EntityTable<Storage, 'id'>
     inventory!: EntityTable<Inventory, 'id'>
+    product_discounts!: EntityTable<ProductDiscount, 'id'>
+    category_discounts!: EntityTable<CategoryDiscount, 'id'>
     inventory_transfer_transactions!: EntityTable<InventoryTransferTransaction, 'id'>
     reorder_transfer_rules!: EntityTable<ReorderTransferRule, 'id'>
     suppliers!: EntityTable<Supplier, 'id'>
@@ -944,6 +948,11 @@ export class AtlasDatabase extends Dexie {
             await tx.table('storages').bulkPut(storageRows)
         })
 
+        this.version(52).stores({
+            product_discounts: 'id, workspaceId, productId, isActive, startsAt, endsAt, updatedAt, isDeleted, [workspaceId+productId]',
+            category_discounts: 'id, workspaceId, categoryId, isActive, startsAt, endsAt, updatedAt, isDeleted, [workspaceId+categoryId]'
+        })
+
         this.registerLocalModeSyncHooks()
     }
 
@@ -958,6 +967,8 @@ export class AtlasDatabase extends Dexie {
             'workspaces',
             'storages',
             'inventory',
+            'product_discounts',
+            'category_discounts',
             'inventory_transfer_transactions',
             'reorder_transfer_rules',
             'suppliers',
@@ -1085,9 +1096,11 @@ export const db = new AtlasDatabase()
 
 // Database utility functions
 export async function clearDatabase(): Promise<void> {
-    await db.transaction('rw', [db.products, db.inventory, db.inventory_transfer_transactions, db.reorder_transfer_rules, db.categories, db.invoices, db.travel_agency_sales, db.payment_transactions, db.syncQueue], async () => {
+    await db.transaction('rw', [db.products, db.inventory, db.product_discounts, db.category_discounts, db.inventory_transfer_transactions, db.reorder_transfer_rules, db.categories, db.invoices, db.travel_agency_sales, db.payment_transactions, db.syncQueue], async () => {
         await db.products.clear()
         await db.inventory.clear()
+        await db.product_discounts.clear()
+        await db.category_discounts.clear()
         await db.inventory_transfer_transactions.clear()
         await db.reorder_transfer_rules.clear()
         await db.categories.clear()

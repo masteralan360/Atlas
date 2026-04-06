@@ -1,4 +1,5 @@
 import { createAdminClient } from '../_shared/supabase.ts'
+import { computeDiscountPrice, type ResolvedWorkspaceDiscountRow } from '../_shared/discounts.ts'
 import { corsHeaders, errorResponse, jsonResponse } from '../_shared/http.ts'
 import {
     listMarketplaceAssetUrls,
@@ -77,7 +78,8 @@ Deno.serve(async (req) => {
 
         const [
             { data: contacts, error: contactsError },
-            { data: products, error: productsError }
+            { data: products, error: productsError },
+            { data: activeDiscounts, error: discountsError }
         ] = await Promise.all([
             adminClient
                 .from('workspace_contacts')
@@ -90,7 +92,10 @@ Deno.serve(async (req) => {
                 .select('id, name, sku, description, price, currency, unit, category_id, image_url')
                 .eq('workspace_id', resolvedWorkspace.id)
                 .eq('is_deleted', false)
-                .order('name', { ascending: true })
+                .order('name', { ascending: true }),
+            adminClient.rpc('get_active_discounts_for_workspace', {
+                p_workspace_id: resolvedWorkspace.id
+            })
         ])
 
         if (contactsError) {
@@ -101,7 +106,20 @@ Deno.serve(async (req) => {
             return errorResponse(productsError.message, 500)
         }
 
+        if (discountsError) {
+            return errorResponse(discountsError.message, 500)
+        }
+
         const productRows = (products ?? []) as ProductRow[]
+        const discountByProductId = new Map<string, ResolvedWorkspaceDiscountRow>()
+        for (const discount of (activeDiscounts ?? []) as ResolvedWorkspaceDiscountRow[]) {
+            if (discount.is_stock_ok) {
+                discountByProductId.set(discount.product_id, {
+                    ...discount,
+                    discount_value: Number(discount.discount_value ?? 0)
+                })
+            }
+        }
         const categoryIds = Array.from(new Set(productRows.map((product) => product.category_id).filter((value): value is string => Boolean(value))))
         const categoryNameById = new Map<string, string>()
 
@@ -159,20 +177,31 @@ Deno.serve(async (req) => {
                         name: categoryNameById.get(categoryId)
                     }))
                     .filter((category): category is { id: string; name: string } => Boolean(category.name)),
-                products: productRows.map((product, index) => ({
-                    id: product.id,
-                    name: product.name,
-                    sku: product.sku,
-                    description: product.description ?? '',
-                    price: Number(product.price ?? 0),
-                    currency: product.currency ?? resolvedWorkspace.default_currency ?? 'iqd',
-                    unit: product.unit ?? 'pcs',
-                    category_id: product.category_id,
-                    category_name: product.category_id ? (categoryNameById.get(product.category_id) ?? null) : null,
-                    image_url: resolvedProductImageUrls[index]
-                        ?? fallbackProductImageUrls[fallbackProductImageIndex++]
-                        ?? resolvedLogoUrl
-                }))
+                products: productRows.map((product, index) => {
+                    const basePrice = Number(product.price ?? 0)
+                    const resolvedDiscount = discountByProductId.get(product.id)
+
+                    return {
+                        id: product.id,
+                        name: product.name,
+                        sku: product.sku,
+                        description: product.description ?? '',
+                        price: basePrice,
+                        currency: product.currency ?? resolvedWorkspace.default_currency ?? 'iqd',
+                        unit: product.unit ?? 'pcs',
+                        category_id: product.category_id,
+                        category_name: product.category_id ? (categoryNameById.get(product.category_id) ?? null) : null,
+                        image_url: resolvedProductImageUrls[index]
+                            ?? fallbackProductImageUrls[fallbackProductImageIndex++]
+                            ?? resolvedLogoUrl,
+                        discount_price: resolvedDiscount
+                            ? computeDiscountPrice(basePrice, resolvedDiscount.discount_type, resolvedDiscount.discount_value)
+                            : null,
+                        discount_type: resolvedDiscount?.discount_type ?? null,
+                        discount_value: resolvedDiscount?.discount_value ?? null,
+                        discount_ends_at: resolvedDiscount?.ends_at ?? null
+                    }
+                })
             },
             {
                 headers: {

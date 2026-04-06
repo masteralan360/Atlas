@@ -253,11 +253,27 @@ export function MobileStoreCart({
                                                                 <Trash2 className="h-3.5 w-3.5" />
                                                             </Button>
                                                         </div>
-                                                        <div className="text-sm font-bold text-primary mt-1">
-                                                            {formatMoney(item.unit_price * item.quantity, item.currency)}
-                                                        </div>
-                                                        <div className="text-[11px] text-muted-foreground">
-                                                            {formatMoney(item.unit_price, item.currency)} / {item.unit}
+                                                        <div className="mt-1 space-y-0.5">
+                                                            {item.unit_price < item.original_unit_price && (
+                                                                <div className="text-[11px] text-muted-foreground line-through">
+                                                                    {formatMoney(item.original_unit_price * item.quantity, item.currency)}
+                                                                </div>
+                                                            )}
+                                                            <div className="text-sm font-bold text-primary">
+                                                                {formatMoney(item.unit_price * item.quantity, item.currency)}
+                                                            </div>
+                                                            <div className="text-[11px] text-muted-foreground">
+                                                                {item.unit_price < item.original_unit_price ? (
+                                                                    <span className="flex flex-col">
+                                                                        <span className="line-through opacity-70">
+                                                                            {formatMoney(item.original_unit_price, item.currency)}
+                                                                        </span>
+                                                                        <span>{formatMoney(item.unit_price, item.currency)} / {item.unit}</span>
+                                                                    </span>
+                                                                ) : (
+                                                                    <span>{formatMoney(item.unit_price, item.currency)} / {item.unit}</span>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>

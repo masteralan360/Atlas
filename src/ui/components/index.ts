@@ -111,3 +111,7 @@ export {
 } from './ui/dropdown-menu'
 export * from './map'
 export { BiometricLock } from './BiometricLock'
+export { Popover, PopoverTrigger, PopoverContent, PopoverAnchor } from './ui/popover'
+export { Calendar } from './ui/calendar'
+export { DateTimePicker } from './ui/date-time-picker'
+export { NumericInput } from './ui/numeric-input'

@@ -1,6 +1,5 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useState } from 'react'
 
 import { db } from './database'
 import { createInventoryTransferTransactions } from './inventoryTransferTransactions'
@@ -10,11 +9,14 @@ import {
     deleteInventoryForProduct,
     getInventoryQuantityForProductStorage,
     setProductInventoryFromLegacyInput,
-    transferInventoryQuantity
+    transferInventoryQuantity,
+    useInventory
 } from './inventory'
 import type {
     Product,
     Category,
+    ProductDiscount,
+    CategoryDiscount,
     Invoice,
     Sale,
     SaleItem,
@@ -43,6 +45,7 @@ import { generateId, toSnakeCase, toCamelCase } from '@/lib/utils'
 import { supabase } from '@/auth/supabase'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { isOnline } from '@/lib/network'
+import { resolveActiveDiscountMap, type ResolvedActiveDiscount } from '@/lib/discounts'
 import { convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
@@ -465,6 +468,241 @@ export async function deleteProduct(id: string): Promise<void> {
     await deleteInventoryForProduct(id, now)
 }
 
+type DiscountEntity = ProductDiscount | CategoryDiscount
+type DiscountEntityTableName = 'product_discounts' | 'category_discounts'
+
+function useDiscountTable<T extends DiscountEntity>(
+    workspaceId: string | undefined,
+    tableName: DiscountEntityTableName,
+    table: any
+) {
+    const online = useNetworkStatus()
+
+    const rows = useLiveQuery(
+        () => workspaceId
+            ? table.where('workspaceId').equals(workspaceId).and((item: T) => !item.isDeleted).toArray()
+            : [],
+        [workspaceId]
+    )
+
+    useEffect(() => {
+        if (!workspaceId || !online || !shouldUseCloudBusinessData(workspaceId)) {
+            return
+        }
+
+        void fetchTableFromSupabase(tableName, table, workspaceId)
+    }, [online, table, tableName, workspaceId])
+
+    return rows ?? []
+}
+
+async function createDiscountEntity<T extends DiscountEntity>(
+    tableName: DiscountEntityTableName,
+    table: any,
+    workspaceId: string,
+    data: Omit<T, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>
+): Promise<T> {
+    const now = new Date().toISOString()
+    const id = generateId()
+    const usesCloud = shouldUseCloudBusinessData(workspaceId)
+    const syncStatus: T['syncStatus'] = usesCloud
+        ? (isOnline() ? 'synced' : 'pending')
+        : 'synced'
+
+    const session = usesCloud && isOnline()
+        ? await getMutationSession(`${tableName}.create`)
+        : null
+
+    const entity: T = {
+        ...data,
+        id,
+        workspaceId,
+        createdBy: data.createdBy ?? session?.user?.id,
+        createdAt: now,
+        updatedAt: now,
+        syncStatus,
+        lastSyncedAt: syncStatus === 'synced' ? now : null,
+        version: 1,
+        isDeleted: false
+    } as T
+
+    if (usesCloud && isOnline()) {
+        const payload = toSnakeCase({
+            ...entity,
+            syncStatus: undefined,
+            lastSyncedAt: undefined
+        })
+        const { error } = await runMutation(`${tableName}.create`, () => supabase.from(tableName).insert(payload))
+        if (error) {
+            throw normalizeSupabaseActionError(error)
+        }
+
+        await table.put(entity)
+        return entity
+    }
+
+    await table.put(entity)
+
+    if (usesCloud) {
+        await addToOfflineMutations(tableName, id, 'create', entity as unknown as Record<string, unknown>, workspaceId)
+    }
+
+    return entity
+}
+
+async function updateDiscountEntity<T extends DiscountEntity>(
+    tableName: DiscountEntityTableName,
+    table: any,
+    id: string,
+    data: Partial<T>
+) {
+    const now = new Date().toISOString()
+    const existing = await table.get(id) as T | undefined
+    if (!existing) {
+        throw new Error('Discount not found')
+    }
+
+    const usesCloud = shouldUseCloudBusinessData(existing.workspaceId)
+    const syncStatus: T['syncStatus'] = usesCloud
+        ? (isOnline() ? 'synced' : 'pending')
+        : 'synced'
+
+    const updated: T = {
+        ...existing,
+        ...data,
+        updatedAt: now,
+        syncStatus,
+        lastSyncedAt: syncStatus === 'synced' ? now : existing.lastSyncedAt,
+        version: existing.version + 1
+    }
+
+    if (usesCloud && isOnline()) {
+        const payload = toSnakeCase({
+            ...data,
+            updatedAt: now
+        })
+        const { error } = await runMutation(`${tableName}.update`, () => supabase.from(tableName).update(payload).eq('id', id))
+        if (error) {
+            throw normalizeSupabaseActionError(error)
+        }
+
+        await table.put(updated)
+        return
+    }
+
+    await table.put(updated)
+
+    if (usesCloud) {
+        await addToOfflineMutations(tableName, id, 'update', updated as unknown as Record<string, unknown>, existing.workspaceId)
+    }
+}
+
+async function deleteDiscountEntity(
+    tableName: DiscountEntityTableName,
+    table: any,
+    id: string
+) {
+    const now = new Date().toISOString()
+    const existing = await table.get(id) as DiscountEntity | undefined
+    if (!existing) {
+        return
+    }
+
+    const usesCloud = shouldUseCloudBusinessData(existing.workspaceId)
+    const syncStatus: DiscountEntity['syncStatus'] = usesCloud
+        ? (isOnline() ? 'synced' : 'pending')
+        : 'synced'
+
+    const updated = {
+        ...existing,
+        isActive: false,
+        isDeleted: true,
+        updatedAt: now,
+        syncStatus,
+        lastSyncedAt: syncStatus === 'synced' ? now : existing.lastSyncedAt,
+        version: existing.version + 1
+    }
+
+    if (usesCloud && isOnline()) {
+        const { error } = await runMutation(`${tableName}.delete`, () =>
+            supabase
+                .from(tableName)
+                .update({ is_deleted: true, is_active: false, updated_at: now })
+                .eq('id', id)
+        )
+
+        if (error) {
+            throw normalizeSupabaseActionError(error)
+        }
+
+        await table.put(updated)
+        return
+    }
+
+    await table.put(updated)
+
+    if (usesCloud) {
+        await addToOfflineMutations(
+            tableName,
+            id,
+            'delete',
+            { id, is_deleted: true, is_active: false, updated_at: now },
+            existing.workspaceId
+        )
+    }
+}
+
+export function useProductDiscounts(workspaceId: string | undefined) {
+    return useDiscountTable<ProductDiscount>(workspaceId, 'product_discounts', db.product_discounts)
+}
+
+export function useCategoryDiscounts(workspaceId: string | undefined) {
+    return useDiscountTable<CategoryDiscount>(workspaceId, 'category_discounts', db.category_discounts)
+}
+
+export function useActiveDiscountMap(workspaceId: string | undefined) {
+    const products = useProducts(workspaceId)
+    const inventory = useInventory(workspaceId)
+    const productDiscounts = useProductDiscounts(workspaceId)
+    const categoryDiscounts = useCategoryDiscounts(workspaceId)
+
+    return useMemo<Map<string, ResolvedActiveDiscount>>(() => resolveActiveDiscountMap({
+        products,
+        productDiscounts,
+        categoryDiscounts,
+        inventoryRows: inventory
+    }), [categoryDiscounts, inventory, productDiscounts, products])
+}
+
+export async function createProductDiscount(
+    workspaceId: string,
+    data: Omit<ProductDiscount, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>
+) {
+    return await createDiscountEntity<ProductDiscount>('product_discounts', db.product_discounts, workspaceId, data)
+}
+
+export async function updateProductDiscount(id: string, data: Partial<ProductDiscount>) {
+    await updateDiscountEntity<ProductDiscount>('product_discounts', db.product_discounts, id, data)
+}
+
+export async function deleteProductDiscount(id: string) {
+    await deleteDiscountEntity('product_discounts', db.product_discounts, id)
+}
+
+export async function createCategoryDiscount(
+    workspaceId: string,
+    data: Omit<CategoryDiscount, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>
+) {
+    return await createDiscountEntity<CategoryDiscount>('category_discounts', db.category_discounts, workspaceId, data)
+}
+
+export async function updateCategoryDiscount(id: string, data: Partial<CategoryDiscount>) {
+    await updateDiscountEntity<CategoryDiscount>('category_discounts', db.category_discounts, id, data)
+}
+
+export async function deleteCategoryDiscount(id: string) {
+    await deleteDiscountEntity('category_discounts', db.category_discounts, id)
+}
 
 // ===================
 

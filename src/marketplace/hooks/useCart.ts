@@ -7,10 +7,14 @@ export interface MarketplaceCartItem {
     name: string
     sku: string
     unit_price: number
+    original_unit_price: number
     currency: string
     image_url: string | null
     unit: string
     quantity: number
+    discount_type: string | null
+    discount_value: number | null
+    discount_ends_at: string | null
 }
 
 function readCart(storageKey: string) {
@@ -76,11 +80,15 @@ export function useCart(storeSlug: string) {
                     product_id: product.id,
                     name: product.name,
                     sku: product.sku,
-                    unit_price: product.price,
+                    unit_price: product.discount_price ?? product.price,
+                    original_unit_price: product.price,
                     currency: product.currency,
                     image_url: product.image_url,
                     unit: product.unit,
-                    quantity: 1
+                    quantity: 1,
+                    discount_type: product.discount_type,
+                    discount_value: product.discount_value,
+                    discount_ends_at: product.discount_ends_at
                 }
             ]
         })
@@ -119,10 +127,14 @@ export function useCart(storeSlug: string) {
                     ...item,
                     name: latest.name,
                     sku: latest.sku,
-                    unit_price: latest.price,
+                    unit_price: latest.discount_price ?? latest.price,
+                    original_unit_price: latest.price,
                     currency: latest.currency,
                     image_url: latest.image_url,
-                    unit: latest.unit
+                    unit: latest.unit,
+                    discount_type: latest.discount_type,
+                    discount_value: latest.discount_value,
+                    discount_ends_at: latest.discount_ends_at
                 }
             })
             .filter((item): item is MarketplaceCartItem => Boolean(item))

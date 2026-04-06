@@ -337,9 +337,16 @@ export function StorePage() {
                                                                 </div>
                                                                 <div className="min-w-0 flex-1">
                                                                     <h3 className="truncate font-bold">{item.name}</h3>
-                                                                    <p className="text-sm text-muted-foreground">
-                                                                        {formatMoney(item.unit_price * item.quantity, item.currency)}
-                                                                    </p>
+                                                                    <div className="space-y-0.5">
+                                                                        {item.unit_price < item.original_unit_price && (
+                                                                            <p className="text-xs text-muted-foreground line-through">
+                                                                                {formatMoney(item.original_unit_price * item.quantity, item.currency)}
+                                                                            </p>
+                                                                        )}
+                                                                        <p className="text-sm text-muted-foreground">
+                                                                            {formatMoney(item.unit_price * item.quantity, item.currency)}
+                                                                        </p>
+                                                                    </div>
                                                                 </div>
                                                                 <Button variant="ghost" size="icon" onClick={() => cart.removeItem(item.product_id)}>
                                                                     <Minus className="h-4 w-4" />
@@ -364,7 +371,16 @@ export function StorePage() {
                                                                     </button>
                                                                 </div>
                                                                 <div className="text-sm text-muted-foreground">
-                                                                    {formatMoney(item.unit_price, item.currency)} / {item.unit}
+                                                                    {item.unit_price < item.original_unit_price ? (
+                                                                        <span className="flex flex-col items-end">
+                                                                            <span className="text-xs line-through opacity-70">
+                                                                                {formatMoney(item.original_unit_price, item.currency)}
+                                                                            </span>
+                                                                            <span>{formatMoney(item.unit_price, item.currency)} / {item.unit}</span>
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span>{formatMoney(item.unit_price, item.currency)} / {item.unit}</span>
+                                                                    )}
                                                                 </div>
                                                             </div>
                                                         </CardContent>

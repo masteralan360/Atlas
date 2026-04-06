@@ -35,6 +35,10 @@ export interface MarketplaceProduct {
     category_id: string | null
     category_name: string | null
     image_url: string | null
+    discount_price: number | null
+    discount_type: string | null
+    discount_value: number | null
+    discount_ends_at: string | null
 }
 
 export interface MarketplaceStoreCatalog {

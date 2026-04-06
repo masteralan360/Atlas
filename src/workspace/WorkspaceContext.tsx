@@ -34,6 +34,7 @@ export type ModuleFeatureKey =
     | 'monthly_comparison'
     | 'team_performance'
     | 'products'
+    | 'discounts'
     | 'storages'
     | 'inventory_transfer'
     | 'invoices_history'
@@ -56,6 +57,7 @@ export interface WorkspaceFeatures {
     monthly_comparison: boolean
     team_performance: boolean
     products: boolean
+    discounts: boolean
     storages: boolean
     inventory_transfer: boolean
     invoices_history: boolean
@@ -123,6 +125,7 @@ const defaultFeatures: WorkspaceFeatures = {
     monthly_comparison: true,
     team_performance: true,
     products: true,
+    discounts: true,
     storages: true,
     inventory_transfer: true,
     invoices_history: true,
@@ -166,6 +169,7 @@ const WORKSPACE_FEATURE_COLUMNS = [
     'monthly_comparison',
     'team_performance',
     'products',
+    'discounts',
     'storages',
     'inventory_transfer',
     'invoices_history',
@@ -216,6 +220,7 @@ function getFeaturesFromLocalWorkspace(localWorkspace: Workspace): WorkspaceFeat
         monthly_comparison: localWorkspace.monthly_comparison ?? true,
         team_performance: localWorkspace.team_performance ?? true,
         products: localWorkspace.products ?? true,
+        discounts: localWorkspace.discounts ?? true,
         storages: localWorkspace.storages ?? true,
         inventory_transfer: localWorkspace.inventory_transfer ?? true,
         invoices_history: localWorkspace.invoices_history ?? true,
@@ -339,6 +344,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             monthly_comparison: nextFeatures.monthly_comparison,
             team_performance: nextFeatures.team_performance,
             products: nextFeatures.products,
+            discounts: nextFeatures.discounts,
             storages: nextFeatures.storages,
             inventory_transfer: nextFeatures.inventory_transfer,
             invoices_history: nextFeatures.invoices_history,
@@ -494,6 +500,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 monthly_comparison: workspaceRow.monthly_comparison ?? currentFeatures.monthly_comparison,
                 team_performance: workspaceRow.team_performance ?? currentFeatures.team_performance,
                 products: workspaceRow.products ?? currentFeatures.products,
+                discounts: workspaceRow.discounts ?? currentFeatures.discounts,
                 storages: workspaceRow.storages ?? currentFeatures.storages,
                 inventory_transfer: workspaceRow.inventory_transfer ?? currentFeatures.inventory_transfer,
                 invoices_history: workspaceRow.invoices_history ?? currentFeatures.invoices_history,
@@ -604,6 +611,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                             monthly_comparison: data.monthly_comparison ?? currentFeatures.monthly_comparison,
                             team_performance: data.team_performance ?? currentFeatures.team_performance,
                             products: data.products ?? currentFeatures.products,
+                            discounts: data.discounts ?? currentFeatures.discounts,
                             storages: data.storages ?? currentFeatures.storages,
                             inventory_transfer: data.inventory_transfer ?? currentFeatures.inventory_transfer,
                             invoices_history: data.invoices_history ?? currentFeatures.invoices_history,
@@ -749,6 +757,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 monthly_comparison: newFeatures.monthly_comparison,
                 team_performance: newFeatures.team_performance,
                 products: newFeatures.products,
+                discounts: newFeatures.discounts,
                 storages: newFeatures.storages,
                 inventory_transfer: newFeatures.inventory_transfer,
                 invoices_history: newFeatures.invoices_history,

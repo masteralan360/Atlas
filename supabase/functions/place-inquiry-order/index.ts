@@ -1,4 +1,5 @@
 import { createAdminClient } from '../_shared/supabase.ts'
+import { computeDiscountPrice, type ResolvedWorkspaceDiscountRow } from '../_shared/discounts.ts'
 import { corsHeaders, errorResponse, jsonResponse, readJson } from '../_shared/http.ts'
 import {
     getLocalizedMarketplaceOrderMessage,
@@ -161,6 +162,24 @@ Deno.serve(async (req) => {
             return errorResponse('Some products could not be found for this store')
         }
 
+        const { data: activeDiscounts, error: discountsError } = await adminClient.rpc('get_active_discounts_for_workspace', {
+            p_workspace_id: (workspace as WorkspaceRow).id
+        })
+
+        if (discountsError) {
+            return errorResponse(discountsError.message, 500)
+        }
+
+        const discountByProductId = new Map<string, ResolvedWorkspaceDiscountRow>()
+        for (const discount of (activeDiscounts ?? []) as ResolvedWorkspaceDiscountRow[]) {
+            if (discount.is_stock_ok) {
+                discountByProductId.set(discount.product_id, {
+                    ...discount,
+                    discount_value: Number(discount.discount_value ?? 0)
+                })
+            }
+        }
+
         const currencies = new Set(
             Array.from(productsById.values()).map((product) => (product.currency ?? (workspace as WorkspaceRow).default_currency ?? 'iqd').toLowerCase())
         )
@@ -173,7 +192,11 @@ Deno.serve(async (req) => {
         const orderItems = productIds.map((productId) => {
             const product = productsById.get(productId)!
             const quantity = normalizedItems.get(productId) ?? 0
-            const unitPrice = Number(product.price ?? 0)
+            const originalUnitPrice = Number(product.price ?? 0)
+            const resolvedDiscount = discountByProductId.get(product.id)
+            const unitPrice = resolvedDiscount
+                ? computeDiscountPrice(originalUnitPrice, resolvedDiscount.discount_type, resolvedDiscount.discount_value)
+                : originalUnitPrice
             const lineTotal = unitPrice * quantity
             subtotal += lineTotal
 
@@ -182,11 +205,16 @@ Deno.serve(async (req) => {
                 name: product.name,
                 sku: product.sku,
                 unit_price: unitPrice,
+                original_unit_price: originalUnitPrice,
                 currency: (product.currency ?? (workspace as WorkspaceRow).default_currency ?? 'iqd').toLowerCase(),
                 quantity,
                 line_total: lineTotal,
                 image_url: resolvePublicAssetUrl(product.image_url),
-                storage_id: product.storage_id
+                storage_id: product.storage_id,
+                discount_type: resolvedDiscount?.discount_type ?? null,
+                discount_value: resolvedDiscount?.discount_value ?? null,
+                discount_ends_at: resolvedDiscount?.ends_at ?? null,
+                discount_source: resolvedDiscount?.source ?? null
             }
         })
 

@@ -70,6 +70,11 @@ export interface CartItem {
     sku: string
     name: string
     price: number
+    discounted_price?: number
+    discount_type?: 'percentage' | 'fixed_amount'
+    discount_value?: number
+    discount_source?: 'product' | 'category'
+    discount_ends_at?: string
     quantity: number
     max_stock: number
     negotiated_price?: number

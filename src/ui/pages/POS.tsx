@@ -7,6 +7,7 @@ import {
     adjustInventoryQuantity,
     createLoanFromPosSale,
     getPrimaryStorageFromList,
+    useActiveDiscountMap,
     useCategories,
     useInventoryProducts,
     useStorages,
@@ -21,6 +22,7 @@ import { useWorkspace, type WorkspaceFeatures } from '@/workspace'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { ExchangeRateResult } from '@/lib/exchangeRate'
 import { verifySale, createVerificationSale } from '@/lib/saleVerification'
+import type { ResolvedActiveDiscount } from '@/lib/discounts'
 import {
     Button,
     Input,
@@ -96,6 +98,30 @@ function buildCartItemKey(productId: string, storageId?: string | null) {
     return `${productId}:${storageId ?? ''}`
 }
 
+function getCartBasePrice(item: CartItem) {
+    return item.discounted_price ?? item.price
+}
+
+function getCartEffectivePrice(item: CartItem) {
+    return item.negotiated_price ?? getCartBasePrice(item)
+}
+
+function hasAutomaticDiscount(item: CartItem) {
+    return typeof item.discounted_price === 'number' && item.discounted_price < item.price
+}
+
+function formatDiscountBadge(
+    discount: { discountType: 'percentage' | 'fixed_amount'; discountValue: number },
+    currency: CurrencyCode,
+    iqdPreference: WorkspaceFeatures['iqd_display_preference']
+) {
+    if (discount.discountType === 'percentage') {
+        return `-${Number(discount.discountValue)}%`
+    }
+
+    return `-${formatCurrency(discount.discountValue, currency, iqdPreference)}`
+}
+
 
 export function POS() {
     const { toast } = useToast()
@@ -103,6 +129,7 @@ export function POS() {
     const { t } = useTranslation()
     const { features, isLocalMode } = useWorkspace()
     const products = useInventoryProducts(user?.workspaceId)
+    const activeDiscountMap = useActiveDiscountMap(user?.workspaceId)
     const storages = useStorages(user?.workspaceId)
     const [selectedStorageId, setSelectedStorageId] = useState<string>(() => {
         return localStorage.getItem('pos_selected_storage') || ''
@@ -437,13 +464,13 @@ export function POS() {
     // Calculate totals
     const totalAmount = cart.reduce((sum, item) => {
         const itemCurrency = findStockProduct(item.product_id, item.storageId)?.currency || 'usd'
-        const basePrice = item.negotiated_price ?? item.price
+        const basePrice = getCartEffectivePrice(item)
         const converted = convertPrice(basePrice, itemCurrency, settlementCurrency)
         return sum + (converted * item.quantity)
     }, 0)
     const originalSubtotal = cart.reduce((sum, item) => {
         const itemCurrency = findStockProduct(item.product_id, item.storageId)?.currency || 'usd'
-        const converted = convertPrice(item.price, itemCurrency, settlementCurrency)
+        const converted = convertPrice(getCartBasePrice(item), itemCurrency, settlementCurrency)
         return sum + (converted * item.quantity)
     }, 0)
     const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0)
@@ -515,7 +542,7 @@ export function POS() {
 
         // Apply to all items by updating negotiated_price
         setCart(prev => prev.map(item => {
-            const newPrice = item.price * (1 - Math.min(percentToApply, 100) / 100)
+            const newPrice = getCartBasePrice(item) * (1 - Math.min(percentToApply, 100) / 100)
             // Only update if significantly different to avoid state churn
             if (item.negotiated_price !== undefined && Math.abs(item.negotiated_price - newPrice) < 0.001) return item
             return { ...item, negotiated_price: newPrice }
@@ -726,6 +753,7 @@ export function POS() {
 
     const addToCart = useCallback((product: InventoryProduct) => {
         if (product.inventoryQuantity <= 0) return // Out of stock
+        const activeDiscount = activeDiscountMap.get(product.id)
 
         // Check EUR support
         if (product.currency === 'eur' && !features.eur_conversion_enabled) {
@@ -767,13 +795,18 @@ export function POS() {
                     sku: product.sku,
                     name: product.name,
                     price: product.price,
+                    discounted_price: activeDiscount?.discountPrice,
+                    discount_type: activeDiscount?.discountType,
+                    discount_value: activeDiscount?.discountValue,
+                    discount_source: activeDiscount?.source,
+                    discount_ends_at: activeDiscount?.endsAt,
                     quantity: 1,
                     max_stock: product.inventoryQuantity,
                     imageUrl: product.imageUrl
                 }
             ]
         })
-    }, [features, t, toast])
+    }, [activeDiscountMap, features, t, toast])
 
     const removeFromCart = (itemKey: string) => {
         setCart((prev) => prev.filter((item) => getCartItemKey(item) !== itemKey))
@@ -808,7 +841,7 @@ export function POS() {
 
     const openPriceEdit = (item: CartItem) => {
         setEditingPriceItemKey(getCartItemKey(item))
-        setNegotiatedPriceInput((item.negotiated_price ?? item.price).toString())
+        setNegotiatedPriceInput(getCartEffectivePrice(item).toString())
     }
 
     const savePriceEdit = () => {
@@ -1241,7 +1274,7 @@ export function POS() {
         const itemsWithMetadata = cart.map((item) => {
             const product = findStockProduct(item.product_id, item.storageId)
             const originalCurrency = product?.currency || 'usd'
-            const effectivePrice = item.negotiated_price ?? item.price
+            const effectivePrice = getCartEffectivePrice(item)
             const convertedUnitPrice = convertPrice(effectivePrice, originalCurrency, settlementCurrency)
             const costPrice = product?.costPrice || 0
             const convertedCostPrice = convertPrice(costPrice, originalCurrency, settlementCurrency)
@@ -1257,7 +1290,7 @@ export function POS() {
                 cost_price: costPrice,
                 converted_cost_price: convertedCostPrice,
                 original_currency: originalCurrency,
-                original_unit_price: item.price, // always store original
+                original_unit_price: item.price, // always store original list price
                 converted_unit_price: convertedUnitPrice,
                 settlement_currency: settlementCurrency,
                 negotiated_price: item.negotiated_price, // store if negotiated
@@ -1620,6 +1653,7 @@ export function POS() {
                                 categories={categories}
                                 selectedCategory={selectedCategory}
                                 setSelectedCategory={setSelectedCategory}
+                                activeDiscountMap={activeDiscountMap}
                             />
                         ) : (
                             <MobileCart
@@ -1711,6 +1745,8 @@ export function POS() {
                                     const minStock = product.minStockLevel || 5
                                     const isLowStock = remainingQuantity <= minStock
                                     const isCriticalStock = remainingQuantity <= (minStock / 2)
+                                    const activeDiscount = activeDiscountMap.get(product.id)
+                                    const displayPrice = activeDiscount?.discountPrice ?? product.price
 
                                     return (
                                         <button
@@ -1754,6 +1790,12 @@ export function POS() {
                                                 )}>
                                                     {remainingQuantity}
                                                 </div>
+
+                                                {activeDiscount && (
+                                                    <div className="absolute bottom-2 left-2 rounded-2xl bg-emerald-500 px-2.5 py-1 text-[11px] font-black text-white shadow-md z-10">
+                                                        {formatDiscountBadge(activeDiscount, product.currency, features.iqd_display_preference)}
+                                                    </div>
+                                                )}
                                             </div>
 
                                             {/* Product Info */}
@@ -1768,9 +1810,20 @@ export function POS() {
 
                                             {/* Pricing */}
                                             <div className="pt-2 border-t border-border/40">
-                                                <div className="text-lg font-black text-primary">
-                                                    {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
-                                                </div>
+                                                {activeDiscount ? (
+                                                    <div className="space-y-0.5">
+                                                        <div className="text-xs font-semibold text-muted-foreground line-through">
+                                                            {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
+                                                        </div>
+                                                        <div className="text-lg font-black text-emerald-600">
+                                                            {formatCurrency(displayPrice, product.currency, features.iqd_display_preference)}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-lg font-black text-primary">
+                                                        {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
+                                                    </div>
+                                                )}
                                             </div>
                                         </button>
                                     )
@@ -1827,10 +1880,12 @@ export function POS() {
                                     ) : (
                                         cart.map((item, index) => {
                                             const productCurrency = findStockProduct(item.product_id, item.storageId)?.currency || 'usd'
-                                            const effectivePrice = item.negotiated_price ?? item.price
+                                            const effectivePrice = getCartEffectivePrice(item)
+                                            const basePrice = getCartBasePrice(item)
                                             const convertedPrice = convertPrice(effectivePrice, productCurrency, settlementCurrency)
                                             const isConverted = productCurrency !== settlementCurrency
                                             const hasNegotiated = item.negotiated_price !== undefined
+                                            const hasDiscount = hasAutomaticDiscount(item)
                                             const itemKey = getCartItemKey(item)
 
                                             return (
@@ -1845,17 +1900,16 @@ export function POS() {
                                                     <div className="flex-1 min-w-0">
                                                         <div className="font-medium truncate">{item.name}</div>
                                                         <div className="flex flex-col gap-0.5">
-                                                            {/* Show original price (grayed out if negotiated) */}
+                                                            {/* Show original price (grayed out if discounted or negotiated) */}
                                                             <div className={cn(
                                                                 "text-xs",
-                                                                hasNegotiated ? "text-muted-foreground/50 line-through" : "text-muted-foreground"
+                                                                hasNegotiated || hasDiscount ? "text-muted-foreground/50 line-through" : "text-muted-foreground"
                                                             )}>
                                                                 {formatCurrency(item.price, productCurrency, features.iqd_display_preference)} x {item.quantity}
                                                             </div>
-                                                            {/* Show negotiated price if set */}
-                                                            {hasNegotiated && (
+                                                            {(hasDiscount || hasNegotiated) && (
                                                                 <div className="text-xs text-emerald-600 font-medium flex items-center gap-1">
-                                                                    <span>{formatCurrency(item.negotiated_price!, productCurrency, features.iqd_display_preference)} x {item.quantity}</span>
+                                                                    <span>{formatCurrency(effectivePrice, productCurrency, features.iqd_display_preference)} x {item.quantity}</span>
                                                                     {isAdmin && (
                                                                         <button
                                                                             onClick={() => clearNegotiatedPrice(item)}
@@ -1889,8 +1943,11 @@ export function POS() {
                                                             )}
                                                         </div>
                                                         {isConverted && !hasNegotiated && (
-                                                            <span className="text-[10px] text-muted-foreground line-through opacity-50">
-                                                                {formatCurrency(item.price * item.quantity, productCurrency, features.iqd_display_preference)}
+                                                            <span className={cn(
+                                                                "text-[10px] text-muted-foreground",
+                                                                !hasDiscount && "line-through opacity-50"
+                                                            )}>
+                                                                {formatCurrency(basePrice * item.quantity, productCurrency, features.iqd_display_preference)}
                                                             </span>
                                                         )}
                                                     </div>
@@ -2729,9 +2786,10 @@ interface MobileGridProps {
     categories: Category[]
     selectedCategory: string
     setSelectedCategory: (id: string) => void
+    activeDiscountMap: Map<string, ResolvedActiveDiscount>
 }
 
-function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModalOpen, isDeviceScannerAutoEnabled, filteredProducts, cart, addToCart, updateQuantity, features, getDisplayImageUrl, categories, selectedCategory, setSelectedCategory }: MobileGridProps) {
+function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModalOpen, isDeviceScannerAutoEnabled, filteredProducts, cart, addToCart, updateQuantity, features, getDisplayImageUrl, categories, selectedCategory, setSelectedCategory, activeDiscountMap }: MobileGridProps) {
     return (
         <div className="flex flex-col gap-4 animate-in fade-in slide-in-from-right-4 duration-300">
             {/* Search & Tool Bar */}
@@ -2813,6 +2871,8 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                     const minStock = product.minStockLevel || 5
                     const isLowStock = remainingQuantity <= minStock
                     const isCriticalStock = remainingQuantity <= (minStock / 2)
+                    const activeDiscount = activeDiscountMap.get(product.id)
+                    const displayPrice = activeDiscount?.discountPrice ?? product.price
 
                     return (
                         <div
@@ -2852,6 +2912,12 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                                     {remainingQuantity}
                                 </div>
 
+                                {activeDiscount && (
+                                    <div className="absolute bottom-2 left-2 rounded-xl bg-emerald-500 px-2 py-1 text-[10px] font-black text-white shadow-sm z-10">
+                                        {formatDiscountBadge(activeDiscount, product.currency, features.iqd_display_preference)}
+                                    </div>
+                                )}
+
                                 {remainingQuantity <= 0 && (
                                     <div className="absolute inset-0 bg-background/60 backdrop-blur-[2px] flex items-center justify-center text-xs font-bold text-destructive">
                                         {t('pos.outOfStock') || 'Out of stock'}
@@ -2860,9 +2926,20 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                             </div>
                             <div className="flex flex-col gap-1 px-1">
                                 <h3 className="font-bold text-sm line-clamp-1">{product.name}</h3>
-                                <div className="text-primary font-black text-sm">
-                                    {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
-                                </div>
+                                {activeDiscount ? (
+                                    <div className="space-y-0.5">
+                                        <div className="text-[11px] font-semibold text-muted-foreground line-through">
+                                            {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
+                                        </div>
+                                        <div className="font-black text-sm text-emerald-600">
+                                            {formatCurrency(displayPrice, product.currency, features.iqd_display_preference)}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="text-primary font-black text-sm">
+                                        {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
+                                    </div>
+                                )}
                             </div>
                             <div
                                 className="flex items-center justify-between bg-muted/30 rounded-2xl p-1 mt-auto"
@@ -3050,9 +3127,10 @@ function MobileCart({
                         ))
                         const originalCurrency = (product?.currency || 'usd') as CurrencyCode
                         const settlementCurr = settlementCurrency as CurrencyCode
-                        const unitPrice = item.negotiated_price ?? item.price
+                        const unitPrice = getCartEffectivePrice(item)
                         const convertedUnitPrice = convertPrice(unitPrice, originalCurrency, settlementCurr)
                         const isExchanged = originalCurrency !== settlementCurr
+                        const hasDiscount = hasAutomaticDiscount(item)
                         const itemKey = buildCartItemKey(item.product_id, item.storageId)
 
                         return (
@@ -3087,14 +3165,14 @@ function MobileCart({
                                             <div className="text-[10px] space-y-0.5 mt-1">
                                                 <div className={cn(
                                                     "text-muted-foreground transition-all duration-300",
-                                                    item.negotiated_price !== undefined ? "line-through opacity-50" : ""
+                                                    item.negotiated_price !== undefined || hasDiscount ? "line-through opacity-50" : ""
                                                 )}>
                                                     {formatCurrency(item.price, originalCurrency, features.iqd_display_preference)} x {item.quantity}
                                                 </div>
 
-                                                {item.negotiated_price !== undefined && (
+                                                {(item.negotiated_price !== undefined || hasDiscount) && (
                                                     <div className="text-emerald-500 font-bold flex items-center gap-1 animate-in slide-in-from-left-2 duration-300">
-                                                        {formatCurrency(item.negotiated_price, originalCurrency, features.iqd_display_preference)} x {item.quantity}
+                                                        {formatCurrency(unitPrice, originalCurrency, features.iqd_display_preference)} x {item.quantity}
                                                         <button
                                                             onClick={() => clearNegotiatedPrice(item)}
                                                             className="p-0.5 rounded-full hover:bg-destructive/10 text-destructive transition-colors"

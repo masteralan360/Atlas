@@ -67,6 +67,8 @@
         "view": "عرض",
         "all": "الكل",
         "print": "طباعة",
+        "am": "صباحاً (AM)",
+        "pm": "مساءً (PM)",
         "pagination": {
             "previous": "السابق",
             "next": "التالي",
@@ -86,21 +88,6 @@
         },
         "exchangeRates": "أسعار الصرف المباشرة",
         "sales": "المبيعات",
-        "revenue": "الإيرادات",
-        "newUpdate": "تم تثبيت تحديث جديد!",
-        "whatsNew": "ما الجديد",
-        "highlights": "أبرز الميزات",
-        "getStarted": "لننطلق!",
-        "badge_new": "جديد",
-        "badge_improved": "مُحسّن",
-        "badge_fixed": "تم الإصلاح",
-        "fromTeam": "من الفريق"
-    },
-    "messages": {
-        "saleCompleted": "تمت عملية البيع بنجاح",
-        "success": "نجاح"
-    },
-    "exchange": {
         "manual": "يدوي",
         "marketAverage": "متوسط السوق",
         "manualEntryTitle": "إدخال سعر الصرف اليدوي",
@@ -134,6 +121,7 @@
         "orders": "الطلبات",
         "invoices": "الفواتير",
         "pos": "نقطة البيع",
+        "discounts": "الخصومات",
         "instantPos": "نقاط البيع الفورية",
         "kdsDashboard": "لوحة تحكم KDS",
         "sales": "سجل المبيعات",
