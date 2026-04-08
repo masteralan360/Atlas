@@ -12,6 +12,113 @@ import { LoanOverdueReminderModal } from './LoanOverdueReminderModal'
 import { useLoanPaymentModal } from './LoanPaymentModalProvider'
 import { useUnifiedSnooze, type SnoozedItem } from '@/context/UnifiedSnoozeContext'
 
+const LOAN_REMINDER_COOLDOWN_STORAGE_KEY = 'loan_reminder_popup_cooldowns'
+const LOAN_REMINDER_COOLDOWN_MS = 6 * 60 * 60 * 1000
+
+interface LoanReminderCooldownEntry {
+    dueDate: string
+    cooldownUntil: string
+}
+
+type LoanReminderCooldownMap = Record<string, LoanReminderCooldownEntry>
+
+function readLoanReminderCooldowns(): LoanReminderCooldownMap {
+    if (typeof window === 'undefined') {
+        return {}
+    }
+
+    try {
+        const raw = window.localStorage.getItem(LOAN_REMINDER_COOLDOWN_STORAGE_KEY)
+        if (!raw) {
+            return {}
+        }
+
+        const parsed = JSON.parse(raw)
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            return {}
+        }
+
+        const next: LoanReminderCooldownMap = {}
+        for (const [loanId, value] of Object.entries(parsed)) {
+            if (
+                typeof loanId === 'string' &&
+                value &&
+                typeof value === 'object' &&
+                typeof value.dueDate === 'string' &&
+                typeof value.cooldownUntil === 'string'
+            ) {
+                next[loanId] = {
+                    dueDate: value.dueDate,
+                    cooldownUntil: value.cooldownUntil
+                }
+            }
+        }
+
+        return next
+    } catch {
+        return {}
+    }
+}
+
+function persistLoanReminderCooldowns(cooldowns: LoanReminderCooldownMap) {
+    if (typeof window === 'undefined') {
+        return
+    }
+
+    if (Object.keys(cooldowns).length === 0) {
+        window.localStorage.removeItem(LOAN_REMINDER_COOLDOWN_STORAGE_KEY)
+        return
+    }
+
+    window.localStorage.setItem(
+        LOAN_REMINDER_COOLDOWN_STORAGE_KEY,
+        JSON.stringify(cooldowns)
+    )
+}
+
+function cleanupLoanReminderCooldowns(
+    cooldowns: LoanReminderCooldownMap,
+    items: LoanReminderItem[],
+    now: number = Date.now()
+): LoanReminderCooldownMap {
+    const dueDateByLoanId = new Map(items.map(item => [item.loanId, item.dueDate] as const))
+    let changed = false
+    const next: LoanReminderCooldownMap = {}
+
+    for (const [loanId, entry] of Object.entries(cooldowns)) {
+        const activeDueDate = dueDateByLoanId.get(loanId)
+        const cooldownEndsAt = Date.parse(entry.cooldownUntil)
+
+        if (
+            !activeDueDate ||
+            entry.dueDate !== activeDueDate ||
+            !Number.isFinite(cooldownEndsAt) ||
+            cooldownEndsAt <= now
+        ) {
+            changed = true
+            continue
+        }
+
+        next[loanId] = entry
+    }
+
+    return changed ? next : cooldowns
+}
+
+function isLoanReminderCoolingDown(
+    item: LoanReminderItem,
+    cooldowns: LoanReminderCooldownMap,
+    now: number
+): boolean {
+    const entry = cooldowns[item.loanId]
+    if (!entry || entry.dueDate !== item.dueDate) {
+        return false
+    }
+
+    const cooldownEndsAt = Date.parse(entry.cooldownUntil)
+    return Number.isFinite(cooldownEndsAt) && cooldownEndsAt > now
+}
+
 export function GlobalLoanReminders() {
     const { user } = useAuth()
     const { features } = useWorkspace()
@@ -28,7 +135,7 @@ export function GlobalLoanReminders() {
             : [],
         [workspaceId]
     ) ?? []
-    const [sessionHandledReminderLoanIds, setSessionHandledReminderLoanIds] = useState<string[]>([])
+    const [reminderCooldowns, setReminderCooldowns] = useState<LoanReminderCooldownMap>(() => readLoanReminderCooldowns())
     const [currentReminderLoanId, setCurrentReminderLoanId] = useState<string | null>(null)
     const [isReminderActionLoading, setIsReminderActionLoading] = useState(false)
     const [isHydrating, setIsHydrating] = useState(true)
@@ -37,19 +144,15 @@ export function GlobalLoanReminders() {
         () => buildOverdueLoanReminderItems(loans, installments),
         [loans, installments]
     )
-    const handledReminderLoanIdSet = useMemo(
-        () => new Set(sessionHandledReminderLoanIds),
-        [sessionHandledReminderLoanIds]
-    )
     const snoozedReminderItems = useMemo(
         () => overdueReminderItems.filter(item => Boolean(item.snoozedAt)),
         [overdueReminderItems]
     )
     const activeReminderItems = useMemo(
         () => overdueReminderItems.filter(item =>
-            !item.snoozedAt && !handledReminderLoanIdSet.has(item.loanId)
+            !item.snoozedAt && !isLoanReminderCoolingDown(item, reminderCooldowns, Date.now())
         ),
-        [overdueReminderItems, handledReminderLoanIdSet]
+        [overdueReminderItems, reminderCooldowns]
     )
     const currentReminder = useMemo(
         () => currentReminderLoanId
@@ -96,17 +199,40 @@ export function GlobalLoanReminders() {
     }, [isOnline, isReadOnly, workspaceId])
 
     useEffect(() => {
-        const validLoanIds = new Set(overdueReminderItems.map(item => item.loanId))
+        setReminderCooldowns(prev => cleanupLoanReminderCooldowns(prev, overdueReminderItems))
 
-        setSessionHandledReminderLoanIds(prev => {
-            const next = prev.filter(loanId => validLoanIds.has(loanId))
-            return next.length === prev.length ? prev : next
-        })
+        const validLoanIds = new Set(overdueReminderItems.map(item => item.loanId))
 
         if (currentReminderLoanId && !validLoanIds.has(currentReminderLoanId)) {
             setCurrentReminderLoanId(null)
         }
     }, [currentReminderLoanId, overdueReminderItems])
+
+    useEffect(() => {
+        persistLoanReminderCooldowns(reminderCooldowns)
+    }, [reminderCooldowns])
+
+    useEffect(() => {
+        const now = Date.now()
+        let nextCooldownEndsAt = Number.POSITIVE_INFINITY
+
+        for (const entry of Object.values(reminderCooldowns)) {
+            const cooldownEndsAt = Date.parse(entry.cooldownUntil)
+            if (Number.isFinite(cooldownEndsAt) && cooldownEndsAt > now && cooldownEndsAt < nextCooldownEndsAt) {
+                nextCooldownEndsAt = cooldownEndsAt
+            }
+        }
+
+        if (!Number.isFinite(nextCooldownEndsAt)) {
+            return
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            setReminderCooldowns(prev => cleanupLoanReminderCooldowns(prev, overdueReminderItems))
+        }, Math.max(0, nextCooldownEndsAt - now + 100))
+
+        return () => window.clearTimeout(timeoutId)
+    }, [overdueReminderItems, reminderCooldowns])
 
     useEffect(() => {
         if (isReadOnly || isHydrating || isPaymentModalOpen || isReminderActionLoading) {
@@ -135,10 +261,26 @@ export function GlobalLoanReminders() {
         isReminderActionLoading
     ])
 
-    const markReminderHandledForSession = (loanId: string) => {
-        setSessionHandledReminderLoanIds(prev =>
-            prev.includes(loanId) ? prev : [...prev, loanId]
-        )
+    const applyReminderCooldown = (item: LoanReminderItem) => {
+        const nextEntry: LoanReminderCooldownEntry = {
+            dueDate: item.dueDate,
+            cooldownUntil: new Date(Date.now() + LOAN_REMINDER_COOLDOWN_MS).toISOString()
+        }
+
+        setReminderCooldowns(prev => {
+            const currentEntry = prev[item.loanId]
+            if (
+                currentEntry?.dueDate === nextEntry.dueDate &&
+                currentEntry.cooldownUntil === nextEntry.cooldownUntil
+            ) {
+                return prev
+            }
+
+            return {
+                ...prev,
+                [item.loanId]: nextEntry
+            }
+        })
     }
 
     const handleReminderSnooze = async (item: LoanReminderItem): Promise<boolean> => {
@@ -211,7 +353,7 @@ export function GlobalLoanReminders() {
                     if (!didUnsnooze) {
                         return
                     }
-                    markReminderHandledForSession(item.loanId)
+                    applyReminderCooldown(item)
                     openLoanPayment(item.loanId, {
                         installmentId: item.installmentId
                     })
@@ -221,7 +363,7 @@ export function GlobalLoanReminders() {
                 void handleReminderUnsnooze(item)
             }
         }))
-    }, [snoozedReminderItems, handleReminderUnsnooze, openLoanPayment, markReminderHandledForSession])
+    }, [snoozedReminderItems, handleReminderUnsnooze, openLoanPayment])
 
     const { registerItems, unregisterItems } = useUnifiedSnooze()
 
@@ -251,7 +393,7 @@ export function GlobalLoanReminders() {
                     if (!currentReminder) {
                         return
                     }
-                    markReminderHandledForSession(currentReminder.loanId)
+                    applyReminderCooldown(currentReminder)
                     setCurrentReminderLoanId(null)
                     openLoanPayment(currentReminder.loanId, {
                         installmentId: currentReminder.installmentId
@@ -265,7 +407,7 @@ export function GlobalLoanReminders() {
                 }}
                 onOpenChange={(open) => {
                     if (!open && currentReminder) {
-                        markReminderHandledForSession(currentReminder.loanId)
+                        applyReminderCooldown(currentReminder)
                         setCurrentReminderLoanId(null)
                     }
                 }}
