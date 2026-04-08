@@ -3,7 +3,7 @@ import { ArrowLeft, CalendarDays, CreditCard, Eye, LayoutGrid, List, Mail, MapPi
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'wouter'
 
-import { convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
+import { convertCurrencyAmountWithAvailableSnapshot, convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
 import { getLoanDetailsPath, getLoanDirection, getLoanDirectionLabel, isSimpleLoan } from '@/lib/loanPresentation'
 import { getTravelSaleCost, getTravelStatusLabel } from '@/lib/travelAgency'
 import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
@@ -230,6 +230,13 @@ function loanStatusLabel(t: TranslationFn, status: Loan['status']) {
 function normalizeLoan(loan: Loan, currency: SalesOrder['currency'], t: TranslationFn): RelatedTransaction {
     const direction = getLoanDirection(loan)
     const directionLabel = getLoanDirectionLabel(direction, t)
+    const totalInPartnerCurrency = convertCurrencyAmountWithAvailableSnapshot(
+        loan.balanceAmount,
+        loan.settlementCurrency,
+        currency,
+        loan.exchangeRateSnapshot
+    ) ?? 0
+
     return {
         id: loan.id,
         source: isSimpleLoan(loan) ? 'simple_loan' : 'loan',
@@ -243,7 +250,7 @@ function normalizeLoan(loan: Loan, currency: SalesOrder['currency'], t: Translat
         summary: isSimpleLoan(loan) ? `${directionLabel} • ${loan.borrowerName}` : loan.borrowerName,
         total: loan.balanceAmount,
         currency: loan.settlementCurrency,
-        totalInPartnerCurrency: convertCurrencyAmountWithSnapshot(loan.balanceAmount, loan.settlementCurrency, currency),
+        totalInPartnerCurrency,
         units: 0,
         viewHref: getLoanDetailsPath(loan, loan.id),
         isActive: loan.status !== 'completed',

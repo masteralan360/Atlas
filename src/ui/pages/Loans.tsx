@@ -10,6 +10,7 @@ import {
     useLoanInstallments,
     useLoanPayments,
     deleteLoan,
+    hasLoanTransactionHistory,
     isLoanDeletionAllowed,
     type Loan,
     type LoanInstallment
@@ -129,9 +130,22 @@ function LoanListView({
         () => db.sales.where('workspaceId').equals(workspaceId).toArray(),
         [workspaceId]
     )
+    const loanTransactionHistoryIds = useLiveQuery(
+        async () => {
+            const rows = await db.payment_transactions.where('workspaceId').equals(workspaceId).toArray()
+            return rows
+                .filter((item) => item.sourceModule === 'loans')
+                .map((item) => item.sourceRecordId)
+        },
+        [workspaceId]
+    )
     const activeSaleIds = useMemo(
         () => new Set((workspaceSales ?? []).filter(item => !item.isDeleted).map(item => item.id)),
         [workspaceSales]
+    )
+    const loanTransactionHistoryIdSet = useMemo(
+        () => new Set(loanTransactionHistoryIds ?? []),
+        [loanTransactionHistoryIds]
     )
 
     const metrics = useMemo(() => {
@@ -207,15 +221,16 @@ function LoanListView({
         printFormat: 'a4' as const
     }), [currency, metrics.totalOutstanding, user?.name])
     const canDeleteLoanRecord = (loan: Loan) => {
+        const hasTransactionHistory = loanTransactionHistoryIdSet.has(loan.id)
         if (loan.source === 'manual' || !loan.saleId) {
-            return true
+            return isLoanDeletionAllowed(loan, false, hasTransactionHistory)
         }
 
         if (workspaceSales === undefined) {
             return false
         }
 
-        return isLoanDeletionAllowed(loan, activeSaleIds.has(loan.saleId))
+        return isLoanDeletionAllowed(loan, activeSaleIds.has(loan.saleId), hasTransactionHistory)
     }
     const confirmDeleteLoan = async () => {
         if (!loanToDelete) {
@@ -667,6 +682,16 @@ function LoanDetailsView({
         },
         [loan?.saleId]
     )
+    const hasPostedTransactionHistory = useLiveQuery(
+        async () => {
+            if (!loan?.id || !loan.workspaceId) {
+                return false
+            }
+
+            return hasLoanTransactionHistory(loan.workspaceId, loan.id)
+        },
+        [loan?.id, loan?.workspaceId]
+    )
 
     if (!loan) {
         return (
@@ -678,11 +703,13 @@ function LoanDetailsView({
         )
     }
 
-    const canDeleteCurrentLoan = loan.source === 'manual'
-        ? true
-        : !loan.saleId
-            ? true
-            : linkedSaleMissingOrDeleted === true
+    const canDeleteCurrentLoan = linkedSaleMissingOrDeleted !== undefined
+        && hasPostedTransactionHistory !== undefined
+        && isLoanDeletionAllowed(
+            loan,
+            linkedSaleMissingOrDeleted === false,
+            hasPostedTransactionHistory
+        )
 
     const confirmDeleteLoan = async () => {
         setIsDeletingLoan(true)

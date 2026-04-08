@@ -3,7 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { Users, X } from 'lucide-react'
 
 import { useAuth } from '@/auth'
+import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { createManualLoan, type CurrencyCode, type LoanDirection } from '@/local-db'
+import { buildOrderExchangeRatesSnapshot } from '@/lib/orderCurrency'
 import { getLoanCounterpartyNameLabel, getLoanDirectionLabel } from '@/lib/loanPresentation'
 import { getLoanLinkedPartyTypeLabel, type LoanPartySelection } from '@/lib/loanParties'
 import { formatLocalDateValue, formatNumericInput, parseFormattedNumber, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
@@ -48,6 +50,7 @@ export function CreateSimpleLoanModal({
     const { toast } = useToast()
     const { user } = useAuth()
     const { features } = useWorkspace()
+    const { exchangeData, eurRates, tryRates } = useExchangeRate()
     const [isSaving, setIsSaving] = useState(false)
     const [direction, setDirection] = useState<LoanDirection>('lent')
     const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>(settlementCurrency)
@@ -96,6 +99,14 @@ export function CreateSimpleLoanModal({
         if (features.try_conversion_enabled && !currencies.includes('try')) currencies.push('try')
         return currencies
     }, [features.eur_conversion_enabled, features.try_conversion_enabled, settlementCurrency])
+    const exchangeRateSnapshot = useMemo(() => {
+        const snapshot = buildOrderExchangeRatesSnapshot({
+            exchangeData,
+            eurRates,
+            tryRates
+        })
+        return snapshot.length > 0 ? snapshot : null
+    }, [exchangeData, eurRates, tryRates])
 
     const handlePartySelect = (selection: LoanPartySelection) => {
         setSelectedParty(selection)
@@ -123,6 +134,7 @@ export function CreateSimpleLoanModal({
                 borrowerNationalId: borrowerNationalId.trim(),
                 principalAmount: parseFormattedNumber(principalAmount || '0'),
                 settlementCurrency: selectedCurrency,
+                exchangeRateSnapshot,
                 installmentCount: 1,
                 installmentFrequency: 'monthly',
                 firstDueDate: dueDate,

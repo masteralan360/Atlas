@@ -52,6 +52,26 @@ function roleLabel(role: BusinessPartnerRole, t: (key: string, options?: Record<
     }
 }
 
+function groupPartnerTotalsByCurrency(
+    partners: BusinessPartner[],
+    selectAmount: (partner: BusinessPartner) => number
+) {
+    const totals = new Map<CurrencyCode, number>()
+
+    for (const partner of partners) {
+        const amount = selectAmount(partner)
+        if (!amount) {
+            continue
+        }
+
+        totals.set(partner.defaultCurrency, (totals.get(partner.defaultCurrency) || 0) + amount)
+    }
+
+    return Array.from(totals.entries())
+        .map(([currency, amount]) => ({ currency, amount }))
+        .sort((left, right) => left.currency.localeCompare(right.currency))
+}
+
 export function BusinessPartners() {
     const { t } = useTranslation()
     const { user } = useAuth()
@@ -108,6 +128,37 @@ export function BusinessPartners() {
         () => mergeCandidates.filter((candidate) => candidate.status === 'pending' && !candidate.isDeleted),
         [mergeCandidates]
     )
+    const receivableTotals = useMemo(
+        () => groupPartnerTotalsByCurrency(visiblePartners, (partner) => partner.receivableBalance),
+        [visiblePartners]
+    )
+    const payableTotals = useMemo(
+        () => groupPartnerTotalsByCurrency(visiblePartners, (partner) => partner.payableBalance),
+        [visiblePartners]
+    )
+
+    const renderGroupedTotals = (totals: Array<{ currency: CurrencyCode; amount: number }>) => {
+        if (totals.length === 0) {
+            return (
+                <div className="text-lg font-black">
+                    {formatCurrency(0, features.default_currency, features.iqd_display_preference)}
+                </div>
+            )
+        }
+
+        return (
+            <div className="space-y-1.5">
+                {totals.map((row) => (
+                    <div key={row.currency} className="text-lg font-black">
+                        {formatCurrency(row.amount, row.currency, features.iqd_display_preference)}
+                    </div>
+                ))}
+                <div className="text-xs text-muted-foreground">
+                    {t('businessPartners.groupedByCurrency', { defaultValue: 'Grouped by partner currency' })}
+                </div>
+            </div>
+        )
+    }
 
     async function handleSubmit(payload: BusinessPartnerFormPayload) {
         if (!user?.workspaceId) {
@@ -220,13 +271,7 @@ export function BusinessPartners() {
                         <CardTitle className="text-sm text-muted-foreground">{t('orders.details.outstanding', { defaultValue: 'Receivable' })}</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-lg font-black">
-                            {formatCurrency(
-                                visiblePartners.reduce((sum, partner) => sum + partner.receivableBalance, 0),
-                                features.default_currency,
-                                features.iqd_display_preference
-                            )}
-                        </div>
+                        {renderGroupedTotals(receivableTotals)}
                     </CardContent>
                 </Card>
                 <Card>
@@ -234,13 +279,7 @@ export function BusinessPartners() {
                         <CardTitle className="text-sm text-muted-foreground">{t('businessPartners.payable') || 'Payable'}</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-lg font-black">
-                            {formatCurrency(
-                                visiblePartners.reduce((sum, partner) => sum + partner.payableBalance, 0),
-                                features.default_currency,
-                                features.iqd_display_preference
-                            )}
-                        </div>
+                        {renderGroupedTotals(payableTotals)}
                     </CardContent>
                 </Card>
                 <Card>

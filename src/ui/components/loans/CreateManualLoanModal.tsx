@@ -2,7 +2,9 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Users, X } from 'lucide-react'
 import { useAuth } from '@/auth'
+import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { createManualLoan, type CurrencyCode, type InstallmentFrequency } from '@/local-db'
+import { buildOrderExchangeRatesSnapshot } from '@/lib/orderCurrency'
 import { getLoanLinkedPartyTypeLabel, type LoanPartySelection } from '@/lib/loanParties'
 import { formatLocalDateValue, formatNumericInput, parseFormattedNumber, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
 import {
@@ -45,6 +47,7 @@ export function CreateManualLoanModal({
     const { toast } = useToast()
     const { user } = useAuth()
     const { features } = useWorkspace()
+    const { exchangeData, eurRates, tryRates } = useExchangeRate()
     const [isSaving, setIsSaving] = useState(false)
     const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>(settlementCurrency)
     const [borrowerName, setBorrowerName] = useState('')
@@ -95,6 +98,14 @@ export function CreateManualLoanModal({
         if (features.try_conversion_enabled && !currencies.includes('try')) currencies.push('try')
         return currencies
     }, [features.eur_conversion_enabled, features.try_conversion_enabled, settlementCurrency])
+    const exchangeRateSnapshot = useMemo(() => {
+        const snapshot = buildOrderExchangeRatesSnapshot({
+            exchangeData,
+            eurRates,
+            tryRates
+        })
+        return snapshot.length > 0 ? snapshot : null
+    }, [exchangeData, eurRates, tryRates])
 
     const handlePartySelect = (selection: LoanPartySelection) => {
         setSelectedParty(selection)
@@ -119,6 +130,7 @@ export function CreateManualLoanModal({
                 borrowerNationalId: borrowerNationalId.trim(),
                 principalAmount: parseFormattedNumber(principalAmount || '0'),
                 settlementCurrency: selectedCurrency,
+                exchangeRateSnapshot,
                 installmentCount,
                 installmentFrequency,
                 firstDueDate,

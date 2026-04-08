@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 import { Eye, LayoutGrid, List, Plus, Printer, Search, Trash2 } from 'lucide-react'
@@ -8,7 +9,8 @@ import { getLoanLinkedPartySummary } from '@/lib/loanParties'
 import { isMobile } from '@/lib/platform'
 import { getLoanDeleteWarning, getLoanDirection, getLoanDirectionLabel, getSimpleLoanModuleTitle } from '@/lib/loanPresentation'
 import { cn, formatCurrency, formatDate } from '@/lib/utils'
-import { deleteLoan, type Loan, useLoans } from '@/local-db'
+import { deleteLoan, isLoanDeletionAllowed, type Loan, useLoans } from '@/local-db'
+import { db } from '@/local-db/database'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import {
     AppPagination,
@@ -84,6 +86,19 @@ export function SimpleLoanListView({
     const simpleLoans = useMemo(
         () => loans.filter((loan) => loan.loanCategory === 'simple'),
         [loans]
+    )
+    const loanTransactionHistoryIds = useLiveQuery(
+        async () => {
+            const rows = await db.payment_transactions.where('workspaceId').equals(workspaceId).toArray()
+            return rows
+                .filter((item) => item.sourceModule === 'loans')
+                .map((item) => item.sourceRecordId)
+        },
+        [workspaceId]
+    )
+    const loanTransactionHistoryIdSet = useMemo(
+        () => new Set(loanTransactionHistoryIds ?? []),
+        [loanTransactionHistoryIds]
     )
 
     const metrics = useMemo(() => {
@@ -164,6 +179,7 @@ export function SimpleLoanListView({
         cashierName: user?.name || 'Unknown',
         printFormat: 'a4' as const
     }), [features.default_currency, metrics.totalBorrowed, metrics.totalLent, user?.name])
+    const canDeleteLoanRecord = (loan: Loan) => isLoanDeletionAllowed(loan, false, loanTransactionHistoryIdSet.has(loan.id))
 
     const confirmDeleteLoan = async () => {
         if (!loanToDelete) {
@@ -181,7 +197,9 @@ export function SimpleLoanListView({
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',
-                description: error?.message || (t('loans.messages.loanDeleteFailed') || 'Failed to delete loan.'),
+                description: error?.message === 'loan_delete_not_allowed'
+                    ? (t('loans.messages.loanDeleteBlocked') || 'Loans with posted payment history cannot be deleted.')
+                    : error?.message || (t('loans.messages.loanDeleteFailed') || 'Failed to delete loan.'),
                 variant: 'destructive'
             })
         } finally {
@@ -361,7 +379,7 @@ export function SimpleLoanListView({
                                                     <Eye className="h-3.5 w-3.5" />
                                                     {t('common.view') || 'View'}
                                                 </Button>
-                                                {!isReadOnly ? (
+                                                {!isReadOnly && canDeleteLoanRecord(loan) ? (
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"
@@ -436,12 +454,12 @@ export function SimpleLoanListView({
                                                         <Button variant="ghost" size="sm" allowViewer={true} onClick={() => navigate(`/loans/${loan.id}`)}>
                                                             {t('common.view') || 'View'}
                                                         </Button>
-                                                        {!isReadOnly ? (
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="sm"
-                                                                className="text-destructive hover:text-destructive"
-                                                                onClick={() => setLoanToDelete(loan)}
+                                                    {!isReadOnly && canDeleteLoanRecord(loan) ? (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="text-destructive hover:text-destructive"
+                                                            onClick={() => setLoanToDelete(loan)}
                                                             >
                                                                 <Trash2 className="mr-1 h-4 w-4" />
                                                                 {t('common.delete') || 'Delete'}

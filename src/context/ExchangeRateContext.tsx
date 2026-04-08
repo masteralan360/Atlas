@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { fetchUSDToIQDRate, fetchEURToIQDRate, fetchTRYToIQDRate, fetchRatesFromAllSources, type ExchangeRateResult } from '@/lib/exchangeRate'
+import { buildOrderExchangeRatesSnapshot, cacheExchangeRatesSnapshot } from '@/lib/orderCurrency'
 import { useWorkspace } from '@/workspace'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { formatTime } from '@/lib/utils'
@@ -80,6 +81,15 @@ export function ExchangeRateProvider({ children }: { children: React.ReactNode }
 
     // Force error status if offline
     const effectiveStatus = !isOnline ? 'error' : status
+
+    useEffect(() => {
+        const snapshot = buildOrderExchangeRatesSnapshot({
+            exchangeData,
+            eurRates,
+            tryRates
+        })
+        cacheExchangeRatesSnapshot(snapshot)
+    }, [exchangeData, eurRates, tryRates])
 
     const refresh = useCallback(async () => {
         // Optimization: Strictly disable fetching for remote KDS clients

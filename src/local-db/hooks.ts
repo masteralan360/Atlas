@@ -39,14 +39,17 @@ import type {
     LoanDirection,
     LoanLinkedPartyType,
     LoanPaymentMethod,
-    LoanStatus
+    LoanStatus,
+    ExchangeRateSnapshot,
+    PaymentTransaction,
+    PaymentTransactionSourceType
 } from './models'
 import { generateId, toSnakeCase, toCamelCase } from '@/lib/utils'
 import { supabase } from '@/auth/supabase'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { isOnline } from '@/lib/network'
 import { resolveActiveDiscountMap, type ResolvedActiveDiscount } from '@/lib/discounts'
-import { convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
+import { convertCurrencyAmountWithAvailableSnapshot, getEffectiveExchangeRatesSnapshot } from '@/lib/orderCurrency'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
@@ -81,6 +84,8 @@ function shouldUseOfflineMutationFallback(error: unknown): boolean {
 function shouldUseCloudBusinessData(workspaceId?: string | null): boolean {
     return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
 }
+
+const LOAN_PAYMENT_TRANSACTION_SOURCE_TYPES: PaymentTransactionSourceType[] = ['loan_payment', 'simple_loan', 'loan_installment']
 
 async function syncUpdatedProductsBestEffort(products: Product[], workspaceId: string): Promise<void> {
     const dedupedProducts = Array.from(new Map(products.map((product) => [product.id, product])).values())
@@ -2591,7 +2596,7 @@ async function resolveLinkedBusinessPartner(linkedPartyType?: LoanLinkedPartyTyp
 
 async function assertLoanCreditLimit(
     workspaceId: string,
-    input: Pick<LoanCreateInput, 'linkedPartyType' | 'linkedPartyId' | 'principalAmount' | 'settlementCurrency' | 'direction'>
+    input: Pick<LoanCreateInput, 'linkedPartyType' | 'linkedPartyId' | 'principalAmount' | 'settlementCurrency' | 'direction' | 'exchangeRateSnapshot'>
 ) {
     if (input.direction === 'borrowed') {
         return
@@ -2605,12 +2610,17 @@ async function assertLoanCreditLimit(
     const { recalculateBusinessPartnerSummary } = await import('./businessPartners')
     const refreshedPartner = await recalculateBusinessPartnerSummary(workspaceId, partner.id)
     const activePartner = refreshedPartner || partner
+    const convertedPrincipal = convertCurrencyAmountWithAvailableSnapshot(
+        input.principalAmount,
+        input.settlementCurrency,
+        activePartner.defaultCurrency,
+        input.exchangeRateSnapshot
+    )
+    if (convertedPrincipal === null) {
+        throw new Error(`Missing exchange rate snapshot for ${input.settlementCurrency.toUpperCase()} to ${activePartner.defaultCurrency.toUpperCase()} loan conversion`)
+    }
     const nextExposure = roundLoanAmount(
-        activePartner.netExposure + convertCurrencyAmountWithSnapshot(
-            input.principalAmount,
-            input.settlementCurrency,
-            activePartner.defaultCurrency
-        ),
+        activePartner.netExposure + convertedPrincipal,
         activePartner.defaultCurrency
     )
 
@@ -2660,6 +2670,172 @@ function computeLoanStatus(nextDueDate: string | null | undefined, balanceAmount
     const today = new Date().toISOString().slice(0, 10)
     if (nextDueDate && nextDueDate < today) return 'overdue'
     return 'active'
+}
+
+function resolveLoanPaymentIdFromTransaction(
+    transaction: Pick<PaymentTransaction, 'sourceType' | 'sourceSubrecordId' | 'metadata'>
+) {
+    const metadataPaymentId = transaction.metadata?.loanPaymentId
+    if (typeof metadataPaymentId === 'string' && metadataPaymentId) {
+        return metadataPaymentId
+    }
+
+    if (
+        transaction.sourceType !== 'loan_installment'
+        && typeof transaction.sourceSubrecordId === 'string'
+        && transaction.sourceSubrecordId
+    ) {
+        return transaction.sourceSubrecordId
+    }
+
+    return null
+}
+
+function resolveLoanTargetInstallmentId(
+    transaction?: Pick<PaymentTransaction, 'sourceType' | 'sourceSubrecordId'> | null
+) {
+    if (
+        transaction?.sourceType === 'loan_installment'
+        && typeof transaction.sourceSubrecordId === 'string'
+        && transaction.sourceSubrecordId
+    ) {
+        return transaction.sourceSubrecordId
+    }
+
+    return null
+}
+
+async function listLoanPaymentTransactionsByLoan(workspaceId: string, loanId: string) {
+    const groups = await Promise.all(
+        LOAN_PAYMENT_TRANSACTION_SOURCE_TYPES.map((sourceType) =>
+            db.payment_transactions
+                .where('[workspaceId+sourceType+sourceRecordId]')
+                .equals([workspaceId, sourceType, loanId])
+                .toArray()
+        )
+    )
+
+    return groups.flat()
+}
+
+export async function hasLoanTransactionHistory(workspaceId: string, loanId: string) {
+    const transactions = await listLoanPaymentTransactionsByLoan(workspaceId, loanId)
+    return transactions.length > 0
+}
+
+function rebuildLoanStateFromPayments(
+    loan: Loan,
+    installmentRows: LoanInstallment[],
+    payments: Array<{ payment: LoanPayment; targetInstallmentId?: string | null }>,
+    now: string
+) {
+    const today = now.slice(0, 10)
+    const updatedInstallments = installmentRows
+        .slice()
+        .sort((left, right) => left.installmentNo - right.installmentNo)
+        .map((installment) => ({
+            ...installment,
+            paidAmount: 0,
+            balanceAmount: roundLoanAmount(installment.plannedAmount, loan.settlementCurrency),
+            status: computeInstallmentStatus(installment.dueDate, installment.plannedAmount),
+            paidAt: null,
+            updatedAt: now,
+            version: installment.version + 1,
+            syncStatus: 'pending' as const,
+            lastSyncedAt: null
+        }))
+
+    const sortedPayments = payments
+        .slice()
+        .sort((left, right) =>
+            left.payment.paidAt.localeCompare(right.payment.paidAt)
+            || left.payment.createdAt.localeCompare(right.payment.createdAt)
+            || left.payment.id.localeCompare(right.payment.id)
+        )
+
+    for (const { payment, targetInstallmentId } of sortedPayments) {
+        let remaining = roundLoanAmount(Math.max(0, Number(payment.amount || 0)), loan.settlementCurrency)
+        const paymentOrder = targetInstallmentId
+            ? [
+                ...updatedInstallments.filter((installment) => installment.id === targetInstallmentId),
+                ...updatedInstallments.filter((installment) => installment.id !== targetInstallmentId)
+            ]
+            : updatedInstallments
+
+        for (const installment of paymentOrder) {
+            if (remaining <= 0) {
+                break
+            }
+
+            if (installment.balanceAmount <= 0) {
+                continue
+            }
+
+            const applied = roundLoanAmount(Math.min(installment.balanceAmount, remaining), loan.settlementCurrency)
+            if (applied <= 0) {
+                continue
+            }
+
+            installment.paidAmount = roundLoanAmount(installment.paidAmount + applied, loan.settlementCurrency)
+            installment.balanceAmount = roundLoanAmount(Math.max(installment.balanceAmount - applied, 0), loan.settlementCurrency)
+            installment.status = installment.balanceAmount <= 0 ? 'paid' : 'partial'
+            installment.paidAt = installment.status === 'paid' ? payment.paidAt : null
+            remaining = roundLoanAmount(Math.max(remaining - applied, 0), loan.settlementCurrency)
+        }
+    }
+
+    for (const installment of updatedInstallments) {
+        if (installment.balanceAmount <= 0) {
+            installment.status = 'paid'
+            continue
+        }
+
+        installment.paidAt = null
+        if (installment.paidAmount > 0) {
+            installment.status = 'partial'
+            continue
+        }
+
+        installment.status = installment.dueDate < today ? 'overdue' : 'unpaid'
+    }
+
+    const totalPaidAmount = roundLoanAmount(
+        updatedInstallments.reduce((sum, installment) => sum + installment.paidAmount, 0),
+        loan.settlementCurrency
+    )
+    const balanceAmount = roundLoanAmount(
+        updatedInstallments.reduce((sum, installment) => sum + installment.balanceAmount, 0),
+        loan.settlementCurrency
+    )
+    const nextDueDate = updatedInstallments.find((installment) => installment.balanceAmount > 0)?.dueDate || null
+    const oldestOverdueDueDate = updatedInstallments.find((installment) => installment.balanceAmount > 0 && installment.dueDate < today)?.dueDate || null
+    const keepReminderSnooze = !!oldestOverdueDueDate && oldestOverdueDueDate === loan.overdueReminderSnoozedForDueDate
+    const baseLoanNo = loan.loanNo.replace(/-\d+$/, '')
+    const rebuiltLoanNo = payments.length > 0 ? `${baseLoanNo}-${payments.length}` : baseLoanNo
+
+    const updatedLoan: Loan = {
+        ...loan,
+        loanNo: rebuiltLoanNo,
+        totalPaidAmount,
+        balanceAmount,
+        nextDueDate,
+        overdueReminderSnoozedAt: keepReminderSnooze ? loan.overdueReminderSnoozedAt || null : null,
+        overdueReminderSnoozedForDueDate: keepReminderSnooze ? loan.overdueReminderSnoozedForDueDate || null : null,
+        status: computeLoanStatus(nextDueDate, balanceAmount),
+        updatedAt: now,
+        version: loan.version + 1,
+        syncStatus: 'pending',
+        lastSyncedAt: null
+    }
+
+    if (updatedInstallments.some((installment) => installment.status === 'overdue')) {
+        updatedLoan.status = balanceAmount <= 0 ? 'completed' : 'overdue'
+    }
+
+    return {
+        updatedLoan,
+        updatedInstallments
+    }
 }
 
 function createInstallmentPlan(
@@ -2733,6 +2909,7 @@ interface LoanCreateInput {
     borrowerNationalId: string
     principalAmount: number
     settlementCurrency: CurrencyCode
+    exchangeRateSnapshot?: ExchangeRateSnapshot[] | null
     installmentCount: number
     installmentFrequency: InstallmentFrequency
     firstDueDate: string
@@ -2742,11 +2919,31 @@ interface LoanCreateInput {
 
 export function isLoanDeletionAllowed(
     loan: Pick<Loan, 'source' | 'saleId'>,
-    hasLinkedActiveSale: boolean
+    hasLinkedActiveSale: boolean,
+    hasTransactionHistory = false
 ): boolean {
+    if (hasTransactionHistory) return false
     if (loan.source === 'manual') return true
     if (!loan.saleId) return true
     return !hasLinkedActiveSale
+}
+
+async function resolveLoanExchangeRateSnapshot(input: Pick<LoanCreateInput, 'saleId' | 'exchangeRateSnapshot'>) {
+    if (Array.isArray(input.exchangeRateSnapshot) && input.exchangeRateSnapshot.length > 0) {
+        return getEffectiveExchangeRatesSnapshot(input.exchangeRateSnapshot)
+    }
+
+    if (input.saleId) {
+        const sale = await db.sales.get(input.saleId)
+        const saleSnapshot = Array.isArray(sale?.exchangeRates)
+            ? getEffectiveExchangeRatesSnapshot(sale.exchangeRates as ExchangeRateSnapshot[])
+            : null
+        if (saleSnapshot && saleSnapshot.length > 0) {
+            return saleSnapshot
+        }
+    }
+
+    return getEffectiveExchangeRatesSnapshot(null)
 }
 
 async function createLoanAggregate(workspaceId: string, input: LoanCreateInput): Promise<{ loan: Loan; installments: LoanInstallment[] }> {
@@ -2776,6 +2973,8 @@ async function createLoanAggregate(workspaceId: string, input: LoanCreateInput):
         throw new Error('Missing borrower information')
     }
 
+    const exchangeRateSnapshot = await resolveLoanExchangeRateSnapshot(input)
+
     const linkedBusinessPartner = await resolveLinkedBusinessPartner(linkedPartyType, linkedPartyId)
     if (linkedPartyType && linkedPartyId && !linkedBusinessPartner) {
         throw new Error('Business partner not found')
@@ -2788,7 +2987,8 @@ async function createLoanAggregate(workspaceId: string, input: LoanCreateInput):
             linkedPartyId,
             principalAmount,
             settlementCurrency: input.settlementCurrency,
-            direction
+            direction,
+            exchangeRateSnapshot
         })
     }
 
@@ -2842,6 +3042,7 @@ async function createLoanAggregate(workspaceId: string, input: LoanCreateInput):
         totalPaidAmount: 0,
         balanceAmount: principalAmount,
         settlementCurrency: input.settlementCurrency,
+        exchangeRateSnapshot: exchangeRateSnapshot && exchangeRateSnapshot.length > 0 ? exchangeRateSnapshot : null,
         installmentCount: Math.max(1, Math.trunc(input.installmentCount)),
         installmentFrequency: input.installmentFrequency,
         firstDueDate,
@@ -3103,7 +3304,8 @@ export async function deleteLoan(loanId: string): Promise<void> {
 
     const linkedSale = loan.saleId ? await db.sales.get(loan.saleId) : undefined
     const hasLinkedActiveSale = Boolean(linkedSale && !linkedSale.isDeleted)
-    if (!isLoanDeletionAllowed(loan, hasLinkedActiveSale)) {
+    const hasTransactionHistory = await hasLoanTransactionHistory(loan.workspaceId, loanId)
+    if (!isLoanDeletionAllowed(loan, hasLinkedActiveSale, hasTransactionHistory)) {
         throw new Error('loan_delete_not_allowed')
     }
 
@@ -3186,6 +3388,164 @@ export async function deleteLoan(loanId: string): Promise<void> {
             return
         }
 
+        throw normalizeSupabaseActionError(error)
+    }
+}
+
+export async function reverseLoanPayment(
+    workspaceId: string,
+    transaction: Pick<PaymentTransaction, 'id' | 'workspaceId' | 'sourceType' | 'sourceRecordId' | 'sourceSubrecordId' | 'metadata'>
+) {
+    if (transaction.workspaceId !== workspaceId) {
+        throw new Error('Workspace mismatch')
+    }
+
+    const loan = await db.loans.get(transaction.sourceRecordId)
+    if (!loan || loan.isDeleted) {
+        throw new Error('Loan not found')
+    }
+
+    const loanPaymentId = resolveLoanPaymentIdFromTransaction(transaction)
+    if (!loanPaymentId) {
+        throw new Error('Loan payment reversal metadata is incomplete')
+    }
+
+    const [installmentRows, paymentRows, loanTransactions] = await Promise.all([
+        db.loan_installments.where('loanId').equals(loan.id).and((item) => !item.isDeleted).sortBy('installmentNo'),
+        db.loan_payments.where('loanId').equals(loan.id).toArray(),
+        listLoanPaymentTransactionsByLoan(workspaceId, loan.id)
+    ])
+
+    const payment = paymentRows.find((item) => item.id === loanPaymentId && !item.isDeleted)
+    if (!payment) {
+        throw new Error('Loan payment not found')
+    }
+
+    const transactionByPaymentId = new Map<string, Pick<PaymentTransaction, 'sourceType' | 'sourceSubrecordId' | 'metadata'>>()
+    loanTransactions
+        .filter((item) => !item.isDeleted && !item.reversalOfTransactionId)
+        .forEach((item) => {
+            const currentLoanPaymentId = resolveLoanPaymentIdFromTransaction(item)
+            if (currentLoanPaymentId) {
+                transactionByPaymentId.set(currentLoanPaymentId, item)
+            }
+        })
+
+    const now = new Date().toISOString()
+    const remainingPayments = paymentRows
+        .filter((item) => !item.isDeleted && item.id !== payment.id)
+        .map((item) => ({
+            payment: item,
+            targetInstallmentId: resolveLoanTargetInstallmentId(transactionByPaymentId.get(item.id))
+        }))
+
+    const { updatedLoan, updatedInstallments } = rebuildLoanStateFromPayments(loan, installmentRows, remainingPayments, now)
+    const deletedPayment: LoanPayment = {
+        ...payment,
+        isDeleted: true,
+        updatedAt: now,
+        version: payment.version + 1,
+        syncStatus: 'pending',
+        lastSyncedAt: null
+    }
+
+    await db.transaction('rw', [db.loans, db.loan_installments, db.loan_payments], async () => {
+        await db.loans.put(updatedLoan)
+        for (const installment of updatedInstallments) {
+            await db.loan_installments.put(installment)
+        }
+        await db.loan_payments.put(deletedPayment)
+    })
+
+    const enqueueMutations = async () => {
+        await addToOfflineMutations('loans', updatedLoan.id, 'update', updatedLoan as unknown as Record<string, unknown>, workspaceId)
+        await Promise.all(updatedInstallments.map((installment) =>
+            addToOfflineMutations(
+                'loan_installments',
+                installment.id,
+                'update',
+                installment as unknown as Record<string, unknown>,
+                workspaceId
+            )
+        ))
+        await addToOfflineMutations('loan_payments', deletedPayment.id, 'delete', { id: deletedPayment.id }, workspaceId)
+    }
+
+    if (!isOnline()) {
+        await enqueueMutations()
+        await recalculateLoanLinkedBusinessPartnerSummary(workspaceId, updatedLoan.linkedPartyType, updatedLoan.linkedPartyId)
+        return { loan: updatedLoan, installments: updatedInstallments, payment: deletedPayment }
+    }
+
+    try {
+        const { error: loanError } = await runMutation('loans.reversePayment.loan', () =>
+            supabase
+                .from('loans')
+                .update(toSnakeCase({
+                    loanNo: updatedLoan.loanNo,
+                    totalPaidAmount: updatedLoan.totalPaidAmount,
+                    balanceAmount: updatedLoan.balanceAmount,
+                    nextDueDate: updatedLoan.nextDueDate,
+                    overdueReminderSnoozedAt: updatedLoan.overdueReminderSnoozedAt,
+                    overdueReminderSnoozedForDueDate: updatedLoan.overdueReminderSnoozedForDueDate,
+                    status: updatedLoan.status,
+                    updatedAt: updatedLoan.updatedAt,
+                    version: updatedLoan.version
+                }))
+                .eq('id', updatedLoan.id)
+        )
+        if (loanError) throw loanError
+
+        const { error: installmentsError } = await runMutation('loans.reversePayment.installments', () =>
+            supabase.from('loan_installments').upsert(
+                updatedInstallments.map((installment) =>
+                    toSupabaseLoanPayload(installment as unknown as Record<string, unknown>)
+                )
+            )
+        )
+        if (installmentsError) throw installmentsError
+
+        const { error: paymentError } = await runMutation('loans.reversePayment.payment', () =>
+            supabase
+                .from('loan_payments')
+                .update({ is_deleted: true, updated_at: now, version: deletedPayment.version })
+                .eq('id', deletedPayment.id)
+        )
+        if (paymentError) throw paymentError
+
+        const syncedAt = new Date().toISOString()
+        await db.transaction('rw', [db.loans, db.loan_installments, db.loan_payments], async () => {
+            await db.loans.update(updatedLoan.id, { syncStatus: 'synced', lastSyncedAt: syncedAt })
+            for (const installment of updatedInstallments) {
+                await db.loan_installments.update(installment.id, { syncStatus: 'synced', lastSyncedAt: syncedAt })
+            }
+            await db.loan_payments.update(deletedPayment.id, { syncStatus: 'synced', lastSyncedAt: syncedAt })
+        })
+
+        await recalculateLoanLinkedBusinessPartnerSummary(workspaceId, updatedLoan.linkedPartyType, updatedLoan.linkedPartyId)
+
+        return {
+            loan: { ...updatedLoan, syncStatus: 'synced', lastSyncedAt: syncedAt },
+            installments: updatedInstallments.map((installment) => ({ ...installment, syncStatus: 'synced', lastSyncedAt: syncedAt })),
+            payment: { ...deletedPayment, syncStatus: 'synced', lastSyncedAt: syncedAt }
+        }
+    } catch (error) {
+        if (shouldUseOfflineMutationFallback(error)) {
+            console.error('[Loans] Reverse payment sync failed, queued offline mutation:', error)
+            await enqueueMutations()
+            await recalculateLoanLinkedBusinessPartnerSummary(workspaceId, updatedLoan.linkedPartyType, updatedLoan.linkedPartyId)
+            return { loan: updatedLoan, installments: updatedInstallments, payment: deletedPayment }
+        }
+
+        await db.transaction('rw', [db.loans, db.loan_installments, db.loan_payments], async () => {
+            await db.loans.put(loan)
+            for (const installment of installmentRows) {
+                await db.loan_installments.put(installment)
+            }
+            await db.loan_payments.put(payment)
+        })
+
+        await recalculateLoanLinkedBusinessPartnerSummary(workspaceId, loan.linkedPartyType, loan.linkedPartyId)
         throw normalizeSupabaseActionError(error)
     }
 }

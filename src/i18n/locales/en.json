@@ -1628,7 +1628,7 @@
             "loanCreateFailed": "Loan creation failed.",
             "loanDeleted": "Loan deleted successfully.",
             "loanDeleteFailed": "Failed to delete loan.",
-            "loanDeleteBlocked": "Only manual loans or loans whose linked sale was deleted can be removed.",
+            "loanDeleteBlocked": "Only loans without posted payment history, and either manual loans or loans whose linked sale was deleted, can be removed.",
             "reminderSnoozed": "Loan reminder snoozed.",
             "reminderSnoozeFailed": "Failed to snooze reminder.",
             "reminderUnsnoozed": "Loan reminder un-snoozed.",

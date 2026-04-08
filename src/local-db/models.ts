@@ -579,6 +579,7 @@ export interface Loan extends BaseEntity {
     totalPaidAmount: number
     balanceAmount: number
     settlementCurrency: CurrencyCode
+    exchangeRateSnapshot?: ExchangeRateSnapshot[] | null
     installmentCount: number
     installmentFrequency: InstallmentFrequency
     firstDueDate: string

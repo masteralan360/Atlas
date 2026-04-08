@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
-import { convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
+import { convertCurrencyAmountWithAvailableSnapshot, convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
 import { isOnline } from '@/lib/network'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
@@ -523,6 +523,17 @@ async function getPartnerLoans(partner: BusinessPartner) {
     return rows as Loan[]
 }
 
+function convertLoanAmountForPartner(loan: Pick<Loan, 'balanceAmount' | 'settlementCurrency' | 'exchangeRateSnapshot'>, currency: CurrencyCode) {
+    const converted = convertCurrencyAmountWithAvailableSnapshot(
+        loan.balanceAmount,
+        loan.settlementCurrency,
+        currency,
+        loan.exchangeRateSnapshot
+    )
+
+    return converted ?? 0
+}
+
 export async function recalculateBusinessPartnerSummary(workspaceId: string, partnerId: string) {
     const partner = await db.business_partners.get(partnerId)
     if (!partner || partner.isDeleted) {
@@ -606,7 +617,7 @@ export async function recalculateBusinessPartnerSummary(workspaceId: string, par
                     0
                 )
             + activeBorrowedLoans.reduce(
-                (sum, loan) => sum + convertCurrencyAmountWithSnapshot(loan.balanceAmount, loan.settlementCurrency, partner.defaultCurrency),
+                (sum, loan) => sum + convertLoanAmountForPartner(loan, partner.defaultCurrency),
                 0
             ),
         partner.defaultCurrency
@@ -614,7 +625,7 @@ export async function recalculateBusinessPartnerSummary(workspaceId: string, par
 
     const totalLoanCount = loans.length
     const loanOutstandingBalance = roundAmount(
-        activeLentLoans.reduce((sum, loan) => sum + convertCurrencyAmountWithSnapshot(loan.balanceAmount, loan.settlementCurrency, partner.defaultCurrency), 0),
+        activeLentLoans.reduce((sum, loan) => sum + convertLoanAmountForPartner(loan, partner.defaultCurrency), 0),
         partner.defaultCurrency
     )
     const netExposure = roundAmount(receivableBalance + loanOutstandingBalance - payableBalance, partner.defaultCurrency)
@@ -1131,6 +1142,9 @@ export async function mergeBusinessPartners(primaryPartnerId: string, secondaryP
     }
     if (primary.workspaceId !== secondary.workspaceId) {
         throw new Error('Partners must belong to the same workspace')
+    }
+    if (primary.defaultCurrency !== secondary.defaultCurrency) {
+        throw new Error('Cannot merge business partners with different default currencies. Align the currencies first.')
     }
 
     const now = new Date().toISOString()

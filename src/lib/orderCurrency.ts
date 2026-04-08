@@ -1,5 +1,7 @@
 import type { CurrencyCode, ExchangeRateSnapshot } from '@/local-db/models'
 
+export const CACHED_EXCHANGE_RATES_SNAPSHOT_KEY = 'atlas:cached-exchange-rates-snapshot'
+
 type RateSnapshot = {
     rate: number
     source: string
@@ -24,6 +26,53 @@ function normalizeAmount(amount: number, currency: CurrencyCode) {
     }
 
     return Math.round(amount * 100) / 100
+}
+
+function normalizeSnapshot(snapshot?: ExchangeRateSnapshot[] | null) {
+    if (!Array.isArray(snapshot)) {
+        return []
+    }
+
+    return snapshot.filter((entry): entry is ExchangeRateSnapshot => (
+        !!entry
+        && typeof entry.pair === 'string'
+        && typeof entry.rate === 'number'
+        && Number.isFinite(entry.rate)
+        && typeof entry.source === 'string'
+    ))
+}
+
+function mergeSnapshots(...snapshots: Array<ExchangeRateSnapshot[] | null | undefined>) {
+    const merged = new Map<string, ExchangeRateSnapshot>()
+
+    for (const snapshot of snapshots) {
+        for (const entry of normalizeSnapshot(snapshot)) {
+            const key = entry.pair.toUpperCase()
+            if (!merged.has(key)) {
+                merged.set(key, entry)
+            }
+        }
+    }
+
+    return Array.from(merged.values())
+}
+
+function hasConversionPath(from: CurrencyCode, to: CurrencyCode, snapshot?: ExchangeRateSnapshot[] | null) {
+    if (from === to) {
+        return true
+    }
+
+    const pairs = new Set(normalizeSnapshot(snapshot).map((entry) => entry.pair.toUpperCase()))
+    const has = (pair: 'USD/IQD' | 'USD/EUR' | 'EUR/IQD' | 'USD/TRY' | 'TRY/IQD') => pairs.has(pair)
+
+    if ((from === 'usd' && to === 'iqd') || (from === 'iqd' && to === 'usd')) return has('USD/IQD')
+    if ((from === 'usd' && to === 'eur') || (from === 'eur' && to === 'usd')) return has('USD/EUR')
+    if ((from === 'eur' && to === 'iqd') || (from === 'iqd' && to === 'eur')) return has('EUR/IQD')
+    if ((from === 'usd' && to === 'try') || (from === 'try' && to === 'usd')) return has('USD/TRY')
+    if ((from === 'try' && to === 'iqd') || (from === 'iqd' && to === 'try')) return has('TRY/IQD')
+    if ((from === 'try' && to === 'eur') || (from === 'eur' && to === 'try')) return has('TRY/IQD') && has('EUR/IQD')
+
+    return false
 }
 
 function convertCurrencyAmountInternal(
@@ -95,6 +144,58 @@ export function convertCurrencyAmountWithSnapshot(
     const ratesByPair = new Map((snapshot ?? []).map((entry) => [entry.pair.toUpperCase(), entry.rate / 100]))
 
     return convertCurrencyAmountInternal(amount, from, to, (pair) => ratesByPair.get(pair) ?? null)
+}
+
+export function cacheExchangeRatesSnapshot(snapshot?: ExchangeRateSnapshot[] | null) {
+    if (typeof window === 'undefined') {
+        return
+    }
+
+    const normalized = normalizeSnapshot(snapshot)
+    if (normalized.length === 0) {
+        window.localStorage.removeItem(CACHED_EXCHANGE_RATES_SNAPSHOT_KEY)
+        return
+    }
+
+    window.localStorage.setItem(CACHED_EXCHANGE_RATES_SNAPSHOT_KEY, JSON.stringify(normalized))
+}
+
+export function readCachedExchangeRatesSnapshot(): ExchangeRateSnapshot[] | null {
+    if (typeof window === 'undefined') {
+        return null
+    }
+
+    const rawSnapshot = window.localStorage.getItem(CACHED_EXCHANGE_RATES_SNAPSHOT_KEY)
+    if (!rawSnapshot) {
+        return null
+    }
+
+    try {
+        const parsed = JSON.parse(rawSnapshot)
+        const normalized = normalizeSnapshot(parsed)
+        return normalized.length > 0 ? normalized : null
+    } catch {
+        return null
+    }
+}
+
+export function getEffectiveExchangeRatesSnapshot(snapshot?: ExchangeRateSnapshot[] | null) {
+    const merged = mergeSnapshots(snapshot, readCachedExchangeRatesSnapshot())
+    return merged.length > 0 ? merged : null
+}
+
+export function convertCurrencyAmountWithAvailableSnapshot(
+    amount: number,
+    from: CurrencyCode,
+    to: CurrencyCode,
+    snapshot?: ExchangeRateSnapshot[] | null
+) {
+    const effectiveSnapshot = getEffectiveExchangeRatesSnapshot(snapshot)
+    if (!hasConversionPath(from, to, effectiveSnapshot)) {
+        return from === to ? normalizeAmount(amount, to) : null
+    }
+
+    return convertCurrencyAmountWithSnapshot(amount, from, to, effectiveSnapshot)
 }
 
 export function buildOrderExchangeRatesSnapshot(rates: LiveOrderRates): ExchangeRateSnapshot[] {

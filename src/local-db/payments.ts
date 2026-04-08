@@ -790,7 +790,10 @@ function assertStandardSettlementPaymentMethod(
 }
 
 export function isReversiblePaymentSourceType(sourceType: PaymentTransactionSourceType) {
-    return sourceType === 'sales_order'
+    return sourceType === 'loan_payment'
+        || sourceType === 'simple_loan'
+        || sourceType === 'loan_installment'
+        || sourceType === 'sales_order'
         || sourceType === 'purchase_order'
         || sourceType === 'expense_item'
         || sourceType === 'payroll_status'
@@ -1333,7 +1336,37 @@ export async function reversePaymentTransaction(
         throw new Error('Only the latest unreversed transaction can be reversed')
     }
 
+    const note = input.note?.trim() || `Reversal of ${transaction.referenceLabel || transaction.sourceType}`
+
     switch (transaction.sourceType) {
+        case 'loan_payment':
+        case 'simple_loan':
+        case 'loan_installment': {
+            const { reverseLoanPayment } = await import('./hooks')
+            const { loan } = await reverseLoanPayment(workspaceId, transaction)
+
+            return appendPaymentTransaction(workspaceId, {
+                sourceModule: transaction.sourceModule,
+                sourceType: transaction.sourceType,
+                sourceRecordId: transaction.sourceRecordId,
+                sourceSubrecordId: transaction.sourceSubrecordId ?? null,
+                direction: transaction.direction,
+                amount: -Math.abs(transaction.amount),
+                currency: transaction.currency,
+                paymentMethod: transaction.paymentMethod,
+                paidAt: input.paidAt ? new Date(input.paidAt).toISOString() : new Date().toISOString(),
+                counterpartyName: transaction.counterpartyName || null,
+                referenceLabel: loan.loanNo || transaction.referenceLabel || null,
+                note,
+                createdBy: input.createdBy || null,
+                reversalOfTransactionId: transaction.id,
+                metadata: {
+                    ...(transaction.metadata && typeof transaction.metadata === 'object' ? transaction.metadata : {}),
+                    reversal: true
+                }
+            })
+        }
+
         case 'sales_order': {
             const { setSalesOrderPaymentStatus } = await import('./orders')
             await setSalesOrderPaymentStatus(transaction.sourceRecordId, {
@@ -1399,8 +1432,6 @@ export async function reversePaymentTransaction(
         case 'direct_transaction':
             break
     }
-
-    const note = input.note?.trim() || `Reversal of ${transaction.referenceLabel || transaction.sourceType}`
     return replacePaymentTransactionForSource(workspaceId, {
         sourceType: transaction.sourceType,
         sourceRecordId: transaction.sourceRecordId,

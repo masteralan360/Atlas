@@ -12,12 +12,10 @@ import { convertToStoreBase } from '@/lib/currency'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import {
     getPaymentTransactionRoutePath,
-    useLoans,
     usePaymentTransactions,
     useSales,
     type CurrencyCode,
     type IQDDisplayPreference,
-    type Loan,
     type PaymentTransaction,
     type Sale
 } from '@/local-db'
@@ -65,8 +63,6 @@ type LedgerEntryType =
     | 'purchase_order_payment'
     | 'expense'
     | 'payroll_payment'
-    | 'loan_given'
-    | 'loan_taken'
     | 'loan_repayment_received'
     | 'loan_repayment_paid'
     | 'installment_received'
@@ -256,10 +252,6 @@ function ledgerTypeLabel(type: LedgerEntryType) {
             return 'Expense'
         case 'payroll_payment':
             return 'Payroll Payment'
-        case 'loan_given':
-            return 'Loan Given'
-        case 'loan_taken':
-            return 'Loan Taken'
         case 'loan_repayment_received':
             return 'Loan Repayment Received'
         case 'loan_repayment_paid':
@@ -713,29 +705,6 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction): LedgerEntry |
     }
 }
 
-function buildLoanOriginationEntry(loan: Loan): LedgerEntry | null {
-    if (loan.isDeleted || loan.source !== 'manual') {
-        return null
-    }
-
-    return {
-        id: `loan-origin:${loan.id}`,
-        transactionId: loan.id,
-        date: loan.createdAt,
-        type: loan.direction === 'borrowed' ? 'loan_taken' : 'loan_given',
-        direction: loan.direction === 'borrowed' ? 'incoming' : 'outgoing',
-        amount: loan.principalAmount,
-        currency: loan.settlementCurrency,
-        sourceModule: 'loans',
-        referenceId: loan.loanNo,
-        partner: loan.linkedPartyName || loan.borrowerName || null,
-        paymentMethod: null,
-        notes: loan.notes?.trim() || null,
-        description: loan.notes?.trim() || 'Loan originated',
-        routePath: `/loans/${loan.id}`
-    }
-}
-
 export function Ledger() {
     const { user } = useAuth()
     const { t, i18n } = useTranslation()
@@ -755,7 +724,6 @@ export function Ledger() {
         || features.loans
 
     const sales = useSales(workspaceId)
-    const loans = useLoans(workspaceId)
     const paymentTransactions = usePaymentTransactions(workspaceId, { includeReversals: false })
     const rates = useMemo(
         () => buildConversionRates(exchangeData, eurRates, tryRates),
@@ -774,12 +742,11 @@ export function Ledger() {
     const allEntries = useMemo(() => {
         const rows = [
             ...sales.map(buildSaleLedgerEntry).filter((entry): entry is LedgerEntry => !!entry),
-            ...paymentTransactions.map(buildPaymentLedgerEntry).filter((entry): entry is LedgerEntry => !!entry),
-            ...loans.map(buildLoanOriginationEntry).filter((entry): entry is LedgerEntry => !!entry)
+            ...paymentTransactions.map(buildPaymentLedgerEntry).filter((entry): entry is LedgerEntry => !!entry)
         ]
 
         return rows.sort((left, right) => right.date.localeCompare(left.date) || right.transactionId.localeCompare(left.transactionId))
-    }, [loans, paymentTransactions, sales])
+    }, [paymentTransactions, sales])
 
     const typeOptions = useMemo(
         () => Array.from(new Set(allEntries.map((entry) => entry.type))).sort((left, right) => ledgerTypeLabel(left).localeCompare(ledgerTypeLabel(right))),

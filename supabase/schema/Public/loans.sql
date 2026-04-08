@@ -17,6 +17,7 @@ CREATE TABLE public.loans (
   total_paid_amount numeric NOT NULL DEFAULT 0,
   balance_amount numeric NOT NULL,
   settlement_currency text NOT NULL,
+  exchange_rate_snapshot jsonb NULL,
   installment_count integer NOT NULL,
   installment_frequency text NOT NULL,
   first_due_date date NOT NULL,
