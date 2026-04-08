@@ -13,9 +13,11 @@ import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import {
     getPaymentTransactionRoutePath,
     usePaymentTransactions,
+    useLoans,
     useSales,
     type CurrencyCode,
     type IQDDisplayPreference,
+    type Loan,
     type PaymentTransaction,
     type Sale
 } from '@/local-db'
@@ -47,13 +49,18 @@ import {
     TableCell,
     TableHead,
     TableHeader,
-    TableRow
+    TableRow,
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger
 } from '@/ui/components'
 import { useWorkspace } from '@/workspace'
 import { useTheme } from '@/ui/components/theme-provider'
 
 type LedgerDirection = 'incoming' | 'outgoing'
 type LedgerSourceModule = 'pos' | 'instant_pos' | 'orders' | 'expenses' | 'payroll' | 'loans'
+type LedgerRelationRole = 'origin' | 'repayment' | 'settlement'
 type LedgerEntryType =
     | 'pos_sale'
     | 'instant_pos_sale'
@@ -85,6 +92,10 @@ interface LedgerEntry {
     notes: string | null
     description: string | null
     routePath: string
+    relationKey?: string | null
+    relationRole?: LedgerRelationRole | null
+    relationTitle?: string | null
+    relationDescription?: string | null
 }
 
 type LedgerDirectionFilter = 'all' | LedgerDirection
@@ -502,6 +513,29 @@ function buildReferenceId(prefix: string, id: string, sequenceId?: number) {
     return sequenceId ? `${prefix}-${sequenceId}` : `${prefix}-${id.slice(0, 8).toUpperCase()}`
 }
 
+function buildSaleReferenceId(sale: Pick<Sale, 'id' | 'origin' | 'sequenceId'>) {
+    return buildReferenceId(sale.origin === 'instant_pos' ? 'IPOS' : 'POS', sale.id, sale.sequenceId)
+}
+
+function ledgerRelationRoleLabel(role: LedgerRelationRole) {
+    switch (role) {
+        case 'origin':
+            return 'Origin'
+        case 'repayment':
+            return 'Repayment'
+        case 'settlement':
+            return 'Settlement'
+        default:
+            return 'Linked'
+    }
+}
+
+interface LedgerBuildContext {
+    loanById: Map<string, Loan>
+    saleById: Map<string, Sale>
+    loanOriginationIds: Set<string>
+}
+
 function buildSaleLedgerEntry(sale: Sale): LedgerEntry | null {
     if (sale.isDeleted || sale.isReturned) {
         return null
@@ -532,7 +566,7 @@ function buildSaleLedgerEntry(sale: Sale): LedgerEntry | null {
         amount: sale.totalAmount,
         currency: sale.settlementCurrency,
         sourceModule: isInstantPos ? 'instant_pos' : 'pos',
-        referenceId: buildReferenceId(isInstantPos ? 'IPOS' : 'POS', sale.id, sale.sequenceId),
+        referenceId: buildSaleReferenceId(sale),
         partner: null,
         paymentMethod,
         notes: sale.notes?.trim() || null,
@@ -589,10 +623,126 @@ function buildTransactionDescription(transaction: PaymentTransaction) {
     return details.length > 0 ? details.join(' | ') : null
 }
 
-function buildPaymentLedgerEntry(transaction: PaymentTransaction): LedgerEntry | null {
+function buildLedgerRelationDescriptor(
+    transaction: PaymentTransaction,
+    context: LedgerBuildContext
+): Pick<LedgerEntry, 'relationKey' | 'relationRole' | 'relationTitle' | 'relationDescription'> {
+    const reference = buildTransactionReference(transaction)
+
+    switch (transaction.sourceType) {
+        case 'loan_origination': {
+            const movementLabel = transaction.direction === 'incoming'
+                ? 'Original loan cash receipt'
+                : 'Original loan cash disbursement'
+
+            return {
+                relationKey: `loan:${transaction.sourceRecordId}`,
+                relationRole: 'origin',
+                relationTitle: movementLabel,
+                relationDescription: `${reference} is the opening cash movement for this loan. Hover a linked repayment to trace the full chain.`
+            }
+        }
+
+        case 'loan_payment':
+        case 'simple_loan':
+        case 'loan_installment': {
+            const loan = context.loanById.get(transaction.sourceRecordId)
+            const sourceLoanReference = loan?.loanNo || reference
+            const hasManualOrigination = context.loanOriginationIds.has(transaction.sourceRecordId)
+            const repaymentLabel = transaction.sourceType === 'loan_installment'
+                ? 'Installment repayment'
+                : transaction.sourceType === 'simple_loan'
+                    ? 'Simple loan repayment'
+                    : 'Loan repayment'
+
+            if (hasManualOrigination) {
+                return {
+                    relationKey: `loan:${transaction.sourceRecordId}`,
+                    relationRole: 'repayment',
+                    relationTitle: repaymentLabel,
+                    relationDescription: `Original source: ${(loan?.direction || 'lent') === 'borrowed' ? 'Loan Taken' : 'Loan Given'} ${sourceLoanReference}. The matching origination row links to this repayment when it is visible in the ledger.`
+                }
+            }
+
+            if (loan?.source === 'pos') {
+                const sourceSale = loan.saleId ? context.saleById.get(loan.saleId) : undefined
+                const saleReference = sourceSale ? buildSaleReferenceId(sourceSale) : null
+
+                return {
+                    relationKey: `loan:${transaction.sourceRecordId}`,
+                    relationRole: 'repayment',
+                    relationTitle: repaymentLabel,
+                    relationDescription: saleReference
+                        ? `Original source: ${saleReference} credit sale. This loan started from a sale, so there is no separate cash origination row in the ledger.`
+                        : 'Original source: POS credit sale. This loan started from a sale, so there is no separate cash origination row in the ledger.'
+                }
+            }
+
+            return {
+                relationKey: `loan:${transaction.sourceRecordId}`,
+                relationRole: 'repayment',
+                relationTitle: repaymentLabel,
+                relationDescription: `Original source: ${sourceLoanReference}.`
+            }
+        }
+
+        case 'sales_order': {
+            const isReceivable = Boolean(transaction.metadata?.receivable)
+            const sourceChannel = typeof transaction.metadata?.sourceChannel === 'string'
+                ? transaction.metadata.sourceChannel.trim().toLowerCase()
+                : null
+
+            return {
+                relationKey: `sales-order:${transaction.sourceRecordId}`,
+                relationRole: isReceivable ? 'origin' : 'settlement',
+                relationTitle: isReceivable ? 'Order receivable source' : 'Order settlement',
+                relationDescription: `Original source: ${sourceChannel === 'marketplace' ? 'E-Commerce order' : 'Sales order'} ${reference}.`
+            }
+        }
+
+        case 'purchase_order':
+            return {
+                relationKey: `purchase-order:${transaction.sourceRecordId}`,
+                relationRole: 'settlement',
+                relationTitle: 'Purchase order settlement',
+                relationDescription: `Original source: Purchase Order ${reference}.`
+            }
+
+        case 'expense_item':
+            return {
+                relationKey: `expense:${transaction.sourceRecordId}`,
+                relationRole: 'settlement',
+                relationTitle: 'Expense settlement',
+                relationDescription: `Original source: Expense ${reference}.`
+            }
+
+        case 'payroll_status': {
+            const month = typeof transaction.metadata?.month === 'string' ? transaction.metadata.month : null
+
+            return {
+                relationKey: `payroll:${transaction.sourceRecordId}`,
+                relationRole: 'settlement',
+                relationTitle: 'Payroll settlement',
+                relationDescription: month
+                    ? `Original source: Payroll ${month}.`
+                    : `Original source: ${reference}.`
+            }
+        }
+
+        default:
+            return {}
+    }
+}
+
+function buildPaymentLedgerEntry(
+    transaction: PaymentTransaction,
+    context: LedgerBuildContext
+): LedgerEntry | null {
     if (transaction.isDeleted || transaction.reversalOfTransactionId || transaction.sourceType === 'direct_transaction') {
         return null
     }
+
+    const relation = buildLedgerRelationDescriptor(transaction, context)
 
     switch (transaction.sourceType) {
         case 'loan_origination':
@@ -610,7 +760,8 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction): LedgerEntry |
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction) || (transaction.direction === 'incoming' ? 'Loan received' : 'Loan disbursed'),
-                routePath: getPaymentTransactionRoutePath(transaction)
+                routePath: getPaymentTransactionRoutePath(transaction),
+                ...relation
             }
         case 'sales_order': {
             const sourceChannel = typeof transaction.metadata?.sourceChannel === 'string'
@@ -634,7 +785,8 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction): LedgerEntry |
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction),
-                routePath: getPaymentTransactionRoutePath(transaction)
+                routePath: getPaymentTransactionRoutePath(transaction),
+                ...relation
             }
         }
         case 'purchase_order':
@@ -652,7 +804,8 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction): LedgerEntry |
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction),
-                routePath: getPaymentTransactionRoutePath(transaction)
+                routePath: getPaymentTransactionRoutePath(transaction),
+                ...relation
             }
         case 'expense_item':
             return {
@@ -669,7 +822,8 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction): LedgerEntry |
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction),
-                routePath: getPaymentTransactionRoutePath(transaction)
+                routePath: getPaymentTransactionRoutePath(transaction),
+                ...relation
             }
         case 'payroll_status':
             return {
@@ -686,7 +840,8 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction): LedgerEntry |
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction),
-                routePath: getPaymentTransactionRoutePath(transaction)
+                routePath: getPaymentTransactionRoutePath(transaction),
+                ...relation
             }
         case 'loan_installment':
             return {
@@ -703,7 +858,8 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction): LedgerEntry |
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction),
-                routePath: getPaymentTransactionRoutePath(transaction)
+                routePath: getPaymentTransactionRoutePath(transaction),
+                ...relation
             }
         case 'loan_payment':
         case 'simple_loan':
@@ -721,7 +877,8 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction): LedgerEntry |
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction),
-                routePath: getPaymentTransactionRoutePath(transaction)
+                routePath: getPaymentTransactionRoutePath(transaction),
+                ...relation
             }
         default:
             return null
@@ -746,6 +903,7 @@ export function Ledger() {
         || features.hr
         || features.loans
 
+    const loans = useLoans(workspaceId)
     const sales = useSales(workspaceId)
     const paymentTransactions = usePaymentTransactions(workspaceId, { includeReversals: false })
     const rates = useMemo(
@@ -756,20 +914,44 @@ export function Ledger() {
     const [filters, setFilters] = useState<LedgerFilterState>(DEFAULT_LEDGER_FILTERS)
     const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false)
     const [draftFilters, setDraftFilters] = useState<LedgerFilterState>(DEFAULT_LEDGER_FILTERS)
+    const [hoveredRelationKey, setHoveredRelationKey] = useState<string | null>(null)
 
     const [currentPage, setCurrentPage] = useState(1)
     const pageSize = 50
 
     const deferredSearch = useDeferredValue(filters.search)
+    const loanById = useMemo(
+        () => new Map(loans.map((loan) => [loan.id, loan])),
+        [loans]
+    )
+    const saleById = useMemo(
+        () => new Map(sales.map((sale) => [sale.id, sale])),
+        [sales]
+    )
+    const loanOriginationIds = useMemo(
+        () => new Set(
+            paymentTransactions
+                .filter((transaction) => !transaction.isDeleted && !transaction.reversalOfTransactionId && transaction.sourceType === 'loan_origination')
+                .map((transaction) => transaction.sourceRecordId)
+        ),
+        [paymentTransactions]
+    )
 
     const allEntries = useMemo(() => {
+        const context: LedgerBuildContext = {
+            loanById,
+            saleById,
+            loanOriginationIds
+        }
         const rows = [
             ...sales.map(buildSaleLedgerEntry).filter((entry): entry is LedgerEntry => !!entry),
-            ...paymentTransactions.map(buildPaymentLedgerEntry).filter((entry): entry is LedgerEntry => !!entry)
+            ...paymentTransactions
+                .map((transaction) => buildPaymentLedgerEntry(transaction, context))
+                .filter((entry): entry is LedgerEntry => !!entry)
         ]
 
         return rows.sort((left, right) => right.date.localeCompare(left.date) || right.transactionId.localeCompare(left.transactionId))
-    }, [paymentTransactions, sales])
+    }, [loanById, loanOriginationIds, paymentTransactions, saleById, sales])
 
     const typeOptions = useMemo(
         () => Array.from(new Set(allEntries.map((entry) => entry.type))).sort((left, right) => ledgerTypeLabel(left).localeCompare(ledgerTypeLabel(right))),
@@ -801,6 +983,46 @@ export function Ledger() {
     const filteredEntries = useMemo(
         () => applyLedgerFilters(dateScopedEntries, effectiveFilters),
         [dateScopedEntries, effectiveFilters]
+    )
+    const visibleEntries = useMemo(
+        () => filteredEntries.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+        [currentPage, filteredEntries]
+    )
+    const visibleRelationCounts = useMemo(() => {
+        const counts = new Map<string, number>()
+
+        visibleEntries.forEach((entry) => {
+            if (!entry.relationKey) {
+                return
+            }
+
+            counts.set(entry.relationKey, (counts.get(entry.relationKey) || 0) + 1)
+        })
+
+        return counts
+    }, [visibleEntries])
+    const visibleRelationRanges = useMemo(() => {
+        const ranges = new Map<string, { firstIndex: number; lastIndex: number }>()
+
+        visibleEntries.forEach((entry, index) => {
+            if (!entry.relationKey) {
+                return
+            }
+
+            const existing = ranges.get(entry.relationKey)
+            if (!existing) {
+                ranges.set(entry.relationKey, { firstIndex: index, lastIndex: index })
+                return
+            }
+
+            existing.lastIndex = index
+        })
+
+        return ranges
+    }, [visibleEntries])
+    const hoveredRelationRange = useMemo(
+        () => hoveredRelationKey ? (visibleRelationRanges.get(hoveredRelationKey) ?? null) : null,
+        [hoveredRelationKey, visibleRelationRanges]
     )
 
     const draftPreviewEntries = useMemo(
@@ -847,6 +1069,12 @@ export function Ledger() {
     useEffect(() => {
         setCurrentPage(1)
     }, [dateRange, customDates, filters])
+
+    useEffect(() => {
+        if (hoveredRelationKey && !visibleEntries.some((entry) => entry.relationKey === hoveredRelationKey)) {
+            setHoveredRelationKey(null)
+        }
+    }, [hoveredRelationKey, visibleEntries])
 
     useEffect(() => {
         if (!isFilterDialogOpen) {
@@ -1540,62 +1768,156 @@ export function Ledger() {
                     </div>
                 </CardHeader>
                 <CardContent className="overflow-x-auto">
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>Transaction ID</TableHead>
-                                <TableHead>Date</TableHead>
-                                <TableHead>Type</TableHead>
-                                <TableHead>Direction</TableHead>
-                                <TableHead>Amount</TableHead>
-                                <TableHead>Source Module</TableHead>
-                                <TableHead>Reference ID</TableHead>
-                                <TableHead>Partner</TableHead>
-                                <TableHead>Description / Notes</TableHead>
-                                <TableHead className="text-right">Actions</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {filteredEntries.length === 0 ? (
+                    <TooltipProvider delayDuration={120}>
+                        <Table className="ml-6 w-[calc(100%-1.5rem)]">
+                            <TableHeader>
                                 <TableRow>
-                                    <TableCell colSpan={10} className="py-12 text-center text-muted-foreground">
-                                        No ledger entries match the current filters.
-                                    </TableCell>
+                                    <TableHead>Transaction ID</TableHead>
+                                    <TableHead>Date</TableHead>
+                                    <TableHead>Type</TableHead>
+                                    <TableHead>Direction</TableHead>
+                                    <TableHead>Amount</TableHead>
+                                    <TableHead>Source Module</TableHead>
+                                    <TableHead>Reference ID</TableHead>
+                                    <TableHead>Partner</TableHead>
+                                    <TableHead>Description / Notes</TableHead>
+                                    <TableHead className="text-right">Actions</TableHead>
                                 </TableRow>
-                            ) : filteredEntries.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((entry) => (
-                                <TableRow key={entry.id}>
-                                    <TableCell className="max-w-[170px] font-mono text-xs text-muted-foreground">
-                                        <span className="block truncate">{entry.transactionId}</span>
-                                    </TableCell>
-                                    <TableCell>{formatDateTime(entry.date)}</TableCell>
-                                    <TableCell className="font-medium">{ledgerTypeLabel(entry.type)}</TableCell>
-                                    <TableCell>
-                                        <span className={cn(
-                                            'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                                            entry.direction === 'incoming'
-                                                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                                : 'border-amber-200 bg-amber-50 text-amber-700'
-                                        )}>
-                                            {entry.direction === 'incoming' ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
-                                            {entry.direction === 'incoming' ? 'IN' : 'OUT'}
-                                        </span>
-                                    </TableCell>
-                                    <TableCell>{formatCurrency(entry.amount, entry.currency, features.iqd_display_preference)}</TableCell>
-                                    <TableCell>{sourceModuleLabel(entry.sourceModule)}</TableCell>
-                                    <TableCell className="font-medium">{entry.referenceId}</TableCell>
-                                    <TableCell>{entry.partner || '-'}</TableCell>
-                                    <TableCell className="max-w-[280px]">
-                                        <span className="block truncate text-sm text-muted-foreground">{entry.description || '-'}</span>
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                        <Button variant="outline" size="sm" onClick={() => setLocation(entry.routePath)}>
-                                            Open
-                                        </Button>
-                                    </TableCell>
-                                </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
+                            </TableHeader>
+                            <TableBody>
+                                {filteredEntries.length === 0 ? (
+                                    <TableRow>
+                                        <TableCell colSpan={10} className="py-12 text-center text-muted-foreground">
+                                            No ledger entries match the current filters.
+                                        </TableCell>
+                                    </TableRow>
+                                ) : visibleEntries.map((entry, rowIndex) => {
+                                    const isRelationHovered = !!hoveredRelationKey && entry.relationKey === hoveredRelationKey
+                                    const relatedVisibleCount = entry.relationKey ? (visibleRelationCounts.get(entry.relationKey) || 0) : 0
+                                    const hasVisibleLinkedPeer = relatedVisibleCount > 1
+                                    const showHoverHierarchyLine = !!hoveredRelationRange
+                                        && hoveredRelationRange.firstIndex !== hoveredRelationRange.lastIndex
+                                        && rowIndex >= hoveredRelationRange.firstIndex
+                                        && rowIndex <= hoveredRelationRange.lastIndex
+                                    const showHoverHierarchyTurn = isRelationHovered && hasVisibleLinkedPeer
+                                    const relationAccentClass = entry.relationRole === 'origin'
+                                        ? 'bg-sky-500/5'
+                                        : entry.relationRole === 'repayment'
+                                            ? 'bg-amber-500/10'
+                                            : 'bg-violet-500/5'
+                                    const hierarchyVerticalClass = hoveredRelationRange && rowIndex === hoveredRelationRange.firstIndex
+                                        ? 'top-1/2 bottom-0'
+                                        : hoveredRelationRange && rowIndex === hoveredRelationRange.lastIndex
+                                            ? 'top-0 bottom-1/2'
+                                            : 'top-0 bottom-0'
+
+                                    return (
+                                        <TableRow
+                                            key={entry.id}
+                                            className={cn(
+                                                entry.relationKey && 'transition-colors duration-150',
+                                                isRelationHovered && relationAccentClass,
+                                                isRelationHovered && hasVisibleLinkedPeer && 'shadow-[inset_0_0_0_1px_rgba(148,163,184,0.35)]'
+                                            )}
+                                            onMouseEnter={() => {
+                                                if (entry.relationKey) {
+                                                    setHoveredRelationKey(entry.relationKey)
+                                                }
+                                            }}
+                                            onMouseLeave={() => {
+                                                if (entry.relationKey) {
+                                                    setHoveredRelationKey((current) => current === entry.relationKey ? null : current)
+                                                }
+                                            }}
+                                        >
+                                            <TableCell className="relative max-w-[170px] font-mono text-xs text-muted-foreground">
+                                                {showHoverHierarchyLine ? (
+                                                    <div className="pointer-events-none absolute inset-y-0 -left-6 w-5">
+                                                        <span
+                                                            className={cn(
+                                                                'absolute left-1.5 w-px bg-foreground/80',
+                                                                hierarchyVerticalClass
+                                                            )}
+                                                        />
+                                                        {showHoverHierarchyTurn ? (
+                                                            <span
+                                                                className="absolute left-1.5 top-1/2 h-px w-3 -translate-y-1/2 bg-foreground/80"
+                                                            />
+                                                        ) : null}
+                                                    </div>
+                                                ) : null}
+                                                <span className="block truncate">{entry.transactionId}</span>
+                                            </TableCell>
+                                            <TableCell>{formatDateTime(entry.date)}</TableCell>
+                                            <TableCell className="font-medium">
+                                                {entry.relationTitle ? (
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <div className="inline-flex max-w-full cursor-default items-center gap-2">
+                                                                <span className="truncate decoration-dotted underline-offset-4 hover:underline">
+                                                                    {ledgerTypeLabel(entry.type)}
+                                                                </span>
+                                                                {entry.relationRole ? (
+                                                                    <span className={cn(
+                                                                        'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                                                                        entry.relationRole === 'origin'
+                                                                            ? 'border-sky-200 bg-sky-50 text-sky-700'
+                                                                            : entry.relationRole === 'repayment'
+                                                                                ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                                                                : 'border-violet-200 bg-violet-50 text-violet-700'
+                                                                    )}>
+                                                                        {ledgerRelationRoleLabel(entry.relationRole)}
+                                                                    </span>
+                                                                ) : null}
+                                                            </div>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent className="max-w-sm p-3">
+                                                            <div className="space-y-1.5">
+                                                                <div className="font-semibold">{entry.relationTitle}</div>
+                                                                {entry.relationDescription ? (
+                                                                    <p className="text-xs leading-relaxed text-muted-foreground">
+                                                                        {entry.relationDescription}
+                                                                    </p>
+                                                                ) : null}
+                                                                {hasVisibleLinkedPeer ? (
+                                                                    <p className="text-[11px] font-semibold text-primary">
+                                                                        Related ledger rows on this page highlight together and reveal the linked hierarchy while you hover.
+                                                                    </p>
+                                                                ) : null}
+                                                            </div>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                ) : ledgerTypeLabel(entry.type)}
+                                            </TableCell>
+                                            <TableCell>
+                                                <span className={cn(
+                                                    'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                                                    entry.direction === 'incoming'
+                                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                                        : 'border-amber-200 bg-amber-50 text-amber-700'
+                                                )}>
+                                                    {entry.direction === 'incoming' ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
+                                                    {entry.direction === 'incoming' ? 'IN' : 'OUT'}
+                                                </span>
+                                            </TableCell>
+                                            <TableCell>{formatCurrency(entry.amount, entry.currency, features.iqd_display_preference)}</TableCell>
+                                            <TableCell>{sourceModuleLabel(entry.sourceModule)}</TableCell>
+                                            <TableCell className="font-medium">{entry.referenceId}</TableCell>
+                                            <TableCell>{entry.partner || '-'}</TableCell>
+                                            <TableCell className="max-w-[280px]">
+                                                <span className="block truncate text-sm text-muted-foreground">{entry.description || '-'}</span>
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                                <Button variant="outline" size="sm" onClick={() => setLocation(entry.routePath)}>
+                                                    Open
+                                                </Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    )
+                                })}
+                            </TableBody>
+                        </Table>
+                    </TooltipProvider>
                 </CardContent>
             </Card>
 

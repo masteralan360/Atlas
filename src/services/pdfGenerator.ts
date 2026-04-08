@@ -61,6 +61,10 @@ interface TemplatePdfOptions {
 const A4_WIDTH_MM = 210
 const RECEIPT_WIDTH_MM = 80
 
+function resolvePrintLanguage(printLang: string | null | undefined) {
+    return printLang && printLang !== 'auto' ? printLang : i18n.language
+}
+
 async function waitForImages(container: HTMLElement) {
     const images = Array.from(container.querySelectorAll('img'))
     await Promise.all(images.map(img => new Promise<void>((resolve) => {
@@ -256,19 +260,20 @@ export async function generateInvoicePdf(options: PDFGeneratorOptions): Promise<
     }
 
     // Create a fixed instance for the specific print language
-    const targetLang = features?.print_lang || i18n.language
+    const targetLang = resolvePrintLanguage(features?.print_lang)
     const pdfI18n = i18n.cloneInstance({ lng: targetLang })
     await pdfI18n.changeLanguage(targetLang)
 
     const processedLogoUrl = await preprocessLogoUrl(features?.logo_url)
     const processedFeatures = {
         ...features,
+        print_lang: targetLang,
         logo_url: processedLogoUrl
     }
 
     // Set direction explicitly for the rendering process based on current print selection
     // though templates handle it, this helps html2canvas detect context better
-    const isRTL = i18n.language === 'ar' || i18n.language === 'ku'
+    const isRTL = targetLang === 'ar' || targetLang === 'ku'
 
     if (format === 'receipt') {
         const element = createElement(
@@ -344,7 +349,7 @@ export async function generateTemplatePdf({
         await new Promise(resolve => i18n.on('initialized', resolve))
     }
 
-    const targetLang = printLang || i18n.language
+    const targetLang = resolvePrintLanguage(printLang)
     const pdfI18n = i18n.cloneInstance({ lng: targetLang })
     await pdfI18n.changeLanguage(targetLang)
 
