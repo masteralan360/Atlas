@@ -31,7 +31,7 @@ import {
     Cell,
     Legend
 } from 'recharts'
-import { formatCurrency, cn } from '@/lib/utils'
+import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import { DollarSign, TrendingUp, BarChart3, PieChart as PieChartIcon, Printer } from 'lucide-react'
 import { useReactToPrint } from 'react-to-print'
 
@@ -109,7 +109,7 @@ export function MetricDetailModal({ isOpen, onClose, metricType, currency, iqdPr
             .sort()
             .map(date => {
                 const row: any = {
-                    date: new Date(date).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }),
+                    date: formatDate(date),
                 }
 
                 activeCurrencies.forEach(curr => {

@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import type { PaymentObligation, WorkspacePaymentMethod } from '@/local-db'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, formatLocalDateTimeValue, parseLocalDateTimeValue } from '@/lib/utils'
 import {
     Button,
+    DateTimePicker,
     Dialog,
     DialogContent,
     DialogDescription,
     DialogFooter,
     DialogHeader,
     DialogTitle,
-    Input,
     Label,
     Select,
     SelectContent,
@@ -32,12 +32,6 @@ interface SettlementDialogProps {
         paidAt: string
         note?: string
     }) => Promise<void> | void
-}
-
-function toLocalDateTimeValue(value: string) {
-    const date = new Date(value)
-    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-    return local.toISOString().slice(0, 16)
 }
 
 const basePaymentMethods: Array<{ value: WorkspacePaymentMethod; label: string }> = [
@@ -68,7 +62,7 @@ export function SettlementDialog({
         }
 
         setPaymentMethod('cash')
-        setPaidAt(toLocalDateTimeValue(new Date().toISOString()))
+        setPaidAt(formatLocalDateTimeValue(new Date()))
         setNote('')
     }, [open, obligation?.id])
 
@@ -78,6 +72,7 @@ export function SettlementDialog({
             : basePaymentMethods,
         [includeLoanAdjustment]
     )
+    const selectedPaidAt = parseLocalDateTimeValue(paidAt)
 
     const actionLabel = obligation?.direction === 'incoming' ? 'Record Collection' : 'Record Payment'
 
@@ -121,7 +116,12 @@ export function SettlementDialog({
 
                         <div className="grid gap-2">
                             <Label>Paid At</Label>
-                            <Input type="datetime-local" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} />
+                            <DateTimePicker
+                                id="settlement-paid-at"
+                                date={selectedPaidAt}
+                                setDate={(value) => setPaidAt(value ? formatLocalDateTimeValue(value) : '')}
+                                placeholder="Pick payment time"
+                            />
                         </div>
 
                         <div className="grid gap-2">
@@ -138,10 +138,10 @@ export function SettlementDialog({
                     <Button
                         onClick={() => onSubmit({
                             paymentMethod,
-                            paidAt: new Date(paidAt).toISOString(),
+                            paidAt: selectedPaidAt?.toISOString() || '',
                             note: note.trim() || undefined
                         })}
-                        disabled={!obligation || !paidAt || isSubmitting}
+                        disabled={!obligation || !selectedPaidAt || isSubmitting}
                     >
                         {actionLabel}
                     </Button>

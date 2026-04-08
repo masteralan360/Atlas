@@ -4,6 +4,7 @@ import { Users, X } from 'lucide-react'
 import { useAuth } from '@/auth'
 import { createManualLoan, type CurrencyCode, type InstallmentFrequency } from '@/local-db'
 import { getLoanLinkedPartyTypeLabel, type LoanPartySelection } from '@/lib/loanParties'
+import { formatLocalDateValue, formatNumericInput, parseFormattedNumber, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
 import {
     Dialog,
     DialogContent,
@@ -13,6 +14,7 @@ import {
     Input,
     Label,
     Button,
+    DateTimePicker,
     Select,
     SelectContent,
     SelectItem,
@@ -23,7 +25,6 @@ import {
 } from '@/ui/components'
 import { useWorkspace } from '@/workspace'
 import { LoanPartyPickerDialog } from './LoanPartyPickerDialog'
-import { formatNumericInput, parseFormattedNumber, sanitizeNumericInput } from '@/lib/utils'
 
 interface CreateManualLoanModalProps {
     isOpen: boolean
@@ -55,7 +56,7 @@ export function CreateManualLoanModal({
     const [principalAmount, setPrincipalAmount] = useState('')
     const [installmentCount, setInstallmentCount] = useState(1)
     const [installmentFrequency, setInstallmentFrequency] = useState<InstallmentFrequency>('monthly')
-    const [firstDueDate, setFirstDueDate] = useState(new Date().toISOString().slice(0, 10))
+    const [firstDueDate, setFirstDueDate] = useState(formatLocalDateValue(new Date()))
     const [notes, setNotes] = useState('')
 
     useEffect(() => {
@@ -71,7 +72,7 @@ export function CreateManualLoanModal({
         setPrincipalAmount('')
         setInstallmentCount(1)
         setInstallmentFrequency('monthly')
-        setFirstDueDate(new Date().toISOString().slice(0, 10))
+        setFirstDueDate(formatLocalDateValue(new Date()))
         setNotes('')
     }, [isOpen, settlementCurrency])
 
@@ -255,7 +256,13 @@ export function CreateManualLoanModal({
                                 </div>
                                 <div className="grid gap-2 xl:col-span-3">
                                     <Label>{t('loans.firstDueDate') || 'First Due Date'}</Label>
-                                    <Input type="date" value={firstDueDate} onChange={e => setFirstDueDate(e.target.value)} />
+                                    <DateTimePicker
+                                        id="manual-loan-first-due-date"
+                                        mode="date"
+                                        date={parseLocalDateValue(firstDueDate)}
+                                        setDate={(value) => setFirstDueDate(value ? formatLocalDateValue(value) : '')}
+                                        placeholder={t('loans.firstDueDate') || 'First Due Date'}
+                                    />
                                 </div>
                             </div>
 

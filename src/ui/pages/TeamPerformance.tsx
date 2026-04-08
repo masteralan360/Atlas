@@ -364,7 +364,7 @@ export function TeamPerformance() {
         }
         if (dateRange === 'custom') {
             if (customDates.start && customDates.end) {
-                return `${customDates.start} ${t('common.to') || 'to'} ${customDates.end}`
+                return `${formatDate(customDates.start)} ${t('common.to') || 'to'} ${formatDate(customDates.end)}`
             }
             return t('performance.filters.custom')
         }
@@ -732,7 +732,7 @@ export function TeamPerformance() {
                                 tickLine={false}
                                 tick={{ fontSize: 10, fontWeight: 700, fill: 'currentColor' }}
                                 className="text-muted-foreground/60"
-                                tickFormatter={(val) => new Date(val).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                                tickFormatter={(val) => formatDate(val)}
                                 dy={10}
                             />
                             <YAxis
@@ -752,6 +752,7 @@ export function TeamPerformance() {
                                 }}
                                 itemStyle={{ fontSize: '11px', fontWeight: 'bold', padding: '2px 0' }}
                                 labelStyle={{ fontSize: '10px', fontWeight: 'black', textTransform: 'uppercase', marginBottom: '8px', opacity: 0.6 }}
+                                labelFormatter={(label) => formatDate(String(label))}
                                 formatter={(value: any, name: any) => {
                                     const member = performanceData.find(p => p.id === name)
                                     return [

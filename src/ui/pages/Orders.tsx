@@ -6,7 +6,7 @@ import { useLocation, useRoute } from 'wouter'
 import { useAuth } from '@/auth'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { buildOrderExchangeRatesSnapshot, convertCurrencyAmountWithLiveRates, getPrimaryExchangeDetails } from '@/lib/orderCurrency'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatDate, formatLocalDateTimeValue, parseLocalDateTimeValue } from '@/lib/utils'
 import {
     createPurchaseOrder,
     createSalesOrder,
@@ -48,6 +48,7 @@ import {
     CardContent,
     CardHeader,
     CardTitle,
+    DateTimePicker,
     Dialog,
     DialogContent,
     DialogFooter,
@@ -473,7 +474,7 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
             sourceStorageId: order.sourceStorageId || defaultStorageId,
             currency: order.currency,
             shippingAddress: order.shippingAddress || '',
-            expectedDeliveryDate: order.expectedDeliveryDate ? order.expectedDeliveryDate.slice(0, 10) : '',
+            expectedDeliveryDate: order.expectedDeliveryDate ? formatLocalDateTimeValue(order.expectedDeliveryDate) : '',
             discount: order.discount ? String(order.discount) : '',
             tax: order.tax ? String(order.tax) : '',
             notes: order.notes || '',
@@ -496,7 +497,7 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
             supplierId: order.businessPartnerId || order.supplierId,
             destinationStorageId: order.destinationStorageId || defaultStorageId,
             currency: order.currency,
-            expectedDeliveryDate: order.expectedDeliveryDate ? order.expectedDeliveryDate.slice(0, 10) : '',
+            expectedDeliveryDate: order.expectedDeliveryDate ? formatLocalDateTimeValue(order.expectedDeliveryDate) : '',
             discount: order.discount ? String(order.discount) : '',
             notes: order.notes || '',
             isPaid: order.isPaid,
@@ -866,7 +867,7 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                                         <OrderStatusBadge status={row.status} label={formatStatusLabel(t, row.status)} />
                                     </TableCell>
                                     <TableCell>{formatCurrency(row.total, row.currency, features.iqd_display_preference)}</TableCell>
-                                    <TableCell>{new Date(row.updatedAt).toLocaleDateString()}</TableCell>
+                                    <TableCell>{formatDate(row.updatedAt)}</TableCell>
                                     <TableCell>
                                         <div className="flex items-center gap-1.5">
                                             <span className={row.isPaid ? 'font-semibold text-emerald-600' : 'text-amber-600'}>
@@ -980,7 +981,7 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                                 <div className="text-right">
                                     <OrderStatusBadge status={row.status} label={formatStatusLabel(t, row.status)} />
                                     <div className="text-xs text-muted-foreground mt-2 font-medium">
-                                        {new Date(row.updatedAt).toLocaleDateString()}
+                                        {formatDate(row.updatedAt)}
                                     </div>
                                 </div>
                             </div>
@@ -1400,7 +1401,16 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                                                             <CalendarDays className="h-4 w-4 text-muted-foreground" />
                                                             {t('orders.form.date') || 'Date'}
                                                         </Label>
-                                                        <Input id="sales-delivery" type="date" value={salesForm.expectedDeliveryDate} onChange={(event) => setSalesForm((current) => ({ ...current, expectedDeliveryDate: event.target.value }))} />
+                                                        <DateTimePicker
+                                                            id="sales-delivery"
+                                                            mode="date-time"
+                                                            date={parseLocalDateTimeValue(salesForm.expectedDeliveryDate)}
+                                                            setDate={(value) => setSalesForm((current) => ({
+                                                                ...current,
+                                                                expectedDeliveryDate: value ? formatLocalDateTimeValue(value) : ''
+                                                            }))}
+                                                            placeholder={t('orders.form.date') || 'Date'}
+                                                        />
                                                     </div>
                                                     <div className="space-y-2">
                                                         <Label>{t('orders.form.currency') || 'Currency'}</Label>
@@ -1639,7 +1649,16 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                                                             <CalendarDays className="h-4 w-4 text-muted-foreground" />
                                                             {t('orders.form.date') || 'Date'}
                                                         </Label>
-                                                        <Input id="purchase-delivery" type="date" value={purchaseForm.expectedDeliveryDate} onChange={(event) => setPurchaseForm((current) => ({ ...current, expectedDeliveryDate: event.target.value }))} />
+                                                        <DateTimePicker
+                                                            id="purchase-delivery"
+                                                            mode="date-time"
+                                                            date={parseLocalDateTimeValue(purchaseForm.expectedDeliveryDate)}
+                                                            setDate={(value) => setPurchaseForm((current) => ({
+                                                                ...current,
+                                                                expectedDeliveryDate: value ? formatLocalDateTimeValue(value) : ''
+                                                            }))}
+                                                            placeholder={t('orders.form.date') || 'Date'}
+                                                        />
                                                     </div>
                                                     <div className="space-y-2">
                                                         <Label>{t('orders.form.currency') || 'Currency'}</Label>

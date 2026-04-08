@@ -23,7 +23,7 @@ import {
     Pie,
     Cell
 } from 'recharts'
-import { formatCurrency, cn } from '@/lib/utils'
+import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import { RotateCcw, TrendingDown, Package, Percent } from 'lucide-react'
 import { Sale } from '@/types'
 
@@ -113,7 +113,7 @@ export function ReturnsAnalysisModal({ isOpen, onClose, sales, iqdPreference, de
         const trendData = Object.entries(dailyReturns)
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([date, data]) => ({
-                date: new Date(date).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }),
+                date: formatDate(date),
                 count: data.count,
                 amount: data.amount
             }))

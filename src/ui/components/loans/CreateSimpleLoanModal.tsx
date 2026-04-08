@@ -6,8 +6,10 @@ import { useAuth } from '@/auth'
 import { createManualLoan, type CurrencyCode, type LoanDirection } from '@/local-db'
 import { getLoanCounterpartyNameLabel, getLoanDirectionLabel } from '@/lib/loanPresentation'
 import { getLoanLinkedPartyTypeLabel, type LoanPartySelection } from '@/lib/loanParties'
+import { formatLocalDateValue, formatNumericInput, parseFormattedNumber, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
 import {
     Button,
+    DateTimePicker,
     Dialog,
     DialogContent,
     DialogDescription,
@@ -26,7 +28,6 @@ import {
 } from '@/ui/components'
 import { useWorkspace } from '@/workspace'
 import { LoanPartyPickerDialog } from './LoanPartyPickerDialog'
-import { formatNumericInput, parseFormattedNumber, sanitizeNumericInput } from '@/lib/utils'
 
 interface CreateSimpleLoanModalProps {
     isOpen: boolean
@@ -57,7 +58,7 @@ export function CreateSimpleLoanModal({
     const [selectedParty, setSelectedParty] = useState<LoanPartySelection | null>(null)
     const [isPartyPickerOpen, setIsPartyPickerOpen] = useState(false)
     const [principalAmount, setPrincipalAmount] = useState('')
-    const [dueDate, setDueDate] = useState(new Date().toISOString().slice(0, 10))
+    const [dueDate, setDueDate] = useState(formatLocalDateValue(new Date()))
     const [notes, setNotes] = useState('')
 
     useEffect(() => {
@@ -73,7 +74,7 @@ export function CreateSimpleLoanModal({
         setSelectedParty(null)
         setIsPartyPickerOpen(false)
         setPrincipalAmount('')
-        setDueDate(new Date().toISOString().slice(0, 10))
+        setDueDate(formatLocalDateValue(new Date()))
         setNotes('')
     }, [isOpen, settlementCurrency])
 
@@ -258,7 +259,13 @@ export function CreateSimpleLoanModal({
                                 </div>
                                 <div className="grid gap-2">
                                     <Label>{t('loans.dueDate', { defaultValue: 'Due Date' })}</Label>
-                                    <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
+                                    <DateTimePicker
+                                        id="simple-loan-due-date"
+                                        mode="date"
+                                        date={parseLocalDateValue(dueDate)}
+                                        setDate={(value) => setDueDate(value ? formatLocalDateValue(value) : '')}
+                                        placeholder={t('loans.dueDate', { defaultValue: 'Due Date' })}
+                                    />
                                 </div>
                             </div>
 

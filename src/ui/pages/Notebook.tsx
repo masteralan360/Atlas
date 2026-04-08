@@ -7,6 +7,7 @@ import { useAuth } from '@/auth'
 import { Button, Input } from '@/ui/components'
 import { useTheme } from '@/ui/components/theme-provider'
 import { getNotebookDocument, getNotebookStorageKey, isNotebookStarterContent, saveNotebookDocument, type NotebookDocument } from '@/local-db/notebook'
+import { formatDateTime } from '@/lib/utils'
 import '@lyfie/luthor/styles.css'
 
 const AUTOSAVE_INTERVAL_MS = 1500
@@ -50,8 +51,8 @@ export function Notebook() {
         }
 
         return t('notebook.status.savedAt', {
-            date: savedDate.toLocaleString()
-        }) || `Saved ${savedDate.toLocaleString()}`
+            date: formatDateTime(savedDate)
+        }) || `Saved ${formatDateTime(savedDate)}`
     }, [t])
 
     useEffect(() => {

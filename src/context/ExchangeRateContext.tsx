@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { fetchUSDToIQDRate, fetchEURToIQDRate, fetchTRYToIQDRate, fetchRatesFromAllSources, type ExchangeRateResult } from '@/lib/exchangeRate'
 import { useWorkspace } from '@/workspace'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
+import { formatTime } from '@/lib/utils'
 
 export interface ExchangeSnapshot {
     rate: number
@@ -309,7 +310,7 @@ export function ExchangeRateProvider({ children }: { children: React.ReactNode }
         } else {
             setStatus('error')
         }
-        setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }))
+        setLastUpdated(formatTime(new Date()))
     }, [features.eur_conversion_enabled, features.try_conversion_enabled])
 
     useEffect(() => {

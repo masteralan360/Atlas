@@ -21,7 +21,7 @@ import {
     ResponsiveContainer,
     Legend
 } from 'recharts'
-import { formatCurrency, cn } from '@/lib/utils'
+import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import { TrendingUp, DollarSign, TrendingDown, BarChart3 } from 'lucide-react'
 
 interface SalesOverviewModalProps {
@@ -80,7 +80,7 @@ export function SalesOverviewModal({ isOpen, onClose, data, iqdPreference }: Sal
                 })
 
                 return {
-                    date: new Date(date).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }),
+                    date: formatDate(date),
                     revenue,
                     cost,
                     profit

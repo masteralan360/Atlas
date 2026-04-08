@@ -2,9 +2,77 @@ import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
 import { getLoanLinkedPartySummary } from '@/lib/loanParties'
 import { getLoanCounterpartyLabel, getLoanDetailsTitle, getLoanDirection, getLoanDirectionLabel, getLoanScheduleTitle, getLoanSummaryTitle, isSimpleLoan } from '@/lib/loanPresentation'
+import i18n from '@/i18n/config'
+import { getAppSettingSync, setAppSetting } from '@/local-db/settings'
 
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs))
+}
+
+export type HourDisplayPreference = '24-hour' | '12-hour'
+
+export const HOUR_DISPLAY_PREFERENCE_KEY = 'hour_display_preference'
+export const HOUR_DISPLAY_PREFERENCE_EVENT = 'atlas:hour-display-preference-change'
+
+function pad2(value: number) {
+    return String(value).padStart(2, '0')
+}
+
+function toDate(value: Date | string): Date {
+    if (value instanceof Date) {
+        return new Date(value.getTime())
+    }
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const [year, month, day] = value.split('-').map(Number)
+        return new Date(year, month - 1, day)
+    }
+
+    return new Date(value)
+}
+
+function isValidDate(value: Date) {
+    return !Number.isNaN(value.getTime())
+}
+
+function formatNumericDate(date: Date, yearDigits: 2 | 4) {
+    if (!isValidDate(date)) {
+        return yearDigits === 2 ? '--/--/--' : '--/--/----'
+    }
+
+    const year = yearDigits === 2
+        ? date.getFullYear().toString().slice(-2)
+        : String(date.getFullYear())
+
+    return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${year}`
+}
+
+function formatTimePlaceholder(includeMinutes: boolean, includeSeconds: boolean, preference: HourDisplayPreference) {
+    if (!includeMinutes) {
+        return preference === '12-hour'
+            ? `-- ${i18n.t('common.am', { defaultValue: 'AM' })}`
+            : '--'
+    }
+
+    const base = includeSeconds ? '--:--:--' : '--:--'
+    return preference === '12-hour'
+        ? `${base} ${i18n.t('common.am', { defaultValue: 'AM' })}`
+        : base
+}
+
+export function getHourDisplayPreference(): HourDisplayPreference {
+    const storedPreference = getAppSettingSync(HOUR_DISPLAY_PREFERENCE_KEY)
+    return storedPreference === '12-hour' ? '12-hour' : '24-hour'
+}
+
+export async function setHourDisplayPreference(preference: HourDisplayPreference): Promise<void> {
+    await setAppSetting(HOUR_DISPLAY_PREFERENCE_KEY, preference)
+
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(HOUR_DISPLAY_PREFERENCE_EVENT, {
+            detail: preference
+        }))
+    }
 }
 
 export function formatCurrency(
@@ -44,40 +112,123 @@ export function formatCurrency(
 }
 
 export function formatDate(date: Date | string): string {
-    return new Intl.DateTimeFormat('en-GB', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-    }).format(new Date(date))
+    return formatNumericDate(toDate(date), 2)
+}
+
+export function parseLocalDateValue(value?: string | null): Date | undefined {
+    if (!value) {
+        return undefined
+    }
+
+    const parsed = toDate(value)
+    return isValidDate(parsed) ? parsed : undefined
+}
+
+export function parseLocalDateTimeValue(value?: string | null): Date | undefined {
+    if (!value) {
+        return undefined
+    }
+
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/)
+    if (match) {
+        const [, year, month, day, hours, minutes, seconds] = match
+        return new Date(
+            Number(year),
+            Number(month) - 1,
+            Number(day),
+            Number(hours),
+            Number(minutes),
+            Number(seconds || 0)
+        )
+    }
+
+    const parsed = new Date(value)
+    return isValidDate(parsed) ? parsed : undefined
+}
+
+export function formatLocalDateValue(value?: Date | string | null): string {
+    if (!value) {
+        return ''
+    }
+
+    const parsed = toDate(value)
+    if (!isValidDate(parsed)) {
+        return ''
+    }
+
+    return `${parsed.getFullYear()}-${pad2(parsed.getMonth() + 1)}-${pad2(parsed.getDate())}`
+}
+
+export function formatLocalDateTimeValue(value?: Date | string | null): string {
+    if (!value) {
+        return ''
+    }
+
+    const parsed = toDate(value)
+    if (!isValidDate(parsed)) {
+        return ''
+    }
+
+    return `${formatLocalDateValue(parsed)}T${pad2(parsed.getHours())}:${pad2(parsed.getMinutes())}`
+}
+
+export function formatTime(
+    date: Date | string,
+    options?: {
+        includeMinutes?: boolean
+        includeSeconds?: boolean
+        preference?: HourDisplayPreference
+    }
+): string {
+    const parsedDate = toDate(date)
+    const includeMinutes = options?.includeMinutes ?? true
+    const includeSeconds = options?.includeSeconds ?? false
+    const preference = options?.preference ?? getHourDisplayPreference()
+
+    if (!isValidDate(parsedDate)) {
+        return formatTimePlaceholder(includeMinutes, includeSeconds, preference)
+    }
+
+    if (preference === '24-hour') {
+        const base = includeMinutes
+            ? `${pad2(parsedDate.getHours())}:${pad2(parsedDate.getMinutes())}`
+            : pad2(parsedDate.getHours())
+
+        return includeSeconds ? `${base}:${pad2(parsedDate.getSeconds())}` : base
+    }
+
+    const rawHours = parsedDate.getHours()
+    const meridiem = rawHours >= 12
+        ? i18n.t('common.pm', { defaultValue: 'PM' })
+        : i18n.t('common.am', { defaultValue: 'AM' })
+    const hour = rawHours % 12 || 12
+    const base = includeMinutes
+        ? `${pad2(hour)}:${pad2(parsedDate.getMinutes())}`
+        : pad2(hour)
+
+    return includeSeconds
+        ? `${base}:${pad2(parsedDate.getSeconds())} ${meridiem}`
+        : `${base} ${meridiem}`
 }
 
 export function formatDateTime(date: Date | string): string {
-    return new Intl.DateTimeFormat('en-GB', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-    }).format(new Date(date))
+    return `${formatDate(date)} ${formatTime(date)}`
 }
 
 export function formatCompactDateTime(date: Date | string): string {
-    const d = new Date(date)
-    const month = d.toLocaleString('en-US', { month: 'short' })
-    const day = d.getDate()
-    const hh = d.getHours().toString().padStart(2, '0')
-    const mm = d.getMinutes().toString().padStart(2, '0')
-    return `${day} ${month}, ${hh}:${mm}`
+    return formatDateTime(date)
 }
 
 export function formatSnapshotTime(date: Date | string): string {
-    const d = new Date(date)
-    const yy = d.getFullYear().toString().slice(-2)
-    const mm = (d.getMonth() + 1).toString().padStart(2, '0')
-    const dd = d.getDate().toString().padStart(2, '0')
-    const hh = d.getHours().toString().padStart(2, '0')
-    const min = d.getMinutes().toString().padStart(2, '0')
-    return `${dd}/${mm}/${yy} ${hh}:${min}`
+    return formatDateTime(date)
+}
+
+export function formatDocumentDate(date: Date | string): string {
+    return formatNumericDate(toDate(date), 4)
+}
+
+export function formatDocumentDateTime(date: Date | string): string {
+    return `${formatDocumentDate(date)} ${formatTime(date, { preference: '24-hour' })}`
 }
 
 export function generateId(): string {
@@ -170,7 +321,7 @@ export function formatNumberWithCommas(val: number | string): string {
 }
 
 export function formatSaleDetailsForWhatsApp(sale: any, t: (key: string) => string): string {
-    const date = formatDateTime(sale.created_at)
+    const date = formatDocumentDateTime(sale.created_at)
     const id = sale.sequenceId ? `#${String(sale.sequenceId).padStart(5, '0')}` : `#${sale.id.slice(0, 8)}`
 
     // Header
@@ -233,7 +384,7 @@ export function formatSaleDetailsForWhatsApp(sale: any, t: (key: string) => stri
 }
 
 export function formatLoanDetailsForWhatsApp(loan: any, t: (key: string) => string): string {
-    const date = formatDateTime(loan.createdAt)
+    const date = formatDocumentDateTime(loan.createdAt)
     const id = loan.loanNo
     const linkedPartySummary = getLoanLinkedPartySummary(loan, t)
     const belongsToLabel = t('loans.belongsTo') === 'loans.belongsTo' ? 'Belongs to' : t('loans.belongsTo')
@@ -269,7 +420,7 @@ export function formatLoanDetailsForWhatsApp(loan: any, t: (key: string) => stri
 
     // Next Due
     if (loan.nextDueDate) {
-        text += `\n*${t('loans.nextDue') || 'Next Due'}:* ${formatDate(loan.nextDueDate)}\n`
+        text += `\n*${t('loans.nextDue') || 'Next Due'}:* ${formatDocumentDate(loan.nextDueDate)}\n`
     }
 
     return text

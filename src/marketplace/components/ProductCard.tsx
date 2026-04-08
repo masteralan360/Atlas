@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Package2, Plus } from 'lucide-react'
 
 import { Button, Card, CardContent } from '@/ui/components'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import type { MarketplaceProduct } from '../lib/marketplaceApi'
 import { getMarketplaceAssetUrl } from '../lib/assets'
 
@@ -90,7 +90,7 @@ export function ProductCard({ product, iqdPreference, addToCartLabel, onAdd }: P
                         <div className="text-xs text-muted-foreground">{product.unit}</div>
                         {endsSoon && endsAt && (
                             <div className="mt-1 text-[11px] font-medium text-amber-600">
-                                Ends {endsAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                Ends {formatDate(endsAt)}
                             </div>
                         )}
                     </div>

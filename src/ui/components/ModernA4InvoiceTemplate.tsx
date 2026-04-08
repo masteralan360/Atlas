@@ -1,6 +1,6 @@
 import { forwardRef } from 'react'
 import { UniversalInvoice } from '@/types'
-import { cn, formatCurrency } from '@/lib/utils'
+import { cn, formatCurrency, formatDate, formatTime } from '@/lib/utils'
 import { platformService } from '@/services/platformService'
 import { useTranslation } from 'react-i18next'
 import { ReactQRCode } from '@lglab/react-qr-code'
@@ -68,10 +68,10 @@ export const ModernA4InvoiceTemplate = forwardRef<HTMLDivElement, ModernA4Invoic
         const createdAt = new Date(data.created_at)
         const hasValidCreatedAt = !Number.isNaN(createdAt.getTime())
         const dateLabel = hasValidCreatedAt
-            ? new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(createdAt)
-            : '--/--/----'
+            ? formatDate(createdAt)
+            : '--/--/--'
         const timeLabel = hasValidCreatedAt
-            ? new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }).format(createdAt)
+            ? formatTime(createdAt)
             : '--:--'
 
         const footerContactGroups = [

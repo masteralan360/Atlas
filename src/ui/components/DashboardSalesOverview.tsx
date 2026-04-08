@@ -16,7 +16,7 @@ import {
     ResponsiveContainer,
     Legend
 } from 'recharts'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import { TrendingUp, DollarSign, TrendingDown, BarChart3 } from 'lucide-react'
 
 interface DashboardSalesOverviewProps {
@@ -65,7 +65,7 @@ export function DashboardSalesOverview({ data, iqdPreference }: DashboardSalesOv
                 })
 
                 return {
-                    date: new Date(date).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }),
+                    date: formatDate(date),
                     revenue,
                     cost,
                     profit

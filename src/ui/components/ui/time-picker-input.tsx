@@ -14,7 +14,8 @@ import {
 
 export interface TimePickerInputProps
   extends React.InputHTMLAttributes<HTMLInputElement> {
-  picker: "hours" | "minutes" | "12hours"
+  picker: "hours" | "minutes" | "period"
+  hourCycle?: 12 | 24
   date: Date | undefined
   setDate: (date: Date | undefined) => void
   onRightFocus?: () => void
@@ -37,6 +38,7 @@ const TimePickerInput = React.forwardRef<
       onChange,
       onKeyDown,
       picker,
+      hourCycle = 24,
       onLeftFocus,
       onRightFocus,
       ...props
@@ -49,20 +51,25 @@ const TimePickerInput = React.forwardRef<
      * compute current value from date
      */
     const calculatedValue = React.useMemo(() => {
+      if (picker === "hours") {
+        if (!date) return hourCycle === 12 ? "12" : "00"
+        const hours = date.getHours()
+        const displayedHours = hourCycle === 12 ? (hours % 12 || 12) : hours
+        return displayedHours.toString().padStart(2, "0")
+      }
       if (!date) return "00"
-      if (picker === "hours") return date.getHours().toString().padStart(2, "0")
       if (picker === "minutes") return date.getMinutes().toString().padStart(2, "0")
-      if (picker === "12hours") {
+      if (picker === "period") {
         const hours = date.getHours()
         const isPM = hours >= 12
         return isPM ? "PM" : "AM"
       }
       return "00"
-    }, [date, picker])
+    }, [date, hourCycle, picker])
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Tab") return
-      if (picker === "12hours") {
+      if (picker === "period") {
         if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "a" || e.key === "p" || e.key === "A" || e.key === "P") {
           e.preventDefault()
           const isPM = date ? date.getHours() >= 12 : false
@@ -82,7 +89,14 @@ const TimePickerInput = React.forwardRef<
         const newValue = parseInt(calculatedValue) + step
         if (picker === "hours") {
           const newDate = new Date(date || new Date())
-          newDate.setHours((newValue + 24) % 24)
+          if (hourCycle === 12) {
+            const currentHours = newDate.getHours()
+            const isPM = currentHours >= 12
+            const nextDisplayedHour = ((newValue - 1 + 12) % 12) + 1
+            newDate.setHours((nextDisplayedHour % 12) + (isPM ? 12 : 0))
+          } else {
+            newDate.setHours((newValue + 24) % 24)
+          }
           setDate(newDate)
         } else if (picker === "minutes") {
           const newDate = new Date(date || new Date())
@@ -93,14 +107,20 @@ const TimePickerInput = React.forwardRef<
     }
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (picker === "12hours") return
+      if (picker === "period") return
       const val = e.target.value.slice(-2)
       const num = parseInt(val)
       if (isNaN(num)) return
 
       const newDate = new Date(date || new Date())
       if (picker === "hours") {
-        newDate.setHours(num % 24)
+        if (hourCycle === 12) {
+          const safeHour = Math.min(Math.max(num, 1), 12)
+          const isPM = newDate.getHours() >= 12
+          newDate.setHours((safeHour % 12) + (isPM ? 12 : 0))
+        } else {
+          newDate.setHours(num % 24)
+        }
       } else {
         newDate.setMinutes(num % 60)
       }
@@ -108,13 +128,12 @@ const TimePickerInput = React.forwardRef<
       if (val.length === 2) onRightFocus?.()
     }
 
-    if (picker === "12hours") {
+    if (picker === "period") {
       return (
         <Select
           value={date ? (date.getHours() >= 12 ? "PM" : "AM") : "AM"}
           onValueChange={(value) => {
-            if (!date) return
-            const newDate = new Date(date)
+            const newDate = new Date(date || new Date())
             const currentHours = newDate.getHours()
             if (value === "PM" && currentHours < 12) {
               newDate.setHours(currentHours + 12)

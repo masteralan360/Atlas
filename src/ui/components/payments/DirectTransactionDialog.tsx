@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 
 import { useBusinessPartners, type CurrencyCode, type WorkspacePaymentMethod } from '@/local-db'
-import { formatNumberWithCommas, parseFormattedNumber } from '@/lib/utils'
+import { formatLocalDateTimeValue, formatNumberWithCommas, parseFormattedNumber, parseLocalDateTimeValue } from '@/lib/utils'
 import {
     Button,
     CurrencySelector,
+    DateTimePicker,
     Dialog,
     DialogContent,
     DialogDescription,
@@ -40,12 +41,6 @@ interface DirectTransactionDialogProps {
     }) => Promise<void> | void
 }
 
-function toLocalDateTimeValue(value: string) {
-    const date = new Date(value)
-    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-    return local.toISOString().slice(0, 16)
-}
-
 export function DirectTransactionDialog({
     open,
     onOpenChange,
@@ -74,13 +69,14 @@ export function DirectTransactionDialog({
         setAmount('')
         setCurrency((features.default_currency || 'usd') as CurrencyCode)
         setPaymentMethod('cash')
-        setPaidAt(toLocalDateTimeValue(new Date().toISOString()))
+        setPaidAt(formatLocalDateTimeValue(new Date()))
         setReason('')
         setNote('')
         setCounterpartyName('')
         setBusinessPartnerId('none')
     }, [features.default_currency, open])
 
+    const selectedPaidAt = parseLocalDateTimeValue(paidAt)
     const selectedPartner = businessPartnerId !== 'none'
         ? partners.find((item) => item.id === businessPartnerId)
         : undefined
@@ -174,7 +170,12 @@ export function DirectTransactionDialog({
 
                     <div className="grid gap-2">
                         <Label>Paid At</Label>
-                        <Input type="datetime-local" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} />
+                        <DateTimePicker
+                            id="direct-transaction-paid-at"
+                            date={selectedPaidAt}
+                            setDate={(value) => setPaidAt(value ? formatLocalDateTimeValue(value) : '')}
+                            placeholder="Pick transaction time"
+                        />
                     </div>
 
                     <div className="grid gap-2">
@@ -194,12 +195,13 @@ export function DirectTransactionDialog({
                             amount: parseFormattedNumber(amount),
                             currency,
                             paymentMethod,
-                            paidAt: new Date(paidAt).toISOString(),
+                            paidAt: selectedPaidAt?.toISOString() || '',
                             reason: reason.trim(),
                             note: note.trim() || undefined,
                             counterpartyName: selectedPartner?.name || counterpartyName.trim() || undefined,
                             businessPartnerId: selectedPartner?.id || null
                         })}
+                        disabled={isSubmitting || !selectedPaidAt}
                     >
                         Save Transaction
                     </Button>

@@ -8,7 +8,7 @@ import { useWorkspace } from '@/workspace'
 import { Coins } from 'lucide-react'
 import type { IQDDisplayPreference, CurrencyCode } from '@/local-db/models'
 import { Settings as SettingsIcon, Database, Cloud, Trash2, RefreshCw, User, Copy, Check, CreditCard, Globe, Download, AlertCircle, Printer, Contact, Fingerprint, Store, ExternalLink } from 'lucide-react'
-import { formatDateTime, cn } from '@/lib/utils'
+import { formatDate, formatDateTime, formatTime, cn, getHourDisplayPreference, setHourDisplayPreference, type HourDisplayPreference } from '@/lib/utils'
 import { useTheme } from '@/ui/components/theme-provider'
 import { Moon, Sun, Monitor, Unlock, Server, MessageSquare, Bell, MonitorPlay, Wifi } from 'lucide-react'
 import { useState, useEffect } from 'react'
@@ -57,6 +57,7 @@ export function Settings() {
     const [tryExchangeRateSource, setTryExchangeRateSource] = useState(localStorage.getItem('primary_try_exchange_rate_source') || 'forexfy')
     const [exchangeRateThreshold, setExchangeRateThreshold] = useState(localStorage.getItem('exchange_rate_threshold') || '2500')
     const [whatsappAutoLaunch, setWhatsappAutoLaunch] = useState(localStorage.getItem('whatsapp_auto_launch') === 'true')
+    const [hourDisplayPreference, setHourDisplayPreferenceState] = useState<HourDisplayPreference>(getHourDisplayPreference())
     const [monthDisplayPreference, setMonthDisplayPreferenceState] = useState<MonthDisplayPreference>(getMonthDisplayPreference())
     const isKdsSaving = false
 
@@ -1217,6 +1218,38 @@ export function Settings() {
                                         <LanguageSwitcher />
                                         <span className="text-sm text-muted-foreground">
                                             {t('settings.languageDesc')}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div className="flex flex-col gap-2">
+                                    <Label>{t('settings.hourDisplay.title', { defaultValue: 'Hour Display' })}</Label>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <Select
+                                            value={hourDisplayPreference}
+                                            onValueChange={(value) => {
+                                                const nextValue = value as HourDisplayPreference
+                                                setHourDisplayPreferenceState(nextValue)
+                                                void setHourDisplayPreference(nextValue).catch((error) => {
+                                                    console.error('[Settings] Failed to save hour display preference:', error)
+                                                })
+                                            }}
+                                        >
+                                            <SelectTrigger className="w-[180px]" allowViewer={true}>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="24-hour">{t('settings.hourDisplay.twentyFourHour', { defaultValue: '24-hour' })}</SelectItem>
+                                                <SelectItem value="12-hour">{t('settings.hourDisplay.twelveHour', { defaultValue: '12-hour' })}</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <span className="text-sm text-muted-foreground">
+                                            {t('settings.hourDisplay.desc', {
+                                                defaultValue: 'Choose how times appear across the interface.'
+                                            })}
+                                        </span>
+                                        <span className="text-sm font-mono text-muted-foreground">
+                                            {`${formatDate(new Date())} ${formatTime(new Date(), { preference: hourDisplayPreference })}`}
                                         </span>
                                     </div>
                                 </div>

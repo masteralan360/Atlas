@@ -424,7 +424,7 @@ export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string
                                 </div>
                                 <div className="rounded-2xl border bg-muted/20 p-3">
                                     <div className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">{t('orders.details.expectedDelivery') || 'Expected Delivery'}</div>
-                                    <div className="mt-1 font-medium">{order.expectedDeliveryDate ? formatDate(order.expectedDeliveryDate) : 'N/A'}</div>
+                                    <div className="mt-1 font-medium">{order.expectedDeliveryDate ? formatDateTime(order.expectedDeliveryDate) : 'N/A'}</div>
                                 </div>
                             </div>
                             <div className="rounded-2xl border bg-background/70 p-4">

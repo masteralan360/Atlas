@@ -17,7 +17,6 @@ import { Button } from '@/ui/components/button'
 import {
     ArrowRightLeft,
     Bot,
-    CalendarDays,
     Check,
     ChevronRight,
     History,
@@ -36,6 +35,7 @@ import {
     CardHeader,
     CardTitle,
     Checkbox,
+    DateTimePicker,
     Dialog,
     DialogContent,
     DialogDescription,
@@ -56,6 +56,7 @@ import {
 } from '@/ui/components'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '@/ui/components/use-toast'
+import { formatDate, formatDateTime, formatLocalDateValue, parseLocalDateValue } from '@/lib/utils'
 
 interface RuleFormState {
     productId: string
@@ -117,11 +118,7 @@ function formatDateLabel(value?: string | null) {
         return value
     }
 
-    return new Intl.DateTimeFormat(undefined, {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-    }).format(parsed)
+    return formatDate(parsed)
 }
 
 function formatDateTimeLabel(value?: string | null) {
@@ -134,13 +131,7 @@ function formatDateTimeLabel(value?: string | null) {
         return value
     }
 
-    return new Intl.DateTimeFormat(undefined, {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    }).format(parsed)
+    return formatDateTime(parsed)
 }
 
 function getTodayDateKey() {
@@ -1251,17 +1242,17 @@ export default function InventoryTransfer() {
                                         <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)] md:items-end">
                                             <div className="space-y-2">
                                                 <div className="relative">
-                                                    <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                                                    <Input
+                                                    <DateTimePicker
                                                         id="rule-expiry"
-                                                        type="date"
-                                                        value={ruleForm.expiresOn}
+                                                        mode="date"
+                                                        date={parseLocalDateValue(ruleForm.expiresOn)}
                                                         disabled={ruleForm.isIndefinite}
-                                                        onChange={(event) => setRuleForm((current) => ({
+                                                        setDate={(value) => setRuleForm((current) => ({
                                                             ...current,
-                                                            expiresOn: event.target.value
+                                                            expiresOn: value ? formatLocalDateValue(value) : ''
                                                         }))}
-                                                        className="h-12 rounded-2xl pl-10"
+                                                        placeholder={t('inventoryTransfer.automation.scheduleExpiry', 'Schedule / Expiry Date')}
+                                                        buttonClassName="h-12 rounded-2xl"
                                                     />
                                                 </div>
                                                 <p className="text-xs text-muted-foreground">

@@ -4,7 +4,7 @@ import { useLocation } from 'wouter'
 import { useAuth } from '@/auth'
 import { Sale } from '@/types'
 import { useSales, useSalesOrders, useTravelAgencySales, toUISale, toUISaleFromTravelAgency } from '@/local-db'
-import { formatCurrency, formatDateTime, formatDate, formatOriginLabel } from '@/lib/utils'
+import { formatCurrency, formatDateTime, formatDate, formatOriginLabel, formatTime } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { isMobile } from '@/lib/platform'
@@ -376,20 +376,16 @@ export function Revenue() {
         const hours = [12, 17, 20, 22] // Example hours mapping to 12 PM, 05 PM, 08 PM, 10 PM
         const maxSales = Math.max(...Object.values(hourly), 1)
 
-        const hourFormatter = new Intl.DateTimeFormat(i18n.language, {
-            hour: 'numeric',
-            hour12: true
-        })
-
         return hours.map(h => {
             const date = new Date()
             date.setHours(h, 0, 0, 0)
             return {
-                hour: hourFormatter.format(date),
+                hour: formatTime(date, { includeMinutes: false }),
+                hourValue: h,
                 value: ((hourly[h] || 0) / maxSales) * 100
             }
         })
-    }, [primaryStats.hourlySales, i18n.language])
+    }, [primaryStats.hourlySales])
 
     const SparklineArea = ({ data, dataKey, color }: { data: any[], dataKey: string, color: string }) => (
         <div className="h-12 w-full mt-4 -mx-2">
@@ -779,7 +775,7 @@ export function Revenue() {
                                                         return (
                                                             <div className="bg-background/95 backdrop-blur-sm border border-border shadow-xl p-3 rounded-2xl">
                                                                 <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5 flex justify-center">
-                                                                    {payload[0].payload.date}
+                                                                    {formatDate(payload[0].payload.date)}
                                                                 </p>
                                                                 <div className="space-y-0.5 flex flex-col items-center">
                                                                     <p className="text-sm font-black text-blue-500">
@@ -856,22 +852,12 @@ export function Revenue() {
                                                 {t('revenue.busiestHour') || 'Busiest hour'}: <span className="text-purple-500 font-black">
                                                     {peakTradingData.length > 0 ? (
                                                         (() => {
-                                                            const hour = parseInt(peakTradingData[0].hour.match(/\d+/)![0])
-                                                            const isPM = peakTradingData[0].hour.toLowerCase().includes('pm')
-                                                            const startH = isPM && hour !== 12 ? hour + 12 : (!isPM && hour === 12 ? 0 : hour)
-
-                                                            const formatter = new Intl.DateTimeFormat(i18n.language, {
-                                                                hour: 'numeric',
-                                                                minute: 'numeric',
-                                                                hour12: true
-                                                            })
-
                                                             const startDate = new Date()
-                                                            startDate.setHours(startH, 0, 0, 0)
+                                                            startDate.setHours(peakTradingData[0].hourValue, 0, 0, 0)
                                                             const endDate = new Date()
-                                                            endDate.setHours(startH + 1, 0, 0, 0)
+                                                            endDate.setHours(peakTradingData[0].hourValue + 1, 0, 0, 0)
 
-                                                            return `${formatter.format(startDate)} - ${formatter.format(endDate)}`
+                                                            return `${formatTime(startDate)} - ${formatTime(endDate)}`
                                                         })()
                                                     ) : '--:--'}
                                                 </span>

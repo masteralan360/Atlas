@@ -1,5 +1,5 @@
 import i18n from '@/i18n/config'
-import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { formatCurrency, formatDocumentDateTime } from '@/lib/utils'
 import { isDesktop } from '@/lib/platform'
 import { clearAppSetting, getAppSetting, setAppSetting } from '@/local-db/settings'
 import type { UniversalInvoice } from '@/types'
@@ -164,7 +164,7 @@ function buildReceiptSections(
     const sections: PrintSections[] = [
         { Title: { text: workspaceName || 'Atlas' } },
         { Subtitle: { text: saleData.invoiceid || `#${saleData.id.slice(0, 8)}` } },
-        { Text: { text: `${t('sales.date', { defaultValue: 'Date' })}: ${formatDateTime(saleData.created_at)}`, styles: { align } } },
+        { Text: { text: `${t('sales.date', { defaultValue: 'Date' })}: ${formatDocumentDateTime(saleData.created_at)}`, styles: { align } } },
         { Text: { text: `${t('sales.cashier', { defaultValue: 'Cashier' })}: ${saleData.cashier_name || 'System'}`, styles: { align } } },
         { Text: { text: `${t('pos.paymentMethod', { defaultValue: 'Payment Method' })}: ${getPaymentMethodLabel(saleData.payment_method, t)}`, styles: { align } } },
         { Line: { character: '-' } }

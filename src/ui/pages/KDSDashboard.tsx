@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react'
 import { useKdsStream } from '@/hooks/useKdsStream'
 import { useWorkspace } from '@/workspace'
-import { cn, stylizeText } from '@/lib/utils'
+import { cn, formatTime, stylizeText } from '@/lib/utils'
 import { Check } from 'lucide-react'
 import { isDesktop } from '@/lib/platform'
 
@@ -109,12 +109,7 @@ function formatElapsed(start: string, now: Date) {
 }
 
 function formatClockTime(date: Date, withSeconds: boolean) {
-    return date.toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: withSeconds ? '2-digit' : undefined,
-        hour12: false
-    })
+    return formatTime(date, { includeSeconds: withSeconds })
 }
 
 export function KDSDashboard() {
