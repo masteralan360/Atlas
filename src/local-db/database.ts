@@ -745,6 +745,38 @@ export class AtlasDatabase extends Dexie {
                 ...input
             })
 
+            for (const loan of loans) {
+                if (loan.isDeleted || loan.source !== 'manual') {
+                    continue
+                }
+
+                rows.push(createRow({
+                    id: crypto.randomUUID(),
+                    workspaceId: loan.workspaceId,
+                    sourceModule: 'loans',
+                    sourceType: 'loan_origination',
+                    sourceRecordId: loan.id,
+                    sourceSubrecordId: null,
+                    direction: loan.direction === 'borrowed' ? 'incoming' : 'outgoing',
+                    amount: loan.principalAmount ?? 0,
+                    currency: loan.settlementCurrency ?? 'usd',
+                    paymentMethod: 'unknown',
+                    paidAt: loan.createdAt ?? now,
+                    counterpartyName: loan.borrowerName ?? null,
+                    referenceLabel: loan.loanNo ?? null,
+                    note: loan.notes ?? null,
+                    createdBy: loan.createdBy ?? null,
+                    reversalOfTransactionId: null,
+                    createdAt: loan.createdAt ?? now,
+                    updatedAt: loan.updatedAt ?? loan.createdAt ?? now,
+                    metadata: {
+                        loanCategory: loan.loanCategory ?? 'standard',
+                        loanDirection: loan.direction ?? 'lent',
+                        origination: true
+                    }
+                }))
+            }
+
             for (const payment of loanPayments) {
                 if (payment.isDeleted) {
                     continue

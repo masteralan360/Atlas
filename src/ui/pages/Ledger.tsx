@@ -63,6 +63,8 @@ type LedgerEntryType =
     | 'purchase_order_payment'
     | 'expense'
     | 'payroll_payment'
+    | 'loan_given'
+    | 'loan_taken'
     | 'loan_repayment_received'
     | 'loan_repayment_paid'
     | 'installment_received'
@@ -252,6 +254,10 @@ function ledgerTypeLabel(type: LedgerEntryType) {
             return 'Expense'
         case 'payroll_payment':
             return 'Payroll Payment'
+        case 'loan_given':
+            return 'Loan Given'
+        case 'loan_taken':
+            return 'Loan Taken'
         case 'loan_repayment_received':
             return 'Loan Repayment Received'
         case 'loan_repayment_paid':
@@ -589,6 +595,23 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction): LedgerEntry |
     }
 
     switch (transaction.sourceType) {
+        case 'loan_origination':
+            return {
+                id: `payment:${transaction.id}`,
+                transactionId: transaction.id,
+                date: transaction.paidAt,
+                type: transaction.direction === 'incoming' ? 'loan_taken' : 'loan_given',
+                direction: transaction.direction,
+                amount: transaction.amount,
+                currency: transaction.currency,
+                sourceModule: 'loans',
+                referenceId: buildTransactionReference(transaction),
+                partner: transaction.counterpartyName || null,
+                paymentMethod: transaction.paymentMethod || 'unknown',
+                notes: transaction.note?.trim() || null,
+                description: buildTransactionDescription(transaction) || (transaction.direction === 'incoming' ? 'Loan received' : 'Loan disbursed'),
+                routePath: getPaymentTransactionRoutePath(transaction)
+            }
         case 'sales_order': {
             const sourceChannel = typeof transaction.metadata?.sourceChannel === 'string'
                 ? transaction.metadata.sourceChannel.trim().toLowerCase()

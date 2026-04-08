@@ -613,6 +613,7 @@ export interface LoanPayment extends BaseEntity {
 
 export type PaymentTransactionSourceModule = 'loans' | 'orders' | 'budget' | 'payments'
 export type PaymentTransactionSourceType =
+    | 'loan_origination'
     | 'loan_payment'
     | 'simple_loan'
     | 'loan_installment'

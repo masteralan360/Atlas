@@ -87,18 +87,16 @@ export function SimpleLoanListView({
         () => loans.filter((loan) => loan.loanCategory === 'simple'),
         [loans]
     )
-    const loanTransactionHistoryIds = useLiveQuery(
+    const loanPaymentHistoryIds = useLiveQuery(
         async () => {
-            const rows = await db.payment_transactions.where('workspaceId').equals(workspaceId).toArray()
-            return rows
-                .filter((item) => item.sourceModule === 'loans')
-                .map((item) => item.sourceRecordId)
+            const rows = await db.loan_payments.where('workspaceId').equals(workspaceId).and((item) => !item.isDeleted).toArray()
+            return rows.map((item) => item.loanId)
         },
         [workspaceId]
     )
-    const loanTransactionHistoryIdSet = useMemo(
-        () => new Set(loanTransactionHistoryIds ?? []),
-        [loanTransactionHistoryIds]
+    const loanPaymentHistoryIdSet = useMemo(
+        () => new Set(loanPaymentHistoryIds ?? []),
+        [loanPaymentHistoryIds]
     )
 
     const metrics = useMemo(() => {
@@ -179,7 +177,7 @@ export function SimpleLoanListView({
         cashierName: user?.name || 'Unknown',
         printFormat: 'a4' as const
     }), [features.default_currency, metrics.totalBorrowed, metrics.totalLent, user?.name])
-    const canDeleteLoanRecord = (loan: Loan) => isLoanDeletionAllowed(loan, false, loanTransactionHistoryIdSet.has(loan.id))
+    const canDeleteLoanRecord = (loan: Loan) => isLoanDeletionAllowed(loan, false, loanPaymentHistoryIdSet.has(loan.id))
 
     const confirmDeleteLoan = async () => {
         if (!loanToDelete) {
@@ -198,7 +196,7 @@ export function SimpleLoanListView({
             toast({
                 title: t('common.error') || 'Error',
                 description: error?.message === 'loan_delete_not_allowed'
-                    ? (t('loans.messages.loanDeleteBlocked') || 'Loans with posted payment history cannot be deleted.')
+                    ? (t('loans.messages.loanDeleteBlocked') || 'Loans with recorded repayments cannot be deleted.')
                     : error?.message || (t('loans.messages.loanDeleteFailed') || 'Failed to delete loan.'),
                 variant: 'destructive'
             })

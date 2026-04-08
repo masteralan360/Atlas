@@ -130,12 +130,10 @@ function LoanListView({
         () => db.sales.where('workspaceId').equals(workspaceId).toArray(),
         [workspaceId]
     )
-    const loanTransactionHistoryIds = useLiveQuery(
+    const loanPaymentHistoryIds = useLiveQuery(
         async () => {
-            const rows = await db.payment_transactions.where('workspaceId').equals(workspaceId).toArray()
-            return rows
-                .filter((item) => item.sourceModule === 'loans')
-                .map((item) => item.sourceRecordId)
+            const rows = await db.loan_payments.where('workspaceId').equals(workspaceId).and((item) => !item.isDeleted).toArray()
+            return rows.map((item) => item.loanId)
         },
         [workspaceId]
     )
@@ -143,9 +141,9 @@ function LoanListView({
         () => new Set((workspaceSales ?? []).filter(item => !item.isDeleted).map(item => item.id)),
         [workspaceSales]
     )
-    const loanTransactionHistoryIdSet = useMemo(
-        () => new Set(loanTransactionHistoryIds ?? []),
-        [loanTransactionHistoryIds]
+    const loanPaymentHistoryIdSet = useMemo(
+        () => new Set(loanPaymentHistoryIds ?? []),
+        [loanPaymentHistoryIds]
     )
 
     const metrics = useMemo(() => {
@@ -221,7 +219,7 @@ function LoanListView({
         printFormat: 'a4' as const
     }), [currency, metrics.totalOutstanding, user?.name])
     const canDeleteLoanRecord = (loan: Loan) => {
-        const hasTransactionHistory = loanTransactionHistoryIdSet.has(loan.id)
+        const hasTransactionHistory = loanPaymentHistoryIdSet.has(loan.id)
         if (loan.source === 'manual' || !loan.saleId) {
             return isLoanDeletionAllowed(loan, false, hasTransactionHistory)
         }

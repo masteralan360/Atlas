@@ -49,6 +49,8 @@ type OpenStatusFilter = 'all' | 'open' | 'overdue'
 
 function sourceTypeLabel(value: PaymentObligation['sourceType'] | PaymentTransaction['sourceType']) {
     switch (value) {
+        case 'loan_origination':
+            return 'Loan Origination'
         case 'loan_installment':
             return 'Loan Installment'
         case 'simple_loan':

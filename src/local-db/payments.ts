@@ -208,6 +208,35 @@ export function getPaymentSourceKey(source: PaymentSourceKeyInput) {
     return `${source.sourceType}:${source.sourceRecordId}:${source.sourceSubrecordId || ''}`
 }
 
+function buildLoanOriginationTransactionInput(loan: Pick<Loan, 'id' | 'source' | 'loanCategory' | 'direction' | 'principalAmount' | 'settlementCurrency' | 'createdAt' | 'borrowerName' | 'loanNo' | 'notes' | 'createdBy'>): AppendPaymentTransactionInput | null {
+    if (loan.source !== 'manual') {
+        return null
+    }
+
+    return {
+        sourceModule: 'loans',
+        sourceType: 'loan_origination',
+        sourceRecordId: loan.id,
+        sourceSubrecordId: null,
+        direction: (loan.direction || 'lent') === 'borrowed' ? 'incoming' : 'outgoing',
+        amount: loan.principalAmount,
+        currency: loan.settlementCurrency,
+        paymentMethod: 'unknown',
+        paidAt: loan.createdAt,
+        counterpartyName: loan.borrowerName || null,
+        referenceLabel: loan.loanNo || null,
+        note: loan.notes?.trim() || null,
+        createdBy: loan.createdBy || null,
+        metadata: {
+            loanCategory: loan.loanCategory || 'standard',
+            loanDirection: loan.direction || 'lent',
+            origination: true
+        }
+    }
+}
+
+const loanOriginationEnsureLocks = new Map<string, Promise<void>>()
+
 function filterTransactions(
     items: PaymentTransaction[],
     filters: PaymentTransactionFilterOptions
@@ -294,6 +323,8 @@ async function hydratePaymentSourceTables(workspaceId: string) {
         fetchTableFromSupabase('payroll_statuses', db.payroll_statuses, workspaceId, { includeDeleted: true }),
         fetchTableFromSupabase('employees', db.employees, workspaceId, { includeDeleted: true })
     ])
+
+    await ensureManualLoanOriginationTransactions(workspaceId)
 }
 
 async function ensureExpenseItemsThroughCurrentMonth(workspaceId: string) {
@@ -671,6 +702,20 @@ export function usePaymentTransactions(workspaceId: string | undefined, filters:
     )
 
     useEffect(() => {
+        if (!workspaceId) {
+            return
+        }
+
+        if (online && shouldUseCloudBusinessData(workspaceId)) {
+            return
+        }
+
+        void ensureManualLoanOriginationTransactions(workspaceId).catch((error) => {
+            console.error('[Payments] Failed to ensure loan origination transactions', error)
+        })
+    }, [online, workspaceId])
+
+    useEffect(() => {
         if (!online || !workspaceId) {
             return
         }
@@ -700,10 +745,16 @@ export function usePaymentObligations(workspaceId: string | undefined, filters: 
             return
         }
 
+        if (!online || !shouldUseCloudBusinessData(workspaceId)) {
+            void ensureManualLoanOriginationTransactions(workspaceId).catch((error) => {
+                console.error('[Payments] Failed to ensure loan origination obligations', error)
+            })
+        }
+
         void ensureExpenseItemsThroughCurrentMonth(workspaceId).catch((error) => {
             console.error('[Payments] Failed to ensure expense items through current month', error)
         })
-    }, [workspaceId])
+    }, [online, workspaceId])
 
     useEffect(() => {
         if (!online || !workspaceId) {
@@ -910,6 +961,88 @@ export async function appendPaymentTransaction(
         }
 
         throw normalizeSupabaseActionError(error)
+    }
+}
+
+export async function appendLoanOriginationTransactionForLoan(
+    workspaceId: string,
+    loan: Pick<Loan, 'id' | 'workspaceId' | 'source' | 'loanCategory' | 'direction' | 'principalAmount' | 'settlementCurrency' | 'createdAt' | 'borrowerName' | 'loanNo' | 'notes' | 'createdBy'>
+) {
+    if (loan.workspaceId !== workspaceId) {
+        throw new Error('Workspace mismatch')
+    }
+
+    const input = buildLoanOriginationTransactionInput(loan)
+    if (!input) {
+        return null
+    }
+
+    const existing = await db.payment_transactions
+        .where('[workspaceId+sourceType+sourceRecordId]')
+        .equals([workspaceId, 'loan_origination', loan.id])
+        .toArray()
+
+    if (existing.length > 0) {
+        return existing
+            .slice()
+            .sort((left, right) => right.paidAt.localeCompare(left.paidAt) || right.createdAt.localeCompare(left.createdAt))[0] || null
+    }
+
+    return appendPaymentTransaction(workspaceId, input)
+}
+
+async function ensureManualLoanOriginationTransactions(workspaceId: string) {
+    const running = loanOriginationEnsureLocks.get(workspaceId)
+    if (running) {
+        return running
+    }
+
+    const task = (async () => {
+        const [loans, transactions] = await Promise.all([
+            db.loans.where('workspaceId').equals(workspaceId).toArray(),
+            db.payment_transactions.where('workspaceId').equals(workspaceId).toArray()
+        ])
+
+        const existingLoanIds = new Set(
+            transactions
+                .filter((item) => item.sourceType === 'loan_origination')
+                .map((item) => item.sourceRecordId)
+        )
+
+        for (const loan of loans) {
+            if (loan.isDeleted || loan.source !== 'manual' || existingLoanIds.has(loan.id)) {
+                continue
+            }
+
+            try {
+                await appendLoanOriginationTransactionForLoan(workspaceId, loan)
+                existingLoanIds.add(loan.id)
+            } catch (error) {
+                console.error('[Payments] Failed to ensure loan origination transaction:', error)
+            }
+        }
+    })().finally(() => {
+        loanOriginationEnsureLocks.delete(workspaceId)
+    })
+
+    loanOriginationEnsureLocks.set(workspaceId, task)
+    return task
+}
+
+export async function hideLoanTransactionsForDeletedLoan(workspaceId: string, loanId: string) {
+    const relatedTransactions = await db.payment_transactions
+        .where('workspaceId')
+        .equals(workspaceId)
+        .toArray()
+
+    const activeLoanTransactions = relatedTransactions.filter((item) =>
+        !item.isDeleted
+        && item.sourceModule === 'loans'
+        && item.sourceRecordId === loanId
+    )
+
+    for (const transaction of activeLoanTransactions) {
+        await softDeletePaymentTransaction(transaction)
     }
 }
 

@@ -85,7 +85,8 @@ function shouldUseCloudBusinessData(workspaceId?: string | null): boolean {
     return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
 }
 
-const LOAN_PAYMENT_TRANSACTION_SOURCE_TYPES: PaymentTransactionSourceType[] = ['loan_payment', 'simple_loan', 'loan_installment']
+const LOAN_PAYMENT_TRANSACTION_SOURCE_TYPES: PaymentTransactionSourceType[] = ['loan_origination', 'loan_payment', 'simple_loan', 'loan_installment']
+const LOAN_SETTLEMENT_TRANSACTION_SOURCE_TYPES: PaymentTransactionSourceType[] = ['loan_payment', 'simple_loan', 'loan_installment']
 
 async function syncUpdatedProductsBestEffort(products: Product[], workspaceId: string): Promise<void> {
     const dedupedProducts = Array.from(new Map(products.map((product) => [product.id, product])).values())
@@ -2719,8 +2720,23 @@ async function listLoanPaymentTransactionsByLoan(workspaceId: string, loanId: st
 }
 
 export async function hasLoanTransactionHistory(workspaceId: string, loanId: string) {
-    const transactions = await listLoanPaymentTransactionsByLoan(workspaceId, loanId)
-    return transactions.length > 0
+    const [activeLoanPayments, settlementTransactions] = await Promise.all([
+        db.loan_payments.where('loanId').equals(loanId).and((item) => !item.isDeleted).count(),
+        Promise.all(
+            LOAN_SETTLEMENT_TRANSACTION_SOURCE_TYPES.map((sourceType) =>
+                db.payment_transactions
+                    .where('[workspaceId+sourceType+sourceRecordId]')
+                    .equals([workspaceId, sourceType, loanId])
+                    .toArray()
+            )
+        ).then((groups) => groups.flat())
+    ])
+
+    if (activeLoanPayments > 0) {
+        return true
+    }
+
+    return settlementTransactions.some((transaction) => !transaction.isDeleted && !transaction.reversalOfTransactionId)
 }
 
 function rebuildLoanStateFromPayments(
@@ -2946,6 +2962,19 @@ async function resolveLoanExchangeRateSnapshot(input: Pick<LoanCreateInput, 'sal
     return getEffectiveExchangeRatesSnapshot(null)
 }
 
+async function appendLoanOriginationTransactionBestEffort(workspaceId: string, loan: Loan) {
+    if (loan.source !== 'manual') {
+        return
+    }
+
+    try {
+        const { appendLoanOriginationTransactionForLoan } = await import('./payments')
+        await appendLoanOriginationTransactionForLoan(workspaceId, loan)
+    } catch (error) {
+        console.error('[Loans] Failed to append origination transaction:', error)
+    }
+}
+
 async function createLoanAggregate(workspaceId: string, input: LoanCreateInput): Promise<{ loan: Loan; installments: LoanInstallment[] }> {
     const now = new Date().toISOString()
     const loanId = generateId()
@@ -3069,6 +3098,7 @@ async function createLoanAggregate(workspaceId: string, input: LoanCreateInput):
 
     if (!isOnline()) {
         await enqueueLoanCreateMutations(workspaceId, loan, installments)
+        await appendLoanOriginationTransactionBestEffort(workspaceId, loan)
         await recalculateLoanLinkedBusinessPartnerSummary(workspaceId, loan.linkedPartyType, loan.linkedPartyId)
         return { loan, installments }
     }
@@ -3093,6 +3123,7 @@ async function createLoanAggregate(workspaceId: string, input: LoanCreateInput):
             }
         })
 
+        await appendLoanOriginationTransactionBestEffort(workspaceId, { ...loan, syncStatus: 'synced', lastSyncedAt: syncedAt })
         await recalculateLoanLinkedBusinessPartnerSummary(workspaceId, loan.linkedPartyType, loan.linkedPartyId)
 
         return {
@@ -3103,6 +3134,7 @@ async function createLoanAggregate(workspaceId: string, input: LoanCreateInput):
         if (shouldUseOfflineMutationFallback(error)) {
             console.error('[Loans] Online create failed, queued offline mutation:', error)
             await enqueueLoanCreateMutations(workspaceId, loan, installments)
+            await appendLoanOriginationTransactionBestEffort(workspaceId, loan)
             await recalculateLoanLinkedBusinessPartnerSummary(workspaceId, loan.linkedPartyType, loan.linkedPartyId)
             return { loan, installments }
         }
@@ -3309,6 +3341,11 @@ export async function deleteLoan(loanId: string): Promise<void> {
         throw new Error('loan_delete_not_allowed')
     }
 
+    const hideLoanTransactions = async () => {
+        const { hideLoanTransactionsForDeletedLoan } = await import('./payments')
+        await hideLoanTransactionsForDeletedLoan(loan.workspaceId, loanId)
+    }
+
     const [installments, payments, offlineMutations] = await Promise.all([
         db.loan_installments.where('loanId').equals(loanId).toArray(),
         db.loan_payments.where('loanId').equals(loanId).toArray(),
@@ -3367,6 +3404,7 @@ export async function deleteLoan(loanId: string): Promise<void> {
     }
 
     if (!isOnline()) {
+        await hideLoanTransactions()
         await removeLoanAggregateLocally(true)
         await recalculateLoanLinkedBusinessPartnerSummary(loan.workspaceId, loan.linkedPartyType, loan.linkedPartyId)
         return
@@ -3378,11 +3416,13 @@ export async function deleteLoan(loanId: string): Promise<void> {
         )
         if (error) throw error
 
+        await hideLoanTransactions()
         await removeLoanAggregateLocally(false)
         await recalculateLoanLinkedBusinessPartnerSummary(loan.workspaceId, loan.linkedPartyType, loan.linkedPartyId)
     } catch (error) {
         if (shouldUseOfflineMutationFallback(error)) {
             console.error('[Loans] Delete sync failed, queued offline mutation:', error)
+            await hideLoanTransactions()
             await removeLoanAggregateLocally(true)
             await recalculateLoanLinkedBusinessPartnerSummary(loan.workspaceId, loan.linkedPartyType, loan.linkedPartyId)
             return
