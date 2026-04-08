@@ -160,7 +160,7 @@ function UpdateHandler() {
         const lastCheck = localStorage.getItem('last_auto_update_check')
         const checkedThisSession = sessionStorage.getItem('startup_checked')
         const now = Date.now()
-        const twentyFourHours = 24 * 60 * 60 * 1000
+        const twelveHours = 12 * 60 * 60 * 1000
 
         // 1. Mandatory Minimum Version Check via latest.json
         // Always runs on startup (no session caching - security critical)
@@ -188,15 +188,15 @@ function UpdateHandler() {
         }
 
         // Skip automatic checks if already checked this session (refresh protection)
-        // OR if checked within the last 24 hours (interval protection)
+        // OR if checked within the last 12 hours (interval protection)
         if (!isManual && !isBlocked) {
             if (checkedThisSession) {
                 console.log('[Tauri] Skipping automatic update check (already checked this session/refresh)')
                 return
             }
 
-            if (lastCheck && now - parseInt(lastCheck) < twentyFourHours) {
-                console.log('[Tauri] Skipping automatic update check (checked within last 24h)')
+            if (lastCheck && now - parseInt(lastCheck) < twelveHours) {
+                console.log('[Tauri] Skipping automatic update check (checked within last 12h)')
                 // Still mark session as checked so refreshes don't keep pinging the logic
                 sessionStorage.setItem('startup_checked', 'true')
                 return
@@ -330,10 +330,10 @@ function UpdateHandler() {
             const intervalTimer = setInterval(() => {
                 const lastCheck = localStorage.getItem('last_auto_update_check')
                 const now = Date.now()
-                const twentyFourHours = 24 * 60 * 60 * 1000
+                const twelveHours = 12 * 60 * 60 * 1000
 
-                if (!lastCheck || now - parseInt(lastCheck) >= twentyFourHours) {
-                    console.log('[Tauri] 24h interval passed while app open. Checking...')
+                if (!lastCheck || now - parseInt(lastCheck) >= twelveHours) {
+                    console.log('[Tauri] 12h interval passed while app open. Checking...')
                     checkForUpdates()
                 }
             }, 4 * 60 * 60 * 1000)
