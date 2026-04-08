@@ -46,6 +46,12 @@ export interface WorkspaceNavigationItem {
     children?: WorkspaceNavigationChild[]
 }
 
+export interface WorkspaceNavigationGroup {
+    title: string
+    items: WorkspaceNavigationItem[]
+    icon: LucideIcon
+}
+
 export interface FlattenedWorkspaceNavigationItem {
     name: string
     href: string
@@ -63,6 +69,13 @@ interface BuildWorkspaceNavigationOptions {
     whatsappStatus?: 'live' | 'off'
 }
 
+import {
+    launcherSectionOrder,
+    launcherSections,
+    moduleMetaByHref,
+    type NavigationSectionKey
+} from './navigationMeta'
+
 export function buildWorkspaceNavigation({
     t,
     role,
@@ -70,14 +83,16 @@ export function buildWorkspaceNavigation({
     features,
     isDesktopDevice,
     whatsappStatus
-}: BuildWorkspaceNavigationOptions): WorkspaceNavigationItem[] {
+}: BuildWorkspaceNavigationOptions): WorkspaceNavigationGroup[] {
     const isCoreRole = role === 'admin' || role === 'staff' || role === 'viewer'
     const hasLedgerSurface = features.pos || features.instant_pos || features.sales_history || features.crm || features.budget || features.hr || features.loans
     const hasPaymentsSurface = features.loans || features.crm || features.budget || features.hr
     const canUseEcommerce = features.data_mode !== 'local' && hasFeature('ecommerce')
 
-    return [
-        { name: t('nav.dashboard', { defaultValue: 'Dashboard' }), href: '/', icon: LayoutDashboard },
+    // 1. Define all possible individual navigation items with their visibility logic
+    const dashboardItem: WorkspaceNavigationItem = { name: t('nav.dashboard', { defaultValue: 'Dashboard' }), href: '/', icon: LayoutDashboard }
+
+    const otherItems: WorkspaceNavigationItem[] = [
         ...(isCoreRole && hasFeature('pos') ? [
             { name: t('nav.pos', { defaultValue: 'Point of Sale' }), href: '/pos', icon: CreditCard },
             {
@@ -124,10 +139,38 @@ export function buildWorkspaceNavigation({
             { name: t('nav.settings', { defaultValue: 'Settings' }), href: '/settings', icon: Settings }
         ] : [])
     ]
+
+    // 2. Group items into launcher-style sections
+    const grouped = new Map<NavigationSectionKey, WorkspaceNavigationItem[]>()
+
+    otherItems.forEach(item => {
+        const meta = moduleMetaByHref[item.href] || { section: 'people-and-workspace' as const }
+        const sectionItems = grouped.get(meta.section) || []
+        sectionItems.push(item)
+        grouped.set(meta.section, sectionItems)
+    })
+
+    // 3. Convert map back to ordered array of WorkspaceNavigationGroup
+    const launcherGroups = launcherSectionOrder
+        .map(key => ({
+            title: launcherSections[key].title,
+            icon: launcherSections[key].icon,
+            items: grouped.get(key) || []
+        }))
+        .filter(group => group.items.length > 0)
+
+    return [
+        {
+            title: '', // Standalone Dashboard has no group title
+            icon: LayoutDashboard,
+            items: [dashboardItem]
+        },
+        ...launcherGroups
+    ]
 }
 
-export function flattenWorkspaceNavigation(items: WorkspaceNavigationItem[]): FlattenedWorkspaceNavigationItem[] {
-    return items.flatMap((item) => [
+export function flattenWorkspaceNavigation(groups: WorkspaceNavigationGroup[]): FlattenedWorkspaceNavigationItem[] {
+    return groups.flatMap((group) => group.items.flatMap((item) => [
         {
             name: item.name,
             href: item.href,
@@ -141,5 +184,5 @@ export function flattenWorkspaceNavigation(items: WorkspaceNavigationItem[]): Fl
             mobileOnly: item.mobileOnly,
             parentHref: item.href
         }))
-    ])
+    ]))
 }

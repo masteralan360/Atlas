@@ -41,7 +41,6 @@ import {
     ShoppingCart,
     Plus,
     Minus,
-    CreditCard,
     Zap,
     Loader2,
     Barcode,
@@ -365,7 +364,7 @@ export function POS() {
         setIsResizing(false)
         document.body.style.cursor = ''
         document.body.style.userSelect = ''
-        
+
         // Sync the temporary DOM width back to React state on release
         if (sidebarRef.current && !isLayoutMobile) {
             const finalWidth = sidebarRef.current.offsetWidth

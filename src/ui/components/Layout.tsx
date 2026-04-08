@@ -354,220 +354,238 @@ export function Layout({ children }: LayoutProps) {
                         </div>
 
                         {/* Navigation */}
-                        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto custom-scrollbar">
-                            {navigation.map((item) => {
-                                const isInstantPosGroup = item.href === '/instant-pos' && item.children?.length
-                                const showReorderAutomationBadge = item.href === '/inventory-transfer' && reorderAutomationCount > 0
-                                const isChildActive = isInstantPosGroup
-                                    ? item.children!.some(child => location === child.href || (child.href !== '/' && location.startsWith(child.href)))
-                                    : false
-                                const isActive = isInstantPosGroup
-                                    ? (location === item.href || isChildActive)
-                                    : (location === item.href || (item.href !== '/' && location.startsWith(item.href)))
-                                const isOpen = isInstantPosGroup ? (instantPosOpen || isChildActive) : false
-                                const showChildren = isOpen && !(isMini && !mobileSidebarOpen)
+                        <nav className="flex-1 px-2 py-4 space-y-6 overflow-y-auto custom-scrollbar antialiased">
+                            {navigation.map((group) => (
+                                <div key={group.title} className="space-y-1">
+                                    {!(isMini && !mobileSidebarOpen) && group.title && (
+                                        <div className="flex items-center gap-2 px-3 mb-4">
+                                            <group.icon className="w-3.5 h-3.5 text-muted-foreground/40" />
+                                            <h2 className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.2em]">
+                                                {group.title}
+                                            </h2>
+                                        </div>
+                                    )}
+                                    {isMini && !mobileSidebarOpen && (
+                                        <div className="h-px bg-border/40 mx-2 mb-4" />
+                                    )}
 
-                                const parentContent = (
-                                    <span
-                                        className={cn(
-                                            'relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-300',
-                                            isActive
-                                                ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/30 scale-[1.02]'
-                                                : 'text-muted-foreground hover:bg-primary/5 hover:text-primary',
-                                            (isMini && !mobileSidebarOpen) && "justify-center px-0 py-3"
-                                        )}
-                                        title={(isMini && !mobileSidebarOpen) ? item.name : undefined}
-                                    >
-                                        <item.icon className="w-5 h-5 flex-shrink-0" />
-                                        {!(isMini && !mobileSidebarOpen) && (
-                                            <>
-                                                {item.name}
-                                                {isInstantPosGroup && (
-                                                    <ChevronDown className={cn(
-                                                        "ms-auto w-4 h-4 transition-transform",
-                                                        isOpen && "rotate-180"
-                                                    )} />
-                                                )}
-                                                {!isInstantPosGroup && showReorderAutomationBadge && (
-                                                    <span
-                                                        role="button"
-                                                        tabIndex={0}
-                                                        aria-label={inventoryTransferAutomationLabel}
-                                                        title={inventoryTransferAutomationLabel}
-                                                        onClick={openInventoryTransferAutomationTab}
-                                                        onKeyDown={(event) => {
-                                                            if (event.key === 'Enter' || event.key === ' ') {
-                                                                openInventoryTransferAutomationTab(event)
-                                                            }
-                                                        }}
-                                                        className={cn(
-                                                            "ms-auto relative flex h-7 w-7 cursor-pointer items-center justify-center rounded-xl transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:focus-visible:ring-sky-200/80",
-                                                            isActive
-                                                                ? "bg-sky-950/20 text-white ring-1 ring-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_10px_24px_rgba(8,47,73,0.22)] backdrop-blur-md"
-                                                                : "bg-sky-500/12 text-sky-700 ring-1 ring-sky-500/20 shadow-[0_10px_24px_rgba(14,165,233,0.12)] dark:bg-sky-400/14 dark:text-sky-200 dark:ring-sky-300/18 dark:shadow-[0_10px_24px_rgba(14,165,233,0.16)]"
-                                                        )}
-                                                    >
-                                                        <Bot className="h-4 w-4" />
-                                                        <span
-                                                            className={cn(
-                                                                "absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border px-1 text-[9px] font-semibold leading-none shadow-sm backdrop-blur-sm",
-                                                                isActive
-                                                                    ? "border-white/15 bg-sky-950/85 text-white"
-                                                                    : "border-white/80 bg-sky-600 text-white dark:border-sky-100/70 dark:bg-sky-300 dark:text-slate-950"
-                                                            )}
-                                                        >
-                                                            {reorderAutomationCountLabel}
-                                                        </span>
-                                                    </span>
-                                                )}
-                                                {!isInstantPosGroup && item.alert && (
-                                                    <div className="ms-auto flex items-center justify-center w-5 h-5 rounded-full bg-red-500 text-white">
-                                                        <AlertCircle className="w-3.5 h-3.5" />
-                                                    </div>
-                                                )}
-                                                {!isInstantPosGroup && item.status && (
-                                                    <div className={cn(
-                                                        "ms-auto w-2 h-2 rounded-full",
-                                                        item.status === 'live' ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"
-                                                    )} />
-                                                )}
-                                            </>
-                                        )}
-                                        {(isMini && !mobileSidebarOpen) && item.alert && (
-                                            <div className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border border-background shadow-sm" />
-                                        )}
-                                        {(isMini && !mobileSidebarOpen) && showReorderAutomationBadge && (
-                                            <span
-                                                role="button"
-                                                tabIndex={0}
-                                                aria-label={inventoryTransferAutomationLabel}
-                                                title={inventoryTransferAutomationLabel}
-                                                onClick={openInventoryTransferAutomationTab}
-                                                onKeyDown={(event) => {
-                                                    if (event.key === 'Enter' || event.key === ' ') {
-                                                        openInventoryTransferAutomationTab(event)
-                                                    }
-                                                }}
-                                                className={cn(
-                                                    "absolute right-1.5 top-1.5 flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:focus-visible:ring-sky-200/80",
-                                                    isActive
-                                                        ? "bg-sky-950/25 text-white ring-1 ring-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_8px_18px_rgba(8,47,73,0.22)] backdrop-blur-md"
-                                                        : "bg-sky-600 text-white shadow-[0_8px_18px_rgba(14,165,233,0.22)] dark:bg-sky-300 dark:text-slate-950"
-                                                )}
-                                            >
-                                                <Bot className="h-3 w-3" />
+                                    <div className="space-y-1">
+                                        {group.items.map((item) => {
+                                            const isInstantPosGroup = item.href === '/instant-pos' && item.children?.length
+                                            const showReorderAutomationBadge = item.href === '/inventory-transfer' && reorderAutomationCount > 0
+                                            const isChildActive = isInstantPosGroup
+                                                ? item.children!.some(child => location === child.href || (child.href !== '/' && location.startsWith(child.href)))
+                                                : false
+                                            const isActive = isInstantPosGroup
+                                                ? (location === item.href || isChildActive)
+                                                : (location === item.href || (item.href !== '/' && location.startsWith(item.href)))
+                                            const isOpen = isInstantPosGroup ? (instantPosOpen || isChildActive) : false
+                                            const showChildren = isOpen && !(isMini && !mobileSidebarOpen)
+
+                                            const parentContent = (
                                                 <span
                                                     className={cn(
-                                                        "absolute -right-1 -top-1 flex h-3.5 min-w-[14px] items-center justify-center rounded-full border px-1 text-[8px] font-semibold leading-none shadow-sm",
+                                                        'relative flex items-center gap-3 px-3 py-2 rounded-sm text-[13px] font-semibold transition-all duration-300 ease-in-out border-s-[3px] border-transparent',
                                                         isActive
-                                                            ? "border-white/15 bg-sky-950/90 text-white"
-                                                            : "border-white/80 bg-sky-700 text-white dark:border-sky-100/75 dark:bg-sky-950 dark:text-sky-100"
+                                                            ? 'bg-primary/10 text-primary border-primary'
+                                                            : 'text-muted-foreground hover:bg-primary/5 hover:text-primary hover:border-primary/30',
+                                                        (isMini && !mobileSidebarOpen) && "justify-center px-0 py-3 border-s-0"
                                                     )}
+                                                    title={(isMini && !mobileSidebarOpen) ? item.name : undefined}
                                                 >
-                                                    {reorderAutomationCountLabel}
-                                                </span>
-                                            </span>
-                                        )}
-                                        {(isMini && !mobileSidebarOpen) && item.status && (
-                                            <div className={cn(
-                                                "absolute top-2 right-2 w-2 h-2 rounded-full border border-background shadow-sm",
-                                                item.status === 'live' ? "bg-emerald-500" : "bg-red-500"
-                                            )} />
-                                        )}
-                                    </span>
-                                )
-
-                                return (
-                                    <div key={item.href} className={cn("space-y-1", item.mobileOnly && "lg:hidden")}>
-                                        <Link
-                                            href={item.href}
-                                            onClick={() => {
-                                                if (isInstantPosGroup) {
-                                                    setInstantPosOpen(prev => !prev)
-                                                }
-                                                if (!isInstantPosGroup) {
-                                                    setMobileSidebarOpen(false)
-                                                }
-                                                triggerHaptic('selection')
-                                            }}
-                                            onMouseEnter={() => !isMobile() && prefetchRoute(item.href)}
-                                        >
-                                            {parentContent}
-                                        </Link>
-
-                                        {isInstantPosGroup && showChildren && (
-                                            <div className={cn(
-                                                "relative flex flex-col space-y-1 mt-1.5",
-                                                !(isMini && !mobileSidebarOpen) && "before:absolute before:inset-y-0 before:left-[22px] rtl:before:right-[22px] rtl:before:left-auto before:w-px before:bg-border/60",
-                                                (isMini && !mobileSidebarOpen) ? "ps-0" : "ps-10"
-                                            )}>
-                                                {item.children!.map(child => {
-                                                    const isChildSelected = location === child.href || (child.href !== '/' && location.startsWith(child.href))
-                                                    return (
-                                                        <Link
-                                                            key={child.href}
-                                                            href={child.href}
-                                                            onClick={() => {
-                                                                setMobileSidebarOpen(false)
-                                                                triggerHaptic('selection')
-                                                            }}
-                                                            onMouseEnter={() => !isMobile() && prefetchRoute(child.href)}
-                                                            className="relative block"
-                                                        >
-                                                            {/* Horizontal hierarchy line */}
-                                                            {!(isMini && !mobileSidebarOpen) && (
-                                                                <div className={cn(
-                                                                    "absolute top-1/2 -translate-y-1/2 w-[18px] h-px",
-                                                                    "left-[-18px] rtl:right-[-18px] rtl:left-auto",
-                                                                    isChildSelected ? "bg-primary" : "bg-border/60"
+                                                    <item.icon className="w-5 h-5 flex-shrink-0" />
+                                                    {!(isMini && !mobileSidebarOpen) && (
+                                                        <>
+                                                            {item.name}
+                                                            {isInstantPosGroup && (
+                                                                <ChevronDown className={cn(
+                                                                    "ms-auto w-4 h-4 transition-transform",
+                                                                    isOpen && "rotate-180"
                                                                 )} />
                                                             )}
+                                                            {!isInstantPosGroup && showReorderAutomationBadge && (
+                                                                <span
+                                                                    role="button"
+                                                                    tabIndex={0}
+                                                                    aria-label={inventoryTransferAutomationLabel}
+                                                                    title={inventoryTransferAutomationLabel}
+                                                                    onClick={openInventoryTransferAutomationTab}
+                                                                    onKeyDown={(event) => {
+                                                                        if (event.key === 'Enter' || event.key === ' ') {
+                                                                            openInventoryTransferAutomationTab(event)
+                                                                        }
+                                                                    }}
+                                                                    className={cn(
+                                                                        "ms-auto relative flex h-7 w-7 cursor-pointer items-center justify-center rounded-xl transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:focus-visible:ring-sky-200/80",
+                                                                        isActive
+                                                                            ? "bg-sky-950/20 text-white ring-1 ring-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_10px_24px_rgba(8,47,73,0.22)] backdrop-blur-md"
+                                                                            : "bg-sky-500/12 text-sky-700 ring-1 ring-sky-500/20 shadow-[0_10px_24px_rgba(14,165,233,0.12)] dark:bg-sky-400/14 dark:text-sky-200 dark:ring-sky-300/18 dark:shadow-[0_10px_24px_rgba(14,165,233,0.16)]"
+                                                                    )}
+                                                                >
+                                                                    <Bot className="h-4 w-4" />
+                                                                    <span
+                                                                        className={cn(
+                                                                            "absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border px-1 text-[9px] font-semibold leading-none shadow-sm backdrop-blur-sm",
+                                                                            isActive
+                                                                                ? "border-white/15 bg-sky-950/85 text-white"
+                                                                                : "border-white/80 bg-sky-600 text-white dark:border-sky-100/70 dark:bg-sky-300 dark:text-slate-950"
+                                                                        )}
+                                                                    >
+                                                                        {reorderAutomationCountLabel}
+                                                                    </span>
+                                                                </span>
+                                                            )}
+                                                            {!isInstantPosGroup && item.alert && (
+                                                                <div className="ms-auto flex items-center justify-center w-5 h-5 rounded-full bg-red-500 text-white">
+                                                                    <AlertCircle className="w-3.5 h-3.5" />
+                                                                </div>
+                                                            )}
+                                                            {!isInstantPosGroup && item.status && (
+                                                                <div className={cn(
+                                                                    "ms-auto w-2 h-2 rounded-full",
+                                                                    item.status === 'live' ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"
+                                                                )} />
+                                                            )}
+                                                        </>
+                                                    )}
+                                                    {(isMini && !mobileSidebarOpen) && item.alert && (
+                                                        <div className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border border-background shadow-sm" />
+                                                    )}
+                                                    {(isMini && !mobileSidebarOpen) && showReorderAutomationBadge && (
+                                                        <span
+                                                            role="button"
+                                                            tabIndex={0}
+                                                            aria-label={inventoryTransferAutomationLabel}
+                                                            title={inventoryTransferAutomationLabel}
+                                                            onClick={openInventoryTransferAutomationTab}
+                                                            onKeyDown={(event) => {
+                                                                if (event.key === 'Enter' || event.key === ' ') {
+                                                                    openInventoryTransferAutomationTab(event)
+                                                                }
+                                                            }}
+                                                            className={cn(
+                                                                "absolute right-1.5 top-1.5 flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:focus-visible:ring-sky-200/80",
+                                                                isActive
+                                                                    ? "bg-sky-950/25 text-white ring-1 ring-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_8px_18px_rgba(8,47,73,0.22)] backdrop-blur-md"
+                                                                    : "bg-sky-600 text-white shadow-[0_8px_18px_rgba(14,165,233,0.22)] dark:bg-sky-300 dark:text-slate-950"
+                                                            )}
+                                                        >
+                                                            <Bot className="h-3 w-3" />
                                                             <span
                                                                 className={cn(
-                                                                    'flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-all duration-300',
-                                                                    isChildSelected
-                                                                        ? 'bg-gradient-to-r from-primary/15 to-primary/5 text-primary shadow-sm border border-primary/20 dark:from-primary/20 dark:to-primary/10'
-                                                                        : 'text-muted-foreground hover:bg-primary/5 hover:text-primary'
+                                                                    "absolute -right-1 -top-1 flex h-3.5 min-w-[14px] items-center justify-center rounded-full border px-1 text-[8px] font-semibold leading-none shadow-sm",
+                                                                    isActive
+                                                                        ? "border-white/15 bg-sky-950/90 text-white"
+                                                                        : "border-white/80 bg-sky-700 text-white dark:border-sky-100/75 dark:bg-sky-950 dark:text-sky-100"
                                                                 )}
                                                             >
-                                                                {child.icon ? (
-                                                                    <child.icon className={cn(
-                                                                        "w-4 h-4 flex-shrink-0 transition-colors",
-                                                                        isChildSelected ? "text-primary" : "text-muted-foreground"
-                                                                    )} />
-                                                                ) : (
-                                                                    <span className={cn(
-                                                                        "w-1.5 h-1.5 rounded-full transition-colors",
-                                                                        isChildSelected ? "bg-primary" : "bg-muted-foreground/30"
-                                                                    )} />
-                                                                )}
-                                                                <span>{child.name}</span>
+                                                                {reorderAutomationCountLabel}
                                                             </span>
-                                                        </Link>
-                                                    )
-                                                })}
-                                            </div>
-                                        )}
+                                                        </span>
+                                                    )}
+                                                    {(isMini && !mobileSidebarOpen) && item.status && (
+                                                        <div className={cn(
+                                                            "absolute top-2 right-2 w-2 h-2 rounded-full border border-background shadow-sm",
+                                                            item.status === 'live' ? "bg-emerald-500" : "bg-red-500"
+                                                        )} />
+                                                    )}
+                                                </span>
+                                            )
+
+                                            return (
+                                                <div key={item.href} className={cn("space-y-1", item.mobileOnly && "lg:hidden")}>
+                                                    <Link
+                                                        href={item.href}
+                                                        onClick={() => {
+                                                            if (isInstantPosGroup) {
+                                                                setInstantPosOpen(prev => !prev)
+                                                            }
+                                                            if (!isInstantPosGroup) {
+                                                                setMobileSidebarOpen(false)
+                                                            }
+                                                            triggerHaptic('selection')
+                                                        }}
+                                                        onMouseEnter={() => !isMobile() && prefetchRoute(item.href)}
+                                                    >
+                                                        {parentContent}
+                                                    </Link>
+
+                                                    {isInstantPosGroup && showChildren && (
+                                                        <div className={cn(
+                                                            "relative flex flex-col space-y-1 mt-1.5",
+                                                            !(isMini && !mobileSidebarOpen) && "before:absolute before:inset-y-0 before:left-[22px] rtl:before:right-[22px] rtl:before:left-auto before:w-px before:bg-border/60",
+                                                            (isMini && !mobileSidebarOpen) ? "ps-0" : "ps-10"
+                                                        )}>
+                                                            {item.children!.map(child => {
+                                                                const isChildSelected = location === child.href || (child.href !== '/' && location.startsWith(child.href))
+                                                                return (
+                                                                    <Link
+                                                                        key={child.href}
+                                                                        href={child.href}
+                                                                        onClick={() => {
+                                                                            setMobileSidebarOpen(false)
+                                                                            triggerHaptic('selection')
+                                                                        }}
+                                                                        onMouseEnter={() => !isMobile() && prefetchRoute(child.href)}
+                                                                        className="relative block"
+                                                                    >
+                                                                        {/* Horizontal hierarchy line */}
+                                                                        {!(isMini && !mobileSidebarOpen) && (
+                                                                            <div className={cn(
+                                                                                "absolute top-1/2 -translate-y-1/2 w-[18px] h-px",
+                                                                                "left-[-18px] rtl:right-[-18px] rtl:left-auto",
+                                                                                isChildSelected ? "bg-primary" : "bg-border/60"
+                                                                            )} />
+                                                                        )}
+                                                                        <span
+                                                                            className={cn(
+                                                                                'flex items-center gap-3 px-3 py-2 rounded-sm text-[13px] font-medium transition-all duration-300 ease-in-out border-s-[3px] border-transparent',
+                                                                                isChildSelected
+                                                                                    ? 'bg-primary/10 text-primary border-primary'
+                                                                                    : 'text-muted-foreground hover:bg-primary/5 hover:text-primary hover:border-primary/30'
+                                                                            )}
+                                                                        >
+                                                                            {child.icon ? (
+                                                                                <child.icon className={cn(
+                                                                                    "w-4 h-4 flex-shrink-0 transition-colors",
+                                                                                    isChildSelected ? "text-primary" : "text-muted-foreground"
+                                                                                )} />
+                                                                            ) : (
+                                                                                <span className={cn(
+                                                                                    "w-1.5 h-1.5 rounded-full transition-colors",
+                                                                                    isChildSelected ? "bg-primary" : "bg-muted-foreground/30"
+                                                                                )} />
+                                                                            )}
+                                                                            <span>{child.name}</span>
+                                                                        </span>
+                                                                    </Link>
+                                                                )
+                                                            })}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )
+                                        })}
                                     </div>
-                                )
-                            })}
+                                </div>
+                            ))}
 
                             {/* Workspace Members Section */}
                             {(user?.role === 'admin' || user?.role === 'staff' || user?.role === 'viewer') && (
                                 <div className="pt-6 pb-2">
                                     {!(isMini && !mobileSidebarOpen) ? (
-                                        <h2 className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                                        <h2 className="px-3 text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.2em] mb-4">
                                             {t('auth.members')}
                                         </h2>
                                     ) : (
-                                        <div className="h-px bg-border mx-2 mb-4" />
+                                        <div className="h-px bg-border/40 mx-2 mb-4" />
                                     )}
 
                                     {/* Workspace Code */}
                                     {user?.workspaceCode && (
                                         <div
                                             className={cn(
-                                                "mx-3 mb-4 rounded-lg border border-border group hover:border-primary/50 transition-all cursor-pointer relative overflow-hidden",
+                                                "mx-3 mb-4 rounded-sm border border-border group hover:border-primary/50 transition-all cursor-pointer relative overflow-hidden",
                                                 (isMini && !mobileSidebarOpen)
                                                     ? "p-2 bg-transparent border-transparent hover:bg-secondary/50 flex justify-center mx-0"
                                                     : "p-2.5 bg-secondary/30"
@@ -589,7 +607,7 @@ export function Layout({ children }: LayoutProps) {
                                             ) : (
                                                 <>
                                                     <div className="relative z-10">
-                                                        <p className="text-[10px] text-muted-foreground uppercase font-bold mb-1 flex items-center justify-between">
+                                                        <p className="text-[10px] text-muted-foreground/60 uppercase font-bold mb-1 flex items-center justify-between">
                                                             {t('auth.workspaceCode')}
                                                             {copied ? (
                                                                 <span className="flex items-center gap-1 text-emerald-500 animate-in fade-in zoom-in duration-300">
@@ -633,8 +651,8 @@ export function Layout({ children }: LayoutProps) {
                                                     </div>
                                                     {!(isMini && !mobileSidebarOpen) && (
                                                         <div className="flex-1 min-w-0">
-                                                            <p className="text-sm font-medium truncate">{member.name}</p>
-                                                            <p className="text-[10px] text-muted-foreground capitalize">{member.role}</p>
+                                                            <p className="text-[13px] font-semibold truncate">{member.name}</p>
+                                                            <p className="text-[10px] text-muted-foreground/60 uppercase font-bold tracking-wider">{member.role}</p>
                                                         </div>
                                                     )}
                                                 </div>
@@ -651,7 +669,7 @@ export function Layout({ children }: LayoutProps) {
                             (isMini && !mobileSidebarOpen) && "flex flex-col items-center gap-4 py-6"
                         )}>
                             <div className={cn("flex items-center gap-3 px-3 py-2", (isMini && !mobileSidebarOpen) && "flex-col p-0 gap-2")}>
-                                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center text-sm font-bold text-white overflow-hidden shadow-sm">
+                                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary to-emerald-600 flex items-center justify-center text-sm font-bold text-white overflow-hidden shadow-sm">
                                     {user?.profileUrl ? (
                                         <img
                                             src={user.profileUrl.startsWith('http') ? user.profileUrl : platformService.convertFileSrc(user.profileUrl)}
