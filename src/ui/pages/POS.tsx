@@ -126,8 +126,9 @@ function formatDiscountBadge(
 export function POS() {
     const { toast } = useToast()
     const { user } = useAuth()
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const { features, isLocalMode } = useWorkspace()
+    const isRTL = i18n.dir() === 'rtl'
     const products = useInventoryProducts(user?.workspaceId)
     const activeDiscountMap = useActiveDiscountMap(user?.workspaceId)
     const storages = useStorages(user?.workspaceId)
@@ -261,6 +262,7 @@ export function POS() {
     const productRefs = useRef<(HTMLButtonElement | null)[]>([])
     const cartItemRefs = useRef<(HTMLDivElement | null)[]>([])
     const cartContainerRef = useRef<HTMLDivElement>(null)
+    const sidebarRef = useRef<HTMLDivElement>(null)
     const lastEnterTime = useRef<number>(0)
 
     useEffect(() => {
@@ -344,6 +346,59 @@ export function POS() {
     useEffect(() => {
         localStorage.setItem('pos_held_sales', JSON.stringify(heldSales))
     }, [heldSales])
+
+    // Cart resizing state
+    const [cartWidth, setCartWidth] = useState<number>(() => {
+        const saved = localStorage.getItem('pos_cart_width')
+        return saved ? parseInt(saved, 10) : 384
+    })
+    const [isResizing, setIsResizing] = useState(false)
+
+    const handleMouseDown = useCallback((e: React.MouseEvent) => {
+        e.preventDefault()
+        setIsResizing(true)
+        document.body.style.cursor = 'col-resize'
+        document.body.style.userSelect = 'none'
+    }, [])
+
+    const handleMouseUp = useCallback(() => {
+        setIsResizing(false)
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+        
+        // Sync the temporary DOM width back to React state on release
+        if (sidebarRef.current && !isLayoutMobile) {
+            const finalWidth = sidebarRef.current.offsetWidth
+            setCartWidth(finalWidth)
+            localStorage.setItem('pos_cart_width', finalWidth.toString())
+        }
+    }, [isLayoutMobile])
+
+    const handleMouseMove = useCallback((e: MouseEvent) => {
+        if (!isResizing || isLayoutMobile) return
+        const newWidth = isRTL ? e.clientX : window.innerWidth - e.clientX
+        if (newWidth >= 384 && newWidth <= 800) {
+            if (sidebarRef.current) {
+                // Bypass React state for 60fps responsiveness during drag
+                sidebarRef.current.style.width = `${newWidth}px`
+            }
+        }
+    }, [isResizing, isRTL, isLayoutMobile])
+
+    useEffect(() => {
+        if (isResizing) {
+            window.addEventListener('mousemove', handleMouseMove)
+            window.addEventListener('mouseup', handleMouseUp)
+        } else {
+            window.removeEventListener('mousemove', handleMouseMove)
+            window.removeEventListener('mouseup', handleMouseUp)
+            localStorage.setItem('pos_cart_width', cartWidth.toString())
+        }
+        return () => {
+            window.removeEventListener('mousemove', handleMouseMove)
+            window.removeEventListener('mouseup', handleMouseUp)
+        }
+    }, [isResizing, handleMouseMove, handleMouseUp, cartWidth])
 
     // Filter products
     const filteredProducts = products.filter((p) => {
@@ -1833,7 +1888,28 @@ export function POS() {
                     </div>
 
                     {/* Cart Sidebar */}
-                    <div className="w-96 bg-card border border-border rounded-xl flex flex-col shadow-xl">
+                    <div
+                        ref={sidebarRef}
+                        className={cn(
+                            "bg-card border border-border rounded-xl flex flex-col shadow-xl relative",
+                            isResizing ? "transition-none will-change-[width]" : "transition-all duration-300"
+                        )}
+                        style={{ width: isLayoutMobile ? '100%' : `${cartWidth}px` }}
+                    >
+                        {/* Resize Handle - Desktop Only */}
+                        {!isLayoutMobile && (
+                            <div
+                                className={cn(
+                                    "absolute top-0 bottom-0 w-2 cursor-col-resize z-[60] flex items-center justify-center group",
+                                    isRTL ? "right-0 translate-x-1/2" : "left-0 -translate-x-1/2"
+                                )}
+                                onMouseDown={handleMouseDown}
+                                onDoubleClick={() => setCartWidth(384)}
+                                title={t('pos.resetWidth') || "Double click to reset width"}
+                            >
+                                <div className="w-0.5 h-8 rounded-full bg-border group-hover:bg-primary/50 transition-colors" />
+                            </div>
+                        )}
                         <div className="p-4 border-b border-border bg-muted/5">
                             <div className="flex items-center justify-between">
                                 <h2 className="text-xl font-bold flex items-center gap-2">
@@ -2276,9 +2352,19 @@ export function POS() {
                                     {isLoading ? (
                                         <Loader2 className="w-6 h-6 animate-spin mr-2" />
                                     ) : (
-                                        <CreditCard className="w-6 h-6 mr-2" />
+                                        paymentType === 'digital' ? (
+                                            <Zap className="w-6 h-6 mr-2" />
+                                        ) : paymentType === 'loan' ? (
+                                            <Coins className="w-6 h-6 mr-2" />
+                                        ) : (
+                                            <Banknote className="w-6 h-6 mr-2" />
+                                        )
                                     )}
-                                    {t('pos.checkout') || 'Checkout'}
+                                    {paymentType === 'digital'
+                                        ? t('pos.digitalCheckout') || 'Digital Checkout'
+                                        : paymentType === 'loan'
+                                            ? t('pos.processLoan') || 'Process Loan'
+                                            : t('pos.checkout') || 'Checkout'}
                                 </Button>
                                 <Button
                                     variant="outline"
@@ -3273,7 +3359,20 @@ function MobileCart({
                         >
                             {isLoading ? <Loader2 className="animate-spin w-5 h-5" /> : (
                                 <div className="flex items-center gap-2">
-                                    <span>{t('pos.checkout')}</span>
+                                    {paymentType === 'digital' ? (
+                                        <Zap className="w-5 h-5" />
+                                    ) : paymentType === 'loan' ? (
+                                        <Coins className="w-5 h-5" />
+                                    ) : (
+                                        <Banknote className="w-5 h-5" />
+                                    )}
+                                    <span>
+                                        {paymentType === 'digital'
+                                            ? t('pos.digitalCheckout') || 'Digital Checkout'
+                                            : paymentType === 'loan'
+                                                ? t('pos.processLoan') || 'Process Loan'
+                                                : t('pos.checkout') || 'Checkout'}
+                                    </span>
                                     <ChevronRight className="w-4 h-4" />
                                 </div>
                             )}
@@ -3426,8 +3525,20 @@ function MobileCart({
                                 >
                                     {isLoading ? <Loader2 className="animate-spin w-6 h-6" /> : (
                                         <div className="flex items-center gap-2">
-                                            <span>{t('pos.checkout')}</span>
-                                            <Plus className="w-5 h-5" />
+                                            {paymentType === 'digital' ? (
+                                                <Zap className="w-6 h-6" />
+                                            ) : paymentType === 'loan' ? (
+                                                <Coins className="w-6 h-6" />
+                                            ) : (
+                                                <Banknote className="w-6 h-6" />
+                                            )}
+                                            <span>
+                                                {paymentType === 'digital'
+                                                    ? t('pos.digitalCheckout') || 'Digital Checkout'
+                                                    : paymentType === 'loan'
+                                                        ? t('pos.processLoan') || 'Process Loan'
+                                                        : t('pos.checkout') || 'Checkout'}
+                                            </span>
                                         </div>
                                     )}
                                 </Button>

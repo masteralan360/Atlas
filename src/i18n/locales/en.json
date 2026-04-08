@@ -211,6 +211,112 @@
         "storeNotFoundHint": "This store may be private or the link may be incorrect.",
         "mixedCurrency": "This store currently supports inquiry orders with one currency per cart."
     },
+    "discounts": {
+        "title": "Discounts",
+        "subtitle": "Schedule promotional pricing for products and categories.",
+        "description": "Product-level discounts override category discounts automatically at checkout.",
+        "insightTitle": "Discount Insight",
+        "productInsightDescription": "Product discounts apply first, then category discounts fill the gaps when no product-level rule is active.",
+        "categoryInsightDescription": "Category discounts let you promote collections while product discounts take priority.",
+        "empty": {
+            "products": "No product discounts yet.",
+            "categories": "No category discounts yet."
+        },
+        "emptyProductDescription": "Create a product discount to override prices during a scheduled window.",
+        "emptyCategoryDescription": "Create a category discount to promote full collections.",
+        "createFirstProductDiscount": "Create First Product Discount",
+        "createFirstCategoryDiscount": "Create First Category Discount",
+        "addCategoryDiscount": "Add Category Discount",
+        "addProductDiscount": "Add Product Discount",
+        "editDiscount": "Edit Discount",
+        "configurationMode": "Configuration Mode",
+        "targetSearch": "Find target",
+        "searchProducts": "Search products...",
+        "searchCategories": "Search categories...",
+        "noTargets": "No available targets.",
+        "originalPrice": "Original price",
+        "discountType": "Discount type",
+        "discountPercent": "Discount percent",
+        "discountAmount": "Discount amount",
+        "minStockThreshold": "Minimum stock threshold",
+        "thresholdShort": "Threshold",
+        "optional": "Optional",
+        "stockHelp": "Pause discount automatically when stock drops below threshold.",
+        "activeRecord": "Active record",
+        "activeHelp": "Inactive records stay in history but do not apply at checkout.",
+        "scheduleWindow": "Schedule Window",
+        "startsAt": "Starts",
+        "endsAt": "Ends",
+        "savingDiscount": "Saving Discount...",
+        "previewTitle": "Preview",
+        "previewStatusFallback": "Waiting for configuration.",
+        "modalPreviewFallback": "Choose a target to preview the discount.",
+        "modalPreviewDateFallback": "Enter valid value and date range to preview.",
+        "modalProductInsight": "Product rules apply first and can pause on low stock.",
+        "modalCategoryInsight": "Category rules apply broadly but are skipped if product rule exists.",
+        "preview": {
+            "product": "{{name}} will be priced at {{price}} from {{start}} until {{end}}.",
+            "category": "{{name}} will apply this discount to {{count}} products whenever no product-level rule overrides it."
+        },
+        "deleteTitle": "Delete Discount",
+        "deleteDescription": "This discount will no longer apply to sales or marketplace pricing.",
+        "searchPlaceholder": "Search discounts...",
+        "missingProduct": "Deleted product",
+        "missingCategory": "Deleted category",
+        "stock": "Stock",
+        "endsInDays": "Ends in {{count}} days",
+        "expiringSoon": "Expiring Soon",
+        "coveredProducts": "Covered Products",
+        "overrideNotice": "Product rules still override this category rule.",
+        "productsCount": "{{count}} products",
+        "uncategorized": "Uncategorized",
+        "product": "Product",
+        "category": "Category",
+        "tabs": {
+            "products": "Products",
+            "categories": "Categories"
+        },
+        "status": {
+            "active": "Active",
+            "scheduled": "Scheduled",
+            "expired": "Expired",
+            "stockPaused": "Stock paused",
+            "inactive": "Inactive"
+        },
+        "columns": {
+            "item": "Discount Item",
+            "discount": "Discount",
+            "pricing": "Pricing",
+            "schedule": "Schedule",
+            "scope": "Scope"
+        },
+        "types": {
+            "fixedAmount": "Fixed amount",
+            "percentage": "Percentage"
+        },
+        "summary": {
+            "total": "Total discounts"
+        },
+        "dialog": {
+            "productDescription": "Choose a product, type, threshold, and window for this rule.",
+            "categoryDescription": "Choose a category, type, threshold, and window for this rule."
+        },
+        "validation": {
+            "targetRequired": "Select a product or category first.",
+            "discountValue": "Enter a valid discount value.",
+            "dateRange": "Choose a valid date and time range.",
+            "stockThreshold": "Stock threshold must be zero or greater.",
+            "activeProductConflict": "This product already has an active discount.",
+            "activeCategoryConflict": "This category already has an active discount."
+        },
+        "messages": {
+            "saved": "Discount updated successfully.",
+            "created": "Discount created successfully.",
+            "saveError": "Failed to save discount.",
+            "deleted": "Discount deleted successfully.",
+            "deleteError": "Failed to delete discount."
+        }
+    },
     "ecommerce": {
         "title": "E-Commerce",
         "subtitle": "Track and manage marketplace orders",
@@ -1097,6 +1203,8 @@
         "searchPlaceholder": "Search products...",
         "currentSale": "Current Sale",
         "checkout": "Checkout",
+        "digitalCheckout": "Digital Checkout",
+        "processLoan": "Process Loan",
         "offlineTitle": "Saved Offline",
         "offlineDesc": "Sale saved locally and will sync when online.",
         "enterSku": "Enter SKU",

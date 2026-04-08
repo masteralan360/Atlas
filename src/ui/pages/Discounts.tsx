@@ -149,20 +149,20 @@ function statusBadgeClass(status: DiscountLifecycleStatus) {
 function getStatusLabel(status: DiscountLifecycleStatus, t: (key: string, options?: Record<string, unknown>) => string) {
     switch (status) {
         case 'active':
-            return t('discounts.status.active', { defaultValue: 'Active' })
+            return t('discounts.status.active')
         case 'scheduled':
-            return t('discounts.status.scheduled', { defaultValue: 'Scheduled' })
+            return t('discounts.status.scheduled')
         case 'expired':
-            return t('discounts.status.expired', { defaultValue: 'Expired' })
+            return t('discounts.status.expired')
         case 'stock_paused':
-            return t('discounts.status.stockPaused', { defaultValue: 'Stock paused' })
+            return t('discounts.status.stockPaused')
         default:
-            return t('discounts.status.inactive', { defaultValue: 'Inactive' })
+            return t('discounts.status.inactive')
     }
 }
 
 function pluralizeProducts(count: number, t: (key: string, options?: Record<string, unknown>) => string) {
-    return t('discounts.productsCount', { count, defaultValue: `${count} product${count === 1 ? '' : 's'}` })
+    return t('discounts.productsCount', { count })
 }
 
 function getCategoryDiscountLifecycleStatus(
@@ -367,7 +367,7 @@ export function Discounts() {
                 .map((product: Product) => ({
                     id: product.id,
                     label: `${product.name} (${product.sku})`,
-                    meta: product.category || t('discounts.uncategorized', { defaultValue: 'Uncategorized' })
+                    meta: product.category || t('discounts.uncategorized')
                 }))
         }
 
@@ -441,8 +441,8 @@ export function Discounts() {
 
         if (!form.targetId) {
             toast({
-                title: t('common.error') || 'Error',
-                description: t('discounts.validation.targetRequired', { defaultValue: 'Select a product or category first.' }),
+                title: t('common.error'),
+                description: t('discounts.validation.targetRequired'),
                 variant: 'destructive'
             })
             return
@@ -451,8 +451,8 @@ export function Discounts() {
         const discountValue = Number(form.discountValue)
         if (!Number.isFinite(discountValue) || discountValue <= 0) {
             toast({
-                title: t('common.error') || 'Error',
-                description: t('discounts.validation.discountValue', { defaultValue: 'Enter a valid discount value.' }),
+                title: t('common.error'),
+                description: t('discounts.validation.discountValue'),
                 variant: 'destructive'
             })
             return
@@ -462,8 +462,8 @@ export function Discounts() {
         const endsAt = form.endsAt
         if (!startsAt || !endsAt || startsAt >= endsAt) {
             toast({
-                title: t('common.error') || 'Error',
-                description: t('discounts.validation.dateRange', { defaultValue: 'Choose a valid date and time range.' }),
+                title: t('common.error'),
+                description: t('discounts.validation.dateRange'),
                 variant: 'destructive'
             })
             return
@@ -472,8 +472,8 @@ export function Discounts() {
         const minStockThreshold = form.minStockThreshold === '' ? null : Number(form.minStockThreshold)
         if (minStockThreshold !== null && (!Number.isFinite(minStockThreshold) || minStockThreshold < 0)) {
             toast({
-                title: t('common.error') || 'Error',
-                description: t('discounts.validation.stockThreshold', { defaultValue: 'Stock threshold must be zero or greater.' }),
+                title: t('common.error'),
+                description: t('discounts.validation.stockThreshold'),
                 variant: 'destructive'
             })
             return
@@ -489,8 +489,8 @@ export function Discounts() {
 
             if (conflict) {
                 toast({
-                    title: t('common.error') || 'Error',
-                    description: t('discounts.validation.activeProductConflict', { defaultValue: 'This product already has an active discount record.' }),
+                    title: t('common.error'),
+                    description: t('discounts.validation.activeProductConflict'),
                     variant: 'destructive'
                 })
                 return
@@ -507,8 +507,8 @@ export function Discounts() {
 
             if (conflict) {
                 toast({
-                    title: t('common.error') || 'Error',
-                    description: t('discounts.validation.activeCategoryConflict', { defaultValue: 'This category already has an active discount record.' }),
+                    title: t('common.error'),
+                    description: t('discounts.validation.activeCategoryConflict'),
                     variant: 'destructive'
                 })
                 return
@@ -552,10 +552,10 @@ export function Discounts() {
             }
 
             toast({
-                title: t('messages.success') || 'Success',
+                title: t('messages.success'),
                 description: editingDiscount
-                    ? t('discounts.messages.saved', { defaultValue: 'Discount updated successfully.' })
-                    : t('discounts.messages.created', { defaultValue: 'Discount created successfully.' })
+                    ? t('discounts.messages.saved')
+                    : t('discounts.messages.created')
             })
 
             setDialogOpen(false)
@@ -564,8 +564,8 @@ export function Discounts() {
             setTargetSearch('')
         } catch (error: any) {
             toast({
-                title: t('common.error') || 'Error',
-                description: error?.message || t('discounts.messages.saveError', { defaultValue: 'Failed to save discount.' }),
+                title: t('common.error'),
+                description: error?.message || t('discounts.messages.saveError'),
                 variant: 'destructive'
             })
         } finally {
@@ -587,14 +587,14 @@ export function Discounts() {
             }
 
             toast({
-                title: t('messages.success') || 'Success',
-                description: t('discounts.messages.deleted', { defaultValue: 'Discount deleted successfully.' })
+                title: t('messages.success'),
+                description: t('discounts.messages.deleted')
             })
             setDeleteTarget(null)
         } catch (error: any) {
             toast({
-                title: t('common.error') || 'Error',
-                description: error?.message || t('discounts.messages.deleteError', { defaultValue: 'Failed to delete discount.' }),
+                title: t('common.error'),
+                description: error?.message || t('discounts.messages.deleteError'),
                 variant: 'destructive'
             })
         } finally {
@@ -603,10 +603,10 @@ export function Discounts() {
     }
 
     const dialogTitle = editingDiscount
-        ? t('discounts.editDiscount', { defaultValue: 'Edit Discount' })
+        ? t('discounts.editDiscount')
         : activeTab === 'products'
-            ? t('discounts.addProductDiscount', { defaultValue: 'Add Product Discount' })
-            : t('discounts.addCategoryDiscount', { defaultValue: 'Add Category Discount' })
+            ? t('discounts.addProductDiscount')
+            : t('discounts.addCategoryDiscount')
 
     const productTabCountLabel = productRows.length > 99 ? '99+' : String(productRows.length)
     const categoryTabCountLabel = categoryRows.length > 99 ? '99+' : String(categoryRows.length)
@@ -681,23 +681,31 @@ export function Discounts() {
 
     const previewMessage = useMemo(() => {
         if (!form.targetId) {
-            return t('discounts.modalPreviewFallback', { defaultValue: 'Choose a target to preview how Atlas will apply this discount.' })
+            return t('discounts.modalPreviewFallback')
         }
 
         if (!isDiscountValueValid || !isDateRangeValid) {
-            return t('discounts.modalPreviewDateFallback', { defaultValue: 'Enter a valid discount value and date range to preview the rule.' })
+            return t('discounts.modalPreviewDateFallback')
         }
 
         if (activeTab === 'products' && selectedProduct) {
             const discountPrice = computeDiscountPrice(selectedProduct.price, form.discountType, parsedDiscountValue)
-            return `${selectedProduct.name} will be priced at ${formatCurrency(discountPrice, selectedProduct.currency, iqdPreference)} from ${formatDateTime(form.startsAt!)} until ${formatDateTime(form.endsAt!)}.`
+            return t('discounts.preview.product', {
+                name: selectedProduct.name,
+                price: formatCurrency(discountPrice, selectedProduct.currency, iqdPreference),
+                start: formatDateTime(form.startsAt!),
+                end: formatDateTime(form.endsAt!)
+            })
         }
 
         if (activeTab === 'categories' && selectedCategory) {
-            return `${selectedCategory.name} will apply this discount to ${selectedCategoryProducts.length} products whenever no product-level rule overrides it.`
+            return t('discounts.preview.category', {
+                name: selectedCategory.name,
+                count: selectedCategoryProducts.length
+            })
         }
 
-        return t('discounts.modalPreviewFallback', { defaultValue: 'Choose a target to preview how Atlas will apply this discount.' })
+        return t('discounts.modalPreviewFallback')
     }, [
         activeTab,
         form.discountType,
@@ -720,21 +728,21 @@ export function Discounts() {
                 <div>
                     <h1 className="flex items-center gap-2 text-2xl font-bold">
                         <Percent className="h-6 w-6 text-primary" />
-                        {t('discounts.title', { defaultValue: 'Discounts' })}
+                        {t('discounts.title')}
                     </h1>
                     <p className="text-muted-foreground">
-                        {t('discounts.subtitle', { defaultValue: 'Schedule promotional pricing for products and categories.' })}
+                        {t('discounts.subtitle')}
                     </p>
                 </div>
                 {canEdit ? (
                     <div className="flex flex-wrap gap-2">
                         <Button variant="outline" className="gap-2 rounded-xl" onClick={() => resetDialog('categories')}>
                             <Shapes className="h-4 w-4" />
-                            {t('discounts.addCategoryDiscount', { defaultValue: 'Add Category Discount' })}
+                            {t('discounts.addCategoryDiscount')}
                         </Button>
                         <Button className="gap-2 rounded-xl" onClick={() => resetDialog('products')}>
                             <Plus className="h-4 w-4" />
-                            {t('discounts.addProductDiscount', { defaultValue: 'Add Product Discount' })}
+                            {t('discounts.addProductDiscount')}
                         </Button>
                     </div>
                 ) : null}
@@ -743,25 +751,25 @@ export function Discounts() {
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <Card>
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-sm text-muted-foreground">{t('discounts.summary.total', { defaultValue: 'Total discounts' })}</CardTitle>
+                        <CardTitle className="text-sm text-muted-foreground">{t('discounts.summary.total')}</CardTitle>
                     </CardHeader>
                     <CardContent><div className="text-3xl font-black">{summary.total}</div></CardContent>
                 </Card>
                 <Card>
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-sm text-muted-foreground">{t('discounts.status.active', { defaultValue: 'Active' })}</CardTitle>
+                        <CardTitle className="text-sm text-muted-foreground">{t('discounts.status.active')}</CardTitle>
                     </CardHeader>
                     <CardContent><div className="text-3xl font-black text-emerald-600 dark:text-emerald-300">{summary.active}</div></CardContent>
                 </Card>
                 <Card>
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-sm text-muted-foreground">{t('discounts.status.scheduled', { defaultValue: 'Scheduled' })}</CardTitle>
+                        <CardTitle className="text-sm text-muted-foreground">{t('discounts.status.scheduled')}</CardTitle>
                     </CardHeader>
                     <CardContent><div className="text-3xl font-black text-sky-600 dark:text-sky-300">{summary.scheduled}</div></CardContent>
                 </Card>
                 <Card>
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-sm text-muted-foreground">{t('discounts.status.stockPaused', { defaultValue: 'Stock paused' })}</CardTitle>
+                        <CardTitle className="text-sm text-muted-foreground">{t('discounts.status.stockPaused')}</CardTitle>
                     </CardHeader>
                     <CardContent><div className="text-3xl font-black text-amber-600 dark:text-amber-300">{summary.stockPaused}</div></CardContent>
                 </Card>
@@ -770,18 +778,18 @@ export function Discounts() {
             <Card>
                 <CardHeader className="gap-4 lg:flex-row lg:items-end lg:justify-between">
                     <div>
-                        <CardTitle>{t('discounts.title', { defaultValue: 'Discounts' })}</CardTitle>
+                        <CardTitle>{t('discounts.title')}</CardTitle>
                         <CardDescription>
-                            {t('discounts.description', { defaultValue: 'Product-level discounts override category discounts automatically at checkout.' })}
+                            {t('discounts.description')}
                         </CardDescription>
                     </div>
                     <div className="w-full max-w-sm">
-                        <Label htmlFor="discount-search">{t('common.searchBox', { defaultValue: 'Search' })}</Label>
+                        <Label htmlFor="discount-search">{t('common.searchBox')}</Label>
                         <Input
                             id="discount-search"
                             value={search}
                             onChange={(event) => setSearch(event.target.value)}
-                            placeholder={t('discounts.searchPlaceholder', { defaultValue: 'Search discounts...' })}
+                            placeholder={t('discounts.searchPlaceholder')}
                             className="mt-2"
                         />
                     </div>
@@ -790,7 +798,7 @@ export function Discounts() {
                     <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as DiscountTab)} className="space-y-4">
                         <TabsList className="grid h-auto min-h-12 w-full max-w-xl grid-cols-2 rounded-2xl items-stretch">
                             <TabsTrigger value="products" className="group min-h-10 gap-2 px-2 sm:px-3">
-                                <span className="truncate">{t('discounts.tabs.products', { defaultValue: 'Products' })}</span>
+                                <span className="truncate">{t('discounts.tabs.products')}</span>
                                 {productRows.length > 0 ? (
                                     <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-primary/10 px-2 text-xs font-semibold text-primary group-data-[state=active]:bg-primary group-data-[state=active]:text-primary-foreground">
                                         {productTabCountLabel}
@@ -798,7 +806,7 @@ export function Discounts() {
                                 ) : null}
                             </TabsTrigger>
                             <TabsTrigger value="categories" className="group min-h-10 gap-2 px-2 sm:px-3">
-                                <span className="truncate">{t('discounts.tabs.categories', { defaultValue: 'Categories' })}</span>
+                                <span className="truncate">{t('discounts.tabs.categories')}</span>
                                 {categoryRows.length > 0 ? (
                                     <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-primary/10 px-2 text-xs font-semibold text-primary group-data-[state=active]:bg-primary group-data-[state=active]:text-primary-foreground">
                                         {categoryTabCountLabel}
@@ -813,25 +821,25 @@ export function Discounts() {
                                     {productRows.length === 0 ? (
                                         <div className="rounded-3xl border border-dashed border-muted-foreground/30 bg-muted/10 px-6 py-12 text-center">
                                             <Percent className="mx-auto mb-4 h-10 w-10 text-primary/70" />
-                                            <h3 className="text-lg font-semibold">{t('discounts.empty.products', { defaultValue: 'No product discounts yet.' })}</h3>
+                                            <h3 className="text-lg font-semibold">{t('discounts.empty.products')}</h3>
                                             <p className="mt-2 text-sm text-muted-foreground">
-                                                {t('discounts.emptyProductDescription', { defaultValue: 'Create a product discount to override the default or category price during a scheduled sales window.' })}
+                                                {t('discounts.emptyProductDescription')}
                                             </p>
                                             {canEdit ? (
                                                 <Button className="mt-5 rounded-2xl" onClick={() => resetDialog('products')}>
-                                                    {t('discounts.createFirstProductDiscount', { defaultValue: 'Create First Product Discount' })}
+                                                    {t('discounts.createFirstProductDiscount')}
                                                 </Button>
                                             ) : null}
                                         </div>
                                     ) : (
                                         <div className="overflow-hidden rounded-3xl border">
                                             <div className="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,0.95fr)_120px_84px] gap-4 border-b bg-muted/20 px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground md:grid">
-                                                <div>{t('discounts.columns.item', { defaultValue: 'Discount Item' })}</div>
-                                                <div>{t('discounts.columns.discount', { defaultValue: 'Discount' })}</div>
-                                                <div>{t('discounts.columns.pricing', { defaultValue: 'Pricing' })}</div>
-                                                <div>{t('discounts.columns.schedule', { defaultValue: 'Schedule' })}</div>
-                                                <div>{t('common.status', { defaultValue: 'Status' })}</div>
-                                                <div>{t('common.actions', { defaultValue: 'Actions' })}</div>
+                                                <div>{t('discounts.columns.item')}</div>
+                                                <div>{t('discounts.columns.discount')}</div>
+                                                <div>{t('discounts.columns.pricing')}</div>
+                                                <div>{t('discounts.columns.schedule')}</div>
+                                                <div>{t('common.status')}</div>
+                                                <div>{t('common.actions')}</div>
                                             </div>
 
                                             <div className="divide-y">
@@ -842,7 +850,7 @@ export function Discounts() {
                                                         <div key={row.discount.id} className="grid gap-4 px-5 py-5 md:grid-cols-[minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,0.95fr)_120px_84px] md:items-center">
                                                             <div>
                                                                 <div className="text-sm font-semibold">
-                                                                    {row.product?.name || t('discounts.missingProduct', { defaultValue: 'Deleted product' })}
+                                                                    {row.product?.name || t('discounts.missingProduct')}
                                                                 </div>
                                                                 <div className="mt-1 text-xs text-muted-foreground">
                                                                     SKU: {row.product?.sku || row.discount.productId}
@@ -856,7 +864,7 @@ export function Discounts() {
                                                                         : formatDiscountLabel(row.discount.discountType, row.discount.discountValue, features.default_currency, iqdPreference)}
                                                                 </div>
                                                                 <div className="text-xs text-muted-foreground">
-                                                                    {t('discounts.thresholdShort', { defaultValue: 'Threshold' })}: {row.discount.minStockThreshold ?? '-'}
+                                                                    {t('discounts.thresholdShort')}: {row.discount.minStockThreshold ?? '-'}
                                                                 </div>
                                                             </div>
 
@@ -866,7 +874,7 @@ export function Discounts() {
                                                                     {row.discountPrice != null ? ` -> ${formatCurrency(row.discountPrice, row.product?.currency || features.default_currency, iqdPreference)}` : ''}
                                                                 </div>
                                                                 <div className="text-muted-foreground">
-                                                                    {t('discounts.stock', { defaultValue: 'Stock' })}: <span className="font-semibold text-foreground">{row.stockTotal}</span>
+                                                                    {t('discounts.stock')}: <span className="font-semibold text-foreground">{row.stockTotal}</span>
                                                                 </div>
                                                             </div>
 
@@ -876,8 +884,8 @@ export function Discounts() {
                                                                 {remainingDays !== null ? (
                                                                     <div className="text-xs text-muted-foreground">
                                                                         {remainingDays >= 0
-                                                                            ? t('discounts.endsInDays', { count: remainingDays, defaultValue: `Ends in ${remainingDays} days` })
-                                                                            : t('discounts.status.expired', { defaultValue: 'Expired' })}
+                                                                            ? t('discounts.endsInDays', { count: remainingDays })
+                                                                            : t('discounts.status.expired')}
                                                                     </div>
                                                                 ) : null}
                                                             </div>
@@ -920,27 +928,27 @@ export function Discounts() {
 
                                 <Card className="rounded-3xl border-0 bg-[linear-gradient(180deg,#166534,#0f3f2d)] text-white shadow-xl">
                                     <CardHeader className="space-y-3 p-6">
-                                        <CardTitle className="text-2xl">{t('discounts.insightTitle', { defaultValue: 'Discount Insight' })}</CardTitle>
+                                        <CardTitle className="text-2xl">{t('discounts.insightTitle')}</CardTitle>
                                         <CardDescription className="text-emerald-100/85">
-                                            {t('discounts.productInsightDescription', { defaultValue: 'Product discounts apply first, then category discounts fill the gaps when no product-level rule is active.' })}
+                                            {t('discounts.productInsightDescription')}
                                         </CardDescription>
                                     </CardHeader>
                                     <CardContent className="grid gap-4 p-6 pt-0">
                                         <div className="rounded-2xl bg-white/10 p-4">
-                                            <div className="text-xs uppercase tracking-[0.2em] text-emerald-100/80">{t('discounts.status.active', { defaultValue: 'Active' })}</div>
+                                            <div className="text-xs uppercase tracking-[0.2em] text-emerald-100/80">{t('discounts.status.active')}</div>
                                             <div className="mt-2 text-4xl font-semibold">{productInsightStats.active}</div>
                                         </div>
                                         <div className="rounded-2xl bg-white/10 p-4">
-                                            <div className="text-xs uppercase tracking-[0.2em] text-emerald-100/80">{t('discounts.status.scheduled', { defaultValue: 'Scheduled' })}</div>
+                                            <div className="text-xs uppercase tracking-[0.2em] text-emerald-100/80">{t('discounts.status.scheduled')}</div>
                                             <div className="mt-2 text-3xl font-semibold">{productInsightStats.scheduled}</div>
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
                                             <div className="rounded-2xl bg-white/10 p-4">
-                                                <div className="text-xs uppercase tracking-[0.18em] text-emerald-100/80">{t('discounts.status.stockPaused', { defaultValue: 'Stock paused' })}</div>
+                                                <div className="text-xs uppercase tracking-[0.18em] text-emerald-100/80">{t('discounts.status.stockPaused')}</div>
                                                 <div className="mt-2 text-2xl font-semibold">{productInsightStats.stockPaused}</div>
                                             </div>
                                             <div className="rounded-2xl bg-white/10 p-4">
-                                                <div className="text-xs uppercase tracking-[0.18em] text-emerald-100/80">{t('discounts.expiringSoon', { defaultValue: 'Expiring Soon' })}</div>
+                                                <div className="text-xs uppercase tracking-[0.18em] text-emerald-100/80">{t('discounts.expiringSoon')}</div>
                                                 <div className="mt-2 text-2xl font-semibold">{productInsightStats.expiringSoon}</div>
                                             </div>
                                         </div>
@@ -955,25 +963,25 @@ export function Discounts() {
                                     {categoryRows.length === 0 ? (
                                         <div className="rounded-3xl border border-dashed border-muted-foreground/30 bg-muted/10 px-6 py-12 text-center">
                                             <Shapes className="mx-auto mb-4 h-10 w-10 text-primary/70" />
-                                            <h3 className="text-lg font-semibold">{t('discounts.empty.categories', { defaultValue: 'No category discounts yet.' })}</h3>
+                                            <h3 className="text-lg font-semibold">{t('discounts.empty.categories')}</h3>
                                             <p className="mt-2 text-sm text-muted-foreground">
-                                                {t('discounts.emptyCategoryDescription', { defaultValue: 'Create a category discount to promote a full collection while preserving product-specific overrides.' })}
+                                                {t('discounts.emptyCategoryDescription')}
                                             </p>
                                             {canEdit ? (
                                                 <Button className="mt-5 rounded-2xl" onClick={() => resetDialog('categories')}>
-                                                    {t('discounts.createFirstCategoryDiscount', { defaultValue: 'Create First Category Discount' })}
+                                                    {t('discounts.createFirstCategoryDiscount')}
                                                 </Button>
                                             ) : null}
                                         </div>
                                     ) : (
                                         <div className="overflow-hidden rounded-3xl border">
                                             <div className="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,0.95fr)_120px_84px] gap-4 border-b bg-muted/20 px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground md:grid">
-                                                <div>{t('discounts.columns.item', { defaultValue: 'Discount Item' })}</div>
-                                                <div>{t('discounts.columns.scope', { defaultValue: 'Scope' })}</div>
-                                                <div>{t('discounts.columns.discount', { defaultValue: 'Discount' })}</div>
-                                                <div>{t('discounts.columns.schedule', { defaultValue: 'Schedule' })}</div>
-                                                <div>{t('common.status', { defaultValue: 'Status' })}</div>
-                                                <div>{t('common.actions', { defaultValue: 'Actions' })}</div>
+                                                <div>{t('discounts.columns.item')}</div>
+                                                <div>{t('discounts.columns.scope')}</div>
+                                                <div>{t('discounts.columns.discount')}</div>
+                                                <div>{t('discounts.columns.schedule')}</div>
+                                                <div>{t('common.status')}</div>
+                                                <div>{t('common.actions')}</div>
                                             </div>
 
                                             <div className="divide-y">
@@ -984,17 +992,17 @@ export function Discounts() {
                                                         <div key={row.discount.id} className="grid gap-4 px-5 py-5 md:grid-cols-[minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,0.95fr)_120px_84px] md:items-center">
                                                             <div>
                                                                 <div className="text-sm font-semibold">
-                                                                    {row.category?.name || t('discounts.missingCategory', { defaultValue: 'Deleted category' })}
+                                                                    {row.category?.name || t('discounts.missingCategory')}
                                                                 </div>
                                                                 <div className="mt-1 text-xs text-muted-foreground">
-                                                                    {t('discounts.productsCount', { count: row.categoryProducts.length, defaultValue: `${row.categoryProducts.length} products` })}
+                                                                    {t('discounts.productsCount', { count: row.categoryProducts.length })}
                                                                 </div>
                                                             </div>
 
                                                             <div className="space-y-1 text-sm">
                                                                 <div className="font-semibold">{pluralizeProducts(row.categoryProducts.length, t)}</div>
                                                                 <div className="text-xs text-muted-foreground">
-                                                                    {t('discounts.thresholdShort', { defaultValue: 'Threshold' })}: {row.discount.minStockThreshold ?? '-'}
+                                                                    {t('discounts.thresholdShort')}: {row.discount.minStockThreshold ?? '-'}
                                                                 </div>
                                                             </div>
 
@@ -1003,7 +1011,7 @@ export function Discounts() {
                                                                     {formatDiscountLabel(row.discount.discountType, row.discount.discountValue, features.default_currency, iqdPreference)}
                                                                 </div>
                                                                 <div className="text-muted-foreground">
-                                                                    {t('discounts.overrideNotice', { defaultValue: 'Product rules still override this category rule.' })}
+                                                                    {t('discounts.overrideNotice')}
                                                                 </div>
                                                             </div>
 
@@ -1013,8 +1021,8 @@ export function Discounts() {
                                                                 {remainingDays !== null ? (
                                                                     <div className="text-xs text-muted-foreground">
                                                                         {remainingDays >= 0
-                                                                            ? t('discounts.endsInDays', { count: remainingDays, defaultValue: `Ends in ${remainingDays} days` })
-                                                                            : t('discounts.status.expired', { defaultValue: 'Expired' })}
+                                                                            ? t('discounts.endsInDays', { count: remainingDays })
+                                                                            : t('discounts.status.expired')}
                                                                     </div>
                                                                 ) : null}
                                                             </div>
@@ -1057,27 +1065,27 @@ export function Discounts() {
 
                                 <Card className="rounded-3xl border-0 bg-[linear-gradient(180deg,#166534,#0f3f2d)] text-white shadow-xl">
                                     <CardHeader className="space-y-3 p-6">
-                                        <CardTitle className="text-2xl">{t('discounts.insightTitle', { defaultValue: 'Discount Insight' })}</CardTitle>
+                                        <CardTitle className="text-2xl">{t('discounts.insightTitle')}</CardTitle>
                                         <CardDescription className="text-emerald-100/85">
-                                            {t('discounts.categoryInsightDescription', { defaultValue: 'Category discounts let you promote collections while product discounts continue to take precedence on checkout and the marketplace.' })}
+                                            {t('discounts.categoryInsightDescription')}
                                         </CardDescription>
                                     </CardHeader>
                                     <CardContent className="grid gap-4 p-6 pt-0">
                                         <div className="rounded-2xl bg-white/10 p-4">
-                                            <div className="text-xs uppercase tracking-[0.2em] text-emerald-100/80">{t('discounts.status.active', { defaultValue: 'Active' })}</div>
+                                            <div className="text-xs uppercase tracking-[0.2em] text-emerald-100/80">{t('discounts.status.active')}</div>
                                             <div className="mt-2 text-4xl font-semibold">{categoryInsightStats.active}</div>
                                         </div>
                                         <div className="rounded-2xl bg-white/10 p-4">
-                                            <div className="text-xs uppercase tracking-[0.2em] text-emerald-100/80">{t('discounts.coveredProducts', { defaultValue: 'Covered Products' })}</div>
+                                            <div className="text-xs uppercase tracking-[0.2em] text-emerald-100/80">{t('discounts.coveredProducts')}</div>
                                             <div className="mt-2 text-3xl font-semibold">{categoryInsightStats.coveredProducts}</div>
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
                                             <div className="rounded-2xl bg-white/10 p-4">
-                                                <div className="text-xs uppercase tracking-[0.18em] text-emerald-100/80">{t('discounts.status.scheduled', { defaultValue: 'Scheduled' })}</div>
+                                                <div className="text-xs uppercase tracking-[0.18em] text-emerald-100/80">{t('discounts.status.scheduled')}</div>
                                                 <div className="mt-2 text-2xl font-semibold">{categoryInsightStats.scheduled}</div>
                                             </div>
                                             <div className="rounded-2xl bg-white/10 p-4">
-                                                <div className="text-xs uppercase tracking-[0.18em] text-emerald-100/80">{t('discounts.status.stockPaused', { defaultValue: 'Stock paused' })}</div>
+                                                <div className="text-xs uppercase tracking-[0.18em] text-emerald-100/80">{t('discounts.status.stockPaused')}</div>
                                                 <div className="mt-2 text-2xl font-semibold">{categoryInsightStats.stockPaused}</div>
                                             </div>
                                         </div>
@@ -1102,39 +1110,39 @@ export function Discounts() {
                             <DialogHeader className="space-y-2 border-b bg-background px-4 py-4 pr-14 text-left sm:px-8 sm:py-6">
                                 <div className="inline-flex w-fit items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-primary">
                                     {activeTab === 'products' ? <Percent className="h-3.5 w-3.5" /> : <Shapes className="h-3.5 w-3.5" />}
-                                    {t('discounts.configurationMode', { defaultValue: 'Configuration Mode' })}
+                                    {t('discounts.configurationMode')}
                                 </div>
                                 <DialogTitle className="text-2xl">{dialogTitle}</DialogTitle>
                                 <DialogDescription>
                                     {activeTab === 'products'
-                                        ? t('discounts.dialog.productDescription', { defaultValue: 'Choose a product, discount type, threshold, and schedule window for this product-level rule.' })
-                                        : t('discounts.dialog.categoryDescription', { defaultValue: 'Choose a category, discount type, threshold, and schedule window for this category-level rule.' })}
+                                        ? t('discounts.dialog.productDescription')
+                                        : t('discounts.dialog.categoryDescription')}
                                 </DialogDescription>
                             </DialogHeader>
 
                             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 pb-6 sm:px-8 sm:py-6 sm:pb-8">
                                 <div className="space-y-5 sm:space-y-6">
                                     <div className="space-y-3">
-                                        <Label htmlFor="target-search">{t('discounts.targetSearch', { defaultValue: 'Find target' })}</Label>
+                                        <Label htmlFor="target-search">{t('discounts.targetSearch')}</Label>
                                         <Input
                                             id="target-search"
                                             value={targetSearch}
                                             onChange={(event) => setTargetSearch(event.target.value)}
                                             placeholder={activeTab === 'products'
-                                                ? t('discounts.searchProducts', { defaultValue: 'Search products...' })
-                                                : t('discounts.searchCategories', { defaultValue: 'Search categories...' })}
+                                                ? t('discounts.searchProducts')
+                                                : t('discounts.searchCategories')}
                                             className="h-12 rounded-2xl"
                                         />
                                     </div>
 
                                     <div className="space-y-3">
                                         <Label>{activeTab === 'products'
-                                            ? t('discounts.product', { defaultValue: 'Product' })
-                                            : t('discounts.category', { defaultValue: 'Category' })}
+                                            ? t('discounts.product')
+                                            : t('discounts.category')}
                                         </Label>
                                         {targetOptions.length === 0 ? (
                                             <div className="rounded-2xl border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                                                {t('discounts.noTargets', { defaultValue: 'No available targets.' })}
+                                                {t('discounts.noTargets')}
                                             </div>
                                         ) : (
                                             <div className="max-h-56 space-y-2 overflow-y-auto rounded-2xl border p-2">
@@ -1155,7 +1163,7 @@ export function Discounts() {
                                                             </div>
                                                             {isSelected ? (
                                                                 <span className="text-xs font-semibold uppercase tracking-[0.18em]">
-                                                                    {t('common.selected', { defaultValue: 'Selected' })}
+                                                                    {t('common.selected')}
                                                                 </span>
                                                             ) : null}
                                                         </button>
@@ -1171,7 +1179,7 @@ export function Discounts() {
                                             <div className="mt-1 text-muted-foreground">{selectedProduct?.sku || selectedTarget?.meta}</div>
                                             {selectedProduct ? (
                                                 <div className="mt-3 text-xs text-muted-foreground">
-                                                    {t('discounts.originalPrice', { defaultValue: 'Original price' })}: {formatCurrency(selectedProduct.price, selectedProduct.currency, iqdPreference)}
+                                                    {t('discounts.originalPrice')}: {formatCurrency(selectedProduct.price, selectedProduct.currency, iqdPreference)}
                                                 </div>
                                             ) : null}
                                         </div>
@@ -1179,12 +1187,12 @@ export function Discounts() {
 
                                     <div className="grid gap-4 md:grid-cols-2">
                                         <div className="space-y-2">
-                                            <Label>{t('discounts.discountType', { defaultValue: 'Discount type' })}</Label>
+                                            <Label>{t('discounts.discountType')}</Label>
                                             <Select value={form.discountType} onValueChange={(value) => setForm((current) => ({ ...current, discountType: value as DiscountType }))}>
                                                 <SelectTrigger className="h-12 rounded-2xl"><SelectValue /></SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="fixed_amount">{t('discounts.types.fixedAmount', { defaultValue: 'Fixed amount' })}</SelectItem>
-                                                    <SelectItem value="percentage">{t('discounts.types.percentage', { defaultValue: 'Percentage' })}</SelectItem>
+                                                    <SelectItem value="fixed_amount">{t('discounts.types.fixedAmount')}</SelectItem>
+                                                    <SelectItem value="percentage">{t('discounts.types.percentage')}</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>
@@ -1192,8 +1200,8 @@ export function Discounts() {
                                         <div className="space-y-2">
                                             <Label htmlFor="discount-value">
                                                 {form.discountType === 'percentage'
-                                                    ? t('discounts.discountPercent', { defaultValue: 'Discount percent' })
-                                                    : t('discounts.discountAmount', { defaultValue: 'Discount amount' })}
+                                                    ? t('discounts.discountPercent')
+                                                    : t('discounts.discountAmount')}
                                             </Label>
                                             <NumericInput
                                                 id="discount-value"
@@ -1207,40 +1215,40 @@ export function Discounts() {
 
                                     <div className="grid gap-4 md:grid-cols-2">
                                         <div className="space-y-2">
-                                            <Label htmlFor="stock-threshold">{t('discounts.minStockThreshold', { defaultValue: 'Minimum stock threshold' })}</Label>
+                                            <Label htmlFor="stock-threshold">{t('discounts.minStockThreshold')}</Label>
                                             <NumericInput
                                                 id="stock-threshold"
                                                 maxFractionDigits={0}
                                                 value={form.minStockThreshold}
                                                 onValueChange={(val) => setForm((current) => ({ ...current, minStockThreshold: val }))}
-                                                placeholder={t('discounts.optional', { defaultValue: 'Optional' })}
+                                                placeholder={t('discounts.optional')}
                                             />
                                             <div className="text-xs text-muted-foreground">
-                                                {t('discounts.stockHelp', { defaultValue: 'Pause this discount automatically when stock drops below the threshold.' })}
+                                                {t('discounts.stockHelp')}
                                             </div>
                                         </div>
 
                                         <div className="rounded-2xl border bg-muted/20 px-4 py-3">
-                                            <div className="text-sm font-medium">{t('discounts.activeRecord', { defaultValue: 'Active record' })}</div>
+                                            <div className="text-sm font-medium">{t('discounts.activeRecord')}</div>
                                             <div className="mt-1 text-xs text-muted-foreground">
-                                                {t('discounts.activeHelp', { defaultValue: 'Inactive records stay in history but do not apply at checkout.' })}
+                                                {t('discounts.activeHelp')}
                                             </div>
                                             <div className="mt-4 flex items-center justify-between">
-                                                <span className="text-sm font-medium">{t('common.status', { defaultValue: 'Status' })}</span>
+                                                <span className="text-sm font-medium">{t('common.status')}</span>
                                                 <Switch checked={form.isActive} onCheckedChange={(checked) => setForm((current) => ({ ...current, isActive: checked }))} />
                                             </div>
                                         </div>
                                     </div>
 
                                     <div className="space-y-4">
-                                        <Label>{t('discounts.scheduleWindow', { defaultValue: 'Schedule Window' })}</Label>
+                                        <Label>{t('discounts.scheduleWindow')}</Label>
                                         <div className="grid gap-6 md:grid-cols-2">
                                             <div className="space-y-2">
-                                                <Label className="text-xs text-muted-foreground">{t('discounts.startsAt', { defaultValue: 'Starts' })}</Label>
+                                                <Label className="text-xs text-muted-foreground">{t('discounts.startsAt')}</Label>
                                                 <DateTimePicker date={form.startsAt} setDate={(d) => setForm((prev) => ({ ...prev, startsAt: d }))} />
                                             </div>
                                             <div className="space-y-2">
-                                                <Label className="text-xs text-muted-foreground">{t('discounts.endsAt', { defaultValue: 'Ends' })}</Label>
+                                                <Label className="text-xs text-muted-foreground">{t('discounts.endsAt')}</Label>
                                                 <DateTimePicker date={form.endsAt} setDate={(d) => setForm((prev) => ({ ...prev, endsAt: d }))} />
                                             </div>
                                         </div>
@@ -1254,8 +1262,8 @@ export function Discounts() {
                                             className="h-12 w-full rounded-2xl px-8"
                                         >
                                             {isSaving
-                                                ? t('discounts.savingDiscount', { defaultValue: 'Saving Discount...' })
-                                                : t('common.save', { defaultValue: 'Save' })}
+                                                ? t('discounts.savingDiscount')
+                                                : t('common.save')}
                                         </Button>
                                     </div>
                                 </div>
@@ -1263,26 +1271,26 @@ export function Discounts() {
 
                             <DialogFooter className="border-t bg-background/95 px-4 py-4 pb-[calc(1rem+var(--safe-area-bottom))] sm:justify-start sm:px-8">
                                 <Button type="button" variant="ghost" className="w-full sm:w-auto" onClick={() => setDialogOpen(false)}>
-                                    {t('common.cancel', { defaultValue: 'Cancel' })}
+                                    {t('common.cancel')}
                                 </Button>
                             </DialogFooter>
                         </div>
 
                         <div className="hidden min-h-0 overflow-y-auto rounded-b-3xl bg-[linear-gradient(180deg,#166534,#0f3f2d)] p-6 text-white lg:block lg:rounded-b-none lg:rounded-r-3xl">
                             <div className="space-y-4">
-                                <h3 className="text-2xl font-semibold">{t('discounts.insightTitle', { defaultValue: 'Discount Insight' })}</h3>
+                                <h3 className="text-2xl font-semibold">{t('discounts.insightTitle')}</h3>
                                 <p className="text-sm text-emerald-100/85">
                                     {activeTab === 'products'
-                                        ? t('discounts.modalProductInsight', { defaultValue: 'Product discounts apply first and can pause automatically if stock falls under the minimum threshold.' })
-                                        : t('discounts.modalCategoryInsight', { defaultValue: 'Category discounts apply broadly and are skipped only when a product-level rule takes priority.' })}
+                                        ? t('discounts.modalProductInsight')
+                                        : t('discounts.modalCategoryInsight')}
                                 </p>
 
                                 <div className="space-y-3 pt-4">
                                     <div className="rounded-2xl bg-white/10 p-4">
                                         <div className="text-xs uppercase tracking-[0.2em] text-emerald-100/80">
                                             {activeTab === 'products'
-                                                ? t('discounts.status.active', { defaultValue: 'Active' })
-                                                : t('discounts.coveredProducts', { defaultValue: 'Covered Products' })}
+                                                ? t('discounts.status.active')
+                                                : t('discounts.coveredProducts')}
                                         </div>
                                         <div className="mt-2 text-4xl font-semibold">
                                             {activeTab === 'products' ? productInsightStats.active : categoryInsightStats.coveredProducts}
@@ -1290,14 +1298,14 @@ export function Discounts() {
                                     </div>
 
                                     <div className="rounded-2xl bg-white/10 p-4">
-                                        <div className="text-xs uppercase tracking-[0.2em] text-emerald-100/80">{t('discounts.previewTitle', { defaultValue: 'Preview' })}</div>
+                                        <div className="text-xs uppercase tracking-[0.2em] text-emerald-100/80">{t('discounts.previewTitle')}</div>
                                         <div className="mt-2 text-lg font-semibold">{previewMessage}</div>
                                     </div>
 
                                     <div className="rounded-2xl bg-white/10 p-4">
-                                        <div className="text-xs uppercase tracking-[0.2em] text-emerald-100/80">{t('common.status', { defaultValue: 'Status' })}</div>
+                                        <div className="text-xs uppercase tracking-[0.2em] text-emerald-100/80">{t('common.status')}</div>
                                         <div className="mt-2 text-lg font-semibold">
-                                            {previewStatus ? getStatusLabel(previewStatus, t) : t('discounts.previewStatusFallback', { defaultValue: 'Waiting for a complete configuration.' })}
+                                            {previewStatus ? getStatusLabel(previewStatus, t) : t('discounts.previewStatusFallback')}
                                         </div>
                                     </div>
                                 </div>
@@ -1313,8 +1321,8 @@ export function Discounts() {
                 onConfirm={handleDelete}
                 isLoading={isDeleting}
                 itemName={deleteTarget?.label}
-                title={t('discounts.deleteTitle', { defaultValue: 'Delete Discount' })}
-                description={t('discounts.deleteDescription', { defaultValue: 'This discount record will no longer apply to sales or marketplace pricing.' })}
+                title={t('discounts.deleteTitle')}
+                description={t('discounts.deleteDescription')}
             />
         </div>
     )

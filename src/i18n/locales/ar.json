@@ -190,6 +190,112 @@
         "storeNotFoundHint": "قد يكون هذا المتجر خاصًا أو أن الرابط غير صحيح.",
         "mixedCurrency": "يدعم هذا المتجر حاليًا طلبات الاستفسار بعملة واحدة لكل سلة."
     },
+    "discounts": {
+        "title": "الخصومات",
+        "subtitle": "جدولة الأسعار الترويجية للمنتجات والفئات.",
+        "description": "تتجاوز خصومات المنتجات خصومات الفئات تلقائياً عند الدفع.",
+        "insightTitle": "رؤية الخصم",
+        "productInsightDescription": "تطبق خصومات المنتجات أولاً، ثم تسد خصومات الفئات الفجوات عند عدم وجود قاعدة فعالة للمنتج.",
+        "categoryInsightDescription": "تسمح لك خصومات الفئات بالترويج للمجموعات بينما تظل لخصومات المنتجات الأولوية.",
+        "empty": {
+            "products": "لا توجد خصومات للمنتجات بعد.",
+            "categories": "لا توجد خصومات للفئات بعد."
+        },
+        "emptyProductDescription": "قم بإنشاء خصم للمنتج لتجاوز الأسعار خلال نافذة مجدولة.",
+        "emptyCategoryDescription": "قم بإنشاء خصم للفئة للترويج لمجموعات كاملة.",
+        "createFirstProductDiscount": "إنشاء أول خصم للمنتج",
+        "createFirstCategoryDiscount": "إنشاء أول خصم للفئة",
+        "addCategoryDiscount": "إضافة خصم للفئة",
+        "addProductDiscount": "إضافة خصم للمنتج",
+        "editDiscount": "تعديل الخصم",
+        "configurationMode": "وضع الإعداد",
+        "targetSearch": "البحث عن الهدف",
+        "searchProducts": "البحث عن المنتجات...",
+        "searchCategories": "البحث عن الفئات...",
+        "noTargets": "لا توجد أهداف متاحة.",
+        "originalPrice": "السعر الأصلي",
+        "discountType": "نوع الخصم",
+        "discountPercent": "نسبة الخصم",
+        "discountAmount": "قيمة الخصم",
+        "minStockThreshold": "الحد الأدنى للمخزون",
+        "thresholdShort": "الحد الأدنى",
+        "optional": "اختياري",
+        "stockHelp": "إيقاف الخصم تلقائياً عندما ينخفض المخزون عن الحد الأدنى.",
+        "activeRecord": "سجل نشط",
+        "activeHelp": "تبقى السجلات غير النشطة في السجل ولكن لا تطبق عند الدفع.",
+        "scheduleWindow": "نافذة الجدول الزمني",
+        "startsAt": "يبدأ",
+        "endsAt": "ينتهي",
+        "savingDiscount": "جاري حفظ الخصم...",
+        "previewTitle": "معاينة",
+        "previewStatusFallback": "في انتظار اكتمال الإعداد.",
+        "modalPreviewFallback": "اختر هدفاً لمعاينة كيفية تطبيق هذا الخصم.",
+        "modalPreviewDateFallback": "أدخل قيمة خصم ونطاقاً زمنياً صالحاً للمعاينة.",
+        "modalProductInsight": "تطبق قواعد المنتج أولاً ويمكن إيقافها عند انخفاض المخزون.",
+        "modalCategoryInsight": "تطبق قواعد الفئة بشكل واسع ولكن يتم تخطيها عند وجود قاعدة للمنتج.",
+        "preview": {
+            "product": "سيتم تسعير {{name}} بـ {{price}} من {{start}} حتى {{end}}.",
+            "category": "سيطبق {{name}} هذا الخصم على {{count}} منتجات عندما لا توجد قاعدة على مستوى المنتج تتجاوزها."
+        },
+        "deleteTitle": "حذف الخصم",
+        "deleteDescription": "لن يتم تطبيق سجل الخصم هذا بعد الآن على المبيعات أو أسعار المتجر الإلكتروني.",
+        "searchPlaceholder": "البحث في الخصومات...",
+        "missingProduct": "منتج محذوف",
+        "missingCategory": "فئة محذوفة",
+        "stock": "المخزون",
+        "endsInDays": "ينتهي خلال {{count}} أيام",
+        "expiringSoon": "ينتهي قريباً",
+        "coveredProducts": "المنتجات المشمولة",
+        "overrideNotice": "لا تزال قواعد المنتج تتجاوز قاعدة الفئة هذه.",
+        "productsCount": "{{count}} منتجات",
+        "uncategorized": "غير مصنف",
+        "product": "منتج",
+        "category": "فئة",
+        "tabs": {
+            "products": "المنتجات",
+            "categories": "الفئات"
+        },
+        "status": {
+            "active": "نشط",
+            "scheduled": "مجدول",
+            "expired": "منتهي",
+            "stockPaused": "متوقف للمخزون",
+            "inactive": "غير نشط"
+        },
+        "columns": {
+            "item": "عنصر الخصم",
+            "discount": "الخصم",
+            "pricing": "التسعير",
+            "schedule": "الجدول",
+            "scope": "النطاق"
+        },
+        "types": {
+            "fixedAmount": "قيمة ثابتة",
+            "percentage": "نسبة مئوية"
+        },
+        "summary": {
+            "total": "إجمالي الخصومات"
+        },
+        "dialog": {
+            "productDescription": "اختر منتجاً، نوع الخصم، الحد الأدنى، ونافذة الجدول الزمني.",
+            "categoryDescription": "اختر فئة، نوع الخصم، الحد الأدنى، ونافذة الجدول الزمني."
+        },
+        "validation": {
+            "targetRequired": "اختر منتجاً أو فئة أولاً.",
+            "discountValue": "أدخل قيمة خصم صالحة.",
+            "dateRange": "اختر نطاقاً زمنياً وتوقيتاً صالحاً.",
+            "stockThreshold": "يجب أن يكون حد المخزون صفراً أو أكثر.",
+            "activeProductConflict": "هذا المنتج لديه سجل خصم نشط بالفعل.",
+            "activeCategoryConflict": "هذه الفئة لديها سجل خصم نشط بالفعل."
+        },
+        "messages": {
+            "saved": "تم تحديث الخصم بنجاح.",
+            "created": "تم إنشاء الخصم بنجاح.",
+            "saveError": "فشل في حفظ الخصم.",
+            "deleted": "تم حذف الخصم بنجاح.",
+            "deleteError": "فشل في حذف الخصم."
+        }
+    },
     "ecommerce": {
         "title": "التجارة الإلكترونية",
         "subtitle": "تتبّع وأدر طلبات السوق",
@@ -1036,6 +1142,8 @@
         "searchPlaceholder": "البحث في المنتجات...",
         "currentSale": "البيع الحالي",
         "checkout": "الدفع",
+        "digitalCheckout": "الدفع الرقمي",
+        "processLoan": "تسجيل القرض",
         "offlineTitle": "تم الحفظ دون اتصال",
         "offlineDesc": "تم حفظ البيع محلياً وسيتم المزامنة عند الاتصال.",
         "enterSku": "أدخل SKU",
