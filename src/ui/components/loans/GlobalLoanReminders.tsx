@@ -39,7 +39,8 @@ function readLoanReminderCooldowns(): LoanReminderCooldownMap {
         }
 
         const next: LoanReminderCooldownMap = {}
-        for (const [loanId, value] of Object.entries(parsed)) {
+        for (const [loanId, rawValue] of Object.entries(parsed)) {
+            const value = rawValue as Record<string, unknown>
             if (
                 typeof loanId === 'string' &&
                 value &&

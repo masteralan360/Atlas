@@ -2754,7 +2754,7 @@ function rebuildLoanStateFromPayments(
             paidAmount: 0,
             balanceAmount: roundLoanAmount(installment.plannedAmount, loan.settlementCurrency),
             status: computeInstallmentStatus(installment.dueDate, installment.plannedAmount),
-            paidAt: null,
+            paidAt: null as string | null,
             updatedAt: now,
             version: installment.version + 1,
             syncStatus: 'pending' as const,

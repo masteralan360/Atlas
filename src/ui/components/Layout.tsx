@@ -22,6 +22,7 @@ import { GlobalExchangeRateReminders } from './exchange/GlobalExchangeRateRemind
 import { UnifiedSnoozedRemindersBell } from './reminders/UnifiedSnoozedRemindersBell'
 import { ThemeAwareLogo } from './ThemeAwareLogo'
 import { buildWorkspaceNavigation } from '@/ui/navigation/workspaceNavigation'
+import { useWorkspaceBranchSwitcher } from '@/hooks/useWorkspaceBranchSwitcher'
 
 import {
     LogOut,
@@ -39,11 +40,21 @@ import {
     Bot,
     PanelRightOpen,
     PanelRightClose,
-    LayoutGrid
+    LayoutGrid,
+    GitBranch,
+    Loader2
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from './button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './dialog'
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger
+} from './ui/dropdown-menu'
 import { useTranslation } from 'react-i18next'
 import { useEffect } from 'react'
 import { supabase } from '@/auth/supabase'
@@ -103,6 +114,15 @@ export function Layout({ children }: LayoutProps) {
     const [location, setLocation] = useLocation()
     const { user, signOut } = useAuth()
     const { hasFeature, workspaceName, isFullscreen, features, activeWorkspace } = useWorkspace()
+    const {
+        branchInfo,
+        branches,
+        canReturnToSource,
+        currentWorkspaceLabel,
+        isLoadingBranches,
+        switchingWorkspaceId,
+        switchWorkspace
+    } = useWorkspaceBranchSwitcher()
     const { trigger: triggerHaptic } = useWebHaptics({ debug: true })
     const reorderRules = useReorderTransferRules(activeWorkspace?.id)
 
@@ -268,6 +288,13 @@ export function Layout({ children }: LayoutProps) {
         }
     }
 
+    const handleSidebarWorkspaceSwitch = async (targetWorkspaceId: string) => {
+        const switched = await switchWorkspace(targetWorkspaceId)
+        if (switched) {
+            setMobileSidebarOpen(false)
+        }
+    }
+
     return (
         <UnifiedSnoozeProvider>
             <LoanPaymentModalProvider>
@@ -324,10 +351,145 @@ export function Layout({ children }: LayoutProps) {
                             )}
 
                             {!(isMini && !mobileSidebarOpen) && (
-                                <div>
-                                    <h1 className="text-lg font-bold gradient-text">{workspaceName || 'Atlas'}</h1>
-                                    <p className="text-xs text-muted-foreground">Workspace</p>
-                                </div>
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <button
+                                            type="button"
+                                            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-start transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                                            title={t('branches.openSwitcher', { defaultValue: 'Open workspace switcher' })}
+                                        >
+                                            <div className="min-w-0 flex-1">
+                                                <h1 className="truncate text-lg font-bold gradient-text">{currentWorkspaceLabel || workspaceName || 'Atlas'}</h1>
+                                                <p className="truncate text-xs text-muted-foreground">Workspace</p>
+                                            </div>
+                                            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                        </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent
+                                        align="start"
+                                        className="w-[280px] rounded-xl border-border/70 bg-background/95 p-2 backdrop-blur-xl"
+                                    >
+                                        <DropdownMenuLabel className="pb-2">
+                                            <div className="space-y-1">
+                                                <p>{t('branches.switchWorkspace', { defaultValue: 'Switch Workspace' })}</p>
+                                                {branchInfo?.isBranch && branchInfo.sourceWorkspaceName && (
+                                                    <p className="truncate text-xs font-normal text-muted-foreground">
+                                                        {`${currentWorkspaceLabel} \u2190 ${branchInfo.sourceWorkspaceName}`}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </DropdownMenuLabel>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem
+                                            disabled
+                                            className="gap-3 rounded-lg px-3 py-2 data-[disabled]:opacity-100"
+                                        >
+                                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                                                <Check className="h-4 w-4" />
+                                            </span>
+                                            <div className="min-w-0">
+                                                <p className="truncate font-semibold text-foreground">{currentWorkspaceLabel || workspaceName || 'Atlas'}</p>
+                                                <p className="truncate text-xs text-muted-foreground">
+                                                    {branchInfo?.isBranch
+                                                        ? t('branches.onBranch', { defaultValue: 'You are on branch' })
+                                                        : 'Workspace'}
+                                                </p>
+                                            </div>
+                                        </DropdownMenuItem>
+
+                                        {branchInfo?.isBranch ? (
+                                            <>
+                                                <DropdownMenuSeparator />
+                                                {canReturnToSource && branchInfo.sourceWorkspaceId ? (
+                                                    <DropdownMenuItem
+                                                        onSelect={() => {
+                                                            void handleSidebarWorkspaceSwitch(branchInfo.sourceWorkspaceId!)
+                                                        }}
+                                                        disabled={switchingWorkspaceId === branchInfo.sourceWorkspaceId}
+                                                        className="gap-3 rounded-lg px-3 py-2"
+                                                    >
+                                                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
+                                                            {switchingWorkspaceId === branchInfo.sourceWorkspaceId ? (
+                                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                            ) : (
+                                                                <GitBranch className="h-4 w-4" />
+                                                            )}
+                                                        </span>
+                                                        <div className="min-w-0">
+                                                            <p className="truncate font-semibold text-foreground">
+                                                                {branchInfo.sourceWorkspaceName || t('branches.returnToSource', { defaultValue: 'Return to Source' })}
+                                                            </p>
+                                                            <p className="truncate text-xs text-muted-foreground">
+                                                                {t('branches.returnToSource', { defaultValue: 'Return to Source' })}
+                                                            </p>
+                                                        </div>
+                                                    </DropdownMenuItem>
+                                                ) : (
+                                                    <DropdownMenuItem
+                                                        disabled
+                                                        className="rounded-lg px-3 py-2 text-xs text-muted-foreground data-[disabled]:opacity-100"
+                                                    >
+                                                        {t('branches.noOtherWorkspaces', { defaultValue: 'No other workspaces available.' })}
+                                                    </DropdownMenuItem>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <>
+                                                <DropdownMenuSeparator />
+                                                <div className="max-h-[280px] overflow-y-auto">
+                                                    {isLoadingBranches ? (
+                                                        <DropdownMenuItem
+                                                            disabled
+                                                            className="gap-3 rounded-lg px-3 py-2 data-[disabled]:opacity-100"
+                                                        >
+                                                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                                                            <span className="text-sm text-muted-foreground">
+                                                                {t('common.loading', { defaultValue: 'Loading...' })}
+                                                            </span>
+                                                        </DropdownMenuItem>
+                                                    ) : branches.length === 0 ? (
+                                                        <DropdownMenuItem
+                                                            disabled
+                                                            className="rounded-lg px-3 py-2 text-xs text-muted-foreground data-[disabled]:opacity-100"
+                                                        >
+                                                            {t('branches.noBranches', { defaultValue: 'No branches yet' })}
+                                                        </DropdownMenuItem>
+                                                    ) : (
+                                                        branches.map((branch) => {
+                                                            const isSwitching = switchingWorkspaceId === branch.branchWorkspaceId
+                                                            return (
+                                                                <DropdownMenuItem
+                                                                    key={branch.id}
+                                                                    onSelect={() => {
+                                                                        void handleSidebarWorkspaceSwitch(branch.branchWorkspaceId)
+                                                                    }}
+                                                                    disabled={isSwitching}
+                                                                    className="gap-3 rounded-lg px-3 py-2"
+                                                                >
+                                                                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
+                                                                        {isSwitching ? (
+                                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                                        ) : (
+                                                                            <GitBranch className="h-4 w-4" />
+                                                                        )}
+                                                                    </span>
+                                                                    <div className="min-w-0">
+                                                                        <p className="truncate font-semibold text-foreground">
+                                                                            {branch.workspaceName || branch.name}
+                                                                        </p>
+                                                                        <p className="truncate text-xs text-muted-foreground">
+                                                                            {branch.workspaceCode || branch.name}
+                                                                        </p>
+                                                                    </div>
+                                                                </DropdownMenuItem>
+                                                            )
+                                                        })
+                                                    )}
+                                                </div>
+                                            </>
+                                        )}
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
                             )}
 
                             <button

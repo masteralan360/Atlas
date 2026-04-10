@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react'
-import { useLocation } from 'wouter'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, GitBranch, Loader2, Plus, Trash2 } from 'lucide-react'
 import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
-import { useWorkspace } from '@/workspace'
+import { useWorkspaceBranchSwitcher, type BranchListItem } from '@/hooks/useWorkspaceBranchSwitcher'
 import {
     Button,
     Card,
@@ -30,26 +29,22 @@ import {
     runSupabaseAction
 } from '@/lib/supabaseRequest'
 
-type BranchListItem = {
-    id: string
-    branchWorkspaceId: string
-    name: string
-    createdAt: string
-    workspaceName?: string
-    workspaceCode?: string
-}
-
 export function BranchManager() {
-    const [, setLocation] = useLocation()
     const { t } = useTranslation()
     const { toast } = useToast()
-    const { user, session, refreshUser, updateUser } = useAuth()
-    const { workspaceName, branchInfo } = useWorkspace()
-    const [branches, setBranches] = useState<BranchListItem[]>([])
-    const [isLoading, setIsLoading] = useState(true)
+    const { session } = useAuth()
+    const {
+        branchInfo,
+        branches,
+        canReturnToSource,
+        currentWorkspaceLabel,
+        isLoadingBranches: isLoading,
+        loadBranches,
+        switchingWorkspaceId,
+        switchWorkspace
+    } = useWorkspaceBranchSwitcher({ showLoadError: true })
     const [createName, setCreateName] = useState('')
     const [isCreating, setIsCreating] = useState(false)
-    const [switchingWorkspaceId, setSwitchingWorkspaceId] = useState<string | null>(null)
     const [branchToDelete, setBranchToDelete] = useState<BranchListItem | null>(null)
     const [isDeleting, setIsDeleting] = useState(false)
 
@@ -75,164 +70,6 @@ export function BranchManager() {
     const getAccessToken = async () => {
         const { data } = await supabase.auth.getSession()
         return data.session?.access_token ?? session?.access_token ?? ''
-    }
-
-    const loadBranches = async () => {
-        if (!user?.workspaceId || user.role !== 'admin') {
-            setBranches([])
-            setIsLoading(false)
-            return
-        }
-
-        setIsLoading(true)
-
-        try {
-            const { data: branchRows, error: branchError } = await runSupabaseAction(
-                'branches.fetchMappings',
-                () => supabase
-                    .from('workspace_branches')
-                    .select('id, name, created_at, branch_workspace_id')
-                    .eq('source_workspace_id', user.workspaceId)
-                    .order('created_at', { ascending: true }),
-                { timeoutMs: 12000, platform: 'all' }
-            ) as {
-                data: Array<{
-                    id: string
-                    name: string
-                    created_at: string
-                    branch_workspace_id: string
-                }> | null
-                error?: unknown
-            }
-
-            if (branchError) {
-                throw branchError
-            }
-
-            const rows = branchRows ?? []
-            const branchIds = rows.map((row) => row.branch_workspace_id).filter(Boolean)
-            const workspaceMap = new Map<string, { name?: string; code?: string }>()
-
-            if (branchIds.length > 0) {
-                const { data: branchWorkspaces, error: branchWorkspacesError } = await runSupabaseAction(
-                    'branches.fetchWorkspaces',
-                    () => supabase
-                        .from('workspaces')
-                        .select('id, name, code')
-                        .in('id', branchIds),
-                    { timeoutMs: 12000, platform: 'all' }
-                ) as {
-                    data: Array<{ id: string; name?: string | null; code?: string | null }> | null
-                    error?: unknown
-                }
-
-                if (branchWorkspacesError) {
-                    throw branchWorkspacesError
-                }
-
-                for (const row of branchWorkspaces ?? []) {
-                    workspaceMap.set(String(row.id), {
-                        name: row.name ?? undefined,
-                        code: row.code ?? undefined
-                    })
-                }
-            }
-
-            setBranches(rows.map((row) => {
-                const workspace = workspaceMap.get(row.branch_workspace_id)
-                return {
-                    id: String(row.id),
-                    branchWorkspaceId: String(row.branch_workspace_id),
-                    name: row.name,
-                    createdAt: row.created_at,
-                    workspaceName: workspace?.name ?? row.name,
-                    workspaceCode: workspace?.code
-                }
-            }))
-        } catch (error) {
-            console.error('[BranchManager] Failed to fetch branches:', error)
-            setBranches([])
-            showActionError(
-                error,
-                t('branches.loadError', { defaultValue: 'Failed to load branches.' })
-            )
-        } finally {
-            setIsLoading(false)
-        }
-    }
-
-    useEffect(() => {
-        void loadBranches()
-    }, [user?.workspaceId, user?.role])
-
-    const handleSwitchWorkspace = async (targetWorkspaceId: string) => {
-        if (!targetWorkspaceId) {
-            return
-        }
-
-        setSwitchingWorkspaceId(targetWorkspaceId)
-
-        try {
-            const accessToken = await getAccessToken()
-            if (!accessToken) {
-                throw new Error('Authentication required')
-            }
-
-            const { data, error } = await runSupabaseAction(
-                'branches.switchWorkspace',
-                () => supabase.functions.invoke('workspace-access', {
-                    headers: {
-                        Authorization: `Bearer ${accessToken}`
-                    },
-                    body: {
-                        action: 'switch-branch',
-                        targetWorkspaceId
-                    }
-                }),
-                { timeoutMs: 20000, platform: 'all' }
-            ) as {
-                data: {
-                    workspace_id: string
-                    workspace_code: string
-                    workspace_name: string
-                    data_mode?: string | null
-                    branch_source_workspace_id?: string | null
-                    branch_workspace_id?: string | null
-                } | null
-                error?: unknown
-            }
-
-            if (error || !data) {
-                throw error ?? new Error('Workspace switch failed')
-            }
-
-            updateUser({
-                workspaceId: data.workspace_id,
-                workspaceCode: data.workspace_code,
-                workspaceName: data.workspace_name,
-                branchSourceWorkspaceId: data.branch_source_workspace_id ?? undefined,
-                branchWorkspaceId: data.branch_workspace_id ?? undefined,
-                workspaceMode: data.data_mode === 'local'
-                    ? 'local'
-                    : data.data_mode === 'hybrid'
-                        ? 'hybrid'
-                        : 'cloud'
-            })
-
-            void refreshUser()
-
-            setTimeout(() => {
-                setLocation('/')
-            }, 100)
-        } catch (error) {
-            console.error('[BranchManager] Failed to switch workspace:', error)
-            showActionError(
-                error,
-                t('branches.switchError', { defaultValue: 'Failed to switch branches.' })
-            )
-        } finally {
-            setSwitchingWorkspaceId(null)
-        }
     }
 
     const handleCreateBranch = async () => {
@@ -337,19 +174,6 @@ export function BranchManager() {
     }
 
     if (branchInfo?.isBranch) {
-        const currentBranchLabel = workspaceName || branchInfo.branchName || t('branches.title')
-        const hasTrackedBranchEntry = Boolean(user?.branchSourceWorkspaceId || user?.branchWorkspaceId)
-        const canReturnToSource = Boolean(
-            branchInfo.sourceWorkspaceId
-            && (
-                !hasTrackedBranchEntry
-                || (
-                    user?.branchSourceWorkspaceId === branchInfo.sourceWorkspaceId
-                    && user?.branchWorkspaceId === user.workspaceId
-                )
-            )
-        )
-
         return (
             <Card className="border-emerald-500/20 bg-emerald-500/5">
                 <CardHeader>
@@ -358,15 +182,15 @@ export function BranchManager() {
                         {t('branches.title', { defaultValue: 'Branches' })}
                     </CardTitle>
                     <CardDescription>
-                        {t('branches.onBranch', { defaultValue: 'You are on branch' })}: {currentBranchLabel}
+                        {t('branches.onBranch', { defaultValue: 'You are on branch' })}: {currentWorkspaceLabel}
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div className="rounded-2xl border border-emerald-500/20 bg-background/80 p-4">
                         <p className="text-sm text-muted-foreground">
                             {branchInfo.sourceWorkspaceName
-                                ? `${currentBranchLabel} \u2190 ${branchInfo.sourceWorkspaceName}`
-                                : currentBranchLabel}
+                                ? `${currentWorkspaceLabel} \u2190 ${branchInfo.sourceWorkspaceName}`
+                                : currentWorkspaceLabel}
                         </p>
                         <p className="mt-2 text-sm text-muted-foreground">
                             {t('branches.createHint', {
@@ -377,7 +201,7 @@ export function BranchManager() {
 
                     <Button
                         type="button"
-                        onClick={() => branchInfo.sourceWorkspaceId && handleSwitchWorkspace(branchInfo.sourceWorkspaceId)}
+                        onClick={() => branchInfo.sourceWorkspaceId && switchWorkspace(branchInfo.sourceWorkspaceId)}
                         disabled={!canReturnToSource || switchingWorkspaceId === branchInfo.sourceWorkspaceId}
                         className="gap-2"
                     >
@@ -477,7 +301,7 @@ export function BranchManager() {
                                             <Button
                                                 type="button"
                                                 variant="outline"
-                                                onClick={() => handleSwitchWorkspace(branch.branchWorkspaceId)}
+                                                onClick={() => switchWorkspace(branch.branchWorkspaceId)}
                                                 disabled={isSwitching || isDeleting}
                                                 className="gap-2"
                                             >

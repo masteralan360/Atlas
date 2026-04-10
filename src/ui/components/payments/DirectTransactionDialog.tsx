@@ -189,7 +189,6 @@ export function DirectTransactionDialog({
                         Cancel
                     </Button>
                     <Button
-                        disabled={isSubmitting}
                         onClick={() => onSubmit({
                             direction,
                             amount: parseFormattedNumber(amount),
