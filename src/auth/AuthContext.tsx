@@ -22,6 +22,8 @@ interface AuthUser {
     workspaceId: string
     workspaceCode: string
     workspaceName?: string
+    branchSourceWorkspaceId?: string
+    branchWorkspaceId?: string
     profileUrl?: string
     isConfigured?: boolean
     workspaceMode: WorkspaceDataMode
@@ -77,6 +79,12 @@ function parseUserFromSupabase(user: User): AuthUser {
         workspaceId: user.user_metadata?.workspace_id ?? '',
         workspaceCode: user.user_metadata?.workspace_code ?? '',
         workspaceName: user.user_metadata?.workspace_name,
+        branchSourceWorkspaceId: typeof user.user_metadata?.branch_source_workspace_id === 'string'
+            ? user.user_metadata.branch_source_workspace_id
+            : undefined,
+        branchWorkspaceId: typeof user.user_metadata?.branch_workspace_id === 'string'
+            ? user.user_metadata.branch_workspace_id
+            : undefined,
         profileUrl: user.user_metadata?.profile_url,
         isConfigured: user.user_metadata?.is_configured,
         workspaceMode: user.user_metadata?.data_mode === 'local' ? 'local' : user.user_metadata?.data_mode === 'hybrid' ? 'hybrid' : 'cloud'
@@ -100,6 +108,8 @@ function resetWorkspaceAssignment(user: AuthUser, previousWorkspaceId?: string |
         workspaceId: '',
         workspaceCode: '',
         workspaceName: undefined,
+        branchSourceWorkspaceId: undefined,
+        branchWorkspaceId: undefined,
         isConfigured: undefined,
         workspaceMode: 'cloud'
     }
@@ -155,6 +165,8 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
         clearPreviousWorkspaceArtifacts(originalWorkspaceId, canonicalWorkspaceId)
         parsedUser.workspaceCode = ''
         parsedUser.workspaceName = undefined
+        parsedUser.branchSourceWorkspaceId = undefined
+        parsedUser.branchWorkspaceId = undefined
         parsedUser.isConfigured = undefined
         parsedUser.workspaceMode = 'cloud'
     }

@@ -58,6 +58,8 @@ export function WorkspaceRegistration() {
                     workspaceId: data.workspace_id,
                     workspaceCode: data.workspace_code,
                     workspaceName: data.workspace_name,
+                    branchSourceWorkspaceId: data.branch_source_workspace_id ?? undefined,
+                    branchWorkspaceId: data.branch_workspace_id ?? undefined,
                     workspaceMode: data.data_mode === 'local' ? 'local' : data.data_mode === 'hybrid' ? 'hybrid' : 'cloud'
                 })
             }

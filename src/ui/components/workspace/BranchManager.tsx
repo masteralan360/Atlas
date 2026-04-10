@@ -196,6 +196,8 @@ export function BranchManager() {
                     workspace_code: string
                     workspace_name: string
                     data_mode?: string | null
+                    branch_source_workspace_id?: string | null
+                    branch_workspace_id?: string | null
                 } | null
                 error?: unknown
             }
@@ -208,6 +210,8 @@ export function BranchManager() {
                 workspaceId: data.workspace_id,
                 workspaceCode: data.workspace_code,
                 workspaceName: data.workspace_name,
+                branchSourceWorkspaceId: data.branch_source_workspace_id ?? undefined,
+                branchWorkspaceId: data.branch_workspace_id ?? undefined,
                 workspaceMode: data.data_mode === 'local'
                     ? 'local'
                     : data.data_mode === 'hybrid'
@@ -334,7 +338,17 @@ export function BranchManager() {
 
     if (branchInfo?.isBranch) {
         const currentBranchLabel = workspaceName || branchInfo.branchName || t('branches.title')
-        const canReturnToSource = Boolean(branchInfo.sourceWorkspaceId)
+        const hasTrackedBranchEntry = Boolean(user?.branchSourceWorkspaceId || user?.branchWorkspaceId)
+        const canReturnToSource = Boolean(
+            branchInfo.sourceWorkspaceId
+            && (
+                !hasTrackedBranchEntry
+                || (
+                    user?.branchSourceWorkspaceId === branchInfo.sourceWorkspaceId
+                    && user?.branchWorkspaceId === user.workspaceId
+                )
+            )
+        )
 
         return (
             <Card className="border-emerald-500/20 bg-emerald-500/5">
