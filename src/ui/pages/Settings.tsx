@@ -30,6 +30,7 @@ import type { PrinterInfo } from 'tauri-plugin-thermal-printer'
 import { registerDeviceTokenIfNeeded } from '@/services/notificationDevice'
 import { useKdsStream } from '@/hooks/useKdsStream'
 import { ReactQRCode } from '@lglab/react-qr-code'
+import { BranchManager } from '@/ui/components/workspace/BranchManager'
 
 export function Settings() {
     const { user, signOut, isSupabaseConfigured, updateUser } = useAuth()
@@ -1902,6 +1903,10 @@ export function Settings() {
                             )}
                         </CardContent>
                     </Card>
+
+                    {user?.role === 'admin' && !isLocalMode && (
+                        <BranchManager />
+                    )}
 
                     {/* Contact Modal (rendered outside card but inside profile tab) */}
                     {user?.role === 'admin' && (

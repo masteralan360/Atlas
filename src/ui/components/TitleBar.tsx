@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { Minus, Square, X, Sun, Moon, ArrowUpCircle, RotateCw } from 'lucide-react'
+import { Minus, Square, X, Sun, Moon, ArrowUpCircle, RotateCw, GitBranch } from 'lucide-react'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useTheme } from '@/ui/components/theme-provider'
 import { useTranslation } from 'react-i18next'
@@ -12,7 +12,7 @@ import { ThemeAwareTitleLogo } from './ThemeAwareTitleLogo'
 
 export function TitleBar() {
     const [isMaximized, setIsMaximized] = useState(false)
-    const { workspaceName, pendingUpdate, isFullscreen } = useWorkspace()
+    const { workspaceName, branchInfo, pendingUpdate, isFullscreen } = useWorkspace()
     const { theme, setTheme, style } = useTheme()
     const { t } = useTranslation()
     // @ts-ignore
@@ -102,11 +102,31 @@ export function TitleBar() {
             "fixed top-0 left-0 right-0 h-[48px] z-[100] flex items-center justify-between px-3 select-none bg-background/80 backdrop-blur-md border-b border-white/10 transition-all duration-300",
             isFullscreen && "opacity-0 pointer-events-none -translate-y-full"
         )}>
-            <div data-tauri-drag-region className="flex items-center gap-3 w-1/3">
+            <div data-tauri-drag-region className="flex items-center gap-3 w-1/3 min-w-0">
                 <ThemeAwareTitleLogo className="w-10 h-10 opacity-90" />
-                <span data-tauri-drag-region className="text-sm font-medium opacity-80 truncate">
-                    {workspaceName || t('auth.titleName')}
-                </span>
+                <div data-tauri-drag-region className="flex items-center gap-2 min-w-0">
+                    <span data-tauri-drag-region className="text-sm font-medium opacity-80 truncate">
+                        {workspaceName || t('auth.titleName')}
+                    </span>
+                    {branchInfo?.isBranch && (
+                        <span
+                            data-tauri-drag-region
+                            className="inline-flex min-w-0 max-w-[240px] items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300"
+                            title={branchInfo.sourceWorkspaceName
+                                ? `${workspaceName || branchInfo.branchName || t('branches.title')} \u2190 ${branchInfo.sourceWorkspaceName}`
+                                : workspaceName || branchInfo.branchName || t('branches.title')}
+                        >
+                            <GitBranch className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{workspaceName || branchInfo.branchName || t('branches.title')}</span>
+                            {branchInfo.sourceWorkspaceName && (
+                                <>
+                                    <span className="opacity-60">\u2190</span>
+                                    <span className="truncate">{branchInfo.sourceWorkspaceName}</span>
+                                </>
+                            )}
+                        </span>
+                    )}
+                </div>
             </div>
 
             {/* Center: Search Box */}

@@ -93,9 +93,17 @@ export interface UpdateInfo {
     body?: string
 }
 
+export interface BranchInfo {
+    isBranch: boolean
+    branchName?: string
+    sourceWorkspaceId?: string
+    sourceWorkspaceName?: string
+}
+
 interface WorkspaceContextType {
     features: WorkspaceFeatures
     workspaceName: string | null
+    branchInfo: BranchInfo | null
     isLoading: boolean
     pendingUpdate: UpdateInfo | null
     setPendingUpdate: (update: UpdateInfo | null) => void
@@ -261,12 +269,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
     const [features, setFeatures] = useState<WorkspaceFeatures>(defaultFeatures)
     const [workspaceName, setWorkspaceName] = useState<string | null>(null)
+    const [branchInfo, setBranchInfo] = useState<BranchInfo | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [pendingUpdate, setPendingUpdate] = useState<UpdateInfo | null>(null)
     const [isFullscreen, setIsFullscreen] = useState(false)
     const realtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
     const currentWorkspaceIdRef = useRef<string | null>(null)
     const fetchRequestRef = useRef(0)
+    const branchFetchRequestRef = useRef(0)
     const featuresRef = useRef(defaultFeatures)
     const workspaceNameRef = useRef<string | null>(null)
 
@@ -315,6 +325,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
     const isCurrentWorkspaceRequest = (workspaceId: string, requestId: number) => {
         return currentWorkspaceIdRef.current === workspaceId && fetchRequestRef.current === requestId
+    }
+
+    const isCurrentBranchWorkspaceRequest = (workspaceId: string, requestId: number) => {
+        return currentWorkspaceIdRef.current === workspaceId && branchFetchRequestRef.current === requestId
     }
 
     const persistWorkspaceState = async (
@@ -552,16 +566,93 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
     }
 
+    const fetchBranchInfo = async (workspaceId: string, requestId: number) => {
+        if (!isSupabaseConfigured || !isAuthenticated || !workspaceId) {
+            setBranchInfo(null)
+            return
+        }
+
+        if (isOffline()) {
+            if (isCurrentBranchWorkspaceRequest(workspaceId, requestId)) {
+                setBranchInfo(null)
+            }
+            return
+        }
+
+        try {
+            const { data, error } = await runSupabaseAction(
+                'workspace.getBranchInfo',
+                () => supabase
+                    .from('workspace_branches')
+                    .select('name, source_workspace_id')
+                    .eq('branch_workspace_id', workspaceId)
+                    .maybeSingle(),
+                { timeoutMs: 8000, platform: 'all' }
+            ) as {
+                data: { name?: string | null; source_workspace_id?: string | null } | null
+                error?: unknown
+            }
+
+            if (!isCurrentBranchWorkspaceRequest(workspaceId, requestId)) {
+                return
+            }
+
+            if (error) {
+                throw error
+            }
+
+            if (!data?.source_workspace_id) {
+                setBranchInfo(null)
+                return
+            }
+
+            const { data: sourceWorkspace, error: sourceWorkspaceError } = await runSupabaseAction(
+                'workspace.getBranchSourceWorkspace',
+                () => supabase
+                    .from('workspaces')
+                    .select('id, name')
+                    .eq('id', data.source_workspace_id)
+                    .maybeSingle(),
+                { timeoutMs: 8000, platform: 'all' }
+            ) as {
+                data: { id: string; name?: string | null } | null
+                error?: unknown
+            }
+
+            if (!isCurrentBranchWorkspaceRequest(workspaceId, requestId)) {
+                return
+            }
+
+            if (sourceWorkspaceError) {
+                throw sourceWorkspaceError
+            }
+
+            setBranchInfo({
+                isBranch: true,
+                branchName: data.name ?? undefined,
+                sourceWorkspaceId: data.source_workspace_id,
+                sourceWorkspaceName: sourceWorkspace?.name ?? undefined
+            })
+        } catch (error) {
+            console.error('[Workspace] Failed to fetch branch info:', error)
+            if (isCurrentBranchWorkspaceRequest(workspaceId, requestId)) {
+                setBranchInfo(null)
+            }
+        }
+    }
+
     useEffect(() => {
         if (authLoading) return
 
         const workspaceId = isAuthenticated ? user?.workspaceId ?? null : null
         currentWorkspaceIdRef.current = workspaceId
         fetchRequestRef.current += 1
+        branchFetchRequestRef.current += 1
 
         if (!workspaceId) {
             setFeatures(defaultFeatures)
             setWorkspaceName(null)
+            setBranchInfo(null)
             setIsLoading(false)
             return
         }
@@ -569,6 +660,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setIsLoading(true)
         setFeatures(defaultFeatures)
         setWorkspaceName(null)
+        setBranchInfo(null)
 
         const cachedSnapshot = readWorkspaceCache<WorkspaceFeatures>(workspaceId)
         if (cachedSnapshot) {
@@ -577,6 +669,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
 
         void fetchFeatures(false, { workspaceId, cachedSnapshot })
+        void fetchBranchInfo(workspaceId, branchFetchRequestRef.current)
     }, [authLoading, isAuthenticated, user?.workspaceId])
 
     useEffect(() => {
@@ -691,7 +784,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (!workspaceId) return
 
         setIsLoading(true)
-        await fetchFeatures(false, { workspaceId })
+        const branchRequestId = ++branchFetchRequestRef.current
+        await Promise.all([
+            fetchFeatures(false, { workspaceId }),
+            fetchBranchInfo(workspaceId, branchRequestId)
+        ])
     }
 
     const updateSettings = async (
@@ -913,6 +1010,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         <WorkspaceContext.Provider value={{
             features,
             workspaceName,
+            branchInfo,
             isLoading,
             pendingUpdate,
             setPendingUpdate,
