@@ -166,6 +166,10 @@ export function Register() {
                                             onChange={(e) => setPasskey(e.target.value)}
                                             className="pl-10"
                                             required={isSupabaseConfigured}
+                                            maxLength={32}
+                                            autoCapitalize="off"
+                                            autoCorrect="off"
+                                            spellCheck={false}
                                         />
                                     </div>
                                 </div>

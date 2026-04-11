@@ -569,6 +569,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         let workspaceId = ''
         let resolvedWorkspaceName = workspaceName
+        const normalizedPasskey = passkey.trim()
 
         try {
             if (role === 'admin') {
@@ -580,7 +581,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                         body: {
                             action: 'create',
                             workspaceName,
-                            passkey
+                            passkey: normalizedPasskey
                         }
                     }),
                     { timeoutMs: 12000, platform: 'all' }
@@ -618,7 +619,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     data: {
                         name,
                         role,
-                        passkey,
+                        passkey: normalizedPasskey,
                         workspace_id: workspaceId,
                         workspace_code: resolvedWorkspaceCode,
                         workspace_name: resolvedWorkspaceName

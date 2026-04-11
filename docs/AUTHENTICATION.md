@@ -10,10 +10,11 @@ Atlas uses **Supabase Auth** for authentication with a custom workspace-based au
 
 ### Sign Up
 1. User enters email, password, name, passkey.
-2. Passkey validated against workspace admin/member key.
+2. Passkey validated against the active one-time registration key for the selected role.
 3. Supabase creates `auth.users` record.
 4. Database trigger creates `profiles` record with `workspace_id`.
-5. User redirected to dashboard.
+5. The submitted passkey is stripped from auth metadata and all three role registration keys rotate.
+6. User redirected to dashboard.
 
 ### Sign In
 1. User enters email, password.
@@ -64,5 +65,5 @@ To prevent application crashes or blank screens during network failures, essenti
 
 1. **Row Level Security (RLS)**: Users only access data within their `workspace_id`.
 2. **Encrypted Persistence**: Local session metadata is encrypted using AES-256 via the `VITE_ENCRYPTION_KEY`.
-3. **Passkey System**: Registration is restricted by workspace-specific keys.
+3. **Passkey System**: Registration is restricted by one-time role keys stored in `public.keys`, and every successful signup rotates the full key set.
 4. **Graceful Degradation**: Token refresh failures trigger a toast notification and a clean sign-out rather than hard crashes.

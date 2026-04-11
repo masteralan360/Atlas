@@ -223,9 +223,9 @@ All Supabase tables enforce RLS policies:
 
 ### Passkey System
 
-- Workspaces have admin and member passkeys
-- Required for user registration
-- Stored encrypted in Supabase
+- Registration uses one active key per role: `admin`, `staff`, and `viewer`
+- Keys live in `public.keys`
+- Successful registration removes the submitted passkey from auth metadata and rotates all three keys atomically
 
 ### Data Encryption
 

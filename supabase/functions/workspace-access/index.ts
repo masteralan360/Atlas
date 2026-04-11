@@ -321,21 +321,16 @@ async function clearUserWorkspaceMetadata(
 
 async function validateCreatePasskey(adminClient: AdminClient, providedPasskey: string) {
     const { data, error } = await adminClient
-        .from('app_permissions')
-        .select('key_name, key_value')
-        .in('key_name', ['admin_passkey', 'registration_passkey'])
+        .from('keys')
+        .select('key_value')
+        .eq('key_name', 'admin')
+        .maybeSingle()
 
     if (error) {
         throw error
     }
 
-    const passkeys = new Map<string, string>()
-    for (const row of data ?? []) {
-        passkeys.set(String(row.key_name), String(row.key_value))
-    }
-
-    return providedPasskey === passkeys.get('admin_passkey')
-        || providedPasskey === passkeys.get('registration_passkey')
+    return providedPasskey === String(data?.key_value ?? '')
 }
 
 async function handleCreateWorkspace(adminClient: AdminClient, body: CreateWorkspaceRequest) {

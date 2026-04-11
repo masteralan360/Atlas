@@ -7,36 +7,52 @@ AS $function$
 declare
     provided_key text;
     requested_role text;
-    required_key_name text;
     valid_key text;
-    general_key text;
+    configured_key_count integer;
 begin
-    provided_key := NEW.raw_user_meta_data->>'passkey';
-    requested_role := NEW.raw_user_meta_data->>'role';
-    
+    provided_key := nullif(btrim(coalesce(NEW.raw_user_meta_data->>'passkey', '')), '');
+    requested_role := nullif(btrim(coalesce(NEW.raw_user_meta_data->>'role', '')), '');
+
     if requested_role is null then
         raise exception 'Role is required for registration. Meta: %', NEW.raw_user_meta_data;
     end if;
 
-    case requested_role
-        when 'admin' then required_key_name := 'admin_passkey';
-        when 'staff' then required_key_name := 'staff_passkey';
-        when 'viewer' then required_key_name := 'viewer_passkey';
-        else raise exception 'Invalid role requested: %. Meta: %', requested_role, NEW.raw_user_meta_data;
-    end case;
-
-    -- Get the role-specific key
-    select key_value into valid_key from public.app_permissions where key_name = required_key_name;
-    -- Get the general registration key as fallback
-    select key_value into general_key from public.app_permissions where key_name = 'registration_passkey';
-
-    if provided_key is null or (provided_key != coalesce(valid_key, 'MISSING') and provided_key != coalesce(general_key, 'MISSING')) then
-        raise exception 'Invalid Passkey provided: "%". For role: %. (Expected role-specific or general key)', provided_key, requested_role;
+    if requested_role not in ('admin', 'staff', 'viewer') then
+        raise exception 'Invalid role requested: %. Meta: %', requested_role, NEW.raw_user_meta_data;
     end if;
-    
+
+    if provided_key is null then
+        raise exception 'Registration passkey is required.';
+    end if;
+
+    perform 1
+    from public.keys
+    where key_name in ('admin', 'staff', 'viewer')
+    order by key_name
+    for update;
+
+    select count(*)
+    into configured_key_count
+    from public.keys
+    where key_name in ('admin', 'staff', 'viewer');
+
+    if configured_key_count <> 3 then
+        raise exception 'Registration keys are not fully configured. Expected 3 active keys, found %.', configured_key_count;
+    end if;
+
+    select key_value into valid_key
+    from public.keys
+    where key_name = requested_role;
+
+    if valid_key is null or provided_key <> valid_key then
+        raise exception 'Invalid passkey provided for role: %.', requested_role;
+    end if;
+
+    perform public.rotate_registration_keys();
+
     -- IMPORTANT: Remove the passkey from metadata so it is not saved to the database.
-    NEW.raw_user_meta_data = NEW.raw_user_meta_data - 'passkey';
-    
+    NEW.raw_user_meta_data = coalesce(NEW.raw_user_meta_data, '{}'::jsonb) - 'passkey';
+
     return NEW;
 end;
 $function$
