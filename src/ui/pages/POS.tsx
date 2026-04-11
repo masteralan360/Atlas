@@ -71,6 +71,7 @@ import { BarcodeScannerModal } from '@/ui/components/pos/BarcodeScannerModal'
 import { mapSaleToUniversal } from '@/lib/mappings'
 import { LoanRegistrationModal, type LoanRegistrationData } from '@/ui/components/pos/LoanRegistrationModal'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
+import { useWebHaptics } from 'web-haptics/react'
 
 function isLoanRegistrationData(value: unknown): value is LoanRegistrationData {
     if (!value || typeof value !== 'object') return false
@@ -122,7 +123,36 @@ function formatDiscountBadge(
 }
 
 
+const playCheckoutSound = () => {
+    try {
+        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContext) return;
+        const ctx = new AudioContext();
+        
+        const playNote = (freq: number, startDelay: number, type: OscillatorType = 'sine', duration: number = 0.15) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, ctx.currentTime + startDelay);
+            gain.gain.setValueAtTime(0, ctx.currentTime + startDelay);
+            gain.gain.linearRampToValueAtTime(0.06, ctx.currentTime + startDelay + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startDelay + duration);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime + startDelay);
+            osc.stop(ctx.currentTime + startDelay + duration);
+        };
+
+        // A minimalist, modern dual-tone chime (elegant UI success pop)
+        playNote(783.99, 0, 'sine', 0.1);     // G5 short
+        playNote(1046.50, 0.08, 'sine', 0.3); // C6 slightly longer with fade
+    } catch(e) {
+        // Ignore gracefully
+    }
+};
+
 export function POS() {
+    const { trigger: hapticTrigger } = useWebHaptics({ debug: true })
     const { toast } = useToast()
     const { user } = useAuth()
     const { t, i18n } = useTranslation()
@@ -860,10 +890,12 @@ export function POS() {
                 }
             ]
         })
-    }, [activeDiscountMap, features, t, toast])
+        hapticTrigger('selection')
+    }, [activeDiscountMap, features, t, toast, hapticTrigger])
 
     const removeFromCart = (itemKey: string) => {
         setCart((prev) => prev.filter((item) => getCartItemKey(item) !== itemKey))
+        hapticTrigger('warning')
     }
 
     const updateQuantity = (itemKey: string, delta: number) => {
@@ -881,6 +913,7 @@ export function POS() {
             }).filter((item): item is CartItem => item !== null) // Filter out nulls (removed items)
             return updatedCart
         })
+        hapticTrigger('selection')
     }
 
     const setNegotiatedPrice = (itemKey: string, price: number | undefined) => {
@@ -948,6 +981,7 @@ export function POS() {
                 description: `${t('pos.skuNotFound')}: ${term}`,
                 duration: 2000,
             })
+            hapticTrigger('error')
         }
     }
 
@@ -991,8 +1025,9 @@ export function POS() {
                 description: `${t('pos.skuNotFound')}: ${text}`,
                 duration: 2000,
             })
+            hapticTrigger('error')
         }
-    }, [isCameraScannerAutoEnabled, isDeviceScannerAutoEnabled, scanDelay, products, addToCart, t, toast, selectedStorageId, storages])
+    }, [isCameraScannerAutoEnabled, isDeviceScannerAutoEnabled, scanDelay, products, addToCart, t, toast, selectedStorageId, storages, hapticTrigger])
 
     useEffect(() => {
         if (!isDeviceScannerAutoEnabled || isBarcodeModalOpen) {
@@ -1105,6 +1140,7 @@ export function POS() {
             description: t('pos.saleHeldDesc', 'Current sale has been put on hold.'),
             duration: 3000
         })
+        hapticTrigger('success')
     }
 
     const handleRestoreSale = (sale: HeldSale) => {
@@ -1146,6 +1182,7 @@ export function POS() {
             description: t('pos.saleRestoredDesc', 'Held sale has been restored with its original rates.'),
             duration: 3000
         })
+        hapticTrigger('success')
     }
 
     const handleDeleteHeldSale = (id: string) => {
@@ -1472,6 +1509,8 @@ export function POS() {
             setIsLoanRegistrationModalOpen(false)
             setCompletedSaleData(saleData)
             setIsSuccessModalOpen(true)
+            hapticTrigger('success')
+            playCheckoutSound()
 
             // Refresh exchange rate for the next sale
             refreshExchangeRate()
@@ -1622,6 +1661,8 @@ export function POS() {
                     setIsLoanRegistrationModalOpen(false)
                     setCompletedSaleData(saleDataOffline)
                     setIsSuccessModalOpen(true)
+                    hapticTrigger('success')
+                    playCheckoutSound()
                     return
                 } catch (saveErr: any) {
                     console.error('Offline save failed:', saveErr)
