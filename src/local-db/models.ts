@@ -735,7 +735,7 @@ export interface WorkspaceContact extends Omit<BaseEntity, 'isDeleted'> {
 export interface OfflineMutation {
     id: string
     workspaceId: string
-    entityType: 'products' | 'inventory' | 'reorder_transfer_rules' | 'inventory_transfer_transactions' | 'invoices' | 'users' | 'sales' | 'categories' | 'product_discounts' | 'category_discounts' | 'workspaces' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments' | 'payment_transactions' | 'budget_settings' | 'budget_allocations' | 'expense_series' | 'expense_items' | 'payroll_statuses' | 'dividend_statuses' | 'customers' | 'suppliers' | 'business_partners' | 'business_partner_merge_candidates' | 'sales_orders' | 'purchase_orders' | 'travel_agency_sales'
+    entityType: 'products' | 'inventory' | 'reorder_transfer_rules' | 'inventory_transfer_transactions' | 'invoices' | 'users' | 'sales' | 'categories' | 'product_discounts' | 'category_discounts' | 'workspaces' | 'workspace_branches' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments' | 'payment_transactions' | 'budget_settings' | 'budget_allocations' | 'expense_series' | 'expense_items' | 'payroll_statuses' | 'dividend_statuses' | 'customers' | 'suppliers' | 'business_partners' | 'business_partner_merge_candidates' | 'sales_orders' | 'purchase_orders' | 'travel_agency_sales'
     entityId: string
     operation: 'create' | 'update' | 'delete'
     payload: Record<string, unknown>

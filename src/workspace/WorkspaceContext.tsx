@@ -95,6 +95,7 @@ export interface UpdateInfo {
 
 export interface BranchInfo {
     isBranch: boolean
+    relationId?: string
     branchName?: string
     sourceWorkspaceId?: string
     sourceWorkspaceName?: string
@@ -584,12 +585,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 'workspace.getBranchInfo',
                 () => supabase
                     .from('workspace_branches')
-                    .select('name, source_workspace_id')
+                    .select('id, name, source_workspace_id')
                     .eq('branch_workspace_id', workspaceId)
                     .maybeSingle(),
                 { timeoutMs: 8000, platform: 'all' }
             ) as {
-                data: { name?: string | null; source_workspace_id?: string | null } | null
+                data: { id: string; name?: string | null; source_workspace_id?: string | null } | null
                 error?: unknown
             }
 
@@ -629,6 +630,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
             setBranchInfo({
                 isBranch: true,
+                relationId: data.id,
                 branchName: data.name ?? undefined,
                 sourceWorkspaceId: data.source_workspace_id,
                 sourceWorkspaceName: sourceWorkspace?.name ?? undefined
@@ -799,6 +801,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
         const { name, ...featureSettings } = settings
         const currentFeatures = featuresRef.current
+        const currentBranchInfo = branchInfo
         const nextWorkspaceName = name ?? workspaceNameRef.current ?? user?.workspaceName ?? 'My Workspace'
         const newFeatures = { ...currentFeatures, ...featureSettings }
         const now = new Date().toISOString()
@@ -806,6 +809,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (name) {
             setWorkspaceName(name)
             updateUser({ workspaceName: name })
+            if (currentBranchInfo?.isBranch) {
+                setBranchInfo({
+                    ...currentBranchInfo,
+                    branchName: name
+                })
+            }
         }
 
         setFeatures(newFeatures)
@@ -902,7 +911,36 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             if (error) {
                 console.error('Error updating workspace settings on Supabase:', error)
                 await addToOfflineMutations('workspaces', workspaceId, 'update', supabaseUpdate, workspaceId)
+                if (name !== undefined && currentBranchInfo?.isBranch && currentBranchInfo.relationId) {
+                    await addToOfflineMutations(
+                        'workspace_branches',
+                        currentBranchInfo.relationId,
+                        'update',
+                        {
+                            id: currentBranchInfo.relationId,
+                            name
+                        },
+                        workspaceId
+                    )
+                }
             } else {
+                if (name !== undefined && currentBranchInfo?.isBranch && currentBranchInfo.relationId) {
+                    const branchUpdatePayload = {
+                        id: currentBranchInfo.relationId,
+                        name
+                    }
+
+                    const { error: branchError } = await supabase
+                        .from('workspace_branches')
+                        .update({ name })
+                        .eq('id', currentBranchInfo.relationId)
+
+                    if (branchError) {
+                        console.error('Error updating branch settings on Supabase:', branchError)
+                        await addToOfflineMutations('workspace_branches', currentBranchInfo.relationId, 'update', branchUpdatePayload, workspaceId)
+                    }
+                }
+
                 await db.workspaces.update(workspaceId, {
                     syncStatus: 'synced',
                     lastSyncedAt: new Date().toISOString()
@@ -910,6 +948,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             }
         } else {
             await addToOfflineMutations('workspaces', workspaceId, 'update', supabaseUpdate, workspaceId)
+            if (name !== undefined && currentBranchInfo?.isBranch && currentBranchInfo.relationId) {
+                await addToOfflineMutations(
+                    'workspace_branches',
+                    currentBranchInfo.relationId,
+                    'update',
+                    {
+                        id: currentBranchInfo.relationId,
+                        name
+                    },
+                    workspaceId
+                )
+            }
         }
     }
 

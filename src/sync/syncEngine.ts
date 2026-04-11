@@ -80,7 +80,7 @@ export async function processMutationQueue(_userId: string): Promise<{ success: 
             // Prepare payload
             const dbPayload = toSnakeCase(payload) as Record<string, unknown>
             // Ensure workspace scope is present for workspace-bound rows.
-            if (entityType !== 'workspaces' && dbPayload.workspace_id === undefined) {
+            if (entityType !== 'workspaces' && entityType !== 'workspace_branches' && dbPayload.workspace_id === undefined) {
                 dbPayload.workspace_id = workspaceId
             }
 
@@ -139,7 +139,7 @@ export async function processMutationQueue(_userId: string): Promise<{ success: 
                         const { error } = await client.from(tableName).update(dbPayload).eq('id', entityId)
                         if (error) throw error
                     }
-                } else if (entityType === 'workspaces') {
+                } else if (entityType === 'workspaces' || entityType === 'workspace_branches') {
                     // Remove workspace_id from payload for workspace table update itself
                     delete dbPayload.workspace_id
                     delete dbPayload.user_id
