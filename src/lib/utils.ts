@@ -439,6 +439,7 @@ export function formatOriginLabel(origin?: string | null, sourceChannel?: string
     if (normalized === 'travel_agency' || normalized === 'travel-agency' || normalized === 'travel agency') return 'Travel Agency'
     if (normalized === 'manual') return 'Manual'
     if (normalized === 'loans' || normalized === 'loan') return 'Loans'
+    if (normalized === 'upload' || normalized === 'uploads') return 'Upload'
     return origin
 }
 

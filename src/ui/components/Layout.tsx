@@ -94,6 +94,7 @@ const routePrefetchMap: Record<string, () => Promise<unknown>> = {
     '/storages': () => import('@/ui/pages/Storages'),
     '/inventory-transfer': () => import('@/ui/pages/InventoryTransfer'),
     '/invoices-history': () => import('@/ui/pages/InvoicesHistory'),
+    '/invoices-history/upload-files': () => import('@/ui/pages/InvoicesHistory'),
     '/hr': () => import('@/ui/pages/HR'),
     '/members': () => import('@/ui/pages/Members'),
     '/settings': () => import('@/ui/pages/Settings'),
@@ -134,11 +135,25 @@ export function Layout({ children }: LayoutProps) {
         }
         return true
     })
-    const [instantPosOpen, setInstantPosOpen] = useState(() => {
+    const [expandedNavGroups, setExpandedNavGroups] = useState<Record<string, boolean>>(() => {
         if (typeof window !== 'undefined') {
-            return localStorage.getItem('instant_pos_nav_open') === 'true'
+            try {
+                const stored = localStorage.getItem('sidebar_expanded_nav_groups')
+                if (stored) {
+                    const parsed = JSON.parse(stored)
+                    if (parsed && typeof parsed === 'object') {
+                        return parsed as Record<string, boolean>
+                    }
+                }
+            } catch (error) {
+                console.warn('[Layout] Failed to restore expanded nav groups:', error)
+            }
+
+            return {
+                '/instant-pos': localStorage.getItem('instant_pos_nav_open') === 'true'
+            }
         }
-        return false
+        return {}
     })
     const [isMini, setIsMini] = useState(() => {
         if (typeof window !== 'undefined') {
@@ -149,9 +164,10 @@ export function Layout({ children }: LayoutProps) {
 
     useEffect(() => {
         if (typeof window !== 'undefined') {
-            localStorage.setItem('instant_pos_nav_open', String(instantPosOpen))
+            localStorage.setItem('sidebar_expanded_nav_groups', JSON.stringify(expandedNavGroups))
+            localStorage.setItem('instant_pos_nav_open', String(Boolean(expandedNavGroups['/instant-pos'])))
         }
-    }, [instantPosOpen])
+    }, [expandedNavGroups])
 
     const [members, setMembers] = useState<{ id: string, name: string, role: string, profile_url?: string }[]>([])
     const [logoError, setLogoError] = useState(false)
@@ -533,16 +549,14 @@ export function Layout({ children }: LayoutProps) {
 
                                     <div className="space-y-1">
                                         {group.items.map((item) => {
-                                            const isInstantPosGroup = item.href === '/instant-pos' && item.children?.length
+                                            const isExpandableGroup = Boolean(item.children?.length)
                                             const showReorderAutomationBadge = item.href === '/inventory-transfer' && reorderAutomationCount > 0
-                                            const isChildActive = isInstantPosGroup
+                                            const isChildActive = isExpandableGroup
                                                 ? item.children!.some(child => location === child.href || (child.href !== '/' && location.startsWith(child.href)))
                                                 : false
-                                            const isActive = isInstantPosGroup
-                                                ? (location === item.href || isChildActive)
-                                                : (location === item.href || (item.href !== '/' && location.startsWith(item.href)))
-                                            const isOpen = isInstantPosGroup ? (instantPosOpen || isChildActive) : false
-                                            const showChildren = isOpen && !(isMini && !mobileSidebarOpen)
+                                            const isActive = location === item.href || (item.href !== '/' && location.startsWith(item.href)) || isChildActive
+                                            const isOpen = isExpandableGroup ? (Boolean(expandedNavGroups[item.href]) || isChildActive) : false
+                                            const showChildren = isExpandableGroup && isOpen && !(isMini && !mobileSidebarOpen)
 
                                             const parentContent = (
                                                 <span
@@ -559,13 +573,13 @@ export function Layout({ children }: LayoutProps) {
                                                     {!(isMini && !mobileSidebarOpen) && (
                                                         <>
                                                             {item.name}
-                                                            {isInstantPosGroup && (
+                                                            {isExpandableGroup && (
                                                                 <ChevronDown className={cn(
                                                                     "ms-auto w-4 h-4 transition-transform",
                                                                     isOpen && "rotate-180"
                                                                 )} />
                                                             )}
-                                                            {!isInstantPosGroup && showReorderAutomationBadge && (
+                                                            {!isExpandableGroup && showReorderAutomationBadge && (
                                                                 <span
                                                                     role="button"
                                                                     tabIndex={0}
@@ -597,12 +611,12 @@ export function Layout({ children }: LayoutProps) {
                                                                     </span>
                                                                 </span>
                                                             )}
-                                                            {!isInstantPosGroup && item.alert && (
+                                                            {!isExpandableGroup && item.alert && (
                                                                 <div className="ms-auto flex items-center justify-center w-5 h-5 rounded-full bg-red-500 text-white">
                                                                     <AlertCircle className="w-3.5 h-3.5" />
                                                                 </div>
                                                             )}
-                                                            {!isInstantPosGroup && item.status && (
+                                                            {!isExpandableGroup && item.status && (
                                                                 <div className={cn(
                                                                     "ms-auto w-2 h-2 rounded-full",
                                                                     item.status === 'live' ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"
@@ -659,10 +673,13 @@ export function Layout({ children }: LayoutProps) {
                                                     <Link
                                                         href={item.href}
                                                         onClick={() => {
-                                                            if (isInstantPosGroup) {
-                                                                setInstantPosOpen(prev => !prev)
+                                                            if (isExpandableGroup) {
+                                                                setExpandedNavGroups((prev) => ({
+                                                                    ...prev,
+                                                                    [item.href]: !prev[item.href]
+                                                                }))
                                                             }
-                                                            if (!isInstantPosGroup) {
+                                                            if (!isExpandableGroup) {
                                                                 setMobileSidebarOpen(false)
                                                             }
                                                             triggerHaptic('selection')
@@ -672,7 +689,7 @@ export function Layout({ children }: LayoutProps) {
                                                         {parentContent}
                                                     </Link>
 
-                                                    {isInstantPosGroup && showChildren && (
+                                                    {showChildren && (
                                                         <div className={cn(
                                                             "relative flex flex-col space-y-1 mt-1.5",
                                                             !(isMini && !mobileSidebarOpen) && "before:absolute before:inset-y-0 before:left-[22px] rtl:before:right-[22px] rtl:before:left-auto before:w-px before:bg-border/60",

@@ -23,6 +23,7 @@ import {
     Truck,
     Users,
     UsersRound,
+    Upload,
     Warehouse,
     Wallet,
     Zap
@@ -132,7 +133,16 @@ export function buildWorkspaceNavigation({
         ...(hasFeature('discounts') ? [{ name: t('nav.discounts', { defaultValue: 'Discounts' }), href: '/discounts', icon: Percent }] : []),
         ...(hasFeature('storages') ? [{ name: t('nav.storages', { defaultValue: 'Storages' }), href: '/storages', icon: Warehouse }] : []),
         ...(hasFeature('inventory_transfer') ? [{ name: t('nav.inventoryTransfer', { defaultValue: 'Inventory Transfer' }), href: '/inventory-transfer', icon: ArrowRightLeft }] : []),
-        ...(hasFeature('invoices_history') ? [{ name: t('nav.invoicesHistory', { defaultValue: 'Invoices History' }), href: '/invoices-history', icon: FileText }] : []),
+        ...(hasFeature('invoices_history') ? [{
+            name: t('nav.invoicesHistory', { defaultValue: 'Invoices History' }),
+            href: '/invoices-history',
+            icon: FileText,
+            children: [{
+                name: t('nav.uploadFiles', { defaultValue: 'Upload Files' }),
+                href: '/invoices-history/upload-files',
+                icon: Upload
+            }]
+        }] : []),
         ...(isCoreRole ? [
             ...(hasFeature('hr') ? [{ name: t('nav.hr', { defaultValue: 'HR' }), href: '/hr', icon: UsersRound }] : []),
             ...(hasFeature('members') ? [{ name: t('members.title', { defaultValue: 'Members' }), href: '/members', icon: Users }] : []),

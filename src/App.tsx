@@ -779,6 +779,13 @@ function App() {
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
+                                            <Route path="/invoices-history/upload-files">
+                                                <ProtectedRoute requiredFeature="invoices_history">
+                                                    <Layout>
+                                                        <InvoicesHistory />
+                                                    </Layout>
+                                                </ProtectedRoute>
+                                            </Route>
                                             <Route path="/invoices-history">
                                                 <ProtectedRoute requiredFeature="invoices_history">
                                                     <Layout>

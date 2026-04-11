@@ -1391,9 +1391,9 @@ export function useDashboardStats(workspaceId: string | undefined) {
         ] = await Promise.all([
             db.products.where('workspaceId').equals(workspaceId).and(p => !p.isDeleted).count(),
             db.categories.where('workspaceId').equals(workspaceId).and(c => !c.isDeleted).count(),
-            db.invoices.where('workspaceId').equals(workspaceId).and(i => !i.isDeleted).count(),
+            db.invoices.where('workspaceId').equals(workspaceId).and(i => !i.isDeleted && i.origin !== 'upload').count(),
             db.sales.where('workspaceId').equals(workspaceId).and(s => !s.isDeleted).reverse().sortBy('createdAt').then(sales => sales.slice(0, 3)),
-            db.invoices.where('workspaceId').equals(workspaceId).and(inv => !inv.isDeleted).reverse().sortBy('createdAt').then(inv => inv.slice(0, 4)),
+            db.invoices.where('workspaceId').equals(workspaceId).and(inv => !inv.isDeleted && inv.origin !== 'upload').reverse().sortBy('createdAt').then(inv => inv.slice(0, 4)),
             db.products.where('workspaceId').equals(workspaceId).and(p => !p.isDeleted && p.quantity <= p.minStockLevel).toArray(),
             db.sales.where('workspaceId').equals(workspaceId).and(s => !s.isDeleted && s.createdAt >= thirtyDaysAgoStr).toArray()
         ])
