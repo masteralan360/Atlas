@@ -163,7 +163,7 @@ export function buildWorkspaceNavigation({
     // 3. Convert map back to ordered array of WorkspaceNavigationGroup
     const launcherGroups = launcherSectionOrder
         .map(key => ({
-            title: launcherSections[key].title,
+            title: t(`nav.sections.${key}.title`, { defaultValue: launcherSections[key].title }),
             icon: launcherSections[key].icon,
             items: grouped.get(key) || []
         }))

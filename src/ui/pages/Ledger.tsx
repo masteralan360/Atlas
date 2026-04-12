@@ -1371,7 +1371,7 @@ export function Ledger() {
                 </div>
 
                 <Card className="relative overflow-hidden shadow-sm xl:w-[340px]">
-                    <div className="absolute -right-4 -top-8 text-primary opacity-[0.03] dark:opacity-5">
+                    <div className="absolute -end-4 -top-8 text-primary opacity-[0.03] dark:opacity-5">
                         <Wallet className="h-32 w-32" />
                     </div>
                     <CardHeader className="pb-2">
@@ -1394,7 +1394,7 @@ export function Ledger() {
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <Card className="rounded-3xl border border-border/50 bg-card/60 overflow-hidden relative group dark:bg-zinc-950">
-                    <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
+                    <div className="absolute top-0 end-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
                         <ArrowDownLeft className="w-24 h-24 text-emerald-500" />
                     </div>
                     <CardHeader className="pb-2 flex flex-row items-center justify-between z-10 relative">
@@ -1417,8 +1417,8 @@ export function Ledger() {
                                     trendStats.inflowOffset < 0 ? "text-rose-600 bg-rose-500/10 border-rose-500/20" :
                                     "text-muted-foreground bg-secondary/50 border-border"
                                 )}>
-                                    {trendStats.inflowOffset > 0 ? <TrendingUp className="w-3 h-3 mr-1" /> :
-                                     trendStats.inflowOffset < 0 ? <TrendingDown className="w-3 h-3 mr-1" /> : null}
+                                    {trendStats.inflowOffset > 0 ? <TrendingUp className="w-3 h-3 me-1" /> :
+                                     trendStats.inflowOffset < 0 ? <TrendingDown className="w-3 h-3 me-1" /> : null}
                                     {trendStats.inflowOffset > 0 ? '+' : ''}{trendStats.inflowOffset.toFixed(1)}%
                                 </span>
                                 <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">{t('ledger.kpis.vsPriorPeriod', { defaultValue: 'vs prior period' })}</span>
@@ -1429,7 +1429,7 @@ export function Ledger() {
                 </Card>
 
                 <Card className="rounded-3xl border border-border/50 bg-card/60 overflow-hidden relative group dark:bg-zinc-950">
-                    <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
+                    <div className="absolute top-0 end-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
                         <ArrowUpRight className="w-24 h-24 text-amber-500" />
                     </div>
                     <CardHeader className="pb-2 flex flex-row items-center justify-between z-10 relative">
@@ -1452,8 +1452,8 @@ export function Ledger() {
                                     trendStats.outflowOffset < 0 ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20" :
                                     "text-muted-foreground bg-secondary/50 border-border"
                                 )}>
-                                    {trendStats.outflowOffset > 0 ? <TrendingUp className="w-3 h-3 mr-1" /> :
-                                     trendStats.outflowOffset < 0 ? <TrendingDown className="w-3 h-3 mr-1" /> : null}
+                                    {trendStats.outflowOffset > 0 ? <TrendingUp className="w-3 h-3 me-1" /> :
+                                     trendStats.outflowOffset < 0 ? <TrendingDown className="w-3 h-3 me-1" /> : null}
                                     {trendStats.outflowOffset > 0 ? '+' : ''}{trendStats.outflowOffset.toFixed(1)}%
                                 </span>
                                 <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">{t('ledger.kpis.vsPriorPeriod', { defaultValue: 'vs prior period' })}</span>
@@ -1464,7 +1464,7 @@ export function Ledger() {
                 </Card>
 
                 <Card className="rounded-3xl border border-border/50 bg-card/60 overflow-hidden relative group dark:bg-zinc-950">
-                    <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
+                    <div className="absolute top-0 end-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
                         <Wallet className={cn("w-24 h-24", netFlowIsNegative ? "text-rose-500" : "text-sky-500")} />
                     </div>
                     <CardHeader className="pb-2 flex flex-row items-center justify-between z-10 relative">
@@ -1489,8 +1489,8 @@ export function Ledger() {
                                     trendStats.netFlowOffset < 0 ? "text-rose-600 bg-rose-500/10 border-rose-500/20" :
                                     "text-muted-foreground bg-secondary/50 border-border"
                                 )}>
-                                    {trendStats.netFlowOffset > 0 ? <TrendingUp className="w-3 h-3 mr-1" /> :
-                                     trendStats.netFlowOffset < 0 ? <TrendingDown className="w-3 h-3 mr-1" /> : null}
+                                    {trendStats.netFlowOffset > 0 ? <TrendingUp className="w-3 h-3 me-1" /> :
+                                     trendStats.netFlowOffset < 0 ? <TrendingDown className="w-3 h-3 me-1" /> : null}
                                     {trendStats.netFlowOffset > 0 ? '+' : ''}{trendStats.netFlowOffset.toFixed(1)}%
                                 </span>
                                 <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">{t('ledger.kpis.vsPriorPeriod', { defaultValue: 'vs prior period' })}</span>
@@ -1501,7 +1501,7 @@ export function Ledger() {
                 </Card>
 
                 <Card className="col-span-1 rounded-3xl border border-border/50 bg-card/60 overflow-hidden relative group dark:bg-zinc-950">
-                    <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
+                    <div className="absolute top-0 end-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
                         <Percent className="w-24 h-24 text-indigo-500" />
                     </div>
                     <CardHeader className="pb-2 flex flex-row items-center justify-between z-10 relative">
@@ -1548,7 +1548,7 @@ export function Ledger() {
                             <div className="flex flex-col h-full divide-y divide-border/20">
                                 {trendStats.topModulesData.map((item, idx) => (
                                     <div key={item.id} className="p-4 flex items-center hover:bg-secondary/20 transition-colors duration-200">
-                                        <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-black text-sm shrink-0 mr-4 border border-primary/20">
+                                        <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-black text-sm shrink-0 me-4 border border-primary/20">
                                             {idx + 1}
                                         </div>
                                         <div className="flex-1 min-w-0">
@@ -1703,17 +1703,17 @@ export function Ledger() {
                                     onClick={() => setIsFilterDialogOpen(true)}
                                     className="h-11 rounded-2xl border-border/60 px-4"
                                 >
-                                    <SlidersHorizontal className="mr-2 h-4 w-4" />
+                                    <SlidersHorizontal className="me-2 h-4 w-4" />
                                     {t('ledger.filters.title', { defaultValue: 'Filters' })}
                                     {activeFilterCount > 0 ? (
-                                        <span className="ml-2 inline-flex min-w-6 items-center justify-center rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">
+                                        <span className="ms-2 inline-flex min-w-6 items-center justify-center rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">
                                             {activeFilterCount}
                                         </span>
                                     ) : null}
                                 </Button>
                                 {activeFilterCount > 0 ? (
                                     <Button type="button" variant="ghost" onClick={handleResetAllFilters} className="h-11 rounded-2xl px-4 text-muted-foreground">
-                                        <RotateCcw className="mr-2 h-4 w-4" />
+                                        <RotateCcw className="me-2 h-4 w-4" />
                                         {t('ledger.filters.clearFilters', { defaultValue: 'Clear Filters' })}
                                     </Button>
                                 ) : null}
@@ -1753,7 +1753,7 @@ export function Ledger() {
                     <CardTitle className="flex items-center gap-2 flex-wrap">
                         {t('ledger.table.title', { defaultValue: 'Ledger Entries' })}
                         {dateDisplay && (
-                            <span className="ml-2 px-2 py-0.5 text-xs font-semibold bg-primary/10 text-primary border border-primary/20 rounded-full">
+                        <span className="ms-2 px-2 py-0.5 text-xs font-semibold bg-primary/10 text-primary border border-primary/20 rounded-full">
                                 {dateDisplay}
                             </span>
                         )}
@@ -1770,7 +1770,7 @@ export function Ledger() {
                 </CardHeader>
                 <CardContent className="overflow-x-auto">
                     <TooltipProvider delayDuration={120}>
-                        <Table className="ml-6 w-[calc(100%-1.5rem)]">
+                        <Table className="ms-6 w-[calc(100%-1.5rem)]">
                             <TableHeader>
                                 <TableRow>
                                     <TableHead>{t('ledger.table.transactionId', { defaultValue: 'Transaction ID' })}</TableHead>
@@ -1833,16 +1833,16 @@ export function Ledger() {
                                         >
                                             <TableCell className="relative max-w-[170px] font-mono text-xs text-muted-foreground">
                                                 {showHoverHierarchyLine ? (
-                                                    <div className="pointer-events-none absolute inset-y-0 -left-6 w-5">
+                                                    <div className="pointer-events-none absolute inset-y-0 -start-6 w-5">
                                                         <span
                                                             className={cn(
-                                                                'absolute left-1.5 w-px bg-foreground/80',
+                                                                'absolute start-1.5 w-px bg-foreground/80',
                                                                 hierarchyVerticalClass
                                                             )}
                                                         />
                                                         {showHoverHierarchyTurn ? (
                                                             <span
-                                                                className="absolute left-1.5 top-1/2 h-px w-3 -translate-y-1/2 bg-foreground/80"
+                                                                className="absolute start-1.5 top-1/2 h-px w-3 -translate-y-1/2 bg-foreground/80"
                                                             />
                                                         ) : null}
                                                     </div>
@@ -1966,13 +1966,13 @@ export function Ledger() {
                                     <div className="space-y-2">
                                         <Label htmlFor="ledger-filter-search">{t('ledger.filters.keywordSearch', { defaultValue: 'Keyword Search' })}</Label>
                                         <div className="relative">
-                                            <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
+                                            <Search className="pointer-events-none absolute start-3 top-3.5 h-4 w-4 text-muted-foreground" />
                                             <Input
                                                 id="ledger-filter-search"
                                                 value={draftFilters.search}
                                                 onChange={(event) => setDraftFilters((current) => ({ ...current, search: event.target.value }))}
                                                 placeholder={t('ledger.filters.searchPlaceholder', { defaultValue: 'Search reference, partner, note, or ID' })}
-                                                className="pl-9"
+                                                className="ps-9"
                                             />
                                         </div>
                                     </div>
@@ -2147,7 +2147,7 @@ export function Ledger() {
 
                         <DialogFooter className="border-t border-border/60 bg-background/95 px-6 py-4 sm:justify-between">
                             <Button type="button" variant="ghost" onClick={handleResetDraftFilters} className="rounded-2xl">
-                                <RotateCcw className="mr-2 h-4 w-4" />
+                                <RotateCcw className="me-2 h-4 w-4" />
                                 {t('ledger.filters.resetDraft', { defaultValue: 'Reset Draft' })}
                             </Button>
                             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">

@@ -167,7 +167,99 @@
         "directTransactions": "Direct Transactions",
         "uploadFiles": "Upload Files",
         "tools": "Tools",
-        "actions": "Actions"
+        "actions": "Actions",
+        "sections": {
+            "sell-and-serve": {
+                "title": "Sell & Serve",
+                "eyebrow": "Frontline operations",
+                "description": "Checkout, service, and sales-touch workflows grouped into one fast-launch section."
+            },
+            "stock-and-supply": {
+                "title": "Stock & Supply",
+                "eyebrow": "Inventory control",
+                "description": "Inventory visibility, movement, and warehouse control in one place."
+            },
+            "cash-and-control": {
+                "title": "Cash & Control",
+                "eyebrow": "Finance operations",
+                "description": "Money movement, finance records, and payment follow-up organized for faster scanning."
+            },
+            "partners-and-demand": {
+                "title": "Partners & Demand",
+                "eyebrow": "Relationship management",
+                "description": "Customer-facing and partner-facing workflows grouped around trade relationships."
+            },
+            "insights-and-trends": {
+                "title": "Insights & Trends",
+                "eyebrow": "Analytics",
+                "description": "Performance reading and comparison views that turn activity into direction."
+            },
+            "people-and-workspace": {
+                "title": "People & Workspace",
+                "eyebrow": "Operations support",
+                "description": "Internal team operations and workspace-level tools collected into one calmer utility layer."
+            }
+        },
+        "modules": {
+            "/": { "description": "Return to the main business overview and headline numbers.", "badge": "Overview" },
+            "/pos": { "description": "Run the main checkout and in-store selling flow.", "badge": "Checkout" },
+            "/instant-pos": { "description": "Handle rapid-service orders with the faster POS flow.", "badge": "Fast lane" },
+            "/kds": { "description": "Track kitchen-ready work and live preparation status.", "badge": "Live" },
+            "/sales": { "description": "Review completed sales, returns, and sales records.", "badge": "History" },
+            "/travel-agency": { "description": "Manage travel-related bookings and service sales.", "badge": "Service" },
+            "/products": { "description": "Maintain product catalog, stock rules, and pricing.", "badge": "Catalog" },
+            "/discounts": { "description": "Manage product promotions, seasonal offers, and campaign-based price reductions.", "badge": "Promos" },
+            "/storages": { "description": "Manage warehouses, storage locations, and availability.", "badge": "Warehouses" },
+            "/inventory-transfer": { "description": "Move stock across locations and coordinate replenishment.", "badge": "Movement" },
+            "/ledger": { "description": "Inspect cross-module inflows, outflows, and payment trails.", "badge": "Flow" },
+            "/payments": { "description": "Settle obligations and review transaction timelines.", "badge": "Settlement" },
+            "/direct-transactions": { "description": "Record standalone inflows and outflows outside linked records.", "badge": "Manual" },
+            "/loans": { "description": "Manage issued and received loans with their histories.", "badge": "Credit" },
+            "/installments": { "description": "Review staged repayments and installment collection flow.", "badge": "Plans" },
+            "/budget": { "description": "Track accounting records, budgets, and financial controls.", "badge": "Books" },
+            "/invoices-history": { "description": "Browse invoice records and audit issued invoice activity.", "badge": "Archive" },
+            "/currency-converter": { "description": "Check exchange values and switch currencies with current rates.", "badge": "Rates" },
+            "/business-partners": { "description": "View trading entities, balances, and relationship data.", "badge": "Network" },
+            "/customers": { "description": "Track customer records, histories, and engagement context.", "badge": "Demand" },
+            "/suppliers": { "description": "Manage supplier relationships and procurement context.", "badge": "Supply" },
+            "/orders": { "description": "Open, settle, and review purchase or sales orders.", "badge": "Pipeline" },
+            "/ecommerce": { "description": "Track and manage incoming marketplace orders.", "badge": "Marketplace" },
+            "/revenue": { "description": "Analyze revenue behavior, inflows, and reporting trends.", "badge": "Revenue" },
+            "/monthly-comparison": { "description": "Compare monthly movement side by side and track change over time.", "badge": "Compare" },
+            "/hr": { "description": "Manage HR workflows, records, and team operations.", "badge": "People" },
+            "/performance": { "description": "Read team output, progress, and contribution trends.", "badge": "Performance" },
+            "/whatsapp": { "description": "Open the desktop communication surface for live follow-up.", "badge": "Desktop" },
+            "/members": { "description": "Review workspace members and role visibility.", "badge": "Access" },
+            "/settings": { "description": "Adjust workspace configuration, behavior, and system preferences.", "badge": "Control" }
+        }
+    },
+    "launcher": {
+        "title": "Navigate {{name}} by workflow",
+        "eyebrow": "Workspace launcher",
+        "searchPlaceholder": "Search visible modules...",
+        "clearSearch": "Clear search",
+        "openDashboard": "Open {{name}}",
+        "openAction": "Open",
+        "viewModes": {
+            "detail": "Detail",
+            "grid": "Grid"
+        },
+        "summary": {
+            "visibleSections": "Visible Sections",
+            "matchingModules": "Matching Modules",
+            "availableModules": "Available Modules",
+            "source": "Source",
+            "sourceDescription": "Same visibility logic as the sidebar"
+        },
+        "results": {
+            "searching": "Showing {{count}} of {{total}} modules for \"{{query}}\".",
+            "browsing": "Browsing {{total}} modules currently visible in the sidebar."
+        },
+        "noResults": {
+            "title": "No matching modules",
+            "description": "Try a different keyword or clear the search to bring the full launcher back.",
+            "reset": "Reset search"
+        }
     },
     "marketplace": {
         "title": "Atlas Marketplace",
