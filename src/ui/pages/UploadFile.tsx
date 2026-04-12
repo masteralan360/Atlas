@@ -90,7 +90,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
         if (!isPdfFile(file)) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: 'Only PDF files are allowed.',
+                description: t('uploadFile.pdfOnly', { defaultValue: 'Only PDF files are allowed.' }),
                 variant: 'destructive',
             })
             return
@@ -99,7 +99,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
         if (file.size > MAX_UPLOAD_SIZE_BYTES) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: 'The selected file exceeds the 2 MB limit.',
+                description: t('uploadFile.maxSizeError', { defaultValue: 'The selected file exceeds the 2 MB limit.' }),
                 variant: 'destructive',
             })
             return
@@ -122,7 +122,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
         if (!user || !activeWorkspace?.id) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: 'Workspace context is missing.',
+                description: t('uploadFile.workspaceMissing', { defaultValue: 'Workspace context is missing.' }),
                 variant: 'destructive',
             })
             return
@@ -132,7 +132,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
         if (!trimmedName) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: 'Name is required.',
+                description: t('uploadFile.nameRequired', { defaultValue: 'Name is required.' }),
                 variant: 'destructive',
             })
             return
@@ -141,7 +141,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
         if (!selectedFile) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: 'Please select a PDF file to upload.',
+                description: t('uploadFile.selectFile', { defaultValue: 'Please select a PDF file to upload.' }),
                 variant: 'destructive',
             })
             return
@@ -150,7 +150,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
         if (!isPdfFile(selectedFile)) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: 'Only PDF files are allowed.',
+                description: t('uploadFile.pdfOnly', { defaultValue: 'Only PDF files are allowed.' }),
                 variant: 'destructive',
             })
             return
@@ -159,7 +159,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
         if (selectedFile.size > MAX_UPLOAD_SIZE_BYTES) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: 'The selected file exceeds the 2 MB limit.',
+                description: t('uploadFile.maxSizeError', { defaultValue: 'The selected file exceeds the 2 MB limit.' }),
                 variant: 'destructive',
             })
             return
@@ -168,7 +168,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
         if (!navigator.onLine) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: 'You must be online to upload files to R2 storage.',
+                description: t('uploadFile.mustBeOnline', { defaultValue: 'You must be online to upload files to R2 storage.' }),
                 variant: 'destructive',
             })
             return
@@ -177,7 +177,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
         if (!r2Service.isConfigured()) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: 'R2 storage is not configured on this device.',
+                description: t('uploadFile.r2NotConfigured', { defaultValue: 'R2 storage is not configured on this device.' }),
                 variant: 'destructive',
             })
             return
@@ -209,8 +209,8 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
 
             setUploadProgress(100)
             toast({
-                title: 'Upload complete',
-                description: `"${trimmedName}" was saved to workspace uploads.`,
+                title: t('uploadFile.uploadComplete', { defaultValue: 'Upload complete' }),
+                description: t('uploadFile.uploadSavedDescription', { defaultValue: '"{{name}}" was saved to workspace uploads.', name: trimmedName }),
             })
 
             resetForm()
@@ -224,7 +224,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
             console.error('[UploadFilesTab] Upload failed:', error)
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: error instanceof Error ? error.message : 'Failed to upload the PDF file.',
+                description: error instanceof Error ? error.message : t('uploadFile.uploadFailed', { defaultValue: 'Failed to upload the PDF file.' }),
                 variant: 'destructive',
             })
         } finally {
@@ -241,7 +241,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
         if (!canDelete) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: 'Only admins can delete uploaded files.',
+                description: t('uploadFile.onlyAdmins', { defaultValue: 'Only admins can delete uploaded files.' }),
                 variant: 'destructive',
             })
             return
@@ -250,7 +250,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
         if (deleteTarget.r2PathA4 && !navigator.onLine) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: 'You must be online to delete files from R2 storage.',
+                description: t('uploadFile.mustBeOnlineDelete', { defaultValue: 'You must be online to delete files from R2 storage.' }),
                 variant: 'destructive',
             })
             return
@@ -265,15 +265,15 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
 
             await deleteInvoice(deleteTarget.id)
             toast({
-                title: 'File deleted',
-                description: `"${deleteTarget.invoiceid}" was removed from uploads.`,
+                title: t('uploadFile.fileDeleted', { defaultValue: 'File deleted' }),
+                description: t('uploadFile.fileDeletedDescription', { defaultValue: '"{{name}}" was removed from uploads.', name: deleteTarget.invoiceid }),
             })
             setDeleteTarget(null)
         } catch (error) {
             console.error('[UploadFilesTab] Delete failed:', error)
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: error instanceof Error ? error.message : 'Failed to delete the uploaded file.',
+                description: error instanceof Error ? error.message : t('uploadFile.deleteFailed', { defaultValue: 'Failed to delete the uploaded file.' }),
                 variant: 'destructive',
             })
         } finally {
@@ -289,29 +289,29 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                         <div className="rounded-2xl bg-primary/10 p-2.5">
                             <FileUp className="h-5 w-5 text-primary" />
                         </div>
-                        Upload Files
+                        {t('uploadFile.title', { defaultValue: 'Upload Files' })}
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
-                        Upload PDF files to workspace R2 storage and track them from the invoices module.
+                        {t('uploadFile.subtitle', { defaultValue: 'Upload PDF files to workspace R2 storage and track them from the invoices module.' })}
                     </p>
                 </CardHeader>
                 <CardContent className="space-y-6 p-6">
                     {!r2Service.isConfigured() && (
                         <div className="flex items-start gap-3 rounded-2xl border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
                             <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0" />
-                            <p>R2 storage is not configured on this device. Uploads will stay blocked until the worker URL and auth token are available.</p>
+                            <p>{t('uploadFile.r2NotConfiguredDesc', { defaultValue: 'R2 storage is not configured on this device. Uploads will stay blocked until the worker URL and auth token are available.' })}</p>
                         </div>
                     )}
 
                     <form className="space-y-6" onSubmit={handleUpload}>
                         <div className="space-y-2">
-                            <Label htmlFor="upload-file-name">Name</Label>
+                            <Label htmlFor="upload-file-name">{t('uploadFile.name', { defaultValue: 'Name' })}</Label>
                             <Input
                                 id="upload-file-name"
                                 allowViewer={true}
                                 value={documentName}
                                 onChange={(event) => setDocumentName(event.target.value)}
-                                placeholder="Enter a document name"
+                                placeholder={t('uploadFile.namePlaceholder', { defaultValue: 'Enter a document name' })}
                                 disabled={isUploading}
                             />
                         </div>
@@ -322,19 +322,19 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                                 allowsMultiple={false}
                                 maxSize={MAX_UPLOAD_SIZE_BYTES}
                                 isDisabled={isUploading}
-                                hint="PDF files only. Maximum file size is 2 MB."
+                                hint={t('uploadFile.dropHint', { defaultValue: 'PDF files only. Maximum file size is 2 MB.' })}
                                 onDropFiles={(files) => handleFileSelected(files[0] ?? null)}
                                 onDropUnacceptedFiles={() => {
                                     toast({
                                         title: t('common.error', { defaultValue: 'Error' }),
-                                        description: 'Only PDF files are allowed.',
+                                        description: t('uploadFile.pdfOnly', { defaultValue: 'Only PDF files are allowed.' }),
                                         variant: 'destructive',
                                     })
                                 }}
                                 onSizeLimitExceed={() => {
                                     toast({
                                         title: t('common.error', { defaultValue: 'Error' }),
-                                        description: 'The selected file exceeds the 2 MB limit.',
+                                        description: t('uploadFile.maxSizeError', { defaultValue: 'The selected file exceeds the 2 MB limit.' }),
                                         variant: 'destructive',
                                     })
                                 }}
@@ -364,14 +364,14 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                                 disabled={isUploading || (!selectedFile && !documentName)}
                                 onClick={resetForm}
                             >
-                                Clear
+                                {t('uploadFile.clear', { defaultValue: 'Clear' })}
                             </Button>
                             <Button
                                 type="submit"
                                 allowViewer={true}
                                 disabled={isUploading || !selectedFile || !documentName.trim() || !r2Service.isConfigured()}
                             >
-                                {isUploading ? 'Uploading...' : 'Upload PDF'}
+                                {isUploading ? t('uploadFile.uploading', { defaultValue: 'Uploading...' }) : t('uploadFile.uploadPdf', { defaultValue: 'Upload PDF' })}
                             </Button>
                         </div>
                     </form>
@@ -382,9 +382,9 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                 <CardHeader className="border-b border-border/50 bg-muted/20">
                     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                         <div>
-                            <CardTitle className="text-lg font-black">Uploaded Files</CardTitle>
+                            <CardTitle className="text-lg font-black">{t('uploadFile.uploadedFiles', { defaultValue: 'Uploaded Files' })}</CardTitle>
                             <p className="mt-1 text-sm text-muted-foreground">
-                                {uploadRecords.length} file{uploadRecords.length === 1 ? '' : 's'} stored in workspace uploads.
+                                {t('uploadFile.filesCount', { count: uploadRecords.length, defaultValue: '{{count}} file stored in workspace uploads.' })}
                             </p>
                         </div>
 
@@ -394,7 +394,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                                 allowViewer={true}
                                 value={search}
                                 onChange={(event) => setSearch(event.target.value)}
-                                placeholder="Search uploaded files"
+                                placeholder={t('uploadFile.searchPlaceholder', { defaultValue: 'Search uploaded files' })}
                                 className="pl-10"
                             />
                         </div>
@@ -406,10 +406,12 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                             <FileUp className="h-12 w-12 opacity-20" />
                             <div>
                                 <p className="font-semibold text-foreground">
-                                    {uploadRecords.length === 0 ? 'No uploaded files yet' : 'No files match your search'}
+                                    {uploadRecords.length === 0 
+                                        ? t('uploadFile.noFiles', { defaultValue: 'No uploaded files yet' }) 
+                                        : t('uploadFile.noMatch', { defaultValue: 'No files match your search' })}
                                 </p>
                                 <p className="mt-1 text-sm text-muted-foreground">
-                                    Drag a PDF into the uploader above to create the first record.
+                                    {t('uploadFile.dragHint', { defaultValue: 'Drag a PDF into the uploader above to create the first record.' })}
                                 </p>
                             </div>
                         </div>
@@ -417,10 +419,10 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                         <Table>
                             <TableHeader className="bg-muted/10">
                                 <TableRow className="hover:bg-transparent">
-                                    <TableHead className="py-4">Created</TableHead>
-                                    <TableHead>Name</TableHead>
-                                    <TableHead>Uploaded By</TableHead>
-                                    <TableHead className="text-right pr-6">Actions</TableHead>
+                                    <TableHead className="py-4">{t('uploadFile.created', { defaultValue: 'Created' })}</TableHead>
+                                    <TableHead>{t('uploadFile.name', { defaultValue: 'Name' })}</TableHead>
+                                    <TableHead>{t('uploadFile.uploadedBy', { defaultValue: 'Uploaded By' })}</TableHead>
+                                    <TableHead className="text-right pr-6">{t('common.actions', { defaultValue: 'Actions' })}</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -433,7 +435,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                                             {invoice.invoiceid}
                                         </TableCell>
                                         <TableCell className="text-sm text-muted-foreground">
-                                            {invoice.createdByName || invoice.createdBy || 'Unknown'}
+                                            {invoice.createdByName || invoice.createdBy || t('uploadFile.unknown', { defaultValue: 'Unknown' })}
                                         </TableCell>
                                         <TableCell className="pr-6">
                                             <div className="flex justify-end gap-2">
@@ -446,7 +448,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                                                     onClick={() => onPreview(invoice)}
                                                 >
                                                     <Eye className="h-4 w-4" />
-                                                    Preview
+                                                    {t('uploadFile.preview', { defaultValue: 'Preview' })}
                                                 </Button>
                                                 {canDelete && (
                                                     <Button
@@ -457,7 +459,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                                                         onClick={() => setDeleteTarget(invoice)}
                                                     >
                                                         <Trash2 className="h-4 w-4" />
-                                                        Delete
+                                                        {t('common.delete', { defaultValue: 'Delete' })}
                                                     </Button>
                                                 )}
                                             </div>
@@ -481,8 +483,8 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                     void handleDelete()
                 }}
                 isLoading={isDeleting}
-                title="Delete Uploaded File"
-                description={deleteTarget ? `This will permanently remove "${deleteTarget.invoiceid}" from R2 storage and the invoices table.` : undefined}
+                title={t('uploadFile.deleteTitle', { defaultValue: 'Delete Uploaded File' })}
+                description={deleteTarget ? t('uploadFile.deleteDescription', { defaultValue: 'This will permanently remove "{{name}}" from R2 storage and the invoices table.', name: deleteTarget.invoiceid }) : undefined}
                 itemName={deleteTarget?.invoiceid}
             />
         </div>

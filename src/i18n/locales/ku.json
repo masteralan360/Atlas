@@ -140,6 +140,10 @@
         "whatsapp": "واتساپ",
         "currencyConverter": "گۆڕەری دراو",
         "members": "ئەندامان",
+        "ledger": "دەفتەری ژمێریاری",
+        "payments": "پارەدانەکان",
+        "directTransactions": "مامەڵە ڕاستەوخۆکان",
+        "uploadFiles": "بارکردنی فایلەکان",
         "tools": "ئامرازەکان",
         "actions": "کردارەکان"
     },
@@ -2333,6 +2337,46 @@
             "fastpay": "فاست پەی",
             "fib": "FIB"
         }
+    },
+    "directTransactionModal": {
+        "title": "مامەڵەی ڕاستەوخۆی نوێ",
+        "description": "پارەی وەرگیراو یان دراو بە دەست بۆ چالاکییەکانی دەرەوەی مۆدیوڵەکانی سیستەم. مووچە لێرە ناژمێردرێت.",
+        "fields": {
+            "direction": "ئاراستە",
+            "directionIncoming": "وەرگیراو",
+            "directionOutgoing": "دراو",
+            "paymentMethod": "شێوازی پارەدان",
+            "amount": "بڕ",
+            "amountPlaceholder": "0",
+            "reason": "هۆکار",
+            "reasonPlaceholder": "بۆچی ئەم پارەدانە ڕوویدا؟",
+            "businessPartner": "هاوبەشی کار",
+            "businessPartnerPlaceholder": "هاوبەشی کاری بژاردەیی",
+            "noPartner": "هیچ هاوبەشێک بەستراو نییە",
+            "counterparty": "لایەنی بەرامبەر",
+            "counterpartyPlaceholder": "کێ ئەم بڕە پارەیەی وەرگرتووە یان داویەتی؟",
+            "paidAt": "کاتی پارەدان",
+            "paidAtPlaceholder": "کاتی مامەڵەکە هەڵبژێرە",
+            "note": "تێبینی",
+            "notePlaceholder": "تێبینی بژاردەیی"
+        },
+        "actions": {
+            "cancel": "هەڵوەشاندنەوە",
+            "save": "پاشەکەوتکردنی مامەڵە"
+        }
+    },
+    "settlementModal": {
+        "recordCollection": "تۆمارکردنی وەرگرتن",
+        "recordPayment": "تۆمارکردنی پارەدان",
+        "postSettlement": "ئەم یەکلاکردنەوەیە پۆست بکە بۆ دەفتەری ژمێریاری ناوەندی.",
+        "receivable": "وەرگیراو",
+        "payable": "دراو",
+        "paymentMethod": "شێوازی پارەدان",
+        "paidAt": "کاتی پارەدان",
+        "pickPaymentTime": "کاتی پارەدانەکە هەڵبژێرە",
+        "note": "تێبینی",
+        "optionalNote": "تێبینی بژاردەیی",
+        "cancel": "هەڵوەشاندنەوە"
     },
     "payments": {
         "title": "پارەدانەکان",

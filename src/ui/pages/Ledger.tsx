@@ -182,34 +182,34 @@ function isEntryInDateRange(
     return true
 }
 
-function paymentMethodLabel(value?: string | null) {
+function paymentMethodLabel(value: string | null | undefined, t: any) {
     switch (value) {
         case 'bank_transfer':
-            return 'Bank Transfer'
+            return t('ledger.paymentMethod.bankTransfer', { defaultValue: 'Bank Transfer' })
         case 'credit':
-            return 'Credit'
+            return t('ledger.paymentMethod.credit', { defaultValue: 'Credit' })
         case 'hawala':
-            return 'Hawala'
+            return t('ledger.paymentMethod.hawala', { defaultValue: 'Hawala' })
         case 'loan_adjustment':
-            return 'Loan Adjustment'
+            return t('ledger.paymentMethod.loanAdjustment', { defaultValue: 'Loan Adjustment' })
         case 'qicard':
-            return 'QiCard'
+            return t('ledger.paymentMethod.qicard', { defaultValue: 'QiCard' })
         case 'zaincash':
-            return 'ZainCash'
+            return t('ledger.paymentMethod.zaincash', { defaultValue: 'ZainCash' })
         case 'fastpay':
-            return 'FastPay'
+            return t('ledger.paymentMethod.fastpay', { defaultValue: 'FastPay' })
         case 'fib':
-            return 'FIB'
+            return t('ledger.paymentMethod.fib', { defaultValue: 'FIB' })
         case 'cash':
-            return 'Cash'
+            return t('ledger.paymentMethod.cash', { defaultValue: 'Cash' })
         case 'loan':
-            return 'Loan'
+            return t('ledger.paymentMethod.loan', { defaultValue: 'Loan' })
         case 'unknown':
-            return 'Unknown'
+            return t('ledger.paymentMethod.unknown', { defaultValue: 'Unknown' })
         default:
             return value
                 ? value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, ' ')
-                : 'Unknown'
+                : t('ledger.paymentMethod.unknown', { defaultValue: 'Unknown' })
     }
 }
 
@@ -247,92 +247,92 @@ function resolveSalePaymentMethod(
     return null
 }
 
-function ledgerTypeLabel(type: LedgerEntryType) {
+function ledgerTypeLabel(type: LedgerEntryType, t: any) {
     switch (type) {
         case 'pos_sale':
-            return 'POS Sale'
+            return t('ledger.type.posSale', { defaultValue: 'POS Sale' })
         case 'instant_pos_sale':
-            return 'Instant POS Sale'
+            return t('ledger.type.instantPosSale', { defaultValue: 'Instant POS Sale' })
         case 'ecommerce_receivable':
-            return 'E-Commerce Receivable'
+            return t('ledger.type.ecommerceReceivable', { defaultValue: 'E-Commerce Receivable' })
         case 'ecommerce_payment':
-            return 'E-Commerce Payment'
+            return t('ledger.type.ecommercePayment', { defaultValue: 'E-Commerce Payment' })
         case 'sales_order_payment':
-            return 'Sales Order Payment'
+            return t('ledger.type.salesOrderPayment', { defaultValue: 'Sales Order Payment' })
         case 'purchase_order_payment':
-            return 'Purchase Order Payment'
+            return t('ledger.type.purchaseOrderPayment', { defaultValue: 'Purchase Order Payment' })
         case 'expense':
-            return 'Expense'
+            return t('ledger.type.expense', { defaultValue: 'Expense' })
         case 'payroll_payment':
-            return 'Payroll Payment'
+            return t('ledger.type.payrollPayment', { defaultValue: 'Payroll Payment' })
         case 'loan_given':
-            return 'Loan Given'
+            return t('ledger.type.loanGiven', { defaultValue: 'Loan Given' })
         case 'loan_taken':
-            return 'Loan Taken'
+            return t('ledger.type.loanTaken', { defaultValue: 'Loan Taken' })
         case 'loan_repayment_received':
-            return 'Loan Repayment Received'
+            return t('ledger.type.loanRepaymentReceived', { defaultValue: 'Loan Repayment Received' })
         case 'loan_repayment_paid':
-            return 'Loan Repayment Paid'
+            return t('ledger.type.loanRepaymentPaid', { defaultValue: 'Loan Repayment Paid' })
         case 'installment_received':
-            return 'Installment Received'
+            return t('ledger.type.installmentReceived', { defaultValue: 'Installment Received' })
         case 'installment_paid':
-            return 'Installment Paid'
+            return t('ledger.type.installmentPaid', { defaultValue: 'Installment Paid' })
         default:
             return type
     }
 }
 
-function sourceModuleLabel(module: LedgerSourceModule) {
+function sourceModuleLabel(module: LedgerSourceModule, t: any) {
     switch (module) {
         case 'pos':
-            return 'POS'
+            return t('ledger.sourceModule.pos', { defaultValue: 'POS' })
         case 'instant_pos':
-            return 'Instant POS'
+            return t('ledger.sourceModule.instantPos', { defaultValue: 'Instant POS' })
         case 'orders':
-            return 'Orders'
+            return t('ledger.sourceModule.orders', { defaultValue: 'Orders' })
         case 'expenses':
-            return 'Expenses'
+            return t('ledger.sourceModule.expenses', { defaultValue: 'Expenses' })
         case 'payroll':
-            return 'Payroll'
+            return t('ledger.sourceModule.payroll', { defaultValue: 'Payroll' })
         case 'loans':
-            return 'Loans'
+            return t('ledger.sourceModule.loans', { defaultValue: 'Loans' })
         default:
             return module
     }
 }
 
-function directionFilterLabel(direction: LedgerDirectionFilter) {
+function directionFilterLabel(direction: LedgerDirectionFilter, t: any) {
     switch (direction) {
         case 'incoming':
-            return 'Inflow'
+            return t('ledger.directionFilter.incoming', { defaultValue: 'Inflow' })
         case 'outgoing':
-            return 'Outflow'
+            return t('ledger.directionFilter.outgoing', { defaultValue: 'Outflow' })
         default:
-            return 'All Directions'
+            return t('ledger.directionFilter.all', { defaultValue: 'All Directions' })
     }
 }
 
-function notesFilterLabel(value: LedgerNotesFilter) {
+function notesFilterLabel(value: LedgerNotesFilter, t: any) {
     switch (value) {
         case 'with_notes':
-            return 'With Notes'
+            return t('ledger.notesFilter.withNotes', { defaultValue: 'With Notes' })
         case 'without_notes':
-            return 'Without Notes'
+            return t('ledger.notesFilter.withoutNotes', { defaultValue: 'Without Notes' })
         default:
-            return 'Any Notes State'
+            return t('ledger.notesFilter.all', { defaultValue: 'Any Notes State' })
     }
 }
 
-function sortOptionLabel(value: LedgerSortOption) {
+function sortOptionLabel(value: LedgerSortOption, t: any) {
     switch (value) {
         case 'date_asc':
-            return 'Date: Oldest First'
+            return t('ledger.sortOption.dateAsc', { defaultValue: 'Date: Oldest First' })
         case 'amount_desc':
-            return 'Amount: Highest First'
+            return t('ledger.sortOption.amountDesc', { defaultValue: 'Amount: Highest First' })
         case 'amount_asc':
-            return 'Amount: Lowest First'
+            return t('ledger.sortOption.amountAsc', { defaultValue: 'Amount: Lowest First' })
         default:
-            return 'Date: Newest First'
+            return t('ledger.sortOption.dateDesc', { defaultValue: 'Date: Newest First' })
     }
 }
 
@@ -411,8 +411,8 @@ function applyLedgerFilters(entries: LedgerEntry[], filters: LedgerFilterState) 
             entry.notes,
             entry.description,
             entry.paymentMethod,
-            ledgerTypeLabel(entry.type),
-            sourceModuleLabel(entry.sourceModule)
+            ledgerTypeLabel(entry.type, { t: (key: string, opts: any) => opts?.defaultValue || key }), 
+            sourceModuleLabel(entry.sourceModule, { t: (key: string, opts: any) => opts?.defaultValue || key })
         ].some((value) => value?.toLowerCase().includes(normalizedSearch))
     })
 
@@ -517,16 +517,16 @@ function buildSaleReferenceId(sale: Pick<Sale, 'id' | 'origin' | 'sequenceId'>) 
     return buildReferenceId(sale.origin === 'instant_pos' ? 'IPOS' : 'POS', sale.id, sale.sequenceId)
 }
 
-function ledgerRelationRoleLabel(role: LedgerRelationRole) {
+function ledgerRelationRoleLabel(role: LedgerRelationRole, t: any) {
     switch (role) {
         case 'origin':
-            return 'Origin'
+            return t('ledger.relationRole.origin', { defaultValue: 'Origin' })
         case 'repayment':
-            return 'Repayment'
+            return t('ledger.relationRole.repayment', { defaultValue: 'Repayment' })
         case 'settlement':
-            return 'Settlement'
+            return t('ledger.relationRole.settlement', { defaultValue: 'Settlement' })
         default:
-            return 'Linked'
+            return t('ledger.relationRole.linked', { defaultValue: 'Linked' })
     }
 }
 
@@ -536,7 +536,7 @@ interface LedgerBuildContext {
     loanOriginationIds: Set<string>
 }
 
-function buildSaleLedgerEntry(sale: Sale): LedgerEntry | null {
+function buildSaleLedgerEntry(sale: Sale, t: any): LedgerEntry | null {
     if (sale.isDeleted || sale.isReturned) {
         return null
     }
@@ -553,7 +553,7 @@ function buildSaleLedgerEntry(sale: Sale): LedgerEntry | null {
 
     const isInstantPos = sale.origin === 'instant_pos'
     const descriptionParts = [
-        paymentMethod ? `Paid via ${paymentMethodLabel(paymentMethod)}` : null,
+        paymentMethod ? `Paid via ${paymentMethodLabel(paymentMethod, t)}` : null,
         sale.notes?.trim() || null
     ].filter(Boolean)
 
@@ -594,7 +594,7 @@ function buildTransactionReference(transaction: PaymentTransaction) {
     }
 }
 
-function buildTransactionDescription(transaction: PaymentTransaction) {
+function buildTransactionDescription(transaction: PaymentTransaction, t: any) {
     const details: string[] = []
 
     if (transaction.note?.trim()) {
@@ -602,7 +602,7 @@ function buildTransactionDescription(transaction: PaymentTransaction) {
     }
 
     if (transaction.paymentMethod && transaction.paymentMethod !== 'unknown') {
-        details.push(`Via ${paymentMethodLabel(transaction.paymentMethod)}`)
+        details.push(`Via ${paymentMethodLabel(transaction.paymentMethod, t)}`)
     }
 
     if (transaction.sourceType === 'expense_item') {
@@ -736,7 +736,8 @@ function buildLedgerRelationDescriptor(
 
 function buildPaymentLedgerEntry(
     transaction: PaymentTransaction,
-    context: LedgerBuildContext
+    context: LedgerBuildContext,
+    t: any
 ): LedgerEntry | null {
     if (transaction.isDeleted || transaction.reversalOfTransactionId || transaction.sourceType === 'direct_transaction') {
         return null
@@ -759,7 +760,7 @@ function buildPaymentLedgerEntry(
                 partner: transaction.counterpartyName || null,
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
-                description: buildTransactionDescription(transaction) || (transaction.direction === 'incoming' ? 'Loan received' : 'Loan disbursed'),
+                description: buildTransactionDescription(transaction, t) || (transaction.direction === 'incoming' ? 'Loan received' : 'Loan disbursed'),
                 routePath: getPaymentTransactionRoutePath(transaction),
                 ...relation
             }
@@ -784,7 +785,7 @@ function buildPaymentLedgerEntry(
                 partner: transaction.counterpartyName || null,
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
-                description: buildTransactionDescription(transaction),
+                description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
                 ...relation
             }
@@ -803,7 +804,7 @@ function buildPaymentLedgerEntry(
                 partner: transaction.counterpartyName || null,
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
-                description: buildTransactionDescription(transaction),
+                description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
                 ...relation
             }
@@ -821,7 +822,7 @@ function buildPaymentLedgerEntry(
                 partner: transaction.counterpartyName || null,
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
-                description: buildTransactionDescription(transaction),
+                description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
                 ...relation
             }
@@ -839,7 +840,7 @@ function buildPaymentLedgerEntry(
                 partner: transaction.counterpartyName || null,
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
-                description: buildTransactionDescription(transaction),
+                description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
                 ...relation
             }
@@ -857,7 +858,7 @@ function buildPaymentLedgerEntry(
                 partner: transaction.counterpartyName || null,
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
-                description: buildTransactionDescription(transaction),
+                description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
                 ...relation
             }
@@ -876,7 +877,7 @@ function buildPaymentLedgerEntry(
                 partner: transaction.counterpartyName || null,
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
-                description: buildTransactionDescription(transaction),
+                description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
                 ...relation
             }
@@ -944,9 +945,9 @@ export function Ledger() {
             loanOriginationIds
         }
         const rows = [
-            ...sales.map(buildSaleLedgerEntry).filter((entry): entry is LedgerEntry => !!entry),
+            ...sales.map(s => buildSaleLedgerEntry(s, t)).filter((entry): entry is LedgerEntry => !!entry),
             ...paymentTransactions
-                .map((transaction) => buildPaymentLedgerEntry(transaction, context))
+                .map((transaction) => buildPaymentLedgerEntry(transaction, context, t))
                 .filter((entry): entry is LedgerEntry => !!entry)
         ]
 
@@ -954,16 +955,16 @@ export function Ledger() {
     }, [loanById, loanOriginationIds, paymentTransactions, saleById, sales])
 
     const typeOptions = useMemo(
-        () => Array.from(new Set(allEntries.map((entry) => entry.type))).sort((left, right) => ledgerTypeLabel(left).localeCompare(ledgerTypeLabel(right))),
-        [allEntries]
+        () => Array.from(new Set(allEntries.map((entry) => entry.type))).sort((left, right) => ledgerTypeLabel(left, t).localeCompare(ledgerTypeLabel(right, t))),
+        [allEntries, t]
     )
     const currencyOptions = useMemo(
         () => Array.from(new Set(allEntries.map((entry) => entry.currency))).sort((left, right) => left.localeCompare(right)),
         [allEntries]
     )
     const paymentMethodOptions = useMemo(
-        () => Array.from(new Set(allEntries.map((entry) => entry.paymentMethod).filter((value): value is string => !!value))).sort((left, right) => paymentMethodLabel(left).localeCompare(paymentMethodLabel(right))),
-        [allEntries]
+        () => Array.from(new Set(allEntries.map((entry) => entry.paymentMethod).filter((value): value is string => !!value))).sort((left, right) => paymentMethodLabel(left, t).localeCompare(paymentMethodLabel(right, t))),
+        [allEntries, t]
     )
     const partnerOptions = useMemo(
         () => Array.from(new Set(allEntries.map((entry) => entry.partner?.trim()).filter((value): value is string => !!value))).sort((left, right) => left.localeCompare(right)),
@@ -1088,41 +1089,41 @@ export function Ledger() {
         const chips: string[] = []
 
         if (filters.search.trim()) {
-            chips.push(`Search: ${filters.search.trim()}`)
+            chips.push(t('ledger.filters.chipSearch', { term: filters.search.trim(), defaultValue: `Search: ${filters.search.trim()}` }))
         }
         if (filters.direction !== 'all') {
-            chips.push(directionFilterLabel(filters.direction))
+            chips.push(directionFilterLabel(filters.direction, t))
         }
         if (filters.type !== 'all') {
-            chips.push(ledgerTypeLabel(filters.type))
+            chips.push(ledgerTypeLabel(filters.type, t))
         }
         if (filters.source !== 'all') {
-            chips.push(sourceModuleLabel(filters.source))
+            chips.push(sourceModuleLabel(filters.source, t))
         }
         if (filters.partner !== 'all') {
-            chips.push(`Partner: ${filters.partner}`)
+            chips.push(t('ledger.filters.chipPartner', { name: filters.partner, defaultValue: `Partner: ${filters.partner}` }))
         }
         if (filters.currency !== 'all') {
-            chips.push(`Currency: ${filters.currency.toUpperCase()}`)
+            chips.push(t('ledger.filters.chipCurrency', { code: filters.currency.toUpperCase(), defaultValue: `Currency: ${filters.currency.toUpperCase()}` }))
         }
         if (filters.paymentMethod !== 'all') {
-            chips.push(`Method: ${paymentMethodLabel(filters.paymentMethod)}`)
+            chips.push(t('ledger.filters.chipMethod', { name: paymentMethodLabel(filters.paymentMethod, t), defaultValue: `Method: ${paymentMethodLabel(filters.paymentMethod, t)}` }))
         }
         if (filters.notes !== 'all') {
-            chips.push(notesFilterLabel(filters.notes))
+            chips.push(notesFilterLabel(filters.notes, t))
         }
         if (filters.minAmount) {
-            chips.push(`Min: ${filters.minAmount}`)
+            chips.push(t('ledger.filters.chipMin', { value: filters.minAmount, defaultValue: `Min: ${filters.minAmount}` }))
         }
         if (filters.maxAmount) {
-            chips.push(`Max: ${filters.maxAmount}`)
+            chips.push(t('ledger.filters.chipMax', { value: filters.maxAmount, defaultValue: `Max: ${filters.maxAmount}` }))
         }
         if (filters.sort !== 'date_desc') {
-            chips.push(sortOptionLabel(filters.sort))
+            chips.push(sortOptionLabel(filters.sort, t))
         }
 
         return chips
-    }, [filters])
+    }, [filters, t])
 
     const activeFilterCount = useMemo(
         () => countActiveLedgerFilters(filters),
@@ -1325,10 +1326,10 @@ export function Ledger() {
             <div className="p-6">
                 <Card>
                     <CardHeader>
-                        <CardTitle>Ledger is not available in this workspace</CardTitle>
+                        <CardTitle>{t('ledger.notAvailable', { defaultValue: 'Ledger is not available in this workspace' })}</CardTitle>
                     </CardHeader>
                     <CardContent className="text-sm text-muted-foreground">
-                        Enable POS, CRM, Loans, Accounting, or HR to use the central ledger.
+                        {t('ledger.enableModules', { defaultValue: 'Enable POS, CRM, Loans, Accounting, or HR to use the central ledger.' })}
                     </CardContent>
                 </Card>
             </div>
@@ -1341,12 +1342,12 @@ export function Ledger() {
                 <div className="space-y-4">
                     <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
                         <ShieldCheck className="h-3.5 w-3.5" />
-                        System Controlled
+                        {t('ledger.systemControlled', { defaultValue: 'System Controlled' })}
                     </div>
                     
                     <div className="space-y-1.5">
                         <div className="flex flex-wrap items-center gap-3">
-                            <h1 className="bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-4xl font-black tracking-tight text-transparent">General Ledger</h1>
+                            <h1 className="bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-4xl font-black tracking-tight text-transparent">{t('ledger.title', { defaultValue: 'General Ledger' })}</h1>
                             {dateDisplay && (
                                 <div className={cn(
                                     "px-3 py-1 text-sm font-bold bg-primary text-primary-foreground shadow-sm animate-pop-in",
@@ -1359,9 +1360,9 @@ export function Ledger() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center rounded-full border border-border/40 bg-secondary/30 px-2.5 py-1 text-xs font-semibold text-secondary-foreground transition-colors hover:bg-secondary/50">Posted movements only</span>
-                        <span className="inline-flex items-center rounded-full border border-border/40 bg-secondary/30 px-2.5 py-1 text-xs font-semibold text-secondary-foreground transition-colors hover:bg-secondary/50">No manual entries</span>
-                        <span className="inline-flex items-center rounded-full border border-border/40 bg-secondary/30 px-2.5 py-1 text-xs font-semibold text-secondary-foreground transition-colors hover:bg-secondary/50">Multi-currency preserved</span>
+                        <span className="inline-flex items-center rounded-full border border-border/40 bg-secondary/30 px-2.5 py-1 text-xs font-semibold text-secondary-foreground transition-colors hover:bg-secondary/50">{t('ledger.badges.postedOnly', { defaultValue: 'Posted movements only' })}</span>
+                        <span className="inline-flex items-center rounded-full border border-border/40 bg-secondary/30 px-2.5 py-1 text-xs font-semibold text-secondary-foreground transition-colors hover:bg-secondary/50">{t('ledger.badges.noManual', { defaultValue: 'No manual entries' })}</span>
+                        <span className="inline-flex items-center rounded-full border border-border/40 bg-secondary/30 px-2.5 py-1 text-xs font-semibold text-secondary-foreground transition-colors hover:bg-secondary/50">{t('ledger.badges.multiCurrency', { defaultValue: 'Multi-currency preserved' })}</span>
                     </div>
 
                     <div className="pt-2">
@@ -1376,16 +1377,16 @@ export function Ledger() {
                     <CardHeader className="pb-2">
                         <CardTitle className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-primary">
                             <Wallet className="h-4 w-4" />
-                            Ledger View Summary
+                            {t('ledger.viewSummary', { defaultValue: 'Ledger View Summary' })}
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3">
                         <div className="flex items-end gap-2">
                             <span className="text-3xl font-black tabular-nums tracking-tight">{filteredEntries.length}</span>
-                            <span className="mb-1 text-sm font-medium text-muted-foreground">active entries</span>
+                            <span className="mb-1 text-sm font-medium text-muted-foreground">{t('ledger.activeEntries', { defaultValue: 'active entries' })}</span>
                         </div>
                         <p className="max-w-[280px] text-xs leading-relaxed text-muted-foreground">
-                            Use the page date range with the general filter modal to refine direction, type, module, party, method, amount range, and sorting.
+                            {t('ledger.summaryDescription', { defaultValue: 'Use the page date range with the general filter modal to refine direction, type, module, party, method, amount range, and sorting.' })}
                         </p>
                     </CardContent>
                 </Card>
@@ -1398,7 +1399,7 @@ export function Ledger() {
                     </div>
                     <CardHeader className="pb-2 flex flex-row items-center justify-between z-10 relative">
                         <CardTitle className="text-[13px] font-semibold tracking-tight text-emerald-600 uppercase">
-                            Total Inflow
+                            {t('ledger.kpis.totalInflow', { defaultValue: 'Total Inflow' })}
                         </CardTitle>
                         <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
                             <DollarSign className="h-4 w-4 text-emerald-600" />
@@ -1420,7 +1421,7 @@ export function Ledger() {
                                      trendStats.inflowOffset < 0 ? <TrendingDown className="w-3 h-3 mr-1" /> : null}
                                     {trendStats.inflowOffset > 0 ? '+' : ''}{trendStats.inflowOffset.toFixed(1)}%
                                 </span>
-                                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">vs prior period</span>
+                                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">{t('ledger.kpis.vsPriorPeriod', { defaultValue: 'vs prior period' })}</span>
                             </div>
                         </div>
                         <LedgerSparkline data={ledgerTrendData} dataKey="inflow" color="#10b981" gradientId="l-inflow" />
@@ -1433,7 +1434,7 @@ export function Ledger() {
                     </div>
                     <CardHeader className="pb-2 flex flex-row items-center justify-between z-10 relative">
                         <CardTitle className="text-[13px] font-semibold tracking-tight text-amber-600 uppercase">
-                            Total Outflow
+                            {t('ledger.kpis.totalOutflow', { defaultValue: 'Total Outflow' })}
                         </CardTitle>
                         <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center border border-amber-500/20">
                             <Package className="h-4 w-4 text-amber-600" />
@@ -1455,7 +1456,7 @@ export function Ledger() {
                                      trendStats.outflowOffset < 0 ? <TrendingDown className="w-3 h-3 mr-1" /> : null}
                                     {trendStats.outflowOffset > 0 ? '+' : ''}{trendStats.outflowOffset.toFixed(1)}%
                                 </span>
-                                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">vs prior period</span>
+                                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">{t('ledger.kpis.vsPriorPeriod', { defaultValue: 'vs prior period' })}</span>
                             </div>
                         </div>
                         <LedgerSparkline data={ledgerTrendData} dataKey="outflow" color="#f59e0b" gradientId="l-outflow" />
@@ -1468,7 +1469,7 @@ export function Ledger() {
                     </div>
                     <CardHeader className="pb-2 flex flex-row items-center justify-between z-10 relative">
                         <CardTitle className={cn("text-[13px] font-semibold tracking-tight uppercase", netFlowIsNegative ? "text-rose-600" : "text-sky-600")}>
-                            Net Flow
+                            {t('ledger.kpis.netFlow', { defaultValue: 'Net Flow' })}
                         </CardTitle>
                         <div className={cn("w-8 h-8 rounded-full flex items-center justify-center border", 
                             netFlowIsNegative ? "bg-rose-500/10 border-rose-500/20" : "bg-sky-500/10 border-sky-500/20"
@@ -1492,7 +1493,7 @@ export function Ledger() {
                                      trendStats.netFlowOffset < 0 ? <TrendingDown className="w-3 h-3 mr-1" /> : null}
                                     {trendStats.netFlowOffset > 0 ? '+' : ''}{trendStats.netFlowOffset.toFixed(1)}%
                                 </span>
-                                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">vs prior period</span>
+                                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">{t('ledger.kpis.vsPriorPeriod', { defaultValue: 'vs prior period' })}</span>
                             </div>
                         </div>
                         <LedgerSparkline data={ledgerTrendData} dataKey="net" color={netFlowIsNegative ? "#ef4444" : "#0ea5e9"} gradientId="l-net" />
@@ -1505,7 +1506,7 @@ export function Ledger() {
                     </div>
                     <CardHeader className="pb-2 flex flex-row items-center justify-between z-10 relative">
                         <CardTitle className="text-[13px] font-semibold tracking-tight text-indigo-600 uppercase">
-                            Gross Surplus
+                            {t('ledger.kpis.grossSurplus', { defaultValue: 'Gross Surplus' })}
                         </CardTitle>
                         <div className="w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
                             <Percent className="h-4 w-4 text-indigo-600" />
@@ -1520,13 +1521,13 @@ export function Ledger() {
                                 <span className="flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-full border text-muted-foreground bg-secondary/50 border-border">
                                     {(trendStats.surplusRatio - trendStats.previousSurplusRatio).toFixed(1)}%
                                 </span>
-                                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">points change</span>
+                                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">{t('ledger.kpis.pointsChange', { defaultValue: 'points change' })}</span>
                             </div>
                         </div>
                         <div className="pt-4 h-12 flex flex-col justify-end">
                             <Progress value={Math.max(0, trendStats.surplusRatio)} className="h-2 bg-secondary" indicatorClassName="bg-indigo-600" />
                             <div className="flex justify-between mt-2 pt-1">
-                                <span className="text-[9px] font-bold uppercase text-muted-foreground tracking-wider">Entries Count</span>
+                                <span className="text-[9px] font-bold uppercase text-muted-foreground tracking-wider">{t('ledger.kpis.entriesCount', { defaultValue: 'Entries Count' })}</span>
                                 <span className="text-[10px] font-black text-indigo-600">{filteredEntries.length}</span>
                             </div>
                         </div>
@@ -1538,8 +1539,8 @@ export function Ledger() {
                 <Card className="col-span-1 rounded-3xl border border-border/50 bg-card/60 dark:bg-zinc-950 flex flex-col relative overflow-hidden">
                     <CardHeader className="border-b border-border/20 z-10 bg-background/50 backdrop-blur-sm relative">
                         <CardTitle className="text-sm tracking-tight font-bold flex items-center justify-between">
-                            Top Sources/Sinks
-                            <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">By Net Value</span>
+                            {t('ledger.charts.topSourcesSinks', { defaultValue: 'Top Sources/Sinks' })}
+                            <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{t('ledger.charts.byNetValue', { defaultValue: 'By Net Value' })}</span>
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="p-0 z-10 relative flex-1">
@@ -1553,7 +1554,7 @@ export function Ledger() {
                                         <div className="flex-1 min-w-0">
                                             <div className="font-bold text-sm truncate uppercase tracking-tight">{item.name}</div>
                                             <div className="text-[10px] font-semibold text-muted-foreground tracking-wider uppercase">
-                                                {item.sold} entries
+                                                {item.sold} {t('ledger.charts.entries', { defaultValue: 'entries' })}
                                             </div>
                                         </div>
                                         <div className="text-right">
@@ -1563,7 +1564,7 @@ export function Ledger() {
                                                 {formatCurrency(item.profit, baseCurrency, features.iqd_display_preference)}
                                             </div>
                                             <div className="text-[9px] font-bold text-muted-foreground tracking-wider flex items-center justify-end gap-1 uppercase">
-                                                Net Result
+                                                {t('ledger.charts.netResult', { defaultValue: 'Net Result' })}
                                             </div>
                                         </div>
                                     </div>
@@ -1571,7 +1572,7 @@ export function Ledger() {
                             </div>
                         ) : (
                             <div className="h-48 flex items-center justify-center text-sm font-medium text-muted-foreground">
-                                No entry data available.
+                                {t('ledger.charts.noEntryData', { defaultValue: 'No entry data available.' })}
                             </div>
                         )}
                     </CardContent>
@@ -1579,7 +1580,7 @@ export function Ledger() {
 
                 <Card className="col-span-1 lg:col-span-2 rounded-3xl border border-border/50 bg-card/60 dark:bg-zinc-950 flex flex-col relative overflow-hidden">
                     <CardHeader className="border-b border-border/20 z-10 bg-background/50 backdrop-blur-sm relative">
-                        <CardTitle className="text-sm font-bold tracking-tight">Ledger Movement Overview</CardTitle>
+                        <CardTitle className="text-sm font-bold tracking-tight">{t('ledger.charts.movementOverview', { defaultValue: 'Ledger Movement Overview' })}</CardTitle>
                     </CardHeader>
                     <CardContent className="flex-1 p-6 relative z-10">
                         <div className="h-[240px] w-full">
@@ -1603,15 +1604,15 @@ export function Ledger() {
                                                         </div>
                                                         <div className="space-y-1">
                                                             <div className="flex justify-between gap-4 font-semibold text-emerald-600">
-                                                                <span>Inflow:</span>
+                                                                <span>{t('ledger.tooltip.inflow', { defaultValue: 'Inflow:' })}</span>
                                                                 <span className="font-mono">{formatCurrency(payload[0].value as number, baseCurrency, features.iqd_display_preference)}</span>
                                                             </div>
                                                             <div className="flex justify-between gap-4 font-semibold text-rose-600">
-                                                                <span>Outflow:</span>
+                                                                <span>{t('ledger.tooltip.outflow', { defaultValue: 'Outflow:' })}</span>
                                                                 <span className="font-mono">{formatCurrency(payload[1].value as number, baseCurrency, features.iqd_display_preference)}</span>
                                                             </div>
                                                             <div className="flex justify-between gap-4 font-bold border-t border-border mt-1 pt-1 text-foreground">
-                                                                <span>Net:</span>
+                                                                <span>{t('ledger.tooltip.net', { defaultValue: 'Net:' })}</span>
                                                                 <span className={cn("font-mono", (payload[0].payload.net as number) < 0 ? "text-rose-600" : "text-sky-600")}>
                                                                     {formatCurrency(payload[0].payload.net as number, baseCurrency, features.iqd_display_preference)}
                                                                 </span>
@@ -1634,7 +1635,7 @@ export function Ledger() {
                 <Card className="col-span-1 border border-border/50 bg-card/60 dark:bg-zinc-950 rounded-3xl overflow-hidden flex flex-col">
                     <CardHeader className="border-b border-border/20 z-10 bg-background/50 backdrop-blur-sm relative py-4">
                         <CardTitle className="text-sm tracking-tight font-bold flex items-center justify-between">
-                            Peak Activity
+                            {t('ledger.charts.peakActivity', { defaultValue: 'Peak Activity' })}
                             <Clock className="h-4 w-4 text-muted-foreground" />
                         </CardTitle>
                     </CardHeader>
@@ -1665,7 +1666,7 @@ export function Ledger() {
                                                         <div className="bg-background border border-border p-2 rounded-lg shadow-xl shadow-black/5 dark:shadow-black/20 text-xs">
                                                             <div className="font-bold mb-1 text-[10px] text-muted-foreground tracking-wide">{hour.hour} - {hour.hour.replace(':00', ':59')}</div>
                                                             <div className="flex items-center justify-between gap-4">
-                                                                <span className="font-bold text-foreground">Activity Level</span>
+                                                                <span className="font-bold text-foreground">{t('ledger.charts.activityLevel', { defaultValue: 'Activity Level' })}</span>
                                                                 <span className="font-black text-indigo-500">{hour.count} tx</span>
                                                             </div>
                                                         </div>
@@ -1680,14 +1681,14 @@ export function Ledger() {
                             </div>
                         </div>
                         <div className="p-3 bg-muted/30 border-t border-border/10 text-[11px] text-center font-semibold text-muted-foreground tracking-wide">
-                             Hourly transaction volume
+                             {t('ledger.charts.hourlyVolume', { defaultValue: 'Hourly transaction volume' })}
                         </div>
                     </CardContent>
                 </Card>
             </div>
             {usesEquivalentTrend ? (
                 <p className="text-xs text-muted-foreground">
-                    Sparkline charts use {trendCurrencyMode.currency.toUpperCase()} equivalent when multiple currencies are included.
+                    {t('ledger.charts.sparklineNote', { currency: trendCurrencyMode.currency.toUpperCase(), defaultValue: `Sparkline charts use ${trendCurrencyMode.currency.toUpperCase()} equivalent when multiple currencies are included.` })}
                 </p>
             ) : null}
 
@@ -1703,7 +1704,7 @@ export function Ledger() {
                                     className="h-11 rounded-2xl border-border/60 px-4"
                                 >
                                     <SlidersHorizontal className="mr-2 h-4 w-4" />
-                                    Filters
+                                    {t('ledger.filters.title', { defaultValue: 'Filters' })}
                                     {activeFilterCount > 0 ? (
                                         <span className="ml-2 inline-flex min-w-6 items-center justify-center rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">
                                             {activeFilterCount}
@@ -1713,18 +1714,18 @@ export function Ledger() {
                                 {activeFilterCount > 0 ? (
                                     <Button type="button" variant="ghost" onClick={handleResetAllFilters} className="h-11 rounded-2xl px-4 text-muted-foreground">
                                         <RotateCcw className="mr-2 h-4 w-4" />
-                                        Clear Filters
+                                        {t('ledger.filters.clearFilters', { defaultValue: 'Clear Filters' })}
                                     </Button>
                                 ) : null}
                             </div>
                             <p className="text-xs text-muted-foreground">
-                                Draft orders and manual direct transactions are intentionally excluded from the ledger. Delivered E-Commerce orders appear as receivables until payment is posted.
+                                {t('ledger.filters.exclusionNote', { defaultValue: 'Draft orders and manual direct transactions are intentionally excluded from the ledger. Delivered E-Commerce orders appear as receivables until payment is posted.' })}
                             </p>
                         </div>
 
                         <div className="rounded-2xl border border-border/60 bg-secondary/20 px-4 py-3 text-sm">
-                            <div className="font-semibold">{filteredEntries.length} matching entries</div>
-                            <div className="text-xs text-muted-foreground">General filters preview before opening any record.</div>
+                            <div className="font-semibold">{t('ledger.filters.matchingEntries', { count: filteredEntries.length, defaultValue: `${filteredEntries.length} matching entries` })}</div>
+                            <div className="text-xs text-muted-foreground">{t('ledger.filters.filterPreview', { defaultValue: 'General filters preview before opening any record.' })}</div>
                         </div>
                     </div>
 
@@ -1741,7 +1742,7 @@ export function Ledger() {
                         </div>
                     ) : (
                         <div className="mt-4 rounded-2xl border border-dashed border-border/60 bg-background/50 px-4 py-3 text-xs text-muted-foreground">
-                            No advanced filters applied. Open the filter modal to narrow the ledger by direction, partner, method, amounts, or notes.
+                            {t('ledger.filters.noFilters', { defaultValue: 'No advanced filters applied. Open the filter modal to narrow the ledger by direction, partner, method, amounts, or notes.' })}
                         </div>
                     )}
                 </CardContent>
@@ -1750,7 +1751,7 @@ export function Ledger() {
             <Card>
                 <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 gap-4">
                     <CardTitle className="flex items-center gap-2 flex-wrap">
-                        Ledger Entries
+                        {t('ledger.table.title', { defaultValue: 'Ledger Entries' })}
                         {dateDisplay && (
                             <span className="ml-2 px-2 py-0.5 text-xs font-semibold bg-primary/10 text-primary border border-primary/20 rounded-full">
                                 {dateDisplay}
@@ -1772,23 +1773,23 @@ export function Ledger() {
                         <Table className="ml-6 w-[calc(100%-1.5rem)]">
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead>Transaction ID</TableHead>
-                                    <TableHead>Date</TableHead>
-                                    <TableHead>Type</TableHead>
-                                    <TableHead>Direction</TableHead>
-                                    <TableHead>Amount</TableHead>
-                                    <TableHead>Source Module</TableHead>
-                                    <TableHead>Reference ID</TableHead>
-                                    <TableHead>Partner</TableHead>
-                                    <TableHead>Description / Notes</TableHead>
-                                    <TableHead className="text-right">Actions</TableHead>
+                                    <TableHead>{t('ledger.table.transactionId', { defaultValue: 'Transaction ID' })}</TableHead>
+                                    <TableHead>{t('ledger.table.date', { defaultValue: 'Date' })}</TableHead>
+                                    <TableHead>{t('ledger.table.type', { defaultValue: 'Type' })}</TableHead>
+                                    <TableHead>{t('ledger.table.direction', { defaultValue: 'Direction' })}</TableHead>
+                                    <TableHead>{t('ledger.table.amount', { defaultValue: 'Amount' })}</TableHead>
+                                    <TableHead>{t('ledger.table.sourceModule', { defaultValue: 'Source Module' })}</TableHead>
+                                    <TableHead>{t('ledger.table.referenceId', { defaultValue: 'Reference ID' })}</TableHead>
+                                    <TableHead>{t('ledger.table.partner', { defaultValue: 'Partner' })}</TableHead>
+                                    <TableHead>{t('ledger.table.descriptionNotes', { defaultValue: 'Description / Notes' })}</TableHead>
+                                    <TableHead className="text-right">{t('ledger.table.actions', { defaultValue: 'Actions' })}</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {filteredEntries.length === 0 ? (
                                     <TableRow>
                                         <TableCell colSpan={10} className="py-12 text-center text-muted-foreground">
-                                            No ledger entries match the current filters.
+                                            {t('ledger.table.noMatch', { defaultValue: 'No ledger entries match the current filters.' })}
                                         </TableCell>
                                     </TableRow>
                                 ) : visibleEntries.map((entry, rowIndex) => {
@@ -1855,7 +1856,7 @@ export function Ledger() {
                                                         <TooltipTrigger asChild>
                                                             <div className="inline-flex max-w-full cursor-default items-center gap-2">
                                                                 <span className="truncate decoration-dotted underline-offset-4 hover:underline">
-                                                                    {ledgerTypeLabel(entry.type)}
+                                                                    {ledgerTypeLabel(entry.type, t)}
                                                                 </span>
                                                                 {entry.relationRole ? (
                                                                     <span className={cn(
@@ -1866,7 +1867,7 @@ export function Ledger() {
                                                                                 ? 'border-amber-200 bg-amber-50 text-amber-700'
                                                                                 : 'border-violet-200 bg-violet-50 text-violet-700'
                                                                     )}>
-                                                                        {ledgerRelationRoleLabel(entry.relationRole)}
+                                                                        {ledgerRelationRoleLabel(entry.relationRole, t)}
                                                                     </span>
                                                                 ) : null}
                                                             </div>
@@ -1881,13 +1882,13 @@ export function Ledger() {
                                                                 ) : null}
                                                                 {hasVisibleLinkedPeer ? (
                                                                     <p className="text-[11px] font-semibold text-primary">
-                                                                        Related ledger rows on this page highlight together and reveal the linked hierarchy while you hover.
+                                                                        {t('ledger.relation.hoverHint', { defaultValue: 'Related ledger rows on this page highlight together and reveal the linked hierarchy while you hover.' })}
                                                                     </p>
                                                                 ) : null}
                                                             </div>
                                                         </TooltipContent>
                                                     </Tooltip>
-                                                ) : ledgerTypeLabel(entry.type)}
+                                                ) : ledgerTypeLabel(entry.type, t)}
                                             </TableCell>
                                             <TableCell>
                                                 <span className={cn(
@@ -1897,11 +1898,11 @@ export function Ledger() {
                                                         : 'border-amber-200 bg-amber-50 text-amber-700'
                                                 )}>
                                                     {entry.direction === 'incoming' ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
-                                                    {entry.direction === 'incoming' ? 'IN' : 'OUT'}
+                                                    {entry.direction === 'incoming' ? t('ledger.direction.in', { defaultValue: 'IN' }) : t('ledger.direction.out', { defaultValue: 'OUT' })}
                                                 </span>
                                             </TableCell>
                                             <TableCell>{formatCurrency(entry.amount, entry.currency, features.iqd_display_preference)}</TableCell>
-                                            <TableCell>{sourceModuleLabel(entry.sourceModule)}</TableCell>
+                                            <TableCell>{sourceModuleLabel(entry.sourceModule, t)}</TableCell>
                                             <TableCell className="font-medium">{entry.referenceId}</TableCell>
                                             <TableCell>{entry.partner || '-'}</TableCell>
                                             <TableCell className="max-w-[280px]">
@@ -1909,7 +1910,7 @@ export function Ledger() {
                                             </TableCell>
                                             <TableCell className="text-right">
                                                 <Button variant="outline" size="sm" onClick={() => setLocation(entry.routePath)}>
-                                                    Open
+                                                    {t('ledger.table.open', { defaultValue: 'Open' })}
                                                 </Button>
                                             </TableCell>
                                         </TableRow>
@@ -1929,48 +1930,48 @@ export function Ledger() {
                                 <div className="rounded-2xl bg-primary/10 p-2.5 text-primary">
                                     <SlidersHorizontal className="h-5 w-5" />
                                 </div>
-                                General Ledger Filters
+                                {t('ledger.filters.dialogTitle', { defaultValue: 'General Ledger Filters' })}
                             </DialogTitle>
                             <DialogDescription className="max-w-3xl">
-                                Refine the ledger with a richer filter set before you inspect entries. Date range stays on the page, and changes here stay in the modal until you apply them.
+                                {t('ledger.filters.dialogDescription', { defaultValue: 'Refine the ledger with a richer filter set before you inspect entries. Date range stays on the page, and changes here stay in the modal until you apply them.' })}
                             </DialogDescription>
                         </DialogHeader>
 
                         <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
                             <div className="grid gap-3 md:grid-cols-3">
                                 <div className="rounded-2xl border border-emerald-500/15 bg-emerald-500/5 p-4">
-                                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-700">Preview</div>
+                                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-700">{t('ledger.filters.preview', { defaultValue: 'Preview' })}</div>
                                     <div className="mt-2 text-2xl font-black text-emerald-700">{draftPreviewEntries.length}</div>
-                                    <div className="mt-1 text-xs text-muted-foreground">entries match the draft filters inside the current page range</div>
+                                    <div className="mt-1 text-xs text-muted-foreground">{t('ledger.filters.previewDescription', { defaultValue: 'entries match the draft filters inside the current page range' })}</div>
                                 </div>
                                 <div className="rounded-2xl border border-border/60 bg-secondary/20 p-4">
-                                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted-foreground">Page Range</div>
-                                    <div className="mt-2 text-sm font-bold">{dateDisplay || 'All Time'}</div>
-                                    <div className="mt-1 text-xs text-muted-foreground">Controlled directly from the ledger page header</div>
+                                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted-foreground">{t('ledger.filters.pageRange', { defaultValue: 'Page Range' })}</div>
+                                    <div className="mt-2 text-sm font-bold">{dateDisplay || t('performance.filters.allTime', { defaultValue: 'All Time' })}</div>
+                                    <div className="mt-1 text-xs text-muted-foreground">{t('ledger.filters.pageRangeDescription', { defaultValue: 'Controlled directly from the ledger page header' })}</div>
                                 </div>
                                 <div className="rounded-2xl border border-border/60 bg-secondary/20 p-4">
-                                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted-foreground">Draft Filters</div>
+                                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted-foreground">{t('ledger.filters.draftFilters', { defaultValue: 'Draft Filters' })}</div>
                                     <div className="mt-2 text-2xl font-black">{countActiveLedgerFilters(draftFilters)}</div>
-                                    <div className="mt-1 text-xs text-muted-foreground">advanced conditions configured</div>
+                                    <div className="mt-1 text-xs text-muted-foreground">{t('ledger.filters.draftFiltersDescription', { defaultValue: 'advanced conditions configured' })}</div>
                                 </div>
                             </div>
 
                             <section className="grid gap-4 lg:grid-cols-2">
                                 <div className="space-y-4 rounded-[1.5rem] border border-border/60 bg-background/80 p-5">
                                     <div className="space-y-1">
-                                        <h3 className="text-base font-black tracking-tight">Search & Movement</h3>
-                                        <p className="text-sm text-muted-foreground">Search by IDs, partner, notes, reference, or module.</p>
+                                        <h3 className="text-base font-black tracking-tight">{t('ledger.filters.searchMovement', { defaultValue: 'Search & Movement' })}</h3>
+                                        <p className="text-sm text-muted-foreground">{t('ledger.filters.searchMovementDescription', { defaultValue: 'Search by IDs, partner, notes, reference, or module.' })}</p>
                                     </div>
 
                                     <div className="space-y-2">
-                                        <Label htmlFor="ledger-filter-search">Keyword Search</Label>
+                                        <Label htmlFor="ledger-filter-search">{t('ledger.filters.keywordSearch', { defaultValue: 'Keyword Search' })}</Label>
                                         <div className="relative">
                                             <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
                                             <Input
                                                 id="ledger-filter-search"
                                                 value={draftFilters.search}
                                                 onChange={(event) => setDraftFilters((current) => ({ ...current, search: event.target.value }))}
-                                                placeholder="Search reference, partner, note, or ID"
+                                                placeholder={t('ledger.filters.searchPlaceholder', { defaultValue: 'Search reference, partner, note, or ID' })}
                                                 className="pl-9"
                                             />
                                         </div>
@@ -1978,29 +1979,29 @@ export function Ledger() {
 
                                     <div className="grid gap-4 sm:grid-cols-2">
                                         <div className="space-y-2">
-                                            <Label>Direction</Label>
+                                            <Label>{t('ledger.filters.direction', { defaultValue: 'Direction' })}</Label>
                                             <Select value={draftFilters.direction} onValueChange={(value: LedgerDirectionFilter) => setDraftFilters((current) => ({ ...current, direction: value }))}>
                                                 <SelectTrigger>
                                                     <SelectValue />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="all">All Directions</SelectItem>
-                                                    <SelectItem value="incoming">Inflow</SelectItem>
-                                                    <SelectItem value="outgoing">Outflow</SelectItem>
+                                                    <SelectItem value="all">{t('ledger.direction.allDirections', { defaultValue: 'All Directions' })}</SelectItem>
+                                                    <SelectItem value="incoming">{t('ledger.direction.inflow', { defaultValue: 'Inflow' })}</SelectItem>
+                                                    <SelectItem value="outgoing">{t('ledger.direction.outflow', { defaultValue: 'Outflow' })}</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>
                                         <div className="space-y-2">
-                                            <Label>Sort By</Label>
+                                            <Label>{t('ledger.filters.sortBy', { defaultValue: 'Sort By' })}</Label>
                                             <Select value={draftFilters.sort} onValueChange={(value: LedgerSortOption) => setDraftFilters((current) => ({ ...current, sort: value }))}>
                                                 <SelectTrigger>
                                                     <SelectValue />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="date_desc">Date: Newest First</SelectItem>
-                                                    <SelectItem value="date_asc">Date: Oldest First</SelectItem>
-                                                    <SelectItem value="amount_desc">Amount: Highest First</SelectItem>
-                                                    <SelectItem value="amount_asc">Amount: Lowest First</SelectItem>
+                                                    <SelectItem value="date_desc">{sortOptionLabel('date_desc', t)}</SelectItem>
+                                                    <SelectItem value="date_asc">{sortOptionLabel('date_asc', t)}</SelectItem>
+                                                    <SelectItem value="amount_desc">{sortOptionLabel('amount_desc', t)}</SelectItem>
+                                                    <SelectItem value="amount_asc">{sortOptionLabel('amount_asc', t)}</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>
@@ -2008,35 +2009,35 @@ export function Ledger() {
 
                                     <div className="grid gap-4 sm:grid-cols-2">
                                         <div className="space-y-2">
-                                            <Label>Transaction Type</Label>
+                                            <Label>{t('ledger.filters.transactionType', { defaultValue: 'Transaction Type' })}</Label>
                                             <Select value={draftFilters.type} onValueChange={(value: 'all' | LedgerEntryType) => setDraftFilters((current) => ({ ...current, type: value }))}>
                                                 <SelectTrigger>
-                                                    <SelectValue placeholder="All Types" />
+                                                    <SelectValue placeholder={t('ledger.filters.allTypes', { defaultValue: 'All Types' })} />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="all">All Types</SelectItem>
+                                                    <SelectItem value="all">{t('ledger.filters.allTypes', { defaultValue: 'All Types' })}</SelectItem>
                                                     {typeOptions.map((type) => (
                                                         <SelectItem key={type} value={type}>
-                                                            {ledgerTypeLabel(type)}
+                                                            {ledgerTypeLabel(type, t)}
                                                         </SelectItem>
                                                     ))}
                                                 </SelectContent>
                                             </Select>
                                         </div>
                                         <div className="space-y-2">
-                                            <Label>Source Module</Label>
+                                            <Label>{t('ledger.filters.sourceModule', { defaultValue: 'Source Module' })}</Label>
                                             <Select value={draftFilters.source} onValueChange={(value: 'all' | LedgerSourceModule) => setDraftFilters((current) => ({ ...current, source: value }))}>
                                                 <SelectTrigger>
-                                                    <SelectValue placeholder="All Modules" />
+                                                    <SelectValue placeholder={t('ledger.filters.allModules', { defaultValue: 'All Modules' })} />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="all">All Modules</SelectItem>
-                                                    <SelectItem value="pos">POS</SelectItem>
-                                                    <SelectItem value="instant_pos">Instant POS</SelectItem>
-                                                    <SelectItem value="orders">Orders</SelectItem>
-                                                    <SelectItem value="expenses">Expenses</SelectItem>
-                                                    <SelectItem value="payroll">Payroll</SelectItem>
-                                                    <SelectItem value="loans">Loans</SelectItem>
+                                                    <SelectItem value="all">{t('ledger.filters.allModules', { defaultValue: 'All Modules' })}</SelectItem>
+                                                    <SelectItem value="pos">{sourceModuleLabel('pos', t)}</SelectItem>
+                                                    <SelectItem value="instant_pos">{sourceModuleLabel('instant_pos', t)}</SelectItem>
+                                                    <SelectItem value="orders">{sourceModuleLabel('orders', t)}</SelectItem>
+                                                    <SelectItem value="expenses">{sourceModuleLabel('expenses', t)}</SelectItem>
+                                                    <SelectItem value="payroll">{sourceModuleLabel('payroll', t)}</SelectItem>
+                                                    <SelectItem value="loans">{sourceModuleLabel('loans', t)}</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>
@@ -2045,19 +2046,19 @@ export function Ledger() {
 
                                 <div className="space-y-4 rounded-[1.5rem] border border-border/60 bg-background/80 p-5">
                                     <div className="space-y-1">
-                                        <h3 className="text-base font-black tracking-tight">Parties, Method & Amount</h3>
-                                        <p className="text-sm text-muted-foreground">Narrow the ledger to specific partners, currencies, methods, or ranges.</p>
+                                        <h3 className="text-base font-black tracking-tight">{t('ledger.filters.partiesMethodAmount', { defaultValue: 'Parties, Method & Amount' })}</h3>
+                                        <p className="text-sm text-muted-foreground">{t('ledger.filters.partiesMethodAmountDescription', { defaultValue: 'Narrow the ledger to specific partners, currencies, methods, or ranges.' })}</p>
                                     </div>
 
                                     <div className="grid gap-4 sm:grid-cols-2">
                                         <div className="space-y-2">
-                                            <Label>Partner</Label>
+                                            <Label>{t('ledger.filters.partner', { defaultValue: 'Partner' })}</Label>
                                             <Select value={draftFilters.partner} onValueChange={(value) => setDraftFilters((current) => ({ ...current, partner: value }))}>
                                                 <SelectTrigger>
-                                                    <SelectValue placeholder="All Partners" />
+                                                    <SelectValue placeholder={t('ledger.filters.allPartners', { defaultValue: 'All Partners' })} />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="all">All Partners</SelectItem>
+                                                    <SelectItem value="all">{t('ledger.filters.allPartners', { defaultValue: 'All Partners' })}</SelectItem>
                                                     {partnerOptions.map((partner) => (
                                                         <SelectItem key={partner} value={partner}>
                                                             {partner}
@@ -2067,13 +2068,13 @@ export function Ledger() {
                                             </Select>
                                         </div>
                                         <div className="space-y-2">
-                                            <Label>Currency</Label>
+                                            <Label>{t('ledger.filters.currency', { defaultValue: 'Currency' })}</Label>
                                             <Select value={draftFilters.currency} onValueChange={(value: LedgerCurrencyFilter) => setDraftFilters((current) => ({ ...current, currency: value }))}>
                                                 <SelectTrigger>
-                                                    <SelectValue placeholder="All Currencies" />
+                                                    <SelectValue placeholder={t('ledger.filters.allCurrencies', { defaultValue: 'All Currencies' })} />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="all">All Currencies</SelectItem>
+                                                    <SelectItem value="all">{t('ledger.filters.allCurrencies', { defaultValue: 'All Currencies' })}</SelectItem>
                                                     {currencyOptions.map((currency) => (
                                                         <SelectItem key={currency} value={currency}>
                                                             {currency.toUpperCase()}
@@ -2086,31 +2087,31 @@ export function Ledger() {
 
                                     <div className="grid gap-4 sm:grid-cols-2">
                                         <div className="space-y-2">
-                                            <Label>Payment Method</Label>
+                                            <Label>{t('ledger.filters.paymentMethod', { defaultValue: 'Payment Method' })}</Label>
                                             <Select value={draftFilters.paymentMethod} onValueChange={(value) => setDraftFilters((current) => ({ ...current, paymentMethod: value }))}>
                                                 <SelectTrigger>
-                                                    <SelectValue placeholder="Any Method" />
+                                                    <SelectValue placeholder={t('ledger.filters.anyMethod', { defaultValue: 'Any Method' })} />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="all">Any Method</SelectItem>
+                                                    <SelectItem value="all">{t('ledger.filters.anyMethod', { defaultValue: 'Any Method' })}</SelectItem>
                                                     {paymentMethodOptions.map((method) => (
                                                         <SelectItem key={method} value={method}>
-                                                            {paymentMethodLabel(method)}
+                                                            {paymentMethodLabel(method, t)}
                                                         </SelectItem>
                                                     ))}
                                                 </SelectContent>
                                             </Select>
                                         </div>
                                         <div className="space-y-2">
-                                            <Label>Notes</Label>
+                                            <Label>{t('ledger.filters.notes', { defaultValue: 'Notes' })}</Label>
                                             <Select value={draftFilters.notes} onValueChange={(value: LedgerNotesFilter) => setDraftFilters((current) => ({ ...current, notes: value }))}>
                                                 <SelectTrigger>
-                                                    <SelectValue placeholder="Any Notes State" />
+                                                    <SelectValue placeholder={t('ledger.filters.anyNotesState', { defaultValue: 'Any Notes State' })} />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="all">Any Notes State</SelectItem>
-                                                    <SelectItem value="with_notes">With Notes</SelectItem>
-                                                    <SelectItem value="without_notes">Without Notes</SelectItem>
+                                                    <SelectItem value="all">{t('ledger.filters.anyNotesState', { defaultValue: 'Any Notes State' })}</SelectItem>
+                                                    <SelectItem value="with_notes">{t('ledger.filters.withNotes', { defaultValue: 'With Notes' })}</SelectItem>
+                                                    <SelectItem value="without_notes">{t('ledger.filters.withoutNotes', { defaultValue: 'Without Notes' })}</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>
@@ -2118,7 +2119,7 @@ export function Ledger() {
 
                                     <div className="grid gap-4 sm:grid-cols-2">
                                         <div className="space-y-2">
-                                            <Label htmlFor="ledger-filter-min-amount">Minimum Amount</Label>
+                                            <Label htmlFor="ledger-filter-min-amount">{t('ledger.filters.minimumAmount', { defaultValue: 'Minimum Amount' })}</Label>
                                             <Input
                                                 id="ledger-filter-min-amount"
                                                 type="number"
@@ -2129,14 +2130,14 @@ export function Ledger() {
                                             />
                                         </div>
                                         <div className="space-y-2">
-                                            <Label htmlFor="ledger-filter-max-amount">Maximum Amount</Label>
+                                            <Label htmlFor="ledger-filter-max-amount">{t('ledger.filters.maximumAmount', { defaultValue: 'Maximum Amount' })}</Label>
                                             <Input
                                                 id="ledger-filter-max-amount"
                                                 type="number"
                                                 min="0"
                                                 value={draftFilters.maxAmount}
                                                 onChange={(event) => setDraftFilters((current) => ({ ...current, maxAmount: event.target.value }))}
-                                                placeholder="No cap"
+                                                placeholder={t('ledger.filters.noCap', { defaultValue: 'No cap' })}
                                             />
                                         </div>
                                     </div>
@@ -2147,14 +2148,14 @@ export function Ledger() {
                         <DialogFooter className="border-t border-border/60 bg-background/95 px-6 py-4 sm:justify-between">
                             <Button type="button" variant="ghost" onClick={handleResetDraftFilters} className="rounded-2xl">
                                 <RotateCcw className="mr-2 h-4 w-4" />
-                                Reset Draft
+                                {t('ledger.filters.resetDraft', { defaultValue: 'Reset Draft' })}
                             </Button>
                             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
                                 <Button type="button" variant="outline" onClick={() => setIsFilterDialogOpen(false)} className="rounded-2xl">
-                                    Cancel
+                                    {t('ledger.filters.cancel', { defaultValue: 'Cancel' })}
                                 </Button>
                                 <Button type="button" onClick={handleApplyFilters} className="rounded-2xl">
-                                    Apply Filters ({draftPreviewEntries.length})
+                                    {t('ledger.filters.applyFilters', { count: draftPreviewEntries.length, defaultValue: `Apply Filters (${draftPreviewEntries.length})` })}
                                 </Button>
                             </div>
                         </DialogFooter>

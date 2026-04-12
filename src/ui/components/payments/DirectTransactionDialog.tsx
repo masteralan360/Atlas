@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { useBusinessPartners, type CurrencyCode, type WorkspacePaymentMethod } from '@/local-db'
 import { formatLocalDateTimeValue, formatNumberWithCommas, parseFormattedNumber, parseLocalDateTimeValue } from '@/lib/utils'
@@ -48,6 +49,7 @@ export function DirectTransactionDialog({
     isSubmitting = false,
     onSubmit
 }: DirectTransactionDialogProps) {
+    const { t } = useTranslation()
     const { features } = useWorkspace()
     const partners = useBusinessPartners(workspaceId)
     const [direction, setDirection] = useState<'incoming' | 'outgoing'>('outgoing')
@@ -85,40 +87,40 @@ export function DirectTransactionDialog({
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-2xl">
                 <DialogHeader>
-                    <DialogTitle>New Direct Transaction</DialogTitle>
+                    <DialogTitle>{t('directTransactionModal.title', { defaultValue: 'New Direct Transaction' })}</DialogTitle>
                     <DialogDescription>
-                        Manual incoming or outgoing money for activity outside the tracked system modules. Payroll does not belong here.
+                        {t('directTransactionModal.description', { defaultValue: 'Manual incoming or outgoing money for activity outside the tracked system modules. Payroll does not belong here.' })}
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="grid gap-4">
                     <div className="grid gap-3 sm:grid-cols-2">
                         <div className="grid gap-2">
-                            <Label>Direction</Label>
+                            <Label>{t('directTransactionModal.fields.direction', { defaultValue: 'Direction' })}</Label>
                             <Select value={direction} onValueChange={(value: 'incoming' | 'outgoing') => setDirection(value)}>
                                 <SelectTrigger>
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="outgoing">Outgoing</SelectItem>
-                                    <SelectItem value="incoming">Incoming</SelectItem>
+                                    <SelectItem value="outgoing">{t('directTransactionModal.fields.directionOutgoing', { defaultValue: 'Outgoing' })}</SelectItem>
+                                    <SelectItem value="incoming">{t('directTransactionModal.fields.directionIncoming', { defaultValue: 'Incoming' })}</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
 
                         <div className="grid gap-2">
-                            <Label>Payment Method</Label>
+                            <Label>{t('directTransactionModal.fields.paymentMethod', { defaultValue: 'Payment Method' })}</Label>
                             <Select value={paymentMethod} onValueChange={(value: WorkspacePaymentMethod) => setPaymentMethod(value)}>
                                 <SelectTrigger>
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="cash">Cash</SelectItem>
-                                    <SelectItem value="fib">FIB</SelectItem>
-                                    <SelectItem value="qicard">QiCard</SelectItem>
-                                    <SelectItem value="zaincash">ZainCash</SelectItem>
-                                    <SelectItem value="fastpay">FastPay</SelectItem>
-                                    <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                                    <SelectItem value="cash">{t('directTransactions.paymentMethod.cash', { defaultValue: 'Cash' })}</SelectItem>
+                                    <SelectItem value="fib">{t('directTransactions.paymentMethod.fib', { defaultValue: 'FIB' })}</SelectItem>
+                                    <SelectItem value="qicard">{t('directTransactions.paymentMethod.qicard', { defaultValue: 'QiCard' })}</SelectItem>
+                                    <SelectItem value="zaincash">{t('directTransactions.paymentMethod.zaincash', { defaultValue: 'ZainCash' })}</SelectItem>
+                                    <SelectItem value="fastpay">{t('directTransactions.paymentMethod.fastpay', { defaultValue: 'FastPay' })}</SelectItem>
+                                    <SelectItem value="bank_transfer">{t('directTransactions.paymentMethod.bankTransfer', { defaultValue: 'Bank Transfer' })}</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -126,30 +128,34 @@ export function DirectTransactionDialog({
 
                     <div className="grid gap-3 sm:grid-cols-[1fr_180px]">
                         <div className="grid gap-2">
-                            <Label>Amount</Label>
+                            <Label>{t('directTransactionModal.fields.amount', { defaultValue: 'Amount' })}</Label>
                             <Input
                                 value={amount}
                                 onChange={(event) => setAmount(formatNumberWithCommas(event.target.value))}
-                                placeholder="0"
+                                placeholder={t('directTransactionModal.fields.amountPlaceholder', { defaultValue: '0' })}
                             />
                         </div>
                         <CurrencySelector value={currency} onChange={setCurrency} iqdDisplayPreference={features.iqd_display_preference} />
                     </div>
 
                     <div className="grid gap-2">
-                        <Label>Reason</Label>
-                        <Input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Why did this payment happen?" />
+                        <Label>{t('directTransactionModal.fields.reason', { defaultValue: 'Reason' })}</Label>
+                        <Input 
+                            value={reason} 
+                            onChange={(event) => setReason(event.target.value)} 
+                            placeholder={t('directTransactionModal.fields.reasonPlaceholder', { defaultValue: 'Why did this payment happen?' })} 
+                        />
                     </div>
 
                     {features.crm ? (
                         <div className="grid gap-2">
-                            <Label>Business Partner</Label>
+                            <Label>{t('directTransactionModal.fields.businessPartner', { defaultValue: 'Business Partner' })}</Label>
                             <Select value={businessPartnerId} onValueChange={setBusinessPartnerId}>
                                 <SelectTrigger>
-                                    <SelectValue placeholder="Optional business partner" />
+                                    <SelectValue placeholder={t('directTransactionModal.fields.businessPartnerPlaceholder', { defaultValue: 'Optional business partner' })} />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="none">No linked partner</SelectItem>
+                                    <SelectItem value="none">{t('directTransactionModal.fields.noPartner', { defaultValue: 'No linked partner' })}</SelectItem>
                                     {partners.map((partner) => (
                                         <SelectItem key={partner.id} value={partner.id}>{partner.name}</SelectItem>
                                     ))}
@@ -159,34 +165,39 @@ export function DirectTransactionDialog({
                     ) : null}
 
                     <div className="grid gap-2">
-                        <Label>Counterparty</Label>
+                        <Label>{t('directTransactionModal.fields.counterparty', { defaultValue: 'Counterparty' })}</Label>
                         <Input
                             value={selectedPartner?.name || counterpartyName}
                             onChange={(event) => setCounterpartyName(event.target.value)}
                             disabled={!!selectedPartner}
-                            placeholder="Who received or paid this amount?"
+                            placeholder={t('directTransactionModal.fields.counterpartyPlaceholder', { defaultValue: 'Who received or paid this amount?' })}
                         />
                     </div>
 
                     <div className="grid gap-2">
-                        <Label>Paid At</Label>
+                        <Label>{t('directTransactionModal.fields.paidAt', { defaultValue: 'Paid At' })}</Label>
                         <DateTimePicker
                             id="direct-transaction-paid-at"
                             date={selectedPaidAt}
                             setDate={(value) => setPaidAt(value ? formatLocalDateTimeValue(value) : '')}
-                            placeholder="Pick transaction time"
+                            placeholder={t('directTransactionModal.fields.paidAtPlaceholder', { defaultValue: 'Pick transaction time' })}
                         />
                     </div>
 
                     <div className="grid gap-2">
-                        <Label>Note</Label>
-                        <Textarea rows={3} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Optional note" />
+                        <Label>{t('directTransactionModal.fields.note', { defaultValue: 'Note' })}</Label>
+                        <Textarea 
+                            rows={3} 
+                            value={note} 
+                            onChange={(event) => setNote(event.target.value)} 
+                            placeholder={t('directTransactionModal.fields.notePlaceholder', { defaultValue: 'Optional note' })} 
+                        />
                     </div>
                 </div>
 
                 <DialogFooter>
                     <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
-                        Cancel
+                        {t('directTransactionModal.actions.cancel', { defaultValue: 'Cancel' })}
                     </Button>
                     <Button
                         onClick={() => onSubmit({
@@ -202,7 +213,7 @@ export function DirectTransactionDialog({
                         })}
                         disabled={isSubmitting || !selectedPaidAt}
                     >
-                        Save Transaction
+                        {t('directTransactionModal.actions.save', { defaultValue: 'Save Transaction' })}
                     </Button>
                 </DialogFooter>
             </DialogContent>

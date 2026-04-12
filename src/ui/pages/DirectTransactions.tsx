@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ArrowDownLeft, ArrowUpRight, Plus, RotateCcw, Search } from 'lucide-react'
 import { useLocation } from 'wouter'
+import { useTranslation } from 'react-i18next'
 
 import { useAuth } from '@/auth'
 import {
@@ -37,20 +38,22 @@ import { useWorkspace } from '@/workspace'
 
 type DirectionFilter = 'all' | 'incoming' | 'outgoing'
 
-function paymentMethodLabel(value: PaymentTransaction['paymentMethod']) {
+function paymentMethodLabel(value: PaymentTransaction['paymentMethod'], t: any) {
     switch (value) {
         case 'bank_transfer':
-            return 'Bank Transfer'
+            return t('directTransactions.paymentMethod.bankTransfer', { defaultValue: 'Bank Transfer' })
         case 'loan_adjustment':
-            return 'Loan Adjustment'
+            return t('directTransactions.paymentMethod.loanAdjustment', { defaultValue: 'Loan Adjustment' })
         case 'qicard':
-            return 'QiCard'
+            return t('directTransactions.paymentMethod.qicard', { defaultValue: 'QiCard' })
         case 'zaincash':
-            return 'ZainCash'
+            return t('directTransactions.paymentMethod.zaincash', { defaultValue: 'ZainCash' })
         case 'fastpay':
-            return 'FastPay'
+            return t('directTransactions.paymentMethod.fastpay', { defaultValue: 'FastPay' })
         case 'fib':
-            return 'FIB'
+            return t('directTransactions.paymentMethod.fib', { defaultValue: 'FIB' })
+        case 'cash':
+            return t('directTransactions.paymentMethod.cash', { defaultValue: 'Cash' })
         default:
             return value.charAt(0).toUpperCase() + value.slice(1).replace('_', ' ')
     }
@@ -71,6 +74,7 @@ function collapseTransactionsBySource(items: PaymentTransaction[]) {
 }
 
 export function DirectTransactions() {
+    const { t } = useTranslation()
     const { user } = useAuth()
     const { toast } = useToast()
     const { features } = useWorkspace()
@@ -155,12 +159,12 @@ export function DirectTransactions() {
                 ...input,
                 createdBy: user?.id || null
             })
-            toast({ title: 'Direct transaction recorded' })
+            toast({ title: t('directTransactions.recorded', { defaultValue: 'Direct transaction recorded' }) })
             setIsDirectDialogOpen(false)
         } catch (error: any) {
             toast({
-                title: 'Error',
-                description: error?.message || 'Failed to record direct transaction.',
+                title: t('common.error', { defaultValue: 'Error' }),
+                description: error?.message || t('directTransactions.recordFailed', { defaultValue: 'Failed to record direct transaction.' }),
                 variant: 'destructive'
             })
         } finally {
@@ -178,11 +182,11 @@ export function DirectTransactions() {
             await reversePaymentTransaction(workspaceId, transaction.id, {
                 createdBy: user?.id || null
             })
-            toast({ title: 'Transaction reversed' })
+            toast({ title: t('directTransactions.reversed', { defaultValue: 'Transaction reversed' }) })
         } catch (error: any) {
             toast({
-                title: 'Error',
-                description: error?.message || 'Failed to reverse transaction.',
+                title: t('common.error', { defaultValue: 'Error' }),
+                description: error?.message || t('directTransactions.reverseFailed', { defaultValue: 'Failed to reverse transaction.' }),
                 variant: 'destructive'
             })
         } finally {
@@ -195,10 +199,10 @@ export function DirectTransactions() {
             <div className="p-6">
                 <Card>
                     <CardHeader>
-                        <CardTitle>Direct Transactions is not available in this workspace</CardTitle>
+                        <CardTitle>{t('directTransactions.notAvailable', { defaultValue: 'Direct Transactions is not available in this workspace' })}</CardTitle>
                     </CardHeader>
                     <CardContent className="text-sm text-muted-foreground">
-                        Enable Loans, CRM, Accounting, or HR to use the central payments surface.
+                        {t('directTransactions.enableModules', { defaultValue: 'Enable Loans, CRM, Accounting, or HR to use the central payments surface.' })}
                     </CardContent>
                 </Card>
             </div>
@@ -209,17 +213,17 @@ export function DirectTransactions() {
         <div className="space-y-6 p-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div className="space-y-3">
-                    <h1 className="text-3xl font-bold tracking-tight">Direct Transactions</h1>
+                    <h1 className="text-3xl font-bold tracking-tight">{t('directTransactions.title', { defaultValue: 'Direct Transactions' })}</h1>
                     <p className="text-sm text-muted-foreground">
-                        Manual incoming and outgoing money for activity outside the tracked modules. Payroll stays out of this page.
+                        {t('directTransactions.subtitle', { defaultValue: 'Manual incoming and outgoing money for activity outside the tracked modules. Payroll stays out of this page.' })}
                     </p>
                     <div className="flex flex-wrap gap-3">
                         <Button type="button" variant="outline" onClick={() => setLocation('/payments')} className="w-fit">
-                            Payments
+                            {t('payments.title', { defaultValue: 'Payments' })}
                         </Button>
                         <Button type="button" onClick={() => setIsDirectDialogOpen(true)} className="w-fit">
                             <Plus className="mr-2 h-4 w-4" />
-                            New Direct Transaction
+                            {t('directTransactions.newTransaction', { defaultValue: 'New Direct Transaction' })}
                         </Button>
                     </div>
                 </div>
@@ -233,18 +237,18 @@ export function DirectTransactions() {
                             <Input
                                 value={search}
                                 onChange={(event) => setSearch(event.target.value)}
-                                placeholder="Search direct transactions"
+                                placeholder={t('directTransactions.searchPlaceholder', { defaultValue: 'Search direct transactions' })}
                                 className="pl-9"
                             />
                         </div>
                         <Select value={directionFilter} onValueChange={(value: DirectionFilter) => setDirectionFilter(value)}>
                             <SelectTrigger>
-                                <SelectValue placeholder="Direction" />
+                                <SelectValue placeholder={t('directTransactions.filters.direction', { defaultValue: 'Direction' })} />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="all">All Directions</SelectItem>
-                                <SelectItem value="incoming">Incoming</SelectItem>
-                                <SelectItem value="outgoing">Outgoing</SelectItem>
+                                <SelectItem value="all">{t('directTransactions.filters.allDirections', { defaultValue: 'All Directions' })}</SelectItem>
+                                <SelectItem value="incoming">{t('directTransactions.filters.incoming', { defaultValue: 'Incoming' })}</SelectItem>
+                                <SelectItem value="outgoing">{t('directTransactions.filters.outgoing', { defaultValue: 'Outgoing' })}</SelectItem>
                             </SelectContent>
                         </Select>
                         {(search.trim() || directionFilter !== 'all') ? (
@@ -253,7 +257,7 @@ export function DirectTransactions() {
                                 setDirectionFilter('all')
                             }} className="justify-self-start lg:justify-self-end">
                                 <RotateCcw className="mr-2 h-4 w-4" />
-                                Clear Filters
+                                {t('directTransactions.clearFilters', { defaultValue: 'Clear Filters' })}
                             </Button>
                         ) : null}
                     </div>
@@ -263,36 +267,36 @@ export function DirectTransactions() {
             <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0">
                     <div className="space-y-1">
-                        <CardTitle>Direct Transactions</CardTitle>
+                        <CardTitle>{t('directTransactions.title', { defaultValue: 'Direct Transactions' })}</CardTitle>
                         <p className="text-sm text-muted-foreground">
-                            Posted direct transactions stay separate from tracked module settlements but still support reversals.
+                            {t('directTransactions.tableSubtitle', { defaultValue: 'Posted direct transactions stay separate from tracked module settlements but still support reversals.' })}
                         </p>
                     </div>
                     <div className="text-sm text-muted-foreground">
-                        {visibleDirectTransactions.length} matching entries
+                        {t('directTransactions.matchingEntries', { count: visibleDirectTransactions.length, defaultValue: '{{count}} matching entries' })}
                     </div>
                 </CardHeader>
                 <CardContent className="overflow-x-auto">
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead>Time</TableHead>
-                                <TableHead>Reason</TableHead>
-                                <TableHead>Counterparty</TableHead>
-                                <TableHead>Linked</TableHead>
-                                <TableHead>Direction</TableHead>
-                                <TableHead>Amount</TableHead>
-                                <TableHead>Method</TableHead>
-                                <TableHead>Note</TableHead>
-                                <TableHead>Status</TableHead>
-                                <TableHead className="text-right">Actions</TableHead>
+                                <TableHead>{t('directTransactions.table.time', { defaultValue: 'Time' })}</TableHead>
+                                <TableHead>{t('directTransactions.table.reason', { defaultValue: 'Reason' })}</TableHead>
+                                <TableHead>{t('directTransactions.table.counterparty', { defaultValue: 'Counterparty' })}</TableHead>
+                                <TableHead>{t('directTransactions.table.linked', { defaultValue: 'Linked' })}</TableHead>
+                                <TableHead>{t('directTransactions.table.direction', { defaultValue: 'Direction' })}</TableHead>
+                                <TableHead>{t('directTransactions.table.amount', { defaultValue: 'Amount' })}</TableHead>
+                                <TableHead>{t('directTransactions.table.method', { defaultValue: 'Method' })}</TableHead>
+                                <TableHead>{t('directTransactions.table.note', { defaultValue: 'Note' })}</TableHead>
+                                <TableHead>{t('directTransactions.table.status', { defaultValue: 'Status' })}</TableHead>
+                                <TableHead className="text-right">{t('directTransactions.table.actions', { defaultValue: 'Actions' })}</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {visibleDirectTransactions.length === 0 ? (
                                 <TableRow>
                                     <TableCell colSpan={10} className="py-12 text-center text-muted-foreground">
-                                        No direct transactions match the current filters.
+                                        {t('directTransactions.noMatch', { defaultValue: 'No direct transactions match the current filters.' })}
                                     </TableCell>
                                 </TableRow>
                             ) : visibleDirectTransactions.map((item) => {
@@ -305,10 +309,12 @@ export function DirectTransactions() {
                                 return (
                                     <TableRow key={item.id}>
                                         <TableCell>{formatDateTime(item.paidAt)}</TableCell>
-                                        <TableCell className="font-medium">{item.referenceLabel || 'Direct transaction'}</TableCell>
+                                        <TableCell className="font-medium">{item.referenceLabel || t('directTransactions.defaultReason', { defaultValue: 'Direct transaction' })}</TableCell>
                                         <TableCell>{item.counterpartyName || '-'}</TableCell>
                                         <TableCell>
-                                            {typeof item.metadata?.businessPartnerId === 'string' && item.metadata.businessPartnerId ? 'Business Partner' : 'External'}
+                                            {typeof item.metadata?.businessPartnerId === 'string' && item.metadata.businessPartnerId 
+                                                ? t('directTransactions.businessPartnerLink', { defaultValue: 'Business Partner' }) 
+                                                : t('directTransactions.external', { defaultValue: 'External' })}
                                         </TableCell>
                                         <TableCell>
                                             <span className={cn(
@@ -318,14 +324,16 @@ export function DirectTransactions() {
                                                     : 'border-amber-200 bg-amber-50 text-amber-700'
                                             )}>
                                                 {item.direction === 'incoming' ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
-                                                {item.direction}
+                                                {item.direction === 'incoming' 
+                                                    ? t('directTransactions.filters.incoming', { defaultValue: 'Incoming' })
+                                                    : t('directTransactions.filters.outgoing', { defaultValue: 'Outgoing' })}
                                             </span>
                                         </TableCell>
                                         <TableCell>
                                             {displayAmount < 0 ? '-' : ''}
                                             {formatCurrency(Math.abs(displayAmount), item.currency, features.iqd_display_preference)}
                                         </TableCell>
-                                        <TableCell>{paymentMethodLabel(item.paymentMethod)}</TableCell>
+                                        <TableCell>{paymentMethodLabel(item.paymentMethod, t)}</TableCell>
                                         <TableCell className="max-w-[240px] truncate">{item.note || '-'}</TableCell>
                                         <TableCell>
                                             <span className={cn(
@@ -336,13 +344,17 @@ export function DirectTransactions() {
                                                         ? 'border-slate-200 bg-slate-50 text-slate-700'
                                                         : 'border-emerald-200 bg-emerald-50 text-emerald-700'
                                             )}>
-                                                {isReversal ? 'Reversal' : isReversed ? 'Reversed' : 'Posted'}
+                                                {isReversal 
+                                                    ? t('directTransactions.status.reversal', { defaultValue: 'Reversal' }) 
+                                                    : isReversed 
+                                                        ? t('directTransactions.status.reversed', { defaultValue: 'Reversed' }) 
+                                                        : t('directTransactions.status.posted', { defaultValue: 'Posted' })}
                                             </span>
                                         </TableCell>
                                         <TableCell className="text-right">
                                             <div className="flex justify-end gap-2">
                                                 <Button variant="outline" size="sm" onClick={() => setLocation(getPaymentTransactionRoutePath(item))}>
-                                                    View
+                                                    {t('common.view', { defaultValue: 'View' })}
                                                 </Button>
                                                 {canReverse ? (
                                                     <Button
@@ -352,7 +364,7 @@ export function DirectTransactions() {
                                                         disabled={reversingTransactionId === item.id}
                                                     >
                                                         <RotateCcw className="mr-1 h-3.5 w-3.5" />
-                                                        Reverse
+                                                        {t('common.reverse', { defaultValue: 'Reverse' })}
                                                     </Button>
                                                 ) : null}
                                             </div>

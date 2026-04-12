@@ -162,6 +162,10 @@
         "whatsapp": "WhatsApp",
         "currencyConverter": "Currency Converter",
         "members": "Members",
+        "ledger": "Ledger",
+        "payments": "Payments",
+        "directTransactions": "Direct Transactions",
+        "uploadFiles": "Upload Files",
         "tools": "Tools",
         "actions": "Actions"
     },
@@ -818,6 +822,46 @@
             "fastpay": "FastPay",
             "fib": "FIB"
         }
+    },
+    "directTransactionModal": {
+        "title": "New Direct Transaction",
+        "description": "Manual incoming or outgoing money for activity outside the tracked system modules. Payroll does not belong here.",
+        "fields": {
+            "direction": "Direction",
+            "directionIncoming": "Incoming",
+            "directionOutgoing": "Outgoing",
+            "paymentMethod": "Payment Method",
+            "amount": "Amount",
+            "amountPlaceholder": "0",
+            "reason": "Reason",
+            "reasonPlaceholder": "Why did this payment happen?",
+            "businessPartner": "Business Partner",
+            "businessPartnerPlaceholder": "Optional business partner",
+            "noPartner": "No linked partner",
+            "counterparty": "Counterparty",
+            "counterpartyPlaceholder": "Who received or paid this amount?",
+            "paidAt": "Paid At",
+            "paidAtPlaceholder": "Pick transaction time",
+            "note": "Note",
+            "notePlaceholder": "Optional note"
+        },
+        "actions": {
+            "cancel": "Cancel",
+            "save": "Save Transaction"
+        }
+    },
+    "settlementModal": {
+        "recordCollection": "Record Collection",
+        "recordPayment": "Record Payment",
+        "postSettlement": "Post this settlement to the central ledger.",
+        "receivable": "Receivable",
+        "payable": "Payable",
+        "paymentMethod": "Payment Method",
+        "paidAt": "Paid At",
+        "pickPaymentTime": "Pick payment time",
+        "note": "Note",
+        "optionalNote": "Optional note",
+        "cancel": "Cancel"
     },
     "payments": {
         "title": "Payments",

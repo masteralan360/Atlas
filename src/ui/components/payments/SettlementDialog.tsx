@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import type { PaymentObligation, WorkspacePaymentMethod } from '@/local-db'
 import { formatCurrency, formatDate, formatLocalDateTimeValue, parseLocalDateTimeValue } from '@/lib/utils'
@@ -34,15 +35,6 @@ interface SettlementDialogProps {
     }) => Promise<void> | void
 }
 
-const basePaymentMethods: Array<{ value: WorkspacePaymentMethod; label: string }> = [
-    { value: 'cash', label: 'Cash' },
-    { value: 'fib', label: 'FIB' },
-    { value: 'qicard', label: 'QiCard' },
-    { value: 'zaincash', label: 'ZainCash' },
-    { value: 'fastpay', label: 'FastPay' },
-    { value: 'bank_transfer', label: 'Bank Transfer' }
-]
-
 export function SettlementDialog({
     open,
     onOpenChange,
@@ -51,6 +43,7 @@ export function SettlementDialog({
     includeLoanAdjustment = false,
     onSubmit
 }: SettlementDialogProps) {
+    const { t } = useTranslation()
     const { features } = useWorkspace()
     const [paymentMethod, setPaymentMethod] = useState<WorkspacePaymentMethod>('cash')
     const [paidAt, setPaidAt] = useState('')
@@ -66,15 +59,35 @@ export function SettlementDialog({
         setNote('')
     }, [open, obligation?.id])
 
-    const methods = useMemo(
-        () => includeLoanAdjustment
-            ? [...basePaymentMethods, { value: 'loan_adjustment' as WorkspacePaymentMethod, label: 'Loan Adjustment' }]
-            : basePaymentMethods,
-        [includeLoanAdjustment]
-    )
+    const methods = useMemo(() => {
+        const baseMethods: Array<{ value: WorkspacePaymentMethod; label: string }> = [
+            { value: 'cash', label: t('directTransactions.paymentMethod.cash', { defaultValue: 'Cash' }) },
+            { value: 'fib', label: t('directTransactions.paymentMethod.fib', { defaultValue: 'FIB' }) },
+            { value: 'qicard', label: t('directTransactions.paymentMethod.qicard', { defaultValue: 'QiCard' }) },
+            { value: 'zaincash', label: t('directTransactions.paymentMethod.zaincash', { defaultValue: 'ZainCash' }) },
+            { value: 'fastpay', label: t('directTransactions.paymentMethod.fastpay', { defaultValue: 'FastPay' }) },
+            { value: 'bank_transfer', label: t('directTransactions.paymentMethod.bankTransfer', { defaultValue: 'Bank Transfer' }) }
+        ]
+
+        if (includeLoanAdjustment) {
+            baseMethods.push({ 
+                value: 'loan_adjustment' as WorkspacePaymentMethod, 
+                label: t('directTransactions.paymentMethod.loanAdjustment', { defaultValue: 'Loan Adjustment' }) 
+            })
+        }
+
+        return baseMethods
+    }, [includeLoanAdjustment, t])
+
     const selectedPaidAt = parseLocalDateTimeValue(paidAt)
 
-    const actionLabel = obligation?.direction === 'incoming' ? 'Record Collection' : 'Record Payment'
+    const actionLabel = obligation?.direction === 'incoming' 
+        ? t('settlementModal.recordCollection', { defaultValue: 'Record Collection' }) 
+        : t('settlementModal.recordPayment', { defaultValue: 'Record Payment' })
+
+    const directionLabel = obligation?.direction === 'incoming'
+        ? t('settlementModal.receivable', { defaultValue: 'Receivable' })
+        : t('settlementModal.payable', { defaultValue: 'Payable' })
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -82,7 +95,9 @@ export function SettlementDialog({
                 <DialogHeader>
                     <DialogTitle>{actionLabel}</DialogTitle>
                     <DialogDescription>
-                        {obligation ? `${obligation.referenceLabel || obligation.title} • ${formatDate(obligation.dueDate)}` : 'Post this settlement to the central ledger.'}
+                        {obligation 
+                            ? `${obligation.referenceLabel || obligation.title} • ${formatDate(obligation.dueDate)}` 
+                            : t('settlementModal.postSettlement', { defaultValue: 'Post this settlement to the central ledger.' })}
                     </DialogDescription>
                 </DialogHeader>
 
@@ -90,7 +105,7 @@ export function SettlementDialog({
                     <div className="grid gap-4">
                         <div className="rounded-xl border bg-muted/20 p-4">
                             <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                                {obligation.direction === 'incoming' ? 'Receivable' : 'Payable'}
+                                {directionLabel}
                             </div>
                             <div className="mt-1 text-xl font-bold">
                                 {formatCurrency(obligation.amount, obligation.currency, features.iqd_display_preference)}
@@ -101,7 +116,7 @@ export function SettlementDialog({
                         </div>
 
                         <div className="grid gap-2">
-                            <Label>Payment Method</Label>
+                            <Label>{t('settlementModal.paymentMethod', { defaultValue: 'Payment Method' })}</Label>
                             <Select value={paymentMethod} onValueChange={(value: WorkspacePaymentMethod) => setPaymentMethod(value)}>
                                 <SelectTrigger>
                                     <SelectValue />
@@ -115,25 +130,30 @@ export function SettlementDialog({
                         </div>
 
                         <div className="grid gap-2">
-                            <Label>Paid At</Label>
+                            <Label>{t('settlementModal.paidAt', { defaultValue: 'Paid At' })}</Label>
                             <DateTimePicker
                                 id="settlement-paid-at"
                                 date={selectedPaidAt}
                                 setDate={(value) => setPaidAt(value ? formatLocalDateTimeValue(value) : '')}
-                                placeholder="Pick payment time"
+                                placeholder={t('settlementModal.pickPaymentTime', { defaultValue: 'Pick payment time' })}
                             />
                         </div>
 
                         <div className="grid gap-2">
-                            <Label>Note</Label>
-                            <Textarea rows={3} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Optional note" />
+                            <Label>{t('settlementModal.note', { defaultValue: 'Note' })}</Label>
+                            <Textarea 
+                                rows={3} 
+                                value={note} 
+                                onChange={(event) => setNote(event.target.value)} 
+                                placeholder={t('settlementModal.optionalNote', { defaultValue: 'Optional note' })} 
+                            />
                         </div>
                     </div>
                 )}
 
                 <DialogFooter>
                     <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
-                        Cancel
+                        {t('settlementModal.cancel', { defaultValue: 'Cancel' })}
                     </Button>
                     <Button
                         onClick={() => onSubmit({

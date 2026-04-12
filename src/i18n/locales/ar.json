@@ -141,6 +141,10 @@
         "whatsapp": "واتساب",
         "currencyConverter": "محول العملات",
         "members": "الأعضاء",
+        "ledger": "دفتر الأستاذ",
+        "payments": "المدفوعات",
+        "directTransactions": "المعاملات المباشرة",
+        "uploadFiles": "رفع الملفات",
         "tools": "الأدوات",
         "actions": "الإجراءات"
     },
@@ -2334,6 +2338,46 @@
             "fastpay": "فاست باي",
             "fib": "FIB"
         }
+    },
+    "directTransactionModal": {
+        "title": "معاملة مباشرة جديدة",
+        "description": "الأموال الواردة أو الصادرة يدويًا للأنشطة خارج وحدات النظام المتعقبة. كشوف المرتبات لا تنتمي هنا.",
+        "fields": {
+            "direction": "الاتجاه",
+            "directionIncoming": "وارد",
+            "directionOutgoing": "صادر",
+            "paymentMethod": "طريقة الدفع",
+            "amount": "المبلغ",
+            "amountPlaceholder": "0",
+            "reason": "السبب",
+            "reasonPlaceholder": "لماذا حدثت هذه الدفعة؟",
+            "businessPartner": "شريك العمل",
+            "businessPartnerPlaceholder": "شريك عمل اختياري",
+            "noPartner": "لا يوجد شريك مرتبط",
+            "counterparty": "الطرف المقابل",
+            "counterpartyPlaceholder": "من استلم أو دفع هذا المبلغ؟",
+            "paidAt": "تاريخ الدفع",
+            "paidAtPlaceholder": "اختر وقت المعاملة",
+            "note": "ملاحظة",
+            "notePlaceholder": "ملاحظة اختيارية"
+        },
+        "actions": {
+            "cancel": "إلغاء",
+            "save": "حفظ المعاملة"
+        }
+    },
+    "settlementModal": {
+        "recordCollection": "تسجيل التحصيل",
+        "recordPayment": "تسجيل الدفع",
+        "postSettlement": "ترحيل هذه التسوية إلى دفتر الأستاذ المركزي.",
+        "receivable": "مستحق القبض",
+        "payable": "مستحق الدفع",
+        "paymentMethod": "طريقة الدفع",
+        "paidAt": "تاريخ الدفع",
+        "pickPaymentTime": "اختر وقت الدفع",
+        "note": "ملاحظة",
+        "optionalNote": "ملاحظة اختيارية",
+        "cancel": "إلغاء"
     },
     "payments": {
         "title": "المدفوعات",
