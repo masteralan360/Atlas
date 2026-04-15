@@ -33,9 +33,14 @@ type DeleteBranchRequest = {
     targetWorkspaceId?: string
 }
 
+type ListProductCloneTargetsRequest = {
+    action: 'list-product-clone-targets'
+}
+
 type CloneProductsToBranchRequest = {
     action: 'clone-products-to-branch'
     targetWorkspaceId?: string
+    targetStorageId?: string
     productIds?: string[]
 }
 
@@ -46,6 +51,7 @@ type WorkspaceAccessRequest =
     | CreateBranchRequest
     | SwitchBranchRequest
     | DeleteBranchRequest
+    | ListProductCloneTargetsRequest
     | CloneProductsToBranchRequest
 
 type AdminClient = ReturnType<typeof createAdminClient>
@@ -59,14 +65,6 @@ type SourceCategoryRow = {
     id: string
     name: string
     description?: string | null
-}
-
-type SourceStorageRow = {
-    id: string
-    name: string
-    is_system?: boolean | null
-    is_protected?: boolean | null
-    is_primary?: boolean | null
 }
 
 type SourceProductRow = {
@@ -102,8 +100,22 @@ type TargetCategoryRow = {
 
 type TargetStorageRow = {
     id: string
+    workspace_id?: string | null
     name: string
     is_primary?: boolean | null
+}
+
+type WorkspaceBranchRelationRow = {
+    source_workspace_id: string
+    branch_workspace_id: string
+    name?: string | null
+}
+
+type ProductCloneTargetRow = {
+    workspaceId: string
+    workspaceName: string
+    workspaceCode?: string
+    relationType: 'source' | 'branch'
 }
 
 type WorkspaceMetadataRow = {
@@ -316,6 +328,96 @@ async function getWorkspaceById(
     }
 
     return data as WorkspaceMetadataRow | null
+}
+
+async function getProductCloneTargets(
+    adminClient: AdminClient,
+    currentWorkspaceId: string
+) {
+    const { data: currentBranchRelation, error: currentBranchRelationError } = await adminClient
+        .from('workspace_branches')
+        .select('source_workspace_id, branch_workspace_id, name')
+        .eq('branch_workspace_id', currentWorkspaceId)
+        .maybeSingle()
+
+    if (currentBranchRelationError) {
+        throw currentBranchRelationError
+    }
+
+    const sourceWorkspaceId = currentBranchRelation?.source_workspace_id ?? currentWorkspaceId
+    const isCurrentBranch = Boolean(currentBranchRelation?.source_workspace_id)
+
+    const { data: branchRelations, error: branchRelationsError } = await adminClient
+        .from('workspace_branches')
+        .select('source_workspace_id, branch_workspace_id, name')
+        .eq('source_workspace_id', sourceWorkspaceId)
+        .order('created_at', { ascending: true })
+
+    if (branchRelationsError) {
+        throw branchRelationsError
+    }
+
+    const orderedTargets: Array<{ workspaceId: string; relationType: 'source' | 'branch' }> = []
+    const seenWorkspaceIds = new Set<string>()
+
+    if (isCurrentBranch && sourceWorkspaceId !== currentWorkspaceId) {
+        orderedTargets.push({
+            workspaceId: sourceWorkspaceId,
+            relationType: 'source'
+        })
+        seenWorkspaceIds.add(sourceWorkspaceId)
+    }
+
+    for (const relation of (branchRelations ?? []) as WorkspaceBranchRelationRow[]) {
+        const branchWorkspaceId = String(relation.branch_workspace_id)
+        if (!branchWorkspaceId || branchWorkspaceId === currentWorkspaceId || seenWorkspaceIds.has(branchWorkspaceId)) {
+            continue
+        }
+
+        orderedTargets.push({
+            workspaceId: branchWorkspaceId,
+            relationType: 'branch'
+        })
+        seenWorkspaceIds.add(branchWorkspaceId)
+    }
+
+    if (orderedTargets.length === 0) {
+        return []
+    }
+
+    const { data: workspaceRows, error: workspaceRowsError } = await adminClient
+        .from('workspaces')
+        .select('id, name, code')
+        .in('id', orderedTargets.map((target) => target.workspaceId))
+        .is('deleted_at', null)
+
+    if (workspaceRowsError) {
+        throw workspaceRowsError
+    }
+
+    const workspaceMap = new Map(
+        (workspaceRows ?? []).map((workspaceRow) => [
+            String(workspaceRow.id),
+            {
+                name: workspaceRow.name ?? undefined,
+                code: workspaceRow.code ?? undefined
+            }
+        ])
+    )
+
+    return orderedTargets.flatMap<ProductCloneTargetRow>((target) => {
+        const workspace = workspaceMap.get(target.workspaceId)
+        if (!workspace) {
+            return []
+        }
+
+        return [{
+            workspaceId: target.workspaceId,
+            workspaceName: workspace.name ?? 'Workspace',
+            workspaceCode: workspace.code,
+            relationType: target.relationType
+        }]
+    })
 }
 
 async function updateUserWorkspaceMetadata(
@@ -634,7 +736,7 @@ async function handleCreateBranch(
         iqd_display_preference: sourceWorkspace.iqd_display_preference ?? 'IQD',
         eur_conversion_enabled: sourceWorkspace.eur_conversion_enabled ?? false,
         try_conversion_enabled: sourceWorkspace.try_conversion_enabled ?? false,
-        locked_workspace: false,
+        locked_workspace: sourceWorkspace.locked_workspace ?? false,
         logo_url: sourceWorkspace.logo_url ?? null,
         coordination: sourceWorkspace.coordination ?? null,
         max_discount_percent: sourceWorkspace.max_discount_percent ?? 100,
@@ -950,12 +1052,68 @@ async function handleDeleteBranch(
     })
 }
 
+async function handleListProductCloneTargets(
+    adminClient: AdminClient,
+    user: User
+) {
+    const callerResult = await requireCallerWorkspace(adminClient, user, true)
+    if (callerResult.response || !callerResult.profile) {
+        return callerResult.response!
+    }
+
+    const currentWorkspaceId = callerResult.profile.workspace_id!
+    const targets = await getProductCloneTargets(adminClient, currentWorkspaceId)
+
+    if (targets.length === 0) {
+        return jsonResponse({ targets: [] })
+    }
+
+    const { data: storageRows, error: storageRowsError } = await adminClient
+        .from('storages')
+        .select('id, workspace_id, name, is_primary')
+        .in('workspace_id', targets.map((target) => target.workspaceId))
+        .eq('is_deleted', false)
+        .order('is_primary', { ascending: false })
+        .order('name', { ascending: true })
+
+    if (storageRowsError) {
+        return errorResponse(storageRowsError.message, 500)
+    }
+
+    const storagesByWorkspaceId = new Map<string, TargetStorageRow[]>()
+    for (const storageRow of (storageRows ?? []) as TargetStorageRow[]) {
+        const workspaceId = typeof storageRow.workspace_id === 'string'
+            ? storageRow.workspace_id
+            : null
+
+        if (!workspaceId) {
+            continue
+        }
+
+        const currentStorages = storagesByWorkspaceId.get(workspaceId) ?? []
+        currentStorages.push(storageRow)
+        storagesByWorkspaceId.set(workspaceId, currentStorages)
+    }
+
+    return jsonResponse({
+        targets: targets.map((target) => ({
+            ...target,
+            storages: (storagesByWorkspaceId.get(target.workspaceId) ?? []).map((storage) => ({
+                id: storage.id,
+                name: storage.name,
+                is_primary: storage.is_primary ?? false
+            }))
+        }))
+    })
+}
+
 async function handleCloneProductsToBranch(
     adminClient: AdminClient,
     user: User,
     body: CloneProductsToBranchRequest
 ) {
     const targetWorkspaceId = body.targetWorkspaceId?.trim() ?? ''
+    const targetStorageId = body.targetStorageId?.trim() ?? ''
     const productIds = Array.from(
         new Set(
             (Array.isArray(body.productIds) ? body.productIds : [])
@@ -968,42 +1126,44 @@ async function handleCloneProductsToBranch(
         return errorResponse('Target workspace is required')
     }
 
+    if (!targetStorageId) {
+        return errorResponse('Target storage is required')
+    }
+
     if (productIds.length === 0) {
         return errorResponse('At least one product must be selected')
     }
 
-    const callerResult = await requireCallerWorkspace(adminClient, user)
+    const callerResult = await requireCallerWorkspace(adminClient, user, true)
     if (callerResult.response || !callerResult.profile) {
         return callerResult.response!
     }
 
-    if (callerResult.profile.role !== 'admin' && callerResult.profile.role !== 'staff') {
-        return errorResponse('Unauthorized: Only admins or staff can clone products', 403)
-    }
-
     const sourceWorkspaceId = callerResult.profile.workspace_id!
     if (sourceWorkspaceId === targetWorkspaceId) {
-        return errorResponse('Target branch must be different from the current workspace', 400)
+        return errorResponse('Target workspace must be different from the current workspace', 400)
     }
 
-    const { data: branchRelation, error: branchRelationError } = await adminClient
-        .from('workspace_branches')
-        .select('id')
-        .eq('source_workspace_id', sourceWorkspaceId)
-        .eq('branch_workspace_id', targetWorkspaceId)
+    const cloneTargets = await getProductCloneTargets(adminClient, sourceWorkspaceId)
+    const targetCloneWorkspace = cloneTargets.find((target) => target.workspaceId === targetWorkspaceId)
+    if (!targetCloneWorkspace) {
+        return errorResponse('Target workspace is not linked to your current workspace', 403)
+    }
+
+    const { data: targetStorage, error: targetStorageError } = await adminClient
+        .from('storages')
+        .select('id, workspace_id, name, is_primary')
+        .eq('workspace_id', targetWorkspaceId)
+        .eq('id', targetStorageId)
+        .eq('is_deleted', false)
         .maybeSingle()
 
-    if (branchRelationError) {
-        return errorResponse(branchRelationError.message, 500)
+    if (targetStorageError) {
+        return errorResponse(targetStorageError.message, 500)
     }
 
-    if (!branchRelation) {
-        return errorResponse('Branch not found for the current workspace', 404)
-    }
-
-    const targetWorkspace = await getWorkspaceById(adminClient, targetWorkspaceId)
-    if (!targetWorkspace) {
-        return errorResponse('Target workspace not found', 404)
+    if (!targetStorage) {
+        return errorResponse('Target storage not found for the selected workspace', 404)
     }
 
     const { data: productRows, error: productsError } = await adminClient
@@ -1036,19 +1196,17 @@ async function handleCloneProductsToBranch(
     }
 
     const sourceInventoryRows = (inventoryRows ?? []) as SourceInventoryRow[]
+    const inventoryQuantityByProductId = new Map<string, number>()
+    for (const inventoryRow of sourceInventoryRows) {
+        const nextQuantity = (inventoryQuantityByProductId.get(inventoryRow.product_id) ?? 0) + Number(inventoryRow.quantity ?? 0)
+        inventoryQuantityByProductId.set(inventoryRow.product_id, nextQuantity)
+    }
+
     const sourceCategoryIds = Array.from(
         new Set(
             sourceProducts
                 .map((product) => product.category_id?.trim())
                 .filter((categoryId): categoryId is string => Boolean(categoryId))
-        )
-    )
-    const sourceStorageIds = Array.from(
-        new Set(
-            [
-                ...sourceProducts.map((product) => product.storage_id?.trim()),
-                ...sourceInventoryRows.map((row) => row.storage_id?.trim())
-            ].filter((storageId): storageId is string => Boolean(storageId))
         )
     )
 
@@ -1068,22 +1226,6 @@ async function handleCloneProductsToBranch(
         sourceCategories = (categoryRows ?? []) as SourceCategoryRow[]
     }
 
-    let sourceStorages: SourceStorageRow[] = []
-    if (sourceStorageIds.length > 0) {
-        const { data: storageRows, error: storagesError } = await adminClient
-            .from('storages')
-            .select('id, name, is_system, is_protected, is_primary')
-            .eq('workspace_id', sourceWorkspaceId)
-            .eq('is_deleted', false)
-            .in('id', sourceStorageIds)
-
-        if (storagesError) {
-            return errorResponse(storagesError.message, 500)
-        }
-
-        sourceStorages = (storageRows ?? []) as SourceStorageRow[]
-    }
-
     let targetCategories: TargetCategoryRow[] = []
     if (sourceCategories.length > 0) {
         const { data: targetCategoryRows, error: targetCategoriesError } = await adminClient
@@ -1099,23 +1241,10 @@ async function handleCloneProductsToBranch(
         targetCategories = (targetCategoryRows ?? []) as TargetCategoryRow[]
     }
 
-    const { data: targetStorageRows, error: targetStoragesError } = await adminClient
-        .from('storages')
-        .select('id, name, is_primary')
-        .eq('workspace_id', targetWorkspaceId)
-        .eq('is_deleted', false)
-
-    if (targetStoragesError) {
-        return errorResponse(targetStoragesError.message, 500)
-    }
-
-    const targetStorages = (targetStorageRows ?? []) as TargetStorageRow[]
     const now = new Date().toISOString()
     const sourceCategoryById = new Map(sourceCategories.map((category) => [category.id, category]))
     const targetCategoryByName = new Map(targetCategories.map((category) => [category.name.trim().toLowerCase(), category]))
-    const targetStorageByName = new Map(targetStorages.map((storage) => [storage.name.trim().toLowerCase(), storage]))
     const categoryIdMap = new Map<string, string>()
-    const storageIdMap = new Map<string, string>()
 
     const categoriesToInsert = sourceCategories.flatMap((category) => {
         const normalizedName = category.name.trim().toLowerCase()
@@ -1152,58 +1281,8 @@ async function handleCloneProductsToBranch(
         }
     }
 
-    const sourceHasPrimaryStorage = sourceStorages.some((storage) => storage.is_primary === true)
-    let targetHasPrimaryStorage = targetStorages.some((storage) => storage.is_primary === true)
-    const storagesToInsert = sourceStorages.flatMap((storage, index) => {
-        const normalizedName = storage.name.trim().toLowerCase()
-        const existingStorage = targetStorageByName.get(normalizedName)
-
-        if (existingStorage) {
-            storageIdMap.set(storage.id, existingStorage.id)
-            return []
-        }
-
-        const id = crypto.randomUUID()
-        const shouldBePrimary = !targetHasPrimaryStorage && (
-            storage.is_primary === true
-            || (!sourceHasPrimaryStorage && index === 0)
-        )
-
-        if (shouldBePrimary) {
-            targetHasPrimaryStorage = true
-        }
-
-        targetStorageByName.set(normalizedName, {
-            id,
-            name: storage.name,
-            is_primary: shouldBePrimary
-        })
-        storageIdMap.set(storage.id, id)
-
-        return [{
-            id,
-            workspace_id: targetWorkspaceId,
-            name: storage.name,
-            is_system: storage.is_system ?? false,
-            is_protected: storage.is_protected ?? false,
-            is_primary: shouldBePrimary,
-            created_at: now,
-            updated_at: now,
-            is_deleted: false
-        }]
-    })
-
-    if (storagesToInsert.length > 0) {
-        const { error: insertStoragesError } = await adminClient
-            .from('storages')
-            .insert(storagesToInsert)
-
-        if (insertStoragesError) {
-            return errorResponse(insertStoragesError.message, 500)
-        }
-    }
-
     const productIdMap = new Map<string, string>()
+    const productQuantityBySourceId = new Map<string, number>()
     const productsToInsert = sourceProducts.map<Record<string, unknown>>((product) => {
         const clonedProductId = crypto.randomUUID()
         productIdMap.set(product.id, clonedProductId)
@@ -1211,12 +1290,14 @@ async function handleCloneProductsToBranch(
         const mappedCategoryId = product.category_id
             ? categoryIdMap.get(product.category_id) ?? null
             : null
-        const mappedStorageId = product.storage_id
-            ? storageIdMap.get(product.storage_id) ?? null
-            : null
         const resolvedCategoryName = mappedCategoryId
             ? targetCategoryByName.get((sourceCategoryById.get(product.category_id ?? '')?.name ?? '').trim().toLowerCase())?.name
             : null
+        const clonedQuantity = inventoryQuantityByProductId.has(product.id)
+            ? inventoryQuantityByProductId.get(product.id) ?? 0
+            : Number(product.quantity ?? 0)
+
+        productQuantityBySourceId.set(product.id, clonedQuantity)
 
         const clonedProduct: Record<string, unknown> = {
             id: clonedProductId,
@@ -1226,10 +1307,10 @@ async function handleCloneProductsToBranch(
             description: product.description ?? '',
             category: resolvedCategoryName ?? product.category ?? null,
             category_id: mappedCategoryId,
-            storage_id: mappedStorageId,
+            storage_id: targetStorageId,
             price: Number(product.price ?? 0),
             cost_price: Number(product.cost_price ?? 0),
-            quantity: Number(product.quantity ?? 0),
+            quantity: clonedQuantity,
             min_stock_level: Number(product.min_stock_level ?? 0),
             unit: product.unit ?? 'pcs',
             currency: product.currency ?? 'usd',
@@ -1257,11 +1338,11 @@ async function handleCloneProductsToBranch(
         return errorResponse(insertProductsError.message, 500)
     }
 
-    const inventoryToInsert = sourceInventoryRows.flatMap((inventoryRow) => {
-        const clonedProductId = productIdMap.get(inventoryRow.product_id)
-        const clonedStorageId = storageIdMap.get(inventoryRow.storage_id)
+    const inventoryToInsert = sourceProducts.flatMap((product) => {
+        const clonedProductId = productIdMap.get(product.id)
+        const clonedQuantity = productQuantityBySourceId.get(product.id) ?? 0
 
-        if (!clonedProductId || !clonedStorageId) {
+        if (!clonedProductId || clonedQuantity <= 0) {
             return []
         }
 
@@ -1269,8 +1350,8 @@ async function handleCloneProductsToBranch(
             id: crypto.randomUUID(),
             workspace_id: targetWorkspaceId,
             product_id: clonedProductId,
-            storage_id: clonedStorageId,
-            quantity: Number(inventoryRow.quantity ?? 0),
+            storage_id: targetStorageId,
+            quantity: clonedQuantity,
             created_at: now,
             updated_at: now,
             version: 1,
@@ -1290,10 +1371,10 @@ async function handleCloneProductsToBranch(
 
     return jsonResponse({
         success: true,
-        target_workspace_id: targetWorkspace.id,
+        target_workspace_id: targetCloneWorkspace.workspaceId,
+        target_storage_id: targetStorage.id,
         cloned_products_count: productsToInsert.length,
         cloned_categories_count: categoriesToInsert.length,
-        cloned_storages_count: storagesToInsert.length,
         cloned_inventory_rows_count: inventoryToInsert.length
     })
 }
@@ -1342,6 +1423,10 @@ Deno.serve(async (req) => {
 
         if (body.action === 'delete-branch') {
             return await handleDeleteBranch(adminClient, user, body)
+        }
+
+        if (body.action === 'list-product-clone-targets') {
+            return await handleListProductCloneTargets(adminClient, user)
         }
 
         if (body.action === 'clone-products-to-branch') {

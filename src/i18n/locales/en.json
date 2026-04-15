@@ -1,6 +1,8 @@
 {
     "lockedWorkspace": {
         "title": "Workspace Locked",
+        "subscriptionExpired": "Subscription Expired",
+        "expiryMessage": "Your subscription has expired. Please renew your subscription to continue using the workspace.",
         "message": "Your workspace has been temporarily locked. Please contact an administrator to regain access.",
         "contactAdmin": "Contact an Admin",
         "additionalInfo": "If you believe this is an error, please reach out to your workspace administrator."
@@ -105,7 +107,6 @@
         "fromTeam": "From the Team",
         "yes": "Yes",
         "no": "No"
-
     },
     "messages": {
         "saleCompleted": "Sale completed successfully",
@@ -732,7 +733,6 @@
         "lowStock": "Low Stock",
         "searchPlaceholder": "Search products...",
         "inStock": "In Stock",
-
         "receipt": {
             "title": "Sale Receipt",
             "date": "Date",
@@ -775,22 +775,36 @@
         },
         "branchClone": {
             "action": "Clone to Branch",
+            "actionWorkspace": "Clone to Workspace",
             "confirm": "Clone Products",
             "dialogTitle": "Clone Products to Branch",
             "dialogDescription": "Copy the selected products into one of this workspace's active branches.",
+            "dialogTitleWorkspace": "Clone Products to Workspace",
+            "dialogDescriptionWorkspace": "Copy the selected products into the source workspace or another branch.",
             "branchLabel": "Target Branch",
             "branchPlaceholder": "Select a branch",
             "branchCount": "{{count}} branches available",
+            "targetWorkspaceLabel": "Target Workspace",
+            "targetWorkspacePlaceholder": "Select a workspace",
+            "targetCount": "{{count}} destinations available",
+            "storageLabel": "Target Storage",
+            "storagePlaceholder": "Select a storage",
+            "primaryStorageTag": "Primary",
+            "sourceWorkspaceTag": "Source Workspace",
+            "branchTag": "Branch",
+            "noStorages": "No active storages are available in the selected destination.",
             "selectAllWorkspace": "Select all workspace products",
             "selectProduct": "Select Product",
             "selectedCount": "{{count}} products selected",
             "clearSelection": "Clear Selection",
             "cancelSelection": "Cancel",
-            "selectionHint": "Select the products you want to copy, then choose the target branch.",
-            "chooseBranch": "Choose Branch",
+            "selectionHint": "Select the products you want to copy, then choose the destination workspace and storage.",
+            "chooseDestination": "Choose Destination",
             "successTitle": "Products cloned to branch",
             "successDescription": "{{count}} products were cloned to {{branch}}.",
-            "error": "Failed to clone products to the selected branch."
+            "successTitleWorkspace": "Products cloned to workspace",
+            "successDescriptionWorkspace": "{{count}} products were cloned to {{workspace}}.",
+            "error": "Failed to clone products to the selected destination."
         },
         "editSubtitle": "Update product details, pricing, stock, and return rules.",
         "cloneSubtitle": "Review the copied values, then create a new product.",
@@ -803,7 +817,6 @@
         "notFoundTitle": "Product not found",
         "notFoundDescription": "This product could not be found. It may have been deleted or is no longer available.",
         "backToList": "Back to Products",
-
         "form": {
             "title": "Product Details",
             "basicInfo": "Basic Information",
@@ -852,8 +865,6 @@
             "webUploadDesc": "Image will be securely uploaded and synced via cloud storage.",
             "productDetailsTitle": "Product Details",
             "productDetailsDesc": "Capture the core identity, description, unit, category, and storage location for this product."
-
-
         },
         "messages": {
             "addSuccess": "Product added successfully",

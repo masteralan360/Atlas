@@ -5,7 +5,6 @@ import { Copy, GitBranch, Info, LayoutGrid, List as ListIcon, Loader2, Package, 
 
 import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
-import { useWorkspaceBranchSwitcher } from '@/hooks/useWorkspaceBranchSwitcher'
 import {
     createCategory,
     deleteCategory,
@@ -60,19 +59,34 @@ import {
 
 const emptyCategoryFormData = { name: '', description: '' }
 
+type ProductCloneTargetStorage = {
+    id: string
+    name: string
+    is_primary?: boolean
+}
+
+type ProductCloneTarget = {
+    workspaceId: string
+    workspaceName: string
+    workspaceCode?: string
+    relationType: 'source' | 'branch'
+    storages: ProductCloneTargetStorage[]
+}
+
 export function Products() {
     const { user, session } = useAuth()
     const { features, branchInfo } = useWorkspace()
     const { t } = useTranslation()
     const { toast } = useToast()
     const [, navigate] = useLocation()
-    const { branches } = useWorkspaceBranchSwitcher()
     const products = useProducts(user?.workspaceId)
     const categories = useCategories(user?.workspaceId)
     const storages = useStorages(user?.workspaceId)
     const workspaceId = user?.workspaceId || ''
     const canEdit = user?.role === 'admin' || user?.role === 'staff'
     const canDelete = user?.role === 'admin'
+    const canCloneProducts = user?.role === 'admin'
+    const isBranchWorkspace = Boolean(branchInfo?.isBranch)
 
     const [search, setSearch] = useState('')
     const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false)
@@ -90,10 +104,11 @@ export function Products() {
     const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set())
     const [isBranchCloneSelectionMode, setIsBranchCloneSelectionMode] = useState(false)
     const [branchCloneDialogOpen, setBranchCloneDialogOpen] = useState(false)
-    const [selectedBranchId, setSelectedBranchId] = useState('')
+    const [cloneTargets, setCloneTargets] = useState<ProductCloneTarget[]>([])
+    const [selectedCloneTargetWorkspaceId, setSelectedCloneTargetWorkspaceId] = useState('')
+    const [selectedCloneTargetStorageId, setSelectedCloneTargetStorageId] = useState('')
     const [isBranchCloning, setIsBranchCloning] = useState(false)
-
-    const canCloneToBranch = canEdit && !branchInfo?.isBranch && branches.length > 0
+    const canCloneToBranch = canCloneProducts && cloneTargets.length > 0
 
     useEffect(() => {
         localStorage.setItem('products_view_mode', viewMode)
@@ -116,17 +131,92 @@ export function Products() {
     }, [canCloneToBranch])
 
     useEffect(() => {
-        if (branches.length === 0) {
-            setSelectedBranchId('')
+        if (!workspaceId || !canCloneProducts) {
+            setCloneTargets([])
+            setSelectedCloneTargetWorkspaceId('')
+            setSelectedCloneTargetStorageId('')
             return
         }
 
-        setSelectedBranchId((current) =>
-            branches.some((branch) => branch.branchWorkspaceId === current)
-                ? current
-                : branches[0].branchWorkspaceId
-        )
-    }, [branches])
+        let isCancelled = false
+
+        const loadCloneTargets = async () => {
+            try {
+                const accessToken = await getAccessToken()
+                if (!accessToken) {
+                    throw new Error('Authentication required')
+                }
+
+                const { data, error } = await runSupabaseAction(
+                    'products.cloneTargets',
+                    () => supabase.functions.invoke('workspace-access', {
+                        headers: {
+                            Authorization: `Bearer ${accessToken}`
+                        },
+                        body: {
+                            action: 'list-product-clone-targets'
+                        }
+                    }),
+                    { timeoutMs: 20000, platform: 'all' }
+                ) as {
+                    data: { targets?: ProductCloneTarget[] } | null
+                    error?: unknown
+                }
+
+                if (error) {
+                    throw error
+                }
+
+                if (!isCancelled) {
+                    setCloneTargets(data?.targets ?? [])
+                }
+            } catch (error) {
+                console.error('[Products] Failed to load clone targets:', error)
+                if (!isCancelled) {
+                    setCloneTargets([])
+                }
+            }
+        }
+
+        void loadCloneTargets()
+
+        return () => {
+            isCancelled = true
+        }
+    }, [workspaceId, canCloneProducts, branchInfo?.isBranch, branchInfo?.sourceWorkspaceId])
+
+    useEffect(() => {
+        if (cloneTargets.length === 0) {
+            setSelectedCloneTargetWorkspaceId('')
+            return
+        }
+
+        setSelectedCloneTargetWorkspaceId((current) => {
+            if (cloneTargets.some((target) => target.workspaceId === current)) {
+                return current
+            }
+
+            return cloneTargets.find((target) => target.storages.length > 0)?.workspaceId ?? cloneTargets[0].workspaceId
+        })
+    }, [cloneTargets])
+
+    useEffect(() => {
+        const selectedCloneTarget = cloneTargets.find((target) => target.workspaceId === selectedCloneTargetWorkspaceId)
+        if (!selectedCloneTarget) {
+            setSelectedCloneTargetStorageId('')
+            return
+        }
+
+        setSelectedCloneTargetStorageId((current) => {
+            if (selectedCloneTarget.storages.some((storage) => storage.id === current)) {
+                return current
+            }
+
+            return selectedCloneTarget.storages.find((storage) => storage.is_primary)?.id
+                ?? selectedCloneTarget.storages[0]?.id
+                ?? ''
+        })
+    }, [cloneTargets, selectedCloneTargetWorkspaceId])
 
     const isCategoryDirty = () => {
         if (!isCategoryDialogOpen) return false
@@ -212,7 +302,35 @@ export function Products() {
     )
     const selectedProductsCount = selectedProductIds.size
     const allWorkspaceProductsSelected = products.length > 0 && selectedProductsCount === products.length
-    const selectedBranch = branches.find((branch) => branch.branchWorkspaceId === selectedBranchId)
+    const selectedCloneTarget = cloneTargets.find((target) => target.workspaceId === selectedCloneTargetWorkspaceId)
+    const branchCloneActionLabel = isBranchWorkspace
+        ? t('products.branchClone.actionWorkspace', { defaultValue: 'Clone to Workspace' })
+        : t('products.branchClone.action', { defaultValue: 'Clone to Branch' })
+    const branchCloneDialogTitle = isBranchWorkspace
+        ? t('products.branchClone.dialogTitleWorkspace', { defaultValue: 'Clone Products to Workspace' })
+        : t('products.branchClone.dialogTitle', { defaultValue: 'Clone Products to Branch' })
+    const branchCloneDialogDescription = isBranchWorkspace
+        ? t('products.branchClone.dialogDescriptionWorkspace', {
+            defaultValue: 'Copy the selected products into the source workspace or another branch.'
+        })
+        : t('products.branchClone.dialogDescription', {
+            defaultValue: "Copy the selected products into one of this workspace's active branches."
+        })
+    const branchCloneTargetLabel = isBranchWorkspace
+        ? t('products.branchClone.targetWorkspaceLabel', { defaultValue: 'Target Workspace' })
+        : t('products.branchClone.branchLabel', { defaultValue: 'Target Branch' })
+    const branchCloneTargetPlaceholder = isBranchWorkspace
+        ? t('products.branchClone.targetWorkspacePlaceholder', { defaultValue: 'Select a workspace' })
+        : t('products.branchClone.branchPlaceholder', { defaultValue: 'Select a branch' })
+    const branchCloneCountLabel = isBranchWorkspace
+        ? t('products.branchClone.targetCount', {
+            defaultValue: '{{count}} destinations available',
+            count: cloneTargets.length
+        })
+        : t('products.branchClone.branchCount', {
+            defaultValue: '{{count}} branches available',
+            count: cloneTargets.length
+        })
 
     const openProductForm = (product?: Product) => {
         navigate(product ? `/products/${product.id}` : '/products/new')
@@ -297,6 +415,14 @@ export function Products() {
         return data.session?.access_token ?? session?.access_token ?? ''
     }
 
+    const getCloneTargetLabel = (target: ProductCloneTarget) => {
+        const relationLabel = target.relationType === 'source'
+            ? t('products.branchClone.sourceWorkspaceTag', { defaultValue: 'Source Workspace' })
+            : t('products.branchClone.branchTag', { defaultValue: 'Branch' })
+
+        return `${target.workspaceName}${target.workspaceCode ? ` (${target.workspaceCode})` : ''} - ${relationLabel}`
+    }
+
     const showBranchCloneError = (error: unknown, fallbackDescription: string) => {
         const normalized = normalizeSupabaseActionError(error)
         if (isRetriableWebRequestError(normalized)) {
@@ -317,7 +443,7 @@ export function Products() {
     }
 
     const handleCloneProductsToBranch = async () => {
-        if (!workspaceId || selectedProductsCount === 0 || !selectedBranchId) {
+        if (!workspaceId || selectedProductsCount === 0 || !selectedCloneTargetWorkspaceId || !selectedCloneTargetStorageId) {
             return
         }
 
@@ -337,7 +463,8 @@ export function Products() {
                     },
                     body: {
                         action: 'clone-products-to-branch',
-                        targetWorkspaceId: selectedBranchId,
+                        targetWorkspaceId: selectedCloneTargetWorkspaceId,
+                        targetStorageId: selectedCloneTargetStorageId,
                         productIds: Array.from(selectedProductIds)
                     }
                 }),
@@ -352,19 +479,27 @@ export function Products() {
             }
 
             toast({
-                title: t('products.branchClone.successTitle', { defaultValue: 'Products cloned to branch' }),
-                description: t('products.branchClone.successDescription', {
-                    defaultValue: '{{count}} products were cloned to {{branch}}.',
-                    count: Number(data?.cloned_products_count ?? selectedProductsCount),
-                    branch: selectedBranch?.workspaceName || selectedBranch?.name || t('branches.title', { defaultValue: 'Branch' })
-                })
+                title: isBranchWorkspace
+                    ? t('products.branchClone.successTitleWorkspace', { defaultValue: 'Products cloned to workspace' })
+                    : t('products.branchClone.successTitle', { defaultValue: 'Products cloned to branch' }),
+                description: (isBranchWorkspace
+                    ? t('products.branchClone.successDescriptionWorkspace', {
+                        defaultValue: '{{count}} products were cloned to {{workspace}}.',
+                        count: Number(data?.cloned_products_count ?? selectedProductsCount),
+                        workspace: selectedCloneTarget?.workspaceName || t('workspace.title', { defaultValue: 'Workspace' })
+                    })
+                    : t('products.branchClone.successDescription', {
+                        defaultValue: '{{count}} products were cloned to {{branch}}.',
+                        count: Number(data?.cloned_products_count ?? selectedProductsCount),
+                        branch: selectedCloneTarget?.workspaceName || t('branches.title', { defaultValue: 'Branch' })
+                    })),
             })
             exitBranchCloneSelectionMode()
         } catch (error) {
             console.error('[Products] Failed to clone products to branch:', error)
             showBranchCloneError(
                 error,
-                t('products.branchClone.error', { defaultValue: 'Failed to clone products to the selected branch.' })
+                t('products.branchClone.error', { defaultValue: 'Failed to clone products to the selected destination.' })
             )
         } finally {
             setIsBranchCloning(false)
@@ -436,7 +571,7 @@ export function Products() {
                                     disabled={products.length === 0}
                                 >
                                     <GitBranch className="h-4 w-4" />
-                                    {t('products.branchClone.action', { defaultValue: 'Clone to Branch' })}
+                                    {branchCloneActionLabel}
                                 </Button>
                             )}
                             <Button variant="outline" onClick={() => handleOpenCategoryDialog()}>
@@ -485,7 +620,7 @@ export function Products() {
                             </p>
                             <p className="text-sm text-muted-foreground">
                                 {t('products.branchClone.selectionHint', {
-                                    defaultValue: 'Select the products you want to copy, then choose the target branch.'
+                                    defaultValue: 'Select the products you want to copy, then choose the destination workspace and storage.'
                                 })}
                             </p>
                         </div>
@@ -504,7 +639,7 @@ export function Products() {
                                 disabled={selectedProductsCount === 0}
                             >
                                 <GitBranch className="h-4 w-4" />
-                                {t('products.branchClone.chooseBranch', { defaultValue: 'Choose Branch' })}
+                                {t('products.branchClone.chooseDestination', { defaultValue: 'Choose Destination' })}
                             </Button>
                         </div>
                     </CardContent>
@@ -887,12 +1022,8 @@ export function Products() {
             <Dialog open={branchCloneDialogOpen} onOpenChange={(open) => !isBranchCloning && setBranchCloneDialogOpen(open)}>
                 <DialogContent className="max-w-md">
                     <DialogHeader>
-                        <DialogTitle>{t('products.branchClone.dialogTitle', { defaultValue: 'Clone Products to Branch' })}</DialogTitle>
-                        <DialogDescription>
-                            {t('products.branchClone.dialogDescription', {
-                                defaultValue: "Copy the selected products into one of this workspace's active branches."
-                            })}
-                        </DialogDescription>
+                        <DialogTitle>{branchCloneDialogTitle}</DialogTitle>
+                        <DialogDescription>{branchCloneDialogDescription}</DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4">
                         <div className="rounded-2xl border border-border/60 bg-muted/20 p-4">
@@ -903,29 +1034,56 @@ export function Products() {
                                 })}
                             </div>
                             <div className="mt-1 text-xs text-muted-foreground">
-                                {t('products.branchClone.branchCount', {
-                                    defaultValue: '{{count}} branches available',
-                                    count: branches.length
-                                })}
+                                {branchCloneCountLabel}
                             </div>
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="branch-clone-target">
-                                {t('products.branchClone.branchLabel', { defaultValue: 'Target Branch' })}
+                                {branchCloneTargetLabel}
                             </Label>
-                            <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
+                            <Select value={selectedCloneTargetWorkspaceId} onValueChange={setSelectedCloneTargetWorkspaceId}>
                                 <SelectTrigger id="branch-clone-target">
-                                    <SelectValue placeholder={t('products.branchClone.branchPlaceholder', { defaultValue: 'Select a branch' })} />
+                                    <SelectValue placeholder={branchCloneTargetPlaceholder} />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {branches.map((branch) => (
-                                        <SelectItem key={branch.branchWorkspaceId} value={branch.branchWorkspaceId}>
-                                            {branch.workspaceName || branch.name}
-                                            {branch.workspaceCode ? ` (${branch.workspaceCode})` : ''}
+                                    {cloneTargets.map((target) => (
+                                        <SelectItem key={target.workspaceId} value={target.workspaceId}>
+                                            {getCloneTargetLabel(target)}
                                         </SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="branch-clone-storage">
+                                {t('products.branchClone.storageLabel', { defaultValue: 'Target Storage' })}
+                            </Label>
+                            <Select
+                                value={selectedCloneTargetStorageId}
+                                onValueChange={setSelectedCloneTargetStorageId}
+                                disabled={!selectedCloneTarget}
+                            >
+                                <SelectTrigger id="branch-clone-storage">
+                                    <SelectValue placeholder={t('products.branchClone.storagePlaceholder', { defaultValue: 'Select a storage' })} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {(selectedCloneTarget?.storages ?? []).map((storage) => (
+                                        <SelectItem key={storage.id} value={storage.id}>
+                                            {storage.name}
+                                            {storage.is_primary
+                                                ? ` (${t('products.branchClone.primaryStorageTag', { defaultValue: 'Primary' })})`
+                                                : ''}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            {selectedCloneTarget && selectedCloneTarget.storages.length === 0 && (
+                                <p className="text-xs text-destructive">
+                                    {t('products.branchClone.noStorages', {
+                                        defaultValue: 'No active storages are available in the selected destination.'
+                                    })}
+                                </p>
+                            )}
                         </div>
                     </div>
                     <DialogFooter>
@@ -936,7 +1094,7 @@ export function Products() {
                             type="button"
                             className="gap-2"
                             onClick={handleCloneProductsToBranch}
-                            disabled={!selectedBranchId || selectedProductsCount === 0 || isBranchCloning}
+                            disabled={!selectedCloneTargetWorkspaceId || !selectedCloneTargetStorageId || selectedProductsCount === 0 || isBranchCloning}
                         >
                             {isBranchCloning ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
