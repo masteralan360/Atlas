@@ -102,7 +102,10 @@
         "badge_new": "New",
         "badge_improved": "Improved",
         "badge_fixed": "Fixed",
-        "fromTeam": "From the Team"
+        "fromTeam": "From the Team",
+        "yes": "Yes",
+        "no": "No"
+
     },
     "messages": {
         "saleCompleted": "Sale completed successfully",
@@ -729,7 +732,7 @@
         "lowStock": "Low Stock",
         "searchPlaceholder": "Search products...",
         "inStock": "In Stock",
-        "backToList": "Back to List",
+
         "receipt": {
             "title": "Sale Receipt",
             "date": "Date",
@@ -789,6 +792,18 @@
             "successDescription": "{{count}} products were cloned to {{branch}}.",
             "error": "Failed to clone products to the selected branch."
         },
+        "editSubtitle": "Update product details, pricing, stock, and return rules.",
+        "cloneSubtitle": "Review the copied values, then create a new product.",
+        "summaryTitle": "Live Summary",
+        "summaryDescription": "A compact snapshot of price, stock, storage, and return behavior while you edit.",
+        "actionsHint": "Review your changes, then save or leave this page from here.",
+        "saveHint": "Saving applies the current details, image, stock, and return settings together.",
+        "readOnlyActionsHint": "This product is open in read-only mode.",
+        "loadingDescription": "Fetching the product details for this page.",
+        "notFoundTitle": "Product not found",
+        "notFoundDescription": "This product could not be found. It may have been deleted or is no longer available.",
+        "backToList": "Back to Products",
+
         "form": {
             "title": "Product Details",
             "basicInfo": "Basic Information",
@@ -823,7 +838,22 @@
             "returnRulesTitle": "Return Rules",
             "rulesLabel": "Specify return conditions",
             "rulesPlaceholder": "e.g. Must be in original packaging, Only within 7 days...",
-            "rulesHint": "These rules will be shown to staff during the return process."
+            "rulesHint": "These rules will be shown to staff during the return process.",
+            "pricingDesc": "Set the selling price, cost basis, and active currency for this product.",
+            "margin": "Margin",
+            "inventoryAndReturnsTitle": "Inventory & Returns",
+            "inventoryAndReturnsDesc": "Track stock levels and define whether this product can be returned.",
+            "lowStockWarning": "Stock is at or below the minimum threshold of {{min}} {{unit}}.",
+            "goodStockNotice": "Current stock is above the minimum threshold.",
+            "editRules": "Edit rules",
+            "visualsDesc": "Upload or link a product image and keep the preview synced with the current record.",
+            "noImage": "No Preview",
+            "imageSource": "Image Source",
+            "webUploadDesc": "Image will be securely uploaded and synced via cloud storage.",
+            "productDetailsTitle": "Product Details",
+            "productDetailsDesc": "Capture the core identity, description, unit, category, and storage location for this product."
+
+
         },
         "messages": {
             "addSuccess": "Product added successfully",

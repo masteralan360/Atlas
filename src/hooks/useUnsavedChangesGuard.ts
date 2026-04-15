@@ -83,15 +83,19 @@ export function useUnsavedChangesGuard(isDirty: boolean) {
         return () => document.removeEventListener('click', handleClick, { capture: true })
     }, [])
 
-    const confirmNavigation = useCallback(() => {
+    const confirmNavigation = useCallback((navigateCb?: (path: string) => void) => {
         const path = pendingPath
         setPendingPath(null)
         isDirtyRef.current = false
-        if (path && originalPushStateRef.current) {
-            // Use the original (unpatched) pushState so we don't re-intercept
-            originalPushStateRef.current(null, '', path)
-            // Dispatch popstate so wouter picks up the new location
-            window.dispatchEvent(new PopStateEvent('popstate'))
+        if (path) {
+            if (navigateCb) {
+                navigateCb(path)
+            } else if (originalPushStateRef.current) {
+                // Use the original (unpatched) pushState so we don't re-intercept
+                originalPushStateRef.current(null, '', path)
+                // Dispatch popstate so wouter picks up the new location
+                window.dispatchEvent(new PopStateEvent('popstate'))
+            }
         }
     }, [pendingPath])
 

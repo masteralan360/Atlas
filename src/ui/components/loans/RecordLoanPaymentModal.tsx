@@ -135,91 +135,101 @@ export function RecordLoanPaymentModal({
         }
     }
 
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault()
+        void handleSave()
+    }
+
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            <DialogContent>
-                <DialogHeader>
+            <DialogContent className="top-[calc(50%+var(--titlebar-height)/2+var(--safe-area-top)/2)] flex max-h-[calc(100dvh-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-0.75rem)] w-[calc(100vw-0.75rem)] max-w-3xl flex-col overflow-hidden rounded-[1.25rem] border-border/60 p-0 sm:w-full sm:max-h-[min(calc(100dvh-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-2rem),820px)] sm:rounded-[1.75rem]">
+                <DialogHeader className="border-b bg-muted/30 px-4 py-4 pr-14 text-left sm:px-6 sm:py-5">
                     <DialogTitle>{getLoanRecordPaymentLabel(loan, t)}</DialogTitle>
                 </DialogHeader>
 
-                <div className="grid gap-4">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                        <div className="rounded-xl border bg-muted/20 p-3">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                                {t('loans.totalPrincipal') || 'Total Principal'}
-                            </div>
-                            <div className="mt-1 text-lg font-bold text-foreground">
-                                {formatCurrency(loan.principalAmount, loan.settlementCurrency, features.iqd_display_preference)}
-                            </div>
-                        </div>
-
-                        <div className="rounded-xl border bg-muted/20 p-3">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                                {t('loans.balance') || 'Balance'}
-                            </div>
-                            <div className="mt-1 text-lg font-bold text-foreground">
-                                {formatCurrency(paymentBalance, loan.settlementCurrency, features.iqd_display_preference)}
-                            </div>
-                            {selectedInstallment && (
-                                <div className="mt-1 text-xs text-muted-foreground">
-                                    #{String(selectedInstallment.installmentNo).padStart(2, '0')} - {t('loans.dueDate') || 'Due Date'}: {formatDate(selectedInstallment.dueDate)}
+                <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+                    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
+                        <div className="grid gap-4">
+                            <div className="grid gap-3 sm:grid-cols-2">
+                                <div className="rounded-xl border bg-muted/20 p-3">
+                                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                        {t('loans.totalPrincipal') || 'Total Principal'}
+                                    </div>
+                                    <div className="mt-1 text-lg font-bold text-foreground">
+                                        {formatCurrency(loan.principalAmount, loan.settlementCurrency, features.iqd_display_preference)}
+                                    </div>
                                 </div>
-                            )}
+
+                                <div className="rounded-xl border bg-muted/20 p-3">
+                                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                        {t('loans.balance') || 'Balance'}
+                                    </div>
+                                    <div className="mt-1 text-lg font-bold text-foreground">
+                                        {formatCurrency(paymentBalance, loan.settlementCurrency, features.iqd_display_preference)}
+                                    </div>
+                                    {selectedInstallment && (
+                                        <div className="mt-1 text-xs text-muted-foreground">
+                                            #{String(selectedInstallment.installmentNo).padStart(2, '0')} - {t('loans.dueDate') || 'Due Date'}: {formatDate(selectedInstallment.dueDate)}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="grid gap-2">
+                                <Label>{t('loans.paymentAmount') || 'Payment Amount'}</Label>
+                                <Input
+                                    type="text"
+                                    inputMode={loan.settlementCurrency === 'iqd' ? 'numeric' : 'decimal'}
+                                    value={amount}
+                                    onChange={e => {
+                                        const nextValue = sanitizePaymentAmountInput(e.target.value, loan.settlementCurrency)
+                                        setAmount(formatPaymentAmountInput(nextValue))
+                                    }}
+                                />
+                            </div>
+
+                            <div className="grid gap-2">
+                                <Label>{t('pos.paymentMethod') || 'Payment Method'}</Label>
+                                <Select value={method} onValueChange={(value: LoanPaymentMethod) => setMethod(value)}>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="cash">{t('pos.cash') || 'Cash'}</SelectItem>
+                                        <SelectItem value="fib">FIB</SelectItem>
+                                        <SelectItem value="qicard">QiCard</SelectItem>
+                                        <SelectItem value="zaincash">ZainCash</SelectItem>
+                                        <SelectItem value="fastpay">FastPay</SelectItem>
+                                        <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                                        <SelectItem value="loan_adjustment">{t('loans.adjustment') || 'Loan Adjustment'}</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            <div className="grid gap-2">
+                                <Label>{t('loans.paymentDate') || 'Payment Date'}</Label>
+                                <DateTimePicker
+                                    date={paymentDate}
+                                    setDate={setPaymentDate}
+                                />
+                            </div>
+
+                            <div className="grid gap-2">
+                                <Label>{t('loans.notes') || 'Notes'}</Label>
+                                <Input value={note} onChange={e => setNote(e.target.value)} />
+                            </div>
                         </div>
                     </div>
 
-                    <div className="grid gap-2">
-                        <Label>{t('loans.paymentAmount') || 'Payment Amount'}</Label>
-                        <Input
-                            type="text"
-                            inputMode={loan.settlementCurrency === 'iqd' ? 'numeric' : 'decimal'}
-                            value={amount}
-                            onChange={e => {
-                                const nextValue = sanitizePaymentAmountInput(e.target.value, loan.settlementCurrency)
-                                setAmount(formatPaymentAmountInput(nextValue))
-                            }}
-                        />
-                    </div>
-
-                    <div className="grid gap-2">
-                        <Label>{t('pos.paymentMethod') || 'Payment Method'}</Label>
-                        <Select value={method} onValueChange={(value: LoanPaymentMethod) => setMethod(value)}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="cash">{t('pos.cash') || 'Cash'}</SelectItem>
-                                <SelectItem value="fib">FIB</SelectItem>
-                                <SelectItem value="qicard">QiCard</SelectItem>
-                                <SelectItem value="zaincash">ZainCash</SelectItem>
-                                <SelectItem value="fastpay">FastPay</SelectItem>
-                                <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                                <SelectItem value="loan_adjustment">{t('loans.adjustment') || 'Loan Adjustment'}</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
-
-                    <div className="grid gap-2">
-                        <Label>{t('loans.paymentDate') || 'Payment Date'}</Label>
-                        <DateTimePicker
-                            date={paymentDate}
-                            setDate={setPaymentDate}
-                        />
-                    </div>
-
-                    <div className="grid gap-2">
-                        <Label>{t('loans.notes') || 'Notes'}</Label>
-                        <Input value={note} onChange={e => setNote(e.target.value)} />
-                    </div>
-                </div>
-
-                <DialogFooter>
-                    <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
-                        {t('common.cancel') || 'Cancel'}
-                    </Button>
-                    <Button onClick={handleSave} disabled={!canSubmit || isSaving}>
-                        {t('common.save') || 'Save'}
-                    </Button>
-                </DialogFooter>
+                    <DialogFooter className="border-t bg-muted/20 px-4 py-4 pb-[calc(1rem+var(--safe-area-bottom))] sm:justify-between sm:px-6">
+                        <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)} disabled={isSaving}>
+                            {t('common.cancel') || 'Cancel'}
+                        </Button>
+                        <Button type="submit" className="w-full sm:w-auto" disabled={!canSubmit || isSaving}>
+                            {t('common.save') || 'Save'}
+                        </Button>
+                    </DialogFooter>
+                </form>
             </DialogContent>
         </Dialog>
+
     )
 }

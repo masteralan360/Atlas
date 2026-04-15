@@ -176,7 +176,36 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             return false
         }
 
-        return JSON.stringify(formData) !== initialFormSnapshotRef.current
+        const currentStr = JSON.stringify(formData)
+        if (currentStr === initialFormSnapshotRef.current) {
+            return false
+        }
+
+        try {
+            const snapshot = JSON.parse(initialFormSnapshotRef.current)
+            const keys = Object.keys(formData) as (keyof ProductFormData)[]
+            
+            for (const key of keys) {
+                let v1: any = formData[key]
+                let v2: any = snapshot[key]
+                
+                // normalize empty representations
+                if (v1 === '' || v1 === undefined) v1 = null
+                if (v2 === '' || v2 === undefined) v2 = null
+                
+                // string-based comparison for values that might be coerced
+                if (v1 !== null && v2 !== null) {
+                    if (String(v1) !== String(v2)) {
+                        return true
+                    }
+                } else if (v1 !== v2) {
+                    return true
+                }
+            }
+            return false
+        } catch {
+            return currentStr !== initialFormSnapshotRef.current
+        }
     }, [formData, isReadOnly])
 
     const { showGuard, confirmNavigation, cancelNavigation, requestNavigation } = useUnsavedChangesGuard(isDirty)
@@ -429,7 +458,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const selectedStorageLabel = formData.storageId
         ? storages.find((storage) => storage.id === formData.storageId)?.name || (t('storages.selectStorage') || 'Select Storage')
         : (t('storages.selectStorage') || 'Select Storage')
-    const returnRulesPreview = formData.returnRules.trim() || 'No custom return guidance yet.'
+    const returnRulesPreview = formData.returnRules.trim() || (t('products.form.noReturnRules') || 'No custom return guidance yet.')
     const statusLabel = isClone
         ? (t('common.clone') || 'Clone')
         : isEditing
@@ -533,10 +562,10 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                     <Card className="overflow-hidden border-border/60 shadow-sm">
                         <CardHeader className="border-b border-border/50 bg-muted/10">
                             <CardTitle className="text-2xl font-black">
-                                Product Details
+                                {t('products.form.productDetailsTitle') || 'Product Details'}
                             </CardTitle>
                             <p className="text-sm text-muted-foreground">
-                                Capture the core identity, description, unit, category, and storage location for this product.
+                                {t('products.form.productDetailsDesc') || 'Capture the core identity, description, unit, category, and storage location for this product.'}
                             </p>
                         </CardHeader>
                         <CardContent className="space-y-8 p-6 sm:p-8">
@@ -700,8 +729,9 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                 {t('products.form.pricing') || 'Pricing'}
                             </CardTitle>
                             <p className="text-sm text-muted-foreground">
-                                Set the selling price, cost basis, and active currency for this product.
+                                {t('products.form.pricingDesc') || 'Set the selling price, cost basis, and active currency for this product.'}
                             </p>
+
                         </CardHeader>
                         <CardContent className="space-y-6 p-6 sm:p-8">
                             <div className="space-y-4">
@@ -779,7 +809,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                     <div className="mt-1 text-base font-black text-foreground">{costPreview}</div>
                                 </div>
                                 <div className="rounded-2xl border border-border/50 bg-background/80 p-4">
-                                    <div className="text-[11px] font-black uppercase tracking-[0.18em] text-muted-foreground">Margin</div>
+                                    <div className="text-[11px] font-black uppercase tracking-[0.18em] text-muted-foreground">{t('products.form.margin') || 'Margin'}</div>
                                     <div className={cn('mt-1 text-base font-black', marginValue < 0 ? 'text-destructive' : 'text-emerald-600')}>
                                         {marginPreview}
                                     </div>
@@ -792,10 +822,10 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                     <Card className="overflow-hidden border-border/60 shadow-sm">
                         <CardHeader className="border-b border-border/50 bg-muted/10">
                             <CardTitle className="text-2xl font-black">
-                                Inventory & Returns
+                                {t('products.form.inventoryAndReturnsTitle') || 'Inventory & Returns'}
                             </CardTitle>
                             <p className="text-sm text-muted-foreground">
-                                Track stock levels and define whether this product can be returned.
+                                {t('products.form.inventoryAndReturnsDesc') || 'Track stock levels and define whether this product can be returned.'}
                             </p>
                         </CardHeader>
                         <CardContent className="space-y-6 p-6 sm:p-8">
@@ -859,8 +889,8 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                     : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700'
                             )}>
                                 {lowStock
-                                    ? `Stock is at or below the minimum threshold of ${minStockValue} ${unitLabel}.`
-                                    : 'Current stock is above the minimum threshold.'}
+                                    ? t('products.form.lowStockWarning', { defaultValue: 'Stock is at or below the minimum threshold of {{min}} {{unit}}.', min: minStockValue, unit: unitLabel })
+                                    : (t('products.form.goodStockNotice') || 'Current stock is above the minimum threshold.')}
                             </div>
 
                             <div className="rounded-2xl border border-border/60 bg-muted/30 p-5">
@@ -913,7 +943,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                 >
                                                     <Settings className="h-4 w-4" />
                                                     {formData.returnRules.trim()
-                                                        ? 'Edit rules'
+                                                        ? (t('products.form.editRules') || 'Edit rules')
                                                         : (t('products.form.addRules') || 'Add rules')}
                                                 </Button>
                                             )}
@@ -931,8 +961,9 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                 {t('products.form.visuals') || 'Visuals'}
                             </CardTitle>
                             <p className="text-sm text-muted-foreground">
-                                Upload or link a product image and keep the preview synced with the current record.
+                                {t('products.form.visualsDesc') || 'Upload or link a product image and keep the preview synced with the current record.'}
                             </p>
+
                         </CardHeader>
                         <CardContent className="space-y-6 p-6 sm:p-8">
                             <div className="space-y-4">
@@ -1201,7 +1232,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                             {t('common.unsavedChanges.message') || 'You have unsaved changes. Would you like to save your work before leaving?'}
                         </p>
                         <DialogFooter className="flex flex-col gap-2 sm:flex-row sm:justify-between">
-                            <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={() => confirmNavigation()}>
+                            <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={() => confirmNavigation(navigate)}>
                                 {t('common.unsavedChanges.discard') || 'Discard Changes'}
                             </Button>
                             <div className="flex gap-2">
@@ -1213,7 +1244,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                     onClick={async () => {
                                         const didSave = await persistProduct({ navigateAfterSave: false })
                                         if (didSave) {
-                                            confirmNavigation()
+                                            confirmNavigation(navigate)
                                         }
                                     }}
                                 >
