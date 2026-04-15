@@ -32,7 +32,7 @@ import {
     Switch,
     DeleteConfirmationModal
 } from '@/ui/components'
-import { Plus, Pencil, Trash2, Package, Search, ImagePlus, Info, Settings, LayoutGrid, List as ListIcon, Camera, Barcode, Type, Tag, Ruler, Boxes, DollarSign, Wallet, Warehouse, FileText, ChevronRight } from 'lucide-react'
+import { Plus, Pencil, Trash2, Package, Search, ImagePlus, Info, Settings, LayoutGrid, List as ListIcon, Camera, Barcode, Type, Tag, Ruler, Boxes, DollarSign, Wallet, Warehouse, FileText, ChevronRight, Copy } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/auth'
 import { useWorkspace } from '@/workspace'
@@ -90,6 +90,7 @@ export function Products() {
     const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false)
     const [editingProduct, setEditingProduct] = useState<Product | null>(null)
     const [editingCategory, setEditingCategory] = useState<Category | null>(null)
+    const [isCloning, setIsCloning] = useState(false)
     const [formData, setFormData] = useState<ProductFormData>(initialFormData)
     const [categoryFormData, setCategoryFormData] = useState({ name: '', description: '' })
     const [isLoading, setIsLoading] = useState(false)
@@ -122,7 +123,7 @@ export function Products() {
 
         let sourceData: ProductFormData;
 
-        if (editingProduct) {
+        if (editingProduct && !isCloning) {
             sourceData = {
                 sku: editingProduct.sku,
                 name: editingProduct.name,
@@ -198,6 +199,7 @@ export function Products() {
         if (unsavedChangesType === 'product') {
             setIsDialogOpen(false)
             setEditingProduct(null)
+            setIsCloning(false)
             setFormData(initialFormData)
         } else if (unsavedChangesType === 'category') {
             setIsCategoryDialogOpen(false)
@@ -352,6 +354,7 @@ export function Products() {
                 return
             }
             setEditingProduct(null)
+            setIsCloning(false)
             setFormData(initialFormData)
         }
         setIsDialogOpen(open)
@@ -392,6 +395,31 @@ export function Products() {
             })
         }
         setImageError(false)
+        setIsCloning(false)
+        setIsDialogOpen(true)
+    }
+
+    const handleCloneProduct = (product: Product) => {
+        setOutsideClickCount(0)
+        setEditingProduct(null)
+        setIsCloning(true)
+        setFormData({
+            sku: product.sku,
+            name: product.name,
+            description: product.description,
+            categoryId: product.categoryId || undefined,
+            price: product.price,
+            costPrice: product.costPrice,
+            quantity: product.quantity,
+            minStockLevel: product.minStockLevel,
+            unit: product.unit,
+            currency: product.currency,
+            imageUrl: product.imageUrl || '',
+            canBeReturned: product.canBeReturned ?? true,
+            returnRules: product.returnRules || '',
+            storageId: product.storageId || ''
+        })
+        setImageError(false)
         setIsDialogOpen(true)
     }
 
@@ -419,7 +447,7 @@ export function Products() {
                 minStockLevel: Number(formData.minStockLevel) || 0
             }
 
-            if (editingProduct) {
+            if (editingProduct && !isCloning) {
                 // Asset Cleanup: Check if the image has been removed or replaced
                 if (editingProduct.imageUrl && editingProduct.imageUrl !== formData.imageUrl) {
                     console.log('[Products] Image changed/removed, cleaning up old asset:', editingProduct.imageUrl);
@@ -432,6 +460,7 @@ export function Products() {
                 await createProduct(workspaceId, dataToSave)
             }
             setIsDialogOpen(false)
+            setIsCloning(false)
             setFormData(initialFormData)
         } catch (error) {
             console.error('Error saving product:', error)
@@ -649,6 +678,16 @@ export function Products() {
                                                             {t('common.view') || 'View'}
                                                         </Button>
                                                     )}
+                                                    {canEdit && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="rounded-xl h-10 w-10 text-primary hover:bg-primary/5"
+                                                            onClick={() => handleCloneProduct(product)}
+                                                        >
+                                                            <Copy className="w-4 h-4" />
+                                                        </Button>
+                                                    )}
                                                     {canDelete && (
                                                         <Button
                                                             variant="ghost"
@@ -744,6 +783,16 @@ export function Products() {
                                                                         <Info className="w-3.5 h-3.5" />
                                                                     </Button>
                                                                 )}
+                                                                {canEdit && (
+                                                                    <Button
+                                                                        variant="ghost"
+                                                                        size="icon"
+                                                                        className="w-8 h-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors"
+                                                                        onClick={() => handleCloneProduct(product)}
+                                                                    >
+                                                                        <Copy className="w-3.5 h-3.5" />
+                                                                    </Button>
+                                                                )}
                                                                 {canDelete && (
                                                                     <Button
                                                                         variant="ghost"
@@ -813,6 +862,11 @@ export function Products() {
                                                                                 <Info className="w-4 h-4 text-primary" />
                                                                             </Button>
                                                                         )}
+                                                                        {canEdit && (
+                                                                            <Button variant="ghost" size="icon" onClick={() => handleCloneProduct(product)}>
+                                                                                <Copy className="w-4 h-4 text-primary" />
+                                                                            </Button>
+                                                                        )}
                                                                         {canDelete && (
                                                                             <Button variant="ghost" size="icon" onClick={() => handleDelete(product)}>
                                                                                 <Trash2 className="w-4 h-4 text-destructive" />
@@ -843,14 +897,14 @@ export function Products() {
                         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary/40 via-primary to-primary/40" />
                         <DialogTitle className="text-xl sm:text-2xl font-black flex items-center justify-center sm:justify-start gap-3 px-6 sm:px-0">
                             <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-primary/10 flex items-center justify-center text-primary shadow-inner shrink-0">
-                                {editingProduct ? <Pencil className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
+                                {isCloning ? <Copy className="w-5 h-5" /> : editingProduct ? <Pencil className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
                             </div>
                             <div className="flex flex-col min-w-0">
                                 <span className="leading-tight truncate">
-                                    {editingProduct ? (canEdit ? t('common.edit') : t('common.view') || 'View') : t('products.addProduct')}
+                                    {isCloning ? (t('common.clone') || 'Clone') : editingProduct ? (canEdit ? t('common.edit') : t('common.view') || 'View') : t('products.addProduct')}
                                 </span>
                                 <span className="text-xs font-bold text-muted-foreground/60 uppercase tracking-widest mt-0.5 hidden sm:block">
-                                    {editingProduct ? `${t('products.table.sku')}: ${formData.sku}` : t('products.subtitle')}
+                                    {(editingProduct || isCloning) ? `${t('products.table.sku')}: ${formData.sku}` : t('products.subtitle')}
                                 </span>
                             </div>
                         </DialogTitle>
@@ -1272,7 +1326,7 @@ export function Products() {
                                     </div>
                                 ) : (
                                     <div className="flex items-center gap-2">
-                                        {editingProduct ? <span className="uppercase tracking-widest">{t('common.save')}</span> : <span className="uppercase tracking-widest">{t('common.create')}</span>}
+                                        {isCloning ? <span className="uppercase tracking-widest">{t('common.clone') || 'Clone'}</span> : editingProduct ? <span className="uppercase tracking-widest">{t('common.save')}</span> : <span className="uppercase tracking-widest">{t('common.create')}</span>}
                                     </div>
                                 )}
                             </Button>
