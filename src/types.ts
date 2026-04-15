@@ -27,6 +27,7 @@ export interface SaleItem {
         category?: string
         can_be_returned: boolean
         return_rules?: string
+        unit?: string
     }
     product_category?: string
 }

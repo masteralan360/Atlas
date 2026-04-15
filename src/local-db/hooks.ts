@@ -1163,7 +1163,8 @@ async function enrichSalesForUiRows(workspaceId: string, sales: Sale[]) {
                 sku: product?.sku || '',
                 category: categoryName || undefined,
                 can_be_returned: product?.canBeReturned ?? true,
-                return_rules: product?.returnRules
+                return_rules: product?.returnRules,
+                unit: product?.unit || ''
             }
         }
 
@@ -1214,10 +1215,10 @@ export function useSales(workspaceId: string | undefined) {
                     .from('sales')
                     .select(`
                         *,
-                        sale_items(
-                            *,
-                            product:product_id(name, sku, can_be_returned, return_rules)
-                        )
+                            sale_items(
+                                *,
+                                product:product_id(name, sku, can_be_returned, return_rules, unit)
+                            )
                     `)
                     .eq('workspace_id', workspaceId)
 
@@ -1265,7 +1266,8 @@ export function useSales(workspaceId: string | undefined) {
                                 ...item,
                                 product_name: item.product?.name || 'Unknown Product',
                                 product_sku: item.product?.sku || '',
-                                product_category: item.product?.category || ''
+                                product_category: item.product?.category || '',
+                                product_unit: item.product?.unit || ''
                             }))
                                 ; (localSale as any)._enrichedItems = enrichedItems
                                 ; (localSale as any)._cashierName = profilesMap[saleData.cashier_id] || 'Staff'
@@ -1302,7 +1304,8 @@ export function toUISale(localSale: any): any {
             name: item.product_name || 'Unknown Product',
             sku: item.product_sku || '',
             can_be_returned: item.can_be_returned ?? true,
-            return_rules: item.return_rules
+            return_rules: item.return_rules,
+            unit: item.product_unit || ''
         }
     }))
 

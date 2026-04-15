@@ -515,10 +515,12 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onReturn
                                                         <div className="flex items-baseline gap-1.5">
                                                             <span className={cn("text-base font-black", isItemReturned && "line-through opacity-50")}>
                                                                 {netQuantity}
+                                                                {item.product?.unit ? ' ' + t(`products.units.${item.product.unit}` as any, item.product.unit) : ''}
                                                             </span>
                                                             {(hasItemPartialReturn || isItemReturned) && (
                                                                 <span className="text-[10px] text-muted-foreground opacity-60 line-through">
                                                                     {item.quantity}
+                                                                    {item.product?.unit ? ' ' + t(`products.units.${item.product.unit}` as any, item.product.unit) : ''}
                                                                 </span>
                                                             )}
                                                         </div>
@@ -672,10 +674,11 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onReturn
                                                     <div className="flex flex-col items-center">
                                                         <span className={cn("text-sm font-semibold", isItemReturned && "line-through opacity-50")}>
                                                             {netQuantity}
+                                                            {item.product?.unit ? ' ' + t(`products.units.${item.product.unit}` as any, item.product.unit) : ''}
                                                         </span>
                                                         {hasItemPartialReturn && !isItemReturned && (
                                                             <div className="text-[10px] text-orange-600 font-medium whitespace-nowrap">
-                                                                -{item.returned_quantity} {t('sales.return.returnedLabel') || 'returned'}
+                                                                -{item.returned_quantity} {item.product?.unit ? t(`products.units.${item.product.unit}` as any, item.product.unit) + ' ' : ''}{t('sales.return.returnedLabel') || 'returned'}
                                                             </div>
                                                         )}
                                                     </div>
