@@ -79,6 +79,7 @@ export interface CartItem {
     max_stock: number
     negotiated_price?: number
     imageUrl?: string
+    unit?: string
 }
 
 export interface UniversalInvoiceItem {

@@ -35,7 +35,7 @@ import {
     getLoanSummaryTitle,
 } from '@/lib/loanPresentation'
 import { setPendingSaleDetailsId } from '@/lib/saleNavigation'
-import { formatCurrency, formatDate, cn, formatLoanDetailsForWhatsApp } from '@/lib/utils'
+import { formatCurrency, formatDate, formatDateTime, cn, formatLoanDetailsForWhatsApp } from '@/lib/utils'
 import { whatsappManager } from '@/lib/whatsappWebviewManager'
 import { WhatsAppNumberInputModal } from '@/ui/components/modals/WhatsAppNumberInputModal'
 import { isMobile } from '@/lib/platform'
@@ -896,7 +896,7 @@ function LoanDetailsView({
                                                     {row.label}
                                                 </div>
                                                 <div className="text-muted-foreground text-xs font-medium flex items-center gap-1.5 pt-1">
-                                                    <span>{formatDate(row.date)}</span>
+                                                    <span>{formatDateTime(row.date)}</span>
                                                     <span className="w-1 h-1 rounded-full bg-muted-foreground/30" />
                                                     <span className="font-bold text-foreground/80">
                                                         {formatCurrency(row.amount, loan.settlementCurrency, features.iqd_display_preference)}

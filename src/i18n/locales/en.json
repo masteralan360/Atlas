@@ -658,6 +658,7 @@
         "units": {
             "pcs": "pcs",
             "kg": "kg",
+            "gram": "gram",
             "liter": "liter",
             "box": "box",
             "pack": "pack"

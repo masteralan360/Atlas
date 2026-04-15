@@ -418,11 +418,11 @@ export function LoanDetailsPrintTemplate({
                     ) : payments
                         .slice()
                         .sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime())
-                        .map((payment) => (
+                        .map((payment, index) => (
                             <tr key={payment.id}>
-                                <td className="border border-slate-300 p-2">{formatDate(payment.paidAt)}</td>
+                                <td className="border border-slate-300 p-2">{formatDateTime(payment.paidAt)}</td>
                                 <td className="border border-slate-300 p-2">
-                                    {getLoanPaymentActivityLabel(loan, t)}
+                                    {getLoanPaymentActivityLabel(loan, t)}{index === 0 && loan.balanceAmount <= 0 ? ' (Final)' : ''}
                                 </td>
                                 <td className="border border-slate-300 p-2">
                                     {t(`pos.${payment.paymentMethod}`) || payment.paymentMethod}
@@ -608,7 +608,7 @@ export function LoanReceiptPrintTemplate({
                             .sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime())
                             .map(payment => (
                                 <tr key={payment.id}>
-                                    <td className="py-1">{formatDate(payment.paidAt)}</td>
+                                    <td className="py-1">{formatDateTime(payment.paidAt)}</td>
                                     <td className="py-1">{t(`pos.${payment.paymentMethod}`) || payment.paymentMethod}</td>
                                     <td className="py-1">{formatCurrency(payment.amount, loan.settlementCurrency, iqdPreference)}</td>
                                 </tr>

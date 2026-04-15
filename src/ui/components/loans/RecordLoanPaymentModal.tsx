@@ -20,6 +20,7 @@ import {
     SelectValue,
     useToast
 } from '@/ui/components'
+import { DateTimePicker } from '@/ui/components/ui/date-time-picker'
 import { useWorkspace } from '@/workspace'
 
 interface RecordLoanPaymentModalProps {
@@ -84,6 +85,7 @@ export function RecordLoanPaymentModal({
     const [amount, setAmount] = useState('')
     const [method, setMethod] = useState<LoanPaymentMethod>('cash')
     const [note, setNote] = useState('')
+    const [paymentDate, setPaymentDate] = useState<Date | undefined>(undefined)
     const [isSaving, setIsSaving] = useState(false)
     const paymentBalance = selectedInstallment?.balanceAmount && selectedInstallment.balanceAmount > 0
         ? selectedInstallment.balanceAmount
@@ -94,6 +96,7 @@ export function RecordLoanPaymentModal({
         setAmount(formatPaymentAmountInput(String(paymentBalance)))
         setMethod('cash')
         setNote('')
+        setPaymentDate(new Date())
     }, [isOpen, loan, paymentBalance])
 
     if (!loan) return null
@@ -111,6 +114,7 @@ export function RecordLoanPaymentModal({
                 amount: numericAmount,
                 paymentMethod: method,
                 note: note.trim() || undefined,
+                paidAt: paymentDate ? paymentDate.toISOString() : undefined,
                 createdBy: user?.id
             })
 
@@ -191,6 +195,14 @@ export function RecordLoanPaymentModal({
                                 <SelectItem value="loan_adjustment">{t('loans.adjustment') || 'Loan Adjustment'}</SelectItem>
                             </SelectContent>
                         </Select>
+                    </div>
+
+                    <div className="grid gap-2">
+                        <Label>{t('loans.paymentDate') || 'Payment Date'}</Label>
+                        <DateTimePicker
+                            date={paymentDate}
+                            setDate={setPaymentDate}
+                        />
                     </div>
 
                     <div className="grid gap-2">

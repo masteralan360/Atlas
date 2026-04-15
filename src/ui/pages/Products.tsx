@@ -39,7 +39,17 @@ import { useWorkspace } from '@/workspace'
 import { isTauri, isMobile } from '@/lib/platform'
 import { platformService } from '@/services/platformService'
 
-const UNITS = ['pcs', 'kg', 'liter', 'box', 'pack']
+const UNITS = ['pcs', 'kg', 'gram', 'liter', 'box', 'pack']
+
+const getCurrencySymbol = (currency: string, iqdPreference: string) => {
+    switch (currency.toLowerCase()) {
+        case 'usd': return '$'
+        case 'eur': return '€'
+        case 'try': return '₺'
+        case 'iqd': return iqdPreference
+        default: return currency.toUpperCase()
+    }
+}
 
 type ProductFormData = {
     sku: string
@@ -1053,18 +1063,23 @@ export function Products() {
                                             <DollarSign className="w-4 h-4 text-primary/60" />
                                             {t('products.table.price')}
                                         </Label>
-                                        <Input
-                                            id="price"
-                                            type="number"
-                                            min="0"
-                                            step="0.01"
-                                            value={formData.price}
-                                            onChange={(e) => setFormData({ ...formData, price: e.target.value === '' ? '' : parseFloat(e.target.value) })}
-                                            placeholder="0.00"
-                                            readOnly={!canEdit}
-                                            className="h-12 rounded-lg border-border/40 focus:border-primary/40 focus:ring-primary/10 bg-background/50 text-lg font-black text-primary transition-all"
-                                            required
-                                        />
+                                        <div className="relative">
+                                            <Input
+                                                id="price"
+                                                type="number"
+                                                min="0"
+                                                step="0.01"
+                                                value={formData.price}
+                                                onChange={(e) => setFormData({ ...formData, price: e.target.value === '' ? '' : parseFloat(e.target.value) })}
+                                                placeholder="0.00"
+                                                readOnly={!canEdit}
+                                                className="h-12 rounded-lg border-border/40 focus:border-primary/40 focus:ring-primary/10 bg-background/50 text-lg font-black text-primary transition-all pr-16"
+                                                required
+                                            />
+                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground/60 uppercase tracking-wider pointer-events-none">
+                                                {getCurrencySymbol(formData.currency, features.iqd_display_preference)}
+                                            </span>
+                                        </div>
                                     </div>
                                     <div className="space-y-2">
                                         <CurrencySelector
@@ -1080,18 +1095,23 @@ export function Products() {
                                             <Wallet className="w-4 h-4 text-primary/60" />
                                             {t('products.form.cost')}
                                         </Label>
-                                        <Input
-                                            id="costPrice"
-                                            type="number"
-                                            min="0"
-                                            step="0.01"
-                                            value={formData.costPrice}
-                                            onChange={(e) => setFormData({ ...formData, costPrice: e.target.value === '' ? '' : parseFloat(e.target.value) })}
-                                            placeholder="0.00"
-                                            readOnly={!canEdit}
-                                            className="h-12 rounded-lg border-border/40 focus:border-primary/40 focus:ring-primary/10 bg-background/50 font-bold transition-all"
-                                            required
-                                        />
+                                        <div className="relative">
+                                            <Input
+                                                id="costPrice"
+                                                type="number"
+                                                min="0"
+                                                step="0.01"
+                                                value={formData.costPrice}
+                                                onChange={(e) => setFormData({ ...formData, costPrice: e.target.value === '' ? '' : parseFloat(e.target.value) })}
+                                                placeholder="0.00"
+                                                readOnly={!canEdit}
+                                                className="h-12 rounded-lg border-border/40 focus:border-primary/40 focus:ring-primary/10 bg-background/50 font-bold transition-all pr-16"
+                                                required
+                                            />
+                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground/60 uppercase tracking-wider pointer-events-none">
+                                                {getCurrencySymbol(formData.currency, features.iqd_display_preference)}
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1108,33 +1128,43 @@ export function Products() {
                                             <Boxes className="w-4 h-4 text-primary/60" />
                                             {t('products.form.stock')}
                                         </Label>
-                                        <Input
-                                            id="quantity"
-                                            type="number"
-                                            min="0"
-                                            value={formData.quantity}
-                                            onChange={(e) => setFormData({ ...formData, quantity: e.target.value === '' ? '' : parseInt(e.target.value) })}
-                                            placeholder="0"
-                                            readOnly={!canEdit}
-                                            className="h-12 rounded-lg border-border/40 focus:border-primary/40 focus:ring-primary/10 bg-muted/10 font-black transition-all"
-                                            required
-                                        />
+                                        <div className="relative">
+                                            <Input
+                                                id="quantity"
+                                                type="number"
+                                                min="0"
+                                                value={formData.quantity}
+                                                onChange={(e) => setFormData({ ...formData, quantity: e.target.value === '' ? '' : parseInt(e.target.value) })}
+                                                placeholder="0"
+                                                readOnly={!canEdit}
+                                                className="h-12 rounded-lg border-border/40 focus:border-primary/40 focus:ring-primary/10 bg-muted/10 font-black transition-all pr-16"
+                                                required
+                                            />
+                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground/60 uppercase tracking-wider pointer-events-none">
+                                                {t(`products.units.${formData.unit}`, formData.unit)}
+                                            </span>
+                                        </div>
                                     </div>
                                     <div className="space-y-2">
                                         <Label htmlFor="minStockLevel" className="flex items-center gap-2 font-bold">
                                             <Info className="w-4 h-4 text-primary/60" />
                                             {t('products.form.minStock')}
                                         </Label>
-                                        <Input
-                                            id="minStockLevel"
-                                            type="number"
-                                            min="0"
-                                            value={formData.minStockLevel}
-                                            onChange={(e) => setFormData({ ...formData, minStockLevel: e.target.value === '' ? '' : parseInt(e.target.value) })}
-                                            readOnly={!canEdit}
-                                            className="h-12 rounded-lg border-border/40 focus:border-primary/40 focus:ring-primary/10 bg-muted/10 font-bold transition-all"
-                                            required
-                                        />
+                                        <div className="relative">
+                                            <Input
+                                                id="minStockLevel"
+                                                type="number"
+                                                min="0"
+                                                value={formData.minStockLevel}
+                                                onChange={(e) => setFormData({ ...formData, minStockLevel: e.target.value === '' ? '' : parseInt(e.target.value) })}
+                                                readOnly={!canEdit}
+                                                className="h-12 rounded-lg border-border/40 focus:border-primary/40 focus:ring-primary/10 bg-muted/10 font-bold transition-all pr-16"
+                                                required
+                                            />
+                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground/60 uppercase tracking-wider pointer-events-none">
+                                                {t(`products.units.${formData.unit}`, formData.unit)}
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
 

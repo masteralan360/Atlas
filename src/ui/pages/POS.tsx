@@ -886,7 +886,8 @@ export function POS() {
                     discount_ends_at: activeDiscount?.endsAt,
                     quantity: 1,
                     max_stock: product.inventoryQuantity,
-                    imageUrl: product.imageUrl
+                    imageUrl: product.imageUrl,
+                    unit: product.unit
                 }
             ]
         })
@@ -1885,7 +1886,7 @@ export function POS() {
                                                                 : "bg-amber-400 text-amber-950"
                                                             : "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 backdrop-blur-md"
                                                 )}>
-                                                    {remainingQuantity}
+                                                    {remainingQuantity} <span className="text-[10px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`).toUpperCase()}</span>
                                                 </div>
 
                                                 {activeDiscount && (
@@ -2023,11 +2024,11 @@ export function POS() {
                                                                 "text-xs",
                                                                 hasNegotiated || hasDiscount ? "text-muted-foreground/50 line-through" : "text-muted-foreground"
                                                             )}>
-                                                                {formatCurrency(item.price, productCurrency, features.iqd_display_preference)} x {item.quantity}
+                                                                {formatCurrency(item.price, productCurrency, features.iqd_display_preference)} x {item.quantity} {t(`products.units.${item.unit}`).toUpperCase()}
                                                             </div>
                                                             {(hasDiscount || hasNegotiated) && (
                                                                 <div className="text-xs text-emerald-600 font-medium flex items-center gap-1">
-                                                                    <span>{formatCurrency(effectivePrice, productCurrency, features.iqd_display_preference)} x {item.quantity}</span>
+                                                                    <span>{formatCurrency(effectivePrice, productCurrency, features.iqd_display_preference)} x {item.quantity} {t(`products.units.${item.unit}`).toUpperCase()}</span>
                                                                     {isAdmin && (
                                                                         <button
                                                                             onClick={() => clearNegotiatedPrice(item)}
@@ -2078,7 +2079,10 @@ export function POS() {
                                                         >
                                                             <Minus className="w-3 h-3" />
                                                         </Button>
-                                                        <span className="w-4 text-center text-sm font-medium">{item.quantity}</span>
+                                                        <span className="flex flex-col items-center justify-center min-w-[2.5rem] leading-none py-1">
+                                                            <span className="text-sm font-black">{item.quantity}</span>
+                                                            <span className="text-[8px] font-bold opacity-50 uppercase tracking-tighter">{t(`products.units.${item.unit}`)}</span>
+                                                        </span>
                                                         <Button
                                                             variant="outline"
                                                             size="icon"
@@ -3037,7 +3041,7 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                                                 : "bg-amber-400 text-amber-950 border-amber-300/50"
                                             : "bg-primary/20 text-primary border-primary/20"
                                 )}>
-                                    {remainingQuantity}
+                                    {remainingQuantity} <span className="text-[9px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`).toUpperCase()}</span>
                                 </div>
 
                                 {activeDiscount && (
@@ -3295,12 +3299,12 @@ function MobileCart({
                                                     "text-muted-foreground transition-all duration-300",
                                                     item.negotiated_price !== undefined || hasDiscount ? "line-through opacity-50" : ""
                                                 )}>
-                                                    {formatCurrency(item.price, originalCurrency, features.iqd_display_preference)} x {item.quantity}
+                                                    {formatCurrency(item.price, originalCurrency, features.iqd_display_preference)} x {item.quantity} {t(`products.units.${item.unit}`).toUpperCase()}
                                                 </div>
 
                                                 {(item.negotiated_price !== undefined || hasDiscount) && (
                                                     <div className="text-emerald-500 font-bold flex items-center gap-1 animate-in slide-in-from-left-2 duration-300">
-                                                        {formatCurrency(unitPrice, originalCurrency, features.iqd_display_preference)} x {item.quantity}
+                                                        {formatCurrency(unitPrice, originalCurrency, features.iqd_display_preference)} x {item.quantity} {t(`products.units.${item.unit}`).toUpperCase()}
                                                         <button
                                                             onClick={() => clearNegotiatedPrice(item)}
                                                             className="p-0.5 rounded-full hover:bg-destructive/10 text-destructive transition-colors"
@@ -3330,7 +3334,10 @@ function MobileCart({
                                             <button onClick={() => updateQuantity(itemKey, -1)} className="p-1.5 hover:bg-background rounded-lg transition-colors">
                                                 <Minus className="w-3 h-3" />
                                             </button>
-                                            <span className="font-bold text-sm min-w-[0.5rem] text-center">{item.quantity}</span>
+                                            <span className="flex flex-col items-center justify-center min-w-[2.5rem] leading-none py-1">
+                                                <span className="text-sm font-black">{item.quantity}</span>
+                                                <span className="text-[8px] font-bold opacity-50 uppercase tracking-tighter">{t(`products.units.${item.unit}`)}</span>
+                                            </span>
                                             <button onClick={() => updateQuantity(itemKey, 1)} className="p-1.5 hover:bg-background rounded-lg transition-colors text-primary">
                                                 <Plus className="w-3 h-3" />
                                             </button>
