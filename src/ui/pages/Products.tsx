@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
-import { Copy, Info, LayoutGrid, List as ListIcon, Package, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { Copy, GitBranch, Info, LayoutGrid, List as ListIcon, Loader2, Package, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 
 import { useAuth } from '@/auth'
+import { supabase } from '@/auth/supabase'
+import { useWorkspaceBranchSwitcher } from '@/hooks/useWorkspaceBranchSwitcher'
 import {
     createCategory,
     deleteCategory,
@@ -16,6 +18,12 @@ import {
     type Product
 } from '@/local-db'
 import { isMobile } from '@/lib/platform'
+import {
+    getRetriableActionToast,
+    isRetriableWebRequestError,
+    normalizeSupabaseActionError,
+    runSupabaseAction
+} from '@/lib/supabaseRequest'
 import { cn, formatCurrency } from '@/lib/utils'
 import { platformService } from '@/services/platformService'
 import { useWorkspace } from '@/workspace'
@@ -28,27 +36,37 @@ import {
     DeleteConfirmationModal,
     Dialog,
     DialogContent,
+    DialogDescription,
     DialogFooter,
     DialogHeader,
     DialogTitle,
     Input,
     Label,
+    Checkbox,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
     Table,
     TableBody,
     TableCell,
     TableHead,
     TableHeader,
     TableRow,
-    Textarea
+    Textarea,
+    useToast
 } from '@/ui/components'
 
 const emptyCategoryFormData = { name: '', description: '' }
 
 export function Products() {
-    const { user } = useAuth()
-    const { features } = useWorkspace()
+    const { user, session } = useAuth()
+    const { features, branchInfo } = useWorkspace()
     const { t } = useTranslation()
+    const { toast } = useToast()
     const [, navigate] = useLocation()
+    const { branches } = useWorkspaceBranchSwitcher()
     const products = useProducts(user?.workspaceId)
     const categories = useCategories(user?.workspaceId)
     const storages = useStorages(user?.workspaceId)
@@ -69,10 +87,46 @@ export function Products() {
     })
     const [deleteModalOpen, setDeleteModalOpen] = useState(false)
     const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string; type: 'product' | 'category' } | null>(null)
+    const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set())
+    const [isBranchCloneSelectionMode, setIsBranchCloneSelectionMode] = useState(false)
+    const [branchCloneDialogOpen, setBranchCloneDialogOpen] = useState(false)
+    const [selectedBranchId, setSelectedBranchId] = useState('')
+    const [isBranchCloning, setIsBranchCloning] = useState(false)
+
+    const canCloneToBranch = canEdit && !branchInfo?.isBranch && branches.length > 0
 
     useEffect(() => {
         localStorage.setItem('products_view_mode', viewMode)
     }, [viewMode])
+
+    useEffect(() => {
+        const currentProductIds = new Set(products.map((product) => product.id))
+        setSelectedProductIds((previous) => {
+            const next = new Set(Array.from(previous).filter((productId) => currentProductIds.has(productId)))
+            return next.size === previous.size ? previous : next
+        })
+    }, [products])
+
+    useEffect(() => {
+        if (!canCloneToBranch) {
+            setSelectedProductIds(new Set())
+            setIsBranchCloneSelectionMode(false)
+            setBranchCloneDialogOpen(false)
+        }
+    }, [canCloneToBranch])
+
+    useEffect(() => {
+        if (branches.length === 0) {
+            setSelectedBranchId('')
+            return
+        }
+
+        setSelectedBranchId((current) =>
+            branches.some((branch) => branch.branchWorkspaceId === current)
+                ? current
+                : branches[0].branchWorkspaceId
+        )
+    }, [branches])
 
     const isCategoryDirty = () => {
         if (!isCategoryDialogOpen) return false
@@ -156,6 +210,9 @@ export function Products() {
         getCategoryName(product.categoryId).toLowerCase().includes(search.toLowerCase()) ||
         getStorageName(product.storageId).toLowerCase().includes(search.toLowerCase())
     )
+    const selectedProductsCount = selectedProductIds.size
+    const allWorkspaceProductsSelected = products.length > 0 && selectedProductsCount === products.length
+    const selectedBranch = branches.find((branch) => branch.branchWorkspaceId === selectedBranchId)
 
     const openProductForm = (product?: Product) => {
         navigate(product ? `/products/${product.id}` : '/products/new')
@@ -206,6 +263,112 @@ export function Products() {
     const handleDeleteProduct = (product: Product) => {
         setItemToDelete({ id: product.id, name: product.name, type: 'product' })
         setDeleteModalOpen(true)
+    }
+
+    const toggleProductSelection = (productId: string) => {
+        setSelectedProductIds((previous) => {
+            const next = new Set(previous)
+            if (next.has(productId)) {
+                next.delete(productId)
+            } else {
+                next.add(productId)
+            }
+            return next
+        })
+    }
+
+    const toggleSelectAllProducts = () => {
+        if (allWorkspaceProductsSelected) {
+            setSelectedProductIds(new Set())
+            return
+        }
+
+        setSelectedProductIds(new Set(products.map((product) => product.id)))
+    }
+
+    const exitBranchCloneSelectionMode = () => {
+        setIsBranchCloneSelectionMode(false)
+        setSelectedProductIds(new Set())
+        setBranchCloneDialogOpen(false)
+    }
+
+    const getAccessToken = async () => {
+        const { data } = await supabase.auth.getSession()
+        return data.session?.access_token ?? session?.access_token ?? ''
+    }
+
+    const showBranchCloneError = (error: unknown, fallbackDescription: string) => {
+        const normalized = normalizeSupabaseActionError(error)
+        if (isRetriableWebRequestError(normalized)) {
+            const message = getRetriableActionToast(normalized)
+            toast({
+                title: message.title,
+                description: message.description,
+                variant: 'destructive'
+            })
+            return
+        }
+
+        toast({
+            title: t('common.error', { defaultValue: 'Error' }),
+            description: fallbackDescription || normalized.message,
+            variant: 'destructive'
+        })
+    }
+
+    const handleCloneProductsToBranch = async () => {
+        if (!workspaceId || selectedProductsCount === 0 || !selectedBranchId) {
+            return
+        }
+
+        setIsBranchCloning(true)
+
+        try {
+            const accessToken = await getAccessToken()
+            if (!accessToken) {
+                throw new Error('Authentication required')
+            }
+
+            const { data, error } = await runSupabaseAction(
+                'products.cloneToBranch',
+                () => supabase.functions.invoke('workspace-access', {
+                    headers: {
+                        Authorization: `Bearer ${accessToken}`
+                    },
+                    body: {
+                        action: 'clone-products-to-branch',
+                        targetWorkspaceId: selectedBranchId,
+                        productIds: Array.from(selectedProductIds)
+                    }
+                }),
+                { timeoutMs: 40000, platform: 'all' }
+            ) as {
+                data: { cloned_products_count?: number } | null
+                error?: unknown
+            }
+
+            if (error) {
+                throw error
+            }
+
+            toast({
+                title: t('products.branchClone.successTitle', { defaultValue: 'Products cloned to branch' }),
+                description: t('products.branchClone.successDescription', {
+                    defaultValue: '{{count}} products were cloned to {{branch}}.',
+                    count: Number(data?.cloned_products_count ?? selectedProductsCount),
+                    branch: selectedBranch?.workspaceName || selectedBranch?.name || t('branches.title', { defaultValue: 'Branch' })
+                })
+            })
+            exitBranchCloneSelectionMode()
+        } catch (error) {
+            console.error('[Products] Failed to clone products to branch:', error)
+            showBranchCloneError(
+                error,
+                t('products.branchClone.error', { defaultValue: 'Failed to clone products to the selected branch.' })
+            )
+        } finally {
+            setIsBranchCloning(false)
+        }
     }
 
     const confirmDelete = async () => {
@@ -266,6 +429,16 @@ export function Products() {
                     )}
                     {canEdit && (
                         <div className="flex gap-2">
+                            {canCloneToBranch && !isBranchCloneSelectionMode && (
+                                <Button
+                                    variant="outline"
+                                    onClick={() => setIsBranchCloneSelectionMode(true)}
+                                    disabled={products.length === 0}
+                                >
+                                    <GitBranch className="h-4 w-4" />
+                                    {t('products.branchClone.action', { defaultValue: 'Clone to Branch' })}
+                                </Button>
+                            )}
                             <Button variant="outline" onClick={() => handleOpenCategoryDialog()}>
                                 <Plus className="h-4 w-4" />
                                 {t('products.addCategory')}
@@ -290,6 +463,54 @@ export function Products() {
                 />
             </div>
 
+            {canCloneToBranch && products.length > 0 && isBranchCloneSelectionMode && (
+                <Card className="border-primary/15 bg-primary/5">
+                    <CardContent className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                                <Checkbox
+                                    id="select-all-workspace-products"
+                                    checked={allWorkspaceProductsSelected}
+                                    onCheckedChange={toggleSelectAllProducts}
+                                />
+                                <Label htmlFor="select-all-workspace-products" className="cursor-pointer font-medium">
+                                    {t('products.branchClone.selectAllWorkspace', { defaultValue: 'Select all workspace products' })} ({products.length})
+                                </Label>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                                {t('products.branchClone.selectedCount', {
+                                    defaultValue: '{{count}} products selected',
+                                    count: selectedProductsCount
+                                })}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                                {t('products.branchClone.selectionHint', {
+                                    defaultValue: 'Select the products you want to copy, then choose the target branch.'
+                                })}
+                            </p>
+                        </div>
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={exitBranchCloneSelectionMode}
+                            >
+                                {t('products.branchClone.cancelSelection', { defaultValue: 'Cancel' })}
+                            </Button>
+                            <Button
+                                type="button"
+                                className="gap-2"
+                                onClick={() => setBranchCloneDialogOpen(true)}
+                                disabled={selectedProductsCount === 0}
+                            >
+                                <GitBranch className="h-4 w-4" />
+                                {t('products.branchClone.chooseBranch', { defaultValue: 'Choose Branch' })}
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+
             <Card>
                 <CardHeader>
                     <CardTitle>{t('products.title')}</CardTitle>
@@ -302,7 +523,25 @@ export function Products() {
                             {isMobile() && (
                                 <div className="grid grid-cols-1 gap-4">
                                     {filteredProducts.map((product) => (
-                                        <div key={product.id} className="space-y-4 rounded-[2rem] border border-border bg-card p-4 shadow-sm">
+                                        <div
+                                            key={product.id}
+                                            className={cn(
+                                                'space-y-4 rounded-[2rem] border border-border bg-card p-4 shadow-sm',
+                                                canCloneToBranch && isBranchCloneSelectionMode && selectedProductIds.has(product.id) && 'border-primary/50 bg-primary/5'
+                                            )}
+                                        >
+                                            {canCloneToBranch && isBranchCloneSelectionMode && (
+                                                <div className="flex items-center gap-2">
+                                                    <Checkbox
+                                                        id={`product-select-mobile-${product.id}`}
+                                                        checked={selectedProductIds.has(product.id)}
+                                                        onCheckedChange={() => toggleProductSelection(product.id)}
+                                                    />
+                                                    <Label htmlFor={`product-select-mobile-${product.id}`} className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                                        {t('products.branchClone.selectProduct', { defaultValue: 'Select Product' })}
+                                                    </Label>
+                                                </div>
+                                            )}
                                             <div className="flex gap-4">
                                                 <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-[1.25rem] border border-border/50 bg-muted/30">
                                                     {product.imageUrl ? (
@@ -377,7 +616,25 @@ export function Products() {
                                     {viewMode === 'grid' ? (
                                         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                                             {filteredProducts.map((product) => (
-                                                <div key={product.id} className="group relative flex flex-col gap-4 overflow-hidden rounded-[1.5rem] border border-border/50 bg-card p-4 transition-all duration-300 hover:-translate-y-1 hover:bg-accent/5 hover:shadow-2xl hover:shadow-primary/5">
+                                                <div
+                                                    key={product.id}
+                                                    className={cn(
+                                                        'group relative flex flex-col gap-4 overflow-hidden rounded-[1.5rem] border border-border/50 bg-card p-4 transition-all duration-300 hover:-translate-y-1 hover:bg-accent/5 hover:shadow-2xl hover:shadow-primary/5',
+                                                        canCloneToBranch && isBranchCloneSelectionMode && selectedProductIds.has(product.id) && 'border-primary/50 bg-primary/5 shadow-lg shadow-primary/10'
+                                                    )}
+                                                >
+                                                    {canCloneToBranch && isBranchCloneSelectionMode && (
+                                                        <div className="flex items-center gap-2">
+                                                            <Checkbox
+                                                                id={`product-select-grid-${product.id}`}
+                                                                checked={selectedProductIds.has(product.id)}
+                                                                onCheckedChange={() => toggleProductSelection(product.id)}
+                                                            />
+                                                            <Label htmlFor={`product-select-grid-${product.id}`} className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                                                {t('products.branchClone.selectProduct', { defaultValue: 'Select Product' })}
+                                                            </Label>
+                                                        </div>
+                                                    )}
                                                     <div className="relative aspect-square overflow-hidden rounded-2xl border border-border/20 bg-muted/30">
                                                         {product.imageUrl ? (
                                                             <img src={getDisplayImageUrl(product.imageUrl)} alt={product.name} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110" />
@@ -453,6 +710,7 @@ export function Products() {
                                         <Table>
                                             <TableHeader>
                                                 <TableRow>
+                                                    {canCloneToBranch && isBranchCloneSelectionMode && <TableHead className="w-[52px]" />}
                                                     <TableHead className="w-[80px]">{t('products.table.image') || 'Image'}</TableHead>
                                                     <TableHead>{t('products.table.sku')}</TableHead>
                                                     <TableHead>{t('products.table.name')}</TableHead>
@@ -465,7 +723,16 @@ export function Products() {
                                             </TableHeader>
                                             <TableBody>
                                                 {filteredProducts.map((product) => (
-                                                    <TableRow key={product.id}>
+                                                    <TableRow key={product.id} className={cn(canCloneToBranch && isBranchCloneSelectionMode && selectedProductIds.has(product.id) && 'bg-primary/5')}>
+                                                        {canCloneToBranch && isBranchCloneSelectionMode && (
+                                                            <TableCell>
+                                                                <Checkbox
+                                                                    id={`product-select-table-${product.id}`}
+                                                                    checked={selectedProductIds.has(product.id)}
+                                                                    onCheckedChange={() => toggleProductSelection(product.id)}
+                                                                />
+                                                            </TableCell>
+                                                        )}
                                                         <TableCell>
                                                             <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg bg-muted">
                                                                 {product.imageUrl ? (
@@ -613,6 +880,71 @@ export function Products() {
                                 {t('common.unsavedChanges.save') || 'Save Changes'}
                             </Button>
                         </div>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={branchCloneDialogOpen} onOpenChange={(open) => !isBranchCloning && setBranchCloneDialogOpen(open)}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>{t('products.branchClone.dialogTitle', { defaultValue: 'Clone Products to Branch' })}</DialogTitle>
+                        <DialogDescription>
+                            {t('products.branchClone.dialogDescription', {
+                                defaultValue: "Copy the selected products into one of this workspace's active branches."
+                            })}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="rounded-2xl border border-border/60 bg-muted/20 p-4">
+                            <div className="text-sm font-semibold">
+                                {t('products.branchClone.selectedCount', {
+                                    defaultValue: '{{count}} products selected',
+                                    count: selectedProductsCount
+                                })}
+                            </div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                                {t('products.branchClone.branchCount', {
+                                    defaultValue: '{{count}} branches available',
+                                    count: branches.length
+                                })}
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="branch-clone-target">
+                                {t('products.branchClone.branchLabel', { defaultValue: 'Target Branch' })}
+                            </Label>
+                            <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
+                                <SelectTrigger id="branch-clone-target">
+                                    <SelectValue placeholder={t('products.branchClone.branchPlaceholder', { defaultValue: 'Select a branch' })} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {branches.map((branch) => (
+                                        <SelectItem key={branch.branchWorkspaceId} value={branch.branchWorkspaceId}>
+                                            {branch.workspaceName || branch.name}
+                                            {branch.workspaceCode ? ` (${branch.workspaceCode})` : ''}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button type="button" variant="ghost" onClick={() => setBranchCloneDialogOpen(false)} disabled={isBranchCloning}>
+                            {t('common.cancel', { defaultValue: 'Cancel' })}
+                        </Button>
+                        <Button
+                            type="button"
+                            className="gap-2"
+                            onClick={handleCloneProductsToBranch}
+                            disabled={!selectedBranchId || selectedProductsCount === 0 || isBranchCloning}
+                        >
+                            {isBranchCloning ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <GitBranch className="h-4 w-4" />
+                            )}
+                            {t('products.branchClone.confirm', { defaultValue: 'Clone Products' })}
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

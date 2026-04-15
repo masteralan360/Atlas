@@ -33,6 +33,12 @@ type DeleteBranchRequest = {
     targetWorkspaceId?: string
 }
 
+type CloneProductsToBranchRequest = {
+    action: 'clone-products-to-branch'
+    targetWorkspaceId?: string
+    productIds?: string[]
+}
+
 type WorkspaceAccessRequest =
     | CreateWorkspaceRequest
     | JoinWorkspaceRequest
@@ -40,12 +46,64 @@ type WorkspaceAccessRequest =
     | CreateBranchRequest
     | SwitchBranchRequest
     | DeleteBranchRequest
+    | CloneProductsToBranchRequest
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
 type CallerProfile = {
     role: string | null
     workspace_id: string | null
+}
+
+type SourceCategoryRow = {
+    id: string
+    name: string
+    description?: string | null
+}
+
+type SourceStorageRow = {
+    id: string
+    name: string
+    is_system?: boolean | null
+    is_protected?: boolean | null
+    is_primary?: boolean | null
+}
+
+type SourceProductRow = {
+    id: string
+    sku: string
+    name: string
+    description?: string | null
+    category?: string | null
+    category_id?: string | null
+    storage_id?: string | null
+    price?: number | null
+    cost_price?: number | null
+    quantity?: number | null
+    min_stock_level?: number | null
+    unit?: string | null
+    currency?: string | null
+    barcode?: string | null
+    image_url?: string | null
+    can_be_returned?: boolean | null
+    return_rules?: string | null
+}
+
+type SourceInventoryRow = {
+    product_id: string
+    storage_id: string
+    quantity?: number | null
+}
+
+type TargetCategoryRow = {
+    id: string
+    name: string
+}
+
+type TargetStorageRow = {
+    id: string
+    name: string
+    is_primary?: boolean | null
 }
 
 type WorkspaceMetadataRow = {
@@ -892,6 +950,354 @@ async function handleDeleteBranch(
     })
 }
 
+async function handleCloneProductsToBranch(
+    adminClient: AdminClient,
+    user: User,
+    body: CloneProductsToBranchRequest
+) {
+    const targetWorkspaceId = body.targetWorkspaceId?.trim() ?? ''
+    const productIds = Array.from(
+        new Set(
+            (Array.isArray(body.productIds) ? body.productIds : [])
+                .map((productId) => productId?.trim())
+                .filter((productId): productId is string => Boolean(productId))
+        )
+    )
+
+    if (!targetWorkspaceId) {
+        return errorResponse('Target workspace is required')
+    }
+
+    if (productIds.length === 0) {
+        return errorResponse('At least one product must be selected')
+    }
+
+    const callerResult = await requireCallerWorkspace(adminClient, user)
+    if (callerResult.response || !callerResult.profile) {
+        return callerResult.response!
+    }
+
+    if (callerResult.profile.role !== 'admin' && callerResult.profile.role !== 'staff') {
+        return errorResponse('Unauthorized: Only admins or staff can clone products', 403)
+    }
+
+    const sourceWorkspaceId = callerResult.profile.workspace_id!
+    if (sourceWorkspaceId === targetWorkspaceId) {
+        return errorResponse('Target branch must be different from the current workspace', 400)
+    }
+
+    const { data: branchRelation, error: branchRelationError } = await adminClient
+        .from('workspace_branches')
+        .select('id')
+        .eq('source_workspace_id', sourceWorkspaceId)
+        .eq('branch_workspace_id', targetWorkspaceId)
+        .maybeSingle()
+
+    if (branchRelationError) {
+        return errorResponse(branchRelationError.message, 500)
+    }
+
+    if (!branchRelation) {
+        return errorResponse('Branch not found for the current workspace', 404)
+    }
+
+    const targetWorkspace = await getWorkspaceById(adminClient, targetWorkspaceId)
+    if (!targetWorkspace) {
+        return errorResponse('Target workspace not found', 404)
+    }
+
+    const { data: productRows, error: productsError } = await adminClient
+        .from('products')
+        .select('*')
+        .eq('workspace_id', sourceWorkspaceId)
+        .eq('is_deleted', false)
+        .in('id', productIds)
+
+    if (productsError) {
+        return errorResponse(productsError.message, 500)
+    }
+
+    const sourceProducts = (productRows ?? []) as SourceProductRow[]
+    if (sourceProducts.length === 0) {
+        return errorResponse('Selected products were not found', 404)
+    }
+
+    const sourceProductIds = sourceProducts.map((product) => product.id)
+
+    const { data: inventoryRows, error: inventoryError } = await adminClient
+        .from('inventory')
+        .select('product_id, storage_id, quantity')
+        .eq('workspace_id', sourceWorkspaceId)
+        .eq('is_deleted', false)
+        .in('product_id', sourceProductIds)
+
+    if (inventoryError) {
+        return errorResponse(inventoryError.message, 500)
+    }
+
+    const sourceInventoryRows = (inventoryRows ?? []) as SourceInventoryRow[]
+    const sourceCategoryIds = Array.from(
+        new Set(
+            sourceProducts
+                .map((product) => product.category_id?.trim())
+                .filter((categoryId): categoryId is string => Boolean(categoryId))
+        )
+    )
+    const sourceStorageIds = Array.from(
+        new Set(
+            [
+                ...sourceProducts.map((product) => product.storage_id?.trim()),
+                ...sourceInventoryRows.map((row) => row.storage_id?.trim())
+            ].filter((storageId): storageId is string => Boolean(storageId))
+        )
+    )
+
+    let sourceCategories: SourceCategoryRow[] = []
+    if (sourceCategoryIds.length > 0) {
+        const { data: categoryRows, error: categoriesError } = await adminClient
+            .from('categories')
+            .select('id, name, description')
+            .eq('workspace_id', sourceWorkspaceId)
+            .eq('is_deleted', false)
+            .in('id', sourceCategoryIds)
+
+        if (categoriesError) {
+            return errorResponse(categoriesError.message, 500)
+        }
+
+        sourceCategories = (categoryRows ?? []) as SourceCategoryRow[]
+    }
+
+    let sourceStorages: SourceStorageRow[] = []
+    if (sourceStorageIds.length > 0) {
+        const { data: storageRows, error: storagesError } = await adminClient
+            .from('storages')
+            .select('id, name, is_system, is_protected, is_primary')
+            .eq('workspace_id', sourceWorkspaceId)
+            .eq('is_deleted', false)
+            .in('id', sourceStorageIds)
+
+        if (storagesError) {
+            return errorResponse(storagesError.message, 500)
+        }
+
+        sourceStorages = (storageRows ?? []) as SourceStorageRow[]
+    }
+
+    let targetCategories: TargetCategoryRow[] = []
+    if (sourceCategories.length > 0) {
+        const { data: targetCategoryRows, error: targetCategoriesError } = await adminClient
+            .from('categories')
+            .select('id, name')
+            .eq('workspace_id', targetWorkspaceId)
+            .eq('is_deleted', false)
+
+        if (targetCategoriesError) {
+            return errorResponse(targetCategoriesError.message, 500)
+        }
+
+        targetCategories = (targetCategoryRows ?? []) as TargetCategoryRow[]
+    }
+
+    const { data: targetStorageRows, error: targetStoragesError } = await adminClient
+        .from('storages')
+        .select('id, name, is_primary')
+        .eq('workspace_id', targetWorkspaceId)
+        .eq('is_deleted', false)
+
+    if (targetStoragesError) {
+        return errorResponse(targetStoragesError.message, 500)
+    }
+
+    const targetStorages = (targetStorageRows ?? []) as TargetStorageRow[]
+    const now = new Date().toISOString()
+    const sourceCategoryById = new Map(sourceCategories.map((category) => [category.id, category]))
+    const targetCategoryByName = new Map(targetCategories.map((category) => [category.name.trim().toLowerCase(), category]))
+    const targetStorageByName = new Map(targetStorages.map((storage) => [storage.name.trim().toLowerCase(), storage]))
+    const categoryIdMap = new Map<string, string>()
+    const storageIdMap = new Map<string, string>()
+
+    const categoriesToInsert = sourceCategories.flatMap((category) => {
+        const normalizedName = category.name.trim().toLowerCase()
+        const existingCategory = targetCategoryByName.get(normalizedName)
+
+        if (existingCategory) {
+            categoryIdMap.set(category.id, existingCategory.id)
+            return []
+        }
+
+        const id = crypto.randomUUID()
+        targetCategoryByName.set(normalizedName, { id, name: category.name })
+        categoryIdMap.set(category.id, id)
+
+        return [{
+            id,
+            workspace_id: targetWorkspaceId,
+            name: category.name,
+            description: category.description ?? null,
+            created_at: now,
+            updated_at: now,
+            version: 1,
+            is_deleted: false
+        }]
+    })
+
+    if (categoriesToInsert.length > 0) {
+        const { error: insertCategoriesError } = await adminClient
+            .from('categories')
+            .insert(categoriesToInsert)
+
+        if (insertCategoriesError) {
+            return errorResponse(insertCategoriesError.message, 500)
+        }
+    }
+
+    const sourceHasPrimaryStorage = sourceStorages.some((storage) => storage.is_primary === true)
+    let targetHasPrimaryStorage = targetStorages.some((storage) => storage.is_primary === true)
+    const storagesToInsert = sourceStorages.flatMap((storage, index) => {
+        const normalizedName = storage.name.trim().toLowerCase()
+        const existingStorage = targetStorageByName.get(normalizedName)
+
+        if (existingStorage) {
+            storageIdMap.set(storage.id, existingStorage.id)
+            return []
+        }
+
+        const id = crypto.randomUUID()
+        const shouldBePrimary = !targetHasPrimaryStorage && (
+            storage.is_primary === true
+            || (!sourceHasPrimaryStorage && index === 0)
+        )
+
+        if (shouldBePrimary) {
+            targetHasPrimaryStorage = true
+        }
+
+        targetStorageByName.set(normalizedName, {
+            id,
+            name: storage.name,
+            is_primary: shouldBePrimary
+        })
+        storageIdMap.set(storage.id, id)
+
+        return [{
+            id,
+            workspace_id: targetWorkspaceId,
+            name: storage.name,
+            is_system: storage.is_system ?? false,
+            is_protected: storage.is_protected ?? false,
+            is_primary: shouldBePrimary,
+            created_at: now,
+            updated_at: now,
+            is_deleted: false
+        }]
+    })
+
+    if (storagesToInsert.length > 0) {
+        const { error: insertStoragesError } = await adminClient
+            .from('storages')
+            .insert(storagesToInsert)
+
+        if (insertStoragesError) {
+            return errorResponse(insertStoragesError.message, 500)
+        }
+    }
+
+    const productIdMap = new Map<string, string>()
+    const productsToInsert = sourceProducts.map<Record<string, unknown>>((product) => {
+        const clonedProductId = crypto.randomUUID()
+        productIdMap.set(product.id, clonedProductId)
+
+        const mappedCategoryId = product.category_id
+            ? categoryIdMap.get(product.category_id) ?? null
+            : null
+        const mappedStorageId = product.storage_id
+            ? storageIdMap.get(product.storage_id) ?? null
+            : null
+        const resolvedCategoryName = mappedCategoryId
+            ? targetCategoryByName.get((sourceCategoryById.get(product.category_id ?? '')?.name ?? '').trim().toLowerCase())?.name
+            : null
+
+        const clonedProduct: Record<string, unknown> = {
+            id: clonedProductId,
+            workspace_id: targetWorkspaceId,
+            sku: product.sku,
+            name: product.name,
+            description: product.description ?? '',
+            category: resolvedCategoryName ?? product.category ?? null,
+            category_id: mappedCategoryId,
+            storage_id: mappedStorageId,
+            price: Number(product.price ?? 0),
+            cost_price: Number(product.cost_price ?? 0),
+            quantity: Number(product.quantity ?? 0),
+            min_stock_level: Number(product.min_stock_level ?? 0),
+            unit: product.unit ?? 'pcs',
+            currency: product.currency ?? 'usd',
+            image_url: product.image_url ?? null,
+            can_be_returned: product.can_be_returned ?? true,
+            return_rules: product.return_rules ?? null,
+            created_at: now,
+            updated_at: now,
+            version: 1,
+            is_deleted: false
+        }
+
+        if (Object.prototype.hasOwnProperty.call(product, 'barcode')) {
+            clonedProduct.barcode = product.barcode ?? null
+        }
+
+        return clonedProduct
+    })
+
+    const { error: insertProductsError } = await adminClient
+        .from('products')
+        .insert(productsToInsert)
+
+    if (insertProductsError) {
+        return errorResponse(insertProductsError.message, 500)
+    }
+
+    const inventoryToInsert = sourceInventoryRows.flatMap((inventoryRow) => {
+        const clonedProductId = productIdMap.get(inventoryRow.product_id)
+        const clonedStorageId = storageIdMap.get(inventoryRow.storage_id)
+
+        if (!clonedProductId || !clonedStorageId) {
+            return []
+        }
+
+        return [{
+            id: crypto.randomUUID(),
+            workspace_id: targetWorkspaceId,
+            product_id: clonedProductId,
+            storage_id: clonedStorageId,
+            quantity: Number(inventoryRow.quantity ?? 0),
+            created_at: now,
+            updated_at: now,
+            version: 1,
+            is_deleted: false
+        }]
+    })
+
+    if (inventoryToInsert.length > 0) {
+        const { error: insertInventoryError } = await adminClient
+            .from('inventory')
+            .insert(inventoryToInsert)
+
+        if (insertInventoryError) {
+            return errorResponse(insertInventoryError.message, 500)
+        }
+    }
+
+    return jsonResponse({
+        success: true,
+        target_workspace_id: targetWorkspace.id,
+        cloned_products_count: productsToInsert.length,
+        cloned_categories_count: categoriesToInsert.length,
+        cloned_storages_count: storagesToInsert.length,
+        cloned_inventory_rows_count: inventoryToInsert.length
+    })
+}
+
 Deno.serve(async (req) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
@@ -936,6 +1342,10 @@ Deno.serve(async (req) => {
 
         if (body.action === 'delete-branch') {
             return await handleDeleteBranch(adminClient, user, body)
+        }
+
+        if (body.action === 'clone-products-to-branch') {
+            return await handleCloneProductsToBranch(adminClient, user, body)
         }
 
         return errorResponse('Unsupported action', 400)

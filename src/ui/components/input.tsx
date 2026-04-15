@@ -3,7 +3,7 @@ import { cn, formatDate, formatDateTime, formatTime } from "@/lib/utils"
 import { useOptionalAuth } from "@/auth"
 
 const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input"> & { allowViewer?: boolean }>(
-    ({ className, type, allowViewer = false, disabled, onChange, value, defaultValue, placeholder, ...props }, ref) => {
+    ({ className, type, allowViewer = false, disabled, onChange, onWheel, value, defaultValue, placeholder, ...props }, ref) => {
         const user = useOptionalAuth()?.user
         const isViewer = user?.role === 'viewer'
         const effectiveDisabled = disabled || (isViewer && !allowViewer)
@@ -66,6 +66,13 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input"> &
             onChange?.(event)
         }
 
+        const handleWheel = (event: React.WheelEvent<HTMLInputElement>) => {
+            if (type === 'number') {
+                (event.target as HTMLInputElement).blur()
+            }
+            onWheel?.(event)
+        }
+
         if (isFormattedNativeInput) {
             const displayValue = getFormattedDisplayValue(displaySourceValue)
 
@@ -77,6 +84,7 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input"> &
                         ref={ref}
                         disabled={effectiveDisabled}
                         onChange={handleChange}
+                        onWheel={handleWheel}
                         value={value}
                         defaultValue={defaultValue}
                         placeholder={placeholder}
@@ -105,6 +113,7 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input"> &
                 ref={ref}
                 disabled={effectiveDisabled}
                 onChange={handleChange}
+                onWheel={handleWheel}
                 value={value}
                 defaultValue={defaultValue}
                 placeholder={placeholder}

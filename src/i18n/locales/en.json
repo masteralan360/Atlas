@@ -770,6 +770,25 @@
             "lowStock": "Low Stock",
             "outOfStock": "Out of Stock"
         },
+        "branchClone": {
+            "action": "Clone to Branch",
+            "confirm": "Clone Products",
+            "dialogTitle": "Clone Products to Branch",
+            "dialogDescription": "Copy the selected products into one of this workspace's active branches.",
+            "branchLabel": "Target Branch",
+            "branchPlaceholder": "Select a branch",
+            "branchCount": "{{count}} branches available",
+            "selectAllWorkspace": "Select all workspace products",
+            "selectProduct": "Select Product",
+            "selectedCount": "{{count}} products selected",
+            "clearSelection": "Clear Selection",
+            "cancelSelection": "Cancel",
+            "selectionHint": "Select the products you want to copy, then choose the target branch.",
+            "chooseBranch": "Choose Branch",
+            "successTitle": "Products cloned to branch",
+            "successDescription": "{{count}} products were cloned to {{branch}}.",
+            "error": "Failed to clone products to the selected branch."
+        },
         "form": {
             "title": "Product Details",
             "basicInfo": "Basic Information",
