@@ -21,7 +21,7 @@ export function ProtectedRoute({
     requiredFeature
 }: ProtectedRouteProps) {
     const { isAuthenticated, isLoading, hasRole, isKicked, user } = useAuth()
-    const { hasFeature, features, isLoading: featuresLoading } = useWorkspace()
+    const { hasFeature, features, isLoading: featuresLoading, isLocked } = useWorkspace()
     const [location] = useLocation()
 
     if (isLoading || featuresLoading) {
@@ -55,7 +55,7 @@ export function ProtectedRoute({
     }
 
     // Redirect locked workspace members to locked workspace page
-    if (features.locked_workspace && location !== '/locked-workspace') {
+    if (isLocked && location !== '/locked-workspace') {
         const isAdminRoute = location.startsWith('/admin') || location.startsWith('/workspace-configuration') || location.startsWith('/settings');
 
         // If not an admin route, redirect everyone (including admins)

@@ -210,6 +210,13 @@ function mergeWorkspaceFeatures(features?: Partial<WorkspaceFeatures> | null): W
     return { ...defaultFeatures, ...(features ?? {}) }
 }
 
+function isWorkspaceCurrentlyLocked(
+    features: Pick<WorkspaceFeatures, 'locked_workspace' | 'subscription_expires_at'>
+) {
+    return features.locked_workspace
+        || (features.subscription_expires_at ? new Date(features.subscription_expires_at) < new Date() : false)
+}
+
 function getFeaturesFromLocalWorkspace(localWorkspace: Workspace): WorkspaceFeatures | null {
     if (typeof localWorkspace.is_configured !== 'boolean') {
         return null
@@ -765,8 +772,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (!isSupabaseConfigured || !isAuthenticated || !user?.workspaceId) return
 
         const unsubscribe = connectionManager.subscribe((event) => {
-            if (event === 'wake') {
-                console.log('[Workspace] Wake event - re-fetching features silently')
+            const shouldRefresh =
+                event === 'wake'
+                || event === 'online'
+                || (event === 'heartbeat' && isWorkspaceCurrentlyLocked(featuresRef.current))
+
+            if (shouldRefresh) {
+                console.log(`[Workspace] ${event} event - re-fetching features silently`)
                 void fetchFeatures(true, { workspaceId: user.workspaceId })
             }
         })
@@ -1053,8 +1065,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const isLocalMode = features.data_mode === 'local'
     const isCloudMode = features.data_mode === 'cloud'
     const isHybridMode = features.data_mode === 'hybrid'
-    const isLocked = features.locked_workspace
-        || (features.subscription_expires_at ? new Date(features.subscription_expires_at) < new Date() : false)
+    const isLocked = isWorkspaceCurrentlyLocked(features)
 
     return (
         <WorkspaceContext.Provider value={{

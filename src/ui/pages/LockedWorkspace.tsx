@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Lock, Mail, LogOut, Clock, AlertCircle } from 'lucide-react'
 import { Button } from '@/ui/components/button'
@@ -9,10 +10,16 @@ import { formatDate } from '@/lib/utils'
 export function LockedWorkspace() {
     const { t } = useTranslation()
     const { signOut } = useAuth()
-    const { features } = useWorkspace()
+    const { features, isLocked, isLoading } = useWorkspace()
     const [, setLocation] = useLocation()
 
     const isExpired = features.subscription_expires_at && new Date(features.subscription_expires_at) < new Date()
+
+    useEffect(() => {
+        if (!isLoading && !isLocked) {
+            setLocation('/')
+        }
+    }, [isLoading, isLocked, setLocation])
 
     const handleContactAdmin = () => {
         // Open email client with admin contact
@@ -22,6 +29,17 @@ export function LockedWorkspace() {
     const handleSignOut = async () => {
         await signOut()
         setLocation('/login')
+    }
+
+    if (isLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-background">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                    <p className="text-muted-foreground">Loading...</p>
+                </div>
+            </div>
+        )
     }
 
     return (
