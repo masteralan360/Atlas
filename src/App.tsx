@@ -25,6 +25,11 @@ const isTauri = !!window.__TAURI_INTERNALS__
 import { Dashboard as DashboardEager } from '@/ui/pages/Dashboard'
 import { POS as POSEager } from '@/ui/pages/POS'
 import { Products as ProductsEager } from '@/ui/pages/Products'
+import {
+    ProductClonePage as ProductClonePageEager,
+    ProductCreatePage as ProductCreatePageEager,
+    ProductEditPage as ProductEditPageEager
+} from '@/ui/pages/ProductFormPage'
 import { Sales as SalesEager } from '@/ui/pages/Sales'
 import { DashboardSkeleton } from '@/ui/components/skeletons/DashboardSkeleton'
 
@@ -32,6 +37,9 @@ import { DashboardSkeleton } from '@/ui/components/skeletons/DashboardSkeleton'
 const Dashboard = isTauri ? DashboardEager : lazy(() => import('@/ui/pages/Dashboard').then(m => ({ default: m.Dashboard })))
 const POS = isTauri ? POSEager : lazy(() => import('@/ui/pages/POS').then(m => ({ default: m.POS })))
 const Products = isTauri ? ProductsEager : lazy(() => import('@/ui/pages/Products').then(m => ({ default: m.Products })))
+const ProductCreatePage = isTauri ? ProductCreatePageEager : lazy(() => import('@/ui/pages/ProductFormPage').then(m => ({ default: m.ProductCreatePage })))
+const ProductEditPage = isTauri ? ProductEditPageEager : lazy(() => import('@/ui/pages/ProductFormPage').then(m => ({ default: m.ProductEditPage })))
+const ProductClonePage = isTauri ? ProductClonePageEager : lazy(() => import('@/ui/pages/ProductFormPage').then(m => ({ default: m.ProductClonePage })))
 const Sales = isTauri ? SalesEager : lazy(() => import('@/ui/pages/Sales').then(m => ({ default: m.Sales })))
 
 // Other pages - always lazy loaded
@@ -713,6 +721,27 @@ function App() {
                                                 <ProtectedRoute allowedRoles={['admin', 'staff', 'viewer']} requiredFeature="allow_whatsapp">
                                                     <Layout>
                                                         <WhatsApp />
+                                                    </Layout>
+                                                </ProtectedRoute>
+                                            </Route>
+                                            <Route path="/products/new">
+                                                <ProtectedRoute requiredFeature="products">
+                                                    <Layout>
+                                                        <ProductCreatePage />
+                                                    </Layout>
+                                                </ProtectedRoute>
+                                            </Route>
+                                            <Route path="/products/:productId/clone">
+                                                <ProtectedRoute requiredFeature="products">
+                                                    <Layout>
+                                                        <ProductClonePage />
+                                                    </Layout>
+                                                </ProtectedRoute>
+                                            </Route>
+                                            <Route path="/products/:productId">
+                                                <ProtectedRoute requiredFeature="products">
+                                                    <Layout>
+                                                        <ProductEditPage />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
