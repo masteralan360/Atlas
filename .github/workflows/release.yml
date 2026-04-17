@@ -89,9 +89,6 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_R2_WORKER_URL: ${{ secrets.VITE_R2_WORKER_URL }}
           VITE_R2_AUTH_TOKEN: ${{ secrets.VITE_R2_AUTH_TOKEN }}
-          VITE_NOVU_APP_ID: ${{ secrets.VITE_NOVU_APP_ID }}
-          VITE_NOVU_API_URL: ${{ secrets.VITE_NOVU_API_URL }}
-          VITE_NOVU_SOCKET_URL: ${{ secrets.VITE_NOVU_SOCKET_URL }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Atlas ${{ github.ref_name }}"
@@ -119,9 +116,6 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_R2_WORKER_URL: ${{ secrets.VITE_R2_WORKER_URL }}
           VITE_R2_AUTH_TOKEN: ${{ secrets.VITE_R2_AUTH_TOKEN }}
-          VITE_NOVU_APP_ID: ${{ secrets.VITE_NOVU_APP_ID }}
-          VITE_NOVU_API_URL: ${{ secrets.VITE_NOVU_API_URL }}
-          VITE_NOVU_SOCKET_URL: ${{ secrets.VITE_NOVU_SOCKET_URL }}
 
       - name: Sign Release APK
         if: matrix.settings.platform == 'ubuntu-latest'
@@ -135,8 +129,9 @@ jobs:
           
           # Sign using apksigner
           ${ANDROID_HOME}/build-tools/34.0.0/apksigner sign --ks release.jks \
-            --ks-pass pass:${{ secrets.ANDROID_KEY_PASSWORD }} \
+            --ks-pass pass:${{ secrets.ANDROID_KEYSTORE_PASSWORD }} \
             --ks-key-alias ${{ secrets.ANDROID_KEY_ALIAS }} \
+            --key-pass pass:${{ secrets.ANDROID_KEY_PASSWORD }} \
             --out src-tauri/gen/android/app/build/outputs/apk/universal/release/Atlas_${{ github.ref_name }}.apk \
             "$unsigned_apk"
 

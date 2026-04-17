@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useAuth } from '@/auth'
 import { initMessaging, onForegroundMessage } from '@/lib/firebase'
+import { isMobile, isTauri } from '@/lib/platform'
 import { registerDeviceTokenIfNeeded } from '@/services/notificationDevice'
 
 function openNotificationTarget(data: Record<string, string> | undefined) {
@@ -22,6 +23,7 @@ export function DeviceTokenBootstrap() {
 
     useEffect(() => {
         if (!isAuthenticated || !user) return
+        if (isTauri() && isMobile()) return
 
         let unsubscribe: (() => void) | undefined
 

@@ -1,7 +1,7 @@
 {
   "name": "atlas",
   "private": true,
-  "version": "0.1.30",
+  "version": "0.1.31",
   "main": "electron/main.cjs",
   "type": "module",
   "repository": {
