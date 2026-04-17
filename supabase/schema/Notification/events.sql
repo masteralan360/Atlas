@@ -14,3 +14,6 @@ CREATE TABLE notifications.events (
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   PRIMARY KEY (id)
 );
+
+CREATE UNIQUE INDEX uniq_notifications_events_dedupe
+  ON notifications.events (user_id, entity_type, entity_id, due_date);

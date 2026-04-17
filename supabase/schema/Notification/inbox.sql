@@ -1,0 +1,22 @@
+CREATE TABLE notifications.inbox (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  event_id uuid NULL UNIQUE REFERENCES notifications.events(id) ON DELETE SET NULL,
+  workspace_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  notification_type text NOT NULL,
+  scope text NOT NULL DEFAULT 'user'::text,
+  priority text NOT NULL DEFAULT 'normal'::text,
+  dedupe_key text NULL,
+  title text NOT NULL,
+  body text NULL,
+  action_url text NULL,
+  action_label text NULL,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  read_at timestamp with time zone NULL,
+  archived_at timestamp with time zone NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT notifications_inbox_scope_check CHECK (scope IN ('user', 'workspace', 'system')),
+  CONSTRAINT notifications_inbox_priority_check CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+  PRIMARY KEY (id)
+);

@@ -1,31 +1,41 @@
 # Notification System
 
 ## Overview
-Notifications are now delivered through Courier.
+Notifications are now stored directly in Supabase and rendered by the app.
 
 Flow:
 1. App code or SQL functions insert rows into `notifications.events`.
-2. `dispatch-notifications` reads pending rows and sends them to Courier using template IDs.
-3. Courier delivers inbox messages to the signed-in user.
-4. `NotificationCenter` renders the Courier inbox popup and shows desktop OS notifications for new messages while the app is open.
+2. `detect_and_dispatch_notification_events` detects overdue/pending sources and immediately dispatches them into `notifications.inbox`.
+3. `dispatch-notifications` can still be called manually, but scheduled detection now uses the database function directly.
+4. `NotificationCenter` loads the inbox via Supabase RPCs and subscribes to realtime changes on `notifications.inbox`.
+4. While the app is open, new inbox rows trigger the in-app sound, toast, and Tauri desktop notification.
+
+## Database
+- `notifications.events` remains the outbox / queue.
+- `notifications.inbox` is the durable user inbox.
+- `notifications.inbox` keeps the stable columns needed for UI (`title`, `body`, `notification_type`, `priority`, `action_url`) plus flexible `payload jsonb` for future notification shapes.
+- `read_at` and `archived_at` are the inbox state columns.
 
 ## Frontend
-- `src/ui/components/NotificationCenter.tsx` uses `@trycourier/courier-react`.
-- The client signs in by calling `issue-courier-token` with the current Supabase access token.
-- The inbox UI is `CourierInboxPopupMenu` with a custom bell button and unread badge.
+- `src/ui/components/NotificationCenter.tsx` now renders a native inbox popover.
+- Inbox data is loaded through:
+  - `public.list_notifications_inbox`
+  - `public.mark_notification_inbox_read`
+  - `public.mark_notification_inbox_archived`
+  - `public.mark_all_notifications_inbox_read`
+- Realtime updates come from `notifications.inbox`.
 - Desktop notifications still use `@tauri-apps/plugin-notification`.
 
 ## Backend
-- `supabase/functions/issue-courier-token/index.ts` issues short-lived Courier JWTs for authenticated users.
-- `supabase/functions/dispatch-notifications/index.ts` maps notification event types to Courier templates and marks rows as `sent` or `failed`.
-- `supabase/functions/place-inquiry-order/index.ts` still queues marketplace notification events and triggers the dispatcher immediately.
+- `public.upsert_notification_event` makes queue writes idempotent on `(user_id, entity_type, entity_id, due_date)` and refreshes payloads without duplicating events.
+- `public.detect_and_dispatch_notification_events` detects marketplace, loan, expense, and payroll notifications and then calls `public.dispatch_notification_events()`.
+- `supabase/functions/dispatch-notifications/index.ts` now delegates to `public.dispatch_notification_events()`.
+- `public.upsert_notification_inbox` makes inbox writes idempotent per event.
+- `supabase/functions/place-inquiry-order/index.ts` still queues marketplace events and triggers the dispatcher immediately.
+- A Supabase Cron job now runs detection every 5 minutes using `pg_cron`.
 
 ## Required Secrets
 Set these in Supabase Edge Function secrets:
-- `COURIER_API_KEY`
-- `COURIER_TEMPLATE_BUDGET_OVERDUE`
-- `COURIER_TEMPLATE_LOAN_OVERDUE`
-- `COURIER_TEMPLATE_MARKETPLACE_PENDING_ORDER`
 - `NOTIFICATION_CRON_SECRET`
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
@@ -35,9 +45,6 @@ Set these in Supabase Edge Function secrets:
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 
-## Removed Pieces
-The old Novu popup registry and popup components are gone:
-- `src/lib/notificationPopups.ts`
-- `src/ui/components/novupopups/`
-
-Courier inbox messages are now the only in-app notification surface.
+## Notes
+- `notifications.inbox` must exist in the `supabase_realtime` publication for live updates.
+- Future delivery channels can reuse the same inbox row and extend behavior through `payload jsonb`.
