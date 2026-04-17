@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
@@ -10,6 +10,7 @@ import {
     useActiveDiscountMap,
     useCategories,
     useInventoryProducts,
+    useWorkspaceProductBarcodes,
     useStorages,
     type Category,
     type CurrencyCode,
@@ -159,6 +160,7 @@ export function POS() {
     const { features, isLocalMode } = useWorkspace()
     const isRTL = i18n.dir() === 'rtl'
     const products = useInventoryProducts(user?.workspaceId)
+    const productBarcodes = useWorkspaceProductBarcodes(user?.workspaceId)
     const activeDiscountMap = useActiveDiscountMap(user?.workspaceId)
     const storages = useStorages(user?.workspaceId)
     const [selectedStorageId, setSelectedStorageId] = useState<string>(() => {
@@ -447,6 +449,16 @@ export function POS() {
         }
         return matchesSearch
     })
+
+    const barcodeMap = useMemo(() => {
+        const map = new Map<string, string>()
+        for (const barcodeRow of productBarcodes) {
+            if (!map.has(barcodeRow.barcode) || barcodeRow.isPrimary) {
+                map.set(barcodeRow.barcode, barcodeRow.productId)
+            }
+        }
+        return map
+    }, [productBarcodes])
 
     const getDisplayImageUrl = (url?: string) => {
         if (!url) return '';
@@ -954,8 +966,16 @@ export function POS() {
 
     const handleSkuSubmit = (e: React.FormEvent) => {
         e.preventDefault()
-        const term = skuInput.toLowerCase()
-        const candidates = products.filter((p) => p.sku.toLowerCase() === term)
+        const normalizedInput = skuInput.trim()
+        const term = normalizedInput.toLowerCase()
+        if (!normalizedInput) {
+            return
+        }
+
+        const barcodeProductId = barcodeMap.get(normalizedInput)
+        const candidates = barcodeProductId
+            ? products.filter((product) => product.id === barcodeProductId)
+            : products.filter((product) => product.sku.toLowerCase() === term)
 
         const exactMatch = candidates.find(p => p.storageId === selectedStorageId)
         const otherMatch = candidates.find(p => p.storageId !== selectedStorageId)
@@ -979,7 +999,7 @@ export function POS() {
             toast({
                 variant: 'destructive',
                 title: t('messages.error'),
-                description: `${t('pos.skuNotFound')}: ${term}`,
+                description: `${t('pos.skuNotFound')}: ${normalizedInput}`,
                 duration: 2000,
             })
             hapticTrigger('error')
@@ -989,7 +1009,8 @@ export function POS() {
     const handleBarcodeDetected = useCallback((barcodes: any[], source: 'camera' | 'device') => {
         const isEnabled = source === 'camera' ? isCameraScannerAutoEnabled : isDeviceScannerAutoEnabled
         if (!isEnabled || barcodes.length === 0) return
-        const text = barcodes[0].rawValue
+        const text = String(barcodes[0].rawValue ?? '').trim()
+        if (!text) return
 
         // Simple debounce/cooldown logic
         const now = Date.now()
@@ -1001,10 +1022,10 @@ export function POS() {
         lastScannedTime.current = now
 
         const term = text.toLowerCase()
-        const candidates = products.filter((p) =>
-            (p.barcode && p.barcode === text) ||
-            p.sku.toLowerCase() === term
-        )
+        const barcodeProductId = barcodeMap.get(text)
+        const candidates = barcodeProductId
+            ? products.filter((product) => product.id === barcodeProductId)
+            : products.filter((product) => product.sku.toLowerCase() === term)
 
         const exactMatch = candidates.find(p => p.storageId === selectedStorageId)
         const otherMatch = candidates.find(p => p.storageId !== selectedStorageId)
@@ -1028,7 +1049,7 @@ export function POS() {
             })
             hapticTrigger('error')
         }
-    }, [isCameraScannerAutoEnabled, isDeviceScannerAutoEnabled, scanDelay, products, addToCart, t, toast, selectedStorageId, storages, hapticTrigger])
+    }, [isCameraScannerAutoEnabled, isDeviceScannerAutoEnabled, scanDelay, barcodeMap, products, addToCart, t, toast, selectedStorageId, storages, hapticTrigger])
 
     useEffect(() => {
         if (!isDeviceScannerAutoEnabled || isBarcodeModalOpen) {

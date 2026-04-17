@@ -14,6 +14,7 @@ import {
 } from './inventory'
 import type {
     Product,
+    ProductBarcode,
     Category,
     ProductDiscount,
     CategoryDiscount,
@@ -44,6 +45,15 @@ import type {
     PaymentTransaction,
     PaymentTransactionSourceType
 } from './models'
+import {
+    DuplicateProductBarcodeError,
+    findActiveProductBarcodeByValue,
+    normalizeProductBarcodeLabel,
+    normalizeProductBarcodeValue,
+    sortProductBarcodes,
+    syncProductBarcodeCache,
+    syncProductBarcodeCachesForWorkspace
+} from './productBarcodes'
 import { generateId, toSnakeCase, toCamelCase } from '@/lib/utils'
 import { supabase } from '@/auth/supabase'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
@@ -85,6 +95,40 @@ function shouldUseCloudBusinessData(workspaceId?: string | null): boolean {
     return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
 }
 
+function toSupabaseProductPayload(product: Partial<Product>) {
+    return toSnakeCase({
+        ...product,
+        syncStatus: undefined,
+        lastSyncedAt: undefined,
+        storageName: undefined,
+        barcode: undefined,
+        barcodes: undefined
+    })
+}
+
+function toSupabaseProductBarcodePayload(productBarcode: ProductBarcode) {
+    return toSnakeCase({
+        ...productBarcode,
+        syncStatus: undefined,
+        lastSyncedAt: undefined
+    })
+}
+
+function isDuplicateProductBarcodeMutationError(error: unknown) {
+    if (!error || typeof error !== 'object') {
+        return false
+    }
+
+    const code = (error as { code?: unknown }).code
+    const message = typeof (error as { message?: unknown }).message === 'string'
+        ? (error as { message: string }).message.toLowerCase()
+        : ''
+
+    return code === '23505'
+        || (message.includes('duplicate') && message.includes('barcode'))
+        || message.includes('already assigned to another product')
+}
+
 const LOAN_PAYMENT_TRANSACTION_SOURCE_TYPES: PaymentTransactionSourceType[] = ['loan_origination', 'loan_payment', 'simple_loan', 'loan_installment']
 const LOAN_SETTLEMENT_TRANSACTION_SOURCE_TYPES: PaymentTransactionSourceType[] = ['loan_payment', 'simple_loan', 'loan_installment']
 
@@ -96,12 +140,7 @@ async function syncUpdatedProductsBestEffort(products: Product[], workspaceId: s
 
     if (isOnline() && shouldUseCloudBusinessData(workspaceId)) {
         try {
-            const payload = dedupedProducts.map((product) => toSnakeCase({
-                ...product,
-                syncStatus: undefined,
-                lastSyncedAt: undefined,
-                storageName: undefined
-            }))
+            const payload = dedupedProducts.map((product) => toSupabaseProductPayload(product))
 
             const { error } = await runMutation('products.inventorySync', () =>
                 supabase.from('products').upsert(payload)
@@ -336,6 +375,8 @@ export function useProducts(workspaceId: string | undefined) {
                         }
                     })
 
+                    await syncProductBarcodeCachesForWorkspace(workspaceId)
+
                     for (const remoteItem of data) {
                         const localItem = toCamelCase(remoteItem as any) as unknown as Product
                         await setProductInventoryFromLegacyInput({
@@ -383,7 +424,7 @@ export async function createProduct(workspaceId: string, data: Omit<Product, 'id
 
     if (isOnline()) {
         // ONLINE
-        const payload = toSnakeCase({ ...product, syncStatus: undefined, lastSyncedAt: undefined, storageName: undefined })
+        const payload = toSupabaseProductPayload(product)
         const { error } = await runMutation('products.create', () => supabase.from('products').insert(payload))
 
         if (error) {
@@ -425,7 +466,7 @@ export async function updateProduct(id: string, data: Partial<Product>): Promise
 
     if (isOnline()) {
         // ONLINE
-        const payload = toSnakeCase({ ...data, updatedAt: now, storageName: undefined })
+        const payload = toSupabaseProductPayload({ ...data, updatedAt: now })
         const { error } = await runMutation('products.update', () => supabase.from('products').update(payload).eq('id', id))
 
         if (error) throw normalizeSupabaseActionError(error)
@@ -444,6 +485,55 @@ export async function updateProduct(id: string, data: Partial<Product>): Promise
         quantity: typeof data.quantity === 'number' ? data.quantity : updated.quantity,
         timestamp: now
     })
+}
+
+async function softDeleteProductBarcodesForDeletedProduct(productId: string, workspaceId: string, now: string) {
+    const activeRows = await db.product_barcodes.where('productId').equals(productId).and((row) => !row.isDeleted).toArray()
+    if (activeRows.length === 0) {
+        return
+    }
+
+    const usesCloud = shouldUseCloudBusinessData(workspaceId)
+    let shouldQueueOffline = usesCloud && !isOnline()
+    let deletedRows: ProductBarcode[] = activeRows.map((row) => ({
+        ...row,
+        isPrimary: false,
+        isDeleted: true,
+        updatedAt: now,
+        syncStatus: shouldQueueOffline ? 'pending' : 'synced',
+        lastSyncedAt: shouldQueueOffline ? row.lastSyncedAt : now,
+        version: row.version + 1
+    }))
+
+    if (usesCloud && isOnline()) {
+        try {
+            const { error } = await runMutation('product_barcodes.cascadeDelete', () =>
+                supabase.from('product_barcodes').upsert(deletedRows.map(toSupabaseProductBarcodePayload))
+            )
+            if (error) {
+                throw normalizeSupabaseActionError(error)
+            }
+        } catch (error) {
+            if (!shouldUseOfflineMutationFallback(error)) {
+                throw normalizeSupabaseActionError(error)
+            }
+
+            shouldQueueOffline = true
+            deletedRows = deletedRows.map((row, index) => ({
+                ...row,
+                syncStatus: 'pending',
+                lastSyncedAt: activeRows[index]?.lastSyncedAt ?? row.lastSyncedAt
+            }))
+        }
+    }
+
+    await putProductBarcodeRowsAndRefreshCache(deletedRows)
+
+    if (usesCloud && shouldQueueOffline) {
+        await Promise.all(deletedRows.map((row) =>
+            addToOfflineMutations('product_barcodes', row.id, 'update', row as unknown as Record<string, unknown>, row.workspaceId)
+        ))
+    }
 }
 
 export async function deleteProduct(id: string): Promise<void> {
@@ -471,7 +561,313 @@ export async function deleteProduct(id: string): Promise<void> {
         await addToOfflineMutations('products', id, 'delete', { id }, existing.workspaceId)
     }
 
+    await softDeleteProductBarcodesForDeletedProduct(id, existing.workspaceId, now)
+
     await deleteInventoryForProduct(id, now)
+}
+
+function useProductBarcodeTable(
+    workspaceId: string | undefined,
+    query: () => Promise<ProductBarcode[]>
+) {
+    const online = useNetworkStatus()
+
+    const rows = useLiveQuery(
+        () => query().then(sortProductBarcodes),
+        [query]
+    )
+
+    useEffect(() => {
+        if (!workspaceId || !online || !shouldUseCloudBusinessData(workspaceId)) {
+            return
+        }
+
+        void fetchTableFromSupabase('product_barcodes', db.product_barcodes, workspaceId)
+            .then(() => syncProductBarcodeCachesForWorkspace(workspaceId))
+    }, [online, workspaceId])
+
+    return rows ?? []
+}
+
+export function useWorkspaceProductBarcodes(workspaceId: string | undefined) {
+    return useProductBarcodeTable(
+        workspaceId,
+        () => workspaceId
+            ? db.product_barcodes.where('workspaceId').equals(workspaceId).and((row) => !row.isDeleted).toArray()
+            : Promise.resolve([])
+    )
+}
+
+export function useProductBarcodes(productId: string | undefined) {
+    const product = useProduct(productId)
+
+    return useProductBarcodeTable(
+        product?.workspaceId,
+        () => productId
+            ? db.product_barcodes.where('productId').equals(productId).and((row) => !row.isDeleted).toArray()
+            : Promise.resolve([])
+    )
+}
+
+async function putProductBarcodeRowsAndRefreshCache(rows: ProductBarcode[]) {
+    if (rows.length === 0) {
+        return
+    }
+
+    await db.transaction('rw', [db.product_barcodes, db.products], async () => {
+        await db.product_barcodes.bulkPut(rows)
+        await syncProductBarcodeCache(rows[0].productId)
+    })
+}
+
+export async function addProductBarcode(
+    workspaceId: string,
+    productId: string,
+    barcode: string,
+    label?: string
+): Promise<ProductBarcode> {
+    const normalizedBarcode = normalizeProductBarcodeValue(barcode)
+    if (!normalizedBarcode) {
+        throw new Error('Barcode is required')
+    }
+
+    const product = await db.products.get(productId)
+    if (!product || product.isDeleted || product.workspaceId !== workspaceId) {
+        throw new Error('Product not found')
+    }
+
+    const duplicateBarcode = await findActiveProductBarcodeByValue(workspaceId, normalizedBarcode)
+    if (duplicateBarcode) {
+        throw new DuplicateProductBarcodeError()
+    }
+
+    const now = new Date().toISOString()
+    const existingRows = await db.product_barcodes.where('productId').equals(productId).and((row) => !row.isDeleted).toArray()
+    const usesCloud = shouldUseCloudBusinessData(workspaceId)
+    let shouldQueueOffline = usesCloud && !isOnline()
+
+    let productBarcode: ProductBarcode = {
+        id: generateId(),
+        workspaceId,
+        productId,
+        barcode: normalizedBarcode,
+        label: normalizeProductBarcodeLabel(label),
+        isPrimary: existingRows.length === 0,
+        createdAt: now,
+        updatedAt: now,
+        syncStatus: shouldQueueOffline ? 'pending' : 'synced',
+        lastSyncedAt: shouldQueueOffline ? null : now,
+        version: 1,
+        isDeleted: false
+    }
+
+    if (usesCloud && isOnline()) {
+        try {
+            const { error } = await runMutation('product_barcodes.create', () =>
+                supabase.from('product_barcodes').insert(toSupabaseProductBarcodePayload(productBarcode))
+            )
+            if (error) {
+                throw error
+            }
+        } catch (error) {
+            if (isDuplicateProductBarcodeMutationError(error)) {
+                throw new DuplicateProductBarcodeError()
+            }
+
+            if (!shouldUseOfflineMutationFallback(error)) {
+                throw normalizeSupabaseActionError(error)
+            }
+
+            shouldQueueOffline = true
+            productBarcode = {
+                ...productBarcode,
+                syncStatus: 'pending',
+                lastSyncedAt: null
+            }
+        }
+    }
+
+    await putProductBarcodeRowsAndRefreshCache([productBarcode])
+
+    if (usesCloud && shouldQueueOffline) {
+        await addToOfflineMutations('product_barcodes', productBarcode.id, 'create', productBarcode as unknown as Record<string, unknown>, workspaceId)
+    }
+
+    return productBarcode
+}
+
+export async function updateProductBarcode(
+    id: string,
+    data: Partial<Pick<ProductBarcode, 'label' | 'isPrimary' | 'barcode'>>
+): Promise<void> {
+    const existing = await db.product_barcodes.get(id)
+    if (!existing) {
+        throw new Error('Product barcode not found')
+    }
+
+    const now = new Date().toISOString()
+    const usesCloud = shouldUseCloudBusinessData(existing.workspaceId)
+    let shouldQueueOffline = usesCloud && !isOnline()
+    const normalizedBarcode = data.barcode !== undefined
+        ? normalizeProductBarcodeValue(data.barcode)
+        : existing.barcode
+    if (!normalizedBarcode) {
+        throw new Error('Barcode is required')
+    }
+
+    const duplicateBarcode = await findActiveProductBarcodeByValue(existing.workspaceId, normalizedBarcode, { excludeId: id })
+    if (duplicateBarcode) {
+        throw new DuplicateProductBarcodeError()
+    }
+
+    const activeRows = await db.product_barcodes.where('productId').equals(existing.productId).and((row) => !row.isDeleted).toArray()
+    let rowsToPersist: ProductBarcode[] = []
+    const primaryChanged = data.isPrimary === true
+
+    for (const row of activeRows) {
+        if (row.id === id) {
+            rowsToPersist.push({
+                ...row,
+                barcode: normalizedBarcode,
+                label: data.label !== undefined ? normalizeProductBarcodeLabel(data.label) : row.label,
+                isPrimary: data.isPrimary ?? row.isPrimary,
+                updatedAt: now,
+                syncStatus: shouldQueueOffline ? 'pending' : 'synced',
+                lastSyncedAt: shouldQueueOffline ? row.lastSyncedAt : now,
+                version: row.version + 1
+            })
+            continue
+        }
+
+        if (primaryChanged && row.isPrimary) {
+            rowsToPersist.push({
+                ...row,
+                isPrimary: false,
+                updatedAt: now,
+                syncStatus: shouldQueueOffline ? 'pending' : 'synced',
+                lastSyncedAt: shouldQueueOffline ? row.lastSyncedAt : now,
+                version: row.version + 1
+            })
+        }
+    }
+
+    if (rowsToPersist.length === 0) {
+        return
+    }
+
+    if (usesCloud && isOnline()) {
+        try {
+            const { error } = await runMutation('product_barcodes.update', () =>
+                supabase.from('product_barcodes').upsert(rowsToPersist.map(toSupabaseProductBarcodePayload))
+            )
+            if (error) {
+                throw error
+            }
+        } catch (error) {
+            if (isDuplicateProductBarcodeMutationError(error)) {
+                throw new DuplicateProductBarcodeError()
+            }
+            if (!shouldUseOfflineMutationFallback(error)) {
+                throw normalizeSupabaseActionError(error)
+            }
+
+            shouldQueueOffline = true
+            rowsToPersist = rowsToPersist.map((row) => {
+                const previousRow = activeRows.find((item) => item.id === row.id)
+                return {
+                    ...row,
+                    syncStatus: 'pending',
+                    lastSyncedAt: previousRow?.lastSyncedAt ?? row.lastSyncedAt
+                }
+            })
+        }
+    }
+
+    await putProductBarcodeRowsAndRefreshCache(rowsToPersist)
+
+    if (usesCloud && shouldQueueOffline) {
+        await Promise.all(rowsToPersist.map((row) =>
+            addToOfflineMutations('product_barcodes', row.id, 'update', row as unknown as Record<string, unknown>, row.workspaceId)
+        ))
+    }
+}
+
+export async function deleteProductBarcode(id: string): Promise<void> {
+    const existing = await db.product_barcodes.get(id)
+    if (!existing) {
+        return
+    }
+
+    const now = new Date().toISOString()
+    const usesCloud = shouldUseCloudBusinessData(existing.workspaceId)
+    let shouldQueueOffline = usesCloud && !isOnline()
+    const activeRows = sortProductBarcodes(
+        await db.product_barcodes.where('productId').equals(existing.productId).and((row) => !row.isDeleted).toArray()
+    )
+    const nextPrimary = existing.isPrimary
+        ? activeRows.find((row) => row.id !== existing.id)
+        : null
+    let rowsToPersist: ProductBarcode[] = activeRows
+        .filter((row) => row.id === existing.id || (nextPrimary?.id === row.id))
+        .map((row) => {
+            if (row.id === existing.id) {
+            return {
+                ...row,
+                isPrimary: false,
+                isDeleted: true,
+                updatedAt: now,
+                syncStatus: shouldQueueOffline ? 'pending' : 'synced',
+                lastSyncedAt: shouldQueueOffline ? row.lastSyncedAt : now,
+                version: row.version + 1
+            }
+        }
+
+        return {
+            ...row,
+            isPrimary: true,
+            updatedAt: now,
+            syncStatus: shouldQueueOffline ? 'pending' : 'synced',
+            lastSyncedAt: shouldQueueOffline ? row.lastSyncedAt : now,
+            version: row.version + 1
+        }
+    })
+
+    if (rowsToPersist.length === 0) {
+        return
+    }
+
+    if (usesCloud && isOnline()) {
+        try {
+            const { error } = await runMutation('product_barcodes.delete', () =>
+                supabase.from('product_barcodes').upsert(rowsToPersist.map(toSupabaseProductBarcodePayload))
+            )
+            if (error) {
+                throw error
+            }
+        } catch (error) {
+            if (!shouldUseOfflineMutationFallback(error)) {
+                throw normalizeSupabaseActionError(error)
+            }
+
+            shouldQueueOffline = true
+            rowsToPersist = rowsToPersist.map((row) => {
+                const previousRow = activeRows.find((item) => item.id === row.id)
+                return {
+                    ...row,
+                    syncStatus: 'pending',
+                    lastSyncedAt: previousRow?.lastSyncedAt ?? row.lastSyncedAt
+                }
+            })
+        }
+    }
+
+    await putProductBarcodeRowsAndRefreshCache(rowsToPersist)
+
+    if (usesCloud && shouldQueueOffline) {
+        await Promise.all(rowsToPersist.map((row) =>
+            addToOfflineMutations('product_barcodes', row.id, 'update', row as unknown as Record<string, unknown>, row.workspaceId)
+        ))
+    }
 }
 
 type DiscountEntity = ProductDiscount | CategoryDiscount

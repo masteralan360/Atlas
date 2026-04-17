@@ -817,6 +817,17 @@
         "notFoundTitle": "Product not found",
         "notFoundDescription": "This product could not be found. It may have been deleted or is no longer available.",
         "backToList": "Back to Products",
+        "barcodes": {
+            "title": "Barcodes",
+            "addBarcode": "Add Barcode",
+            "label": "Label",
+            "primary": "Primary",
+            "duplicate": "This barcode is already assigned to another product.",
+            "empty": "No barcodes added yet.",
+            "deleteConfirm": "Remove this barcode?",
+            "saveFirst": "Save the product first",
+            "saveFirstDescription": "Create this product before attaching barcode records to it."
+        },
         "form": {
             "title": "Product Details",
             "basicInfo": "Basic Information",

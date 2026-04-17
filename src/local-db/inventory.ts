@@ -11,6 +11,7 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { db } from './database'
 import { addToOfflineMutations } from './offlineMutations'
 import type { Inventory, Product } from './models'
+import { syncProductBarcodeCachesForWorkspace } from './productBarcodes'
 
 type InventorySyncSource = 'local' | 'remote'
 
@@ -303,6 +304,8 @@ async function fetchInventoryWorkspaceFromSupabase(workspaceId: string) {
     await Promise.all(Array.from(affectedProductIds).map((productId) =>
         syncProductStockSnapshot(productId, fetchedAt, 'remote')
     ))
+
+    await syncProductBarcodeCachesForWorkspace(workspaceId)
 
     if (affectedProductIds.size > 0) {
         const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')

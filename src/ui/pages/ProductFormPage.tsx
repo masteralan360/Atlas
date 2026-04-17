@@ -26,13 +26,19 @@ import { useTranslation } from 'react-i18next'
 
 import { useAuth } from '@/auth'
 import {
+    addProductBarcode,
     createProduct,
+    deleteProductBarcode,
+    DuplicateProductBarcodeError,
     getPrimaryStorageFromList,
+    updateProductBarcode,
     updateProduct,
     useCategories,
     useProduct,
+    useProductBarcodes,
     useStorages,
-    type Product
+    type Product,
+    type ProductBarcode
 } from '@/local-db'
 import type { CurrencyCode } from '@/local-db/models'
 import { assetManager } from '@/lib/assetManager'
@@ -48,6 +54,7 @@ import {
     CardHeader,
     CardTitle,
     CurrencySelector,
+    DeleteConfirmationModal,
     Dialog,
     DialogContent,
     DialogFooter,
@@ -61,7 +68,8 @@ import {
     SelectTrigger,
     SelectValue,
     Switch,
-    Textarea
+    Textarea,
+    useToast
 } from '@/ui/components'
 
 const UNITS = ['pcs', 'kg', 'gram', 'liter', 'box', 'pack']
@@ -149,6 +157,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const { user } = useAuth()
     const { features } = useWorkspace()
     const [, navigate] = useLocation()
+    const { toast } = useToast()
     const categories = useCategories(user?.workspaceId)
     const storages = useStorages(user?.workspaceId)
     const product = useProduct(productId)
@@ -158,6 +167,8 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const isEditing = mode === 'edit'
     const isReadOnly = isEditing && !canEdit
     const isDesktopShell = isTauri()
+    const persistedProductId = isEditing ? product?.id : undefined
+    const productBarcodes = useProductBarcodes(persistedProductId)
 
     const [formData, setFormData] = useState<ProductFormData>(() =>
         createInitialFormData(features.default_currency, getPrimaryStorageFromList(storages)?.id || '')
@@ -166,6 +177,11 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const [imageError, setImageError] = useState(false)
     const [returnRulesModalOpen, setReturnRulesModalOpen] = useState(false)
     const [missingProductStateVisible, setMissingProductStateVisible] = useState(false)
+    const [newBarcodeValue, setNewBarcodeValue] = useState('')
+    const [newBarcodeLabel, setNewBarcodeLabel] = useState('')
+    const [isSubmittingBarcode, setIsSubmittingBarcode] = useState(false)
+    const [barcodeToDelete, setBarcodeToDelete] = useState<ProductBarcode | null>(null)
+    const [isDeletingBarcode, setIsDeletingBarcode] = useState(false)
     const cameraInputRef = useRef<HTMLInputElement>(null)
     const imageUploadInputRef = useRef<HTMLInputElement>(null)
     const initializedKeyRef = useRef<string | null>(null)
@@ -366,6 +382,104 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             setImageError(false)
         } catch (error) {
             console.error('[Products] Error removing image:', error)
+        }
+    }
+
+    const showBarcodeErrorToast = (error: unknown) => {
+        if (error instanceof DuplicateProductBarcodeError) {
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: t('products.barcodes.duplicate') || 'This barcode is already assigned to another product.'
+            })
+            return
+        }
+
+        toast({
+            variant: 'destructive',
+            title: t('messages.error'),
+            description: error instanceof Error ? error.message : (t('common.error') || 'Something went wrong')
+        })
+    }
+
+    const handleAddBarcode = async () => {
+        if (!workspaceId || !persistedProductId || isReadOnly) {
+            return
+        }
+
+        const barcodeValue = newBarcodeValue.trim()
+        if (!barcodeValue) {
+            return
+        }
+
+        setIsSubmittingBarcode(true)
+        try {
+            await addProductBarcode(workspaceId, persistedProductId, barcodeValue, newBarcodeLabel)
+            setNewBarcodeValue('')
+            setNewBarcodeLabel('')
+        } catch (error) {
+            showBarcodeErrorToast(error)
+        } finally {
+            setIsSubmittingBarcode(false)
+        }
+    }
+
+    const handleBarcodeLabelBlur = async (barcodeRow: ProductBarcode, nextValue: string) => {
+        if (isReadOnly) {
+            return
+        }
+
+        const normalizedCurrent = barcodeRow.label?.trim() || ''
+        const normalizedNext = nextValue.trim()
+        if (normalizedCurrent === normalizedNext) {
+            return
+        }
+
+        try {
+            await updateProductBarcode(barcodeRow.id, { label: normalizedNext || undefined })
+        } catch (error) {
+            showBarcodeErrorToast(error)
+        }
+    }
+
+    const handleBarcodeLabelKeyDown = async (
+        event: React.KeyboardEvent<HTMLInputElement>,
+        barcodeRow: ProductBarcode
+    ) => {
+        if (event.key !== 'Enter') {
+            return
+        }
+
+        event.preventDefault()
+        await handleBarcodeLabelBlur(barcodeRow, event.currentTarget.value)
+        event.currentTarget.blur()
+    }
+
+    const handleSetPrimaryBarcode = async (barcodeRow: ProductBarcode) => {
+        if (isReadOnly || barcodeRow.isPrimary) {
+            return
+        }
+
+        try {
+            await updateProductBarcode(barcodeRow.id, { isPrimary: true })
+        } catch (error) {
+            showBarcodeErrorToast(error)
+        }
+    }
+
+    const handleConfirmDeleteBarcode = async () => {
+        if (!barcodeToDelete) {
+            return
+        }
+
+        setIsDeletingBarcode(true)
+        try {
+            await deleteProductBarcode(barcodeToDelete.id)
+            setBarcodeToDelete(null)
+        } catch (error) {
+            showBarcodeErrorToast(error)
+        } finally {
+            setIsDeletingBarcode(false)
         }
     }
 
@@ -720,6 +834,171 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                 </div>
                             </div>
                         </div>
+                        </CardContent>
+                    </Card>
+
+                    <Card className="overflow-hidden border-border/60 shadow-sm">
+                        <CardHeader className="border-b border-border/50 bg-muted/10">
+                            <CardTitle className="text-2xl font-black">
+                                {t('products.barcodes.title') || 'Barcodes'}
+                            </CardTitle>
+                            <p className="text-sm text-muted-foreground">
+                                {persistedProductId
+                                    ? t('products.barcodes.manageDescription', {
+                                        defaultValue: 'Attach every scannable code that should resolve to this product in POS.'
+                                    })
+                                    : (t('products.barcodes.saveFirstDescription') || 'Save this product first, then manage its barcodes here.')}
+                            </p>
+                        </CardHeader>
+                        <CardContent className="space-y-4 p-6 sm:p-8">
+                            {persistedProductId ? (
+                                <>
+                                    {productBarcodes.length > 0 ? (
+                                        <div className="space-y-3">
+                                            {productBarcodes.map((barcodeRow) => (
+                                                <div key={barcodeRow.id} className="rounded-2xl border border-border/60 bg-background/80 p-4">
+                                                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                                        <div className="min-w-0 flex-1 space-y-3">
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <span className="rounded-full border border-primary/15 bg-primary/10 px-3 py-1 font-mono text-sm font-bold text-primary">
+                                                                    {barcodeRow.barcode}
+                                                                </span>
+                                                                {barcodeRow.isPrimary && (
+                                                                    <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] text-emerald-600">
+                                                                        {t('products.barcodes.primary') || 'Primary'}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+
+                                                            {isReadOnly ? (
+                                                                <p className="text-sm text-muted-foreground">
+                                                                    {barcodeRow.label || '—'}
+                                                                </p>
+                                                            ) : (
+                                                                <div className="max-w-md space-y-2">
+                                                                    <Label
+                                                                        htmlFor={`product-barcode-label-${barcodeRow.id}`}
+                                                                        className="text-[11px] font-black uppercase tracking-[0.16em] text-muted-foreground"
+                                                                    >
+                                                                        {t('products.barcodes.label') || 'Label'}
+                                                                    </Label>
+                                                                    <Input
+                                                                        id={`product-barcode-label-${barcodeRow.id}`}
+                                                                        defaultValue={barcodeRow.label || ''}
+                                                                        placeholder={t('products.barcodes.label') || 'Label'}
+                                                                        className="h-10 rounded-lg border-border/40 bg-muted/10"
+                                                                        onBlur={(event) => {
+                                                                            void handleBarcodeLabelBlur(barcodeRow, event.currentTarget.value)
+                                                                        }}
+                                                                        onKeyDown={(event) => {
+                                                                            void handleBarcodeLabelKeyDown(event, barcodeRow)
+                                                                        }}
+                                                                    />
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        <div className="flex flex-wrap items-center gap-4 lg:justify-end">
+                                                            <div className="flex items-center gap-3 rounded-full border border-border/50 bg-muted/20 px-3 py-2">
+                                                                <Label
+                                                                    htmlFor={`product-barcode-primary-${barcodeRow.id}`}
+                                                                    className="text-[11px] font-black uppercase tracking-[0.16em] text-muted-foreground"
+                                                                >
+                                                                    {t('products.barcodes.primary') || 'Primary'}
+                                                                </Label>
+                                                                <Switch
+                                                                    id={`product-barcode-primary-${barcodeRow.id}`}
+                                                                    checked={barcodeRow.isPrimary}
+                                                                    onCheckedChange={(checked) => {
+                                                                        if (checked) {
+                                                                            void handleSetPrimaryBarcode(barcodeRow)
+                                                                        }
+                                                                    }}
+                                                                    disabled={isReadOnly || barcodeRow.isPrimary}
+                                                                    className="data-[state=checked]:bg-emerald-500"
+                                                                />
+                                                            </div>
+
+                                                            {!isReadOnly && (
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    aria-label={t('common.delete') || 'Delete'}
+                                                                    onClick={() => setBarcodeToDelete(barcodeRow)}
+                                                                    className="h-10 w-10 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                                                >
+                                                                    <Trash2 className="h-4 w-4" />
+                                                                </Button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="rounded-2xl border border-dashed border-border/70 bg-muted/10 p-6 text-sm text-muted-foreground">
+                                            {t('products.barcodes.empty') || 'No barcodes added yet.'}
+                                        </div>
+                                    )}
+
+                                    {!isReadOnly && (
+                                        <div className="rounded-2xl border border-border/60 bg-muted/20 p-4">
+                                            <div className="grid gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_auto]">
+                                                <Input
+                                                    value={newBarcodeValue}
+                                                    onChange={(event) => setNewBarcodeValue(event.target.value)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === 'Enter') {
+                                                            event.preventDefault()
+                                                            void handleAddBarcode()
+                                                        }
+                                                    }}
+                                                    placeholder="0123456789012"
+                                                    className="h-11 rounded-lg border-border/40 bg-background/80 font-mono"
+                                                />
+                                                <Input
+                                                    value={newBarcodeLabel}
+                                                    onChange={(event) => setNewBarcodeLabel(event.target.value)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === 'Enter') {
+                                                            event.preventDefault()
+                                                            void handleAddBarcode()
+                                                        }
+                                                    }}
+                                                    placeholder={t('products.barcodes.label') || 'Label'}
+                                                    className="h-11 rounded-lg border-border/40 bg-background/80"
+                                                />
+                                                <Button
+                                                    type="button"
+                                                    onClick={() => void handleAddBarcode()}
+                                                    disabled={!newBarcodeValue.trim() || isSubmittingBarcode}
+                                                    className="h-11 gap-2 rounded-xl px-5 font-black"
+                                                >
+                                                    <Plus className="h-4 w-4" />
+                                                    {t('products.barcodes.addBarcode') || 'Add Barcode'}
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <div className="rounded-2xl border border-dashed border-border/70 bg-muted/10 p-6">
+                                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                        <div className="space-y-1">
+                                            <div className="text-sm font-bold text-foreground">
+                                                {t('products.barcodes.saveFirst') || 'Save the product first'}
+                                            </div>
+                                            <p className="text-sm text-muted-foreground">
+                                                {t('products.barcodes.saveFirstDescription') || 'Create this product before attaching barcode records to it.'}
+                                            </p>
+                                        </div>
+                                        <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] text-muted-foreground">
+                                            {mode === 'clone' ? (t('common.clone') || 'Clone') : (t('common.create') || 'Create')}
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
                         </CardContent>
                     </Card>
 
@@ -1218,6 +1497,22 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <DeleteConfirmationModal
+                isOpen={!!barcodeToDelete}
+                onClose={() => {
+                    if (!isDeletingBarcode) {
+                        setBarcodeToDelete(null)
+                    }
+                }}
+                onConfirm={() => {
+                    void handleConfirmDeleteBarcode()
+                }}
+                isLoading={isDeletingBarcode}
+                title={t('products.barcodes.deleteConfirm') || 'Remove this barcode?'}
+                description={t('products.barcodes.deleteConfirm') || 'Remove this barcode?'}
+                itemName={barcodeToDelete?.barcode || ''}
+            />
 
             {!isReadOnly && (
                 <Dialog open={showGuard} onOpenChange={(open) => { if (!open) cancelNavigation() }}>

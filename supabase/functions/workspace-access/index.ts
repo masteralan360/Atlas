@@ -93,6 +93,13 @@ type SourceInventoryRow = {
     quantity?: number | null
 }
 
+type SourceProductBarcodeRow = {
+    product_id: string
+    barcode: string
+    label?: string | null
+    is_primary?: boolean | null
+}
+
 type TargetCategoryRow = {
     id: string
     name: string
@@ -1184,6 +1191,17 @@ async function handleCloneProductsToBranch(
 
     const sourceProductIds = sourceProducts.map((product) => product.id)
 
+    const { data: productBarcodeRows, error: productBarcodesError } = await adminClient
+        .from('product_barcodes')
+        .select('product_id, barcode, label, is_primary')
+        .eq('workspace_id', sourceWorkspaceId)
+        .eq('is_deleted', false)
+        .in('product_id', sourceProductIds)
+
+    if (productBarcodesError) {
+        return errorResponse(productBarcodesError.message, 500)
+    }
+
     const { data: inventoryRows, error: inventoryError } = await adminClient
         .from('inventory')
         .select('product_id, storage_id, quantity')
@@ -1338,6 +1356,37 @@ async function handleCloneProductsToBranch(
         return errorResponse(insertProductsError.message, 500)
     }
 
+    const sourceProductBarcodes = (productBarcodeRows ?? []) as SourceProductBarcodeRow[]
+    const productBarcodesToInsert = sourceProductBarcodes.flatMap<Record<string, unknown>>((productBarcode) => {
+        const clonedProductId = productIdMap.get(productBarcode.product_id)
+        if (!clonedProductId) {
+            return []
+        }
+
+        return [{
+            id: crypto.randomUUID(),
+            workspace_id: targetWorkspaceId,
+            product_id: clonedProductId,
+            barcode: productBarcode.barcode,
+            label: productBarcode.label ?? null,
+            is_primary: productBarcode.is_primary ?? false,
+            created_at: now,
+            updated_at: now,
+            version: 1,
+            is_deleted: false
+        }]
+    })
+
+    if (productBarcodesToInsert.length > 0) {
+        const { error: insertProductBarcodesError } = await adminClient
+            .from('product_barcodes')
+            .insert(productBarcodesToInsert)
+
+        if (insertProductBarcodesError) {
+            return errorResponse(insertProductBarcodesError.message, 500)
+        }
+    }
+
     const inventoryToInsert = sourceProducts.flatMap((product) => {
         const clonedProductId = productIdMap.get(product.id)
         const clonedQuantity = productQuantityBySourceId.get(product.id) ?? 0
@@ -1374,6 +1423,7 @@ async function handleCloneProductsToBranch(
         target_workspace_id: targetCloneWorkspace.workspaceId,
         target_storage_id: targetStorage.id,
         cloned_products_count: productsToInsert.length,
+        cloned_product_barcodes_count: productBarcodesToInsert.length,
         cloned_categories_count: categoriesToInsert.length,
         cloned_inventory_rows_count: inventoryToInsert.length
     })

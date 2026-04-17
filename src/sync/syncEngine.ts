@@ -2,6 +2,7 @@ import { supabase, isSupabaseConfigured } from '@/auth/supabase'
 import { db } from '@/local-db'
 import { syncProductStockSnapshot } from '@/local-db/inventory'
 import type { Inventory } from '@/local-db/models'
+import { syncProductBarcodeCachesForWorkspace } from '@/local-db/productBarcodes'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
@@ -87,6 +88,12 @@ export async function processMutationQueue(_userId: string): Promise<{ success: 
             // Remove local metadata
             delete dbPayload.sync_status
             delete dbPayload.last_synced_at
+
+            if (entityType === 'products') {
+                delete dbPayload.storage_name
+                delete dbPayload.barcode
+                delete dbPayload.barcodes
+            }
 
             if (operation === 'create' || operation === 'update') {
                 if (entityType === 'sales') {
@@ -230,6 +237,10 @@ export async function processMutationQueue(_userId: string): Promise<{ success: 
                 }
             }
 
+            if (entityType === 'product_barcodes' && workspaceId) {
+                await syncProductBarcodeCachesForWorkspace(workspaceId)
+            }
+
             successCount++
 
         } catch (err: any) {
@@ -269,6 +280,7 @@ export async function pullChanges(workspaceId: string, lastSyncTime: string | nu
 
     const tables = [
         'products',
+        'product_barcodes',
         'inventory',
         'product_discounts',
         'category_discounts',
@@ -365,6 +377,10 @@ export async function pullChanges(workspaceId: string, lastSyncTime: string | nu
                         syncProductStockSnapshot(productId, new Date().toISOString(), 'remote')
                             .then(() => evaluateReorderTransferRulesForProduct(workspaceId, productId))
                     ))
+                }
+
+                if (table === 'products' || table === 'product_barcodes') {
+                    await syncProductBarcodeCachesForWorkspace(workspaceId)
                 }
             }
         } catch (err: any) {

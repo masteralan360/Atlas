@@ -1,6 +1,7 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type {
     Product,
+    ProductBarcode,
     Category,
     Invoice,
     User,
@@ -46,6 +47,7 @@ import {
 // Atlas Database using Dexie.js for IndexedDB
 export class AtlasDatabase extends Dexie {
     products!: EntityTable<Product, 'id'>
+    product_barcodes!: EntityTable<ProductBarcode, 'id'>
     categories!: EntityTable<Category, 'id'>
     invoices!: EntityTable<Invoice, 'id'>
     users!: EntityTable<User, 'id'>
@@ -985,6 +987,69 @@ export class AtlasDatabase extends Dexie {
             category_discounts: 'id, workspaceId, categoryId, isActive, startsAt, endsAt, updatedAt, isDeleted, [workspaceId+categoryId]'
         })
 
+        this.version(53).stores({
+            product_barcodes: 'id, productId, workspaceId, barcode, isPrimary, updatedAt, isDeleted, [workspaceId+barcode], [productId+isPrimary]'
+        }).upgrade(async tx => {
+            const now = new Date().toISOString()
+            const barcodeTable = tx.table('product_barcodes')
+            const products = await tx.table('products').toArray() as Array<Record<string, unknown>>
+            const existingBarcodes = await barcodeTable.toArray() as Array<Record<string, unknown>>
+            const activeBarcodeKeys = new Set(
+                existingBarcodes
+                    .filter((row) => !row.isDeleted)
+                    .map((row) => `${String(row.workspaceId ?? '')}::${String(row.barcode ?? '')}`)
+            )
+            const barcodeRowsToInsert: Array<Record<string, unknown>> = []
+            const productsToUpdate: Array<Record<string, unknown>> = []
+
+            for (const product of products) {
+                const workspaceId = String(product.workspaceId ?? '')
+                const productId = String(product.id ?? '')
+                const legacyBarcode = String(product.barcode ?? '').trim()
+                if (!workspaceId || !productId) {
+                    continue
+                }
+
+                if (!legacyBarcode) {
+                    continue
+                }
+
+                const barcodeKey = `${workspaceId}::${legacyBarcode}`
+                if (activeBarcodeKeys.has(barcodeKey)) {
+                    continue
+                }
+
+                barcodeRowsToInsert.push({
+                    id: crypto.randomUUID(),
+                    workspaceId,
+                    productId,
+                    barcode: legacyBarcode,
+                    label: undefined,
+                    isPrimary: true,
+                    createdAt: String(product.createdAt ?? now),
+                    updatedAt: String(product.updatedAt ?? product.createdAt ?? now),
+                    syncStatus: product.syncStatus ?? 'synced',
+                    lastSyncedAt: product.lastSyncedAt ?? null,
+                    version: typeof product.version === 'number' ? product.version : 1,
+                    isDeleted: false
+                })
+                productsToUpdate.push({
+                    ...product,
+                    barcode: legacyBarcode,
+                    barcodes: [legacyBarcode]
+                })
+                activeBarcodeKeys.add(barcodeKey)
+            }
+
+            if (barcodeRowsToInsert.length > 0) {
+                await barcodeTable.bulkPut(barcodeRowsToInsert)
+            }
+
+            if (productsToUpdate.length > 0) {
+                await tx.table('products').bulkPut(productsToUpdate)
+            }
+        })
+
         this.registerLocalModeSyncHooks()
     }
 
@@ -992,6 +1057,7 @@ export class AtlasDatabase extends Dexie {
         const database = this
         const syncAwareTables = [
             'products',
+            'product_barcodes',
             'categories',
             'invoices',
             'users',
@@ -1128,8 +1194,9 @@ export const db = new AtlasDatabase()
 
 // Database utility functions
 export async function clearDatabase(): Promise<void> {
-    await db.transaction('rw', [db.products, db.inventory, db.product_discounts, db.category_discounts, db.inventory_transfer_transactions, db.reorder_transfer_rules, db.categories, db.invoices, db.travel_agency_sales, db.payment_transactions, db.syncQueue], async () => {
+    await db.transaction('rw', [db.products, db.product_barcodes, db.inventory, db.product_discounts, db.category_discounts, db.inventory_transfer_transactions, db.reorder_transfer_rules, db.categories, db.invoices, db.travel_agency_sales, db.payment_transactions, db.syncQueue], async () => {
         await db.products.clear()
+        await db.product_barcodes.clear()
         await db.inventory.clear()
         await db.product_discounts.clear()
         await db.category_discounts.clear()
