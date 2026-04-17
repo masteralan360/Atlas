@@ -1066,7 +1066,7 @@ export function Layout({ children }: LayoutProps) {
                                 <P2PSyncIndicator />
                                 <ExchangeRateIndicator />
                                 <div className="w-px h-4 bg-border mx-1" />
-                                <NotificationCenter />
+                                {(!isTauri || isMobile()) && <NotificationCenter />}
                                 <UnifiedSnoozedRemindersBell />
                                 {!isMobile() && <SyncStatusIndicator />}
 

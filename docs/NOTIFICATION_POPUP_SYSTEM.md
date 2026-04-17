@@ -1,58 +1,43 @@
-# Notification Popup System Documentation
+# Notification System
 
 ## Overview
-The Notification Popup System is a scalable, registry-driven architecture designed to intercept Novu notifications and display specialized UI modals (popups) based on notification content or metadata. This allows for dynamic user interaction (e.g., roadmap updates, forced feature toggles) driven directly from the Novu notification cloud.
+Notifications are now delivered through Courier.
 
-## Core Architecture
+Flow:
+1. App code or SQL functions insert rows into `notifications.events`.
+2. `dispatch-notifications` reads pending rows and sends them to Courier using template IDs.
+3. Courier delivers inbox messages to the signed-in user.
+4. `NotificationCenter` renders the Courier inbox popup and shows desktop OS notifications for new messages while the app is open.
 
-The system is built on a "Registry-Driven Rule Engine" to ensure scalability and maintainability.
+## Frontend
+- `src/ui/components/NotificationCenter.tsx` uses `@trycourier/courier-react`.
+- The client signs in by calling `issue-courier-token` with the current Supabase access token.
+- The inbox UI is `CourierInboxPopupMenu` with a custom bell button and unread badge.
+- Desktop notifications still use `@tauri-apps/plugin-notification`.
 
-### 1. Central Registry (`src/lib/notificationPopups.ts`)
-The `POPUP_REGISTRY` is the single source of truth. It maps "Popup IDs" to React components and defines the rules for when each should appear.
+## Backend
+- `supabase/functions/issue-courier-token/index.ts` issues short-lived Courier JWTs for authenticated users.
+- `supabase/functions/dispatch-notifications/index.ts` maps notification event types to Courier templates and marks rows as `sent` or `failed`.
+- `supabase/functions/place-inquiry-order/index.ts` still queues marketplace notification events and triggers the dispatcher immediately.
 
-### 2. Rule Engine
-Each popup in the registry has a `rules` object. The engine iterates through the registry and performs a logical **AND** check on all specified rules:
-- `enabled`: Global toggle for the popup.
-- `subjectMatch`: Exact string match for the notification subject.
-- `contentMatch`: Exact string match for the notification body/content.
-- `workflowSlug`: Match for the Novu workflow identifier.
+## Required Secrets
+Set these in Supabase Edge Function secrets:
+- `COURIER_API_KEY`
+- `COURIER_TEMPLATE_BUDGET_OVERDUE`
+- `COURIER_TEMPLATE_LOAN_OVERDUE`
+- `COURIER_TEMPLATE_MARKETPLACE_PENDING_ORDER`
+- `NOTIFICATION_CRON_SECRET`
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
 
-### 3. Controller (`src/ui/components/popups/NotificationPopupController.tsx`)
-The controller acts as a dynamic renderer. It:
-- Receives the raw notification data.
-- Asks the library to resolve a `popupId`.
-- Looks up the component and injects the corresponding configuration rules via the `config` prop.
+## Required Frontend Env
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
 
-## Configuration Guide
+## Removed Pieces
+The old Novu popup registry and popup components are gone:
+- `src/lib/notificationPopups.ts`
+- `src/ui/components/novupopups/`
 
-### Adding a New Modal
-1. **Create the UI Component**: Add a new `.tsx` file in `src/ui/components/popups/`.
-2. **Accept Config Prop**: Ensure the component accepts a `config` prop to receive its rules dynamically.
-3. **Register**: Add the component to the `POPUP_REGISTRY` in `notificationPopups.ts`.
-
-### Example Registry Entry
-```typescript
-{
-    id: 'roadmap-v1',
-    component: RoadmapModal,
-    rules: {
-        enabled: true,
-        subjectMatch: "New Roadmap",
-        contentMatch: "Roadmap",
-        preventOutsideClose: true // UI-specific flag
-    }
-}
-```
-
-## Advanced Patterns
-
-### Override Behavior
-The registry is an **array**. The engine scans from top to bottom. The first modal that satisfies all its rules will be the one displayed. This allows you to set high-priority "Roadblock" modals at the top of the list.
-
-### Circular Dependency Safety
-Components **must not** import constants or the registry from `notificationPopups.ts`. Instead, they should rely solely on the `config` prop passed down by the `NotificationPopupController`. This prevents runtime `ReferenceErrors` during application boot.
-
-## Notification Metadata Mapping
-- **Subject**: `notification.subject`
-- **Content**: `notification.body` or `notification.content`
-- **Identifier**: `notification.workflow.slug` or `notification.transactionId`
+Courier inbox messages are now the only in-app notification surface.

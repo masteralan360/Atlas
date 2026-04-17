@@ -11,3 +11,7 @@ verify_jwt = false
 
 [functions.place-inquiry-order]
 verify_jwt = false
+
+[functions.issue-courier-token]
+verify_jwt = false
+

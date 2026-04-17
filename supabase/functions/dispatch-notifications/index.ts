@@ -1,4 +1,4 @@
-import { Novu } from 'npm:@novu/api'
+import Courier from 'npm:@trycourier/courier'
 import { createAdminClient } from '../_shared/supabase.ts'
 import { errorResponse, jsonResponse } from '../_shared/http.ts'
 
@@ -11,21 +11,17 @@ type PendingNotificationEvent = {
     payload: Record<string, unknown>
 }
 
-const novuApiKeyRaw = Deno.env.get('NOVU_API_KEY') ?? ''
-const workflowBudgetOverdue = Deno.env.get('NOVU_WORKFLOW_BUDGET_OVERDUE') ?? ''
-const workflowLoanOverdue = Deno.env.get('NOVU_WORKFLOW_LOAN_OVERDUE') ?? ''
-const workflowMarketplacePendingOrder = Deno.env.get('NOVU_WORKFLOW_MARKETPLACE_PENDING_ORDER') ?? ''
+const courierApiKey = Deno.env.get('COURIER_API_KEY') ?? ''
+const templateBudgetOverdue = Deno.env.get('COURIER_TEMPLATE_BUDGET_OVERDUE') ?? ''
+const templateLoanOverdue = Deno.env.get('COURIER_TEMPLATE_LOAN_OVERDUE') ?? ''
+const templateMarketplacePendingOrder = Deno.env.get('COURIER_TEMPLATE_MARKETPLACE_PENDING_ORDER') ?? ''
 const cronSecret = Deno.env.get('NOTIFICATION_CRON_SECRET') ?? ''
 
-const novuApiKey = novuApiKeyRaw.startsWith('ApiKey ')
-    ? novuApiKeyRaw
-    : `ApiKey ${novuApiKeyRaw}`
-
-function resolveWorkflowId(entityType: string) {
-    if (entityType === 'loan_overdue') return workflowLoanOverdue
-    if (entityType === 'marketplace_order_pending') return workflowMarketplacePendingOrder
+function resolveTemplateId(entityType: string) {
+    if (entityType === 'loan_overdue') return templateLoanOverdue
+    if (entityType === 'marketplace_order_pending') return templateMarketplacePendingOrder
     if (entityType === 'budget_expense' || entityType === 'budget_payroll' || entityType === 'budget_dividend') {
-        return workflowBudgetOverdue
+        return templateBudgetOverdue
     }
     return ''
 }
@@ -61,12 +57,12 @@ Deno.serve(async (req) => {
         return errorResponse('Unauthorized', 401)
     }
 
-    if (!novuApiKeyRaw) {
-        return errorResponse('NOVU_API_KEY is not configured', 500)
+    if (!courierApiKey) {
+        return errorResponse('COURIER_API_KEY is not configured', 500)
     }
 
     const adminClient = createAdminClient()
-    const novu = new Novu({ secretKey: novuApiKey })
+    const courier = new Courier({ apiKey: courierApiKey })
 
     const { data, error } = await adminClient.rpc('get_pending_notification_events')
     if (error) {
@@ -82,25 +78,27 @@ Deno.serve(async (req) => {
     let processed = 0
 
     for (const event of events) {
-        const workflowId = resolveWorkflowId(event.entity_type)
-        if (!workflowId) {
-            await markEventStatus(adminClient, event.id, 'failed', `Missing workflow for ${event.entity_type}`)
+        const templateId = resolveTemplateId(event.entity_type)
+        if (!templateId) {
+            await markEventStatus(adminClient, event.id, 'failed', `Missing Courier template for ${event.entity_type}`)
             processed += 1
             continue
         }
 
         try {
-            await novu.subscribers.create({
-                subscriberId: event.user_id
-            })
-
-            await novu.trigger({
-                workflowId,
-                transactionId: event.id,
-                to: {
-                    subscriberId: event.user_id
-                },
-                payload: event.payload ?? {}
+            await courier.send.message({
+                message: {
+                    to: {
+                        user_id: event.user_id
+                    },
+                    template: templateId,
+                    data: {
+                        ...(event.payload ?? {}),
+                        event_id: event.id,
+                        entity_id: event.entity_id,
+                        entity_type: event.entity_type
+                    }
+                }
             })
 
             await markEventStatus(adminClient, event.id, 'sent')
