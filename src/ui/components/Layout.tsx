@@ -175,6 +175,7 @@ export function Layout({ children }: LayoutProps) {
     const [version, setVersion] = useState('')
     const [whatsappStatus, setWhatsappStatus] = useState<'live' | 'off'>(whatsappManager.isActive() ? 'live' : 'off')
     const [isSignOutModalOpen, setIsSignOutModalOpen] = useState(false)
+    const [pendingEcommerceCount, setPendingEcommerceCount] = useState(0)
 
     const copyToClipboard = (text: string) => {
         navigator.clipboard.writeText(text)
@@ -237,6 +238,37 @@ export function Layout({ children }: LayoutProps) {
         }
     }, [user?.workspaceId])
 
+    useEffect(() => {
+        if (!user?.workspaceId || features.data_mode === 'local' || !hasFeature('ecommerce')) {
+            setPendingEcommerceCount(0)
+            return
+        }
+
+        const fetchPendingOrders = async () => {
+            try {
+                const { count, error } = await supabase
+                    .from('marketplace_orders')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('status', 'pending')
+                    
+                if (!error && count !== null) {
+                    setPendingEcommerceCount(count)
+                }
+            } catch (error) {
+                console.error('[Layout] Failed to fetch pending marketplace orders count:', error)
+            }
+        }
+
+        fetchPendingOrders()
+
+        const handleEcommerceUpdate = () => fetchPendingOrders()
+        window.addEventListener('focus', handleEcommerceUpdate)
+
+        return () => {
+            window.removeEventListener('focus', handleEcommerceUpdate)
+        }
+    }, [user?.workspaceId, features.data_mode, hasFeature])
+
     // @ts-ignore
     const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
 
@@ -275,6 +307,9 @@ export function Layout({ children }: LayoutProps) {
     ).length
     const reorderAutomationCountLabel = reorderAutomationCount > 99 ? '99+' : reorderAutomationCount
     const inventoryTransferAutomationLabel = t('inventoryTransfer.tabs.automation', 'Reorder Automation')
+
+    const ecommerceCountLabel = pendingEcommerceCount > 99 ? '99+' : pendingEcommerceCount
+    const ecommercePendingLabel = t('ecommerce.pendingOrders', { defaultValue: 'Pending Orders' })
 
     const isPosLikeRoute = location === '/pos' || location === '/instant-pos'
     const isModuleLauncherRoute = location === '/modules'
@@ -551,6 +586,7 @@ export function Layout({ children }: LayoutProps) {
                                         {group.items.map((item) => {
                                             const isExpandableGroup = Boolean(item.children?.length)
                                             const showReorderAutomationBadge = item.href === '/inventory-transfer' && reorderAutomationCount > 0
+                                            const showEcommerceBadge = item.href === '/ecommerce' && pendingEcommerceCount > 0
                                             const isChildActive = isExpandableGroup
                                                 ? item.children!.some(child => location === child.href || (child.href !== '/' && location.startsWith(child.href)))
                                                 : false
@@ -611,6 +647,19 @@ export function Layout({ children }: LayoutProps) {
                                                                     </span>
                                                                 </span>
                                                             )}
+                                                            {!isExpandableGroup && showEcommerceBadge && (
+                                                                <span
+                                                                    title={ecommercePendingLabel}
+                                                                    className={cn(
+                                                                        "ms-auto flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold shadow-sm transition-all",
+                                                                        isActive
+                                                                            ? "bg-amber-400 text-amber-950 ring-1 ring-amber-400/20 shadow-[0_2px_8px_rgba(251,191,36,0.3)]"
+                                                                            : "bg-amber-500 text-white shadow-[0_2px_8px_rgba(245,158,11,0.25)] dark:bg-amber-500/20 dark:text-amber-400 dark:shadow-none"
+                                                                    )}
+                                                                >
+                                                                    {ecommerceCountLabel}
+                                                                </span>
+                                                            )}
                                                             {!isExpandableGroup && item.alert && (
                                                                 <div className="ms-auto flex items-center justify-center w-5 h-5 rounded-full bg-red-500 text-white">
                                                                     <AlertCircle className="w-3.5 h-3.5" />
@@ -657,6 +706,19 @@ export function Layout({ children }: LayoutProps) {
                                                             >
                                                                 {reorderAutomationCountLabel}
                                                             </span>
+                                                        </span>
+                                                    )}
+                                                    {(isMini && !mobileSidebarOpen) && showEcommerceBadge && (
+                                                        <span
+                                                            title={ecommercePendingLabel}
+                                                            className={cn(
+                                                                "absolute -right-1 -top-1 flex h-3.5 min-w-[14px] items-center justify-center rounded-full border px-1 text-[8px] font-bold shadow-sm transition-all",
+                                                                isActive
+                                                                    ? "bg-amber-400 text-amber-950 border-amber-300"
+                                                                    : "bg-amber-500 text-white border-white/80 dark:bg-amber-500/20 dark:text-amber-400 dark:border-amber-400/30"
+                                                            )}
+                                                        >
+                                                            {ecommerceCountLabel}
                                                         </span>
                                                     )}
                                                     {(isMini && !mobileSidebarOpen) && item.status && (
