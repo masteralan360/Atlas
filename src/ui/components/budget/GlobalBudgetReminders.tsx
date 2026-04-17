@@ -378,7 +378,15 @@ export function GlobalBudgetReminders() {
     }, [currentReminderId, reminderItems])
 
     useEffect(() => {
-        if (!isAdmin || isHydrating || isReminderActionLoading || settlementTarget || isSubmittingSettlement) return
+        if (
+            !isAdmin
+            || isHydrating
+            || isReminderActionLoading
+            || settlementTarget
+            || snoozeTarget
+            || lockTarget
+            || isSubmittingSettlement
+        ) return
 
         if (activeReminderItems.length === 0) {
             if (currentReminderId) setCurrentReminderId(null)
@@ -392,7 +400,17 @@ export function GlobalBudgetReminders() {
         if (!stillValid) {
             setCurrentReminderId(activeReminderItems[0].id)
         }
-    }, [activeReminderItems, currentReminderId, isAdmin, isReminderActionLoading, settlementTarget, isSubmittingSettlement, isHydrating])
+    }, [
+        activeReminderItems,
+        currentReminderId,
+        isAdmin,
+        isHydrating,
+        isReminderActionLoading,
+        settlementTarget,
+        snoozeTarget,
+        lockTarget,
+        isSubmittingSettlement
+    ])
 
     const markReminderHandledForSession = (id: string) => {
         setSessionHandledIds(prev => (prev.includes(id) ? prev : [...prev, id]))

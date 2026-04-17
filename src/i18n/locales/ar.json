@@ -2285,7 +2285,7 @@
         "reminder": {
             "didYouPay": "هل دفعت؟",
             "yesPaid": "نعم، دفعت",
-            "noSnooze": "لا (ذكرني غداً)",
+            "noSnooze": "ذكرني غداً",
             "queueProgress": "{{current}} من {{total}}",
             "overdue": "متأخر",
             "dueToday": "مستحق اليوم",

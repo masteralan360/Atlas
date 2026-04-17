@@ -130,7 +130,7 @@ export function BudgetReminderModal({
                         {t('budget.reminder.snoozeNow') || 'Snooze for now'}
                     </Button>
                     <Button variant="outline" onClick={onRemindTomorrow}>
-                        {t('budget.reminder.noSnooze') || 'No (Remind me tomorrow)'}
+                        {t('budget.reminder.noSnooze') || 'Remind me tomorrow'}
                     </Button>
                     <Button onClick={onPaid}>
                         {t('budget.reminder.yesPaid') || 'Yes, I Paid'}

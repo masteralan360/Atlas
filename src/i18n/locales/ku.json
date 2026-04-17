@@ -2284,7 +2284,7 @@
         "reminder": {
             "didYouPay": "پارەت دا؟",
             "yesPaid": "بەڵێ، پارەم دا",
-            "noSnooze": "نەخێر (سبەینێ بیرم بخەرەوە)",
+            "noSnooze": "سبەینێ بیرم بخەرەوە",
             "queueProgress": "{{current}} لە {{total}}",
             "overdue": "بەسەرچوو",
             "dueToday": "ئەمڕۆ وادەکەیەتی",

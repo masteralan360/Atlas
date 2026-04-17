@@ -2752,7 +2752,7 @@
         "reminder": {
             "didYouPay": "Did you pay?",
             "yesPaid": "Yes, I Paid",
-            "noSnooze": "No (Remind me tomorrow)",
+            "noSnooze": "Remind me tomorrow",
             "queueProgress": "{{current}} of {{total}}",
             "overdue": "Overdue",
             "dueToday": "Due Today",
