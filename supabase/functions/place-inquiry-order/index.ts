@@ -49,6 +49,54 @@ function countDigits(value: string) {
     return value.replace(/\D/g, '').length
 }
 
+function resolveFunctionsBaseUrl() {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+    if (!supabaseUrl) {
+        return ''
+    }
+
+    try {
+        const url = new URL(supabaseUrl)
+        if (!url.hostname.endsWith('.supabase.co')) {
+            return ''
+        }
+
+        return `${url.protocol}//${url.hostname.replace('.supabase.co', '.functions.supabase.co')}`
+    } catch {
+        return ''
+    }
+}
+
+async function triggerNotificationDispatch() {
+    const cronSecret = Deno.env.get('NOTIFICATION_CRON_SECRET') ?? ''
+    const functionsBaseUrl = resolveFunctionsBaseUrl()
+
+    if (!cronSecret || !functionsBaseUrl) {
+        return
+    }
+
+    try {
+        const response = await fetch(`${functionsBaseUrl}/dispatch-notifications`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Cron-Secret': cronSecret
+            },
+            body: '{}'
+        })
+
+        if (!response.ok) {
+            console.error(
+                '[place-inquiry-order] Failed to trigger notification dispatch',
+                response.status,
+                await response.text()
+            )
+        }
+    } catch (error) {
+        console.error('[place-inquiry-order] Failed to trigger notification dispatch', error)
+    }
+}
+
 Deno.serve(async (req) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
@@ -236,11 +284,24 @@ Deno.serve(async (req) => {
                 currency: orderCurrency,
                 request_ip_hash: requestIpHash
             })
-            .select('order_number')
+            .select('id, order_number')
             .single()
 
         if (insertError || !insertedOrder) {
             return errorResponse(insertError?.message ?? 'Failed to create marketplace order', 500)
+        }
+
+        const { error: queueNotificationError } = await adminClient.rpc('queue_marketplace_pending_order_notifications', {
+            p_order_id: insertedOrder.id
+        })
+
+        if (queueNotificationError) {
+            console.error(
+                '[place-inquiry-order] Failed to queue marketplace pending-order notifications',
+                queueNotificationError
+            )
+        } else {
+            await triggerNotificationDispatch()
         }
 
         return jsonResponse(
@@ -255,3 +316,4 @@ Deno.serve(async (req) => {
         return errorResponse(message, 500)
     }
 })
+

@@ -93,12 +93,16 @@ function InboxWithBadge({ appearance, tabs, notifications }: InboxWithBadgeProps
             // Map content from Novu message
             const payload = notification?.payload || {}
             const title = notification?.subject || payload?.title || t('notifications.newNotificationTitle') || 'New Notification'
+            const marketplaceBody = payload?.customer_name
+                ? `${payload.customer_name}${payload?.order_number ? ` (${payload.order_number})` : ''}`
+                : payload?.order_number || ''
 
             // Build body from multiple possible sources
             const body = notification?.body ||
                 notification?.content ||
                 payload?.content ||
                 payload?.borrower_name ||
+                marketplaceBody ||
                 (payload?.amount ? `${payload.amount} ${payload.currency || ''}` : '') ||
                 ''
 
@@ -336,3 +340,5 @@ export function NotificationCenter() {
         </NovuProvider>
     );
 }
+
+

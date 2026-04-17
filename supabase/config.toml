@@ -1,5 +1,8 @@
 project_id = "eboispangcayxxheoufy"
 
+[functions.dispatch-notifications]
+verify_jwt = false
+
 [functions.get-marketplace-stores]
 verify_jwt = false
 
