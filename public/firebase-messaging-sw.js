@@ -23,10 +23,32 @@ if (firebaseConfig.apiKey && firebaseConfig.projectId) {
         const notificationOptions = {
             body,
             icon: '/icon-192.png',
-            data: payload.data || payload.notification?.data
+            data: payload.data || payload.notification?.data || {}
         };
 
         return self.registration.showNotification(title, notificationOptions);
+    });
+
+    self.addEventListener('notificationclick', (event) => {
+        event.notification.close();
+        const data = event.notification?.data || {};
+        const route = data.actionUrl || data.route || '/';
+        const targetUrl = new URL(route, self.location.origin).toString();
+
+        event.waitUntil((async () => {
+            const windowClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+            for (const client of windowClients) {
+                if ('focus' in client) {
+                    if (client.url === targetUrl || client.url === new URL('/', self.location.origin).toString()) {
+                        await client.navigate(targetUrl);
+                        await client.focus();
+                        return;
+                    }
+                }
+            }
+
+            await clients.openWindow(targetUrl);
+        })());
     });
 } else {
     console.warn('[firebase-messaging-sw.js] Missing Firebase config query parameters.');

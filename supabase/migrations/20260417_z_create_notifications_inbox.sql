@@ -17,12 +17,18 @@ CREATE TABLE IF NOT EXISTS notifications.inbox (
   action_url text NULL,
   action_label text NULL,
   payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  push_status text NOT NULL DEFAULT 'pending',
+  push_sent_at timestamptz NULL,
+  push_last_attempt_at timestamptz NULL,
+  push_error text NULL,
+  push_attempt_count integer NOT NULL DEFAULT 0,
   read_at timestamptz NULL,
   archived_at timestamptz NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT notifications_inbox_scope_check CHECK (scope IN ('user', 'workspace', 'system')),
-  CONSTRAINT notifications_inbox_priority_check CHECK (priority IN ('low', 'normal', 'high', 'urgent'))
+  CONSTRAINT notifications_inbox_priority_check CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+  CONSTRAINT notifications_inbox_push_status_check CHECK (push_status IN ('pending', 'sent', 'failed', 'skipped'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_notifications_inbox_user_created_at
@@ -46,6 +52,10 @@ CREATE INDEX IF NOT EXISTS idx_notifications_inbox_notification_type_created_at
 CREATE INDEX IF NOT EXISTS idx_notifications_inbox_user_dedupe_key
   ON notifications.inbox (user_id, dedupe_key)
   WHERE dedupe_key IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_notifications_inbox_push_status_created_at
+  ON notifications.inbox (push_status, created_at ASC)
+  WHERE archived_at IS NULL;
 
 DROP TRIGGER IF EXISTS set_notifications_inbox_updated_at ON notifications.inbox;
 CREATE TRIGGER set_notifications_inbox_updated_at
@@ -110,25 +120,11 @@ $function$;
 REVOKE ALL ON FUNCTION public.get_pending_notification_events() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_pending_notification_events() TO service_role;
 
-CREATE OR REPLACE FUNCTION public.upsert_notification_inbox(
-  p_event_id uuid,
-  p_workspace_id uuid,
-  p_user_id uuid,
-  p_notification_type text,
-  p_scope text DEFAULT 'user',
-  p_priority text DEFAULT 'normal',
-  p_dedupe_key text DEFAULT NULL,
-  p_title text DEFAULT '',
-  p_body text DEFAULT NULL,
-  p_action_url text DEFAULT NULL,
-  p_action_label text DEFAULT NULL,
-  p_payload jsonb DEFAULT '{}'::jsonb,
-  p_created_at timestamptz DEFAULT now()
-)
-RETURNS uuid
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, notifications
+CREATE OR REPLACE FUNCTION public.upsert_notification_inbox(p_event_id uuid, p_workspace_id uuid, p_user_id uuid, p_notification_type text, p_scope text DEFAULT 'user'::text, p_priority text DEFAULT 'normal'::text, p_dedupe_key text DEFAULT NULL::text, p_title text DEFAULT ''::text, p_body text DEFAULT NULL::text, p_action_url text DEFAULT NULL::text, p_action_label text DEFAULT NULL::text, p_payload jsonb DEFAULT '{}'::jsonb, p_created_at timestamp with time zone DEFAULT now())
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path = public, notifications
 AS $function$
 DECLARE
   v_notification_id uuid;
@@ -146,6 +142,11 @@ BEGIN
     action_url,
     action_label,
     payload,
+    push_status,
+    push_sent_at,
+    push_last_attempt_at,
+    push_error,
+    push_attempt_count,
     created_at
   )
   VALUES (
@@ -161,6 +162,11 @@ BEGIN
     NULLIF(TRIM(COALESCE(p_action_url, '')), ''),
     NULLIF(TRIM(COALESCE(p_action_label, '')), ''),
     COALESCE(p_payload, '{}'::jsonb),
+    'pending',
+    NULL,
+    NULL,
+    NULL,
+    0,
     COALESCE(p_created_at, now())
   )
   ON CONFLICT (event_id) DO UPDATE
@@ -176,6 +182,11 @@ BEGIN
     action_url = EXCLUDED.action_url,
     action_label = EXCLUDED.action_label,
     payload = EXCLUDED.payload,
+    push_status = 'pending',
+    push_sent_at = NULL,
+    push_last_attempt_at = NULL,
+    push_error = NULL,
+    push_attempt_count = 0,
     created_at = LEAST(notifications.inbox.created_at, EXCLUDED.created_at),
     updated_at = now()
   RETURNING id INTO v_notification_id;

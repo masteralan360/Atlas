@@ -20,6 +20,11 @@ BEGIN
     action_url,
     action_label,
     payload,
+    push_status,
+    push_sent_at,
+    push_last_attempt_at,
+    push_error,
+    push_attempt_count,
     created_at
   )
   VALUES (
@@ -35,6 +40,11 @@ BEGIN
     NULLIF(TRIM(COALESCE(p_action_url, '')), ''),
     NULLIF(TRIM(COALESCE(p_action_label, '')), ''),
     COALESCE(p_payload, '{}'::jsonb),
+    'pending',
+    NULL,
+    NULL,
+    NULL,
+    0,
     COALESCE(p_created_at, now())
   )
   ON CONFLICT (event_id) DO UPDATE
@@ -50,10 +60,15 @@ BEGIN
     action_url = EXCLUDED.action_url,
     action_label = EXCLUDED.action_label,
     payload = EXCLUDED.payload,
+    push_status = 'pending',
+    push_sent_at = NULL,
+    push_last_attempt_at = NULL,
+    push_error = NULL,
+    push_attempt_count = 0,
     created_at = LEAST(notifications.inbox.created_at, EXCLUDED.created_at),
     updated_at = now()
   RETURNING id INTO v_notification_id;
 
   RETURN v_notification_id;
 END;
-$function$
+$function$;

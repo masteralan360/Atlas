@@ -6,5 +6,15 @@ CREATE TABLE notifications.device_tokens (
   device_token text NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
-  PRIMARY KEY (id)
+  PRIMARY KEY (id),
+  CONSTRAINT notifications_device_tokens_platform_check CHECK (platform IN ('android', 'web'))
 );
+
+CREATE UNIQUE INDEX uniq_notifications_device_tokens_token
+  ON notifications.device_tokens (device_token);
+
+CREATE INDEX idx_notifications_device_tokens_user_updated_at
+  ON notifications.device_tokens (user_id, updated_at DESC);
+
+CREATE INDEX idx_notifications_device_tokens_workspace_updated_at
+  ON notifications.device_tokens (workspace_id, updated_at DESC);

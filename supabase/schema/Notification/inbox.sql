@@ -12,11 +12,42 @@ CREATE TABLE notifications.inbox (
   action_url text NULL,
   action_label text NULL,
   payload jsonb NOT NULL DEFAULT '{}'::jsonb,
-  read_at timestamp with time zone NULL,
-  archived_at timestamp with time zone NULL,
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  push_status text NOT NULL DEFAULT 'pending'::text,
+  push_sent_at timestamptz NULL,
+  push_last_attempt_at timestamptz NULL,
+  push_error text NULL,
+  push_attempt_count integer NOT NULL DEFAULT 0,
+  read_at timestamptz NULL,
+  archived_at timestamptz NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT notifications_inbox_scope_check CHECK (scope IN ('user', 'workspace', 'system')),
   CONSTRAINT notifications_inbox_priority_check CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
-  PRIMARY KEY (id)
+  CONSTRAINT notifications_inbox_push_status_check CHECK (push_status IN ('pending', 'sent', 'failed', 'skipped'))
 );
+
+CREATE INDEX idx_notifications_inbox_user_created_at
+  ON notifications.inbox (user_id, created_at DESC);
+
+CREATE INDEX idx_notifications_inbox_user_active_created_at
+  ON notifications.inbox (user_id, created_at DESC)
+  WHERE archived_at IS NULL;
+
+CREATE INDEX idx_notifications_inbox_user_unread_created_at
+  ON notifications.inbox (user_id, created_at DESC)
+  WHERE archived_at IS NULL
+    AND read_at IS NULL;
+
+CREATE INDEX idx_notifications_inbox_workspace_created_at
+  ON notifications.inbox (workspace_id, created_at DESC);
+
+CREATE INDEX idx_notifications_inbox_notification_type_created_at
+  ON notifications.inbox (notification_type, created_at DESC);
+
+CREATE INDEX idx_notifications_inbox_user_dedupe_key
+  ON notifications.inbox (user_id, dedupe_key)
+  WHERE dedupe_key IS NOT NULL;
+
+CREATE INDEX idx_notifications_inbox_push_status_created_at
+  ON notifications.inbox (push_status, created_at ASC)
+  WHERE archived_at IS NULL;
