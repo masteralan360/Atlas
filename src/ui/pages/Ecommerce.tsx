@@ -111,6 +111,8 @@ const MARKETPLACE_ORDER_SELECT = `
     updated_at
 `
 
+const MARKETPLACE_ORDER_REFRESH_EVENT = 'marketplace-orders:changed'
+
 async function hydrateMarketplaceCollectionDependencies(workspaceId: string, salesOrderId: string) {
     await Promise.all([
         fetchTableFromSupabase('sales_orders', db.sales_orders, workspaceId, { includeDeleted: true }),
@@ -711,6 +713,7 @@ export function Ecommerce() {
 
             setSettlementTarget(null)
             await loadOrders()
+            window.dispatchEvent(new CustomEvent(MARKETPLACE_ORDER_REFRESH_EVENT))
         } catch (error) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
@@ -738,6 +741,7 @@ export function Ecommerce() {
             }
 
             await loadOrders()
+            window.dispatchEvent(new CustomEvent(MARKETPLACE_ORDER_REFRESH_EVENT))
 
             if (nextStatus === 'delivered' && data?.sales_order_id) {
                 if (data.warning) {

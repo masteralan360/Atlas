@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react'
 
-export type SnoozedItemType = 'loan' | 'budget' | 'exchange'
+export type SnoozedItemType = 'loan' | 'budget' | 'exchange' | 'marketplace'
 
 export interface SnoozedItem {
     id: string

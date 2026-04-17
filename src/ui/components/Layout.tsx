@@ -16,6 +16,7 @@ import { NotificationCenter } from './NotificationCenter'
 import { ManualRateModals } from './exchange/ManualRateModals'
 import { GlobalLoanReminders } from './loans/GlobalLoanReminders'
 import { GlobalBudgetReminders } from './budget/GlobalBudgetReminders'
+import { GlobalMarketplaceOrderReminders } from './ecommerce/GlobalMarketplaceOrderReminders'
 import { LoanPaymentModalProvider } from './loans/LoanPaymentModalProvider'
 import { UnifiedSnoozeProvider } from '@/context/UnifiedSnoozeContext'
 import { GlobalExchangeRateReminders } from './exchange/GlobalExchangeRateReminders'
@@ -261,11 +262,15 @@ export function Layout({ children }: LayoutProps) {
 
         fetchPendingOrders()
 
-        const handleEcommerceUpdate = () => fetchPendingOrders()
+        const handleEcommerceUpdate = () => { void fetchPendingOrders() }
         window.addEventListener('focus', handleEcommerceUpdate)
+        window.addEventListener('marketplace-orders:changed', handleEcommerceUpdate)
+        const intervalId = window.setInterval(() => { void fetchPendingOrders() }, 60_000)
 
         return () => {
             window.removeEventListener('focus', handleEcommerceUpdate)
+            window.removeEventListener('marketplace-orders:changed', handleEcommerceUpdate)
+            window.clearInterval(intervalId)
         }
     }, [user?.workspaceId, features.data_mode, hasFeature])
 
@@ -355,6 +360,7 @@ export function Layout({ children }: LayoutProps) {
                     <GlobalExchangeRateReminders />
                     <GlobalBudgetReminders />
                     <GlobalLoanReminders />
+                    <GlobalMarketplaceOrderReminders />
                     {/* Mobile sidebar backdrop */}
                     {mobileSidebarOpen && (
                         <div
