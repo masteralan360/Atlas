@@ -1,166 +1,177 @@
-import type Dexie from 'dexie'
+import type Dexie from "dexie";
 
-import { isTauri } from '@/lib/platform'
-import { shouldMirrorToSqlite } from '@/workspace/workspaceMode'
+import { isTauri } from "@/lib/platform";
+import { shouldMirrorToSqlite } from "@/workspace/workspaceMode";
 
-const LOCAL_MODE_SQLITE_PATH = 'sqlite:atlas-local-mode.db'
+const LOCAL_MODE_SQLITE_PATH = "sqlite:atlas-local-mode.db";
 
 export const LOCAL_MODE_SQLITE_TABLES = [
-    'products',
-    'product_barcodes',
-    'categories',
-    'invoices',
-    'users',
-    'sales',
-    'sale_items',
-    'workspaces',
-    'storages',
-    'inventory',
-    'stock_adjustments',
-    'inventory_transactions',
-    'stock_batches',
-    'product_discounts',
-    'category_discounts',
-    'inventory_transfer_transactions',
-    'reorder_transfer_rules',
-    'suppliers',
-    'customers',
-    'business_partners',
-    'business_partner_merge_candidates',
-    'employees',
-    'budget_settings',
-    'budget_allocations',
-    'expense_series',
-    'expense_items',
-    'payroll_statuses',
-    'dividend_statuses',
-    'workspace_contacts',
-    'loans',
-    'loan_installments',
-    'loan_payments',
-    'payment_transactions',
-    'sales_orders',
-    'purchase_orders',
-    'travel_agency_sales'
-] as const
+  "products",
+  "product_barcodes",
+  "categories",
+  "invoices",
+  "users",
+  "sales",
+  "sale_items",
+  "workspaces",
+  "storages",
+  "inventory",
+  "inventory_transactions",
+  "stock_batches",
+  "product_discounts",
+  "category_discounts",
+  "inventory_transfer_transactions",
+  "reorder_transfer_rules",
+  "suppliers",
+  "customers",
+  "business_partners",
+  "business_partner_merge_candidates",
+  "employees",
+  "budget_settings",
+  "budget_allocations",
+  "expense_series",
+  "expense_items",
+  "payroll_statuses",
+  "dividend_statuses",
+  "workspace_contacts",
+  "loans",
+  "loan_installments",
+  "loan_payments",
+  "payment_transactions",
+  "sales_orders",
+  "purchase_orders",
+  "travel_agency_sales",
+] as const;
 
-export type LocalModeSqliteTableName = (typeof LOCAL_MODE_SQLITE_TABLES)[number]
+export type LocalModeSqliteTableName =
+  (typeof LOCAL_MODE_SQLITE_TABLES)[number];
 
 interface SqliteConnection {
-    execute(query: string, bindValues?: unknown[]): Promise<unknown>
-    select<T>(query: string, bindValues?: unknown[]): Promise<T>
+  execute(query: string, bindValues?: unknown[]): Promise<unknown>;
+  select<T>(query: string, bindValues?: unknown[]): Promise<T>;
 }
 
 interface StoredEntityRow {
-    entity_type: LocalModeSqliteTableName
-    entity_id: string
-    workspace_id: string | null
-    payload: string
-    updated_at: string | null
+  entity_type: LocalModeSqliteTableName;
+  entity_id: string;
+  workspace_id: string | null;
+  payload: string;
+  updated_at: string | null;
 }
 
-const hydratedWorkspaces = new Set<string>()
-const hydrationTasks = new Map<string, Promise<void>>()
+const hydratedWorkspaces = new Set<string>();
+const hydrationTasks = new Map<string, Promise<void>>();
 
-let sqlitePromise: Promise<SqliteConnection | null> | null = null
-let sqliteWriteQueue: Promise<void> = Promise.resolve()
-let mirroringPauseDepth = 0
+let sqlitePromise: Promise<SqliteConnection | null> | null = null;
+let sqliteWriteQueue: Promise<void> = Promise.resolve();
+let mirroringPauseDepth = 0;
 
 function isSupported() {
-    return isTauri()
+  return isTauri();
 }
 
-function isMirroredTableName(tableName: string): tableName is LocalModeSqliteTableName {
-    return (LOCAL_MODE_SQLITE_TABLES as readonly string[]).includes(tableName)
+function isMirroredTableName(
+  tableName: string,
+): tableName is LocalModeSqliteTableName {
+  return (LOCAL_MODE_SQLITE_TABLES as readonly string[]).includes(tableName);
 }
 
-function isBlobMarker(value: unknown): value is { __atlasType: 'blob'; mimeType: string; data: string } {
-    return !!value
-        && typeof value === 'object'
-        && (value as { __atlasType?: string }).__atlasType === 'blob'
-        && typeof (value as { data?: unknown }).data === 'string'
+function isBlobMarker(
+  value: unknown,
+): value is { __atlasType: "blob"; mimeType: string; data: string } {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    (value as { __atlasType?: string }).__atlasType === "blob" &&
+    typeof (value as { data?: unknown }).data === "string"
+  );
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-    return Object.prototype.toString.call(value) === '[object Object]'
+  return Object.prototype.toString.call(value) === "[object Object]";
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer) {
-    const bytes = new Uint8Array(buffer)
-    let binary = ''
-    const chunkSize = 0x8000
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
 
-    for (let index = 0; index < bytes.length; index += chunkSize) {
-        binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
-    }
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
 
-    return btoa(binary)
+  return btoa(binary);
 }
 
 function base64ToBlob(base64: string, mimeType: string) {
-    const binary = atob(base64)
-    const bytes = new Uint8Array(binary.length)
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
 
-    for (let index = 0; index < binary.length; index += 1) {
-        bytes[index] = binary.charCodeAt(index)
-    }
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
 
-    return new Blob([bytes], { type: mimeType || 'application/octet-stream' })
+  return new Blob([bytes], { type: mimeType || "application/octet-stream" });
 }
 
 async function serializeValue(value: unknown): Promise<unknown> {
-    if (value instanceof Blob) {
-        return {
-            __atlasType: 'blob' as const,
-            mimeType: value.type,
-            data: arrayBufferToBase64(await value.arrayBuffer())
-        }
-    }
+  if (value instanceof Blob) {
+    return {
+      __atlasType: "blob" as const,
+      mimeType: value.type,
+      data: arrayBufferToBase64(await value.arrayBuffer()),
+    };
+  }
 
-    if (Array.isArray(value)) {
-        return Promise.all(value.map((item) => serializeValue(item)))
-    }
+  if (Array.isArray(value)) {
+    return Promise.all(value.map((item) => serializeValue(item)));
+  }
 
-    if (isPlainObject(value)) {
-        const entries = await Promise.all(
-            Object.entries(value).map(async ([key, nested]) => [key, await serializeValue(nested)] as const)
-        )
+  if (isPlainObject(value)) {
+    const entries = await Promise.all(
+      Object.entries(value).map(
+        async ([key, nested]) => [key, await serializeValue(nested)] as const,
+      ),
+    );
 
-        return Object.fromEntries(entries)
-    }
+    return Object.fromEntries(entries);
+  }
 
-    return value
+  return value;
 }
 
 function deserializeValue(value: unknown): unknown {
-    if (isBlobMarker(value)) {
-        return base64ToBlob(value.data, value.mimeType)
-    }
+  if (isBlobMarker(value)) {
+    return base64ToBlob(value.data, value.mimeType);
+  }
 
-    if (Array.isArray(value)) {
-        return value.map((item) => deserializeValue(item))
-    }
+  if (Array.isArray(value)) {
+    return value.map((item) => deserializeValue(item));
+  }
 
-    if (isPlainObject(value)) {
-        return Object.fromEntries(
-            Object.entries(value).map(([key, nested]) => [key, deserializeValue(nested)])
-        )
-    }
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [
+        key,
+        deserializeValue(nested),
+      ]),
+    );
+  }
 
-    return value
+  return value;
 }
 
 async function ensureConnection() {
-    if (!isSupported()) {
-        return null
-    }
+  if (!isSupported()) {
+    return null;
+  }
 
-    if (!sqlitePromise) {
-        sqlitePromise = (async () => {
-            const { default: Database } = await import('@tauri-apps/plugin-sql')
-            const connection = await Database.load(LOCAL_MODE_SQLITE_PATH)
+  if (!sqlitePromise) {
+    sqlitePromise = (async () => {
+      const { default: Database } = await import("@tauri-apps/plugin-sql");
+      const connection = await Database.load(LOCAL_MODE_SQLITE_PATH);
 
-            await connection.execute(`
+      await connection.execute(`
                 CREATE TABLE IF NOT EXISTS local_entities (
                     entity_type TEXT NOT NULL,
                     entity_id TEXT NOT NULL,
@@ -169,184 +180,231 @@ async function ensureConnection() {
                     updated_at TEXT,
                     PRIMARY KEY (entity_type, entity_id)
                 )
-            `)
-            await connection.execute(`
+            `);
+      await connection.execute(`
                 CREATE INDEX IF NOT EXISTS idx_local_entities_workspace
                 ON local_entities (workspace_id)
-            `)
-            await connection.execute(`
+            `);
+      await connection.execute(`
                 CREATE INDEX IF NOT EXISTS idx_local_entities_type_workspace
                 ON local_entities (entity_type, workspace_id)
-            `)
+            `);
 
-            return connection as SqliteConnection
-        })().catch((error) => {
-            sqlitePromise = null
-            console.error('[LocalModeSQLite] Failed to initialize SQLite connection:', error)
-            return null
-        })
-    }
+      return connection as SqliteConnection;
+    })().catch((error) => {
+      sqlitePromise = null;
+      console.error(
+        "[LocalModeSQLite] Failed to initialize SQLite connection:",
+        error,
+      );
+      return null;
+    });
+  }
 
-    return sqlitePromise
+  return sqlitePromise;
 }
 
 function enqueueWrite(task: () => Promise<void>) {
-    sqliteWriteQueue = sqliteWriteQueue
-        .catch(() => undefined)
-        .then(task)
-        .catch((error) => {
-            console.error('[LocalModeSQLite] Write failed:', error)
-        })
+  sqliteWriteQueue = sqliteWriteQueue
+    .catch(() => undefined)
+    .then(task)
+    .catch((error) => {
+      console.error("[LocalModeSQLite] Write failed:", error);
+    });
 
-    return sqliteWriteQueue
+  return sqliteWriteQueue;
 }
 
 async function withMirroringPaused<T>(work: () => Promise<T>) {
-    mirroringPauseDepth += 1
+  mirroringPauseDepth += 1;
 
-    try {
-        return await work()
-    } finally {
-        mirroringPauseDepth = Math.max(0, mirroringPauseDepth - 1)
-    }
+  try {
+    return await work();
+  } finally {
+    mirroringPauseDepth = Math.max(0, mirroringPauseDepth - 1);
+  }
 }
 
-function getEntityId(tableName: LocalModeSqliteTableName, row: Record<string, unknown>) {
-    if (tableName === 'workspaces') {
-        return typeof row.id === 'string' ? row.id : (typeof row.workspaceId === 'string' ? row.workspaceId : null)
-    }
+function getEntityId(
+  tableName: LocalModeSqliteTableName,
+  row: Record<string, unknown>,
+) {
+  if (tableName === "workspaces") {
+    return typeof row.id === "string"
+      ? row.id
+      : typeof row.workspaceId === "string"
+        ? row.workspaceId
+        : null;
+  }
 
-    return typeof row.id === 'string' ? row.id : null
+  return typeof row.id === "string" ? row.id : null;
 }
 
 async function resolveWorkspaceId(
-    cacheDb: Dexie,
-    tableName: LocalModeSqliteTableName,
-    row: Record<string, unknown>
+  cacheDb: Dexie,
+  tableName: LocalModeSqliteTableName,
+  row: Record<string, unknown>,
 ) {
-    if (tableName === 'workspaces') {
-        return typeof row.id === 'string'
-            ? row.id
-            : (typeof row.workspaceId === 'string' ? row.workspaceId : null)
-    }
+  if (tableName === "workspaces") {
+    return typeof row.id === "string"
+      ? row.id
+      : typeof row.workspaceId === "string"
+        ? row.workspaceId
+        : null;
+  }
 
-    if (typeof row.workspaceId === 'string') {
-        return row.workspaceId
-    }
+  if (typeof row.workspaceId === "string") {
+    return row.workspaceId;
+  }
 
-    if (tableName === 'sale_items' && typeof row.saleId === 'string') {
-        const sale = await cacheDb.table('sales').get(row.saleId)
-        return typeof sale?.workspaceId === 'string' ? sale.workspaceId : null
-    }
+  if (tableName === "sale_items" && typeof row.saleId === "string") {
+    const sale = await cacheDb.table("sales").get(row.saleId);
+    return typeof sale?.workspaceId === "string" ? sale.workspaceId : null;
+  }
 
-    return null
+  return null;
 }
 
 async function readCacheRowsForWorkspace(
-    cacheDb: Dexie,
-    tableName: LocalModeSqliteTableName,
-    workspaceId: string
+  cacheDb: Dexie,
+  tableName: LocalModeSqliteTableName,
+  workspaceId: string,
 ) {
-    if (tableName === 'workspaces') {
-        const workspace = await cacheDb.table(tableName).get(workspaceId)
-        return workspace ? [workspace] : []
+  if (tableName === "workspaces") {
+    const workspace = await cacheDb.table(tableName).get(workspaceId);
+    return workspace ? [workspace] : [];
+  }
+
+  if (tableName === "sale_items") {
+    const sales = await cacheDb
+      .table("sales")
+      .where("workspaceId")
+      .equals(workspaceId)
+      .toArray();
+    const saleIds = sales
+      .map((sale: Record<string, unknown>) => sale.id)
+      .filter((saleId): saleId is string => typeof saleId === "string");
+
+    if (saleIds.length === 0) {
+      return [];
     }
 
-    if (tableName === 'sale_items') {
-        const sales = await cacheDb.table('sales').where('workspaceId').equals(workspaceId).toArray()
-        const saleIds = sales
-            .map((sale: Record<string, unknown>) => sale.id)
-            .filter((saleId): saleId is string => typeof saleId === 'string')
+    return cacheDb.table(tableName).where("saleId").anyOf(saleIds).toArray();
+  }
 
-        if (saleIds.length === 0) {
-            return []
-        }
-
-        return cacheDb.table(tableName).where('saleId').anyOf(saleIds).toArray()
-    }
-
-    return cacheDb.table(tableName).where('workspaceId').equals(workspaceId).toArray()
+  return cacheDb
+    .table(tableName)
+    .where("workspaceId")
+    .equals(workspaceId)
+    .toArray();
 }
 
 async function clearCacheRowsForWorkspace(cacheDb: Dexie, workspaceId: string) {
-    const currentSales = await cacheDb.table('sales').where('workspaceId').equals(workspaceId).toArray()
-    const currentSaleIds = currentSales
-        .map((sale: Record<string, unknown>) => sale.id)
-        .filter((saleId): saleId is string => typeof saleId === 'string')
+  const currentSales = await cacheDb
+    .table("sales")
+    .where("workspaceId")
+    .equals(workspaceId)
+    .toArray();
+  const currentSaleIds = currentSales
+    .map((sale: Record<string, unknown>) => sale.id)
+    .filter((saleId): saleId is string => typeof saleId === "string");
 
-    for (const tableName of LOCAL_MODE_SQLITE_TABLES) {
-        if (tableName === 'workspaces') {
-            await cacheDb.table(tableName).delete(workspaceId)
-            continue
-        }
-
-        if (tableName === 'sale_items') {
-            if (currentSaleIds.length > 0) {
-                await cacheDb.table(tableName).where('saleId').anyOf(currentSaleIds).delete()
-            }
-            continue
-        }
-
-        await cacheDb.table(tableName).where('workspaceId').equals(workspaceId).delete()
+  for (const tableName of LOCAL_MODE_SQLITE_TABLES) {
+    if (tableName === "workspaces") {
+      await cacheDb.table(tableName).delete(workspaceId);
+      continue;
     }
+
+    if (tableName === "sale_items") {
+      if (currentSaleIds.length > 0) {
+        await cacheDb
+          .table(tableName)
+          .where("saleId")
+          .anyOf(currentSaleIds)
+          .delete();
+      }
+      continue;
+    }
+
+    await cacheDb
+      .table(tableName)
+      .where("workspaceId")
+      .equals(workspaceId)
+      .delete();
+  }
 }
 
-async function getStoredWorkspaceRowCount(connection: SqliteConnection, workspaceId: string) {
-    const rows = await connection.select<Array<{ count: number | string }>>(
-        `
+async function getStoredWorkspaceRowCount(
+  connection: SqliteConnection,
+  workspaceId: string,
+) {
+  const rows = await connection.select<Array<{ count: number | string }>>(
+    `
             SELECT COUNT(*) AS count
             FROM local_entities
             WHERE workspace_id = $1
                OR (entity_type = 'workspaces' AND entity_id = $1)
         `,
-        [workspaceId]
-    )
+    [workspaceId],
+  );
 
-    const count = rows[0]?.count
-    return typeof count === 'string' ? Number.parseInt(count, 10) : Number(count ?? 0)
+  const count = rows[0]?.count;
+  return typeof count === "string"
+    ? Number.parseInt(count, 10)
+    : Number(count ?? 0);
 }
 
 async function seedWorkspaceFromDexie(cacheDb: Dexie, workspaceId: string) {
-    for (const tableName of LOCAL_MODE_SQLITE_TABLES) {
-        const rows = await readCacheRowsForWorkspace(cacheDb, tableName, workspaceId)
+  for (const tableName of LOCAL_MODE_SQLITE_TABLES) {
+    const rows = await readCacheRowsForWorkspace(
+      cacheDb,
+      tableName,
+      workspaceId,
+    );
 
-        for (const row of rows) {
-            await persistEntity(cacheDb, tableName, row as Record<string, unknown>)
-        }
+    for (const row of rows) {
+      await persistEntity(cacheDb, tableName, row as Record<string, unknown>);
     }
+  }
 }
 
 async function persistEntity(
-    cacheDb: Dexie,
-    tableName: LocalModeSqliteTableName,
-    row: Record<string, unknown>
+  cacheDb: Dexie,
+  tableName: LocalModeSqliteTableName,
+  row: Record<string, unknown>,
 ) {
-    const entityId = getEntityId(tableName, row)
-    if (!entityId) {
-        return
-    }
+  const entityId = getEntityId(tableName, row);
+  if (!entityId) {
+    return;
+  }
 
-    const workspaceId = await resolveWorkspaceId(cacheDb, tableName, row)
-    const shouldPersist = tableName === 'workspaces'
-        ? row.data_mode === 'local' || row.data_mode === 'hybrid' || (workspaceId ? shouldMirrorToSqlite(workspaceId) : false)
-        : (workspaceId ? shouldMirrorToSqlite(workspaceId) : false)
+  const workspaceId = await resolveWorkspaceId(cacheDb, tableName, row);
+  const shouldPersist =
+    tableName === "workspaces"
+      ? row.data_mode === "local" ||
+        row.data_mode === "hybrid" ||
+        (workspaceId ? shouldMirrorToSqlite(workspaceId) : false)
+      : workspaceId
+        ? shouldMirrorToSqlite(workspaceId)
+        : false;
 
-    if (!shouldPersist) {
-        return
-    }
+  if (!shouldPersist) {
+    return;
+  }
 
-    const connection = await ensureConnection()
-    if (!connection) {
-        return
-    }
+  const connection = await ensureConnection();
+  if (!connection) {
+    return;
+  }
 
-    const payload = JSON.stringify(await serializeValue(row))
-    const updatedAt = typeof row.updatedAt === 'string'
-        ? row.updatedAt
-        : new Date().toISOString()
+  const payload = JSON.stringify(await serializeValue(row));
+  const updatedAt =
+    typeof row.updatedAt === "string"
+      ? row.updatedAt
+      : new Date().toISOString();
 
-    await connection.execute(
-        `
+  await connection.execute(
+    `
             INSERT INTO local_entities (entity_type, entity_id, workspace_id, payload, updated_at)
             VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT(entity_type, entity_id) DO UPDATE SET
@@ -354,158 +412,179 @@ async function persistEntity(
                 payload = excluded.payload,
                 updated_at = excluded.updated_at
         `,
-        [tableName, entityId, workspaceId, payload, updatedAt]
-    )
+    [tableName, entityId, workspaceId, payload, updatedAt],
+  );
 }
 
 async function deleteEntity(
-    cacheDb: Dexie,
-    tableName: LocalModeSqliteTableName,
-    row: Record<string, unknown>
+  cacheDb: Dexie,
+  tableName: LocalModeSqliteTableName,
+  row: Record<string, unknown>,
 ) {
-    const entityId = getEntityId(tableName, row)
-    if (!entityId) {
-        return
-    }
+  const entityId = getEntityId(tableName, row);
+  if (!entityId) {
+    return;
+  }
 
-    const workspaceId = await resolveWorkspaceId(cacheDb, tableName, row)
-    const shouldDelete = tableName === 'workspaces'
-        ? row.data_mode === 'local' || row.data_mode === 'hybrid' || (workspaceId ? shouldMirrorToSqlite(workspaceId) : false)
-        : (workspaceId ? shouldMirrorToSqlite(workspaceId) : false)
+  const workspaceId = await resolveWorkspaceId(cacheDb, tableName, row);
+  const shouldDelete =
+    tableName === "workspaces"
+      ? row.data_mode === "local" ||
+        row.data_mode === "hybrid" ||
+        (workspaceId ? shouldMirrorToSqlite(workspaceId) : false)
+      : workspaceId
+        ? shouldMirrorToSqlite(workspaceId)
+        : false;
 
-    if (!shouldDelete) {
-        return
-    }
+  if (!shouldDelete) {
+    return;
+  }
 
-    const connection = await ensureConnection()
-    if (!connection) {
-        return
-    }
+  const connection = await ensureConnection();
+  if (!connection) {
+    return;
+  }
 
-    await connection.execute(
-        `
+  await connection.execute(
+    `
             DELETE FROM local_entities
             WHERE entity_type = $1 AND entity_id = $2
         `,
-        [tableName, entityId]
-    )
+    [tableName, entityId],
+  );
 }
 
 export async function hydrateLocalModeCacheFromSqlite(
-    cacheDb: Dexie,
-    workspaceId?: string | null
+  cacheDb: Dexie,
+  workspaceId?: string | null,
 ) {
-    if (!workspaceId || !shouldMirrorToSqlite(workspaceId) || !isSupported()) {
-        return
+  if (!workspaceId || !shouldMirrorToSqlite(workspaceId) || !isSupported()) {
+    return;
+  }
+
+  const existingTask = hydrationTasks.get(workspaceId);
+  if (existingTask) {
+    return existingTask;
+  }
+
+  if (hydratedWorkspaces.has(workspaceId)) {
+    return;
+  }
+
+  const task = (async () => {
+    const connection = await ensureConnection();
+    if (!connection) {
+      return;
     }
 
-    const existingTask = hydrationTasks.get(workspaceId)
-    if (existingTask) {
-        return existingTask
+    const storedRowCount = await getStoredWorkspaceRowCount(
+      connection,
+      workspaceId,
+    );
+    if (storedRowCount === 0) {
+      await seedWorkspaceFromDexie(cacheDb, workspaceId);
+      hydratedWorkspaces.add(workspaceId);
+      return;
     }
 
-    if (hydratedWorkspaces.has(workspaceId)) {
-        return
-    }
-
-    const task = (async () => {
-        const connection = await ensureConnection()
-        if (!connection) {
-            return
-        }
-
-        const storedRowCount = await getStoredWorkspaceRowCount(connection, workspaceId)
-        if (storedRowCount === 0) {
-            await seedWorkspaceFromDexie(cacheDb, workspaceId)
-            hydratedWorkspaces.add(workspaceId)
-            return
-        }
-
-        const rows = await connection.select<StoredEntityRow[]>(
-            `
+    const rows = await connection.select<StoredEntityRow[]>(
+      `
                 SELECT entity_type, entity_id, workspace_id, payload, updated_at
                 FROM local_entities
                 WHERE workspace_id = $1
                    OR (entity_type = 'workspaces' AND entity_id = $1)
                 ORDER BY entity_type, updated_at
             `,
-            [workspaceId]
-        )
+      [workspaceId],
+    );
 
-        await withMirroringPaused(async () => {
-            await clearCacheRowsForWorkspace(cacheDb, workspaceId)
+    await withMirroringPaused(async () => {
+      await clearCacheRowsForWorkspace(cacheDb, workspaceId);
 
-            const groupedRows = new Map<LocalModeSqliteTableName, Record<string, unknown>[]>()
-            for (const row of rows) {
-                const payload = JSON.parse(row.payload) as unknown
-                const revived = deserializeValue(payload) as Record<string, unknown>
-                const existingGroup = groupedRows.get(row.entity_type) ?? []
-                existingGroup.push(revived)
-                groupedRows.set(row.entity_type, existingGroup)
-            }
+      const groupedRows = new Map<
+        LocalModeSqliteTableName,
+        Record<string, unknown>[]
+      >();
+      for (const row of rows) {
+        const payload = JSON.parse(row.payload) as unknown;
+        const revived = deserializeValue(payload) as Record<string, unknown>;
+        const existingGroup = groupedRows.get(row.entity_type) ?? [];
+        existingGroup.push(revived);
+        groupedRows.set(row.entity_type, existingGroup);
+      }
 
-            for (const tableName of LOCAL_MODE_SQLITE_TABLES) {
-                const records = groupedRows.get(tableName)
-                if (!records?.length) {
-                    continue
-                }
+      for (const tableName of LOCAL_MODE_SQLITE_TABLES) {
+        const records = groupedRows.get(tableName);
+        if (!records?.length) {
+          continue;
+        }
 
-                await cacheDb.table(tableName).bulkPut(records)
-            }
-        })
+        await cacheDb.table(tableName).bulkPut(records);
+      }
+    });
 
-        hydratedWorkspaces.add(workspaceId)
-    })().finally(() => {
-        hydrationTasks.delete(workspaceId)
-    })
+    hydratedWorkspaces.add(workspaceId);
+  })().finally(() => {
+    hydrationTasks.delete(workspaceId);
+  });
 
-    hydrationTasks.set(workspaceId, task)
-    return task
+  hydrationTasks.set(workspaceId, task);
+  return task;
 }
 
 export function queueLocalModeSqliteUpsert(
-    cacheDb: Dexie,
-    tableName: string,
-    row: Record<string, unknown>
+  cacheDb: Dexie,
+  tableName: string,
+  row: Record<string, unknown>,
 ) {
-    if (!isSupported() || mirroringPauseDepth > 0 || !isMirroredTableName(tableName)) {
-        return
-    }
+  if (
+    !isSupported() ||
+    mirroringPauseDepth > 0 ||
+    !isMirroredTableName(tableName)
+  ) {
+    return;
+  }
 
-    void enqueueWrite(() => persistEntity(cacheDb, tableName, row))
+  void enqueueWrite(() => persistEntity(cacheDb, tableName, row));
 }
 
 export function queueLocalModeSqliteDelete(
-    cacheDb: Dexie,
-    tableName: string,
-    row: Record<string, unknown>
+  cacheDb: Dexie,
+  tableName: string,
+  row: Record<string, unknown>,
 ) {
-    if (!isSupported() || mirroringPauseDepth > 0 || !isMirroredTableName(tableName)) {
-        return
-    }
+  if (
+    !isSupported() ||
+    mirroringPauseDepth > 0 ||
+    !isMirroredTableName(tableName)
+  ) {
+    return;
+  }
 
-    void enqueueWrite(() => deleteEntity(cacheDb, tableName, row))
+  void enqueueWrite(() => deleteEntity(cacheDb, tableName, row));
 }
 
 export async function clearWorkspaceSqliteData(workspaceId: string) {
-    if (!isSupported()) {
-        return
-    }
+  if (!isSupported()) {
+    return;
+  }
 
-    const connection = await ensureConnection()
-    if (!connection) {
-        return
-    }
+  const connection = await ensureConnection();
+  if (!connection) {
+    return;
+  }
 
-    await connection.execute(
-        `
+  await connection.execute(
+    `
             DELETE FROM local_entities
             WHERE workspace_id = $1
                OR (entity_type = 'workspaces' AND entity_id = $1)
         `,
-        [workspaceId]
-    )
+    [workspaceId],
+  );
 
-    hydratedWorkspaces.delete(workspaceId)
-    console.log(`[LocalModeSQLite] Cleared all SQLite data for workspace ${workspaceId}`)
+  hydratedWorkspaces.delete(workspaceId);
+  console.log(
+    `[LocalModeSQLite] Cleared all SQLite data for workspace ${workspaceId}`,
+  );
 }

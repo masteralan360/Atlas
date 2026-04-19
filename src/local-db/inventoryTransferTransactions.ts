@@ -229,12 +229,27 @@ export function useInventoryTransferTransactions(workspaceId: string | undefined
             }
 
             const syncedAt = new Date().toISOString()
+            const remoteIds = new Set(data.map((row: Record<string, unknown>) => row.id as string))
+
             await db.transaction('rw', db.inventory_transfer_transactions, async () => {
+                // Upsert remote records
                 for (const remoteItem of data) {
                     const localItem = toCamelCase(remoteItem as Record<string, unknown>) as unknown as InventoryTransferTransaction
                     localItem.syncStatus = 'synced'
                     localItem.lastSyncedAt = syncedAt
                     await db.inventory_transfer_transactions.put(localItem)
+                }
+
+                // Remove local records that no longer exist in Supabase
+                const localRows = await db.inventory_transfer_transactions
+                    .where('workspaceId')
+                    .equals(workspaceId)
+                    .toArray()
+                const staleIds = localRows
+                    .filter((row) => row.syncStatus === 'synced' && !remoteIds.has(row.id))
+                    .map((row) => row.id)
+                if (staleIds.length > 0) {
+                    await db.inventory_transfer_transactions.bulkDelete(staleIds)
                 }
             })
         }
