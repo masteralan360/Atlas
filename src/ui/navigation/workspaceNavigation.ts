@@ -2,6 +2,7 @@ import type { TFunction } from 'i18next'
 import {
     ArrowRightLeft,
     BarChart3,
+    Boxes,
     Calculator,
     Copy,
     CreditCard,
@@ -133,6 +134,7 @@ export function buildWorkspaceNavigation({
         ...(hasFeature('discounts') ? [{ name: t('nav.discounts', { defaultValue: 'Discounts' }), href: '/discounts', icon: Percent }] : []),
         ...(hasFeature('storages') ? [{ name: t('nav.storages', { defaultValue: 'Storages' }), href: '/storages', icon: Warehouse }] : []),
         ...(hasFeature('inventory_transfer') ? [{ name: t('nav.inventoryTransfer', { defaultValue: 'Inventory Transfer' }), href: '/inventory-transfer', icon: ArrowRightLeft }] : []),
+        ...(hasFeature('stock_adjustments') ? [{ name: t('nav.stockAdjustments', { defaultValue: 'Stock Adjustments' }), href: '/stock-adjustments', icon: Boxes }] : []),
         ...(hasFeature('invoices_history') ? [{
             name: t('nav.invoicesHistory', { defaultValue: 'Invoices History' }),
             href: '/invoices-history',

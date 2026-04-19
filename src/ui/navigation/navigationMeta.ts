@@ -94,6 +94,7 @@ export const moduleMetaByHref: Record<string, ModuleMeta> = {
     '/discounts': { section: 'stock-and-supply', description: 'Manage product promotions, seasonal offers, and campaign-based price reductions.', badge: 'Promos' },
     '/storages': { section: 'stock-and-supply', description: 'Manage warehouses, storage locations, and availability.', badge: 'Warehouses' },
     '/inventory-transfer': { section: 'stock-and-supply', description: 'Move stock across locations and coordinate replenishment.', badge: 'Movement' },
+    '/stock-adjustments': { section: 'stock-and-supply', description: 'Adjust stock levels, review manual changes, and manage product batches.', badge: 'Audit' },
     '/ledger': { section: 'cash-and-control', description: 'Inspect cross-module inflows, outflows, and payment trails.', badge: 'Flow' },
     '/payments': { section: 'cash-and-control', description: 'Settle obligations and review transaction timelines.', badge: 'Settlement' },
     '/direct-transactions': { section: 'cash-and-control', description: 'Record standalone inflows and outflows outside linked records.', badge: 'Manual' },

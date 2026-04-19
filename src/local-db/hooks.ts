@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 
 import { db } from './database'
 import { createInventoryTransferTransactions } from './inventoryTransferTransactions'
+import { createInventoryTransaction } from './inventoryTransactions'
 import { addToOfflineMutations } from './offlineMutations'
 import { getPrimaryStorageId as getPrimaryStorageIdForWorkspace, normalizeStorageRecord, sortStoragesByPriority } from './storageUtils'
 import {
@@ -447,6 +448,20 @@ export async function createProduct(workspaceId: string, data: Omit<Product, 'id
         timestamp: now
     })
 
+    if ((Number(data.quantity) || 0) > 0 && data.storageId) {
+        await createInventoryTransaction(workspaceId, {
+            productId: id,
+            storageId: data.storageId,
+            transactionType: 'initial_stock',
+            quantityDelta: Number(data.quantity) || 0,
+            previousQuantity: 0,
+            newQuantity: Number(data.quantity) || 0,
+            referenceId: id,
+            referenceType: 'product',
+            createdBy: null
+        }, { timestamp: now })
+    }
+
     return normalizedProduct || product
 }
 
@@ -454,10 +469,16 @@ export async function updateProduct(id: string, data: Partial<Product>): Promise
     const now = new Date().toISOString()
     const existing = await db.products.get(id)
     if (!existing) throw new Error('Product not found')
+    const {
+        quantity: _ignoredQuantity,
+        storageId: _ignoredStorageId,
+        storageName: _ignoredStorageName,
+        ...productData
+    } = data
 
     const updated = {
         ...existing,
-        ...data,
+        ...productData,
         updatedAt: now,
         syncStatus: (isOnline() ? 'synced' : 'pending') as any,
         lastSyncedAt: isOnline() ? now : existing.lastSyncedAt,
@@ -466,7 +487,7 @@ export async function updateProduct(id: string, data: Partial<Product>): Promise
 
     if (isOnline()) {
         // ONLINE
-        const payload = toSupabaseProductPayload({ ...data, updatedAt: now })
+        const payload = toSupabaseProductPayload({ ...productData, updatedAt: now })
         const { error } = await runMutation('products.update', () => supabase.from('products').update(payload).eq('id', id))
 
         if (error) throw normalizeSupabaseActionError(error)
@@ -477,14 +498,6 @@ export async function updateProduct(id: string, data: Partial<Product>): Promise
         await db.products.put(updated)
         await addToOfflineMutations('products', id, 'update', updated as unknown as Record<string, unknown>, existing.workspaceId)
     }
-
-    await setProductInventoryFromLegacyInput({
-        workspaceId: existing.workspaceId,
-        productId: id,
-        storageId: data.storageId ?? existing.storageId ?? null,
-        quantity: typeof data.quantity === 'number' ? data.quantity : updated.quantity,
-        timestamp: now
-    })
 }
 
 async function softDeleteProductBarcodesForDeletedProduct(productId: string, workspaceId: string, now: string) {
@@ -2112,7 +2125,8 @@ export async function transferInventoryBetweenStorages(
                     targetStorageId: sourceStorageId,
                     quantity: transfer.quantity,
                     timestamp: now,
-                    skipReorderCheck: true
+                    skipReorderCheck: true,
+                    skipTransactionLog: true
                 })
             } catch (rollbackError) {
                 console.error('[InventoryTransfer] Failed to rollback transfer:', rollbackError)
@@ -2190,7 +2204,8 @@ export async function deleteStorage(id: string, moveProductsToStorageId: string)
                         targetStorageId: id,
                         quantity: move.quantity,
                         timestamp: now,
-                        skipReorderCheck: true
+                        skipReorderCheck: true,
+                        skipTransactionLog: true
                     })
                 }
                 throw normalizeSupabaseActionError(error)

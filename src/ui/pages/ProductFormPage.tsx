@@ -166,6 +166,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const isClone = mode === 'clone'
     const isEditing = mode === 'edit'
     const isReadOnly = isEditing && !canEdit
+    const canEditStockAllocation = mode !== 'edit'
     const isDesktopShell = isTauri()
     const persistedProductId = isEditing ? product?.id : undefined
     const productBarcodes = useProductBarcodes(persistedProductId)
@@ -555,7 +556,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         : isClone
             ? (t('products.cloneSubtitle') || 'Review the copied values, then create a new product.')
             : isEditing
-                ? (t('products.editSubtitle') || 'Update product details, pricing, stock, and return rules.')
+                ? (t('products.editSubtitle') || 'Update product details, pricing, and return rules. Use Stock Adjustments for stock changes.')
                 : (t('products.subtitle') || 'Manage your inventory')
 
     const unitLabel = t(`products.units.${formData.unit}`, formData.unit)
@@ -801,7 +802,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                     <Select
                                         value={formData.storageId}
                                         onValueChange={(value) => setFormData((current) => ({ ...current, storageId: value }))}
-                                        disabled={isReadOnly}
+                                        disabled={isReadOnly || !canEditStockAllocation}
                                     >
                                         <SelectTrigger id="product-storage" className="h-12 rounded-lg border-border/40 bg-muted/10" allowViewer={true}>
                                             <SelectValue placeholder={t('storages.selectStorage') || 'Select Storage'} />
@@ -817,6 +818,11 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                             ))}
                                         </SelectContent>
                                     </Select>
+                                    {isEditing && (
+                                        <div className="rounded-xl border border-sky-500/20 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-700">
+                                            {t('products.form.stockAdjustmentStorageHint') || 'Storage is locked for existing products. Use Stock Adjustments to move stock between storages.'}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             <div className="grid gap-3 sm:grid-cols-3">
@@ -1126,7 +1132,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                 quantity: event.target.value === '' ? '' : parseInt(event.target.value, 10)
                                             }))}
                                             placeholder="0"
-                                            readOnly={isReadOnly}
+                                            readOnly={isReadOnly || isEditing}
                                             required
                                             className="h-12 rounded-lg border-border/40 bg-muted/10 pr-16 font-black"
                                         />
@@ -1134,6 +1140,11 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                             {t(`products.units.${formData.unit}`, formData.unit)}
                                         </span>
                                     </div>
+                                    {isEditing && (
+                                        <div className="rounded-xl border border-sky-500/20 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-700">
+                                            {t('products.form.stockAdjustmentHint') || 'Use Stock Adjustments to change stock quantities for existing products.'}
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="product-min-stock" className="flex items-center gap-2 font-bold">
@@ -1443,7 +1454,9 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                             </Button>
                             {!isReadOnly && (
                                 <div className="rounded-2xl border border-border/50 bg-muted/20 p-4 text-xs leading-5 text-muted-foreground">
-                                    {t('products.saveHint') || 'Saving applies the current details, image, stock, and return settings together.'}
+                                    {isEditing
+                                        ? (t('products.saveHintEdit') || 'Saving updates product details, image, pricing, and return settings. Stock changes happen in Stock Adjustments.')
+                                        : (t('products.saveHint') || 'Saving applies the current details, image, stock, and return settings together.')}
                                 </div>
                             )}
                         </CardContent>

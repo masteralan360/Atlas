@@ -309,7 +309,8 @@ export async function evaluateReorderTransferRule(ruleId: string) {
                     targetStorageId: rule.sourceStorageId,
                     quantity: rule.transferQuantity,
                     timestamp: new Date().toISOString(),
-                    skipReorderCheck: true
+                    skipReorderCheck: true,
+                    skipTransactionLog: true
                 })
             } catch (rollbackError) {
                 console.error('[ReorderTransferRules] Failed to rollback automated transfer:', rollbackError)

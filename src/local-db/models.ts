@@ -85,6 +85,60 @@ export interface Inventory extends BaseEntity {
     quantity: number
 }
 
+export type StockAdjustmentType = 'increase' | 'decrease'
+export type StockAdjustmentReason =
+    | 'purchase'
+    | 'return'
+    | 'correction'
+    | 'damage'
+    | 'theft'
+    | 'expired'
+    | 'production'
+    | 'other'
+
+export interface StockAdjustment extends BaseEntity {
+    productId: string
+    storageId: string
+    adjustmentType: StockAdjustmentType
+    quantity: number
+    previousQuantity: number
+    newQuantity: number
+    reason: StockAdjustmentReason
+    notes?: string | null
+    createdBy?: string | null
+}
+
+export type InventoryTransactionType =
+    | 'stock_adjustment'
+    | 'transfer_in'
+    | 'transfer_out'
+    | 'sale'
+    | 'return'
+    | 'initial_stock'
+
+export interface InventoryTransaction extends BaseEntity {
+    productId: string
+    storageId: string
+    transactionType: InventoryTransactionType
+    quantityDelta: number
+    previousQuantity: number
+    newQuantity: number
+    referenceId?: string | null
+    referenceType?: string | null
+    notes?: string | null
+    createdBy?: string | null
+}
+
+export interface StockBatch extends BaseEntity {
+    productId: string
+    storageId: string
+    batchNumber: string
+    quantity: number
+    expiryDate?: string | null
+    manufacturingDate?: string | null
+    notes?: string | null
+}
+
 export type DiscountType = 'percentage' | 'fixed_amount'
 export type DiscountSource = 'product' | 'category'
 
@@ -675,7 +729,7 @@ export interface PaymentObligation {
 // Sync Queue Item for tracking pending changes
 export interface SyncQueueItem {
     id: string
-    entityType: 'products' | 'product_barcodes' | 'inventory' | 'reorder_transfer_rules' | 'inventory_transfer_transactions' | 'invoices' | 'users' | 'sales' | 'categories' | 'product_discounts' | 'category_discounts' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments' | 'payment_transactions' | 'budget_settings' | 'budget_allocations' | 'expense_series' | 'expense_items' | 'payroll_statuses' | 'dividend_statuses' | 'customers' | 'suppliers' | 'business_partners' | 'business_partner_merge_candidates' | 'sales_orders' | 'purchase_orders' | 'travel_agency_sales'
+    entityType: 'products' | 'product_barcodes' | 'inventory' | 'stock_adjustments' | 'inventory_transactions' | 'stock_batches' | 'reorder_transfer_rules' | 'inventory_transfer_transactions' | 'invoices' | 'users' | 'sales' | 'categories' | 'product_discounts' | 'category_discounts' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments' | 'payment_transactions' | 'budget_settings' | 'budget_allocations' | 'expense_series' | 'expense_items' | 'payroll_statuses' | 'dividend_statuses' | 'customers' | 'suppliers' | 'business_partners' | 'business_partner_merge_candidates' | 'sales_orders' | 'purchase_orders' | 'travel_agency_sales'
     entityId: string
     operation: 'create' | 'update' | 'delete'
     data: Record<string, unknown>
@@ -706,6 +760,7 @@ export interface Workspace extends BaseEntity {
     discounts?: boolean
     storages?: boolean
     inventory_transfer?: boolean
+    stock_adjustments?: boolean
     invoices_history: boolean
     hr?: boolean
     members?: boolean
@@ -744,7 +799,7 @@ export interface WorkspaceContact extends Omit<BaseEntity, 'isDeleted'> {
 export interface OfflineMutation {
     id: string
     workspaceId: string
-    entityType: 'products' | 'product_barcodes' | 'inventory' | 'reorder_transfer_rules' | 'inventory_transfer_transactions' | 'invoices' | 'users' | 'sales' | 'categories' | 'product_discounts' | 'category_discounts' | 'workspaces' | 'workspace_branches' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments' | 'payment_transactions' | 'budget_settings' | 'budget_allocations' | 'expense_series' | 'expense_items' | 'payroll_statuses' | 'dividend_statuses' | 'customers' | 'suppliers' | 'business_partners' | 'business_partner_merge_candidates' | 'sales_orders' | 'purchase_orders' | 'travel_agency_sales'
+    entityType: 'products' | 'product_barcodes' | 'inventory' | 'stock_adjustments' | 'inventory_transactions' | 'stock_batches' | 'reorder_transfer_rules' | 'inventory_transfer_transactions' | 'invoices' | 'users' | 'sales' | 'categories' | 'product_discounts' | 'category_discounts' | 'workspaces' | 'workspace_branches' | 'storages' | 'employees' | 'workspace_contacts' | 'loans' | 'loan_installments' | 'loan_payments' | 'payment_transactions' | 'budget_settings' | 'budget_allocations' | 'expense_series' | 'expense_items' | 'payroll_statuses' | 'dividend_statuses' | 'customers' | 'suppliers' | 'business_partners' | 'business_partner_merge_candidates' | 'sales_orders' | 'purchase_orders' | 'travel_agency_sales'
     entityId: string
     operation: 'create' | 'update' | 'delete'
     payload: Record<string, unknown>

@@ -13,6 +13,9 @@ import type {
     AppSetting,
     Storage,
     Inventory,
+    StockAdjustment,
+    InventoryTransaction,
+    StockBatch,
     InventoryTransferTransaction,
     ReorderTransferRule,
     Supplier,
@@ -56,6 +59,9 @@ export class AtlasDatabase extends Dexie {
     workspaces!: EntityTable<Workspace, 'id'>
     storages!: EntityTable<Storage, 'id'>
     inventory!: EntityTable<Inventory, 'id'>
+    stock_adjustments!: EntityTable<StockAdjustment, 'id'>
+    inventory_transactions!: EntityTable<InventoryTransaction, 'id'>
+    stock_batches!: EntityTable<StockBatch, 'id'>
     product_discounts!: EntityTable<ProductDiscount, 'id'>
     category_discounts!: EntityTable<CategoryDiscount, 'id'>
     inventory_transfer_transactions!: EntityTable<InventoryTransferTransaction, 'id'>
@@ -1050,6 +1056,12 @@ export class AtlasDatabase extends Dexie {
             }
         })
 
+        this.version(54).stores({
+            stock_adjustments: 'id, workspaceId, productId, storageId, adjustmentType, reason, createdAt, isDeleted, [workspaceId+productId], [workspaceId+createdAt]',
+            inventory_transactions: 'id, workspaceId, productId, storageId, transactionType, referenceId, createdAt, isDeleted, [workspaceId+productId], [workspaceId+createdAt], [workspaceId+transactionType]',
+            stock_batches: 'id, workspaceId, productId, storageId, batchNumber, expiryDate, isDeleted, [workspaceId+productId], [productId+storageId]'
+        })
+
         this.registerLocalModeSyncHooks()
     }
 
@@ -1065,6 +1077,9 @@ export class AtlasDatabase extends Dexie {
             'workspaces',
             'storages',
             'inventory',
+            'stock_adjustments',
+            'inventory_transactions',
+            'stock_batches',
             'product_discounts',
             'category_discounts',
             'inventory_transfer_transactions',
@@ -1194,10 +1209,13 @@ export const db = new AtlasDatabase()
 
 // Database utility functions
 export async function clearDatabase(): Promise<void> {
-    await db.transaction('rw', [db.products, db.product_barcodes, db.inventory, db.product_discounts, db.category_discounts, db.inventory_transfer_transactions, db.reorder_transfer_rules, db.categories, db.invoices, db.travel_agency_sales, db.payment_transactions, db.syncQueue], async () => {
+    await db.transaction('rw', [db.products, db.product_barcodes, db.inventory, db.stock_adjustments, db.inventory_transactions, db.stock_batches, db.product_discounts, db.category_discounts, db.inventory_transfer_transactions, db.reorder_transfer_rules, db.categories, db.invoices, db.travel_agency_sales, db.payment_transactions, db.syncQueue], async () => {
         await db.products.clear()
         await db.product_barcodes.clear()
         await db.inventory.clear()
+        await db.stock_adjustments.clear()
+        await db.inventory_transactions.clear()
+        await db.stock_batches.clear()
         await db.product_discounts.clear()
         await db.category_discounts.clear()
         await db.inventory_transfer_transactions.clear()

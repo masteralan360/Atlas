@@ -37,6 +37,7 @@ export type ModuleFeatureKey =
     | 'discounts'
     | 'storages'
     | 'inventory_transfer'
+    | 'stock_adjustments'
     | 'invoices_history'
     | 'hr'
     | 'members'
@@ -60,6 +61,7 @@ export interface WorkspaceFeatures {
     discounts: boolean
     storages: boolean
     inventory_transfer: boolean
+    stock_adjustments: boolean
     invoices_history: boolean
     hr: boolean
     members: boolean
@@ -137,6 +139,7 @@ const defaultFeatures: WorkspaceFeatures = {
     discounts: true,
     storages: true,
     inventory_transfer: true,
+    stock_adjustments: true,
     invoices_history: true,
     hr: true,
     members: true,
@@ -181,6 +184,7 @@ const WORKSPACE_FEATURE_COLUMNS = [
     'discounts',
     'storages',
     'inventory_transfer',
+    'stock_adjustments',
     'invoices_history',
     'hr',
     'members',
@@ -239,6 +243,7 @@ function getFeaturesFromLocalWorkspace(localWorkspace: Workspace): WorkspaceFeat
         discounts: localWorkspace.discounts ?? true,
         storages: localWorkspace.storages ?? true,
         inventory_transfer: localWorkspace.inventory_transfer ?? true,
+        stock_adjustments: localWorkspace.stock_adjustments ?? true,
         invoices_history: localWorkspace.invoices_history ?? true,
         hr: localWorkspace.hr ?? true,
         members: localWorkspace.members ?? true,
@@ -369,6 +374,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             discounts: nextFeatures.discounts,
             storages: nextFeatures.storages,
             inventory_transfer: nextFeatures.inventory_transfer,
+            stock_adjustments: nextFeatures.stock_adjustments,
             invoices_history: nextFeatures.invoices_history,
             hr: nextFeatures.hr,
             members: nextFeatures.members,
@@ -525,6 +531,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 discounts: workspaceRow.discounts ?? currentFeatures.discounts,
                 storages: workspaceRow.storages ?? currentFeatures.storages,
                 inventory_transfer: workspaceRow.inventory_transfer ?? currentFeatures.inventory_transfer,
+                stock_adjustments: workspaceRow.stock_adjustments ?? currentFeatures.stock_adjustments,
                 invoices_history: workspaceRow.invoices_history ?? currentFeatures.invoices_history,
                 hr: workspaceRow.hr ?? currentFeatures.hr,
                 members: workspaceRow.members ?? currentFeatures.members,
@@ -716,6 +723,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                             discounts: data.discounts ?? currentFeatures.discounts,
                             storages: data.storages ?? currentFeatures.storages,
                             inventory_transfer: data.inventory_transfer ?? currentFeatures.inventory_transfer,
+                            stock_adjustments: data.stock_adjustments ?? currentFeatures.stock_adjustments,
                             invoices_history: data.invoices_history ?? currentFeatures.invoices_history,
                             hr: data.hr ?? currentFeatures.hr,
                             members: data.members ?? currentFeatures.members,
@@ -878,6 +886,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 discounts: newFeatures.discounts,
                 storages: newFeatures.storages,
                 inventory_transfer: newFeatures.inventory_transfer,
+                stock_adjustments: newFeatures.stock_adjustments,
                 invoices_history: newFeatures.invoices_history,
                 hr: newFeatures.hr,
                 members: newFeatures.members,

@@ -11,6 +11,7 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { db } from './database'
 import { addToOfflineMutations } from './offlineMutations'
 import type { Inventory, Product } from './models'
+import { createInventoryTransaction } from './inventoryTransactions'
 import { syncProductBarcodeCachesForWorkspace } from './productBarcodes'
 
 type InventorySyncSource = 'local' | 'remote'
@@ -613,10 +614,15 @@ export async function transferInventoryQuantity(input: {
     sourceStorageId: string
     targetStorageId: string
     quantity: number
+    referenceId?: string | null
+    referenceType?: string | null
+    notes?: string | null
+    createdBy?: string | null
     timestamp?: string
     syncSource?: InventorySyncSource
     skipRemoteSync?: boolean
     skipReorderCheck?: boolean
+    skipTransactionLog?: boolean
 }) {
     if (input.sourceStorageId === input.targetStorageId) {
         throw new Error('Source and target storages must be different')
@@ -630,6 +636,8 @@ export async function transferInventoryQuantity(input: {
     const syncSource = input.syncSource || 'local'
     let sourceRow: Inventory | null = null
     let targetRow: Inventory | null = null
+    let sourcePreviousQuantity = 0
+    let targetPreviousQuantity = 0
 
     if (syncSource === 'local') {
         await hydrateInventoryProductStoragesFromSupabase(
@@ -646,6 +654,8 @@ export async function transferInventoryQuantity(input: {
         }
 
         const targetQuantity = await getInventoryQuantityForProductStorage(input.productId, input.targetStorageId)
+        sourcePreviousQuantity = sourceQuantity
+        targetPreviousQuantity = targetQuantity
 
         sourceRow = await putInventoryQuantity(
             input.workspaceId,
@@ -669,6 +679,36 @@ export async function transferInventoryQuantity(input: {
 
     if (!input.skipRemoteSync && syncSource !== 'remote') {
         await syncInventoryRowsBestEffort([sourceRow, targetRow], input.workspaceId)
+    }
+
+    if (!input.skipTransactionLog) {
+        const referenceType = input.referenceType || 'transfer'
+        await Promise.all([
+            createInventoryTransaction(input.workspaceId, {
+                productId: input.productId,
+                storageId: input.sourceStorageId,
+                transactionType: 'transfer_out',
+                quantityDelta: -input.quantity,
+                previousQuantity: sourcePreviousQuantity,
+                newQuantity: Math.max(sourcePreviousQuantity - input.quantity, 0),
+                referenceId: input.referenceId ?? null,
+                referenceType,
+                notes: input.notes ?? null,
+                createdBy: input.createdBy ?? null
+            }, { timestamp }),
+            createInventoryTransaction(input.workspaceId, {
+                productId: input.productId,
+                storageId: input.targetStorageId,
+                transactionType: 'transfer_in',
+                quantityDelta: input.quantity,
+                previousQuantity: targetPreviousQuantity,
+                newQuantity: targetPreviousQuantity + input.quantity,
+                referenceId: input.referenceId ?? null,
+                referenceType,
+                notes: input.notes ?? null,
+                createdBy: input.createdBy ?? null
+            }, { timestamp })
+        ])
     }
 
     await evaluateReorderRulesIfNeeded({

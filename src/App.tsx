@@ -65,6 +65,7 @@ const KDSDashboard = lazy(() => import('@/ui/pages/KDSDashboard').then(m => ({ d
 const Discounts = lazy(() => import('@/ui/pages/Discounts').then(m => ({ default: m.Discounts })))
 const Storages = lazy(() => import('@/ui/pages/Storages').then(m => ({ default: m.default })))
 const InventoryTransfer = lazy(() => import('@/ui/pages/InventoryTransfer').then(m => ({ default: m.default })))
+const StockAdjustments = lazy(() => import('@/ui/pages/StockAdjustments').then(m => ({ default: m.StockAdjustments })))
 const HR = lazy(() => import('@/ui/pages/HR').then(m => ({ default: m.default })))
 const Loans = lazy(() => import('@/ui/pages/Loans').then(m => ({ default: m.Loans })))
 const Installments = lazy(() => import('@/ui/pages/Loans').then(m => ({ default: m.Installments })))
@@ -770,6 +771,13 @@ function App() {
                                                 <ProtectedRoute requiredFeature="inventory_transfer">
                                                     <Layout>
                                                         <InventoryTransfer />
+                                                    </Layout>
+                                                </ProtectedRoute>
+                                            </Route>
+                                            <Route path="/stock-adjustments">
+                                                <ProtectedRoute requiredFeature="stock_adjustments">
+                                                    <Layout>
+                                                        <StockAdjustments />
                                                     </Layout>
                                                 </ProtectedRoute>
                                             </Route>
