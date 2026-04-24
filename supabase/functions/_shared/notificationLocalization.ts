@@ -114,13 +114,14 @@ export function normalizeNotificationLanguage(value?: string | null): Notificati
 
 export function localizeNotification(input: NotificationLocalizationInput, requestedLanguage?: string | null): NotificationLocalizationResult {
   const language = normalizeNotificationLanguage(requestedLanguage)
+  const notificationType = input.notificationType === 'budget_payroll' ? 'payroll_overdue' : input.notificationType
   const payload = toPayload(input.payload)
   const actionUrl = readString(input.actionUrl) || readString(payload.route) || null
-  const fallbackTitle = readString(input.title) || formatNotificationTypeFallback(input.notificationType)
+  const fallbackTitle = readString(input.title) || formatNotificationTypeFallback(notificationType)
   const fallbackBody = readString(input.body)
   const fallbackActionLabel = readString(input.actionLabel) || (language === 'ar' ? '\u0641\u062a\u062d' : language === 'ku' ? '\u06a9\u0631\u062f\u0646\u06d5\u0648\u06d5' : 'Open')
 
-  if (input.notificationType === 'marketplace_order_pending') {
+  if (notificationType === 'marketplace_order_pending') {
     const orderNumber = readString(payload.order_number)
     const customerName = readString(payload.customer_name)
     const itemCount = readNumber(payload.item_count)
@@ -170,7 +171,7 @@ export function localizeNotification(input: NotificationLocalizationInput, reque
     }
   }
 
-  if (input.notificationType === 'loan_installment_overdue') {
+  if (notificationType === 'loan_installment_overdue') {
     const loanNo = readString(payload.loan_no)
     const borrowerName = readString(payload.borrower_name)
     const overdueInstallmentCount = readNumber(payload.overdue_installment_count)
@@ -220,7 +221,7 @@ export function localizeNotification(input: NotificationLocalizationInput, reque
     }
   }
 
-  if (input.notificationType === 'expense_item_overdue') {
+  if (notificationType === 'expense_item_overdue') {
     const seriesName = readString(payload.series_name)
     const categoryLabel = readString(payload.subcategory) || readString(payload.category)
     const amountText = formatAmount(readNumber(payload.amount), readString(payload.currency), language)
@@ -270,8 +271,8 @@ export function localizeNotification(input: NotificationLocalizationInput, reque
     }
   }
 
-  if (input.notificationType === 'payroll_overdue') {
-    const employeeName = readString(payload.employee_name)
+  if (notificationType === 'payroll_overdue') {
+    const employeeName = readString(payload.employee_name) || (input.notificationType === 'budget_payroll' ? fallbackTitle : '')
     const employeeRole = readString(payload.employee_role)
     const amountText = formatAmount(readNumber(payload.amount), readString(payload.currency), language)
     const monthLabel = formatMonth(readString(payload.month), language)
@@ -320,7 +321,7 @@ export function localizeNotification(input: NotificationLocalizationInput, reque
     }
   }
 
-  if (input.notificationType === 'inventory_low_stock') {
+  if (notificationType === 'inventory_low_stock') {
     const productName = readString(payload.product_name)
     const storageName = readString(payload.storage_name)
     const quantity = readNumber(payload.quantity)
@@ -377,6 +378,6 @@ export function localizeNotification(input: NotificationLocalizationInput, reque
     body: fallbackBody,
     actionLabel: fallbackActionLabel,
     actionUrl,
-    typeLabel: formatNotificationTypeFallback(input.notificationType),
+    typeLabel: formatNotificationTypeFallback(notificationType),
   }
 }

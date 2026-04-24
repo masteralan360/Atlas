@@ -243,3 +243,34 @@ BEGIN
   RETURN v_processed;
 END;
 $function$;
+
+DO $do$
+DECLARE
+  v_job record;
+BEGIN
+  FOR v_job IN
+    SELECT jobid
+    FROM cron.job
+    WHERE jobname = 'overdue_notifications_hourly'
+  LOOP
+    PERFORM cron.unschedule(v_job.jobid);
+  END LOOP;
+END;
+$do$;
+
+DROP FUNCTION IF EXISTS notifications.cron_overdue_job();
+DROP FUNCTION IF EXISTS notifications.detect_overdue_events();
+
+DELETE FROM notifications.inbox
+WHERE notification_type = 'budget_payroll'
+   OR (
+     notification_type = 'payroll_overdue'
+     AND COALESCE(payload, '{}'::jsonb) ? 'status_id'
+   );
+
+DELETE FROM notifications.events
+WHERE entity_type = 'budget_payroll'
+   OR (
+     entity_type = 'payroll_overdue'
+     AND COALESCE(payload, '{}'::jsonb) ? 'status_id'
+   );

@@ -34,27 +34,6 @@ BEGIN
     LOOP
       BEGIN
         v_payload := COALESCE(v_event.payload, '{}'::jsonb);
-
-        IF v_event.entity_type = 'budget_payroll'
-          OR (
-            v_event.entity_type = 'payroll_overdue'
-            AND v_payload ? 'status_id'
-          ) THEN
-          DELETE FROM notifications.inbox
-          WHERE event_id = v_event.id;
-
-          PERFORM public.update_notification_event_status(
-            v_event.id,
-            'sent'::text,
-            NULL::text,
-            NULL::integer
-          );
-
-          v_processed := v_processed + 1;
-          v_batch_processed := v_batch_processed + 1;
-          CONTINUE;
-        END IF;
-
         v_due_date := NULLIF(BTRIM(COALESCE(v_payload ->> 'due_date', '')), '');
         v_title := NULLIF(BTRIM(COALESCE(v_payload ->> 'title', '')), '');
         v_body := COALESCE(
@@ -243,3 +222,118 @@ BEGIN
   RETURN v_processed;
 END;
 $function$;
+
+WITH legacy_payroll_events AS (
+  SELECT
+    e.id,
+    NULLIF(BTRIM(COALESCE(e.payload ->> 'employee_name', e.payload ->> 'title', '')), '') AS employee_name,
+    COALESCE(NULLIF(BTRIM(COALESCE(e.payload ->> 'employee_role', '')), ''), 'Employee') AS employee_role,
+    CASE
+      WHEN COALESCE(e.payload ->> 'amount', '') ~ '^-?\d+(\.\d+)?$' THEN trim(to_char((e.payload ->> 'amount')::numeric, 'FM999999999990.##'))
+      ELSE NULL
+    END AS amount_text,
+    UPPER(NULLIF(BTRIM(COALESCE(e.payload ->> 'currency', '')), '')) AS currency,
+    NULLIF(BTRIM(COALESCE(e.payload ->> 'month', '')), '') AS month_value
+  FROM notifications.events e
+  WHERE e.entity_type = 'budget_payroll'
+)
+UPDATE notifications.events e
+SET
+  entity_type = 'payroll_overdue',
+  payload = jsonb_strip_nulls(
+    COALESCE(e.payload, '{}'::jsonb)
+    || jsonb_build_object(
+      'entity_type', 'payroll_overdue',
+      'employee_name', l.employee_name,
+      'employee_role', l.employee_role,
+      'route', COALESCE(NULLIF(BTRIM(COALESCE(e.payload ->> 'route', '')), ''), '/budget'),
+      'action_label', COALESCE(NULLIF(BTRIM(COALESCE(e.payload ->> 'action_label', '')), ''), 'Open budget'),
+      'scope', COALESCE(NULLIF(BTRIM(COALESCE(e.payload ->> 'scope', '')), ''), 'workspace'),
+      'priority', COALESCE(NULLIF(BTRIM(COALESCE(e.payload ->> 'priority', '')), ''), 'high'),
+      'title', CASE
+        WHEN l.employee_name IS NOT NULL THEN format('Payroll overdue for %s', l.employee_name)
+        ELSE 'Payroll overdue'
+      END,
+      'body', concat_ws(
+        ' | ',
+        l.employee_role,
+        CASE
+          WHEN l.amount_text IS NOT NULL THEN concat_ws(' ', l.amount_text, l.currency)
+          ELSE NULL
+        END,
+        l.month_value
+      )
+    )
+  ),
+  updated_at = now()
+FROM legacy_payroll_events l
+WHERE e.id = l.id;
+
+WITH legacy_payroll_inbox AS (
+  SELECT
+    i.id,
+    NULLIF(BTRIM(COALESCE(i.payload ->> 'employee_name', i.payload ->> 'title', i.title, '')), '') AS employee_name,
+    COALESCE(NULLIF(BTRIM(COALESCE(i.payload ->> 'employee_role', '')), ''), 'Employee') AS employee_role,
+    CASE
+      WHEN COALESCE(i.payload ->> 'amount', '') ~ '^-?\d+(\.\d+)?$' THEN trim(to_char((i.payload ->> 'amount')::numeric, 'FM999999999990.##'))
+      ELSE NULL
+    END AS amount_text,
+    UPPER(NULLIF(BTRIM(COALESCE(i.payload ->> 'currency', '')), '')) AS currency,
+    NULLIF(BTRIM(COALESCE(i.payload ->> 'month', '')), '') AS month_value
+  FROM notifications.inbox i
+  WHERE i.notification_type = 'budget_payroll'
+)
+UPDATE notifications.inbox i
+SET
+  notification_type = 'payroll_overdue',
+  scope = 'workspace',
+  priority = 'high',
+  title = CASE
+    WHEN l.employee_name IS NOT NULL THEN format('Payroll overdue for %s', l.employee_name)
+    ELSE 'Payroll overdue'
+  END,
+  body = COALESCE(
+    NULLIF(BTRIM(COALESCE(i.body, '')), ''),
+    concat_ws(
+      ' | ',
+      l.employee_role,
+      CASE
+        WHEN l.amount_text IS NOT NULL THEN concat_ws(' ', l.amount_text, l.currency)
+        ELSE NULL
+      END,
+      l.month_value
+    )
+  ),
+  action_url = COALESCE(NULLIF(BTRIM(COALESCE(i.action_url, '')), ''), '/budget'),
+  action_label = COALESCE(NULLIF(BTRIM(COALESCE(i.action_label, '')), ''), 'Open budget'),
+  payload = jsonb_strip_nulls(
+    COALESCE(i.payload, '{}'::jsonb)
+    || jsonb_build_object(
+      'entity_type', 'payroll_overdue',
+      'employee_name', l.employee_name,
+      'employee_role', l.employee_role,
+      'route', COALESCE(NULLIF(BTRIM(COALESCE(i.payload ->> 'route', '')), ''), COALESCE(NULLIF(BTRIM(COALESCE(i.action_url, '')), ''), '/budget')),
+      'action_label', COALESCE(NULLIF(BTRIM(COALESCE(i.payload ->> 'action_label', '')), ''), COALESCE(NULLIF(BTRIM(COALESCE(i.action_label, '')), ''), 'Open budget')),
+      'scope', 'workspace',
+      'priority', 'high',
+      'title', CASE
+        WHEN l.employee_name IS NOT NULL THEN format('Payroll overdue for %s', l.employee_name)
+        ELSE 'Payroll overdue'
+      END,
+      'body', COALESCE(
+        NULLIF(BTRIM(COALESCE(i.body, '')), ''),
+        concat_ws(
+          ' | ',
+          l.employee_role,
+          CASE
+            WHEN l.amount_text IS NOT NULL THEN concat_ws(' ', l.amount_text, l.currency)
+            ELSE NULL
+          END,
+          l.month_value
+        )
+      )
+    )
+  ),
+  updated_at = now()
+FROM legacy_payroll_inbox l
+WHERE i.id = l.id;
