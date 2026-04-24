@@ -11,9 +11,22 @@ type WorkspaceRow = {
     default_currency: string | null
 }
 
-type ProductCountRow = {
+type MarketplaceStorageRow = {
+    id: string
+    workspace_id: string
+}
+
+type ProductSummaryRow = {
+    id: string
     workspace_id: string
     category_id: string | null
+}
+
+type InventoryRow = {
+    workspace_id: string
+    storage_id: string
+    product_id: string
+    quantity: number | null
 }
 
 Deno.serve(async (req) => {
@@ -41,36 +54,90 @@ Deno.serve(async (req) => {
 
         const publicWorkspaces = ((workspaces ?? []) as WorkspaceRow[]).filter((workspace) => Boolean(workspace.store_slug))
         const workspaceIds = publicWorkspaces.map((workspace) => workspace.id)
-        const countsByWorkspace = new Map<string, { productCount: number; categoryIds: Set<string> }>()
+        const countsByWorkspace = new Map<string, { productIds: Set<string>; categoryIds: Set<string> }>()
 
         if (workspaceIds.length > 0) {
-            const { data: products, error: productError } = await adminClient
-                .from('products')
-                .select('workspace_id, category_id')
-                .in('workspace_id', workspaceIds)
-                .eq('is_deleted', false)
+            const [
+                { data: marketplaceStorages, error: marketplaceStorageError },
+                { data: products, error: productError }
+            ] = await Promise.all([
+                adminClient
+                    .from('storages')
+                    .select('id, workspace_id')
+                    .in('workspace_id', workspaceIds)
+                    .eq('is_deleted', false)
+                    .eq('is_marketplace', true),
+                adminClient
+                    .from('products')
+                    .select('id, workspace_id, category_id')
+                    .in('workspace_id', workspaceIds)
+                    .eq('is_deleted', false)
+            ])
+
+            if (marketplaceStorageError) {
+                return errorResponse(marketplaceStorageError.message, 500)
+            }
 
             if (productError) {
                 return errorResponse(productError.message, 500)
             }
 
-            for (const row of (products ?? []) as ProductCountRow[]) {
-                const current = countsByWorkspace.get(row.workspace_id) ?? {
-                    productCount: 0,
-                    categoryIds: new Set<string>()
+            const marketplaceStorageIdByWorkspace = new Map<string, string>()
+            for (const row of (marketplaceStorages ?? []) as MarketplaceStorageRow[]) {
+                if (!marketplaceStorageIdByWorkspace.has(row.workspace_id)) {
+                    marketplaceStorageIdByWorkspace.set(row.workspace_id, row.id)
+                }
+            }
+
+            const productById = new Map<string, ProductSummaryRow>()
+            for (const row of (products ?? []) as ProductSummaryRow[]) {
+                productById.set(row.id, row)
+            }
+
+            const marketplaceStorageIds = Array.from(new Set(Array.from(marketplaceStorageIdByWorkspace.values())))
+            if (marketplaceStorageIds.length > 0) {
+                const { data: inventoryRows, error: inventoryError } = await adminClient
+                    .from('inventory')
+                    .select('workspace_id, storage_id, product_id, quantity')
+                    .in('workspace_id', workspaceIds)
+                    .in('storage_id', marketplaceStorageIds)
+                    .eq('is_deleted', false)
+                    .gt('quantity', 0)
+
+                if (inventoryError) {
+                    return errorResponse(inventoryError.message, 500)
                 }
 
-                current.productCount += 1
-                if (row.category_id) {
-                    current.categoryIds.add(row.category_id)
-                }
+                for (const row of (inventoryRows ?? []) as InventoryRow[]) {
+                    if (marketplaceStorageIdByWorkspace.get(row.workspace_id) !== row.storage_id) {
+                        continue
+                    }
 
-                countsByWorkspace.set(row.workspace_id, current)
+                    const product = productById.get(row.product_id)
+                    if (!product || product.workspace_id !== row.workspace_id) {
+                        continue
+                    }
+
+                    const current = countsByWorkspace.get(row.workspace_id) ?? {
+                        productIds: new Set<string>(),
+                        categoryIds: new Set<string>()
+                    }
+
+                    current.productIds.add(product.id)
+                    if (product.category_id) {
+                        current.categoryIds.add(product.category_id)
+                    }
+
+                    countsByWorkspace.set(row.workspace_id, current)
+                }
             }
         }
 
         const stores = await Promise.all(publicWorkspaces.map(async (workspace) => {
-            const counts = countsByWorkspace.get(workspace.id)
+            const counts = countsByWorkspace.get(workspace.id) ?? {
+                productIds: new Set<string>(),
+                categoryIds: new Set<string>()
+            }
             const logoUrl = resolvePublicAssetUrl(workspace.logo_url)
                 ?? (await listMarketplaceAssetUrls([
                     `${workspace.id}/workspace-logos/`,
@@ -84,8 +151,8 @@ Deno.serve(async (req) => {
                 description: workspace.store_description,
                 logo_url: logoUrl,
                 default_currency: workspace.default_currency ?? 'iqd',
-                product_count: counts?.productCount ?? 0,
-                category_count: counts?.categoryIds.size ?? 0
+                product_count: counts.productIds.size,
+                category_count: counts.categoryIds.size
             }
         }))
 

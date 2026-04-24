@@ -1971,6 +1971,58 @@ export class AtlasDatabase extends Dexie {
         }
       });
 
+    this.version(56)
+      .stores({
+        storages:
+          "id, name, workspaceId, isSystem, isProtected, isPrimary, isMarketplace, syncStatus, updatedAt, isDeleted",
+      })
+      .upgrade(async (tx) => {
+        const storageRows = (await tx.table("storages").toArray()) as Array<
+          Record<string, unknown>
+        >;
+        if (storageRows.length === 0) {
+          return;
+        }
+
+        const rowsByWorkspace = new Map<
+          string,
+          Array<Record<string, unknown>>
+        >();
+        for (const row of storageRows) {
+          const workspaceId = String(row.workspaceId || "");
+          if (!workspaceId) {
+            row.isMarketplace = false;
+            continue;
+          }
+
+          const workspaceRows = rowsByWorkspace.get(workspaceId) ?? [];
+          workspaceRows.push(row);
+          rowsByWorkspace.set(workspaceId, workspaceRows);
+        }
+
+        for (const workspaceRows of rowsByWorkspace.values()) {
+          const activeRows = workspaceRows.filter((row) => !row.isDeleted);
+          const marketplaceRow =
+            activeRows.find((row) => row.isMarketplace === true) ??
+            activeRows.find((row) => row.isPrimary === true) ??
+            activeRows.find(
+              (row) =>
+                row.isSystem === true &&
+                String(row.name || "")
+                  .trim()
+                  .toLowerCase() === "main",
+            ) ??
+            activeRows[0];
+
+          for (const row of workspaceRows) {
+            row.isMarketplace =
+              !!marketplaceRow && !row.isDeleted && row.id === marketplaceRow.id;
+          }
+        }
+
+        await tx.table("storages").bulkPut(storageRows);
+      });
+
     this.registerLocalModeSyncHooks();
   }
 

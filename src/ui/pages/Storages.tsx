@@ -1,10 +1,10 @@
-import { useStorages, createStorage, updateStorage, deleteStorage, getPrimaryStorageId, getPrimaryStorageFromList, isPrimaryStorage, useInventory, useProducts, useCategories, type Storage, type CurrencyCode } from '@/local-db'
+import { useStorages, createStorage, updateStorage, deleteStorage, setMarketplaceStorage, getPrimaryStorageId, getPrimaryStorageFromList, isPrimaryStorage, useInventory, useProducts, useCategories, type Storage, type CurrencyCode } from '@/local-db'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { useAuth } from '@/auth'
 import { useWorkspace } from '@/workspace'
 import { Button } from '@/ui/components/button'
-import { Plus, Search, Edit, Trash2, Warehouse, ShieldCheck, Package, Filter, LayoutGrid, Info } from 'lucide-react'
+import { Plus, Search, Edit, Trash2, Warehouse, ShieldCheck, Package, Filter, LayoutGrid, Info, Store } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/ui/components/card'
 import { Input } from '@/ui/components/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/components/table'
@@ -43,9 +43,19 @@ export default function Storages() {
     })
     const [selectedCategoryId, setSelectedCategoryId] = useState<string>('all')
     const [inventorySearch, setInventorySearch] = useState('')
+    const [marketplaceStoragePendingId, setMarketplaceStoragePendingId] = useState<string | null>(null)
 
     const { exchangeData, eurRates, tryRates } = useExchangeRate()
     const settlementCurrency = (features.default_currency || 'usd') as CurrencyCode
+    const isMarketplacePublic = features.visibility === 'public'
+    const canManageMarketplaceStorage = user?.role === 'admin' && isMarketplacePublic
+    const showMarketplaceStorageState = isMarketplacePublic
+
+    const getStorageDisplayName = useCallback((storage: Storage) => {
+        return storage.isSystem
+            ? (t(`storages.${storage.name.toLowerCase()}`, { defaultValue: storage.name }) || storage.name)
+            : storage.name
+    }, [t])
 
     const convertPrice = useCallback((amount: number, from: CurrencyCode, to: CurrencyCode) => {
         if (from === to) return amount
@@ -142,7 +152,7 @@ export default function Storages() {
             return { row, product }
         })
         .filter((entry): entry is { row: (typeof inventory)[number]; product: (typeof products)[number] } => !!entry),
-    [inventory, inventorySearch, products, selectedCategoryId, selectedStorageId])
+        [inventory, inventorySearch, products, selectedCategoryId, selectedStorageId])
 
     const getDisplayImageUrl = (url?: string) => {
         if (!url) return '';
@@ -185,10 +195,8 @@ export default function Storages() {
                     description: t('storages.productsMovedToStorage', '{{count}} products moved to {{storage}}', {
                         count: result.movedCount,
                         storage: fallbackStorage
-                            ? (fallbackStorage.isSystem
-                                ? (t(`storages.${fallbackStorage.name.toLowerCase()}`) || fallbackStorage.name)
-                                : fallbackStorage.name)
-                            : (t('storages.primary', 'Primary Storage') || 'Primary Storage')
+                            ? getStorageDisplayName(fallbackStorage)
+                            : (t('storages.primary', { defaultValue: 'Primary Storage' }) || 'Primary Storage')
                     })
                 })
             } else {
@@ -196,6 +204,34 @@ export default function Storages() {
             }
         }
         setDeletingStorage(undefined)
+    }
+
+    const handleMarketplaceStorageChange = async (storage: Storage, checked: boolean) => {
+        if (!activeWorkspace || !canManageMarketplaceStorage || !checked || storage.isMarketplace) {
+            return
+        }
+
+        setMarketplaceStoragePendingId(storage.id)
+        try {
+            await setMarketplaceStorage(activeWorkspace.id, storage.id)
+            toast({
+                title: t('storages.marketplaceUpdated', { defaultValue: 'Marketplace storage updated' }),
+                description: t('storages.marketplaceUpdatedDesc', {
+                    defaultValue: 'Marketplace products will now be served from {{storage}}.',
+                    storage: getStorageDisplayName(storage)
+                })
+            })
+        } catch (error) {
+            toast({
+                title: t('common.error', { defaultValue: 'Error' }),
+                description: error instanceof Error
+                    ? error.message
+                    : t('storages.marketplaceUpdateError', { defaultValue: 'Failed to update marketplace storage.' }),
+                variant: 'destructive'
+            })
+        } finally {
+            setMarketplaceStoragePendingId(null)
+        }
     }
 
     const openCreateDialog = () => {
@@ -253,6 +289,15 @@ export default function Storages() {
                         </div>
                     </div>
 
+                    {canManageMarketplaceStorage && (
+                        <Card className="border-emerald-500/20 bg-emerald-500/5">
+                            <CardContent className="flex items-start gap-3 p-4 text-sm text-emerald-800 dark:text-emerald-200">
+                                <Store className="mt-0.5 h-4 w-4 shrink-0" />
+                                <p>{t('storages.marketplaceHint', { defaultValue: 'Click "Enable Marketplace Storage" on the storage you want to publish. Only one storage can power the marketplace at a time, and switching it disables the previous one automatically.' })}</p>
+                            </CardContent>
+                        </Card>
+                    )}
+
                     <Card className="rounded-2xl overflow-hidden border-2 shadow-sm">
                         <CardHeader className="bg-muted/30 border-b">
                             <CardTitle className="text-lg font-bold flex items-center gap-2">
@@ -284,11 +329,16 @@ export default function Storages() {
                                             <TableRow key={storage.id} className="group hover:bg-muted/30 transition-colors border-b last:border-0 text-foreground/80">
                                                 <TableCell className="font-bold pl-6 text-foreground">
                                                     <div className="flex flex-wrap items-center gap-2">
-                                                    {storage.isSystem && <ShieldCheck className="w-4 h-4 text-amber-500" />}
-                                                    {storage.isSystem ? (t(`storages.${storage.name.toLowerCase()}`) || storage.name) : storage.name}
+                                                        {storage.isSystem && <ShieldCheck className="w-4 h-4 text-amber-500" />}
+                                                        {getStorageDisplayName(storage)}
                                                         {isPrimaryStorage(storage) && (
                                                             <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-primary/10 text-primary">
                                                                 {t('storages.primary', 'Primary')}
+                                                            </span>
+                                                        )}
+                                                        {showMarketplaceStorageState && storage.isMarketplace && (
+                                                            <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                                                                {t('storages.marketplaceBadge', { defaultValue: 'Marketplace' })}
                                                             </span>
                                                         )}
                                                     </div>
@@ -302,21 +352,40 @@ export default function Storages() {
                                                     </span>
                                                 </TableCell>
                                                 <TableCell className="text-right pr-6">
-                                                    <div className="flex justify-end gap-1 opacity-10 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                                                        {!storage.isSystem && (
-                                                            <>
-                                                                {(user?.role === 'admin' || user?.role === 'staff') && (
-                                                                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl hover:bg-primary/10 hover:text-primary transition-all" onClick={() => openEditDialog(storage)}>
-                                                                        <Edit className="h-4 w-4" />
-                                                                    </Button>
-                                                                )}
-                                                                {user?.role === 'admin' && (
-                                                                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl hover:bg-destructive/10 hover:text-destructive transition-all" onClick={() => setDeletingStorage(storage)}>
-                                                                        <Trash2 className="h-4 w-4" />
-                                                                    </Button>
-                                                                )}
-                                                            </>
+                                                    <div className="flex justify-end items-center gap-2 flex-wrap">
+                                                        {canManageMarketplaceStorage && (
+                                                            <Button
+                                                                type="button"
+                                                                size="sm"
+                                                                variant={storage.isMarketplace ? 'default' : 'outline'}
+                                                                disabled={marketplaceStoragePendingId !== null}
+                                                                className={storage.isMarketplace
+                                                                    ? 'rounded-full bg-emerald-600 hover:bg-emerald-600 text-white'
+                                                                    : 'rounded-full border-emerald-500/30 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300'}
+                                                                onClick={() => {
+                                                                    void handleMarketplaceStorageChange(storage, true)
+                                                                }}
+                                                            >
+                                                                <Store className="h-3.5 w-3.5" />
+
+                                                            </Button>
                                                         )}
+                                                        <div className="flex justify-end gap-1">
+                                                            {!storage.isSystem && (
+                                                                <>
+                                                                    {(user?.role === 'admin' || user?.role === 'staff') && (
+                                                                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl hover:bg-primary/10 hover:text-primary transition-all" onClick={() => openEditDialog(storage)}>
+                                                                            <Edit className="h-4 w-4" />
+                                                                        </Button>
+                                                                    )}
+                                                                    {user?.role === 'admin' && (
+                                                                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl hover:bg-destructive/10 hover:text-destructive transition-all" onClick={() => setDeletingStorage(storage)}>
+                                                                            <Trash2 className="h-4 w-4" />
+                                                                        </Button>
+                                                                    )}
+                                                                </>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 </TableCell>
                                             </TableRow>

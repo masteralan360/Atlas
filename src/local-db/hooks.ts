@@ -1963,6 +1963,7 @@ export async function createStorage(workspaceId: string, data: { name: string })
         isSystem: false,
         isProtected: false,
         isPrimary: activeStorageCount === 0,
+        isMarketplace: activeStorageCount === 0,
         createdAt: now,
         updatedAt: now,
         syncStatus: (isOnline() ? 'synced' : 'pending') as any,
@@ -1970,8 +1971,6 @@ export async function createStorage(workspaceId: string, data: { name: string })
         version: 1,
         isDeleted: false
     }
-
-    await db.storages.put(storage)
 
     await db.storages.put(storage)
 
@@ -2051,6 +2050,114 @@ export async function updateStorage(id: string, data: Partial<Pick<Storage, 'nam
         }
     } else {
         await addToOfflineMutations('storages', id, 'update', toSnakeCase(data) as any, existing.workspaceId)
+    }
+}
+
+function toSupabaseStoragePayload(storage: Partial<Storage>) {
+    return toSnakeCase({
+        ...storage,
+        syncStatus: undefined,
+        lastSyncedAt: undefined,
+        version: undefined
+    })
+}
+
+async function queueStorageUpdateRows(rows: Storage[], workspaceId: string) {
+    await Promise.all(rows.map((row) =>
+        addToOfflineMutations(
+            'storages',
+            row.id,
+            'update',
+            toSupabaseStoragePayload(row) as any,
+            workspaceId
+        )
+    ))
+}
+
+async function syncStorageUpdatesSequentially(rows: Storage[]) {
+    for (const row of rows) {
+        const payload = toSupabaseStoragePayload(row)
+        const { error } = await runMutation('storages.syncRow', () =>
+            supabase
+                .from('storages')
+                .update(payload)
+                .eq('id', row.id)
+        )
+
+        if (error) {
+            throw normalizeSupabaseActionError(error)
+        }
+    }
+}
+
+export async function setMarketplaceStorage(workspaceId: string, storageId: string): Promise<void> {
+    const activeStorages = (await db.storages
+        .where('workspaceId')
+        .equals(workspaceId)
+        .and((storage) => !storage.isDeleted)
+        .toArray())
+        .map(normalizeStorageRecord)
+
+    const targetStorage = activeStorages.find((storage) => storage.id === storageId)
+    if (!targetStorage) {
+        throw new Error('Storage not found')
+    }
+
+    const hasExclusiveMarketplaceSelection = activeStorages.every((storage) =>
+        storage.id === storageId ? storage.isMarketplace : !storage.isMarketplace
+    )
+    if (hasExclusiveMarketplaceSelection) {
+        return
+    }
+
+    const now = new Date().toISOString()
+    const updatedRows = activeStorages
+        .filter((storage) => storage.id === storageId || storage.isMarketplace)
+        .map((storage) => ({
+            ...storage,
+            isMarketplace: storage.id === storageId,
+            updatedAt: now,
+            syncStatus: 'pending' as const,
+            lastSyncedAt: isOnline() ? storage.lastSyncedAt : null,
+            version: storage.version + 1
+        }))
+
+    const previousRows = new Map(updatedRows.map((row) => {
+        const previousRow = activeStorages.find((storage) => storage.id === row.id)
+        return [row.id, previousRow ? { ...previousRow } : null] as const
+    }))
+
+    await db.transaction('rw', db.storages, async () => {
+        for (const row of updatedRows) {
+            await db.storages.put(row)
+        }
+    })
+
+    if (isOnline()) {
+        try {
+            await syncStorageUpdatesSequentially(updatedRows)
+
+            const syncedAt = new Date().toISOString()
+            await Promise.all(updatedRows.map((row) =>
+                db.storages.update(row.id, { syncStatus: 'synced', lastSyncedAt: syncedAt })
+            ))
+        } catch (error) {
+            if (shouldUseOfflineMutationFallback(error)) {
+                await queueStorageUpdateRows(updatedRows, workspaceId)
+            } else {
+                await db.transaction('rw', db.storages, async () => {
+                    for (const row of updatedRows) {
+                        const previousRow = previousRows.get(row.id)
+                        if (previousRow) {
+                            await db.storages.put(previousRow)
+                        }
+                    }
+                })
+                throw normalizeSupabaseActionError(error)
+            }
+        }
+    } else {
+        await queueStorageUpdateRows(updatedRows, workspaceId)
     }
 }
 
@@ -2174,28 +2281,65 @@ export async function deleteStorage(id: string, moveProductsToStorageId: string)
         throw normalizeSupabaseActionError(error)
     }
 
-    // Soft delete the storage
-    await db.storages.update(id, { isDeleted: true, updatedAt: now, syncStatus: 'pending' })
+    const fallbackStorage = existing.isMarketplace
+        ? await db.storages.get(moveProductsToStorageId)
+        : null
+
+    const deletedStorage: Storage = {
+        ...normalizeStorageRecord(existing),
+        isMarketplace: false,
+        isDeleted: true,
+        updatedAt: now,
+        syncStatus: 'pending',
+        lastSyncedAt: isOnline() ? existing.lastSyncedAt : null,
+        version: existing.version + 1
+    }
+    const promotedFallbackStorage: Storage | null = existing.isMarketplace && fallbackStorage && !fallbackStorage.isDeleted
+        ? {
+            ...normalizeStorageRecord(fallbackStorage),
+            isMarketplace: true,
+            updatedAt: now,
+            syncStatus: 'pending',
+            lastSyncedAt: isOnline() ? fallbackStorage.lastSyncedAt : null,
+            version: fallbackStorage.version + 1
+        }
+        : null
+
+    await db.transaction('rw', db.storages, async () => {
+        await db.storages.put(deletedStorage)
+        if (promotedFallbackStorage) {
+            await db.storages.put(promotedFallbackStorage)
+        }
+    })
 
     if (isOnline()) {
         try {
-            const { error } = await runMutation('storages.delete', () =>
-                supabase
-                    .from('storages')
-                    .update({ is_deleted: true, updated_at: now })
-                    .eq('id', id)
-            )
-
-            if (error) {
-                throw normalizeSupabaseActionError(error)
-            }
+            const rowsToSync = promotedFallbackStorage
+                ? [deletedStorage, promotedFallbackStorage]
+                : [deletedStorage]
+            await syncStorageUpdatesSequentially(rowsToSync)
 
             await db.storages.update(id, { syncStatus: 'synced', lastSyncedAt: now })
+            if (promotedFallbackStorage) {
+                await db.storages.update(promotedFallbackStorage.id, { syncStatus: 'synced', lastSyncedAt: now })
+            }
         } catch (error) {
             if (shouldUseOfflineMutationFallback(error)) {
-                await addToOfflineMutations('storages', id, 'update', { is_deleted: true } as any, existing.workspaceId)
+                await addToOfflineMutations('storages', id, 'update', toSupabaseStoragePayload(deletedStorage) as any, existing.workspaceId)
+                if (promotedFallbackStorage) {
+                    await addToOfflineMutations(
+                        'storages',
+                        promotedFallbackStorage.id,
+                        'update',
+                        toSupabaseStoragePayload(promotedFallbackStorage) as any,
+                        existing.workspaceId
+                    )
+                }
             } else {
                 await db.storages.put(existing)
+                if (fallbackStorage) {
+                    await db.storages.put(normalizeStorageRecord(fallbackStorage))
+                }
                 for (const move of [...completedMoves].reverse()) {
                     await transferInventoryQuantity({
                         workspaceId: existing.workspaceId,
@@ -2212,7 +2356,16 @@ export async function deleteStorage(id: string, moveProductsToStorageId: string)
             }
         }
     } else {
-        await addToOfflineMutations('storages', id, 'update', { is_deleted: true } as any, existing.workspaceId)
+        await addToOfflineMutations('storages', id, 'update', toSupabaseStoragePayload(deletedStorage) as any, existing.workspaceId)
+        if (promotedFallbackStorage) {
+            await addToOfflineMutations(
+                'storages',
+                promotedFallbackStorage.id,
+                'update',
+                toSupabaseStoragePayload(promotedFallbackStorage) as any,
+                existing.workspaceId
+            )
+        }
     }
 
     try {

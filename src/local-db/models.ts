@@ -89,6 +89,7 @@ export interface Storage extends BaseEntity {
   isSystem: boolean;
   isProtected: boolean;
   isPrimary: boolean;
+  isMarketplace: boolean;
 }
 
 export interface Inventory extends BaseEntity {

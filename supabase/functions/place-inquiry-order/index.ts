@@ -42,7 +42,11 @@ type ProductRow = {
     price: number
     currency: string | null
     image_url: string | null
-    storage_id: string | null
+}
+
+type InventoryRow = {
+    product_id: string
+    quantity: number | null
 }
 
 function countDigits(value: string) {
@@ -189,33 +193,73 @@ Deno.serve(async (req) => {
             return errorResponse('Too many orders from this IP address. Please try again later.', 429)
         }
 
+        const { data: marketplaceStorageId, error: marketplaceStorageError } = await adminClient.rpc('ensure_marketplace_storage', {
+            p_workspace_id: (workspace as WorkspaceRow).id
+        })
+
+        if (marketplaceStorageError) {
+            return errorResponse(marketplaceStorageError.message, 500)
+        }
+
+        if (!marketplaceStorageId) {
+            return errorResponse('Marketplace storage is not configured for this store', 409)
+        }
+
         const productIds = Array.from(normalizedItems.keys())
-        const { data: products, error: productsError } = await adminClient
-            .from('products')
-            .select('id, name, sku, price, currency, image_url, storage_id')
-            .eq('workspace_id', (workspace as WorkspaceRow).id)
-            .eq('is_deleted', false)
-            .in('id', productIds)
+        const [
+            { data: inventoryRows, error: inventoryError },
+            { data: products, error: productsError },
+            { data: activeDiscounts, error: discountsError }
+        ] = await Promise.all([
+            adminClient
+                .from('inventory')
+                .select('product_id, quantity')
+                .eq('workspace_id', (workspace as WorkspaceRow).id)
+                .eq('storage_id', marketplaceStorageId)
+                .eq('is_deleted', false)
+                .in('product_id', productIds),
+            adminClient
+                .from('products')
+                .select('id, name, sku, price, currency, image_url')
+                .eq('workspace_id', (workspace as WorkspaceRow).id)
+                .eq('is_deleted', false)
+                .in('id', productIds),
+            adminClient.rpc('get_active_discounts_for_marketplace_storage', {
+                p_workspace_id: (workspace as WorkspaceRow).id,
+                p_storage_id: marketplaceStorageId
+            })
+        ])
+
+        if (inventoryError) {
+            return errorResponse(inventoryError.message, 500)
+        }
 
         if (productsError) {
             return errorResponse(productsError.message, 500)
         }
 
+        if (discountsError) {
+            return errorResponse(discountsError.message, 500)
+        }
+
+        const inventoryProductIds = new Set(
+            ((inventoryRows ?? []) as InventoryRow[])
+                .map((row) => row.product_id)
+                .filter(Boolean)
+        )
+        if (inventoryProductIds.size !== productIds.length) {
+            return errorResponse('Some products could not be found for this store')
+        }
+
         const productsById = new Map<string, ProductRow>()
         for (const product of (products ?? []) as ProductRow[]) {
-            productsById.set(product.id, product)
+            if (inventoryProductIds.has(product.id)) {
+                productsById.set(product.id, product)
+            }
         }
 
         if (productsById.size !== productIds.length) {
             return errorResponse('Some products could not be found for this store')
-        }
-
-        const { data: activeDiscounts, error: discountsError } = await adminClient.rpc('get_active_discounts_for_workspace', {
-            p_workspace_id: (workspace as WorkspaceRow).id
-        })
-
-        if (discountsError) {
-            return errorResponse(discountsError.message, 500)
         }
 
         const discountByProductId = new Map<string, ResolvedWorkspaceDiscountRow>()
@@ -258,7 +302,7 @@ Deno.serve(async (req) => {
                 quantity,
                 line_total: lineTotal,
                 image_url: resolvePublicAssetUrl(product.image_url),
-                storage_id: product.storage_id,
+                storage_id: marketplaceStorageId,
                 discount_type: resolvedDiscount?.discount_type ?? null,
                 discount_value: resolvedDiscount?.discount_value ?? null,
                 discount_ends_at: resolvedDiscount?.ends_at ?? null,
@@ -316,4 +360,3 @@ Deno.serve(async (req) => {
         return errorResponse(message, 500)
     }
 })
-

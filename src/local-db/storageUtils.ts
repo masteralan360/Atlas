@@ -14,7 +14,8 @@ export function normalizeStorageRecord(storage: Storage): Storage {
         ...storage,
         isSystem: !!storage.isSystem,
         isProtected: !!storage.isProtected,
-        isPrimary: !!storage.isPrimary
+        isPrimary: !!storage.isPrimary,
+        isMarketplace: !!storage.isMarketplace
     }
 }
 
@@ -37,12 +38,37 @@ export function getPrimaryStorageFromList(storages: Storage[]) {
         ?? activeStorages[0]
 }
 
+export function isMarketplaceStorage(storage?: Pick<Storage, 'isDeleted' | 'isMarketplace'> | null) {
+    if (!storage || storage.isDeleted) {
+        return false
+    }
+
+    return storage.isMarketplace === true
+}
+
+export function getMarketplaceStorageFromList(storages: Storage[]) {
+    const activeStorages = storages.filter((storage) => !storage.isDeleted)
+    if (activeStorages.length === 0) {
+        return undefined
+    }
+
+    return activeStorages.find((storage) => storage.isMarketplace)
+        ?? getPrimaryStorageFromList(activeStorages)
+        ?? activeStorages[0]
+}
+
 export function sortStoragesByPriority(storages: Storage[]) {
     return [...storages].sort((left, right) => {
         const leftPrimary = isPrimaryStorage(left) ? 1 : 0
         const rightPrimary = isPrimaryStorage(right) ? 1 : 0
         if (leftPrimary !== rightPrimary) {
             return rightPrimary - leftPrimary
+        }
+
+        const leftMarketplace = isMarketplaceStorage(left) ? 1 : 0
+        const rightMarketplace = isMarketplaceStorage(right) ? 1 : 0
+        if (leftMarketplace !== rightMarketplace) {
+            return rightMarketplace - leftMarketplace
         }
 
         const leftSystem = left.isSystem ? 1 : 0

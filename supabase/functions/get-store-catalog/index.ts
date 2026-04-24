@@ -40,6 +40,11 @@ type ContactRow = {
     is_primary: boolean | null
 }
 
+type InventoryRow = {
+    product_id: string
+    quantity: number | null
+}
+
 Deno.serve(async (req) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
@@ -78,8 +83,7 @@ Deno.serve(async (req) => {
 
         const [
             { data: contacts, error: contactsError },
-            { data: products, error: productsError },
-            { data: activeDiscounts, error: discountsError }
+            { data: marketplaceStorageId, error: marketplaceStorageError }
         ] = await Promise.all([
             adminClient
                 .from('workspace_contacts')
@@ -87,13 +91,7 @@ Deno.serve(async (req) => {
                 .eq('workspace_id', resolvedWorkspace.id)
                 .order('is_primary', { ascending: false })
                 .order('created_at', { ascending: true }),
-            adminClient
-                .from('products')
-                .select('id, name, sku, description, price, currency, unit, category_id, image_url')
-                .eq('workspace_id', resolvedWorkspace.id)
-                .eq('is_deleted', false)
-                .order('name', { ascending: true }),
-            adminClient.rpc('get_active_discounts_for_workspace', {
+            adminClient.rpc('ensure_marketplace_storage', {
                 p_workspace_id: resolvedWorkspace.id
             })
         ])
@@ -102,12 +100,115 @@ Deno.serve(async (req) => {
             return errorResponse(contactsError.message, 500)
         }
 
-        if (productsError) {
-            return errorResponse(productsError.message, 500)
+        if (marketplaceStorageError) {
+            return errorResponse(marketplaceStorageError.message, 500)
+        }
+
+        const primaryContacts = ((contacts ?? []) as ContactRow[]).filter((contact) => contact.is_primary)
+        const visibleContacts = (primaryContacts.length > 0 ? primaryContacts : (contacts ?? []) as ContactRow[]).slice(0, 5)
+        const resolvedLogoUrl = resolvePublicAssetUrl(resolvedWorkspace.logo_url)
+            ?? (await listMarketplaceAssetUrls([
+                `${resolvedWorkspace.id}/workspace-logos/`,
+                `${resolvedWorkspace.id}/workspaces/`
+            ], 1))[0]
+            ?? null
+
+        if (!marketplaceStorageId) {
+            return jsonResponse(
+                {
+                    store: {
+                        name: resolvedWorkspace.name,
+                        slug: resolvedWorkspace.store_slug,
+                        description: resolvedWorkspace.store_description,
+                        logo_url: resolvedLogoUrl,
+                        currency: resolvedWorkspace.default_currency ?? 'iqd',
+                        contacts: visibleContacts.map((contact) => ({
+                            type: contact.type,
+                            value: contact.value,
+                            label: contact.label,
+                            is_primary: Boolean(contact.is_primary)
+                        }))
+                    },
+                    categories: [],
+                    products: []
+                },
+                {
+                    headers: {
+                        'Cache-Control': 'public, max-age=30, s-maxage=120'
+                    }
+                }
+            )
+        }
+
+        const [
+            { data: inventoryRows, error: inventoryError },
+            { data: activeDiscounts, error: discountsError }
+        ] = await Promise.all([
+            adminClient
+                .from('inventory')
+                .select('product_id, quantity')
+                .eq('workspace_id', resolvedWorkspace.id)
+                .eq('storage_id', marketplaceStorageId)
+                .eq('is_deleted', false)
+                .gt('quantity', 0),
+            adminClient.rpc('get_active_discounts_for_marketplace_storage', {
+                p_workspace_id: resolvedWorkspace.id,
+                p_storage_id: marketplaceStorageId
+            })
+        ])
+
+        if (inventoryError) {
+            return errorResponse(inventoryError.message, 500)
         }
 
         if (discountsError) {
             return errorResponse(discountsError.message, 500)
+        }
+
+        const visibleProductIds = Array.from(new Set(
+            ((inventoryRows ?? []) as InventoryRow[])
+                .filter((row) => Number(row.quantity ?? 0) > 0)
+                .map((row) => row.product_id)
+                .filter(Boolean)
+        ))
+
+        if (visibleProductIds.length === 0) {
+            return jsonResponse(
+                {
+                    store: {
+                        name: resolvedWorkspace.name,
+                        slug: resolvedWorkspace.store_slug,
+                        description: resolvedWorkspace.store_description,
+                        logo_url: resolvedLogoUrl,
+                        currency: resolvedWorkspace.default_currency ?? 'iqd',
+                        contacts: visibleContacts.map((contact) => ({
+                            type: contact.type,
+                            value: contact.value,
+                            label: contact.label,
+                            is_primary: Boolean(contact.is_primary)
+                        }))
+                    },
+                    categories: [],
+                    products: []
+                },
+                {
+                    headers: {
+                        'Cache-Control': 'public, max-age=30, s-maxage=120'
+                    }
+                }
+            )
+        }
+
+        const { data: products, error: productsError } = await adminClient
+            .from('products')
+            .select('id, name, sku, description, price, currency, unit, category_id, image_url')
+            .eq('workspace_id', resolvedWorkspace.id)
+            .eq('is_deleted', false)
+            .in('id', visibleProductIds)
+            .order('name', { ascending: true })
+
+        if (productsError) {
+            return errorResponse(productsError.message, 500)
         }
 
         const productRows = (products ?? []) as ProductRow[]
@@ -120,6 +221,7 @@ Deno.serve(async (req) => {
                 })
             }
         }
+
         const categoryIds = Array.from(new Set(productRows.map((product) => product.category_id).filter((value): value is string => Boolean(value))))
         const categoryNameById = new Map<string, string>()
 
@@ -139,15 +241,6 @@ Deno.serve(async (req) => {
                 categoryNameById.set(category.id, category.name)
             }
         }
-
-        const primaryContacts = ((contacts ?? []) as ContactRow[]).filter((contact) => contact.is_primary)
-        const visibleContacts = (primaryContacts.length > 0 ? primaryContacts : (contacts ?? []) as ContactRow[]).slice(0, 5)
-        const resolvedLogoUrl = resolvePublicAssetUrl(resolvedWorkspace.logo_url)
-            ?? (await listMarketplaceAssetUrls([
-                `${resolvedWorkspace.id}/workspace-logos/`,
-                `${resolvedWorkspace.id}/workspaces/`
-            ], 1))[0]
-            ?? null
 
         const resolvedProductImageUrls = productRows.map((product) => resolvePublicAssetUrl(product.image_url))
         const missingProductImageCount = resolvedProductImageUrls.filter((value) => !value).length
