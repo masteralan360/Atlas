@@ -70,3 +70,6 @@ BEGIN
   RETURN v_event_id;
 END;
 $function$;
+
+REVOKE ALL ON FUNCTION public.upsert_notification_event(uuid, uuid, text, text, date, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.upsert_notification_event(uuid, uuid, text, text, date, jsonb) TO service_role;

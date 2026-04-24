@@ -47,7 +47,7 @@ BEGIN
     SELECT p.id AS user_id, p.workspace_id
     FROM public.profiles p
     WHERE p.workspace_id IS NOT NULL
-      AND LOWER(BTRIM(COALESCE(p.role, ''))) = 'admin'
+      AND p.role = 'admin'
       AND (p_target_workspace_id IS NULL OR p.workspace_id = p_target_workspace_id)
   ) r
   JOIN (
@@ -126,7 +126,7 @@ BEGIN
     SELECT p.id AS user_id, p.workspace_id
     FROM public.profiles p
     WHERE p.workspace_id IS NOT NULL
-      AND LOWER(BTRIM(COALESCE(p.role, ''))) = 'admin'
+      AND p.role = 'admin'
       AND (p_target_workspace_id IS NULL OR p.workspace_id = p_target_workspace_id)
   ) r
   JOIN (
@@ -153,7 +153,7 @@ BEGIN
       WHERE (p_target_workspace_id IS NULL OR ei.workspace_id = p_target_workspace_id)
         AND COALESCE(ei.is_deleted, false) = false
         AND COALESCE(es.is_deleted, false) = false
-        AND ei.due_date <= current_date
+        AND ei.due_date < current_date
         AND COALESCE(ei.status, 'pending') <> 'paid'
     ) expense_candidates
     WHERE NOT (
@@ -197,7 +197,7 @@ BEGIN
     SELECT p.id AS user_id, p.workspace_id
     FROM public.profiles p
     WHERE p.workspace_id IS NOT NULL
-      AND LOWER(BTRIM(COALESCE(p.role, ''))) = 'admin'
+      AND p.role = 'admin'
       AND (p_target_workspace_id IS NULL OR p.workspace_id = p_target_workspace_id)
   ) r
   JOIN (
@@ -246,7 +246,7 @@ BEGIN
         AND COALESCE(e.is_fired, false) = false
         AND COALESCE(e.salary, 0) > 0
     ) payroll_base
-    WHERE due_date <= current_date
+    WHERE due_date < current_date
       AND status <> 'paid'
       AND NOT (
         status = 'snoozed'
@@ -290,7 +290,7 @@ BEGIN
     SELECT p.id AS user_id, p.workspace_id
     FROM public.profiles p
     WHERE p.workspace_id IS NOT NULL
-      AND LOWER(BTRIM(COALESCE(p.role, ''))) = 'admin'
+      AND p.role = 'admin'
       AND (p_target_workspace_id IS NULL OR p.workspace_id = p_target_workspace_id)
   ) r
   JOIN (
@@ -324,3 +324,6 @@ BEGIN
   RETURN COALESCE(v_dispatched_count, 0);
 END;
 $function$;
+
+REVOKE ALL ON FUNCTION public.detect_and_dispatch_notification_events(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.detect_and_dispatch_notification_events(uuid) TO service_role;

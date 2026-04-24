@@ -47,7 +47,7 @@ BEGIN
     SELECT p.id AS user_id, p.workspace_id
     FROM public.profiles p
     WHERE p.workspace_id IS NOT NULL
-      AND LOWER(BTRIM(COALESCE(p.role, ''))) = 'admin'
+      AND LOWER(BTRIM(COALESCE(p.role, ''))) IN ('admin', 'staff')
       AND (p_target_workspace_id IS NULL OR p.workspace_id = p_target_workspace_id)
   ) r
   JOIN (
@@ -126,7 +126,7 @@ BEGIN
     SELECT p.id AS user_id, p.workspace_id
     FROM public.profiles p
     WHERE p.workspace_id IS NOT NULL
-      AND LOWER(BTRIM(COALESCE(p.role, ''))) = 'admin'
+      AND LOWER(BTRIM(COALESCE(p.role, ''))) IN ('admin', 'staff')
       AND (p_target_workspace_id IS NULL OR p.workspace_id = p_target_workspace_id)
   ) r
   JOIN (
@@ -197,7 +197,7 @@ BEGIN
     SELECT p.id AS user_id, p.workspace_id
     FROM public.profiles p
     WHERE p.workspace_id IS NOT NULL
-      AND LOWER(BTRIM(COALESCE(p.role, ''))) = 'admin'
+      AND LOWER(BTRIM(COALESCE(p.role, ''))) IN ('admin', 'staff')
       AND (p_target_workspace_id IS NULL OR p.workspace_id = p_target_workspace_id)
   ) r
   JOIN (
@@ -324,3 +324,6 @@ BEGIN
   RETURN COALESCE(v_dispatched_count, 0);
 END;
 $function$;
+
+REVOKE ALL ON FUNCTION public.detect_and_dispatch_notification_events(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.detect_and_dispatch_notification_events(uuid) TO service_role;

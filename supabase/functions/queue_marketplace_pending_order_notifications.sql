@@ -49,6 +49,6 @@ BEGIN
   )
   FROM public.profiles p
   WHERE p.workspace_id = v_order.workspace_id
-    AND p.role IN ('admin', 'staff');
+    AND LOWER(BTRIM(COALESCE(p.role, ''))) IN ('admin', 'staff');
 END;
 $function$;
