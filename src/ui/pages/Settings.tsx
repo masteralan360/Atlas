@@ -46,7 +46,7 @@ export function Settings() {
     }, [features.kds_enabled, kdsStatus, startStream])
 
     const { toast } = useToast()
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const { alerts, forceAlert } = useExchangeRate()
     const [copied, setCopied] = useState(false)
     const [isCurrencyModalOpen, setIsCurrencyModalOpen] = useState(false)
@@ -626,7 +626,7 @@ export function Settings() {
 
             if (permissionGranted) {
                 if (user?.id) {
-                    await registerDeviceTokenIfNeeded(user.id)
+                    await registerDeviceTokenIfNeeded(user.id, i18n.resolvedLanguage ?? i18n.language)
                 }
                 toast({
                     title: t('settings.notifications.subscribedTitle') || 'Subscribed',

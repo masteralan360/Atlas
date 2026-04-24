@@ -1,3 +1,5 @@
+﻿import { localizeNotification } from './notificationLocalization.ts'
+
 type FirebaseServiceAccount = {
     project_id: string
     client_email: string
@@ -17,6 +19,7 @@ export type PushNotificationTarget = {
     token_id: string | null
     device_token: string | null
     platform: 'android' | 'web' | null
+    language: string | null
 }
 
 type FirebaseSendResult = {
@@ -169,16 +172,28 @@ async function getAccessToken() {
     return cachedAccessToken.value
 }
 
-function buildDataPayload(target: PushNotificationTarget) {
+function buildLocalizedPush(target: PushNotificationTarget) {
+    return localizeNotification({
+        notificationType: target.notification_type,
+        payload: target.payload,
+        title: target.title,
+        body: target.body,
+        actionUrl: target.action_url,
+    }, target.language)
+}
+
+function buildDataPayload(target: PushNotificationTarget, localized: ReturnType<typeof buildLocalizedPush>) {
     const data: Record<string, string> = {
         notificationId: target.notification_id,
         notificationType: target.notification_type,
-        title: target.title,
-        body: target.body ?? '',
-        actionUrl: target.action_url ?? '',
+        title: localized.title,
+        body: localized.body,
+        actionUrl: localized.actionUrl ?? '',
+        actionLabel: localized.actionLabel,
         workspaceId: target.workspace_id,
         userId: target.user_id,
         createdAt: target.created_at,
+        language: localized.language,
     }
 
     if (target.payload) {
@@ -250,14 +265,15 @@ export async function sendFirebasePush(target: PushNotificationTarget): Promise<
 
     const accessToken = await getAccessToken()
     const projectId = readServiceAccount().project_id
-    const data = buildDataPayload(target)
-    const body = target.body ?? 'You have a new notification.'
+    const localized = buildLocalizedPush(target)
+    const data = buildDataPayload(target, localized)
+    const body = localized.body || 'You have a new notification.'
 
     const message: Record<string, unknown> = {
         token: target.device_token,
         data,
         notification: {
-            title: target.title,
+            title: localized.title,
             body,
         },
     }
@@ -278,7 +294,7 @@ export async function sendFirebasePush(target: PushNotificationTarget): Promise<
                 Urgency: 'high',
             },
             notification: {
-                title: target.title,
+                title: localized.title,
                 body,
                 icon: '/icon-192.png',
                 data,

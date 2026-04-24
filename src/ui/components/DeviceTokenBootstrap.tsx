@@ -1,4 +1,5 @@
-import { useEffect } from 'react'
+﻿import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/auth'
 import { initMessaging, onForegroundMessage } from '@/lib/firebase'
 import { isMobile, isTauri } from '@/lib/platform'
@@ -15,11 +16,13 @@ function openNotificationTarget(data: Record<string, string> | undefined) {
 
 export function DeviceTokenBootstrap() {
     const { user, isAuthenticated } = useAuth()
+    const { i18n } = useTranslation()
+    const language = i18n.resolvedLanguage ?? i18n.language
 
     useEffect(() => {
         if (!isAuthenticated || !user) return
-        void registerDeviceTokenIfNeeded(user.id)
-    }, [isAuthenticated, user?.id])
+        void registerDeviceTokenIfNeeded(user.id, language)
+    }, [isAuthenticated, language, user?.id])
 
     useEffect(() => {
         if (!isAuthenticated || !user) return

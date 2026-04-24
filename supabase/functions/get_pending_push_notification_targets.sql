@@ -1,3 +1,5 @@
+﻿DROP FUNCTION IF EXISTS public.get_pending_push_notification_targets(integer, uuid);
+
 CREATE OR REPLACE FUNCTION public.get_pending_push_notification_targets(
   p_limit integer DEFAULT 100,
   p_workspace_id uuid DEFAULT NULL
@@ -14,7 +16,8 @@ RETURNS TABLE(
   created_at timestamptz,
   token_id uuid,
   device_token text,
-  platform text
+  platform text,
+  language text
 )
 LANGUAGE sql
 SECURITY DEFINER
@@ -50,7 +53,8 @@ AS $function$
     pn.created_at,
     dt.id,
     dt.device_token,
-    dt.platform
+    dt.platform,
+    dt.language
   FROM pending_notifications pn
   LEFT JOIN notifications.device_tokens dt
     ON dt.user_id = pn.user_id

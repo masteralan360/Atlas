@@ -1,8 +1,12 @@
+﻿DROP FUNCTION IF EXISTS public.upsert_device_token(uuid, text, text, uuid);
+DROP FUNCTION IF EXISTS public.upsert_device_token(uuid, text, text, uuid, text);
+
 CREATE OR REPLACE FUNCTION public.upsert_device_token(
   p_user_id uuid,
   p_platform text,
   p_device_token text,
-  p_workspace_id uuid DEFAULT NULL
+  p_workspace_id uuid DEFAULT NULL,
+  p_language text DEFAULT 'en'
 )
 RETURNS uuid
 LANGUAGE plpgsql
@@ -13,10 +17,12 @@ DECLARE
   v_workspace_id uuid;
   v_platform text;
   v_device_token text;
+  v_language text;
   v_device_token_id uuid;
 BEGIN
   v_platform := lower(trim(COALESCE(p_platform, '')));
   v_device_token := trim(COALESCE(p_device_token, ''));
+  v_language := lower(trim(COALESCE(p_language, 'en')));
 
   IF p_user_id IS NULL THEN
     RAISE EXCEPTION 'User id is required';
@@ -32,6 +38,14 @@ BEGIN
 
   IF length(v_device_token) > 4096 THEN
     RAISE EXCEPTION 'Device token is too long';
+  END IF;
+
+  IF v_language = 'ar' OR v_language LIKE 'ar-%' THEN
+    v_language := 'ar';
+  ELSIF v_language = 'ku' OR v_language = 'ckb' OR v_language LIKE 'ku-%' OR v_language LIKE 'ckb-%' THEN
+    v_language := 'ku';
+  ELSE
+    v_language := 'en';
   END IF;
 
   v_workspace_id := p_workspace_id;
@@ -50,19 +64,22 @@ BEGIN
     user_id,
     workspace_id,
     platform,
-    device_token
+    device_token,
+    language
   )
   VALUES (
     p_user_id,
     v_workspace_id,
     v_platform,
-    v_device_token
+    v_device_token,
+    v_language
   )
   ON CONFLICT (device_token) DO UPDATE
   SET
     user_id = EXCLUDED.user_id,
     workspace_id = EXCLUDED.workspace_id,
     platform = EXCLUDED.platform,
+    language = EXCLUDED.language,
     updated_at = now()
   RETURNING id INTO v_device_token_id;
 

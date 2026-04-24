@@ -5,6 +5,7 @@ import { useAuth } from '@/auth'
 import { useTranslation } from 'react-i18next'
 import { toast } from '@/ui/components/use-toast'
 import { connectionManager } from '@/lib/connectionManager'
+import { localizeNotification, type NotificationLocalizationResult } from '@/lib/notificationLocalization'
 import { cn } from '@/lib/utils'
 import { isMobile, isTauri } from '@/lib/platform'
 import { useTheme } from './theme-provider'
@@ -81,26 +82,9 @@ function readString(value: unknown) {
     return typeof value === 'string' ? value.trim() : ''
 }
 
-function readNumber(value: unknown) {
-    if (typeof value === 'number' && Number.isFinite(value)) return value
-    if (typeof value === 'string') {
-        const parsed = Number(value)
-        return Number.isFinite(parsed) ? parsed : null
-    }
-    return null
-}
-
 function mergeNotification(items: NotificationInboxRecord[], nextItem: NotificationInboxRecord) {
     const remaining = items.filter((item) => item.id !== nextItem.id)
     return [nextItem, ...remaining].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
-}
-
-function formatNotificationTypeLabel(notificationType: string) {
-    return notificationType
-        .split(/[_-]+/)
-        .filter(Boolean)
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(' ')
 }
 
 function formatNotificationTime(timestamp: string, locale: string) {
@@ -116,30 +100,18 @@ function formatNotificationTime(timestamp: string, locale: string) {
     return new Intl.DateTimeFormat(locale || 'en', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date)
 }
 
-function buildNotificationPreview(item: NotificationInboxRecord, locale: string) {
-    const body = readString(item.body)
-    if (body) return body
-    const payload = item.payload
-    const summary = readString(payload.summary) || readString(payload.preview) || readString(payload.content) || readString(payload.message)
-    if (summary) return summary
-    if (item.notification_type === 'marketplace_order_pending') {
-        const customerName = readString(payload.customer_name)
-        const itemCount = readNumber(payload.item_count)
-        const amount = readNumber(payload.amount)
-        const currency = readString(payload.currency).toUpperCase()
-        const parts: string[] = []
-        if (customerName) parts.push(customerName)
-        if (itemCount !== null && itemCount > 0) parts.push(`${itemCount} item${itemCount === 1 ? '' : 's'}`)
-        if (amount !== null) {
-            const formattedAmount = new Intl.NumberFormat(locale || 'en', { maximumFractionDigits: 2 }).format(amount)
-            parts.push(currency ? `${formattedAmount} ${currency}` : formattedAmount)
-        }
-        if (parts.length > 0) return parts.join(' • ')
-    }
-    return readString(payload.order_number) || readString(payload.entity_type)
+function localizeInboxNotification(item: NotificationInboxRecord, language: string): NotificationLocalizationResult {
+    return localizeNotification({
+        notificationType: item.notification_type,
+        payload: item.payload,
+        title: item.title,
+        body: item.body,
+        actionUrl: item.action_url,
+        actionLabel: item.action_label,
+    }, language)
 }
 
-function getNotificationActions(item: NotificationInboxRecord): NotificationAction[] {
+function getNotificationActions(item: NotificationInboxRecord, localized: NotificationLocalizationResult): NotificationAction[] {
     const payloadActions = item.payload.actions
     const actions: NotificationAction[] = []
     if (Array.isArray(payloadActions)) {
@@ -151,8 +123,8 @@ function getNotificationActions(item: NotificationInboxRecord): NotificationActi
         }
     }
     if (actions.length > 0) return actions
-    const fallbackUrl = readString(item.action_url) || readString(item.payload.route)
-    return fallbackUrl ? [{ label: readString(item.action_label) || 'Open', url: fallbackUrl }] : []
+    const fallbackUrl = localized.actionUrl || readString(item.action_url) || readString(item.payload.route)
+    return fallbackUrl ? [{ label: localized.actionLabel, url: fallbackUrl }] : []
 }
 
 function getNotificationIcon(item: NotificationInboxRecord) {
@@ -223,9 +195,10 @@ export function NotificationCenter() {
             let permission = await isPermissionGranted()
             if (!permission) permission = (await requestPermission()) === 'granted'
             if (!permission) return
+            const localized = localizeInboxNotification(item, i18n.language)
             sendNotification({
-                title: item.title || t('notifications.newNotificationTitle', { defaultValue: 'New Notification' }),
-                body: buildNotificationPreview(item, i18n.language) || t('notifications.newNotification', { defaultValue: 'You have a new notification' }),
+                title: localized.title || t('notifications.newNotificationTitle', { defaultValue: 'New Notification' }),
+                body: localized.body || t('notifications.newNotification', { defaultValue: 'You have a new notification' }),
             })
         } catch (error) {
             console.warn('[NotificationCenter] Failed to show desktop notification:', error)
@@ -391,16 +364,22 @@ export function NotificationCenter() {
                             <div className="space-y-3">
                                 {visibleItems.map((item) => {
                                     const Icon = getNotificationIcon(item)
-                                    const preview = buildNotificationPreview(item, i18n.language)
-                                    const actions = getNotificationActions(item)
+                                    const localized = localizeInboxNotification(item, i18n.language)
+                                    const preview = localized.body
+                                    const actions = getNotificationActions(item, localized)
                                     const timeLabel = formatNotificationTime(item.created_at, i18n.language)
-                                    const typeLabel = formatNotificationTypeLabel(item.notification_type)
+                                    const typeLabel = localized.typeLabel
+                                    const scopeLabel = item.scope === 'workspace'
+                                        ? t('notifications.tabs.workspace', { defaultValue: 'Workspace' })
+                                        : item.scope === 'user'
+                                            ? t('notifications.tabs.user', { defaultValue: 'User' })
+                                            : item.scope
                                     return <div key={item.id} role="button" tabIndex={0} onClick={() => handleOpenNotification(item)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); handleOpenNotification(item) } }} className={cn('group rounded-2xl border p-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40', item.read_at ? 'border-border/70 bg-background hover:bg-muted/40' : 'border-primary/20 bg-primary/5 shadow-sm shadow-primary/10 hover:bg-primary/10')}>
                                         <div className="flex items-start gap-3">
                                             <div className={cn('mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border', item.priority === 'high' || item.priority === 'urgent' ? 'border-amber-500/30 bg-amber-500/10 text-amber-600' : 'border-primary/20 bg-primary/10 text-primary')}><Icon className="h-4 w-4" /></div>
                                             <div className="min-w-0 flex-1 space-y-2">
-                                                <div className="flex items-start justify-between gap-3"><div className="space-y-1"><div className="flex items-center gap-2"><span className="text-sm font-semibold leading-none text-foreground">{item.title}</span>{!item.read_at && <span className="h-2 w-2 rounded-full bg-primary" />}</div>{preview && <p className="line-clamp-2 text-xs text-muted-foreground">{preview}</p>}</div>{timeLabel && <span className="shrink-0 text-[11px] text-muted-foreground">{timeLabel}</span>}</div>
-                                                <div className="flex flex-wrap items-center gap-2"><span className="inline-flex rounded-full border border-border/70 bg-muted/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{typeLabel}</span>{item.scope !== 'user' && <span className="inline-flex rounded-full border border-border/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{item.scope}</span>}</div>
+                                                <div className="flex items-start justify-between gap-3"><div className="space-y-1"><div className="flex items-center gap-2"><span className="text-sm font-semibold leading-none text-foreground">{localized.title}</span>{!item.read_at && <span className="h-2 w-2 rounded-full bg-primary" />}</div>{preview && <p className="line-clamp-2 text-xs text-muted-foreground">{preview}</p>}</div>{timeLabel && <span className="shrink-0 text-[11px] text-muted-foreground">{timeLabel}</span>}</div>
+                                                <div className="flex flex-wrap items-center gap-2"><span className="inline-flex rounded-full border border-border/70 bg-muted/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{typeLabel}</span>{item.scope !== 'user' && <span className="inline-flex rounded-full border border-border/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{scopeLabel}</span>}</div>
                                                 <div className="flex flex-wrap items-center gap-2 pt-1">
                                                     {actions.map((action) => <Button key={`${item.id}-${action.url}`} type="button" variant="outline" size="sm" className="h-8 rounded-xl text-[11px] font-semibold" onClick={(event) => { event.stopPropagation(); handleOpenNotification(item, action.url) }}><ExternalLink className="h-3.5 w-3.5" />{action.label}</Button>)}
                                                     {!item.read_at && <Button type="button" variant="ghost" size="sm" className="h-8 rounded-xl text-[11px] font-semibold" onClick={(event) => { event.stopPropagation(); void handleMarkRead(item, true) }}><CheckCheck className="h-3.5 w-3.5" />{t('notifications.markRead', { defaultValue: 'Mark read' })}</Button>}

@@ -1,9 +1,11 @@
+﻿import { corsHeaders, errorResponse, jsonResponse, readJson } from '../_shared/http.ts'
+import { normalizeNotificationLanguage } from '../_shared/notificationLocalization.ts'
 import { createAdminClient, getAuthenticatedUser } from '../_shared/supabase.ts'
-import { corsHeaders, errorResponse, jsonResponse, readJson } from '../_shared/http.ts'
 
 type RegisterDeviceTokenRequest = {
     token?: string
     platform?: string
+    language?: string | null
 }
 
 Deno.serve(async (req) => {
@@ -27,6 +29,7 @@ Deno.serve(async (req) => {
 
     const token = typeof body.token === 'string' ? body.token.trim() : ''
     const platform = typeof body.platform === 'string' ? body.platform.trim().toLowerCase() : ''
+    const language = normalizeNotificationLanguage(body.language)
 
     if (!token) {
         return errorResponse('Device token is required')
@@ -43,6 +46,7 @@ Deno.serve(async (req) => {
             p_platform: platform,
             p_device_token: token,
             p_workspace_id: null,
+            p_language: language,
         })
 
         if (error) {
@@ -54,6 +58,7 @@ Deno.serve(async (req) => {
             ok: true,
             deviceTokenId: data,
             platform,
+            language,
         })
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
