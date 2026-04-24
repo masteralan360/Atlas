@@ -361,7 +361,7 @@ BEGIN
     SELECT p.id AS user_id, p.workspace_id
     FROM public.profiles p
     WHERE p.workspace_id IS NOT NULL
-      AND p.role IN ('admin', 'staff')
+      AND p.role = 'admin'
       AND (p_target_workspace_id IS NULL OR p.workspace_id = p_target_workspace_id)
   ) r
   JOIN (
@@ -440,7 +440,7 @@ BEGIN
     SELECT p.id AS user_id, p.workspace_id
     FROM public.profiles p
     WHERE p.workspace_id IS NOT NULL
-      AND p.role IN ('admin', 'staff')
+      AND p.role = 'admin'
       AND (p_target_workspace_id IS NULL OR p.workspace_id = p_target_workspace_id)
   ) r
   JOIN (
@@ -511,7 +511,7 @@ BEGIN
     SELECT p.id AS user_id, p.workspace_id
     FROM public.profiles p
     WHERE p.workspace_id IS NOT NULL
-      AND p.role IN ('admin', 'staff')
+      AND p.role = 'admin'
       AND (p_target_workspace_id IS NULL OR p.workspace_id = p_target_workspace_id)
   ) r
   JOIN (

@@ -262,3 +262,6 @@ BEGIN
   RETURN COALESCE(v_dispatched_count, 0);
 END;
 $function$;
+
+REVOKE ALL ON FUNCTION public.detect_and_dispatch_notification_events(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.detect_and_dispatch_notification_events(uuid) TO service_role;
