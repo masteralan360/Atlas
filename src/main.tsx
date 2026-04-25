@@ -1,21 +1,17 @@
-import { StrictMode } from 'react'
+import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
-import App from './App.tsx'
 import './index.css'
-
-import { Toaster } from '@/ui/components'
-import { ThemeProvider } from '@/ui/components/theme-provider'
-import './i18n/config'
-import { platformService } from '@/services/platformService'
-import { connectionManager } from '@/lib/connectionManager'
-import { MarketplaceApp } from './marketplace/MarketplaceApp'
-
-// Initialize connection manager (visibility, online/offline, heartbeat)
-connectionManager.init()
 
 const isMarketplaceHost =
     typeof window !== 'undefined'
     && window.location.hostname === 'marketplace-atlas.vercel.app'
+const normalizedPathname =
+    typeof window !== 'undefined'
+        ? window.location.pathname.replace(/\/+$/, '') || '/'
+        : '/'
+const isWebsiteRoute =
+    typeof window !== 'undefined'
+    && (normalizedPathname === '/website' || normalizedPathname.startsWith('/website/'))
 
 if (
     import.meta.env.PROD
@@ -45,44 +41,96 @@ if (
     })
 }
 
-// Global error handler for lazy loading failures (chunks)
 window.addEventListener('unhandledrejection', (event) => {
     if (event.reason?.message?.includes('Failed to fetch dynamically imported module') ||
         event.reason?.message?.includes('Importing a stopped module')) {
-        console.error('[Critical] Chunk load failed. Auto-reloading...', event.reason);
-        window.location.reload();
+        console.error('[Critical] Chunk load failed. Auto-reloading...', event.reason)
+        window.location.reload()
     }
-});
+})
 
-// Initialize platform service and then render
-const init = async () => {
-    try {
-        await platformService.initialize();
-    } catch (e) {
-        console.error('Failed to initialize platform service:', e);
-    }
+const rootElement = document.getElementById('root')
 
-    if (isMarketplaceHost && window.location.hash) {
-        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
-    }
+if (!rootElement) {
+    throw new Error('Root element not found')
+}
 
-    createRoot(document.getElementById('root')!).render(
+const root = createRoot(rootElement)
+
+const renderRoot = (content: ReactNode) => {
+    root.render(
         <StrictMode>
-            <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme" defaultStyle="emerald">
-                {isMarketplaceHost ? (
-                    <>
-                        <MarketplaceApp />
-                        <Toaster />
-                    </>
-                ) : (
-                    <>
-                        {/* To set Legacy as default, use: defaultStyle="legacy" */}
-                        <App />
-                    </>
-                )}
-            </ThemeProvider>
+            {content}
         </StrictMode>,
     )
 }
 
-init();
+const renderWebsite = async () => {
+    const { WebsiteApp } = await import('./Website/WebsiteApp')
+    renderRoot(<WebsiteApp />)
+}
+
+const renderMarketplace = async () => {
+    const [{ ThemeProvider }, { Toaster }, { MarketplaceApp }] = await Promise.all([
+        import('@/ui/components/theme-provider'),
+        import('@/ui/components'),
+        import('./marketplace/MarketplaceApp'),
+        import('./i18n/config')
+    ])
+
+    renderRoot(
+        <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme" defaultStyle="emerald">
+            <MarketplaceApp />
+            <Toaster />
+        </ThemeProvider>,
+    )
+}
+
+const renderApp = async () => {
+    const [
+        { ThemeProvider },
+        { platformService },
+        { connectionManager },
+        { default: App }
+    ] = await Promise.all([
+        import('@/ui/components/theme-provider'),
+        import('@/services/platformService'),
+        import('@/lib/connectionManager'),
+        import('./App.tsx'),
+        import('./i18n/config')
+    ])
+
+    connectionManager.init()
+
+    try {
+        await platformService.initialize()
+    } catch (error) {
+        console.error('Failed to initialize platform service:', error)
+    }
+
+    renderRoot(
+        <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme" defaultStyle="emerald">
+            <App />
+        </ThemeProvider>,
+    )
+}
+
+const init = async () => {
+    if (isMarketplaceHost && window.location.hash) {
+        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
+    }
+
+    if (isMarketplaceHost) {
+        await renderMarketplace()
+        return
+    }
+
+    if (isWebsiteRoute) {
+        await renderWebsite()
+        return
+    }
+
+    await renderApp()
+}
+
+init()
