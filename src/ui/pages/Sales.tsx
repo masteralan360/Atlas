@@ -47,7 +47,15 @@ import {
     TooltipProvider,
     TooltipTrigger,
     useToast,
-    AppPagination
+    AppPagination,
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter,
+    Input,
+    Label
 } from '@/ui/components'
 import { LoanDetailsPrintTemplate, LoanReceiptPrintTemplate } from '@/ui/components/loans/LoanPrintTemplates'
 import { SaleItem } from '@/types'
@@ -58,12 +66,50 @@ import {
     Loader2,
     Printer,
     RotateCcw,
-    Filter,
     StickyNote,
     FileSpreadsheet,
     LayoutGrid,
-    List
+    List,
+    SlidersHorizontal,
+    Search
 } from 'lucide-react'
+
+export type SalesSortOption = 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc'
+
+export interface SalesFilterState {
+    search: string
+    currency: string
+    paymentMethod: string
+    cashier: string
+    origin: string
+    minAmount: string
+    maxAmount: string
+    sort: SalesSortOption
+}
+
+export const DEFAULT_SALES_FILTERS: SalesFilterState = {
+    search: '',
+    currency: 'all',
+    paymentMethod: 'all',
+    cashier: 'all',
+    origin: 'all',
+    minAmount: '',
+    maxAmount: '',
+    sort: 'date_desc'
+}
+
+function countActiveSalesFilters(filters: SalesFilterState) {
+    return [
+        !!filters.search.trim(),
+        filters.currency !== 'all',
+        filters.paymentMethod !== 'all',
+        filters.cashier !== 'all',
+        filters.origin !== 'all',
+        !!filters.minAmount,
+        !!filters.maxAmount,
+        filters.sort !== 'date_desc'
+    ].filter(Boolean).length
+}
 
 type EffectiveLoanStatus = 'pending' | 'active' | 'overdue' | 'completed'
 
@@ -132,9 +178,12 @@ export function Sales() {
     const [returnModalOpen, setReturnModalOpen] = useState(false)
     const [saleToReturn, setSaleToReturn] = useState<Sale | null>(null)
     const { dateRange, customDates } = useDateRange()
-    const [selectedCashier, setSelectedCashier] = useState<string>(() => {
-        return localStorage.getItem('sales_selected_cashier') || 'all'
+    const [filters, setFilters] = useState<SalesFilterState>(() => {
+        const cachedCashier = localStorage.getItem('sales_selected_cashier') || 'all'
+        return { ...DEFAULT_SALES_FILTERS, cashier: cachedCashier }
     })
+    const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false)
+    const [draftFilters, setDraftFilters] = useState<SalesFilterState>(filters)
     const [currentPage, setCurrentPage] = useState(1)
     const pageSize = 20
 
@@ -161,7 +210,19 @@ export function Sales() {
         clearPendingSaleDetailsId()
     }, [allSales])
 
-    // Client-side filtering: date range + cashier
+    const { effectiveFilters, currencyOptions, paymentMethodOptions, originOptions } = useMemo(() => {
+        const currOpts = Array.from(new Set(allSales.map((sale) => sale.settlement_currency || (sale as any).settlementCurrency).filter(Boolean)))
+        const pMethodOpts = Array.from(new Set(allSales.map((sale) => String(sale.payment_method || (sale as any).paymentMethod || (sale as any).paymentType || 'unknown')).filter(value => !!value && value !== 'unknown')))
+        const originOpts = Array.from(new Set(allSales.map((sale) => sale.origin).filter(Boolean)))
+        return {
+            effectiveFilters: filters,
+            currencyOptions: currOpts,
+            paymentMethodOptions: pMethodOpts,
+            originOptions: originOpts
+        }
+    }, [filters, allSales])
+
+    // Client-side filtering: date range + filters
     const filteredSales = useMemo(() => {
         let result = allSales
         const now = new Date()
@@ -183,15 +244,78 @@ export function Sales() {
             })
         }
 
-        if (selectedCashier !== 'all') {
-            result = result.filter(s => s.cashier_id === selectedCashier)
-        }
+        const normalizedSearch = effectiveFilters.search.trim().toLowerCase()
+        const minAmount = effectiveFilters.minAmount ? Number(effectiveFilters.minAmount) : null
+        const maxAmount = effectiveFilters.maxAmount ? Number(effectiveFilters.maxAmount) : null
 
-        // Sort by created_at descending
-        result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        result = result.filter(s => {
+            if (effectiveFilters.cashier !== 'all' && s.cashier_id !== effectiveFilters.cashier) {
+                return false
+            }
+            if (effectiveFilters.currency !== 'all' && s.settlement_currency !== effectiveFilters.currency && (s as any).settlementCurrency !== effectiveFilters.currency) {
+                return false
+            }
+            if (effectiveFilters.origin !== 'all' && s.origin !== effectiveFilters.origin) {
+                return false
+            }
+            const pMethod = String(s.payment_method || (s as any).paymentMethod || (s as any).paymentType || 'unknown').toLowerCase()
+            const eMethod = effectiveFilters.paymentMethod.toLowerCase()
+            if (effectiveFilters.paymentMethod !== 'all' && pMethod !== eMethod) {
+                return false
+            }
+
+            const total = s.total_amount || 0
+            if (minAmount !== null && Number.isFinite(minAmount) && total < minAmount) {
+                return false
+            }
+            if (maxAmount !== null && Number.isFinite(maxAmount) && total > maxAmount) {
+                return false
+            }
+
+            if (!normalizedSearch) {
+                return true
+            }
+
+            const searchString = [
+                s.id,
+                (s as any).invoice_number,
+                s.cashier_name,
+                s.customer_name,
+                s.notes
+            ].filter(Boolean).join(' ').toLowerCase()
+
+            return searchString.includes(normalizedSearch)
+        })
+
+        // Sort
+        result.sort((a, b) => {
+            if (effectiveFilters.sort === 'amount_desc') return b.total_amount - a.total_amount
+            if (effectiveFilters.sort === 'amount_asc') return a.total_amount - b.total_amount
+            if (effectiveFilters.sort === 'date_asc') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        })
 
         return result
-    }, [allSales, dateRange, customDates, selectedCashier])
+    }, [allSales, dateRange, customDates, effectiveFilters])
+
+    useEffect(() => {
+        setCurrentPage(1)
+    }, [dateRange, customDates, filters])
+
+    useEffect(() => {
+        if (!isFilterDialogOpen) {
+            return
+        }
+        setDraftFilters(filters)
+    }, [filters, isFilterDialogOpen])
+
+    const activeFilterCount = countActiveSalesFilters(filters)
+
+    const handleApplyFilters = () => {
+        setFilters(draftFilters)
+        setIsFilterDialogOpen(false)
+        setCurrentPage(1)
+    }
 
     const totalCount = filteredSales.length
 
@@ -396,8 +520,8 @@ export function Sales() {
 
 
     useEffect(() => {
-        localStorage.setItem('sales_selected_cashier', selectedCashier)
-    }, [selectedCashier])
+        localStorage.setItem('sales_selected_cashier', filters.cashier)
+    }, [filters.cashier])
 
     useEffect(() => {
         localStorage.setItem('sales_print_format', printFormat)
@@ -676,10 +800,10 @@ export function Sales() {
                             ; (existingLocal as any)._enrichedItems = updatedSale.items
                             ; (existingLocal as any).totalAmount = updatedSale.total_amount
                             ; (existingLocal as any).isReturned = updatedSale.is_returned
-                        ; (existingLocal as any).updatedAt = returnTimestamp
+                            ; (existingLocal as any).updatedAt = returnTimestamp
                         if (shouldQueueOfflineReturn) {
                             ; (existingLocal as any).syncStatus = 'pending'
-                            ; (existingLocal as any).lastSyncedAt = null
+                                ; (existingLocal as any).lastSyncedAt = null
                         }
                         await db.sales.put(existingLocal)
                     }
@@ -754,7 +878,7 @@ export function Sales() {
                             ; (existingLocal as any)._enrichedItems = updatedItems
                         if (shouldQueueOfflineReturn) {
                             ; (existingLocal as any).syncStatus = 'pending'
-                            ; (existingLocal as any).lastSyncedAt = null
+                                ; (existingLocal as any).lastSyncedAt = null
                         }
                         await db.sales.put(existingLocal)
                     }
@@ -962,7 +1086,7 @@ export function Sales() {
 
     const handleSaveNote = async (note: string) => {
         if (!selectedSaleForNote) return
-        
+
         // Viewer role cannot save notes
         if (user?.role === 'viewer') {
             toast({
@@ -1092,10 +1216,6 @@ export function Sales() {
         }
     }
 
-    // Reset to page 1 when filters change
-    useEffect(() => {
-        setCurrentPage(1)
-    }, [dateRange, customDates, selectedCashier])
 
     return (
         <TooltipProvider>
@@ -1160,34 +1280,28 @@ export function Sales() {
                     <div className="flex flex-wrap items-center gap-3">
                         <DateRangeFilters />
 
-                        {availableCashiers.length > 0 && (
-                            <div className={cn(
-                                "flex flex-col gap-1 bg-secondary/30 p-2 px-3 border min-w-[140px]",
-                                style === 'neo-orange' ? "rounded-[var(--radius)] border-black dark:border-white" : "rounded-xl border-border/40 backdrop-blur-md shadow-sm"
-                            )}>
-                                <div className="flex items-center gap-2">
-                                    <Filter className="w-3 h-3 text-muted-foreground/70" />
-                                    <span className="text-[9px] uppercase font-black tracking-tighter text-muted-foreground/60 whitespace-nowrap">
-                                        {t('sales.filters.cashier') || 'Filter By Cashier'}
-                                    </span>
-                                </div>
-                                <Select value={selectedCashier} onValueChange={setSelectedCashier}>
-                                    <SelectTrigger className="h-7 text-[11px] w-full bg-background/40 border-none focus-visible:ring-1 focus-visible:ring-primary/30 transition-all font-medium">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="all">
-                                            {t('sales.filters.allCashiers') || 'All Cashiers'}
-                                        </SelectItem>
-                                        {availableCashiers.map((cashier) => (
-                                            <SelectItem key={cashier.id} value={cashier.id}>
-                                                {cashier.name || 'Unknown'}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        )}
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setIsFilterDialogOpen(true)}
+                            className={cn("h-11 rounded-2xl border-border/60 px-4",
+                                style === 'neo-orange' ? "rounded-[var(--radius)] border-2 border-black dark:border-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:shadow-none hover:translate-y-[2px]" : ""
+                            )}
+                        >
+                            <SlidersHorizontal className="me-2 h-4 w-4" />
+                            {t('sales.filters.title', { defaultValue: 'Filters' })}
+                            {activeFilterCount > 0 ? (
+                                <span className="ms-2 inline-flex min-w-6 items-center justify-center rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">
+                                    {activeFilterCount}
+                                </span>
+                            ) : null}
+                        </Button>
+                        {activeFilterCount > 0 ? (
+                            <Button type="button" variant="ghost" onClick={() => setFilters(DEFAULT_SALES_FILTERS)} className="h-11 rounded-2xl px-4 text-muted-foreground">
+                                <RotateCcw className="me-2 h-4 w-4" />
+                                {t('sales.filters.clear', { defaultValue: 'Clear Filters' })}
+                            </Button>
+                        ) : null}
                     </div>
                 </div>
 
@@ -1704,7 +1818,7 @@ export function Sales() {
                     filters={{
                         dateRange,
                         customDates,
-                        selectedCashier
+                        selectedCashier: filters.cashier
                     }}
                 />
 
@@ -1753,6 +1867,169 @@ export function Sales() {
                             : renderLoanPrintTemplate(effectiveId))
                         : undefined}
                 />
+
+                <Dialog open={isFilterDialogOpen} onOpenChange={setIsFilterDialogOpen}>
+                    <DialogContent className={cn("top-[calc(50%+var(--titlebar-height)/2+var(--safe-area-top)/2)] w-[calc(100vw-0.75rem)] max-w-4xl overflow-hidden p-0 sm:w-[calc(100vw-2rem)]", style === 'neo-orange' ? "rounded-none border-2 border-black dark:border-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]" : "rounded-[2rem] border-border/60")}>
+                        <div className="flex max-h-[calc(100dvh-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-1rem)] flex-col">
+                            <DialogHeader className={cn("border-b border-border/60 px-6 py-5 text-left", style === 'neo-orange' ? "bg-neo-blue/10" : "bg-gradient-to-r from-primary/8 via-background to-emerald-500/5")}>
+                                <DialogTitle className="flex items-center gap-3 text-xl font-black tracking-tight">
+                                    <div className={cn("p-2.5", style === 'neo-orange' ? "rounded-none border-2 border-black dark:border-white bg-white text-black" : "rounded-2xl bg-primary/10 text-primary")}>
+                                        <SlidersHorizontal className="h-5 w-5" />
+                                    </div>
+                                    {t('sales.filters.dialogTitle', { defaultValue: 'Sales Filters' })}
+                                </DialogTitle>
+                                <DialogDescription className="max-w-3xl">
+                                    {t('sales.filters.dialogDescription', { defaultValue: 'Refine the sales history with a richer filter set.' })}
+                                </DialogDescription>
+                            </DialogHeader>
+
+                            <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
+                                <section className="grid gap-4 lg:grid-cols-2">
+                                    <div className={cn("space-y-4 p-5", style === 'neo-orange' ? "border-2 border-black dark:border-white rounded-none bg-white dark:bg-black" : "rounded-[1.5rem] border border-border/60 bg-background/80")}>
+                                        <div className="space-y-1">
+                                            <h3 className="text-base font-black tracking-tight">{t('sales.filters.searchTitle', { defaultValue: 'Search & Sort' })}</h3>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <Label>{t('sales.filters.keywordSearch', { defaultValue: 'Keyword Search' })}</Label>
+                                            <div className="relative">
+                                                <Search className="pointer-events-none absolute start-3 top-3.5 h-4 w-4 text-muted-foreground" />
+                                                <Input
+                                                    value={draftFilters.search}
+                                                    onChange={(event) => setDraftFilters((current) => ({ ...current, search: event.target.value }))}
+                                                    placeholder={t('sales.filters.searchPlaceholder', { defaultValue: 'Search ID, invoice, name...' })}
+                                                    className="ps-9"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <Label>{t('sales.filters.sortBy', { defaultValue: 'Sort By' })}</Label>
+                                            <Select value={draftFilters.sort} onValueChange={(value: SalesSortOption) => setDraftFilters((current) => ({ ...current, sort: value }))}>
+                                                <SelectTrigger>
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="date_desc">{t('sales.filters.sortDateDesc', { defaultValue: 'Date: Newest First' })}</SelectItem>
+                                                    <SelectItem value="date_asc">{t('sales.filters.sortDateAsc', { defaultValue: 'Date: Oldest First' })}</SelectItem>
+                                                    <SelectItem value="amount_desc">{t('sales.filters.sortAmountDesc', { defaultValue: 'Amount: Highest First' })}</SelectItem>
+                                                    <SelectItem value="amount_asc">{t('sales.filters.sortAmountAsc', { defaultValue: 'Amount: Lowest First' })}</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <Label>{t('sales.filters.cashier', { defaultValue: 'Cashier' })}</Label>
+                                            <Select value={draftFilters.cashier} onValueChange={(value) => setDraftFilters((current) => ({ ...current, cashier: value }))}>
+                                                <SelectTrigger>
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="all">{t('sales.filters.allCashiers', { defaultValue: 'All Cashiers' })}</SelectItem>
+                                                    {availableCashiers.map((cashier) => (
+                                                        <SelectItem key={cashier.id} value={cashier.id}>
+                                                            {cashier.name || 'Unknown'}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+
+                                    <div className={cn("space-y-4 p-5", style === 'neo-orange' ? "border-2 border-black dark:border-white rounded-none bg-white dark:bg-black" : "rounded-[1.5rem] border border-border/60 bg-background/80")}>
+                                        <div className="space-y-1">
+                                            <h3 className="text-base font-black tracking-tight">{t('sales.filters.detailsTitle', { defaultValue: 'Currency, Method & Amount' })}</h3>
+                                        </div>
+
+                                        <div className="grid gap-4 sm:grid-cols-2">
+                                            <div className="space-y-2">
+                                                <Label>{t('sales.filters.currency', { defaultValue: 'Currency' })}</Label>
+                                                <Select value={draftFilters.currency} onValueChange={(value) => setDraftFilters((current) => ({ ...current, currency: value }))}>
+                                                    <SelectTrigger>
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="all">{t('sales.filters.all', { defaultValue: 'All' })}</SelectItem>
+                                                        {currencyOptions.map((curr) => (
+                                                            <SelectItem key={curr} value={curr}>{curr.toUpperCase()}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>{t('sales.filters.origin', { defaultValue: 'Source / Origin' })}</Label>
+                                                <Select value={draftFilters.origin} onValueChange={(value) => setDraftFilters((current) => ({ ...current, origin: value }))}>
+                                                    <SelectTrigger>
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="all">{t('sales.filters.all', { defaultValue: 'All' })}</SelectItem>
+                                                        {originOptions.map((o) => (
+                                                            <SelectItem key={o} value={o}>{String(o).toUpperCase().replace(/_/g, ' ')}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <Label>{t('sales.filters.paymentMethod', { defaultValue: 'Payment Method' })}</Label>
+                                            <Select value={draftFilters.paymentMethod} onValueChange={(value) => setDraftFilters((current) => ({ ...current, paymentMethod: value }))}>
+                                                <SelectTrigger>
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="all">{t('sales.filters.all', { defaultValue: 'All' })}</SelectItem>
+                                                    {paymentMethodOptions.map((method) => (
+                                                        <SelectItem key={method} value={method}>{method.toUpperCase().replace('_', ' ')}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <div className="grid gap-4 sm:grid-cols-2">
+                                            <div className="space-y-2">
+                                                <Label>{t('sales.filters.minAmount', { defaultValue: 'Min Amount' })}</Label>
+                                                <Input
+                                                    type="number"
+                                                    min="0"
+                                                    value={draftFilters.minAmount}
+                                                    onChange={(event) => setDraftFilters((current) => ({ ...current, minAmount: event.target.value }))}
+                                                    placeholder="0"
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>{t('sales.filters.maxAmount', { defaultValue: 'Max Amount' })}</Label>
+                                                <Input
+                                                    type="number"
+                                                    min="0"
+                                                    value={draftFilters.maxAmount}
+                                                    onChange={(event) => setDraftFilters((current) => ({ ...current, maxAmount: event.target.value }))}
+                                                    placeholder={t('sales.filters.noCap', { defaultValue: 'No cap' })}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </section>
+                            </div>
+
+                            <DialogFooter className="border-t border-border/60 bg-background/95 px-6 py-4 sm:justify-between">
+                                <Button type="button" variant="ghost" onClick={() => setDraftFilters(DEFAULT_SALES_FILTERS)} className={cn(style === 'neo-orange' ? "rounded-none" : "rounded-2xl")}>
+                                    <RotateCcw className="me-2 h-4 w-4" />
+                                    {t('sales.filters.reset', { defaultValue: 'Reset Draft' })}
+                                </Button>
+                                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+                                    <Button type="button" variant="outline" onClick={() => setIsFilterDialogOpen(false)} className={cn(style === 'neo-orange' ? "rounded-none" : "rounded-2xl")}>
+                                        {t('common.cancel', { defaultValue: 'Cancel' })}
+                                    </Button>
+                                    <Button type="button" onClick={handleApplyFilters} className={cn(style === 'neo-orange' ? "rounded-none border-2 border-black dark:border-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:shadow-none hover:translate-y-[2px]" : "rounded-2xl")}>
+                                        {t('sales.filters.apply', { defaultValue: 'Apply Filters' })}
+                                    </Button>
+                                </div>
+                            </DialogFooter>
+                        </div>
+                    </DialogContent>
+                </Dialog>
             </div>
         </TooltipProvider>
     )

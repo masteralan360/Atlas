@@ -1578,7 +1578,27 @@
         "paymentMethod": "\u0637\u0631\u064a\u0642\u0629 \u0627\u0644\u062f\u0641\u0639",
         "filters": {
             "cashier": "\u0627\u0644\u0643\u0627\u0634\u064a\u0631",
-            "allCashiers": "\u062c\u0645\u064a\u0639 \u0627\u0644\u0643\u0627\u0634\u064a\u0631\u064a\u0629"
+            "allCashiers": "\u062c\u0645\u064a\u0639 \u0627\u0644\u0643\u0627\u0634\u064a\u0631\u064a\u0629",
+            "dialogTitle": "مرشحات المبيعات",
+            "dialogDescription": "قم بتصفية سجل المبيعات باستخدام مجموعة خيارات أوسع.",
+            "searchTitle": "البحث والفرز",
+            "keywordSearch": "كلمة البحث",
+            "searchPlaceholder": "البحث عن المعرف، الفاتورة، الاسم...",
+            "sortBy": "فرز حسب",
+            "sortDateDesc": "التاريخ: الأحدث أولاً",
+            "sortDateAsc": "التاريخ: الأقدم أولاً",
+            "sortAmountDesc": "المبلغ: الأعلى أولاً",
+            "sortAmountAsc": "المبلغ: الأقل أولاً",
+            "detailsTitle": "العملة، الطريقة، والمبلغ",
+            "currency": "العملة",
+            "all": "الكل",
+            "origin": "المصدر / الأصل",
+            "paymentMethod": "طريقة الدفع",
+            "minAmount": "الحد الأدنى للمبلغ",
+            "maxAmount": "الحد الأقصى للمبلغ",
+            "noCap": "بدون حد أعلى",
+            "reset": "إعادة تعيين",
+            "apply": "تطبيق"
         },
         "view": {
             "table": "\u062a\u0641\u0627\u0635\u064a\u0644 \u0627\u0644\u0645\u0628\u064a\u0639\u0627\u062a",

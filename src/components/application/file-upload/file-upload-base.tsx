@@ -139,6 +139,7 @@ export const FileUploadDropZone = ({
     return (
         <div
             data-dropzone
+            onClick={() => !isDisabled && inputRef.current?.click()}
             onDragOver={handleDragIn}
             onDragEnter={handleDragIn}
             onDragLeave={handleDragOut}
@@ -146,8 +147,8 @@ export const FileUploadDropZone = ({
             onDrop={handleDrop}
             className={cn(
                 'relative flex flex-col items-center gap-4 rounded-[1.75rem] border-2 border-dashed px-6 py-8 text-center transition-all duration-200',
-                isDraggingOver ? 'border-primary bg-primary/10 shadow-lg shadow-primary/10' : 'border-border/70 bg-muted/20',
-                isDisabled && 'cursor-not-allowed opacity-60',
+                isDraggingOver ? 'border-primary bg-primary/10 shadow-lg shadow-primary/10' : 'border-border/70 bg-muted/20 hover:bg-muted/30',
+                isDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
                 className,
             )}
         >
@@ -169,7 +170,10 @@ export const FileUploadDropZone = ({
                     />
                     <button
                         type="button"
-                        onClick={() => inputRef.current?.click()}
+                        onClick={(e) => {
+                            e.stopPropagation()
+                            inputRef.current?.click()
+                        }}
                         disabled={isDisabled}
                         className="font-semibold text-primary transition-colors hover:text-primary/80 disabled:cursor-not-allowed disabled:text-muted-foreground"
                     >

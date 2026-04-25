@@ -1,8 +1,8 @@
 import { useTranslation } from 'react-i18next'
 import { Calendar } from 'lucide-react'
-import { Button, Input } from '@/ui/components'
+import { Button, DateTimePicker } from '@/ui/components'
 import { useDateRange } from '@/context/DateRangeContext'
-import { cn } from '@/lib/utils'
+import { cn, parseLocalDateValue, formatLocalDateValue } from '@/lib/utils'
 
 interface DateRangeFiltersProps {
     className?: string
@@ -62,23 +62,23 @@ export function DateRangeFilters({ className }: DateRangeFiltersProps) {
                 <div className="flex items-center gap-2 bg-secondary/30 p-1 px-3 rounded-lg border border-border/50 animate-in fade-in slide-in-from-left-2 duration-300">
                     <div className="flex items-center gap-2">
                         <span className="text-[10px] uppercase font-bold text-muted-foreground whitespace-nowrap">{t('performance.filters.start')}</span>
-                        <Input
-                            type="date"
-                            value={customDates.start}
-                            allowViewer={true}
-                            onChange={(e) => setCustomDates(prev => ({ ...prev, start: e.target.value }))}
-                            className="h-8 text-xs w-36 bg-background/50 border-none focus-visible:ring-1 focus-visible:ring-primary/50 transition-all font-mono"
+                        <DateTimePicker
+                            mode="date"
+                            date={parseLocalDateValue(customDates.start)}
+                            setDate={(value) => setCustomDates(prev => ({ ...prev, start: value ? formatLocalDateValue(value) : '' }))}
+                            buttonClassName="h-8 text-xs w-36 bg-background/50 border-none focus-visible:ring-1 focus-visible:ring-primary/50 transition-all font-mono"
+                            placeholder="dd/mm/yy"
                         />
                     </div>
                     <div className="w-px h-4 bg-border/50 mx-1" />
                     <div className="flex items-center gap-2">
                         <span className="text-[10px] uppercase font-bold text-muted-foreground whitespace-nowrap">{t('performance.filters.end')}</span>
-                        <Input
-                            type="date"
-                            value={customDates.end}
-                            allowViewer={true}
-                            onChange={(e) => setCustomDates(prev => ({ ...prev, end: e.target.value }))}
-                            className="h-8 text-xs w-36 bg-background/50 border-none focus-visible:ring-1 focus-visible:ring-primary/50 transition-all font-mono"
+                        <DateTimePicker
+                            mode="date"
+                            date={parseLocalDateValue(customDates.end)}
+                            setDate={(value) => setCustomDates(prev => ({ ...prev, end: value ? formatLocalDateValue(value) : '' }))}
+                            buttonClassName="h-8 text-xs w-36 bg-background/50 border-none focus-visible:ring-1 focus-visible:ring-primary/50 transition-all font-mono"
+                            placeholder="dd/mm/yy"
                         />
                     </div>
                 </div>

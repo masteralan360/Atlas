@@ -154,6 +154,26 @@ export function DateTimePicker({
               </div>
             </div>
           ) : null}
+          <div className="flex w-full items-center justify-between border-t border-border/50 bg-secondary/10 p-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-3 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setDate(undefined)}
+            >
+              {t("common.reset", { defaultValue: "Reset" })}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="h-7 px-3 text-xs font-medium bg-background border shadow-sm"
+              onClick={() => handleSelectDate(new Date())}
+            >
+              {t("common.today", { defaultValue: "Today" })}
+            </Button>
+          </div>
         </div>
       </PopoverContent>
     </Popover>

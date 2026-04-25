@@ -150,7 +150,7 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onReturn
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
             <DialogContent className={cn(
-                "max-w-2xl w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto",
+                "w-[95vw] sm:w-full max-w-2xl md:max-w-3xl lg:max-w-4xl max-h-[90vh] overflow-y-auto",
                 "p-0 gap-0 rounded-lg border border-border shadow-xl bg-card",
                 style === 'neo-orange' && "neo-border rounded-none"
             )}>

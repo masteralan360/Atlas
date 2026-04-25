@@ -2034,7 +2034,27 @@
         "paymentMethod": "Payment Method",
         "filters": {
             "cashier": "Cashier",
-            "allCashiers": "All Cashiers"
+            "allCashiers": "All Cashiers",
+            "dialogTitle": "Sales Filters",
+            "dialogDescription": "Refine the sales history with a richer filter set.",
+            "searchTitle": "Search & Sort",
+            "keywordSearch": "Keyword Search",
+            "searchPlaceholder": "Search ID, invoice, name...",
+            "sortBy": "Sort By",
+            "sortDateDesc": "Date: Newest First",
+            "sortDateAsc": "Date: Oldest First",
+            "sortAmountDesc": "Amount: Highest First",
+            "sortAmountAsc": "Amount: Lowest First",
+            "detailsTitle": "Currency, Method & Amount",
+            "currency": "Currency",
+            "all": "All",
+            "origin": "Source / Origin",
+            "paymentMethod": "Payment Method",
+            "minAmount": "Min Amount",
+            "maxAmount": "Max Amount",
+            "noCap": "No cap",
+            "reset": "Reset Draft",
+            "apply": "Apply Filters"
         },
         "view": {
             "table": "Sales Details",
