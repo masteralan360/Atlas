@@ -109,7 +109,8 @@ export default defineConfig(({ mode }) => {
             rollupOptions: {
                 input: {
                     main: path.resolve(__dirname, 'index.html'),
-                    marketplace: path.resolve(__dirname, 'marketplace.html')
+                    marketplace: path.resolve(__dirname, 'marketplace.html'),
+                    website: path.resolve(__dirname, 'Website/index.html')
                 },
                 output: {
                     manualChunks: {

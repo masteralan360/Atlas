@@ -1,6 +1,5 @@
 import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
-import './index.css'
 
 const isMarketplaceHost =
     typeof window !== 'undefined'
@@ -66,12 +65,16 @@ const renderRoot = (content: ReactNode) => {
 }
 
 const renderWebsite = async () => {
-    const { WebsiteApp } = await import('./Website/WebsiteApp')
+    const [{ WebsiteApp }] = await Promise.all([
+        import('../Website/src/WebsiteApp'),
+        import('../Website/src/index.css')
+    ])
     renderRoot(<WebsiteApp />)
 }
 
 const renderMarketplace = async () => {
-    const [{ ThemeProvider }, { Toaster }, { MarketplaceApp }] = await Promise.all([
+    const [, { ThemeProvider }, { Toaster }, { MarketplaceApp }] = await Promise.all([
+        import('./index.css'),
         import('@/ui/components/theme-provider'),
         import('@/ui/components'),
         import('./marketplace/MarketplaceApp'),
@@ -88,11 +91,13 @@ const renderMarketplace = async () => {
 
 const renderApp = async () => {
     const [
+        ,
         { ThemeProvider },
         { platformService },
         { connectionManager },
         { default: App }
     ] = await Promise.all([
+        import('./index.css'),
         import('@/ui/components/theme-provider'),
         import('@/services/platformService'),
         import('@/lib/connectionManager'),

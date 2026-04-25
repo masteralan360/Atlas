@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { motion, useScroll, useTransform, type Variants } from 'motion/react'
 import { ArrowRight, Check, ChevronRight } from 'lucide-react'
 
+import atlasLogoUrl from './assets/AtlasClear.svg'
 import {
     websiteArchitectureBlocks,
     websiteDesignSignals,
@@ -118,7 +119,7 @@ export function WebsiteApp() {
                             onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
                             className="flex items-center gap-3 text-left"
                         >
-                            <img src="/AtlasClear.svg" alt="Atlas logo" className="h-11 w-11 shrink-0 object-contain" />
+                            <img src={atlasLogoUrl} alt="Atlas logo" className="h-11 w-11 shrink-0 object-contain" />
                             <div>
                                 <div className="text-[11px] font-black uppercase tracking-[0.34em] text-[var(--website-muted)]">Atlas</div>
                                 <div className="text-sm font-semibold text-[var(--website-ink)]">Business operating system</div>
