@@ -64,13 +64,7 @@ const renderRoot = (content: ReactNode) => {
     )
 }
 
-const renderWebsite = async () => {
-    const [{ WebsiteApp }] = await Promise.all([
-        import('../Website/src/WebsiteApp'),
-        import('../Website/src/index.css')
-    ])
-    renderRoot(<WebsiteApp />)
-}
+
 
 const renderMarketplace = async () => {
     const [, { ThemeProvider }, { Toaster }, { MarketplaceApp }] = await Promise.all([
@@ -127,11 +121,6 @@ const init = async () => {
 
     if (isMarketplaceHost) {
         await renderMarketplace()
-        return
-    }
-
-    if (isWebsiteRoute) {
-        await renderWebsite()
         return
     }
 
