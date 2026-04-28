@@ -10,6 +10,7 @@ import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { buildConversionRates } from '@/lib/budget'
 import { convertToStoreBase } from '@/lib/currency'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
+import { setPendingSaleDetailsId } from '@/lib/saleNavigation'
 import {
     getPaymentTransactionRoutePath,
     usePaymentTransactions,
@@ -465,12 +466,52 @@ interface LedgerTrendPoint {
     net: number
 }
 
+interface LedgerRelationRange {
+    firstIndex: number
+    lastIndex: number
+}
+
 function toLedgerDateKey(date: string) {
     if (/^\d{4}-\d{2}-\d{2}/.test(date)) {
         return date.slice(0, 10)
     }
 
     return new Date(date).toISOString().slice(0, 10)
+}
+
+function buildVisibleRelationMaps(entries: LedgerEntry[]) {
+    const counts = new Map<string, number>()
+    const ranges = new Map<string, LedgerRelationRange>()
+
+    entries.forEach((entry, index) => {
+        if (!entry.relationKey) {
+            return
+        }
+
+        counts.set(entry.relationKey, (counts.get(entry.relationKey) || 0) + 1)
+
+        const existingRange = ranges.get(entry.relationKey)
+        if (!existingRange) {
+            ranges.set(entry.relationKey, { firstIndex: index, lastIndex: index })
+            return
+        }
+
+        existingRange.lastIndex = index
+    })
+
+    return { counts, ranges }
+}
+
+function formatTransactionIdForDisplay(transactionId: string, compact = false) {
+    if (!compact || transactionId.length <= 14) {
+        return transactionId
+    }
+
+    return `${transactionId.slice(0, 6)}...${transactionId.slice(-4)}`
+}
+
+function shouldOpenSaleDetails(entry: LedgerEntry) {
+    return entry.type === 'pos_sale' || entry.type === 'instant_pos_sale'
 }
 
 function LedgerSparkline({
@@ -916,6 +957,7 @@ export function Ledger() {
     const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false)
     const [draftFilters, setDraftFilters] = useState<LedgerFilterState>(DEFAULT_LEDGER_FILTERS)
     const [hoveredRelationKey, setHoveredRelationKey] = useState<string | null>(null)
+    const [isDirectionSplitView, setIsDirectionSplitView] = useState(false)
 
     const [currentPage, setCurrentPage] = useState(1)
     const pageSize = 50
@@ -989,41 +1031,13 @@ export function Ledger() {
         () => filteredEntries.slice((currentPage - 1) * pageSize, currentPage * pageSize),
         [currentPage, filteredEntries]
     )
-    const visibleRelationCounts = useMemo(() => {
-        const counts = new Map<string, number>()
-
-        visibleEntries.forEach((entry) => {
-            if (!entry.relationKey) {
-                return
-            }
-
-            counts.set(entry.relationKey, (counts.get(entry.relationKey) || 0) + 1)
-        })
-
-        return counts
-    }, [visibleEntries])
-    const visibleRelationRanges = useMemo(() => {
-        const ranges = new Map<string, { firstIndex: number; lastIndex: number }>()
-
-        visibleEntries.forEach((entry, index) => {
-            if (!entry.relationKey) {
-                return
-            }
-
-            const existing = ranges.get(entry.relationKey)
-            if (!existing) {
-                ranges.set(entry.relationKey, { firstIndex: index, lastIndex: index })
-                return
-            }
-
-            existing.lastIndex = index
-        })
-
-        return ranges
-    }, [visibleEntries])
-    const hoveredRelationRange = useMemo(
-        () => hoveredRelationKey ? (visibleRelationRanges.get(hoveredRelationKey) ?? null) : null,
-        [hoveredRelationKey, visibleRelationRanges]
+    const visibleIncomingEntries = useMemo(
+        () => visibleEntries.filter((entry) => entry.direction === 'incoming'),
+        [visibleEntries]
+    )
+    const visibleOutgoingEntries = useMemo(
+        () => visibleEntries.filter((entry) => entry.direction === 'outgoing'),
+        [visibleEntries]
     )
 
     const draftPreviewEntries = useMemo(
@@ -1320,6 +1334,219 @@ export function Ledger() {
         () => ledgerTrendData.reduce((sum, point) => sum + point.net, 0) < 0,
         [ledgerTrendData]
     )
+    const renderEntriesTable = (
+        rows: LedgerEntry[],
+        emptyMessage: string,
+        options?: {
+            compactTransactionId?: boolean
+            compactColumns?: boolean
+            hideDescriptionNotes?: boolean
+            hideActions?: boolean
+        }
+    ) => {
+        const { counts: relationCounts, ranges: relationRanges } = buildVisibleRelationMaps(rows)
+        const hoveredRange = hoveredRelationKey ? (relationRanges.get(hoveredRelationKey) ?? null) : null
+        const compactTransactionId = options?.compactTransactionId ?? false
+        const compactColumns = options?.compactColumns ?? false
+        const showDescriptionNotes = !options?.hideDescriptionNotes
+        const showActions = !options?.hideActions
+        const columnCount = 8 + (showDescriptionNotes ? 1 : 0) + (showActions ? 1 : 0)
+        const openEntry = (entry: LedgerEntry) => {
+            if (shouldOpenSaleDetails(entry)) {
+                setPendingSaleDetailsId(entry.transactionId)
+            }
+
+            setLocation(entry.routePath)
+        }
+
+        return (
+            <TooltipProvider delayDuration={120}>
+                <Table className={cn(
+                    "ms-6 w-[calc(100%-1.5rem)]",
+                    compactColumns && "ms-0 min-w-[760px] w-full table-fixed text-[11px] leading-tight"
+                )}>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead className={cn(compactColumns && 'w-[92px] px-2 py-3')}>{t('ledger.table.transactionId', { defaultValue: 'Transaction ID' })}</TableHead>
+                            <TableHead className={cn(compactColumns && 'w-[78px] px-2 py-3')}>{t('ledger.table.date', { defaultValue: 'Date' })}</TableHead>
+                            <TableHead className={cn(compactColumns && 'w-[120px] px-2 py-3')}>{t('ledger.table.type', { defaultValue: 'Type' })}</TableHead>
+                            <TableHead className={cn(compactColumns && 'w-[74px] px-2 py-3')}>{t('ledger.table.direction', { defaultValue: 'Direction' })}</TableHead>
+                            <TableHead className={cn(compactColumns && 'w-[92px] px-2 py-3')}>{t('ledger.table.amount', { defaultValue: 'Amount' })}</TableHead>
+                            <TableHead className={cn(compactColumns && 'w-[72px] px-2 py-3')}>{t('ledger.table.sourceModule', { defaultValue: 'Source Module' })}</TableHead>
+                            <TableHead className={cn(compactColumns && 'w-[90px] px-2 py-3')}>{t('ledger.table.referenceId', { defaultValue: 'Reference ID' })}</TableHead>
+                            <TableHead className={cn(compactColumns && 'w-[90px] px-2 py-3')}>{t('ledger.table.partner', { defaultValue: 'Partner' })}</TableHead>
+                            {showDescriptionNotes ? (
+                                <TableHead className={cn(compactColumns && 'min-w-[140px] px-2 py-3')}>{t('ledger.table.descriptionNotes', { defaultValue: 'Description / Notes' })}</TableHead>
+                            ) : null}
+                            {showActions ? (
+                                <TableHead className={cn("text-right", compactColumns ? 'w-[72px] px-2 py-3' : 'w-[84px]')}>{t('ledger.table.actions', { defaultValue: 'Actions' })}</TableHead>
+                            ) : null}
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {rows.length === 0 ? (
+                            <TableRow>
+                                <TableCell colSpan={columnCount} className="py-12 text-center text-muted-foreground">
+                                    {emptyMessage}
+                                </TableCell>
+                            </TableRow>
+                        ) : rows.map((entry, rowIndex) => {
+                            const isRelationHovered = !!hoveredRelationKey && entry.relationKey === hoveredRelationKey
+                            const relatedVisibleCount = entry.relationKey ? (relationCounts.get(entry.relationKey) || 0) : 0
+                            const hasVisibleLinkedPeer = relatedVisibleCount > 1
+                            const showHoverHierarchyLine = !!hoveredRange
+                                && hoveredRange.firstIndex !== hoveredRange.lastIndex
+                                && rowIndex >= hoveredRange.firstIndex
+                                && rowIndex <= hoveredRange.lastIndex
+                            const showHoverHierarchyTurn = isRelationHovered && hasVisibleLinkedPeer
+                            const relationAccentClass = entry.relationRole === 'origin'
+                                ? 'bg-sky-500/5'
+                                : entry.relationRole === 'repayment'
+                                    ? 'bg-amber-500/10'
+                                    : 'bg-violet-500/5'
+                            const hierarchyVerticalClass = hoveredRange && rowIndex === hoveredRange.firstIndex
+                                ? 'top-1/2 bottom-0'
+                                : hoveredRange && rowIndex === hoveredRange.lastIndex
+                                    ? 'top-0 bottom-1/2'
+                                    : 'top-0 bottom-0'
+
+                            return (
+                                <TableRow
+                                    key={entry.id}
+                                    className={cn(
+                                        entry.relationKey && 'transition-colors duration-150',
+                                        isRelationHovered && relationAccentClass,
+                                        isRelationHovered && hasVisibleLinkedPeer && 'shadow-[inset_0_0_0_1px_rgba(148,163,184,0.35)]'
+                                    )}
+                                    onMouseEnter={() => {
+                                        if (entry.relationKey) {
+                                            setHoveredRelationKey(entry.relationKey)
+                                        }
+                                    }}
+                                    onMouseLeave={() => {
+                                        if (entry.relationKey) {
+                                            setHoveredRelationKey((current) => current === entry.relationKey ? null : current)
+                                        }
+                                    }}
+                                >
+                                    <TableCell className={cn(
+                                        "relative font-mono text-xs text-muted-foreground",
+                                        compactColumns ? "max-w-[92px] px-2 py-3" : "max-w-[170px]"
+                                    )}>
+                                        {showHoverHierarchyLine ? (
+                                            <div className="pointer-events-none absolute inset-y-0 -start-6 w-5">
+                                                <span
+                                                    className={cn(
+                                                        'absolute start-1.5 w-px bg-foreground/80',
+                                                        hierarchyVerticalClass
+                                                    )}
+                                                />
+                                                {showHoverHierarchyTurn ? (
+                                                    <span
+                                                        className="absolute start-1.5 top-1/2 h-px w-3 -translate-y-1/2 bg-foreground/80"
+                                                    />
+                                                ) : null}
+                                            </div>
+                                        ) : null}
+                                        <span className="block truncate" title={entry.transactionId}>
+                                            {formatTransactionIdForDisplay(entry.transactionId, compactTransactionId)}
+                                        </span>
+                                    </TableCell>
+                                    <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>{formatDateTime(entry.date)}</TableCell>
+                                    <TableCell className={cn("font-medium", compactColumns && "align-top px-2 py-3")}>
+                                        {entry.relationTitle ? (
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <div className={cn("inline-flex max-w-full cursor-default items-center gap-2", compactColumns && "gap-1")}>
+                                                        <span className="truncate decoration-dotted underline-offset-4 hover:underline">
+                                                            {ledgerTypeLabel(entry.type, t)}
+                                                        </span>
+                                                        {entry.relationRole ? (
+                                                            <span className={cn(
+                                                                'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                                                                entry.relationRole === 'origin'
+                                                                    ? 'border-sky-200 bg-sky-50 text-sky-700'
+                                                                    : entry.relationRole === 'repayment'
+                                                                        ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                                                        : 'border-violet-200 bg-violet-50 text-violet-700'
+                                                            )}>
+                                                                {ledgerRelationRoleLabel(entry.relationRole, t)}
+                                                            </span>
+                                                        ) : null}
+                                                    </div>
+                                                </TooltipTrigger>
+                                                <TooltipContent className="max-w-sm p-3">
+                                                    <div className="space-y-1.5">
+                                                        <div className="font-semibold">{entry.relationTitle}</div>
+                                                        {entry.relationDescription ? (
+                                                            <p className="text-xs leading-relaxed text-muted-foreground">
+                                                                {entry.relationDescription}
+                                                            </p>
+                                                        ) : null}
+                                                        {hasVisibleLinkedPeer ? (
+                                                            <p className="text-[11px] font-semibold text-primary">
+                                                                {t('ledger.relation.hoverHint', { defaultValue: 'Related ledger rows on this page highlight together and reveal the linked hierarchy while you hover.' })}
+                                                            </p>
+                                                        ) : null}
+                                                    </div>
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        ) : ledgerTypeLabel(entry.type, t)}
+                                    </TableCell>
+                                    <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>
+                                        <span className={cn(
+                                            'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                                            compactColumns && 'gap-0.5 px-1.5 text-[9px]',
+                                            entry.direction === 'incoming'
+                                                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                                : 'border-amber-200 bg-amber-50 text-amber-700'
+                                        )}>
+                                            {entry.direction === 'incoming' ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
+                                            {entry.direction === 'incoming' ? t('ledger.direction.in', { defaultValue: 'IN' }) : t('ledger.direction.out', { defaultValue: 'OUT' })}
+                                        </span>
+                                    </TableCell>
+                                    <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>{formatCurrency(entry.amount, entry.currency, features.iqd_display_preference)}</TableCell>
+                                    <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>{sourceModuleLabel(entry.sourceModule, t)}</TableCell>
+                                    <TableCell className={cn("font-medium", compactColumns && "align-top px-2 py-3")}>
+                                        <span className="block truncate" title={entry.referenceId}>
+                                            {entry.referenceId}
+                                        </span>
+                                    </TableCell>
+                                    <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>
+                                        <span className="block truncate" title={entry.partner || undefined}>
+                                            {entry.partner || '-'}
+                                        </span>
+                                    </TableCell>
+                                    {showDescriptionNotes ? (
+                                        <TableCell className={cn(compactColumns ? 'max-w-[140px] px-2 py-3' : 'max-w-[280px]')}>
+                                            <span className={cn(
+                                                "block truncate text-muted-foreground",
+                                                compactColumns ? "text-xs" : "text-sm"
+                                            )} title={entry.description || undefined}>
+                                                {entry.description || '-'}
+                                            </span>
+                                        </TableCell>
+                                    ) : null}
+                                    {showActions ? (
+                                        <TableCell className={cn("text-right", compactColumns && "px-2 py-3")}>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => openEntry(entry)}
+                                                className={cn(compactColumns && "h-7 px-2 text-[10px]")}
+                                            >
+                                                {t('ledger.table.open', { defaultValue: 'Open' })}
+                                            </Button>
+                                        </TableCell>
+                                    ) : null}
+                                </TableRow>
+                            )
+                        })}
+                    </TableBody>
+                </Table>
+            </TooltipProvider>
+        )
+    }
 
     if (!hasLedgerSurface) {
         return (
@@ -1759,6 +1986,16 @@ export function Ledger() {
                         )}
                     </CardTitle>
                     <div className="flex flex-col sm:flex-row items-center gap-4">
+                        <Button
+                            type="button"
+                            variant={isDirectionSplitView ? 'default' : 'outline'}
+                            onClick={() => setIsDirectionSplitView((current) => !current)}
+                            className="h-10 rounded-2xl px-4"
+                        >
+                            {isDirectionSplitView
+                                ? t('ledger.table.combinedView', { defaultValue: 'Show Original Ledger View' })
+                                : t('ledger.table.splitView', { defaultValue: 'Separate Inflows / Outflows' })}
+                        </Button>
                         <AppPagination
                             currentPage={currentPage}
                             totalCount={filteredEntries.length}
@@ -1768,157 +2005,58 @@ export function Ledger() {
                         />
                     </div>
                 </CardHeader>
-                <CardContent className="overflow-x-auto">
-                    <TooltipProvider delayDuration={120}>
-                        <Table className="ms-6 w-[calc(100%-1.5rem)]">
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>{t('ledger.table.transactionId', { defaultValue: 'Transaction ID' })}</TableHead>
-                                    <TableHead>{t('ledger.table.date', { defaultValue: 'Date' })}</TableHead>
-                                    <TableHead>{t('ledger.table.type', { defaultValue: 'Type' })}</TableHead>
-                                    <TableHead>{t('ledger.table.direction', { defaultValue: 'Direction' })}</TableHead>
-                                    <TableHead>{t('ledger.table.amount', { defaultValue: 'Amount' })}</TableHead>
-                                    <TableHead>{t('ledger.table.sourceModule', { defaultValue: 'Source Module' })}</TableHead>
-                                    <TableHead>{t('ledger.table.referenceId', { defaultValue: 'Reference ID' })}</TableHead>
-                                    <TableHead>{t('ledger.table.partner', { defaultValue: 'Partner' })}</TableHead>
-                                    <TableHead>{t('ledger.table.descriptionNotes', { defaultValue: 'Description / Notes' })}</TableHead>
-                                    <TableHead className="text-right">{t('ledger.table.actions', { defaultValue: 'Actions' })}</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {filteredEntries.length === 0 ? (
-                                    <TableRow>
-                                        <TableCell colSpan={10} className="py-12 text-center text-muted-foreground">
-                                            {t('ledger.table.noMatch', { defaultValue: 'No ledger entries match the current filters.' })}
-                                        </TableCell>
-                                    </TableRow>
-                                ) : visibleEntries.map((entry, rowIndex) => {
-                                    const isRelationHovered = !!hoveredRelationKey && entry.relationKey === hoveredRelationKey
-                                    const relatedVisibleCount = entry.relationKey ? (visibleRelationCounts.get(entry.relationKey) || 0) : 0
-                                    const hasVisibleLinkedPeer = relatedVisibleCount > 1
-                                    const showHoverHierarchyLine = !!hoveredRelationRange
-                                        && hoveredRelationRange.firstIndex !== hoveredRelationRange.lastIndex
-                                        && rowIndex >= hoveredRelationRange.firstIndex
-                                        && rowIndex <= hoveredRelationRange.lastIndex
-                                    const showHoverHierarchyTurn = isRelationHovered && hasVisibleLinkedPeer
-                                    const relationAccentClass = entry.relationRole === 'origin'
-                                        ? 'bg-sky-500/5'
-                                        : entry.relationRole === 'repayment'
-                                            ? 'bg-amber-500/10'
-                                            : 'bg-violet-500/5'
-                                    const hierarchyVerticalClass = hoveredRelationRange && rowIndex === hoveredRelationRange.firstIndex
-                                        ? 'top-1/2 bottom-0'
-                                        : hoveredRelationRange && rowIndex === hoveredRelationRange.lastIndex
-                                            ? 'top-0 bottom-1/2'
-                                            : 'top-0 bottom-0'
+                <CardContent className={cn(isDirectionSplitView ? "overflow-hidden" : "overflow-x-auto")}>
+                    {filteredEntries.length === 0 ? renderEntriesTable(
+                        visibleEntries,
+                        t('ledger.table.noMatch', { defaultValue: 'No ledger entries match the current filters.' })
+                    ) : isDirectionSplitView ? (
+                        <div className="grid gap-6 xl:grid-cols-2">
+                            <section className="min-w-0 overflow-x-auto rounded-3xl border border-emerald-500/15 bg-emerald-500/[0.03]">
+                                <div className="flex items-center justify-between border-b border-emerald-500/15 px-5 py-4">
+                                    <div>
+                                        <div className="text-sm font-bold text-emerald-700">
+                                            {t('ledger.directionFilter.incoming', { defaultValue: 'Inflow' })}
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            {t('ledger.table.splitViewDescription', { defaultValue: 'Current page entries grouped by flow direction.' })}
+                                        </p>
+                                    </div>
+                                    <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-700">
+                                        {visibleIncomingEntries.length}
+                                    </span>
+                                </div>
+                                {renderEntriesTable(
+                                    visibleIncomingEntries,
+                                    t('ledger.table.noIncoming', { defaultValue: 'No inflow entries on this page.' }),
+                                    { compactTransactionId: true, compactColumns: true, hideDescriptionNotes: true, hideActions: true }
+                                )}
+                            </section>
 
-                                    return (
-                                        <TableRow
-                                            key={entry.id}
-                                            className={cn(
-                                                entry.relationKey && 'transition-colors duration-150',
-                                                isRelationHovered && relationAccentClass,
-                                                isRelationHovered && hasVisibleLinkedPeer && 'shadow-[inset_0_0_0_1px_rgba(148,163,184,0.35)]'
-                                            )}
-                                            onMouseEnter={() => {
-                                                if (entry.relationKey) {
-                                                    setHoveredRelationKey(entry.relationKey)
-                                                }
-                                            }}
-                                            onMouseLeave={() => {
-                                                if (entry.relationKey) {
-                                                    setHoveredRelationKey((current) => current === entry.relationKey ? null : current)
-                                                }
-                                            }}
-                                        >
-                                            <TableCell className="relative max-w-[170px] font-mono text-xs text-muted-foreground">
-                                                {showHoverHierarchyLine ? (
-                                                    <div className="pointer-events-none absolute inset-y-0 -start-6 w-5">
-                                                        <span
-                                                            className={cn(
-                                                                'absolute start-1.5 w-px bg-foreground/80',
-                                                                hierarchyVerticalClass
-                                                            )}
-                                                        />
-                                                        {showHoverHierarchyTurn ? (
-                                                            <span
-                                                                className="absolute start-1.5 top-1/2 h-px w-3 -translate-y-1/2 bg-foreground/80"
-                                                            />
-                                                        ) : null}
-                                                    </div>
-                                                ) : null}
-                                                <span className="block truncate">{entry.transactionId}</span>
-                                            </TableCell>
-                                            <TableCell>{formatDateTime(entry.date)}</TableCell>
-                                            <TableCell className="font-medium">
-                                                {entry.relationTitle ? (
-                                                    <Tooltip>
-                                                        <TooltipTrigger asChild>
-                                                            <div className="inline-flex max-w-full cursor-default items-center gap-2">
-                                                                <span className="truncate decoration-dotted underline-offset-4 hover:underline">
-                                                                    {ledgerTypeLabel(entry.type, t)}
-                                                                </span>
-                                                                {entry.relationRole ? (
-                                                                    <span className={cn(
-                                                                        'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                                                                        entry.relationRole === 'origin'
-                                                                            ? 'border-sky-200 bg-sky-50 text-sky-700'
-                                                                            : entry.relationRole === 'repayment'
-                                                                                ? 'border-amber-200 bg-amber-50 text-amber-700'
-                                                                                : 'border-violet-200 bg-violet-50 text-violet-700'
-                                                                    )}>
-                                                                        {ledgerRelationRoleLabel(entry.relationRole, t)}
-                                                                    </span>
-                                                                ) : null}
-                                                            </div>
-                                                        </TooltipTrigger>
-                                                        <TooltipContent className="max-w-sm p-3">
-                                                            <div className="space-y-1.5">
-                                                                <div className="font-semibold">{entry.relationTitle}</div>
-                                                                {entry.relationDescription ? (
-                                                                    <p className="text-xs leading-relaxed text-muted-foreground">
-                                                                        {entry.relationDescription}
-                                                                    </p>
-                                                                ) : null}
-                                                                {hasVisibleLinkedPeer ? (
-                                                                    <p className="text-[11px] font-semibold text-primary">
-                                                                        {t('ledger.relation.hoverHint', { defaultValue: 'Related ledger rows on this page highlight together and reveal the linked hierarchy while you hover.' })}
-                                                                    </p>
-                                                                ) : null}
-                                                            </div>
-                                                        </TooltipContent>
-                                                    </Tooltip>
-                                                ) : ledgerTypeLabel(entry.type, t)}
-                                            </TableCell>
-                                            <TableCell>
-                                                <span className={cn(
-                                                    'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                                                    entry.direction === 'incoming'
-                                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                                        : 'border-amber-200 bg-amber-50 text-amber-700'
-                                                )}>
-                                                    {entry.direction === 'incoming' ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
-                                                    {entry.direction === 'incoming' ? t('ledger.direction.in', { defaultValue: 'IN' }) : t('ledger.direction.out', { defaultValue: 'OUT' })}
-                                                </span>
-                                            </TableCell>
-                                            <TableCell>{formatCurrency(entry.amount, entry.currency, features.iqd_display_preference)}</TableCell>
-                                            <TableCell>{sourceModuleLabel(entry.sourceModule, t)}</TableCell>
-                                            <TableCell className="font-medium">{entry.referenceId}</TableCell>
-                                            <TableCell>{entry.partner || '-'}</TableCell>
-                                            <TableCell className="max-w-[280px]">
-                                                <span className="block truncate text-sm text-muted-foreground">{entry.description || '-'}</span>
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <Button variant="outline" size="sm" onClick={() => setLocation(entry.routePath)}>
-                                                    {t('ledger.table.open', { defaultValue: 'Open' })}
-                                                </Button>
-                                            </TableCell>
-                                        </TableRow>
-                                    )
-                                })}
-                            </TableBody>
-                        </Table>
-                    </TooltipProvider>
+                            <section className="min-w-0 overflow-x-auto rounded-3xl border border-amber-500/15 bg-amber-500/[0.03]">
+                                <div className="flex items-center justify-between border-b border-amber-500/15 px-5 py-4">
+                                    <div>
+                                        <div className="text-sm font-bold text-amber-700">
+                                            {t('ledger.directionFilter.outgoing', { defaultValue: 'Outflow' })}
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            {t('ledger.table.splitViewDescription', { defaultValue: 'Current page entries grouped by flow direction.' })}
+                                        </p>
+                                    </div>
+                                    <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-700">
+                                        {visibleOutgoingEntries.length}
+                                    </span>
+                                </div>
+                                {renderEntriesTable(
+                                    visibleOutgoingEntries,
+                                    t('ledger.table.noOutgoing', { defaultValue: 'No outflow entries on this page.' }),
+                                    { compactTransactionId: true, compactColumns: true, hideDescriptionNotes: true, hideActions: true }
+                                )}
+                            </section>
+                        </div>
+                    ) : renderEntriesTable(
+                        visibleEntries,
+                        t('ledger.table.noMatch', { defaultValue: 'No ledger entries match the current filters.' })
+                    )}
                 </CardContent>
             </Card>
 
