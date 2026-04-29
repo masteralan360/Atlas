@@ -172,12 +172,14 @@ function isEntryInDateRange(
         return value >= getStartOfMonth(now)
     }
 
-    if (dateRange === 'custom' && customDates.start && customDates.end) {
-        const start = new Date(customDates.start)
-        start.setHours(0, 0, 0, 0)
-        const end = new Date(customDates.end)
-        end.setHours(23, 59, 59, 999)
-        return value >= start && value <= end
+    if (dateRange === 'custom' && (customDates.start || customDates.end)) {
+        const start = customDates.start ? new Date(customDates.start) : null
+        if (start) start.setHours(0, 0, 0, 0)
+        const end = customDates.end ? new Date(customDates.end) : null
+        if (end) end.setHours(23, 59, 59, 999)
+        if (start && value < start) return false
+        if (end && value > end) return false
+        return true
     }
 
     return true
@@ -1062,8 +1064,11 @@ export function Ledger() {
                 return `${t('performance.filters.from')} ${formatDate(minDate)} ${t('performance.filters.to')} ${formatDate(maxDate)}`
             }
 
-            if (customDates.start && customDates.end) {
-                return `${t('performance.filters.from')} ${formatDate(customDates.start)} ${t('performance.filters.to')} ${formatDate(customDates.end)}`
+            if (customDates.start || customDates.end) {
+                const parts = []
+                if (customDates.start) parts.push(`${t('performance.filters.from')} ${formatDate(customDates.start)}`)
+                if (customDates.end) parts.push(`${t('performance.filters.to')} ${formatDate(customDates.end)}`)
+                return parts.join(' ')
             }
         }
 
@@ -1072,7 +1077,7 @@ export function Ledger() {
                 const dates = dateScopedEntries.map((entry) => new Date(entry.date).getTime())
                 const minDate = new Date(Math.min(...dates))
                 const maxDate = new Date(Math.max(...dates))
-                return `${t('performance.filters.allTime') || 'All Time'}, ${t('performance.filters.from')} ${formatDate(minDate)} ${t('performance.filters.to')} ${formatDate(maxDate)}`
+                return `${t('performance.filters.from')} ${formatDate(minDate)} ${t('performance.filters.to')} ${formatDate(maxDate)}`
             }
 
             return t('performance.filters.allTime') || 'All Time'

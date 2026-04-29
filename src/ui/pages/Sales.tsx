@@ -233,14 +233,16 @@ export function Sales() {
         } else if (dateRange === 'month') {
             const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
             result = result.filter(s => new Date(s.created_at) >= startOfMonth)
-        } else if (dateRange === 'custom' && customDates.start && customDates.end) {
-            const start = new Date(customDates.start)
-            start.setHours(0, 0, 0, 0)
-            const end = new Date(customDates.end)
-            end.setHours(23, 59, 59, 999)
+        } else if (dateRange === 'custom' && (customDates.start || customDates.end)) {
+            const start = customDates.start ? new Date(customDates.start) : null
+            if (start) start.setHours(0, 0, 0, 0)
+            const end = customDates.end ? new Date(customDates.end) : null
+            if (end) end.setHours(23, 59, 59, 999)
             result = result.filter(s => {
                 const d = new Date(s.created_at)
-                return d >= start && d <= end
+                if (start && d < start) return false
+                if (end && d > end) return false
+                return true
             })
         }
 
@@ -411,22 +413,25 @@ export function Sales() {
             return formatLocalizedMonthYear(now, i18n.language)
         }
         if (dateRange === 'custom') {
-            if (sales && sales.length > 0) {
-                const dates = sales.map(s => new Date(s.created_at).getTime())
+            if (filteredSales && filteredSales.length > 0) {
+                const dates = filteredSales.map(s => new Date(s.created_at).getTime())
                 const minDate = new Date(Math.min(...dates))
                 const maxDate = new Date(Math.max(...dates))
                 return `${t('performance.filters.from')} ${formatDate(minDate)} ${t('performance.filters.to')} ${formatDate(maxDate)}`
             }
-            if (customDates.start && customDates.end) {
-                return `${t('performance.filters.from')} ${formatDate(customDates.start)} ${t('performance.filters.to')} ${formatDate(customDates.end)}`
+            if (customDates.start || customDates.end) {
+                const parts = []
+                if (customDates.start) parts.push(`${t('performance.filters.from')} ${formatDate(customDates.start)}`)
+                if (customDates.end) parts.push(`${t('performance.filters.to')} ${formatDate(customDates.end)}`)
+                return parts.join(' ')
             }
         }
         if (dateRange === 'allTime') {
-            if (sales && sales.length > 0) {
-                const dates = sales.map(s => new Date(s.created_at).getTime())
+            if (filteredSales && filteredSales.length > 0) {
+                const dates = filteredSales.map(s => new Date(s.created_at).getTime())
                 const minDate = new Date(Math.min(...dates))
                 const maxDate = new Date(Math.max(...dates))
-                return `${t('performance.filters.allTime')}, ${t('performance.filters.from')} ${formatDate(minDate)} ${t('performance.filters.to')} ${formatDate(maxDate)}`
+                return `${t('performance.filters.from')} ${formatDate(minDate)} ${t('performance.filters.to')} ${formatDate(maxDate)}`
             }
             return t('performance.filters.allTime') || 'All Time'
         }

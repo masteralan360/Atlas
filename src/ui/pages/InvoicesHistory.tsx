@@ -91,12 +91,14 @@ export function InvoicesHistory() {
                     return matchesSearch && invoiceDate >= startOfMonth
                 }
 
-                if (dateRange === 'custom' && customDates.start && customDates.end) {
-                    const start = new Date(customDates.start)
-                    start.setHours(0, 0, 0, 0)
-                    const end = new Date(customDates.end)
-                    end.setHours(23, 59, 59, 999)
-                    return matchesSearch && invoiceDate >= start && invoiceDate <= end
+                if (dateRange === 'custom' && (customDates.start || customDates.end)) {
+                    const start = customDates.start ? new Date(customDates.start) : null
+                    if (start) start.setHours(0, 0, 0, 0)
+                    const end = customDates.end ? new Date(customDates.end) : null
+                    if (end) end.setHours(23, 59, 59, 999)
+                    if (start && invoiceDate < start) return false
+                    if (end && invoiceDate > end) return false
+                    return matchesSearch
                 }
 
                 return matchesSearch
@@ -121,8 +123,11 @@ export function InvoicesHistory() {
                 return `${t('performance.filters.from') || 'From'} ${formatDate(minDate)} ${t('performance.filters.to') || 'To'} ${formatDate(maxDate)}`
             }
 
-            if (customDates.start && customDates.end) {
-                return `${t('performance.filters.from') || 'From'} ${formatDate(customDates.start)} ${t('performance.filters.to') || 'To'} ${formatDate(customDates.end)}`
+            if (customDates.start || customDates.end) {
+                const parts = []
+                if (customDates.start) parts.push(`${t('performance.filters.from') || 'From'} ${formatDate(customDates.start)}`)
+                if (customDates.end) parts.push(`${t('performance.filters.to') || 'To'} ${formatDate(customDates.end)}`)
+                return parts.join(' ')
             }
         }
 
@@ -131,7 +136,7 @@ export function InvoicesHistory() {
                 const dates = historyInvoices.map((invoice) => new Date(invoice.createdAt).getTime())
                 const minDate = new Date(Math.min(...dates))
                 const maxDate = new Date(Math.max(...dates))
-                return `${t('performance.filters.allTime')}, ${t('performance.filters.from')} ${formatDate(minDate)} ${t('performance.filters.to')} ${formatDate(maxDate)}`
+                return `${t('performance.filters.from') || 'From'} ${formatDate(minDate)} ${t('performance.filters.to') || 'To'} ${formatDate(maxDate)}`
             }
 
             return t('performance.filters.allTime') || 'All Time'
