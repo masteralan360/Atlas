@@ -2313,7 +2313,8 @@
             "duplicateName": "A category with this name already exists."
         },
         "confirmDelete": "Delete Category",
-        "deleteWarning": "Deleting this category will unassign it from all products. The products will remain in stock."
+        "deleteWarning": "Deleting this category will unassign it from all products. The products will remain in stock.",
+        "deleteWarningWithProducts": "This category has {{count}} product attached. If you continue, the category will be deleted and those products will be moved to No Category."
     },
     "revenue": {
         "title": "Revenue Analytics",

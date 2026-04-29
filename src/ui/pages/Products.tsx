@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 import { Copy, GitBranch, Info, LayoutGrid, List as ListIcon, Loader2, Package, Pencil, Plus, Search, Trash2 } from 'lucide-react'
@@ -109,6 +109,27 @@ export function Products() {
     const [selectedCloneTargetStorageId, setSelectedCloneTargetStorageId] = useState('')
     const [isBranchCloning, setIsBranchCloning] = useState(false)
     const canCloneToBranch = canCloneProducts && cloneTargets.length > 0
+
+    const productsAttachedToDeleteCategory = useMemo(() => {
+        if (itemToDelete?.type !== 'category') {
+            return []
+        }
+
+        const categoryName = itemToDelete.name.trim()
+        return products.filter((product) =>
+            product.categoryId === itemToDelete.id
+            || (!product.categoryId && categoryName.length > 0 && product.category?.trim() === categoryName)
+        )
+    }, [itemToDelete, products])
+
+    const deleteConfirmationDescription = itemToDelete?.type === 'category'
+        ? productsAttachedToDeleteCategory.length > 0
+            ? t('categories.deleteWarningWithProducts', {
+                count: productsAttachedToDeleteCategory.length,
+                defaultValue: 'This category has {{count}} product attached. If you continue, the category will be deleted and those products will be moved to No Category.'
+            })
+            : t('categories.deleteWarning')
+        : t('products.deleteWarning')
 
     useEffect(() => {
         localStorage.setItem('products_view_mode', viewMode)
@@ -1114,7 +1135,7 @@ export function Products() {
                 itemName={itemToDelete?.name}
                 isLoading={isLoading}
                 title={itemToDelete?.type === 'category' ? t('categories.confirmDelete') : t('products.confirmDelete')}
-                description={itemToDelete?.type === 'category' ? t('categories.deleteWarning') : t('products.deleteWarning')}
+                description={deleteConfirmationDescription}
             />
         </div>
     )

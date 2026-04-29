@@ -315,25 +315,83 @@ export async function deleteCategory(id: string): Promise<void> {
     const existing = await db.categories.get(id)
     if (!existing) return
 
+    const attachedProductsById = await db.products.where('categoryId').equals(id).toArray()
+    const legacyAttachedProducts = existing.name
+        ? await db.products
+            .where('workspaceId')
+            .equals(existing.workspaceId)
+            .and((product) => !product.isDeleted && !product.categoryId && product.category?.trim() === existing.name.trim())
+            .toArray()
+        : []
+    const attachedProducts = Array.from(
+        new Map([...attachedProductsById, ...legacyAttachedProducts].map((product) => [product.id, product])).values()
+    )
+    const shouldSyncOnline = shouldUseCloudBusinessData(existing.workspaceId) && isOnline()
+    const updatedProducts = attachedProducts.map((product) => ({
+        ...product,
+        categoryId: null,
+        category: null,
+        updatedAt: now,
+        syncStatus: shouldSyncOnline ? 'synced' : 'pending',
+        lastSyncedAt: shouldSyncOnline ? now : product.lastSyncedAt,
+        version: product.version + 1
+    }) as Product)
+
     const updated = {
         ...existing,
         isDeleted: true,
         updatedAt: now,
-        syncStatus: isOnline() ? 'synced' : 'pending',
+        syncStatus: shouldSyncOnline ? 'synced' : 'pending',
         version: existing.version + 1
     } as Category
 
-    if (isOnline()) {
+    if (shouldSyncOnline) {
         // ONLINE: Delete in Supabase (Soft Delete)
+        const { error: productsError } = await runMutation('categories.clearProducts', () =>
+            supabase
+                .from('products')
+                .update({ category_id: null, category: null, updated_at: now })
+                .eq('category_id', id)
+        )
+        if (productsError) throw normalizeSupabaseActionError(productsError)
+
+        if (existing.name.trim()) {
+            const { error: legacyProductsError } = await runMutation('categories.clearLegacyProducts', () =>
+                supabase
+                    .from('products')
+                    .update({ category: null, updated_at: now })
+                    .eq('workspace_id', existing.workspaceId)
+                    .is('category_id', null)
+                    .eq('category', existing.name)
+            )
+            if (legacyProductsError) throw normalizeSupabaseActionError(legacyProductsError)
+        }
+
         const { error } = await runMutation('categories.delete', () => supabase.from('categories').update({ is_deleted: true, updated_at: now }).eq('id', id))
         if (error) throw normalizeSupabaseActionError(error)
 
-        await db.categories.put(updated)
+        await db.transaction('rw', [db.products, db.categories], async () => {
+            for (const product of updatedProducts) {
+                await db.products.put(product)
+            }
+            await db.categories.put(updated)
+        })
     } else {
         // OFFLINE
-        await db.categories.put(updated)
-        // For delete, we might just need the ID, but passing full updated record is safe or just payload with ID
-        await addToOfflineMutations('categories', id, 'delete', { id }, existing.workspaceId)
+        await db.transaction('rw', [db.products, db.categories], async () => {
+            for (const product of updatedProducts) {
+                await db.products.put(product)
+            }
+            await db.categories.put(updated)
+        })
+
+        if (shouldUseCloudBusinessData(existing.workspaceId)) {
+            await Promise.all(updatedProducts.map((product) =>
+                addToOfflineMutations('products', product.id, 'update', product as unknown as Record<string, unknown>, existing.workspaceId)
+            ))
+            // For delete, we might just need the ID, but passing full updated record is safe or just payload with ID
+            await addToOfflineMutations('categories', id, 'delete', { id }, existing.workspaceId)
+        }
     }
 }
 
