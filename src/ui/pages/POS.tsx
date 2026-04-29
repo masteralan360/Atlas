@@ -21,6 +21,13 @@ import { formatCurrency, generateId, cn } from '@/lib/utils'
 import { CartItem } from '@/types'
 import { useWorkspace, type WorkspaceFeatures } from '@/workspace'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
+import {
+    BARCODE_SCANNER_ACTIVE_FAST_KEY_COUNT,
+    BARCODE_SCANNER_AUTO_COMMIT_DELAY_MS,
+    BARCODE_SCANNER_FAST_KEY_THRESHOLD_MS,
+    normalizeBarcodeScannerKey,
+    normalizeBarcodeScannerText
+} from '@/lib/barcodeScanner'
 import { ExchangeRateResult } from '@/lib/exchangeRate'
 import { verifySale, createVerificationSale } from '@/lib/saleVerification'
 import type { ResolvedActiveDiscount } from '@/lib/discounts'
@@ -123,6 +130,91 @@ function formatDiscountBadge(
     return `-${formatCurrency(discount.discountValue, currency, iqdPreference)}`
 }
 
+type EditableScanElement = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLElement
+
+type EditableScanSnapshot = {
+    element: EditableScanElement
+    value?: string
+    selectionStart?: number | null
+    selectionEnd?: number | null
+    textContent?: string | null
+}
+
+function getFocusedEditableScanElement(): EditableScanElement | null {
+    const activeElement = document.activeElement
+
+    if (activeElement instanceof HTMLInputElement) {
+        return activeElement
+    }
+
+    if (activeElement instanceof HTMLTextAreaElement) {
+        return activeElement
+    }
+
+    if (activeElement instanceof HTMLSelectElement) {
+        return activeElement
+    }
+
+    if (activeElement instanceof HTMLElement && activeElement.isContentEditable) {
+        return activeElement
+    }
+
+    return null
+}
+
+function createEditableScanSnapshot(element: EditableScanElement): EditableScanSnapshot {
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+        return {
+            element,
+            value: element.value,
+            selectionStart: element.selectionStart,
+            selectionEnd: element.selectionEnd
+        }
+    }
+
+    if (element instanceof HTMLSelectElement) {
+        return {
+            element,
+            value: element.value
+        }
+    }
+
+    return {
+        element,
+        textContent: element.textContent
+    }
+}
+
+function restoreEditableScanSnapshot(snapshot: EditableScanSnapshot | null) {
+    if (!snapshot) {
+        return
+    }
+
+    const { element } = snapshot
+
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+        element.value = snapshot.value ?? ''
+        if (
+            typeof snapshot.selectionStart === 'number'
+            && typeof snapshot.selectionEnd === 'number'
+            && typeof element.setSelectionRange === 'function'
+        ) {
+            element.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd)
+        }
+        element.blur()
+        return
+    }
+
+    if (element instanceof HTMLSelectElement) {
+        element.value = snapshot.value ?? ''
+        element.blur()
+        return
+    }
+
+    element.textContent = snapshot.textContent ?? ''
+    element.blur()
+}
+
 
 const playCheckoutSound = () => {
     try {
@@ -196,6 +288,7 @@ export function POS() {
     const deviceScanLastTime = useRef(0)
     const deviceScanFastCount = useRef(0)
     const deviceScanActive = useRef(false)
+    const deviceScanEditableSnapshot = useRef<EditableScanSnapshot | null>(null)
     const [scanDelay, setScanDelay] = useState(() => {
         return Number(localStorage.getItem('scanner_scan_delay')) || 2500
     })
@@ -1009,7 +1102,7 @@ export function POS() {
     const handleBarcodeDetected = useCallback((barcodes: any[], source: 'camera' | 'device') => {
         const isEnabled = source === 'camera' ? isCameraScannerAutoEnabled : isDeviceScannerAutoEnabled
         if (!isEnabled || barcodes.length === 0) return
-        const text = String(barcodes[0].rawValue ?? '').trim()
+        const text = normalizeBarcodeScannerText(String(barcodes[0].rawValue ?? ''))
         if (!text) return
 
         // Simple debounce/cooldown logic
@@ -1052,22 +1145,42 @@ export function POS() {
     }, [isCameraScannerAutoEnabled, isDeviceScannerAutoEnabled, scanDelay, barcodeMap, products, addToCart, t, toast, selectedStorageId, storages, hapticTrigger])
 
     useEffect(() => {
-        if (!isDeviceScannerAutoEnabled || isBarcodeModalOpen) {
+        if (!isDeviceScannerAutoEnabled) {
             deviceScanBuffer.current = ''
             deviceScanActive.current = false
             deviceScanFastCount.current = 0
+            deviceScanLastTime.current = 0
+            deviceScanEditableSnapshot.current = null
             if (deviceScanTimeout.current) {
                 window.clearTimeout(deviceScanTimeout.current)
             }
             return
         }
 
-        const commitDeviceScan = () => {
-            if (!deviceScanBuffer.current) return
-            const payload = deviceScanBuffer.current
+        const resetDeviceScanState = () => {
             deviceScanBuffer.current = ''
             deviceScanActive.current = false
             deviceScanFastCount.current = 0
+            deviceScanLastTime.current = 0
+            deviceScanEditableSnapshot.current = null
+        }
+
+        const activateDeviceScannerCapture = () => {
+            if (deviceScanActive.current) {
+                return
+            }
+
+            deviceScanActive.current = true
+            restoreEditableScanSnapshot(deviceScanEditableSnapshot.current)
+        }
+
+        const commitDeviceScan = () => {
+            if (!deviceScanBuffer.current) return
+            const payload = normalizeBarcodeScannerText(deviceScanBuffer.current)
+            resetDeviceScanState()
+            if (!payload) {
+                return
+            }
             handleBarcodeDetected([{ rawValue: payload }], 'device')
         }
 
@@ -1080,29 +1193,39 @@ export function POS() {
                 if (deviceScanBuffer.current) {
                     event.preventDefault()
                     event.stopPropagation()
+                    restoreEditableScanSnapshot(deviceScanEditableSnapshot.current)
                     commitDeviceScan()
                 }
                 return
             }
 
             if (event.key.length !== 1) return
+            const normalizedKey = normalizeBarcodeScannerKey(event.key)
+            if (normalizedKey.length !== 1) return
 
             const now = Date.now()
             const delta = now - deviceScanLastTime.current
-            deviceScanLastTime.current = now
 
-            if (delta > 0 && delta < 45) {
-                deviceScanFastCount.current += 1
-            } else {
-                deviceScanFastCount.current = 0
+            if (!deviceScanBuffer.current || delta <= 0 || delta > BARCODE_SCANNER_FAST_KEY_THRESHOLD_MS) {
+                const focusedEditableElement = getFocusedEditableScanElement()
                 deviceScanBuffer.current = ''
                 deviceScanActive.current = false
+                deviceScanFastCount.current = 0
+                deviceScanEditableSnapshot.current = focusedEditableElement
+                    ? createEditableScanSnapshot(focusedEditableElement)
+                    : null
             }
 
-            deviceScanBuffer.current += event.key
+            deviceScanLastTime.current = now
 
-            if (deviceScanFastCount.current >= 2) {
-                deviceScanActive.current = true
+            if (delta > 0 && delta <= BARCODE_SCANNER_FAST_KEY_THRESHOLD_MS) {
+                deviceScanFastCount.current += 1
+            }
+
+            deviceScanBuffer.current += normalizedKey
+
+            if (deviceScanFastCount.current >= BARCODE_SCANNER_ACTIVE_FAST_KEY_COUNT) {
+                activateDeviceScannerCapture()
             }
 
             if (deviceScanActive.current) {
@@ -1113,7 +1236,7 @@ export function POS() {
                 }
                 deviceScanTimeout.current = window.setTimeout(() => {
                     commitDeviceScan()
-                }, 120)
+                }, BARCODE_SCANNER_AUTO_COMMIT_DELAY_MS)
             }
         }
 
@@ -1125,7 +1248,7 @@ export function POS() {
                 deviceScanTimeout.current = null
             }
         }
-    }, [isDeviceScannerAutoEnabled, isBarcodeModalOpen, handleBarcodeDetected])
+    }, [isDeviceScannerAutoEnabled, handleBarcodeDetected])
 
     const handleHoldSale = () => {
         if (cart.length === 0) return

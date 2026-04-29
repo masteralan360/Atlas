@@ -1,12 +1,16 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type RefObject } from 'react'
 import { ScanBarcode } from 'lucide-react'
 
+import {
+    BARCODE_SCANNER_ACTIVE_FAST_KEY_COUNT,
+    BARCODE_SCANNER_AUTO_COMMIT_DELAY_MS,
+    BARCODE_SCANNER_FAST_KEY_THRESHOLD_MS,
+    normalizeBarcodeScannerKey,
+    normalizeBarcodeScannerText
+} from '@/lib/barcodeScanner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/ui/components/button'
 
-const FAST_KEY_THRESHOLD_MS = 45
-const ACTIVE_FAST_KEY_COUNT = 2
-const AUTO_COMMIT_DELAY_MS = 120
 const DUPLICATE_SCAN_COOLDOWN_MS = 2500
 const LONG_PRESS_DELAY_MS = 650
 
@@ -20,6 +24,28 @@ interface BarcodeScannerToggleButtonProps {
     disabled?: boolean
     className?: string
     deviceStorageKey?: string
+    targetInputRef?: RefObject<HTMLInputElement | null>
+}
+
+function getFocusedEditableElement() {
+    const activeElement = document.activeElement
+    if (activeElement instanceof HTMLInputElement) {
+        return activeElement
+    }
+
+    if (activeElement instanceof HTMLTextAreaElement) {
+        return activeElement
+    }
+
+    if (activeElement instanceof HTMLSelectElement) {
+        return activeElement
+    }
+
+    if (activeElement instanceof HTMLElement && activeElement.isContentEditable) {
+        return activeElement
+    }
+
+    return null
 }
 
 function buildHidDeviceId(device: any) {
@@ -38,7 +64,8 @@ export function BarcodeScannerToggleButton({
     inactiveLabel = 'Scanner Disabled',
     disabled = false,
     className,
-    deviceStorageKey
+    deviceStorageKey,
+    targetInputRef
 }: BarcodeScannerToggleButtonProps) {
     const onScanRef = useRef(onScan)
     const scanBufferRef = useRef('')
@@ -60,6 +87,7 @@ export function BarcodeScannerToggleButton({
             scanBufferRef.current = ''
             scannerActiveRef.current = false
             fastKeyCountRef.current = 0
+            lastKeyTimeRef.current = 0
             if (scanTimeoutRef.current) {
                 window.clearTimeout(scanTimeoutRef.current)
                 scanTimeoutRef.current = null
@@ -68,10 +96,11 @@ export function BarcodeScannerToggleButton({
         }
 
         const commitScan = () => {
-            const payload = scanBufferRef.current.trim()
+            const payload = normalizeBarcodeScannerText(scanBufferRef.current)
             scanBufferRef.current = ''
             scannerActiveRef.current = false
             fastKeyCountRef.current = 0
+            lastKeyTimeRef.current = 0
 
             if (!payload) {
                 return
@@ -94,10 +123,17 @@ export function BarcodeScannerToggleButton({
             if (event.ctrlKey || event.metaKey || event.altKey) return
             if (event.key === 'Shift' || event.key === 'CapsLock' || event.key === 'Escape') return
 
+            const activeElement = document.activeElement
+            const focusedEditableElement = getFocusedEditableElement()
+            const targetInputIsFocused = Boolean(targetInputRef?.current && activeElement === targetInputRef.current)
+
             if (event.key === 'Enter' || event.key === 'Tab') {
                 if (scanBufferRef.current) {
                     event.preventDefault()
                     event.stopPropagation()
+                    if (focusedEditableElement) {
+                        focusedEditableElement.blur()
+                    }
                     commitScan()
                 }
                 return
@@ -107,11 +143,22 @@ export function BarcodeScannerToggleButton({
                 return
             }
 
+            const normalizedKey = normalizeBarcodeScannerKey(event.key)
+            if (normalizedKey.length !== 1) {
+                return
+            }
+
+            if (focusedEditableElement || targetInputIsFocused) {
+                event.preventDefault()
+                event.stopPropagation()
+                focusedEditableElement?.blur()
+            }
+
             const now = Date.now()
             const delta = now - lastKeyTimeRef.current
             lastKeyTimeRef.current = now
 
-            if (delta > 0 && delta < FAST_KEY_THRESHOLD_MS) {
+            if (delta > 0 && delta <= BARCODE_SCANNER_FAST_KEY_THRESHOLD_MS) {
                 fastKeyCountRef.current += 1
             } else {
                 fastKeyCountRef.current = 0
@@ -119,20 +166,23 @@ export function BarcodeScannerToggleButton({
                 scannerActiveRef.current = false
             }
 
-            scanBufferRef.current += event.key
+            scanBufferRef.current += normalizedKey
 
-            if (fastKeyCountRef.current >= ACTIVE_FAST_KEY_COUNT) {
+            if (fastKeyCountRef.current >= BARCODE_SCANNER_ACTIVE_FAST_KEY_COUNT) {
                 scannerActiveRef.current = true
             }
 
             if (scannerActiveRef.current) {
+                if (focusedEditableElement) {
+                    focusedEditableElement.blur()
+                }
                 event.preventDefault()
                 event.stopPropagation()
 
                 if (scanTimeoutRef.current) {
                     window.clearTimeout(scanTimeoutRef.current)
                 }
-                scanTimeoutRef.current = window.setTimeout(commitScan, AUTO_COMMIT_DELAY_MS)
+                scanTimeoutRef.current = window.setTimeout(commitScan, BARCODE_SCANNER_AUTO_COMMIT_DELAY_MS)
             }
         }
 
@@ -144,7 +194,7 @@ export function BarcodeScannerToggleButton({
                 scanTimeoutRef.current = null
             }
         }
-    }, [disabled, enabled])
+    }, [disabled, enabled, targetInputRef])
 
     useEffect(() => {
         return () => {

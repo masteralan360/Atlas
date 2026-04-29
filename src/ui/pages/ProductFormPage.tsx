@@ -42,6 +42,7 @@ import {
 } from '@/local-db'
 import type { CurrencyCode } from '@/local-db/models'
 import { assetManager } from '@/lib/assetManager'
+import { normalizeBarcodeDigits, normalizeBarcodeScannerText } from '@/lib/barcodeScanner'
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard'
 import { isTauri } from '@/lib/platform'
 import { cn, formatCurrency } from '@/lib/utils'
@@ -74,6 +75,9 @@ import {
 } from '@/ui/components'
 
 const UNITS = ['pcs', 'kg', 'gram', 'liter', 'box', 'pack']
+type ProductScannerTarget = 'none' | 'sku' | 'barcode'
+
+const PRODUCT_SCANNER_TARGET_KEY = 'products_scanner_target'
 const PRODUCT_SKU_SCANNER_ENABLED_KEY = 'products_sku_scanner_enabled'
 const PRODUCT_BARCODE_SCANNER_ENABLED_KEY = 'products_barcode_scanner_enabled'
 const PRODUCT_SKU_HID_DEVICE_KEY = 'products_sku_hid_device_id'
@@ -123,12 +127,35 @@ function readStoredBoolean(key: string) {
     return localStorage.getItem(key) === 'true'
 }
 
-function writeStoredBoolean(key: string, value: boolean) {
+function readStoredScannerTarget(): ProductScannerTarget {
+    if (typeof localStorage === 'undefined') {
+        return 'none'
+    }
+
+    const storedTarget = localStorage.getItem(PRODUCT_SCANNER_TARGET_KEY)
+    if (storedTarget === 'sku' || storedTarget === 'barcode') {
+        return storedTarget
+    }
+
+    if (readStoredBoolean(PRODUCT_SKU_SCANNER_ENABLED_KEY)) {
+        return 'sku'
+    }
+
+    if (readStoredBoolean(PRODUCT_BARCODE_SCANNER_ENABLED_KEY)) {
+        return 'barcode'
+    }
+
+    return 'none'
+}
+
+function writeStoredScannerTarget(target: ProductScannerTarget) {
     if (typeof localStorage === 'undefined') {
         return
     }
 
-    localStorage.setItem(key, String(value))
+    localStorage.setItem(PRODUCT_SCANNER_TARGET_KEY, target)
+    localStorage.setItem(PRODUCT_SKU_SCANNER_ENABLED_KEY, String(target === 'sku'))
+    localStorage.setItem(PRODUCT_BARCODE_SCANNER_ENABLED_KEY, String(target === 'barcode'))
 }
 
 function getCurrencySymbol(currency: string, iqdPreference: string) {
@@ -204,11 +231,9 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const [isSubmittingBarcode, setIsSubmittingBarcode] = useState(false)
     const [barcodeToDelete, setBarcodeToDelete] = useState<ProductBarcode | null>(null)
     const [isDeletingBarcode, setIsDeletingBarcode] = useState(false)
-    const [isSkuScannerEnabled, setIsSkuScannerEnabled] = useState(() => readStoredBoolean(PRODUCT_SKU_SCANNER_ENABLED_KEY))
-    const [isBarcodeScannerEnabled, setIsBarcodeScannerEnabled] = useState(() => readStoredBoolean(PRODUCT_BARCODE_SCANNER_ENABLED_KEY))
+    const [activeScannerTarget, setActiveScannerTarget] = useState<ProductScannerTarget>(() => readStoredScannerTarget())
     const skuInputRef = useRef<HTMLInputElement>(null)
     const newBarcodeInputRef = useRef<HTMLInputElement>(null)
-    const activeProductScannerTargetRef = useRef<'sku' | 'barcode'>('sku')
     const cameraInputRef = useRef<HTMLInputElement>(null)
     const imageUploadInputRef = useRef<HTMLInputElement>(null)
     const initializedKeyRef = useRef<string | null>(null)
@@ -434,8 +459,16 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             return
         }
 
-        const barcodeValue = newBarcodeValue.trim()
+        const barcodeValue = normalizeBarcodeScannerText(newBarcodeValue)
         if (!barcodeValue) {
+            return
+        }
+
+        const alreadyExists = productBarcodes.some((barcodeRow) => (
+            normalizeBarcodeScannerText(barcodeRow.barcode) === barcodeValue
+        ))
+        if (alreadyExists) {
+            showBarcodeErrorToast(new DuplicateProductBarcodeError())
             return
         }
 
@@ -510,40 +543,33 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         }
     }
 
+    const handleScannerTargetChange = (target: ProductScannerTarget) => {
+        setActiveScannerTarget(target)
+        writeStoredScannerTarget(target)
+    }
+
     const handleSkuScannerEnabledChange = (enabled: boolean) => {
-        setIsSkuScannerEnabled(enabled)
-        writeStoredBoolean(PRODUCT_SKU_SCANNER_ENABLED_KEY, enabled)
-        if (enabled) {
-            activeProductScannerTargetRef.current = 'sku'
-            window.requestAnimationFrame(() => skuInputRef.current?.focus())
-        }
+        handleScannerTargetChange(enabled ? 'sku' : 'none')
     }
 
     const handleBarcodeScannerEnabledChange = (enabled: boolean) => {
-        setIsBarcodeScannerEnabled(enabled)
-        writeStoredBoolean(PRODUCT_BARCODE_SCANNER_ENABLED_KEY, enabled)
-        if (enabled) {
-            activeProductScannerTargetRef.current = 'barcode'
-            window.requestAnimationFrame(() => newBarcodeInputRef.current?.focus())
-        }
+        handleScannerTargetChange(enabled ? 'barcode' : 'none')
     }
 
     const handleSkuBarcodeScan = (value: string) => {
-        if (isReadOnly || (isBarcodeScannerEnabled && activeProductScannerTargetRef.current === 'barcode')) {
+        if (isReadOnly || activeScannerTarget !== 'sku') {
             return
         }
 
-        setFormData((current) => ({ ...current, sku: value }))
-        window.requestAnimationFrame(() => skuInputRef.current?.focus())
+        setFormData((current) => ({ ...current, sku: normalizeBarcodeScannerText(value) }))
     }
 
     const handleAdditionalBarcodeScan = (value: string) => {
-        if (isReadOnly || !persistedProductId || (isSkuScannerEnabled && activeProductScannerTargetRef.current === 'sku')) {
+        if (isReadOnly || !persistedProductId || activeScannerTarget !== 'barcode') {
             return
         }
 
-        setNewBarcodeValue(value)
-        window.requestAnimationFrame(() => newBarcodeInputRef.current?.focus())
+        setNewBarcodeValue(normalizeBarcodeScannerText(value))
     }
 
     const persistProduct = async ({ navigateAfterSave = true }: { navigateAfterSave?: boolean } = {}) => {
@@ -766,10 +792,10 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                             ref={skuInputRef}
                                             id="product-sku"
                                             value={formData.sku}
-                                            onChange={(event) => setFormData((current) => ({ ...current, sku: event.target.value }))}
-                                            onFocus={() => {
-                                                activeProductScannerTargetRef.current = 'sku'
-                                            }}
+                                            onChange={(event) => setFormData((current) => ({
+                                                ...current,
+                                                sku: normalizeBarcodeDigits(event.target.value)
+                                            }))}
                                             placeholder="PRD-001"
                                             readOnly={isReadOnly}
                                             required
@@ -777,13 +803,14 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                         />
                                         {!isReadOnly && (
                                             <BarcodeScannerToggleButton
-                                                enabled={isSkuScannerEnabled}
+                                                enabled={activeScannerTarget === 'sku'}
                                                 onEnabledChange={handleSkuScannerEnabledChange}
                                                 onScan={handleSkuBarcodeScan}
                                                 label={t('products.table.sku')}
                                                 activeLabel={scannerEnabledLabel}
                                                 inactiveLabel={scannerDisabledLabel}
                                                 deviceStorageKey={PRODUCT_SKU_HID_DEVICE_KEY}
+                                                targetInputRef={skuInputRef}
                                             />
                                         )}
                                     </div>
@@ -941,13 +968,14 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                 </div>
                                 {persistedProductId && !isReadOnly && (
                                     <BarcodeScannerToggleButton
-                                        enabled={isBarcodeScannerEnabled}
+                                        enabled={activeScannerTarget === 'barcode'}
                                         onEnabledChange={handleBarcodeScannerEnabledChange}
                                         onScan={handleAdditionalBarcodeScan}
                                         label={t('products.barcodes.title') || 'Barcodes'}
                                         activeLabel={scannerEnabledLabel}
                                         inactiveLabel={scannerDisabledLabel}
                                         deviceStorageKey={PRODUCT_BARCODE_HID_DEVICE_KEY}
+                                        targetInputRef={newBarcodeInputRef}
                                     />
                                 )}
                             </div>
@@ -1050,10 +1078,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                 <Input
                                                     ref={newBarcodeInputRef}
                                                     value={newBarcodeValue}
-                                                    onChange={(event) => setNewBarcodeValue(event.target.value)}
-                                                    onFocus={() => {
-                                                        activeProductScannerTargetRef.current = 'barcode'
-                                                    }}
+                                                    onChange={(event) => setNewBarcodeValue(normalizeBarcodeDigits(event.target.value))}
                                                     onKeyDown={(event) => {
                                                         if (event.key === 'Enter') {
                                                             event.preventDefault()

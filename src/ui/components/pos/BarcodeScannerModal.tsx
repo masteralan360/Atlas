@@ -3,6 +3,13 @@ import { useTranslation } from 'react-i18next'
 import { BarcodeScanner } from 'react-barcode-scanner'
 import 'react-barcode-scanner/polyfill'
 import {
+    BARCODE_SCANNER_ACTIVE_FAST_KEY_COUNT,
+    BARCODE_SCANNER_AUTO_COMMIT_DELAY_MS,
+    BARCODE_SCANNER_FAST_KEY_THRESHOLD_MS,
+    normalizeBarcodeDigits,
+    normalizeBarcodeScannerText
+} from '@/lib/barcodeScanner'
+import {
     Button,
     Dialog,
     DialogContent,
@@ -74,9 +81,17 @@ export function BarcodeScannerModal({
     }, [scannerMode])
 
     useEffect(() => {
-        if (!open || scannerMode !== 'device') return
-        deviceInputRef.current?.focus()
-    }, [open, scannerMode])
+        if (!open) return
+
+        if (isDeviceScannerAutoEnabled) {
+            setScannerMode('device')
+            return
+        }
+
+        if (isCameraScannerAutoEnabled) {
+            setScannerMode('camera')
+        }
+    }, [open, isCameraScannerAutoEnabled, isDeviceScannerAutoEnabled])
 
     const formatHidLabel = (device: any) => {
         const vendorId = typeof device?.vendorId === 'number'
@@ -172,12 +187,13 @@ export function BarcodeScannerModal({
     }, [])
 
     const commitDeviceScan = (value: string) => {
-        const trimmed = value.trim()
+        const trimmed = normalizeBarcodeScannerText(value)
         if (!trimmed) return
         handleBarcodeDetected([{ rawValue: trimmed }], 'device')
         setDeviceInput('')
         scannerActiveRef.current = false
         fastKeyCountRef.current = 0
+        lastKeyTimeRef.current = 0
     }
 
     const scheduleDeviceScan = (value: string) => {
@@ -186,7 +202,7 @@ export function BarcodeScannerModal({
         }
         deviceScanTimeoutRef.current = window.setTimeout(() => {
             commitDeviceScan(value)
-        }, 200)
+        }, BARCODE_SCANNER_AUTO_COMMIT_DELAY_MS)
     }
 
     const registerScannerKeystroke = () => {
@@ -194,13 +210,13 @@ export function BarcodeScannerModal({
         const delta = now - lastKeyTimeRef.current
         lastKeyTimeRef.current = now
 
-        if (delta > 0 && delta < 50) {
+        if (delta > 0 && delta <= BARCODE_SCANNER_FAST_KEY_THRESHOLD_MS) {
             fastKeyCountRef.current += 1
         } else {
             fastKeyCountRef.current = 0
         }
 
-        if (fastKeyCountRef.current >= 3) {
+        if (fastKeyCountRef.current >= BARCODE_SCANNER_ACTIVE_FAST_KEY_COUNT) {
             scannerActiveRef.current = true
         }
     }
@@ -294,6 +310,9 @@ export function BarcodeScannerModal({
                                     <Switch
                                         checked={isCameraScannerAutoEnabled}
                                         onCheckedChange={(val) => {
+                                            if (val) {
+                                                setScannerMode('camera')
+                                            }
                                             setIsCameraScannerAutoEnabled(val)
                                         }}
                                     />
@@ -391,8 +410,8 @@ export function BarcodeScannerModal({
                             <div className="rounded-xl border border-border bg-muted/30 p-4">
                                 <p className="text-sm font-semibold">{t('pos.barcodeScanner') || 'Barcode Scanner'}</p>
                                 <p className="text-xs text-muted-foreground">
-                                {t('pos.barcodeScannerDeviceDesc', {
-                                    defaultValue: 'Use a USB/Bluetooth barcode scanner. Keep the cursor in the input below and scan a code.'
+                                {t('pos.autoScannerGlobalDesc', {
+                                    defaultValue: 'Automatic scanner works globally in POS. Turn it on and scan from anywhere without focusing an input first.'
                                 })}
                             </p>
                         </div>
@@ -403,7 +422,7 @@ export function BarcodeScannerModal({
                                 ref={deviceInputRef}
                                 value={deviceInput}
                                 onChange={(e) => {
-                                    const nextValue = e.target.value
+                                    const nextValue = normalizeBarcodeDigits(e.target.value)
                                     setDeviceInput(nextValue)
                                     if (!nextValue) {
                                         scannerActiveRef.current = false
@@ -431,7 +450,7 @@ export function BarcodeScannerModal({
                                 className="h-10"
                             />
                             <p className="text-[10px] text-muted-foreground">
-                                {t('pos.scanInputDesc', { defaultValue: 'Scans automatically when the input completes.' })}
+                                {t('pos.scanInputOptionalDesc', { defaultValue: 'Manual input is optional. Automatic scanner captures completed scans anywhere in POS.' })}
                             </p>
                         </div>
 
@@ -445,6 +464,9 @@ export function BarcodeScannerModal({
                                     <Switch
                                         checked={isDeviceScannerAutoEnabled}
                                         onCheckedChange={(val) => {
+                                            if (val) {
+                                                setScannerMode('device')
+                                            }
                                             setIsDeviceScannerAutoEnabled(val)
                                         }}
                                     />
