@@ -47,6 +47,7 @@ import { isTauri } from '@/lib/platform'
 import { cn, formatCurrency } from '@/lib/utils'
 import { platformService } from '@/services/platformService'
 import { useWorkspace } from '@/workspace'
+import { BarcodeScannerToggleButton } from '@/ui/components/BarcodeScannerToggleButton'
 import {
     Button,
     Card,
@@ -73,6 +74,10 @@ import {
 } from '@/ui/components'
 
 const UNITS = ['pcs', 'kg', 'gram', 'liter', 'box', 'pack']
+const PRODUCT_SKU_SCANNER_ENABLED_KEY = 'products_sku_scanner_enabled'
+const PRODUCT_BARCODE_SCANNER_ENABLED_KEY = 'products_barcode_scanner_enabled'
+const PRODUCT_SKU_HID_DEVICE_KEY = 'products_sku_hid_device_id'
+const PRODUCT_BARCODE_HID_DEVICE_KEY = 'products_barcode_hid_device_id'
 
 type ProductFormMode = 'create' | 'edit' | 'clone'
 
@@ -108,6 +113,22 @@ const emptyProductFormData: ProductFormData = {
     canBeReturned: true,
     returnRules: '',
     storageId: ''
+}
+
+function readStoredBoolean(key: string) {
+    if (typeof localStorage === 'undefined') {
+        return false
+    }
+
+    return localStorage.getItem(key) === 'true'
+}
+
+function writeStoredBoolean(key: string, value: boolean) {
+    if (typeof localStorage === 'undefined') {
+        return
+    }
+
+    localStorage.setItem(key, String(value))
 }
 
 function getCurrencySymbol(currency: string, iqdPreference: string) {
@@ -183,6 +204,11 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const [isSubmittingBarcode, setIsSubmittingBarcode] = useState(false)
     const [barcodeToDelete, setBarcodeToDelete] = useState<ProductBarcode | null>(null)
     const [isDeletingBarcode, setIsDeletingBarcode] = useState(false)
+    const [isSkuScannerEnabled, setIsSkuScannerEnabled] = useState(() => readStoredBoolean(PRODUCT_SKU_SCANNER_ENABLED_KEY))
+    const [isBarcodeScannerEnabled, setIsBarcodeScannerEnabled] = useState(() => readStoredBoolean(PRODUCT_BARCODE_SCANNER_ENABLED_KEY))
+    const skuInputRef = useRef<HTMLInputElement>(null)
+    const newBarcodeInputRef = useRef<HTMLInputElement>(null)
+    const activeProductScannerTargetRef = useRef<'sku' | 'barcode'>('sku')
     const cameraInputRef = useRef<HTMLInputElement>(null)
     const imageUploadInputRef = useRef<HTMLInputElement>(null)
     const initializedKeyRef = useRef<string | null>(null)
@@ -484,6 +510,42 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         }
     }
 
+    const handleSkuScannerEnabledChange = (enabled: boolean) => {
+        setIsSkuScannerEnabled(enabled)
+        writeStoredBoolean(PRODUCT_SKU_SCANNER_ENABLED_KEY, enabled)
+        if (enabled) {
+            activeProductScannerTargetRef.current = 'sku'
+            window.requestAnimationFrame(() => skuInputRef.current?.focus())
+        }
+    }
+
+    const handleBarcodeScannerEnabledChange = (enabled: boolean) => {
+        setIsBarcodeScannerEnabled(enabled)
+        writeStoredBoolean(PRODUCT_BARCODE_SCANNER_ENABLED_KEY, enabled)
+        if (enabled) {
+            activeProductScannerTargetRef.current = 'barcode'
+            window.requestAnimationFrame(() => newBarcodeInputRef.current?.focus())
+        }
+    }
+
+    const handleSkuBarcodeScan = (value: string) => {
+        if (isReadOnly || (isBarcodeScannerEnabled && activeProductScannerTargetRef.current === 'barcode')) {
+            return
+        }
+
+        setFormData((current) => ({ ...current, sku: value }))
+        window.requestAnimationFrame(() => skuInputRef.current?.focus())
+    }
+
+    const handleAdditionalBarcodeScan = (value: string) => {
+        if (isReadOnly || !persistedProductId || (isSkuScannerEnabled && activeProductScannerTargetRef.current === 'sku')) {
+            return
+        }
+
+        setNewBarcodeValue(value)
+        window.requestAnimationFrame(() => newBarcodeInputRef.current?.focus())
+    }
+
     const persistProduct = async ({ navigateAfterSave = true }: { navigateAfterSave?: boolean } = {}) => {
         if (!workspaceId || !canEdit) {
             return false
@@ -581,6 +643,8 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                 ? (t('common.view') || 'View')
                 : (t('common.edit') || 'Edit')
             : (t('common.create') || 'Create')
+    const scannerEnabledLabel = t('pos.scannerEnabled', { defaultValue: 'Scanner Enabled' })
+    const scannerDisabledLabel = t('pos.scannerDisabled', { defaultValue: 'Scanner Disabled' })
 
     if (mode !== 'create' && !product) {
         return (
@@ -697,15 +761,32 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                         <Barcode className="h-4 w-4 text-primary/60" />
                                         {t('products.table.sku')}
                                     </Label>
-                                    <Input
-                                        id="product-sku"
-                                        value={formData.sku}
-                                        onChange={(event) => setFormData((current) => ({ ...current, sku: event.target.value }))}
-                                        placeholder="PRD-001"
-                                        readOnly={isReadOnly}
-                                        required
-                                        className="h-12 rounded-lg border-border/40 bg-muted/10 font-mono"
-                                    />
+                                    <div className="flex gap-2">
+                                        <Input
+                                            ref={skuInputRef}
+                                            id="product-sku"
+                                            value={formData.sku}
+                                            onChange={(event) => setFormData((current) => ({ ...current, sku: event.target.value }))}
+                                            onFocus={() => {
+                                                activeProductScannerTargetRef.current = 'sku'
+                                            }}
+                                            placeholder="PRD-001"
+                                            readOnly={isReadOnly}
+                                            required
+                                            className="h-12 min-w-0 flex-1 rounded-lg border-border/40 bg-muted/10 font-mono"
+                                        />
+                                        {!isReadOnly && (
+                                            <BarcodeScannerToggleButton
+                                                enabled={isSkuScannerEnabled}
+                                                onEnabledChange={handleSkuScannerEnabledChange}
+                                                onScan={handleSkuBarcodeScan}
+                                                label={t('products.table.sku')}
+                                                activeLabel={scannerEnabledLabel}
+                                                inactiveLabel={scannerDisabledLabel}
+                                                deviceStorageKey={PRODUCT_SKU_HID_DEVICE_KEY}
+                                            />
+                                        )}
+                                    </div>
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="product-name" className="flex items-center gap-2 font-bold">
@@ -845,16 +926,31 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
 
                     <Card className="overflow-hidden border-border/60 shadow-sm">
                         <CardHeader className="border-b border-border/50 bg-muted/10">
-                            <CardTitle className="text-2xl font-black">
-                                {t('products.barcodes.title') || 'Barcodes'}
-                            </CardTitle>
-                            <p className="text-sm text-muted-foreground">
-                                {persistedProductId
-                                    ? t('products.barcodes.manageDescription', {
-                                        defaultValue: 'Attach every scannable code that should resolve to this product in POS.'
-                                    })
-                                    : (t('products.barcodes.saveFirstDescription') || 'Save this product first, then manage its barcodes here.')}
-                            </p>
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="space-y-1">
+                                    <CardTitle className="text-2xl font-black">
+                                        {t('products.barcodes.title') || 'Barcodes'}
+                                    </CardTitle>
+                                    <p className="text-sm text-muted-foreground">
+                                        {persistedProductId
+                                            ? t('products.barcodes.manageDescription', {
+                                                defaultValue: 'Attach every scannable code that should resolve to this product in POS.'
+                                            })
+                                            : (t('products.barcodes.saveFirstDescription') || 'Save this product first, then manage its barcodes here.')}
+                                    </p>
+                                </div>
+                                {persistedProductId && !isReadOnly && (
+                                    <BarcodeScannerToggleButton
+                                        enabled={isBarcodeScannerEnabled}
+                                        onEnabledChange={handleBarcodeScannerEnabledChange}
+                                        onScan={handleAdditionalBarcodeScan}
+                                        label={t('products.barcodes.title') || 'Barcodes'}
+                                        activeLabel={scannerEnabledLabel}
+                                        inactiveLabel={scannerDisabledLabel}
+                                        deviceStorageKey={PRODUCT_BARCODE_HID_DEVICE_KEY}
+                                    />
+                                )}
+                            </div>
                         </CardHeader>
                         <CardContent className="space-y-4 p-6 sm:p-8">
                             {persistedProductId ? (
@@ -952,8 +1048,12 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                         <div className="rounded-2xl border border-border/60 bg-muted/20 p-4">
                                             <div className="grid gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_auto]">
                                                 <Input
+                                                    ref={newBarcodeInputRef}
                                                     value={newBarcodeValue}
                                                     onChange={(event) => setNewBarcodeValue(event.target.value)}
+                                                    onFocus={() => {
+                                                        activeProductScannerTargetRef.current = 'barcode'
+                                                    }}
                                                     onKeyDown={(event) => {
                                                         if (event.key === 'Enter') {
                                                             event.preventDefault()
