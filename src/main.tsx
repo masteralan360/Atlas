@@ -4,13 +4,7 @@ import { createRoot } from 'react-dom/client'
 const isMarketplaceHost =
     typeof window !== 'undefined'
     && window.location.hostname === 'marketplace-atlas.vercel.app'
-const normalizedPathname =
-    typeof window !== 'undefined'
-        ? window.location.pathname.replace(/\/+$/, '') || '/'
-        : '/'
-const isWebsiteRoute =
-    typeof window !== 'undefined'
-    && (normalizedPathname === '/website' || normalizedPathname.startsWith('/website/'))
+
 
 if (
     import.meta.env.PROD
