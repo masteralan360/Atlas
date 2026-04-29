@@ -62,7 +62,7 @@ export interface Product extends BaseEntity {
   name: string;
   description: string;
   categoryId?: string | null;
-  category?: string;
+  category?: string | null;
   storageId?: string | null;
   storageName?: string;
   price: number;
@@ -82,6 +82,7 @@ export interface Product extends BaseEntity {
 export interface Category extends BaseEntity {
   name: string;
   description?: string;
+  createdBy?: string | null;
 }
 
 export interface Storage extends BaseEntity {

@@ -501,7 +501,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
 
             const dataToSave = {
                 ...formData,
-                category: categoryName || undefined,
+                category: categoryName || null,
                 storageName: storageName || undefined,
                 categoryId: formData.categoryId || null,
                 storageId: formData.storageId || null,

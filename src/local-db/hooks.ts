@@ -97,13 +97,29 @@ function shouldUseCloudBusinessData(workspaceId?: string | null): boolean {
 }
 
 function toSupabaseProductPayload(product: Partial<Product>) {
-    return toSnakeCase({
+    const hasCategory = Object.prototype.hasOwnProperty.call(product, 'category')
+    const hasCategoryId = Object.prototype.hasOwnProperty.call(product, 'categoryId')
+    const payload: Record<string, unknown> = {
         ...product,
         syncStatus: undefined,
         lastSyncedAt: undefined,
         storageName: undefined,
         barcode: undefined,
         barcodes: undefined
+    }
+
+    if (hasCategoryId && product.categoryId == null && (!hasCategory || product.category === undefined)) {
+        payload.category = null
+    }
+
+    return toSnakeCase(payload)
+}
+
+function toSupabaseCategoryPayload(category: Partial<Category>) {
+    return toSnakeCase({
+        ...category,
+        syncStatus: undefined,
+        lastSyncedAt: undefined
     })
 }
 
@@ -229,11 +245,13 @@ export function useCategories(workspaceId: string | undefined) {
 export async function createCategory(workspaceId: string, data: Omit<Category, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>): Promise<Category> {
     const now = new Date().toISOString()
     const id = generateId()
+    const session = isOnline() ? await getMutationSession('categories.create') : null
 
     const category: Category = {
         ...data,
         id,
         workspaceId,
+        createdBy: data.createdBy ?? session?.user?.id ?? null,
         createdAt: now,
         updatedAt: now,
         syncStatus: (isOnline() ? 'synced' : 'pending') as any, // Optimistic status
@@ -243,16 +261,8 @@ export async function createCategory(workspaceId: string, data: Omit<Category, '
     }
 
     if (isOnline()) {
-        const session = await getMutationSession('categories.create')
-        const currentUserId = session?.user?.id
-
         // ONLINE: Write directly to Supabase
-        const payload = toSnakeCase({
-            ...category,
-            userId: currentUserId,
-            syncStatus: undefined,
-            lastSyncedAt: undefined
-        })
+        const payload = toSupabaseCategoryPayload(category)
         const { error } = await runMutation('categories.create', () => supabase.from('categories').upsert(payload))
 
         if (error) {
@@ -287,7 +297,7 @@ export async function updateCategory(id: string, data: Partial<Category>): Promi
 
     if (isOnline()) {
         // ONLINE: Update Supabase directly
-        const payload = toSnakeCase({ ...data, updatedAt: now })
+        const payload = toSupabaseCategoryPayload({ ...data, updatedAt: now })
         const { error } = await runMutation('categories.update', () => supabase.from('categories').update(payload).eq('id', id))
 
         if (error) throw normalizeSupabaseActionError(error)
@@ -1540,8 +1550,8 @@ async function enrichSalesForUiRows(workspaceId: string, sales: Sale[]) {
     for (const item of localItems) {
         const product = productById.get(item.productId)
         const categoryName = product?.categoryId
-            ? (categoryById.get(product.categoryId)?.name || '')
-            : ''
+            ? (categoryById.get(product.categoryId)?.name || product.category || '')
+            : (product?.category || '')
 
         const enrichedItem: Record<string, unknown> = {
             id: item.id,
@@ -1626,7 +1636,7 @@ export function useSales(workspaceId: string | undefined) {
                         *,
                             sale_items(
                                 *,
-                                product:product_id(name, sku, can_be_returned, return_rules, unit)
+                                product:product_id(name, sku, category, category_id, can_be_returned, return_rules, unit)
                             )
                     `)
                     .eq('workspace_id', workspaceId)

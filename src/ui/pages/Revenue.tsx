@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 import { useAuth } from '@/auth'
 import { Sale } from '@/types'
-import { useSales, useSalesOrders, useTravelAgencySales, toUISale, toUISaleFromTravelAgency } from '@/local-db'
+import { useCategories, useProducts, useSales, useSalesOrders, useTravelAgencySales, toUISale, toUISaleFromTravelAgency } from '@/local-db'
 import { formatCurrency, formatDateTime, formatDate, formatOriginLabel, formatTime } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
@@ -78,6 +78,8 @@ export function Revenue() {
     const rawSales = useSales(user?.workspaceId)
     const salesOrders = useSalesOrders(user?.workspaceId)
     const rawTravelSales = useTravelAgencySales(user?.workspaceId)
+    const products = useProducts(user?.workspaceId)
+    const categories = useCategories(user?.workspaceId)
     
     const allSales = useMemo<Sale[]>(() => (rawSales || []).map(toUISale), [rawSales])
     const travelSales = useMemo<Sale[]>(() =>
@@ -112,9 +114,30 @@ export function Revenue() {
     const itemsPerPage = 25
     const listRef = useRef<HTMLDivElement>(null)
 
+    const categoryNameById = useMemo(
+        () => new Map(categories.map((category) => [category.id, category.name] as const)),
+        [categories]
+    )
+    const productCategoryByProductId = useMemo(() => {
+        const categoryByProduct = new Map<string, string>()
+
+        products.forEach((product) => {
+            const categoryName = product.categoryId
+                ? categoryNameById.get(product.categoryId)
+                : undefined
+            const resolvedCategory = (categoryName || product.category || '').trim()
+
+            if (resolvedCategory) {
+                categoryByProduct.set(product.id, resolvedCategory)
+            }
+        })
+
+        return categoryByProduct
+    }, [categoryNameById, products])
+
     const revenueRecords = useMemo(
-        () => buildRevenueAnalysisRecords(allSales, salesOrders, travelSales),
-        [allSales, salesOrders, travelSales]
+        () => buildRevenueAnalysisRecords(allSales, salesOrders, travelSales, { productCategoryByProductId }),
+        [allSales, salesOrders, travelSales, productCategoryByProductId]
     )
     const filteredSales = useMemo(
         () => filterSalesByDateRange(allSales, dateRange, customDates),

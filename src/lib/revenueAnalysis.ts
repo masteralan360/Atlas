@@ -36,6 +36,10 @@ export interface RevenueAnalysisTotals {
     margin: number
 }
 
+export type RevenueCategoryLookup = {
+    productCategoryByProductId?: ReadonlyMap<string, string | null | undefined> | Record<string, string | null | undefined>
+}
+
 type CustomDates = {
     start: string | null
     end: string | null
@@ -53,7 +57,35 @@ function getOrderRevenueDate(order: SalesOrder) {
     return order.actualDeliveryDate || order.updatedAt || order.createdAt
 }
 
-export function toRevenueRecordFromSale(sale: Sale): RevenueAnalysisRecord {
+function normalizeRevenueCategory(value: string | null | undefined) {
+    const trimmed = value?.trim()
+    return trimmed || undefined
+}
+
+function getProductCategoryFromLookup(productId: string, options?: RevenueCategoryLookup) {
+    const lookup = options?.productCategoryByProductId
+    if (!lookup) return undefined
+
+    if (typeof (lookup as ReadonlyMap<string, string | null | undefined>).get === 'function') {
+        return normalizeRevenueCategory((lookup as ReadonlyMap<string, string | null | undefined>).get(productId))
+    }
+
+    return normalizeRevenueCategory((lookup as Record<string, string | null | undefined>)[productId])
+}
+
+function resolveRevenueCategory(productId: string, candidates: Array<string | null | undefined>, options?: RevenueCategoryLookup) {
+    const mappedCategory = getProductCategoryFromLookup(productId, options)
+    if (mappedCategory) return mappedCategory
+
+    for (const candidate of candidates) {
+        const category = normalizeRevenueCategory(candidate)
+        if (category) return category
+    }
+
+    return 'Uncategorized'
+}
+
+export function toRevenueRecordFromSale(sale: Sale, options: RevenueCategoryLookup = {}): RevenueAnalysisRecord {
     return {
         key: `sale:${sale.id}`,
         id: sale.id,
@@ -69,7 +101,7 @@ export function toRevenueRecordFromSale(sale: Sale): RevenueAnalysisRecord {
         items: (sale.items || []).map((item) => ({
             productId: item.product_id,
             productName: item.product_name || item.product?.name || 'Unknown Product',
-            productCategory: item.product_category || item.product?.category || 'Uncategorized',
+            productCategory: resolveRevenueCategory(item.product_id, [item.product_category, item.product?.category], options),
             quantity: item.quantity || 0,
             returnedQuantity: item.is_returned ? (item.quantity || 0) : (item.returned_quantity || 0),
             unitPrice: item.converted_unit_price || item.unit_price || 0,
@@ -78,7 +110,7 @@ export function toRevenueRecordFromSale(sale: Sale): RevenueAnalysisRecord {
     }
 }
 
-export function toRevenueRecordFromSalesOrder(order: SalesOrder): RevenueAnalysisRecord {
+export function toRevenueRecordFromSalesOrder(order: SalesOrder, options: RevenueCategoryLookup = {}): RevenueAnalysisRecord {
     return {
         key: `sales_order:${order.id}`,
         id: order.id,
@@ -92,25 +124,44 @@ export function toRevenueRecordFromSalesOrder(order: SalesOrder): RevenueAnalysi
         partyName: order.customerName,
         hasPartialReturn: false,
         isReturned: false,
-        items: (order.items || []).map((item) => ({
-            productId: item.productId,
-            productName: item.productName || 'Unknown Product',
-            productCategory: 'Uncategorized',
-            quantity: item.quantity || 0,
-            returnedQuantity: 0,
-            unitPrice: item.convertedUnitPrice || 0,
-            costPrice: item.convertedCostPrice || item.costPrice || 0
-        }))
+        items: (order.items || []).map((item) => {
+            const categorySource = item as typeof item & {
+                productCategory?: string | null
+                product_category?: string | null
+                categoryName?: string | null
+                category?: string | null
+            }
+
+            return {
+                productId: item.productId,
+                productName: item.productName || 'Unknown Product',
+                productCategory: resolveRevenueCategory(item.productId, [
+                    categorySource.productCategory,
+                    categorySource.product_category,
+                    categorySource.categoryName,
+                    categorySource.category
+                ], options),
+                quantity: item.quantity || 0,
+                returnedQuantity: 0,
+                unitPrice: item.convertedUnitPrice || 0,
+                costPrice: item.convertedCostPrice || item.costPrice || 0
+            }
+        })
     }
 }
 
-export function buildRevenueAnalysisRecords(sales: Sale[], salesOrders: SalesOrder[], travelAgencySales: Sale[] = []): RevenueAnalysisRecord[] {
+export function buildRevenueAnalysisRecords(
+    sales: Sale[],
+    salesOrders: SalesOrder[],
+    travelAgencySales: Sale[] = [],
+    options: RevenueCategoryLookup = {}
+): RevenueAnalysisRecord[] {
     return [
-        ...sales.map(toRevenueRecordFromSale),
+        ...sales.map((sale) => toRevenueRecordFromSale(sale, options)),
         ...salesOrders
             .filter((order) => !order.isDeleted && order.status === 'completed')
-            .map(toRevenueRecordFromSalesOrder),
-        ...travelAgencySales.map(toRevenueRecordFromSale)
+            .map((order) => toRevenueRecordFromSalesOrder(order, options)),
+        ...travelAgencySales.map((sale) => toRevenueRecordFromSale(sale, options))
     ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 }
 
