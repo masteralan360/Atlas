@@ -1866,7 +1866,7 @@
         "scannerDevicePlaceholder": "Select a scanner",
         "refreshDevices": "Refresh",
         "noScannerDevices": "No scanner devices detected.",
-        "hidNotSupported": "HID is not supported in this browser.",
+        "hidNotSupported": "This browser does not expose direct WebHID device selection. Keyboard-style USB/Bluetooth scanners still work in POS when Automatic Scanner is enabled.",
         "hidDeviceFallback": "HID Device",
         "selectCamera": "Select Camera",
         "scannerEnabled": "Scanner Enabled",
