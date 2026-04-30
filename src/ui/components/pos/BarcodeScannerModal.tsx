@@ -366,7 +366,7 @@ export function BarcodeScannerModal({
                         </div>
                     ) : (
                         <div className="space-y-6">
-                            {isHidSupported ? (
+                            {isHidSupported && (
                                 <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
                                     <div className="space-y-2">
                                         <Label className="text-sm font-medium">{t('pos.scannerDevice') || 'Scanner Device'}</Label>
@@ -401,14 +401,6 @@ export function BarcodeScannerModal({
                                     >
                                         {t('pos.refreshDevices', { defaultValue: 'Refresh' })}
                                     </Button>
-                                </div>
-                            ) : (
-                                <div className="rounded-xl border border-border bg-muted/20 p-4">
-                                    <p className="text-xs text-muted-foreground">
-                                        {t('pos.hidNotSupported', {
-                                            defaultValue: 'This browser does not expose direct WebHID device selection. Keyboard-style USB/Bluetooth scanners still work in POS when Automatic Scanner is enabled.'
-                                        })}
-                                    </p>
                                 </div>
                             )}
 
