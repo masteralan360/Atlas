@@ -1186,6 +1186,7 @@ export function POS() {
 
         const onKeyDown = (event: KeyboardEvent) => {
             if (!isDeviceScannerAutoEnabled) return
+            if (isLoanRegistrationModalOpen) return
             if (event.ctrlKey || event.metaKey || event.altKey) return
             if (event.key === 'Shift' || event.key === 'CapsLock' || event.key === 'Escape') return
 

@@ -33,7 +33,7 @@ type BusinessPartnerFormState = {
     role: BusinessPartnerRole
 }
 
-const DEFAULT_ROLE: BusinessPartnerRole = 'customer'
+const DEFAULT_ROLE: BusinessPartnerRole = 'both'
 
 function createEmptyState(defaultCurrency: CurrencyCode, role: BusinessPartnerRole): BusinessPartnerFormState {
     return {
@@ -153,7 +153,7 @@ export function BusinessPartnerFormDialog({
                     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
                         <div className="grid gap-4 md:grid-cols-2">
                             <div className="space-y-2">
-                                <Label htmlFor="business-partner-name">{t('suppliers.form.name') || 'Company Name'}</Label>
+                                <Label htmlFor="business-partner-name">{t('suppliers.form.name') || 'Company Name'} <span className="text-destructive">*</span></Label>
                                 <Input
                                     id="business-partner-name"
                                     value={formState.name}
@@ -193,9 +193,9 @@ export function BusinessPartnerFormDialog({
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
+                                        <SelectItem value="both">{t('businessPartners.roles.both') || 'Both'}</SelectItem>
                                         <SelectItem value="customer">{t('customers.title') || 'Customer'}</SelectItem>
                                         <SelectItem value="supplier">{t('suppliers.title') || 'Supplier'}</SelectItem>
-                                        <SelectItem value="both">{t('businessPartners.roles.both') || 'Both'}</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>

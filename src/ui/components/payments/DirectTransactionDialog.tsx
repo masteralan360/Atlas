@@ -145,7 +145,7 @@ export function DirectTransactionDialog({
 
                             <div className="grid gap-4 md:grid-cols-2">
                                 <div className="grid gap-2">
-                                    <Label>{t('directTransactionModal.fields.amount', { defaultValue: 'Amount' })}</Label>
+                                    <Label>{t('directTransactionModal.fields.amount', { defaultValue: 'Amount' })} <span className="text-destructive">*</span></Label>
                                     <Input
                                         type="text"
                                         inputMode={currency === 'iqd' ? 'numeric' : 'decimal'}
@@ -163,7 +163,7 @@ export function DirectTransactionDialog({
                             </div>
 
                             <div className="grid gap-2">
-                                <Label>{t('directTransactionModal.fields.reason', { defaultValue: 'Reason' })}</Label>
+                                <Label>{t('directTransactionModal.fields.reason', { defaultValue: 'Reason' })} <span className="text-destructive">*</span></Label>
                                 <Input 
                                     value={reason} 
                                     onChange={(event) => setReason(event.target.value)} 
@@ -199,7 +199,7 @@ export function DirectTransactionDialog({
                             </div>
 
                             <div className="grid gap-2">
-                                <Label>{t('directTransactionModal.fields.paidAt', { defaultValue: 'Paid At' })}</Label>
+                                <Label>{t('directTransactionModal.fields.paidAt', { defaultValue: 'Paid At' })} <span className="text-destructive">*</span></Label>
                                 <DateTimePicker
                                     id="direct-transaction-paid-at"
                                     date={selectedPaidAt}

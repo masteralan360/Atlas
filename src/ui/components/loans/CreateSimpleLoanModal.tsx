@@ -208,7 +208,7 @@ export function CreateSimpleLoanModal({
                             </div>
 
                             <div className="grid gap-2">
-                                <Label>{counterpartyNameLabel}</Label>
+                                <Label>{counterpartyNameLabel} <span className="text-destructive">*</span></Label>
                                 <div className="flex flex-col gap-2 md:flex-row md:items-center">
                                     <Input value={borrowerName} onChange={e => setBorrowerName(e.target.value)} className="flex-1" />
                                     <Button type="button" variant="outline" className="w-full shrink-0 gap-2 md:w-auto" onClick={() => setIsPartyPickerOpen(true)}>
@@ -258,7 +258,7 @@ export function CreateSimpleLoanModal({
 
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                 <div className="grid gap-2">
-                                    <Label>{t('loans.principal', { defaultValue: 'Principal' })}</Label>
+                                    <Label>{t('loans.principal', { defaultValue: 'Principal' })} <span className="text-destructive">*</span></Label>
                                     <Input
                                         type="text"
                                         inputMode={selectedCurrency === 'iqd' ? 'numeric' : 'decimal'}
@@ -270,7 +270,7 @@ export function CreateSimpleLoanModal({
                                     />
                                 </div>
                                 <div className="grid gap-2">
-                                    <Label>{t('loans.dueDate', { defaultValue: 'Due Date' })}</Label>
+                                    <Label>{t('loans.dueDate', { defaultValue: 'Due Date' })} <span className="text-destructive">*</span></Label>
                                     <DateTimePicker
                                         id="simple-loan-due-date"
                                         mode="date"

@@ -171,7 +171,7 @@ export function CreateManualLoanModal({
                     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
                         <div className="grid gap-4">
                             <div className="grid gap-2">
-                                <Label>{t('loans.borrowerName') || 'Borrower Name'}</Label>
+                                <Label>{t('loans.borrowerName') || 'Borrower Name'} <span className="text-destructive">*</span></Label>
                                 <div className="flex flex-col gap-2 md:flex-row md:items-center">
                                     <Input value={borrowerName} onChange={e => setBorrowerName(e.target.value)} className="flex-1" />
                                     <Button type="button" variant="outline" className="w-full shrink-0 gap-2 md:w-auto" onClick={() => setIsPartyPickerOpen(true)}>
@@ -205,23 +205,23 @@ export function CreateManualLoanModal({
 
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                 <div className="grid gap-2">
-                                    <Label>{t('loans.borrowerPhone') || 'Borrower Phone'}</Label>
+                                    <Label>{t('loans.borrowerPhone') || 'Borrower Phone'} <span className="text-destructive">*</span></Label>
                                     <Input value={borrowerPhone} onChange={e => setBorrowerPhone(e.target.value)} />
                                 </div>
                                 <div className="grid gap-2">
-                                    <Label>{t('loans.borrowerNationalId') || 'Borrower National ID'}</Label>
+                                    <Label>{t('loans.borrowerNationalId') || 'Borrower National ID'} <span className="text-destructive">*</span></Label>
                                     <Input value={borrowerNationalId} onChange={e => setBorrowerNationalId(e.target.value)} />
                                 </div>
                             </div>
 
                             <div className="grid gap-2">
-                                <Label>{t('loans.borrowerAddress') || 'Borrower Address'}</Label>
+                                <Label>{t('loans.borrowerAddress') || 'Borrower Address'} <span className="text-destructive">*</span></Label>
                                 <Input value={borrowerAddress} onChange={e => setBorrowerAddress(e.target.value)} />
                             </div>
 
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-12">
                                 <div className="grid gap-2 xl:col-span-3">
-                                    <Label>{t('loans.principal') || 'Principal'}</Label>
+                                    <Label>{t('loans.principal') || 'Principal'} <span className="text-destructive">*</span></Label>
                                     <Input
                                         type="text"
                                         inputMode={selectedCurrency === 'iqd' ? 'numeric' : 'decimal'}
@@ -246,7 +246,7 @@ export function CreateManualLoanModal({
                                     </Select>
                                 </div>
                                 <div className="grid gap-2 xl:col-span-2">
-                                    <Label>{t('loans.installmentCount') || 'Installments'}</Label>
+                                    <Label>{t('loans.installmentCount') || 'Installments'} <span className="text-destructive">*</span></Label>
                                     <Input
                                         type="number"
                                         min={1}
@@ -267,7 +267,7 @@ export function CreateManualLoanModal({
                                     </Select>
                                 </div>
                                 <div className="grid gap-2 xl:col-span-3">
-                                    <Label>{t('loans.firstDueDate') || 'First Due Date'}</Label>
+                                    <Label>{t('loans.firstDueDate') || 'First Due Date'} <span className="text-destructive">*</span></Label>
                                     <DateTimePicker
                                         id="manual-loan-first-due-date"
                                         mode="date"
