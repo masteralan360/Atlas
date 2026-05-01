@@ -23,6 +23,8 @@ import {
     Textarea
 } from '@/ui/components'
 import { LoanPartyPickerDialog } from '@/ui/components/loans/LoanPartyPickerDialog'
+import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
+import type { BusinessPartner } from '@/local-db'
 
 export interface LoanRegistrationData {
     linkedPartyType?: 'business_partner' | null
@@ -141,10 +143,21 @@ export function LoanRegistrationModal({
                             <div className="grid gap-2">
                                 <Label>{t('loans.borrowerName') || 'Borrower Name'} <span className="text-destructive">*</span></Label>
                                 <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                                    <Input
+                                    <PartnerAutocompleteInput
                                         value={form.borrowerName}
-                                        onChange={e => setForm(prev => ({ ...prev, borrowerName: e.target.value }))}
-                                        className="flex-1"
+                                        onChange={v => setForm(prev => ({ ...prev, borrowerName: v }))}
+                                        onSelectPartner={(partner: BusinessPartner) => {
+                                            setForm(prev => ({
+                                                ...prev,
+                                                borrowerName: partner.name,
+                                                borrowerPhone: partner.phone || prev.borrowerPhone,
+                                                borrowerAddress: [partner.address, partner.city, partner.country].filter(Boolean).join(', ') || prev.borrowerAddress,
+                                                linkedPartyType: 'business_partner',
+                                                linkedPartyId: partner.id,
+                                                linkedPartyName: partner.name
+                                            }))
+                                        }}
+                                        workspaceId={workspaceId}
                                     />
                                     <Button type="button" variant="outline" className="w-full shrink-0 gap-2 md:w-auto" onClick={() => setIsPartyPickerOpen(true)}>
                                         <Users className="h-4 w-4" />

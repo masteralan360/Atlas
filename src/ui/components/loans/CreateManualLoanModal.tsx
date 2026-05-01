@@ -27,6 +27,8 @@ import {
 } from '@/ui/components'
 import { useWorkspace } from '@/workspace'
 import { LoanPartyPickerDialog } from './LoanPartyPickerDialog'
+import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
+import type { BusinessPartner } from '@/local-db'
 
 interface CreateManualLoanModalProps {
     isOpen: boolean
@@ -173,7 +175,26 @@ export function CreateManualLoanModal({
                             <div className="grid gap-2">
                                 <Label>{t('loans.borrowerName') || 'Borrower Name'} <span className="text-destructive">*</span></Label>
                                 <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                                    <Input value={borrowerName} onChange={e => setBorrowerName(e.target.value)} className="flex-1" />
+                                    <PartnerAutocompleteInput
+                                        value={borrowerName}
+                                        onChange={setBorrowerName}
+                                        onSelectPartner={(partner: BusinessPartner) => {
+                                            setSelectedParty({
+                                                linkedPartyType: 'business_partner',
+                                                linkedPartyId: partner.id,
+                                                linkedPartyName: partner.name,
+                                                borrowerName: partner.name,
+                                                borrowerPhone: partner.phone || '',
+                                                borrowerAddress: [partner.address, partner.city, partner.country].filter(Boolean).join(', '),
+                                                defaultCurrency: partner.defaultCurrency
+                                            })
+                                            setSelectedCurrency(partner.defaultCurrency)
+                                            setBorrowerName(partner.name)
+                                            setBorrowerPhone(partner.phone || '')
+                                            setBorrowerAddress([partner.address, partner.city, partner.country].filter(Boolean).join(', '))
+                                        }}
+                                        workspaceId={workspaceId}
+                                    />
                                     <Button type="button" variant="outline" className="w-full shrink-0 gap-2 md:w-auto" onClick={() => setIsPartyPickerOpen(true)}>
                                         <Users className="h-4 w-4" />
                                         {t('loans.selectParty', { defaultValue: 'Business Partner' })}

@@ -25,6 +25,8 @@ import {
 } from '@/ui/components'
 import { useWorkspace } from '@/workspace'
 import { LoanPartyPickerDialog } from '@/ui/components/loans/LoanPartyPickerDialog'
+import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
+import type { BusinessPartner } from '@/local-db'
 
 interface DirectTransactionDialogProps {
     open: boolean
@@ -192,11 +194,19 @@ export function DirectTransactionDialog({
                             <div className="grid gap-2">
                                 <Label>{t('directTransactionModal.fields.counterparty', { defaultValue: 'Counterparty' })} <span className="text-destructive">*</span></Label>
                                 <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                                    <Input
+                                    <PartnerAutocompleteInput
                                         value={counterpartyName}
-                                        onChange={(event) => setCounterpartyName(event.target.value)}
+                                        onChange={setCounterpartyName}
+                                        onSelectPartner={(partner: BusinessPartner) => {
+                                            setCounterpartyName(partner.name)
+                                            setLinkedPartner({
+                                                type: 'business_partner',
+                                                id: partner.id,
+                                                name: partner.name
+                                            })
+                                        }}
+                                        workspaceId={workspaceId}
                                         placeholder={t('directTransactionModal.fields.counterpartyPlaceholder', { defaultValue: 'Who received or paid this amount?' })}
-                                        className="flex-1"
                                     />
                                     {features.crm ? (
                                         <Button
