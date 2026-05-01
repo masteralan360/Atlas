@@ -60,7 +60,7 @@ import { useWorkspace } from '@/workspace'
 import { useTheme } from '@/ui/components/theme-provider'
 
 type LedgerDirection = 'incoming' | 'outgoing'
-type LedgerSourceModule = 'pos' | 'instant_pos' | 'orders' | 'expenses' | 'payroll' | 'loans'
+type LedgerSourceModule = 'pos' | 'instant_pos' | 'orders' | 'expenses' | 'payroll' | 'loans' | 'manual'
 type LedgerRelationRole = 'origin' | 'repayment' | 'settlement'
 type LedgerEntryType =
     | 'pos_sale'
@@ -77,6 +77,8 @@ type LedgerEntryType =
     | 'loan_repayment_paid'
     | 'installment_received'
     | 'installment_paid'
+    | 'direct_inflow'
+    | 'direct_outflow'
 
 interface LedgerEntry {
     id: string
@@ -280,6 +282,10 @@ function ledgerTypeLabel(type: LedgerEntryType, t: any) {
             return t('ledger.type.installmentReceived', { defaultValue: 'Installment Received' })
         case 'installment_paid':
             return t('ledger.type.installmentPaid', { defaultValue: 'Installment Paid' })
+        case 'direct_inflow':
+            return t('ledger.type.directInflow', { defaultValue: 'Direct Inflow' })
+        case 'direct_outflow':
+            return t('ledger.type.directOutflow', { defaultValue: 'Direct Outflow' })
         default:
             return type
     }
@@ -299,6 +305,8 @@ function sourceModuleLabel(module: LedgerSourceModule, t: any) {
             return t('ledger.sourceModule.payroll', { defaultValue: 'Payroll' })
         case 'loans':
             return t('ledger.sourceModule.loans', { defaultValue: 'Loans' })
+        case 'manual':
+            return t('ledger.sourceModule.manual', { defaultValue: 'Manual' })
         default:
             return module
     }
@@ -414,7 +422,7 @@ function applyLedgerFilters(entries: LedgerEntry[], filters: LedgerFilterState) 
             entry.notes,
             entry.description,
             entry.paymentMethod,
-            ledgerTypeLabel(entry.type, { t: (key: string, opts: any) => opts?.defaultValue || key }), 
+            ledgerTypeLabel(entry.type, { t: (key: string, opts: any) => opts?.defaultValue || key }),
             sourceModuleLabel(entry.sourceModule, { t: (key: string, opts: any) => opts?.defaultValue || key })
         ].some((value) => value?.toLowerCase().includes(normalizedSearch))
     })
@@ -782,8 +790,32 @@ function buildPaymentLedgerEntry(
     context: LedgerBuildContext,
     t: any
 ): LedgerEntry | null {
-    if (transaction.isDeleted || transaction.reversalOfTransactionId || transaction.sourceType === 'direct_transaction') {
+    if (transaction.isDeleted || transaction.reversalOfTransactionId) {
         return null
+    }
+
+    if (transaction.sourceType === 'direct_transaction') {
+        const descriptionParts = [
+            transaction.referenceLabel?.trim() || null,
+            transaction.note?.trim() || null
+        ].filter(Boolean)
+
+        return {
+            id: `direct:${transaction.id}`,
+            transactionId: transaction.id,
+            date: transaction.paidAt,
+            type: transaction.direction === 'incoming' ? 'direct_inflow' : 'direct_outflow',
+            direction: transaction.direction,
+            amount: transaction.amount,
+            currency: transaction.currency,
+            sourceModule: 'manual',
+            referenceId: (transaction.referenceLabel || 'DIR').slice(0, 10).toUpperCase(),
+            partner: transaction.counterpartyName || null,
+            paymentMethod: transaction.paymentMethod,
+            notes: transaction.note?.trim() || null,
+            description: descriptionParts.length > 0 ? descriptionParts.join(' | ') : null,
+            routePath: '/direct-transactions'
+        }
     }
 
     const relation = buildLedgerRelationDescriptor(transaction, context)
@@ -1214,7 +1246,7 @@ export function Ledger() {
         allEntries.forEach((entry) => {
             const date = new Date(entry.date)
             if (date > now) return
-            
+
             // Check if current period
             const isCurrent = date >= periodStart && date <= now
             // Check if previous period
@@ -1576,7 +1608,7 @@ export function Ledger() {
                         <ShieldCheck className="h-3.5 w-3.5" />
                         {t('ledger.systemControlled', { defaultValue: 'System Controlled' })}
                     </div>
-                    
+
                     <div className="space-y-1.5">
                         <div className="flex flex-wrap items-center gap-3">
                             <h1 className="bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-4xl font-black tracking-tight text-transparent">{t('ledger.title', { defaultValue: 'General Ledger' })}</h1>
@@ -1593,7 +1625,6 @@ export function Ledger() {
 
                     <div className="flex flex-wrap items-center gap-2">
                         <span className="inline-flex items-center rounded-full border border-border/40 bg-secondary/30 px-2.5 py-1 text-xs font-semibold text-secondary-foreground transition-colors hover:bg-secondary/50">{t('ledger.badges.postedOnly', { defaultValue: 'Posted movements only' })}</span>
-                        <span className="inline-flex items-center rounded-full border border-border/40 bg-secondary/30 px-2.5 py-1 text-xs font-semibold text-secondary-foreground transition-colors hover:bg-secondary/50">{t('ledger.badges.noManual', { defaultValue: 'No manual entries' })}</span>
                         <span className="inline-flex items-center rounded-full border border-border/40 bg-secondary/30 px-2.5 py-1 text-xs font-semibold text-secondary-foreground transition-colors hover:bg-secondary/50">{t('ledger.badges.multiCurrency', { defaultValue: 'Multi-currency preserved' })}</span>
                     </div>
 
@@ -1646,11 +1677,11 @@ export function Ledger() {
                                 <span className={cn(
                                     "flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-full border",
                                     trendStats.inflowOffset > 0 ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20" :
-                                    trendStats.inflowOffset < 0 ? "text-rose-600 bg-rose-500/10 border-rose-500/20" :
-                                    "text-muted-foreground bg-secondary/50 border-border"
+                                        trendStats.inflowOffset < 0 ? "text-rose-600 bg-rose-500/10 border-rose-500/20" :
+                                            "text-muted-foreground bg-secondary/50 border-border"
                                 )}>
                                     {trendStats.inflowOffset > 0 ? <TrendingUp className="w-3 h-3 me-1" /> :
-                                     trendStats.inflowOffset < 0 ? <TrendingDown className="w-3 h-3 me-1" /> : null}
+                                        trendStats.inflowOffset < 0 ? <TrendingDown className="w-3 h-3 me-1" /> : null}
                                     {trendStats.inflowOffset > 0 ? '+' : ''}{trendStats.inflowOffset.toFixed(1)}%
                                 </span>
                                 <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">{t('ledger.kpis.vsPriorPeriod', { defaultValue: 'vs prior period' })}</span>
@@ -1681,11 +1712,11 @@ export function Ledger() {
                                 <span className={cn(
                                     "flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-full border",
                                     trendStats.outflowOffset > 0 ? "text-rose-600 bg-rose-500/10 border-rose-500/20" :
-                                    trendStats.outflowOffset < 0 ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20" :
-                                    "text-muted-foreground bg-secondary/50 border-border"
+                                        trendStats.outflowOffset < 0 ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20" :
+                                            "text-muted-foreground bg-secondary/50 border-border"
                                 )}>
                                     {trendStats.outflowOffset > 0 ? <TrendingUp className="w-3 h-3 me-1" /> :
-                                     trendStats.outflowOffset < 0 ? <TrendingDown className="w-3 h-3 me-1" /> : null}
+                                        trendStats.outflowOffset < 0 ? <TrendingDown className="w-3 h-3 me-1" /> : null}
                                     {trendStats.outflowOffset > 0 ? '+' : ''}{trendStats.outflowOffset.toFixed(1)}%
                                 </span>
                                 <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">{t('ledger.kpis.vsPriorPeriod', { defaultValue: 'vs prior period' })}</span>
@@ -1703,7 +1734,7 @@ export function Ledger() {
                         <CardTitle className={cn("text-[13px] font-semibold tracking-tight uppercase", netFlowIsNegative ? "text-rose-600" : "text-sky-600")}>
                             {t('ledger.kpis.netFlow', { defaultValue: 'Net Flow' })}
                         </CardTitle>
-                        <div className={cn("w-8 h-8 rounded-full flex items-center justify-center border", 
+                        <div className={cn("w-8 h-8 rounded-full flex items-center justify-center border",
                             netFlowIsNegative ? "bg-rose-500/10 border-rose-500/20" : "bg-sky-500/10 border-sky-500/20"
                         )}>
                             <BarChart3 className={cn("h-4 w-4", netFlowIsNegative ? "text-rose-600" : "text-sky-600")} />
@@ -1718,11 +1749,11 @@ export function Ledger() {
                                 <span className={cn(
                                     "flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-full border",
                                     trendStats.netFlowOffset > 0 ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20" :
-                                    trendStats.netFlowOffset < 0 ? "text-rose-600 bg-rose-500/10 border-rose-500/20" :
-                                    "text-muted-foreground bg-secondary/50 border-border"
+                                        trendStats.netFlowOffset < 0 ? "text-rose-600 bg-rose-500/10 border-rose-500/20" :
+                                            "text-muted-foreground bg-secondary/50 border-border"
                                 )}>
                                     {trendStats.netFlowOffset > 0 ? <TrendingUp className="w-3 h-3 me-1" /> :
-                                     trendStats.netFlowOffset < 0 ? <TrendingDown className="w-3 h-3 me-1" /> : null}
+                                        trendStats.netFlowOffset < 0 ? <TrendingDown className="w-3 h-3 me-1" /> : null}
                                     {trendStats.netFlowOffset > 0 ? '+' : ''}{trendStats.netFlowOffset.toFixed(1)}%
                                 </span>
                                 <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">{t('ledger.kpis.vsPriorPeriod', { defaultValue: 'vs prior period' })}</span>
@@ -1790,7 +1821,7 @@ export function Ledger() {
                                             </div>
                                         </div>
                                         <div className="text-right">
-                                            <div className={cn("text-sm font-black tabular-nums tracking-tighter", 
+                                            <div className={cn("text-sm font-black tabular-nums tracking-tighter",
                                                 item.profit > 0 ? "text-emerald-600" : item.profit < 0 ? "text-rose-600" : "text-muted-foreground"
                                             )}>
                                                 {formatCurrency(item.profit, baseCurrency, features.iqd_display_preference)}
@@ -1818,14 +1849,14 @@ export function Ledger() {
                         <div className="h-[240px] w-full">
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={ledgerTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                                    <XAxis 
-                                        dataKey="dateKey" 
+                                    <XAxis
+                                        dataKey="dateKey"
                                         tickLine={false}
                                         axisLine={false}
                                         tick={{ fontSize: 10, fill: '#888888', fontWeight: 600 }}
                                         tickMargin={10}
                                     />
-                                    <RechartsTooltip 
+                                    <RechartsTooltip
                                         cursor={{ fill: 'rgba(0,0,0,0.05)' }}
                                         content={({ active, payload }) => {
                                             if (active && payload && payload.length) {
@@ -1882,14 +1913,14 @@ export function Ledger() {
                                                 <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
                                             </linearGradient>
                                         </defs>
-                                        <XAxis 
-                                            dataKey="hour" 
+                                        <XAxis
+                                            dataKey="hour"
                                             tick={{ fontSize: 9, fill: '#888' }}
                                             axisLine={false}
                                             tickLine={false}
                                             interval={3}
                                         />
-                                        <RechartsTooltip 
+                                        <RechartsTooltip
                                             cursor={false}
                                             content={({ active, payload }) => {
                                                 if (active && payload && payload.length) {
@@ -1913,7 +1944,7 @@ export function Ledger() {
                             </div>
                         </div>
                         <div className="p-3 bg-muted/30 border-t border-border/10 text-[11px] text-center font-semibold text-muted-foreground tracking-wide">
-                             {t('ledger.charts.hourlyVolume', { defaultValue: 'Hourly transaction volume' })}
+                            {t('ledger.charts.hourlyVolume', { defaultValue: 'Hourly transaction volume' })}
                         </div>
                     </CardContent>
                 </Card>
@@ -1950,9 +1981,7 @@ export function Ledger() {
                                     </Button>
                                 ) : null}
                             </div>
-                            <p className="text-xs text-muted-foreground">
-                                {t('ledger.filters.exclusionNote', { defaultValue: 'Draft orders and manual direct transactions are intentionally excluded from the ledger. Delivered E-Commerce orders appear as receivables until payment is posted.' })}
-                            </p>
+
                         </div>
 
                         <div className="rounded-2xl border border-border/60 bg-secondary/20 px-4 py-3 text-sm">
@@ -1985,7 +2014,7 @@ export function Ledger() {
                     <CardTitle className="flex items-center gap-2 flex-wrap">
                         {t('ledger.table.title', { defaultValue: 'Ledger Entries' })}
                         {dateDisplay && (
-                        <span className="ms-2 px-2 py-0.5 text-xs font-semibold bg-primary/10 text-primary border border-primary/20 rounded-full">
+                            <span className="ms-2 px-2 py-0.5 text-xs font-semibold bg-primary/10 text-primary border border-primary/20 rounded-full">
                                 {dateDisplay}
                             </span>
                         )}

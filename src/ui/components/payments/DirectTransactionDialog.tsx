@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-
-import { useBusinessPartners, type CurrencyCode, type WorkspacePaymentMethod } from '@/local-db'
+import { Users, X } from 'lucide-react'
+import { type CurrencyCode, type WorkspacePaymentMethod } from '@/local-db'
+import { getLoanLinkedPartyTypeLabel, type LoanPartySelection } from '@/lib/loanParties'
 import { formatLocalDateTimeValue, formatNumericInput, parseFormattedNumber, parseLocalDateTimeValue, sanitizeNumericInput } from '@/lib/utils'
 import {
     Button,
@@ -23,6 +24,7 @@ import {
     Textarea
 } from '@/ui/components'
 import { useWorkspace } from '@/workspace'
+import { LoanPartyPickerDialog } from '@/ui/components/loans/LoanPartyPickerDialog'
 
 interface DirectTransactionDialogProps {
     open: boolean
@@ -51,7 +53,6 @@ export function DirectTransactionDialog({
 }: DirectTransactionDialogProps) {
     const { t } = useTranslation()
     const { features } = useWorkspace()
-    const partners = useBusinessPartners(workspaceId)
     const [direction, setDirection] = useState<'incoming' | 'outgoing'>('outgoing')
     const [amount, setAmount] = useState('')
     const [currency, setCurrency] = useState<CurrencyCode>((features.default_currency || 'usd') as CurrencyCode)
@@ -60,7 +61,12 @@ export function DirectTransactionDialog({
     const [reason, setReason] = useState('')
     const [note, setNote] = useState('')
     const [counterpartyName, setCounterpartyName] = useState('')
-    const [businessPartnerId, setBusinessPartnerId] = useState<string>('none')
+    const [linkedPartner, setLinkedPartner] = useState<{
+        type: 'business_partner' | null
+        id: string | null
+        name: string | null
+    }>({ type: null, id: null, name: null })
+    const [isPartyPickerOpen, setIsPartyPickerOpen] = useState(false)
 
     useEffect(() => {
         if (!open) {
@@ -75,13 +81,25 @@ export function DirectTransactionDialog({
         setReason('')
         setNote('')
         setCounterpartyName('')
-        setBusinessPartnerId('none')
+        setLinkedPartner({ type: null, id: null, name: null })
+        setIsPartyPickerOpen(false)
     }, [features.default_currency, open])
 
     const selectedPaidAt = parseLocalDateTimeValue(paidAt)
-    const selectedPartner = businessPartnerId !== 'none'
-        ? partners.find((item) => item.id === businessPartnerId)
-        : undefined
+
+    const isValid = parseFormattedNumber(amount) > 0 &&
+        reason.trim() !== '' &&
+        counterpartyName.trim() !== '' &&
+        !!selectedPaidAt
+
+    const handlePartySelect = (selection: LoanPartySelection) => {
+        setLinkedPartner({
+            type: selection.linkedPartyType,
+            id: selection.linkedPartyId,
+            name: selection.linkedPartyName
+        })
+        setCounterpartyName(selection.borrowerName)
+    }
 
     const handleSubmit = (event: React.FormEvent) => {
         event.preventDefault()
@@ -93,14 +111,14 @@ export function DirectTransactionDialog({
             paidAt: selectedPaidAt?.toISOString() || '',
             reason: reason.trim(),
             note: note.trim() || undefined,
-            counterpartyName: selectedPartner?.name || counterpartyName.trim() || undefined,
-            businessPartnerId: selectedPartner?.id || null
+            counterpartyName: counterpartyName.trim() || undefined,
+            businessPartnerId: linkedPartner.id
         })
     }
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="top-[calc(50%+var(--titlebar-height)/2+var(--safe-area-top)/2)] flex max-h-[calc(100dvh-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-0.75rem)] w-[calc(100vw-0.75rem)] max-w-3xl flex-col overflow-hidden rounded-[1.25rem] border-border/60 p-0 sm:w-full sm:max-h-[min(calc(100dvh-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-2rem),820px)] sm:rounded-[1.75rem]">
+            <DialogContent className="top-[calc(50%+var(--titlebar-height)/2+var(--safe-area-top)/2)] flex max-h-[calc(100dvh-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-0.75rem)] w-[calc(100vw-0.75rem)] max-w-4xl flex-col overflow-hidden rounded-[1.25rem] border-border/60 p-0 sm:w-full sm:max-h-[min(calc(100dvh-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-2rem),820px)] sm:rounded-[1.75rem]">
                 <DialogHeader className="border-b bg-muted/30 px-4 py-4 pr-14 text-left sm:px-6 sm:py-5">
                     <DialogTitle>{t('directTransactionModal.title', { defaultValue: 'New Direct Transaction' })}</DialogTitle>
                     <DialogDescription>
@@ -171,31 +189,49 @@ export function DirectTransactionDialog({
                                 />
                             </div>
 
-                            {features.crm ? (
-                                <div className="grid gap-2">
-                                    <Label>{t('directTransactionModal.fields.businessPartner', { defaultValue: 'Business Partner' })}</Label>
-                                    <Select value={businessPartnerId} onValueChange={setBusinessPartnerId}>
-                                        <SelectTrigger>
-                                            <SelectValue placeholder={t('directTransactionModal.fields.businessPartnerPlaceholder', { defaultValue: 'Optional business partner' })} />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="none">{t('directTransactionModal.fields.noPartner', { defaultValue: 'No linked partner' })}</SelectItem>
-                                            {partners.map((partner) => (
-                                                <SelectItem key={partner.id} value={partner.id}>{partner.name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            ) : null}
-
                             <div className="grid gap-2">
-                                <Label>{t('directTransactionModal.fields.counterparty', { defaultValue: 'Counterparty' })}</Label>
-                                <Input
-                                    value={selectedPartner?.name || counterpartyName}
-                                    onChange={(event) => setCounterpartyName(event.target.value)}
-                                    disabled={!!selectedPartner}
-                                    placeholder={t('directTransactionModal.fields.counterpartyPlaceholder', { defaultValue: 'Who received or paid this amount?' })}
-                                />
+                                <Label>{t('directTransactionModal.fields.counterparty', { defaultValue: 'Counterparty' })} <span className="text-destructive">*</span></Label>
+                                <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                                    <Input
+                                        value={counterpartyName}
+                                        onChange={(event) => setCounterpartyName(event.target.value)}
+                                        placeholder={t('directTransactionModal.fields.counterpartyPlaceholder', { defaultValue: 'Who received or paid this amount?' })}
+                                        className="flex-1"
+                                    />
+                                    {features.crm ? (
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="w-full shrink-0 gap-2 md:w-auto"
+                                            onClick={() => setIsPartyPickerOpen(true)}
+                                        >
+                                            <Users className="h-4 w-4" />
+                                            {t('loans.selectParty', { defaultValue: 'Business Partner' })}
+                                        </Button>
+                                    ) : null}
+                                </div>
+                                {linkedPartner.type && linkedPartner.name ? (
+                                    <div className="flex flex-col gap-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 sm:flex-row sm:items-start sm:justify-between">
+                                        <div className="min-w-0">
+                                            <div className="text-[11px] font-bold uppercase tracking-wide text-primary">
+                                                {t('loans.belongsTo', { defaultValue: 'Belongs to' })}
+                                            </div>
+                                            <div className="text-sm font-semibold">
+                                                {getLoanLinkedPartyTypeLabel(linkedPartner.type, t)} - {linkedPartner.name}
+                                            </div>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-8 shrink-0 px-2 text-muted-foreground"
+                                            onClick={() => setLinkedPartner({ type: null, id: null, name: null })}
+                                        >
+                                            <X className="h-4 w-4" />
+                                            {t('loans.clearParty', { defaultValue: 'Clear Link' })}
+                                        </Button>
+                                    </div>
+                                ) : null}
                             </div>
 
                             <div className="grid gap-2">
@@ -227,13 +263,23 @@ export function DirectTransactionDialog({
                         <Button
                             type="submit"
                             className="w-full sm:w-auto"
-                            disabled={isSubmitting || !selectedPaidAt}
+                            disabled={isSubmitting || !isValid}
                         >
                             {t('directTransactionModal.actions.save', { defaultValue: 'Save Transaction' })}
                         </Button>
                     </DialogFooter>
                 </form>
             </DialogContent>
+
+            {features.crm && (
+                <LoanPartyPickerDialog
+                    isOpen={isPartyPickerOpen}
+                    onOpenChange={setIsPartyPickerOpen}
+                    workspaceId={workspaceId}
+                    selectedPartyId={linkedPartner.id || undefined}
+                    onSelect={handlePartySelect}
+                />
+            )}
         </Dialog>
 
     )
