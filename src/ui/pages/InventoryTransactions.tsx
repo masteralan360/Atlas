@@ -35,6 +35,10 @@ type InventoryActivityRecord =
       quantity: number;
       sourceStorageId: string;
       destinationStorageId: string;
+      sourceWorkspaceName?: string | null;
+      destinationWorkspaceName?: string | null;
+      sourceStorageName?: string | null;
+      destinationStorageName?: string | null;
       sourceKind: "manual" | "automation";
     }
   | {
@@ -104,6 +108,10 @@ export function InventoryTransactionsPage() {
         quantity: transaction.quantity,
         sourceStorageId: transaction.sourceStorageId,
         destinationStorageId: transaction.destinationStorageId,
+        sourceWorkspaceName: transaction.sourceWorkspaceName,
+        destinationWorkspaceName: transaction.destinationWorkspaceName,
+        sourceStorageName: transaction.sourceStorageName,
+        destinationStorageName: transaction.destinationStorageName,
         sourceKind: transaction.transferType,
       }),
     );
@@ -269,17 +277,29 @@ export function InventoryTransactionsPage() {
                           {record.kind === "transfer" ? (
                             <>
                               <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wide">
-                                {getStorageDisplayName(
-                                  storagesById.get(record.sourceStorageId),
-                                  t,
-                                )}
+                                {record.sourceStorageName
+                                  ? `${record.sourceStorageName}${
+                                      record.sourceWorkspaceName
+                                        ? ` (${record.sourceWorkspaceName})`
+                                        : ""
+                                    }`
+                                  : getStorageDisplayName(
+                                      storagesById.get(record.sourceStorageId),
+                                      t,
+                                    )}
                               </span>
                               <ChevronRight className="h-4 w-4 text-muted-foreground" />
                               <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-800">
-                                {getStorageDisplayName(
-                                  storagesById.get(record.destinationStorageId),
-                                  t,
-                                )}
+                                {record.destinationStorageName
+                                  ? `${record.destinationStorageName}${
+                                      record.destinationWorkspaceName
+                                        ? ` (${record.destinationWorkspaceName})`
+                                        : ""
+                                    }`
+                                  : getStorageDisplayName(
+                                      storagesById.get(record.destinationStorageId),
+                                      t,
+                                    )}
                               </span>
                             </>
                           ) : (

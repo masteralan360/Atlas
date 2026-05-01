@@ -232,6 +232,54 @@ async function syncUpsertTransactions(
   }
 }
 
+export async function refreshInventoryTransactionsFromSupabase(
+  workspaceId: string,
+) {
+  if (!workspaceId || !shouldUseCloudBusinessData(workspaceId) || !isOnline()) {
+    return;
+  }
+
+  const client = getSupabaseClientForTable(TABLE_NAME);
+  const { data, error } = await runSupabaseAction(`${TABLE_NAME}.fetch`, () =>
+    client
+      .from(TABLE_NAME)
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .eq("is_deleted", false),
+  );
+
+  if (!data || error || !shouldUseCloudBusinessData(workspaceId)) {
+    return;
+  }
+
+  const syncedAt = new Date().toISOString();
+  const remoteIds = new Set(
+    data.map((row: Record<string, unknown>) => row.id as string),
+  );
+
+  await db.transaction("rw", db.inventory_transactions, async () => {
+    for (const remoteItem of data) {
+      const localItem = toCamelCase(
+        remoteItem as Record<string, unknown>,
+      ) as unknown as InventoryTransaction;
+      localItem.syncStatus = "synced";
+      localItem.lastSyncedAt = syncedAt;
+      await db.inventory_transactions.put(localItem);
+    }
+
+    const localRows = await db.inventory_transactions
+      .where("workspaceId")
+      .equals(workspaceId)
+      .toArray();
+    const staleIds = localRows
+      .filter((row) => row.syncStatus === "synced" && !remoteIds.has(row.id))
+      .map((row) => row.id);
+    if (staleIds.length > 0) {
+      await db.inventory_transactions.bulkDelete(staleIds);
+    }
+  });
+}
+
 export async function createInventoryTransaction(
   workspaceId: string,
   input: InventoryTransactionInput,
@@ -351,51 +399,11 @@ export function useInventoryTransactions(workspaceId: string | undefined) {
 
   useEffect(() => {
     async function fetchFromSupabase() {
-      if (!online || !workspaceId || !shouldUseCloudBusinessData(workspaceId)) {
+      if (!online || !workspaceId) {
         return;
       }
 
-      const client = getSupabaseClientForTable(TABLE_NAME);
-      const { data, error } = await runSupabaseAction(
-        `${TABLE_NAME}.fetch`,
-        () =>
-          client
-            .from(TABLE_NAME)
-            .select("*")
-            .eq("workspace_id", workspaceId)
-            .eq("is_deleted", false),
-      );
-
-      if (!data || error || !shouldUseCloudBusinessData(workspaceId)) {
-        return;
-      }
-
-      const syncedAt = new Date().toISOString();
-      const remoteIds = new Set(data.map((row: Record<string, unknown>) => row.id as string));
-
-      await db.transaction("rw", db.inventory_transactions, async () => {
-        // Upsert remote records
-        for (const remoteItem of data) {
-          const localItem = toCamelCase(
-            remoteItem as Record<string, unknown>,
-          ) as unknown as InventoryTransaction;
-          localItem.syncStatus = "synced";
-          localItem.lastSyncedAt = syncedAt;
-          await db.inventory_transactions.put(localItem);
-        }
-
-        // Remove local records that no longer exist in Supabase
-        const localRows = await db.inventory_transactions
-          .where("workspaceId")
-          .equals(workspaceId)
-          .toArray();
-        const staleIds = localRows
-          .filter((row) => row.syncStatus === "synced" && !remoteIds.has(row.id))
-          .map((row) => row.id);
-        if (staleIds.length > 0) {
-          await db.inventory_transactions.bulkDelete(staleIds);
-        }
-      });
+      await refreshInventoryTransactionsFromSupabase(workspaceId);
     }
 
     void fetchFromSupabase();

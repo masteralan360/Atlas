@@ -199,6 +199,12 @@ export interface InventoryTransferTransaction extends BaseEntity {
   quantity: number;
   transferType: InventoryTransferTransactionType;
   reorderRuleId?: string | null;
+  sourceWorkspaceId?: string | null;
+  destinationWorkspaceId?: string | null;
+  sourceWorkspaceName?: string | null;
+  destinationWorkspaceName?: string | null;
+  sourceStorageName?: string | null;
+  destinationStorageName?: string | null;
 }
 
 export interface Supplier extends BaseEntity {

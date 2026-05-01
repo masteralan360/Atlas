@@ -44,6 +44,28 @@ type CloneProductsToBranchRequest = {
     productIds?: string[]
 }
 
+type ListInventoryTransferTargetsRequest = {
+    action: 'list-inventory-transfer-targets'
+}
+
+type ListInventoryTransferSourceProductsRequest = {
+    action: 'list-inventory-transfer-source-products'
+    sourceWorkspaceId?: string
+    sourceStorageId?: string
+}
+
+type TransferInventoryBetweenWorkspacesRequest = {
+    action: 'transfer-inventory-between-workspaces'
+    sourceWorkspaceId?: string
+    sourceStorageId?: string
+    destinationWorkspaceId?: string
+    destinationStorageId?: string
+    items?: Array<{
+        productId?: string
+        quantity?: number
+    }>
+}
+
 type WorkspaceAccessRequest =
     | CreateWorkspaceRequest
     | JoinWorkspaceRequest
@@ -53,6 +75,9 @@ type WorkspaceAccessRequest =
     | DeleteBranchRequest
     | ListProductCloneTargetsRequest
     | CloneProductsToBranchRequest
+    | ListInventoryTransferTargetsRequest
+    | ListInventoryTransferSourceProductsRequest
+    | TransferInventoryBetweenWorkspacesRequest
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -85,12 +110,23 @@ type SourceProductRow = {
     image_url?: string | null
     can_be_returned?: boolean | null
     return_rules?: string | null
+    storage_name?: string | null
+    updated_at?: string | null
+    created_at?: string | null
+    version?: number | null
+    is_deleted?: boolean | null
 }
 
 type SourceInventoryRow = {
+    id?: string
+    workspace_id?: string | null
     product_id: string
     storage_id: string
     quantity?: number | null
+    created_at?: string | null
+    updated_at?: string | null
+    version?: number | null
+    is_deleted?: boolean | null
 }
 
 type SourceProductBarcodeRow = {
@@ -123,6 +159,13 @@ type ProductCloneTargetRow = {
     workspaceName: string
     workspaceCode?: string
     relationType: 'source' | 'branch'
+}
+
+type InventoryTransferTargetRow = ProductCloneTargetRow | {
+    workspaceId: string
+    workspaceName: string
+    workspaceCode?: string
+    relationType: 'current'
 }
 
 type WorkspaceMetadataRow = {
@@ -318,6 +361,10 @@ async function requireCallerWorkspace(adminClient: AdminClient, user: User, requ
     return { response: null, profile }
 }
 
+function hasInventoryTransferRole(role: string | null | undefined) {
+    return role === 'admin' || role === 'staff'
+}
+
 async function getWorkspaceById(
     adminClient: AdminClient,
     workspaceId: string,
@@ -425,6 +472,27 @@ async function getProductCloneTargets(
             relationType: target.relationType
         }]
     })
+}
+
+async function getInventoryTransferTargets(
+    adminClient: AdminClient,
+    currentWorkspaceId: string
+) {
+    const currentWorkspace = await getWorkspaceById(adminClient, currentWorkspaceId, 'id, name, code')
+    if (!currentWorkspace) {
+        throw new Error('Current workspace not found')
+    }
+
+    const linkedTargets = await getProductCloneTargets(adminClient, currentWorkspaceId)
+    return [
+        {
+            workspaceId: currentWorkspaceId,
+            workspaceName: currentWorkspace.name ?? 'Workspace',
+            workspaceCode: currentWorkspace.code ?? undefined,
+            relationType: 'current' as const
+        },
+        ...linkedTargets
+    ] satisfies InventoryTransferTargetRow[]
 }
 
 async function updateUserWorkspaceMetadata(
@@ -1114,6 +1182,791 @@ async function handleListProductCloneTargets(
     })
 }
 
+function buildWorkspaceProductKey(workspaceId: string, productId: string) {
+    return `${workspaceId}::${productId}`
+}
+
+function buildWorkspaceStorageProductKey(workspaceId: string, productId: string, storageId: string) {
+    return `${workspaceId}::${productId}::${storageId}`
+}
+
+function normalizeSkuKey(value?: string | null) {
+    return value?.trim().toLowerCase() ?? ''
+}
+
+function parseTransferQuantity(value: unknown) {
+    const quantity = Number(value)
+    return Number.isInteger(quantity) ? quantity : NaN
+}
+
+async function handleListInventoryTransferTargets(
+    adminClient: AdminClient,
+    user: User
+) {
+    const callerResult = await requireCallerWorkspace(adminClient, user)
+    if (callerResult.response || !callerResult.profile) {
+        return callerResult.response!
+    }
+
+    if (!hasInventoryTransferRole(callerResult.profile.role)) {
+        return errorResponse('Unauthorized: Only admins and staff can perform this action', 403)
+    }
+
+    const currentWorkspaceId = callerResult.profile.workspace_id!
+    const targets = await getInventoryTransferTargets(adminClient, currentWorkspaceId)
+
+    const { data: storageRows, error: storageRowsError } = await adminClient
+        .from('storages')
+        .select('id, workspace_id, name, is_primary')
+        .in('workspace_id', targets.map((target) => target.workspaceId))
+        .eq('is_deleted', false)
+        .order('is_primary', { ascending: false })
+        .order('name', { ascending: true })
+
+    if (storageRowsError) {
+        return errorResponse(storageRowsError.message, 500)
+    }
+
+    const storagesByWorkspaceId = new Map<string, TargetStorageRow[]>()
+    for (const storageRow of (storageRows ?? []) as TargetStorageRow[]) {
+        const workspaceId = typeof storageRow.workspace_id === 'string'
+            ? storageRow.workspace_id
+            : null
+
+        if (!workspaceId) {
+            continue
+        }
+
+        const currentStorages = storagesByWorkspaceId.get(workspaceId) ?? []
+        currentStorages.push(storageRow)
+        storagesByWorkspaceId.set(workspaceId, currentStorages)
+    }
+
+    return jsonResponse({
+        targets: targets.map((target) => ({
+            ...target,
+            storages: (storagesByWorkspaceId.get(target.workspaceId) ?? []).map((storage) => ({
+                id: storage.id,
+                name: storage.name,
+                is_primary: storage.is_primary ?? false
+            }))
+        }))
+    })
+}
+
+async function handleListInventoryTransferSourceProducts(
+    adminClient: AdminClient,
+    user: User,
+    body: ListInventoryTransferSourceProductsRequest
+) {
+    const sourceWorkspaceId = body.sourceWorkspaceId?.trim() ?? ''
+    const sourceStorageId = body.sourceStorageId?.trim() ?? ''
+
+    if (!sourceWorkspaceId) {
+        return errorResponse('Source workspace is required')
+    }
+
+    if (!sourceStorageId) {
+        return errorResponse('Source storage is required')
+    }
+
+    const callerResult = await requireCallerWorkspace(adminClient, user)
+    if (callerResult.response || !callerResult.profile) {
+        return callerResult.response!
+    }
+
+    if (!hasInventoryTransferRole(callerResult.profile.role)) {
+        return errorResponse('Unauthorized: Only admins and staff can perform this action', 403)
+    }
+
+    const currentWorkspaceId = callerResult.profile.workspace_id!
+    const targets = await getInventoryTransferTargets(adminClient, currentWorkspaceId)
+    const allowedWorkspaceIds = new Set(targets.map((target) => target.workspaceId))
+    if (!allowedWorkspaceIds.has(sourceWorkspaceId)) {
+        return errorResponse('Source workspace is not linked to your current workspace', 403)
+    }
+
+    const { data: storageRow, error: storageError } = await adminClient
+        .from('storages')
+        .select('id, workspace_id, name')
+        .eq('workspace_id', sourceWorkspaceId)
+        .eq('id', sourceStorageId)
+        .eq('is_deleted', false)
+        .maybeSingle()
+
+    if (storageError) {
+        return errorResponse(storageError.message, 500)
+    }
+
+    if (!storageRow) {
+        return errorResponse('Source storage not found for the selected workspace', 404)
+    }
+
+    const { data: inventoryRows, error: inventoryError } = await adminClient
+        .from('inventory')
+        .select('id, workspace_id, product_id, storage_id, quantity')
+        .eq('workspace_id', sourceWorkspaceId)
+        .eq('storage_id', sourceStorageId)
+        .eq('is_deleted', false)
+        .gt('quantity', 0)
+
+    if (inventoryError) {
+        return errorResponse(inventoryError.message, 500)
+    }
+
+    const sourceInventoryRows = (inventoryRows ?? []) as SourceInventoryRow[]
+    const productIds = Array.from(
+        new Set(sourceInventoryRows.map((row) => row.product_id).filter(Boolean))
+    )
+
+    if (productIds.length === 0) {
+        return jsonResponse({ products: [] })
+    }
+
+    const { data: productRows, error: productsError } = await adminClient
+        .from('products')
+        .select('id, sku, name, unit')
+        .eq('workspace_id', sourceWorkspaceId)
+        .eq('is_deleted', false)
+        .in('id', productIds)
+
+    if (productsError) {
+        return errorResponse(productsError.message, 500)
+    }
+
+    const productsById = new Map(
+        ((productRows ?? []) as SourceProductRow[]).map((product) => [product.id, product] as const)
+    )
+
+    const products = sourceInventoryRows
+        .map((row) => {
+            const product = productsById.get(row.product_id)
+            if (!product) {
+                return null
+            }
+
+            return {
+                productId: product.id,
+                sku: product.sku,
+                name: product.name,
+                unit: product.unit ?? 'pcs',
+                availableQuantity: Number(row.quantity ?? 0)
+            }
+        })
+        .filter((product): product is NonNullable<typeof product> => Boolean(product))
+        .sort((left, right) => left.name.localeCompare(right.name))
+
+    return jsonResponse({ products })
+}
+
+async function handleTransferInventoryBetweenWorkspaces(
+    adminClient: AdminClient,
+    user: User,
+    body: TransferInventoryBetweenWorkspacesRequest
+) {
+    const sourceWorkspaceId = body.sourceWorkspaceId?.trim() ?? ''
+    const sourceStorageId = body.sourceStorageId?.trim() ?? ''
+    const destinationWorkspaceId = body.destinationWorkspaceId?.trim() ?? ''
+    const destinationStorageId = body.destinationStorageId?.trim() ?? ''
+    const normalizedItems = Array.from(
+        new Map(
+            (Array.isArray(body.items) ? body.items : [])
+                .map((item) => {
+                    const productId = item?.productId?.trim() ?? ''
+                    const quantity = parseTransferQuantity(item?.quantity)
+                    return [productId, { productId, quantity }] as const
+                })
+                .filter(([productId]) => Boolean(productId))
+        ).values()
+    )
+
+    if (!sourceWorkspaceId) {
+        return errorResponse('Source workspace is required')
+    }
+
+    if (!sourceStorageId) {
+        return errorResponse('Source storage is required')
+    }
+
+    if (!destinationWorkspaceId) {
+        return errorResponse('Destination workspace is required')
+    }
+
+    if (!destinationStorageId) {
+        return errorResponse('Destination storage is required')
+    }
+
+    if (normalizedItems.length === 0) {
+        return errorResponse('At least one product must be selected')
+    }
+
+    if (sourceWorkspaceId === destinationWorkspaceId && sourceStorageId === destinationStorageId) {
+        return errorResponse('Source and destination storages must be different', 400)
+    }
+
+    for (const item of normalizedItems) {
+        if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
+            return errorResponse('Transfer quantity must be a whole number greater than zero', 400)
+        }
+    }
+
+    const callerResult = await requireCallerWorkspace(adminClient, user)
+    if (callerResult.response || !callerResult.profile) {
+        return callerResult.response!
+    }
+
+    if (!hasInventoryTransferRole(callerResult.profile.role)) {
+        return errorResponse('Unauthorized: Only admins and staff can perform this action', 403)
+    }
+
+    const currentWorkspaceId = callerResult.profile.workspace_id!
+    const targets = await getInventoryTransferTargets(adminClient, currentWorkspaceId)
+    const targetMap = new Map(targets.map((target) => [target.workspaceId, target] as const))
+
+    if (!targetMap.has(sourceWorkspaceId)) {
+        return errorResponse('Source workspace is not linked to your current workspace', 403)
+    }
+
+    if (!targetMap.has(destinationWorkspaceId)) {
+        return errorResponse('Destination workspace is not linked to your current workspace', 403)
+    }
+
+    const sourceWorkspace = targetMap.get(sourceWorkspaceId)!
+    const destinationWorkspace = targetMap.get(destinationWorkspaceId)!
+
+    const { data: storageRows, error: storageRowsError } = await adminClient
+        .from('storages')
+        .select('id, workspace_id, name')
+        .in('id', [sourceStorageId, destinationStorageId])
+        .eq('is_deleted', false)
+
+    if (storageRowsError) {
+        return errorResponse(storageRowsError.message, 500)
+    }
+
+    const sourceStorage = (storageRows ?? []).find((row) =>
+        row.id === sourceStorageId && row.workspace_id === sourceWorkspaceId
+    )
+    const destinationStorage = (storageRows ?? []).find((row) =>
+        row.id === destinationStorageId && row.workspace_id === destinationWorkspaceId
+    )
+
+    if (!sourceStorage) {
+        return errorResponse('Source storage not found for the selected workspace', 404)
+    }
+
+    if (!destinationStorage) {
+        return errorResponse('Destination storage not found for the selected workspace', 404)
+    }
+
+    const sourceProductIds = normalizedItems.map((item) => item.productId)
+    const { data: sourceProductRows, error: sourceProductsError } = await adminClient
+        .from('products')
+        .select('*')
+        .eq('workspace_id', sourceWorkspaceId)
+        .eq('is_deleted', false)
+        .in('id', sourceProductIds)
+
+    if (sourceProductsError) {
+        return errorResponse(sourceProductsError.message, 500)
+    }
+
+    const sourceProducts = (sourceProductRows ?? []) as SourceProductRow[]
+    if (sourceProducts.length !== sourceProductIds.length) {
+        return errorResponse('One or more selected products were not found in the source workspace', 404)
+    }
+
+    const sourceProductsById = new Map(sourceProducts.map((product) => [product.id, product] as const))
+    const quantityBySourceProductId = new Map(normalizedItems.map((item) => [item.productId, item.quantity] as const))
+
+    const destinationProductIdBySourceProductId = new Map<string, string>()
+    const destinationProductsById = new Map<string, SourceProductRow>()
+
+    if (sourceWorkspaceId === destinationWorkspaceId) {
+        for (const product of sourceProducts) {
+            destinationProductIdBySourceProductId.set(product.id, product.id)
+            destinationProductsById.set(product.id, product)
+        }
+    } else {
+        const sourceSkuByProductId = new Map<string, string>()
+        const duplicateSourceSkus = new Set<string>()
+
+        for (const product of sourceProducts) {
+            const normalizedSku = normalizeSkuKey(product.sku)
+            if (!normalizedSku) {
+                return errorResponse(`Source product "${product.name}" must have a SKU before it can be transferred to another workspace`, 400)
+            }
+
+            if (Array.from(sourceSkuByProductId.values()).includes(normalizedSku)) {
+                duplicateSourceSkus.add(normalizedSku)
+            }
+
+            sourceSkuByProductId.set(product.id, normalizedSku)
+        }
+
+        if (duplicateSourceSkus.size > 0) {
+            return errorResponse('Selected source products must have unique SKUs for cross-workspace transfers', 400)
+        }
+
+        const { data: destinationProductRows, error: destinationProductsError } = await adminClient
+            .from('products')
+            .select('*')
+            .eq('workspace_id', destinationWorkspaceId)
+            .eq('is_deleted', false)
+            .in('sku', sourceProducts.map((product) => product.sku))
+
+        if (destinationProductsError) {
+            return errorResponse(destinationProductsError.message, 500)
+        }
+
+        const destinationProductRowsList = (destinationProductRows ?? []) as SourceProductRow[]
+        const destinationProductBySku = new Map<string, SourceProductRow>()
+        const duplicateDestinationSkus = new Set<string>()
+
+        for (const product of destinationProductRowsList) {
+            const normalizedSku = normalizeSkuKey(product.sku)
+            if (!normalizedSku) {
+                continue
+            }
+
+            if (destinationProductBySku.has(normalizedSku)) {
+                duplicateDestinationSkus.add(normalizedSku)
+                continue
+            }
+
+            destinationProductBySku.set(normalizedSku, product)
+        }
+
+        if (duplicateDestinationSkus.size > 0) {
+            return errorResponse('Destination workspace has duplicate SKUs for one or more selected products', 400)
+        }
+
+        for (const product of sourceProducts) {
+            const normalizedSku = sourceSkuByProductId.get(product.id) ?? ''
+            const destinationProduct = destinationProductBySku.get(normalizedSku)
+            if (!destinationProduct) {
+                return errorResponse(
+                    `Destination workspace is missing product SKU "${product.sku}" for "${product.name}"`,
+                    400
+                )
+            }
+
+            destinationProductIdBySourceProductId.set(product.id, destinationProduct.id)
+            destinationProductsById.set(destinationProduct.id, destinationProduct)
+        }
+    }
+
+    const destinationProductIds = Array.from(
+        new Set(
+            sourceProducts.map((product) => destinationProductIdBySourceProductId.get(product.id)).filter((productId): productId is string => Boolean(productId))
+        )
+    )
+
+    const { data: sourceStorageInventoryRows, error: sourceInventoryError } = await adminClient
+        .from('inventory')
+        .select('*')
+        .eq('workspace_id', sourceWorkspaceId)
+        .eq('storage_id', sourceStorageId)
+        .eq('is_deleted', false)
+        .in('product_id', sourceProductIds)
+
+    if (sourceInventoryError) {
+        return errorResponse(sourceInventoryError.message, 500)
+    }
+
+    const sourceInventoryByProductId = new Map(
+        ((sourceStorageInventoryRows ?? []) as SourceInventoryRow[])
+            .map((row) => [row.product_id, row] as const)
+    )
+
+    for (const product of sourceProducts) {
+        const sourceRow = sourceInventoryByProductId.get(product.id)
+        const availableQuantity = Number(sourceRow?.quantity ?? 0)
+        const requestedQuantity = quantityBySourceProductId.get(product.id) ?? 0
+
+        if (availableQuantity < requestedQuantity) {
+            return errorResponse(`Insufficient inventory for "${product.name}" in the selected source storage`, 400)
+        }
+    }
+
+    const inventoryRowsByWorkspaceId = new Map<string, SourceInventoryRow[]>()
+    const productIdsByWorkspaceId = new Map<string, string[]>()
+
+    productIdsByWorkspaceId.set(sourceWorkspaceId, Array.from(new Set(sourceProductIds)))
+    productIdsByWorkspaceId.set(
+        destinationWorkspaceId,
+        Array.from(new Set(destinationProductIds))
+    )
+
+    for (const [workspaceId, productIds] of productIdsByWorkspaceId.entries()) {
+        const { data: inventoryRows, error: inventoryError } = await adminClient
+            .from('inventory')
+            .select('*')
+            .eq('workspace_id', workspaceId)
+            .in('product_id', productIds)
+
+        if (inventoryError) {
+            return errorResponse(inventoryError.message, 500)
+        }
+
+        inventoryRowsByWorkspaceId.set(workspaceId, (inventoryRows ?? []) as SourceInventoryRow[])
+    }
+
+    const inventoryRowsByPositionKey = new Map<string, SourceInventoryRow>()
+    const activeInventoryRowsByWorkspaceProductKey = new Map<string, SourceInventoryRow[]>()
+
+    for (const [workspaceId, inventoryRows] of inventoryRowsByWorkspaceId.entries()) {
+        for (const row of inventoryRows) {
+            const productKey = buildWorkspaceProductKey(workspaceId, row.product_id)
+            const positionKey = buildWorkspaceStorageProductKey(workspaceId, row.product_id, row.storage_id)
+            const existingPositionRow = inventoryRowsByPositionKey.get(positionKey)
+            if (!existingPositionRow || (existingPositionRow.is_deleted && !row.is_deleted)) {
+                inventoryRowsByPositionKey.set(positionKey, row)
+            }
+
+            if (!row.is_deleted && Number(row.quantity ?? 0) > 0) {
+                const rows = activeInventoryRowsByWorkspaceProductKey.get(productKey) ?? []
+                rows.push({ ...row })
+                activeInventoryRowsByWorkspaceProductKey.set(productKey, rows)
+            }
+        }
+    }
+
+    const inventoryRowsToUpsert = new Map<string, SourceInventoryRow>()
+    const insertedInventoryRowIds = new Set<string>()
+    const storageNameById = new Map<string, string>(
+        (storageRows ?? []).map((row) => [String(row.id), String(row.name ?? '')] as const)
+    )
+
+    const applyInventoryState = (
+        workspaceId: string,
+        productId: string,
+        storageId: string,
+        nextRow: SourceInventoryRow
+    ) => {
+        const productKey = buildWorkspaceProductKey(workspaceId, productId)
+        const currentRows = activeInventoryRowsByWorkspaceProductKey.get(productKey) ?? []
+        const remainingRows = currentRows.filter((row) => row.storage_id !== storageId)
+
+        if (!nextRow.is_deleted && Number(nextRow.quantity ?? 0) > 0) {
+            remainingRows.push({ ...nextRow })
+        }
+
+        activeInventoryRowsByWorkspaceProductKey.set(productKey, remainingRows)
+    }
+
+    const transferTransactionSeedId = crypto.randomUUID()
+    const inventoryTransactionRows: Record<string, unknown>[] = []
+    const inventoryTransferTransactionRows: Record<string, unknown>[] = []
+    const changedProductKeys = new Set<string>()
+    const transactionTimestamp = new Date().toISOString()
+
+    for (const item of normalizedItems) {
+        const sourceProduct = sourceProductsById.get(item.productId)
+        const destinationProductId = destinationProductIdBySourceProductId.get(item.productId)
+        const destinationProduct = destinationProductId
+            ? destinationProductsById.get(destinationProductId)
+            : null
+
+        if (!sourceProduct || !destinationProductId || !destinationProduct) {
+            return errorResponse('Transfer could not resolve one or more selected products', 400)
+        }
+
+        const sourcePositionKey = buildWorkspaceStorageProductKey(sourceWorkspaceId, sourceProduct.id, sourceStorageId)
+        const previousSourceRow = inventoryRowsByPositionKey.get(sourcePositionKey)
+        const previousSourceQuantity = Number(previousSourceRow?.quantity ?? 0)
+        const nextSourceQuantity = previousSourceQuantity - item.quantity
+
+        const updatedSourceRow: SourceInventoryRow = previousSourceRow
+            ? {
+                ...previousSourceRow,
+                quantity: Math.max(nextSourceQuantity, 0),
+                updated_at: transactionTimestamp,
+                version: Number(previousSourceRow.version ?? 0) + 1,
+                is_deleted: nextSourceQuantity <= 0
+            }
+            : {
+                id: crypto.randomUUID(),
+                workspace_id: sourceWorkspaceId,
+                product_id: sourceProduct.id,
+                storage_id: sourceStorageId,
+                quantity: Math.max(nextSourceQuantity, 0),
+                created_at: transactionTimestamp,
+                updated_at: transactionTimestamp,
+                version: 1,
+                is_deleted: nextSourceQuantity <= 0
+            }
+
+        if (!previousSourceRow) {
+            insertedInventoryRowIds.add(String(updatedSourceRow.id))
+        }
+
+        inventoryRowsToUpsert.set(String(updatedSourceRow.id), updatedSourceRow)
+        applyInventoryState(sourceWorkspaceId, sourceProduct.id, sourceStorageId, updatedSourceRow)
+        changedProductKeys.add(buildWorkspaceProductKey(sourceWorkspaceId, sourceProduct.id))
+
+        const destinationPositionKey = buildWorkspaceStorageProductKey(destinationWorkspaceId, destinationProductId, destinationStorageId)
+        const previousDestinationRow = inventoryRowsByPositionKey.get(destinationPositionKey)
+        const previousDestinationQuantity = Number(previousDestinationRow?.quantity ?? 0)
+        const nextDestinationQuantity = previousDestinationQuantity + item.quantity
+
+        const updatedDestinationRow: SourceInventoryRow = previousDestinationRow
+            ? {
+                ...previousDestinationRow,
+                quantity: nextDestinationQuantity,
+                updated_at: transactionTimestamp,
+                version: Number(previousDestinationRow.version ?? 0) + 1,
+                is_deleted: false
+            }
+            : {
+                id: crypto.randomUUID(),
+                workspace_id: destinationWorkspaceId,
+                product_id: destinationProductId,
+                storage_id: destinationStorageId,
+                quantity: nextDestinationQuantity,
+                created_at: transactionTimestamp,
+                updated_at: transactionTimestamp,
+                version: 1,
+                is_deleted: false
+            }
+
+        if (!previousDestinationRow) {
+            insertedInventoryRowIds.add(String(updatedDestinationRow.id))
+        }
+
+        inventoryRowsToUpsert.set(String(updatedDestinationRow.id), updatedDestinationRow)
+        applyInventoryState(destinationWorkspaceId, destinationProductId, destinationStorageId, updatedDestinationRow)
+        changedProductKeys.add(buildWorkspaceProductKey(destinationWorkspaceId, destinationProductId))
+
+        const operationReferenceId = transferTransactionSeedId
+
+        inventoryTransactionRows.push({
+            id: crypto.randomUUID(),
+            workspace_id: sourceWorkspaceId,
+            product_id: sourceProduct.id,
+            storage_id: sourceStorageId,
+            transaction_type: 'transfer_out',
+            quantity_delta: -item.quantity,
+            previous_quantity: previousSourceQuantity,
+            new_quantity: Math.max(nextSourceQuantity, 0),
+            adjustment_reason: null,
+            reference_id: operationReferenceId,
+            reference_type: 'transfer',
+            notes: `Transferred to ${destinationWorkspace.workspaceName} / ${destinationStorage.name}`,
+            created_by: user.id,
+            created_at: transactionTimestamp,
+            updated_at: transactionTimestamp,
+            version: 1,
+            is_deleted: false
+        })
+
+        inventoryTransactionRows.push({
+            id: crypto.randomUUID(),
+            workspace_id: destinationWorkspaceId,
+            product_id: destinationProductId,
+            storage_id: destinationStorageId,
+            transaction_type: 'transfer_in',
+            quantity_delta: item.quantity,
+            previous_quantity: previousDestinationQuantity,
+            new_quantity: nextDestinationQuantity,
+            adjustment_reason: null,
+            reference_id: operationReferenceId,
+            reference_type: 'transfer',
+            notes: `Transferred from ${sourceWorkspace.workspaceName} / ${sourceStorage.name}`,
+            created_by: user.id,
+            created_at: transactionTimestamp,
+            updated_at: transactionTimestamp,
+            version: 1,
+            is_deleted: false
+        })
+
+        const transferMetadata = {
+            source_workspace_id: sourceWorkspaceId,
+            destination_workspace_id: destinationWorkspaceId,
+            source_workspace_name: sourceWorkspace.workspaceName,
+            destination_workspace_name: destinationWorkspace.workspaceName,
+            source_storage_name: sourceStorage.name,
+            destination_storage_name: destinationStorage.name
+        }
+
+        if (sourceWorkspaceId === destinationWorkspaceId) {
+            inventoryTransferTransactionRows.push({
+                id: crypto.randomUUID(),
+                workspace_id: sourceWorkspaceId,
+                product_id: sourceProduct.id,
+                source_storage_id: sourceStorageId,
+                destination_storage_id: destinationStorageId,
+                quantity: item.quantity,
+                transfer_type: 'manual',
+                reorder_rule_id: null,
+                created_at: transactionTimestamp,
+                updated_at: transactionTimestamp,
+                version: 1,
+                is_deleted: false,
+                ...transferMetadata
+            })
+        } else {
+            inventoryTransferTransactionRows.push({
+                id: crypto.randomUUID(),
+                workspace_id: sourceWorkspaceId,
+                product_id: sourceProduct.id,
+                source_storage_id: sourceStorageId,
+                destination_storage_id: destinationStorageId,
+                quantity: item.quantity,
+                transfer_type: 'manual',
+                reorder_rule_id: null,
+                created_at: transactionTimestamp,
+                updated_at: transactionTimestamp,
+                version: 1,
+                is_deleted: false,
+                ...transferMetadata
+            })
+            inventoryTransferTransactionRows.push({
+                id: crypto.randomUUID(),
+                workspace_id: destinationWorkspaceId,
+                product_id: destinationProductId,
+                source_storage_id: sourceStorageId,
+                destination_storage_id: destinationStorageId,
+                quantity: item.quantity,
+                transfer_type: 'manual',
+                reorder_rule_id: null,
+                created_at: transactionTimestamp,
+                updated_at: transactionTimestamp,
+                version: 1,
+                is_deleted: false,
+                ...transferMetadata
+            })
+        }
+    }
+
+    const productIdsByWorkspaceKey = new Map<string, SourceProductRow>()
+    for (const product of sourceProducts) {
+        productIdsByWorkspaceKey.set(buildWorkspaceProductKey(sourceWorkspaceId, product.id), product)
+    }
+    for (const product of destinationProductsById.values()) {
+        productIdsByWorkspaceKey.set(buildWorkspaceProductKey(destinationWorkspaceId, product.id), product)
+    }
+
+    const updatedProductsToUpsert: SourceProductRow[] = []
+    for (const productKey of changedProductKeys) {
+        const product = productIdsByWorkspaceKey.get(productKey)
+        if (!product) {
+            continue
+        }
+
+        const activeRows = activeInventoryRowsByWorkspaceProductKey.get(productKey) ?? []
+        const totalQuantity = activeRows.reduce((sum, row) => sum + Number(row.quantity ?? 0), 0)
+        const resolvedStorageId = activeRows.length === 1 ? activeRows[0].storage_id : null
+        const resolvedStorageName = resolvedStorageId
+            ? storageNameById.get(resolvedStorageId) ?? null
+            : null
+
+        updatedProductsToUpsert.push({
+            ...product,
+            quantity: totalQuantity,
+            storage_id: resolvedStorageId,
+            storage_name: resolvedStorageName,
+            updated_at: transactionTimestamp,
+            version: Number(product.version ?? 0) + 1
+        })
+    }
+
+    const previousSourceProducts = sourceProducts.map((product) => ({ ...product }))
+    const previousDestinationProducts = Array.from(destinationProductsById.values()).map((product) => ({ ...product }))
+    const previousInventoryRows = Array.from(inventoryRowsByPositionKey.values()).map((row) => ({ ...row }))
+    const inventoryRowsInserted = Array.from(insertedInventoryRowIds)
+    let inventoryTransactionsInserted = false
+
+    const rollbackChanges = async () => {
+        if (inventoryTransactionsInserted && inventoryTransactionRows.length > 0) {
+            await adminClient
+                .from('inventory_transactions')
+                .delete()
+                .in('id', inventoryTransactionRows.map((row) => String(row.id)))
+        }
+
+        if (previousInventoryRows.length > 0) {
+            await adminClient
+                .from('inventory')
+                .upsert(previousInventoryRows)
+        }
+
+        if (inventoryRowsInserted.length > 0) {
+            await adminClient
+                .from('inventory')
+                .delete()
+                .in('id', inventoryRowsInserted)
+        }
+
+        const previousProductsToRestore = sourceWorkspaceId === destinationWorkspaceId
+            ? previousSourceProducts
+            : [...previousSourceProducts, ...previousDestinationProducts]
+
+        if (previousProductsToRestore.length > 0) {
+            await adminClient
+                .from('products')
+                .upsert(previousProductsToRestore)
+        }
+    }
+
+    try {
+        if (inventoryRowsToUpsert.size > 0) {
+            const { error: inventoryUpsertError } = await adminClient
+                .from('inventory')
+                .upsert(Array.from(inventoryRowsToUpsert.values()))
+
+            if (inventoryUpsertError) {
+                return errorResponse(inventoryUpsertError.message, 500)
+            }
+        }
+
+        if (updatedProductsToUpsert.length > 0) {
+            const { error: productsUpsertError } = await adminClient
+                .from('products')
+                .upsert(updatedProductsToUpsert)
+
+            if (productsUpsertError) {
+                await rollbackChanges()
+                return errorResponse(productsUpsertError.message, 500)
+            }
+        }
+
+        if (inventoryTransactionRows.length > 0) {
+            const { error: inventoryTransactionsError } = await adminClient
+                .from('inventory_transactions')
+                .insert(inventoryTransactionRows)
+
+            if (inventoryTransactionsError) {
+                await rollbackChanges()
+                return errorResponse(inventoryTransactionsError.message, 500)
+            }
+
+            inventoryTransactionsInserted = true
+        }
+
+        if (inventoryTransferTransactionRows.length > 0) {
+            const { error: transferTransactionsError } = await adminClient
+                .from('inventory_transfer_transactions')
+                .insert(inventoryTransferTransactionRows)
+
+            if (transferTransactionsError) {
+                await rollbackChanges()
+                return errorResponse(transferTransactionsError.message, 500)
+            }
+        }
+    } catch (error) {
+        await rollbackChanges()
+        return errorResponse(error instanceof Error ? error.message : 'Failed to transfer inventory', 500)
+    }
+
+    return jsonResponse({
+        success: true,
+        moved_products_count: normalizedItems.length,
+        source_workspace_id: sourceWorkspaceId,
+        destination_workspace_id: destinationWorkspaceId
+    })
+}
+
 async function handleCloneProductsToBranch(
     adminClient: AdminClient,
     user: User,
@@ -1477,6 +2330,18 @@ Deno.serve(async (req) => {
 
         if (body.action === 'list-product-clone-targets') {
             return await handleListProductCloneTargets(adminClient, user)
+        }
+
+        if (body.action === 'list-inventory-transfer-targets') {
+            return await handleListInventoryTransferTargets(adminClient, user)
+        }
+
+        if (body.action === 'list-inventory-transfer-source-products') {
+            return await handleListInventoryTransferSourceProducts(adminClient, user, body)
+        }
+
+        if (body.action === 'transfer-inventory-between-workspaces') {
+            return await handleTransferInventoryBetweenWorkspaces(adminClient, user, body)
         }
 
         if (body.action === 'clone-products-to-branch') {

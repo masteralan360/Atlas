@@ -23,6 +23,12 @@ export interface InventoryTransferTransactionInput {
     quantity: number
     transferType: InventoryTransferTransactionType
     reorderRuleId?: string | null
+    sourceWorkspaceId?: string | null
+    destinationWorkspaceId?: string | null
+    sourceWorkspaceName?: string | null
+    destinationWorkspaceName?: string | null
+    sourceStorageName?: string | null
+    destinationStorageName?: string | null
 }
 
 function shouldUseCloudBusinessData(workspaceId?: string | null) {
@@ -58,6 +64,12 @@ function normalizeTransactionInput(input: InventoryTransferTransactionInput) {
     const quantity = Number(input.quantity)
     const transferType = input.transferType
     const reorderRuleId = input.reorderRuleId?.trim() || null
+    const sourceWorkspaceId = input.sourceWorkspaceId?.trim() || null
+    const destinationWorkspaceId = input.destinationWorkspaceId?.trim() || null
+    const sourceWorkspaceName = input.sourceWorkspaceName?.trim() || null
+    const destinationWorkspaceName = input.destinationWorkspaceName?.trim() || null
+    const sourceStorageName = input.sourceStorageName?.trim() || null
+    const destinationStorageName = input.destinationStorageName?.trim() || null
 
     if (!productId) {
         throw new Error('Product is required')
@@ -89,8 +101,57 @@ function normalizeTransactionInput(input: InventoryTransferTransactionInput) {
         destinationStorageId,
         quantity,
         transferType,
-        reorderRuleId
+        reorderRuleId,
+        sourceWorkspaceId,
+        destinationWorkspaceId,
+        sourceWorkspaceName,
+        destinationWorkspaceName,
+        sourceStorageName,
+        destinationStorageName
     }
+}
+
+export async function refreshInventoryTransferTransactionsFromSupabase(
+    workspaceId: string
+) {
+    if (!workspaceId || !shouldUseCloudBusinessData(workspaceId) || !isOnline()) {
+        return
+    }
+
+    const { data, error } = await supabase
+        .from('inventory_transfer_transactions')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .eq('is_deleted', false)
+
+    if (!data || error || !shouldUseCloudBusinessData(workspaceId)) {
+        return
+    }
+
+    const syncedAt = new Date().toISOString()
+    const remoteIds = new Set(data.map((row: Record<string, unknown>) => row.id as string))
+
+    await db.transaction('rw', db.inventory_transfer_transactions, async () => {
+        for (const remoteItem of data) {
+            const localItem = toCamelCase(remoteItem as Record<string, unknown>) as unknown as InventoryTransferTransaction
+            localItem.syncStatus = 'synced'
+            localItem.lastSyncedAt = syncedAt
+            await db.inventory_transfer_transactions.put(localItem)
+        }
+
+        const localRows = await db.inventory_transfer_transactions
+            .where('workspaceId')
+            .equals(workspaceId)
+            .toArray()
+
+        const staleIds = localRows
+            .filter((row) => row.syncStatus === 'synced' && !remoteIds.has(row.id))
+            .map((row) => row.id)
+
+        if (staleIds.length > 0) {
+            await db.inventory_transfer_transactions.bulkDelete(staleIds)
+        }
+    })
 }
 
 async function runMutation<T>(label: string, promiseFactory: () => PromiseLike<T>) {
@@ -214,44 +275,11 @@ export function useInventoryTransferTransactions(workspaceId: string | undefined
 
     useEffect(() => {
         async function fetchFromSupabase() {
-            if (!online || !workspaceId || !shouldUseCloudBusinessData(workspaceId)) {
+            if (!online || !workspaceId) {
                 return
             }
 
-            const { data, error } = await supabase
-                .from('inventory_transfer_transactions')
-                .select('*')
-                .eq('workspace_id', workspaceId)
-                .eq('is_deleted', false)
-
-            if (!data || error || !shouldUseCloudBusinessData(workspaceId)) {
-                return
-            }
-
-            const syncedAt = new Date().toISOString()
-            const remoteIds = new Set(data.map((row: Record<string, unknown>) => row.id as string))
-
-            await db.transaction('rw', db.inventory_transfer_transactions, async () => {
-                // Upsert remote records
-                for (const remoteItem of data) {
-                    const localItem = toCamelCase(remoteItem as Record<string, unknown>) as unknown as InventoryTransferTransaction
-                    localItem.syncStatus = 'synced'
-                    localItem.lastSyncedAt = syncedAt
-                    await db.inventory_transfer_transactions.put(localItem)
-                }
-
-                // Remove local records that no longer exist in Supabase
-                const localRows = await db.inventory_transfer_transactions
-                    .where('workspaceId')
-                    .equals(workspaceId)
-                    .toArray()
-                const staleIds = localRows
-                    .filter((row) => row.syncStatus === 'synced' && !remoteIds.has(row.id))
-                    .map((row) => row.id)
-                if (staleIds.length > 0) {
-                    await db.inventory_transfer_transactions.bulkDelete(staleIds)
-                }
-            })
+            await refreshInventoryTransferTransactionsFromSupabase(workspaceId)
         }
 
         void fetchFromSupabase()

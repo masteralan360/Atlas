@@ -233,7 +233,7 @@ async function evaluateReorderRulesIfNeeded(input: {
     await evaluateReorderTransferRulesForProduct(input.workspaceId, input.productId)
 }
 
-async function fetchInventoryWorkspaceFromSupabase(workspaceId: string) {
+export async function fetchInventoryWorkspaceFromSupabase(workspaceId: string) {
     if (!shouldUseCloudBusinessData(workspaceId)) {
         return
     }
