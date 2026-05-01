@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, CalendarDays, CreditCard, Eye, LayoutGrid, List, Mail, MapPin, Package, Phone, Receipt, ShoppingCart, Truck, UsersRound } from 'lucide-react'
+import { ArrowLeft, CalendarDays, CreditCard, Eye, LayoutGrid, List, Mail, MapPin, Package, Phone, Receipt, ShoppingCart, Truck, UsersRound, TrendingUp, TrendingDown, Activity } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'wouter'
 
+import { useExchangeRate } from '@/context/ExchangeRateContext'
+import { buildConversionRates } from '@/lib/budget'
+import { convertToStoreBase } from '@/lib/currency'
 import { convertCurrencyAmountWithAvailableSnapshot, convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
 import { getLoanDetailsPath, getLoanDirection, getLoanDirectionLabel, isSimpleLoan } from '@/lib/loanPresentation'
 import { getTravelSaleCost, getTravelStatusLabel } from '@/lib/travelAgency'
@@ -11,10 +14,12 @@ import {
     useBusinessPartner,
     useCustomerSalesOrders,
     useLoans,
+    usePaymentTransactions,
     useSupplierPurchaseOrders,
     useSupplierTravelAgencySales,
     type Loan,
     type PurchaseOrder,
+    type PaymentTransaction,
     type SalesOrder,
     type TravelAgencySale
 } from '@/local-db'
@@ -37,7 +42,7 @@ type PartnerKind = 'customer' | 'supplier' | 'business_partner'
 type RelatedProductOrder = SalesOrder | PurchaseOrder
 type RelatedTransaction = {
     id: string
-    source: 'sales_order' | 'purchase_order' | 'travel_sale' | 'loan' | 'simple_loan'
+    source: 'sales_order' | 'purchase_order' | 'travel_sale' | 'loan' | 'simple_loan' | 'direct_transaction'
     reference: string
     displayDate: string
     sortDate: string
@@ -86,6 +91,8 @@ function sourceLabel(source: RelatedTransaction['source'], t: TranslationFn) {
             return t('travelAgency.title', { defaultValue: 'Travel Sale' })
         case 'simple_loan':
             return t('loans.simpleTab', { defaultValue: 'Loans' })
+        case 'direct_transaction':
+            return t('ledger.type.direct_transaction', { defaultValue: 'Direct Transaction' })
         default:
             return t('loans.installmentLoan', { defaultValue: 'Installment Loan' })
     }
@@ -99,6 +106,8 @@ function sourceBadgeClass(source: RelatedTransaction['source']) {
             return 'border-sky-200 bg-sky-500/10 text-sky-700'
         case 'travel_sale':
             return 'border-violet-200 bg-violet-500/10 text-violet-700'
+        case 'direct_transaction':
+            return 'border-fuchsia-200 bg-fuchsia-500/10 text-fuchsia-700'
         default:
             return 'border-orange-200 bg-orange-500/10 text-orange-700'
     }
@@ -259,6 +268,35 @@ function normalizeLoan(loan: Loan, currency: SalesOrder['currency'], t: Translat
     }
 }
 
+function normalizePaymentTransaction(
+    tx: PaymentTransaction,
+    baseCurrency: string,
+    conversionRates: any,
+    t: TranslationFn
+): RelatedTransaction {
+    const isIncoming = tx.direction === 'incoming'
+    return {
+        id: tx.id,
+        source: 'direct_transaction',
+        reference: tx.referenceLabel || tx.note || t('ledger.type.direct_transaction', { defaultValue: 'Direct Transaction' }),
+        displayDate: tx.paidAt || tx.createdAt,
+        sortDate: tx.updatedAt || tx.paidAt || tx.createdAt,
+        activityDate: tx.updatedAt || tx.paidAt || tx.createdAt,
+        status: 'completed',
+        statusLabel: t('ledger.directionFilter.' + tx.direction, { defaultValue: isIncoming ? 'Inflow' : 'Outflow' }),
+        isPaid: true,
+        summary: tx.note || (isIncoming ? t('ledger.type.direct_inflow', { defaultValue: 'Direct Inflow' }) : t('ledger.type.direct_outflow', { defaultValue: 'Direct Outflow' })),
+        total: tx.amount,
+        currency: tx.currency,
+        totalInPartnerCurrency: convertToStoreBase(tx.amount, tx.currency, baseCurrency, conversionRates),
+        units: 0,
+        viewHref: `/ledger`,
+        isActive: true,
+        isCompleted: true,
+        isOutstanding: false
+    }
+}
+
 function paymentBadgeClass(isPaid: boolean) {
     return isPaid
         ? 'border-emerald-200 bg-emerald-500/10 text-emerald-700'
@@ -276,12 +314,15 @@ export function PartnerDetailsView({
 }) {
     const { t } = useTranslation()
     const { features } = useWorkspace()
+    const { exchangeData, eurRates, tryRates } = useExchangeRate()
+    const conversionRates = useMemo(() => buildConversionRates(exchangeData, eurRates, tryRates), [exchangeData, eurRates, tryRates])
     const [, navigate] = useLocation()
     const partner = useBusinessPartner(partnerId)
     const customerOrders = useCustomerSalesOrders(partnerId, workspaceId)
     const supplierOrders = useSupplierPurchaseOrders(partnerId, workspaceId)
     const supplierTravelSales = useSupplierTravelAgencySales(partnerId, workspaceId)
     const loans = useLoans(workspaceId)
+    const paymentTransactions = usePaymentTransactions(workspaceId)
     const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => readViewMode(kind))
 
     useEffect(() => {
@@ -332,14 +373,20 @@ export function PartnerDetailsView({
     const referenceColumnLabel = t('common.reference', { defaultValue: 'Reference' })
     const productOrders = [...customerOrders, ...supplierOrders]
 
+    const directTransactions = useMemo(
+        () => paymentTransactions.filter(tx => tx.sourceType === 'direct_transaction' && tx.metadata?.businessPartnerId === partnerId),
+        [paymentTransactions, partnerId]
+    )
+
     const relatedTransactions = useMemo(
         () => [
             ...customerOrders.map((order) => normalizeSalesOrder(order, defaultCurrency, t)),
             ...supplierOrders.map((order) => normalizePurchaseOrder(order, defaultCurrency, t)),
             ...supplierTravelSales.map((sale) => normalizeTravelSale(sale, defaultCurrency)),
-            ...partnerLoans.map((loan) => normalizeLoan(loan, defaultCurrency, t))
+            ...partnerLoans.map((loan) => normalizeLoan(loan, defaultCurrency, t)),
+            ...directTransactions.map((tx) => normalizePaymentTransaction(tx, defaultCurrency, conversionRates, t))
         ],
-        [customerOrders, defaultCurrency, partnerLoans, supplierOrders, supplierTravelSales, t]
+        [customerOrders, defaultCurrency, partnerLoans, supplierOrders, supplierTravelSales, directTransactions, conversionRates, t]
     )
     const activeTransactions = useMemo(
         () => relatedTransactions.filter((transaction) => transaction.isActive),
@@ -357,10 +404,16 @@ export function PartnerDetailsView({
         () => [...relatedTransactions].sort((a, b) => new Date(b.sortDate).getTime() - new Date(a.sortDate).getTime()),
         [relatedTransactions]
     )
-    const totalValue = partner ? partner.totalSalesValue + partner.totalPurchaseValue : 0
+    const directTransactionsVolume = useMemo(
+        () => directTransactions.reduce((sum, tx) => sum + convertToStoreBase(tx.amount, tx.currency, defaultCurrency, conversionRates), 0),
+        [directTransactions, defaultCurrency, conversionRates]
+    )
+
+    const totalValue = (partner ? partner.totalSalesValue + partner.totalPurchaseValue : 0) + directTransactionsVolume
     const outstandingValue = (partner?.receivableBalance || 0) + (partner?.payableBalance || 0) + (partner?.loanOutstandingBalance || 0)
-    const averageOrderValue = (customerOrders.length + supplierOrders.length + supplierTravelSales.length) > 0
-        ? totalValue / (customerOrders.length + supplierOrders.length + supplierTravelSales.length)
+    const averageOrderItemsCount = customerOrders.length + supplierOrders.length + supplierTravelSales.length + directTransactions.length
+    const averageOrderValue = averageOrderItemsCount > 0
+        ? totalValue / averageOrderItemsCount
         : 0
     const totalUnits = useMemo(
         () => productOrders
@@ -385,6 +438,52 @@ export function PartnerDetailsView({
         })),
         [sortedTransactions]
     )
+
+    const partnerFlows = useMemo(() => {
+        let incoming = 0
+        let outgoing = 0
+
+        const customerOrderIds = new Set(customerOrders.map(o => o.id))
+        const supplierOrderIds = new Set(supplierOrders.map(o => o.id))
+        const partnerLoanIds = new Set(partnerLoans.map(l => l.id))
+
+        for (const tx of paymentTransactions) {
+            let isRelated = false
+            if (tx.metadata?.businessPartnerId === partnerId) {
+                isRelated = true
+            } else if (tx.sourceType === 'sales_order' && customerOrderIds.has(tx.sourceRecordId)) {
+                isRelated = true
+            } else if (tx.sourceType === 'purchase_order' && supplierOrderIds.has(tx.sourceRecordId)) {
+                isRelated = true
+            } else if (tx.sourceModule === 'loans' && partnerLoanIds.has(tx.sourceRecordId)) {
+                isRelated = true
+            }
+
+            if (isRelated) {
+                const amountBase = convertToStoreBase(tx.amount, tx.currency, defaultCurrency, conversionRates)
+                if (tx.direction === 'incoming') {
+                    incoming += amountBase
+                } else if (tx.direction === 'outgoing') {
+                    outgoing += amountBase
+                }
+            }
+        }
+
+        return {
+            incoming,
+            outgoing,
+            net: incoming - outgoing
+        }
+    }, [
+        paymentTransactions,
+        partnerId,
+        customerOrders,
+        supplierOrders,
+        supplierTravelSales,
+        partnerLoans,
+        defaultCurrency,
+        conversionRates
+    ])
     const topProducts = useMemo(() => {
         const rows = new Map<string, { id: string; name: string; quantity: number; amount: number }>()
         for (const order of productOrders.filter((row) => row.status !== 'cancelled')) {
@@ -753,6 +852,41 @@ export function PartnerDetailsView({
                                     </div>
                                     <div className="mt-2 text-2xl font-black text-primary">
                                         {formatCurrency(partner.netExposure || 0, defaultCurrency, iqdPreference)}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-6">
+                                <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                                    {t('businessPartners.cashFlow', { defaultValue: 'Cash Flow' })}
+                                </h3>
+                                <div className="grid gap-3 sm:grid-cols-3">
+                                    <div className="rounded-2xl border bg-emerald-500/5 p-4">
+                                        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-emerald-600 dark:text-emerald-400">
+                                            <TrendingUp className="h-4 w-4" />
+                                            {t('ledger.incoming', { defaultValue: 'Incoming' })}
+                                        </div>
+                                        <div className="mt-2 text-2xl font-black text-emerald-600 dark:text-emerald-400">
+                                            {formatCurrency(partnerFlows.incoming, defaultCurrency, iqdPreference)}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-2xl border bg-amber-500/5 p-4">
+                                        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-amber-600 dark:text-amber-400">
+                                            <TrendingDown className="h-4 w-4" />
+                                            {t('ledger.outgoing', { defaultValue: 'Outgoing' })}
+                                        </div>
+                                        <div className="mt-2 text-2xl font-black text-amber-600 dark:text-amber-400">
+                                            {formatCurrency(partnerFlows.outgoing, defaultCurrency, iqdPreference)}
+                                        </div>
+                                    </div>
+                                    <div className={cn("rounded-2xl border p-4", partnerFlows.net < 0 ? "bg-amber-500/5" : "bg-emerald-500/5")}>
+                                        <div className={cn("flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em]", partnerFlows.net < 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400")}>
+                                            <Activity className="h-4 w-4" />
+                                            {t('ledger.netFlow', { defaultValue: 'Net Flow' })}
+                                        </div>
+                                        <div className={cn("mt-2 text-2xl font-black", partnerFlows.net < 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400")}>
+                                            {formatCurrency(partnerFlows.net, defaultCurrency, iqdPreference)}
+                                        </div>
                                     </div>
                                 </div>
                             </div>

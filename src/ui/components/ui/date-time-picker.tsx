@@ -18,6 +18,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/ui/components/ui/popover"
+import { isTauri } from "@/lib/platform"
 import { TimePickerInput } from "./time-picker-input"
 
 interface DateTimePickerProps {
@@ -106,6 +107,7 @@ export function DateTimePicker({
         className={cn("w-auto rounded-2xl p-0", contentClassName)}
         align="center"
         sideOffset={8}
+        collisionPadding={isTauri() ? { top: 56, bottom: 8, left: 8, right: 8 } : 8}
       >
         <div className="flex flex-col items-center">
           <Calendar
