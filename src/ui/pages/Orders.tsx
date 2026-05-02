@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { CalendarDays, CreditCard, Eye, LayoutGrid, List, Lock, PackagePlus, Pencil, Plus, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse } from 'lucide-react'
+import { CalendarDays, CreditCard, Eye, LayoutGrid, List, Lock, PackagePlus, Pencil, Plus, Printer, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useRoute } from 'wouter'
 
 import { useAuth } from '@/auth'
+import { useDateRange } from '@/context/DateRangeContext'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
+import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { buildOrderExchangeRatesSnapshot, convertCurrencyAmountWithLiveRates, getPrimaryExchangeDetails } from '@/lib/orderCurrency'
 import { formatCurrency, formatDate, formatLocalDateTimeValue, parseLocalDateTimeValue } from '@/lib/utils'
+import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import {
     createPurchaseOrder,
     createSalesOrder,
@@ -74,10 +77,13 @@ import {
     TabsTrigger,
     SettlementDialog,
     Textarea,
+    PrintPreviewModal,
+    DateRangeFilters,
     useToast
 } from '@/ui/components'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { OrderDetailsView } from '@/ui/components/orders/OrderDetailsView'
+import { OrderListPrintTemplate } from '@/ui/components/orders/OrderPrintTemplates'
 import { OrderStatusBadge } from '@/ui/components/orders/OrderStatusBadge'
 
 type OrderTab = 'sales' | 'purchase'
@@ -202,12 +208,13 @@ function buildPurchaseOrderPaymentObligation(order: PurchaseOrder): PaymentOblig
 }
 
 function OrdersListView({ workspaceId }: { workspaceId: string }) {
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const { user } = useAuth()
-    const { features } = useWorkspace()
+    const { features, workspaceName } = useWorkspace()
     const { exchangeData, eurRates, tryRates } = useExchangeRate()
     const { toast } = useToast()
     const [, navigate] = useLocation()
+    const { dateRange, customDates } = useDateRange()
     const products = useProducts(workspaceId)
     const inventory = useInventory(workspaceId)
     const storages = useStorages(workspaceId)
@@ -238,6 +245,7 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
     })
     const [settlementTarget, setSettlementTarget] = useState<PaymentObligation | null>(null)
     const [isSubmittingSettlement, setIsSubmittingSettlement] = useState(false)
+    const [showPrintPreview, setShowPrintPreview] = useState(false)
 
     const [salesForm, setSalesForm] = useState<SalesFormState>({
         customerId: '',
@@ -306,53 +314,85 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
     }, [defaultStorageId])
 
     const filteredSalesOrders = useMemo(() => {
-        const query = search.trim().toLowerCase()
         let items = [...salesOrders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 
-        // Status Filter
-        if (statusFilter !== 'all') {
-            const mappedStatus = statusFilter === 'ordered' ? 'pending' : statusFilter
-            if (mappedStatus === 'received') {
-                items = []
-            } else {
-                items = items.filter(order => order.status === mappedStatus)
-            }
+        const now = new Date()
+        if (dateRange === 'today') {
+            const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+            items = items.filter(s => new Date(s.createdAt) >= startOfDay)
+        } else if (dateRange === 'month') {
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+            items = items.filter(s => new Date(s.createdAt) >= startOfMonth)
+        } else if (dateRange === 'custom' && (customDates.start || customDates.end)) {
+            const start = customDates.start ? new Date(customDates.start) : null
+            if (start) start.setHours(0, 0, 0, 0)
+            const end = customDates.end ? new Date(customDates.end) : null
+            if (end) end.setHours(23, 59, 59, 999)
+            items = items.filter(s => {
+                const d = new Date(s.createdAt)
+                if (start && d < start) return false
+                if (end && d > end) return false
+                return true
+            })
         }
 
-        // Payment Filter
+        if (statusFilter !== 'all') {
+            items = items.filter((order) => order.status === statusFilter)
+        }
+
         if (paymentFilter !== 'all') {
             items = items.filter(order => paymentFilter === 'paid' ? order.isPaid : !order.isPaid)
         }
 
+        const query = search.trim().toLowerCase()
         if (!query) return items
+
         return items.filter((order) =>
             order.orderNumber.toLowerCase().includes(query)
             || order.customerName.toLowerCase().includes(query)
             || order.items.some((item) => item.productName.toLowerCase().includes(query))
         )
-    }, [salesOrders, search, statusFilter, paymentFilter])
+    }, [salesOrders, search, statusFilter, paymentFilter, dateRange, customDates])
 
     const filteredPurchaseOrders = useMemo(() => {
-        const query = search.trim().toLowerCase()
-        let items = [...purchaseOrders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        let items = purchaseOrders
 
-        // Status Filter
-        if (statusFilter !== 'all') {
-            items = items.filter(order => order.status === statusFilter)
+        const now = new Date()
+        if (dateRange === 'today') {
+            const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+            items = items.filter(s => new Date(s.createdAt) >= startOfDay)
+        } else if (dateRange === 'month') {
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+            items = items.filter(s => new Date(s.createdAt) >= startOfMonth)
+        } else if (dateRange === 'custom' && (customDates.start || customDates.end)) {
+            const start = customDates.start ? new Date(customDates.start) : null
+            if (start) start.setHours(0, 0, 0, 0)
+            const end = customDates.end ? new Date(customDates.end) : null
+            if (end) end.setHours(23, 59, 59, 999)
+            items = items.filter(s => {
+                const d = new Date(s.createdAt)
+                if (start && d < start) return false
+                if (end && d > end) return false
+                return true
+            })
         }
 
-        // Payment Filter
+        if (statusFilter !== 'all') {
+            items = items.filter((order) => order.status === statusFilter)
+        }
+
         if (paymentFilter !== 'all') {
             items = items.filter(order => paymentFilter === 'paid' ? order.isPaid : !order.isPaid)
         }
 
+        const query = search.trim().toLowerCase()
         if (!query) return items
         return items.filter((order) =>
             order.orderNumber.toLowerCase().includes(query)
             || order.supplierName.toLowerCase().includes(query)
             || order.items.some((item) => item.productName.toLowerCase().includes(query))
         )
-    }, [purchaseOrders, search, statusFilter, paymentFilter])
+    }, [purchaseOrders, search, statusFilter, paymentFilter, dateRange, customDates])
 
     const salesPreview = useMemo(() => {
         const subtotal = salesForm.items.reduce((sum, item) => sum + ((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)), 0)
@@ -373,6 +413,47 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
         () => purchaseForm.items.filter((item) => item.productId && Number(item.quantity) > 0).length,
         [purchaseForm.items]
     )
+
+    const getDateDisplay = () => {
+        if (dateRange === 'today') {
+            return formatDate(new Date())
+        }
+        if (dateRange === 'month') {
+            const now = new Date()
+            return formatLocalizedMonthYear(now, i18n.language)
+        }
+        if (dateRange === 'custom') {
+            if (activeTab === 'sales' && filteredSalesOrders && filteredSalesOrders.length > 0) {
+                const dates = filteredSalesOrders.map(s => new Date(s.createdAt).getTime())
+                const minDate = new Date(Math.min(...dates))
+                const maxDate = new Date(Math.max(...dates))
+                return `${t('performance.filters.from')} ${formatDate(minDate)} ${t('performance.filters.to')} ${formatDate(maxDate)}`
+            }
+            if (activeTab === 'purchase' && filteredPurchaseOrders && filteredPurchaseOrders.length > 0) {
+                const dates = filteredPurchaseOrders.map(s => new Date(s.createdAt).getTime())
+                const minDate = new Date(Math.min(...dates))
+                const maxDate = new Date(Math.max(...dates))
+                return `${t('performance.filters.from')} ${formatDate(minDate)} ${t('performance.filters.to')} ${formatDate(maxDate)}`
+            }
+            if (customDates.start || customDates.end) {
+                const parts = []
+                if (customDates.start) parts.push(`${t('performance.filters.from')} ${formatDate(customDates.start)}`)
+                if (customDates.end) parts.push(`${t('performance.filters.to')} ${formatDate(customDates.end)}`)
+                return parts.join(' ')
+            }
+        }
+        if (dateRange === 'allTime') {
+            const arr = activeTab === 'sales' ? filteredSalesOrders : filteredPurchaseOrders
+            if (arr && arr.length > 0) {
+                const dates = arr.map(s => new Date(s.createdAt).getTime())
+                const minDate = new Date(Math.min(...dates))
+                const maxDate = new Date(Math.max(...dates))
+                return `${t('performance.filters.from')} ${formatDate(minDate)} ${t('performance.filters.to')} ${formatDate(maxDate)}`
+            }
+            return t('performance.filters.allTime') || 'All Time'
+        }
+        return ''
+    }
 
     const getStorageDisplayName = (storageId: string) => {
         const storage = storages.find((entry) => entry.id === storageId)
@@ -1073,22 +1154,30 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
         <div className="space-y-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                    <h1 className="flex items-center gap-2 text-2xl font-bold">
+                    <h1 className="flex flex-wrap items-center gap-2 text-2xl font-bold">
                         <ShoppingCart className="h-6 w-6 text-primary" />
                         {t('orders.title') || 'Orders'}
+                        {getDateDisplay() && (
+                            <span className="text-sm font-semibold text-muted-foreground bg-muted/40 px-2.5 py-0.5 rounded-lg border border-border/50 translate-y-[1px]">
+                                {getDateDisplay()}
+                            </span>
+                        )}
                     </h1>
                     <p className="text-muted-foreground">{t('orders.subtitle') || 'Track sales and purchase orders'}</p>
                 </div>
-                {canManageOrders && (
-                    <Button
-                        className="gap-2 self-start rounded-xl"
-                        onClick={() => openCreateDialog(activeTab)}
-                        disabled={(activeTab === 'sales' && salesDisabled) || (activeTab === 'purchase' && purchaseDisabled)}
-                    >
-                        <Plus className="h-4 w-4" />
-                        {activeTab === 'sales' ? (t('orders.form.newSalesOrder') || 'New Sales Order') : (t('orders.form.newPurchaseOrder') || 'New Purchase Order')}
-                    </Button>
-                )}
+                <div className="flex flex-col sm:flex-row lg:items-center gap-4 self-start lg:self-auto w-full lg:w-auto">
+                    <DateRangeFilters />
+                    {canManageOrders && (
+                        <Button
+                            className="gap-2 self-start sm:self-center w-full sm:w-auto rounded-xl"
+                            onClick={() => openCreateDialog(activeTab)}
+                            disabled={(activeTab === 'sales' && salesDisabled) || (activeTab === 'purchase' && purchaseDisabled)}
+                        >
+                            <Plus className="h-4 w-4" />
+                            {activeTab === 'sales' ? (t('orders.form.newSalesOrder') || 'New Sales Order') : (t('orders.form.newPurchaseOrder') || 'New Purchase Order')}
+                        </Button>
+                    )}
+                </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
@@ -1216,6 +1305,10 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                                         </Button>
                                     </div>
                                 )}
+                                <Button variant="outline" allowViewer={true} onClick={() => setShowPrintPreview(true)} className="gap-2 print:hidden">
+                                    <Printer className="w-4 h-4" />
+                                    {t('common.print') || 'Print'}
+                                </Button>
                             </div>
                         </div>
                         <TabsContent value="sales" className="mt-0">
@@ -1791,6 +1884,72 @@ function OrdersListView({ workspaceId }: { workspaceId: string }) {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <PrintPreviewModal
+                isOpen={showPrintPreview}
+                onClose={() => setShowPrintPreview(false)}
+                onConfirm={() => setShowPrintPreview(false)}
+                title={activeTab === 'sales' ? (t('orders.tabs.sales') || 'Sales Orders') : (t('orders.tabs.purchase') || 'Purchase Orders')}
+                features={features}
+                workspaceName={workspaceName}
+                invoiceData={{
+                    totalAmount: (activeTab === 'sales' ? filteredSalesOrders : filteredPurchaseOrders).reduce((s, o) => s + o.total, 0),
+                    settlementCurrency: features.default_currency || 'usd',
+                    origin: 'sales_order' as const,
+                    createdByName: user?.name || 'Unknown',
+                    cashierName: user?.name || 'Unknown',
+                    printFormat: 'a4' as const
+                }}
+                pdfBuilder={async ({ format }: { format: PrintFormat; effectiveId: string }) => {
+                    const printLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
+                    const orders = activeTab === 'sales' ? filteredSalesOrders : filteredPurchaseOrders
+                    const metrics = {
+                        totalOrders: orders.length,
+                        totalValue: orders.reduce((s, o) => s + o.total, 0),
+                        paidCount: orders.filter(o => o.isPaid).length,
+                        unpaidCount: orders.filter(o => !o.isPaid).length
+                    }
+                    return generateTemplatePdf({
+                        element: (
+                            <OrderListPrintTemplate
+                                workspaceName={workspaceName}
+                                printLang={printLang}
+                                salesOrders={activeTab === 'sales' ? filteredSalesOrders : []}
+                                purchaseOrders={activeTab === 'purchase' ? filteredPurchaseOrders : []}
+                                activeTab={activeTab}
+                                iqdPreference={features.iqd_display_preference}
+                                metrics={metrics}
+                                logoUrl={features.logo_url}
+                            />
+                        ),
+                        format,
+                        printLang,
+                        printQuality: features.print_quality
+                    })
+                }}
+                printTemplate={() => {
+                    const printLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
+                    const orders = activeTab === 'sales' ? filteredSalesOrders : filteredPurchaseOrders
+                    const metrics = {
+                        totalOrders: orders.length,
+                        totalValue: orders.reduce((s, o) => s + o.total, 0),
+                        paidCount: orders.filter(o => o.isPaid).length,
+                        unpaidCount: orders.filter(o => !o.isPaid).length
+                    }
+                    return (
+                        <OrderListPrintTemplate
+                            workspaceName={workspaceName}
+                            printLang={printLang}
+                            salesOrders={activeTab === 'sales' ? filteredSalesOrders : []}
+                            purchaseOrders={activeTab === 'purchase' ? filteredPurchaseOrders : []}
+                            activeTab={activeTab}
+                            iqdPreference={features.iqd_display_preference}
+                            metrics={metrics}
+                            logoUrl={features.logo_url}
+                        />
+                    )
+                }}
+            />
         </div>
     )
 }

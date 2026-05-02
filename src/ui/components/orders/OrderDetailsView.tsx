@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, CalendarDays, CreditCard, LayoutGrid, List, Lock, Package, Receipt, ShoppingCart, Trash2, Truck, UsersRound, Warehouse } from 'lucide-react'
+import { ArrowLeft, CalendarDays, CreditCard, LayoutGrid, List, Lock, Package, Printer, Receipt, ShoppingCart, Trash2, Truck, UsersRound, Warehouse } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'wouter'
 
 import { useAuth } from '@/auth'
 import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
+import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import {
     deletePurchaseOrder,
     deleteSalesOrder,
@@ -40,6 +41,7 @@ import {
     DialogFooter,
     DialogHeader,
     DialogTitle,
+    PrintPreviewModal,
     SettlementDialog,
     Table,
     TableBody,
@@ -50,6 +52,7 @@ import {
     useToast
 } from '@/ui/components'
 
+import { OrderDetailsPrintTemplate } from './OrderPrintTemplates'
 import { OrderStatusBadge } from './OrderStatusBadge'
 
 function statusLabel(t: (key: string) => string, status: string) {
@@ -132,9 +135,9 @@ function buildPurchaseOrderPaymentObligation(order: PurchaseOrder): PaymentOblig
 }
 
 export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string; orderId: string }) {
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const { user } = useAuth()
-    const { features } = useWorkspace()
+    const { features, workspaceName } = useWorkspace()
     const [, navigate] = useLocation()
     const { toast } = useToast()
     const storages = useStorages(workspaceId)
@@ -143,6 +146,7 @@ export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string
     const [viewMode, setViewMode] = useState<'table' | 'grid'>(readViewMode)
     const [deleteOpen, setDeleteOpen] = useState(false)
     const [isDeleting, setIsDeleting] = useState(false)
+    const [showPrintPreview, setShowPrintPreview] = useState(false)
     const [lockConfirm, setLockConfirm] = useState<{ isOpen: boolean }>({ isOpen: false })
     const [isLocking, setIsLocking] = useState(false)
     const [settlementTarget, setSettlementTarget] = useState<PaymentObligation | null>(null)
@@ -379,6 +383,10 @@ export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string
                             {t('common.delete') || 'Delete'}
                         </Button>
                     )}
+                    <Button variant="outline" onClick={() => setShowPrintPreview(true)} className="gap-2 print:hidden bg-background">
+                        <Printer className="h-4 w-4" />
+                        {t('common.print') || 'Print'}
+                    </Button>
                 </div>
             </div>
 
@@ -737,6 +745,54 @@ export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <PrintPreviewModal
+                isOpen={showPrintPreview}
+                onClose={() => setShowPrintPreview(false)}
+                onConfirm={() => setShowPrintPreview(false)}
+                title={isSales ? (t('orders.tabs.sales') || 'Sales Order') : (t('orders.tabs.purchase') || 'Purchase Order')}
+                features={features}
+                workspaceName={workspaceName}
+                invoiceData={{
+                    totalAmount: order.total,
+                    settlementCurrency: order.currency,
+                    origin: 'sales_order' as const,
+                    createdByName: user?.name || 'Unknown',
+                    cashierName: user?.name || 'Unknown',
+                    printFormat: 'a4' as const
+                }}
+                pdfBuilder={async ({ format }: { format: PrintFormat; effectiveId: string }) => {
+                    const printLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
+                    return generateTemplatePdf({
+                        element: (
+                            <OrderDetailsPrintTemplate
+                                workspaceName={workspaceName}
+                                printLang={printLang}
+                                order={order}
+                                kind={resolved.kind}
+                                iqdPreference={features.iqd_display_preference}
+                                logoUrl={features.logo_url}
+                            />
+                        ),
+                        format,
+                        printLang,
+                        printQuality: features.print_quality
+                    })
+                }}
+                printTemplate={() => {
+                    const printLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
+                    return (
+                        <OrderDetailsPrintTemplate
+                            workspaceName={workspaceName}
+                            printLang={printLang}
+                            order={order}
+                            kind={resolved.kind}
+                            iqdPreference={features.iqd_display_preference}
+                            logoUrl={features.logo_url}
+                        />
+                    )
+                }}
+            />
         </div>
     )
 }
