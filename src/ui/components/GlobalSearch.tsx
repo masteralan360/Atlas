@@ -1,4 +1,4 @@
-import { Search, Command, LayoutDashboard, ShoppingCart, Package, ListOrdered, Settings as SettingsIcon, BarChart3, Users2, Globe, MessageSquare, Moon, Sun, LogOut, ChevronRight, ArrowRightLeft, NotebookPen, Wallet, Zap, TrendingUp, FileSpreadsheet } from 'lucide-react'
+import { Search, Command, LayoutDashboard, ShoppingCart, Package, ListOrdered, Settings as SettingsIcon, BarChart3, Users2, Globe, MessageSquare, Moon, Sun, LogOut, ChevronRight, ArrowRightLeft, NotebookPen, Wallet, Zap, FileSpreadsheet } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState, useEffect, useRef } from 'react'
 import { useHashLocation } from '@/hooks/useHashLocation'
@@ -32,7 +32,7 @@ export function GlobalSearch({ className, placeholder }: GlobalSearchProps) {
     const { features } = useWorkspace()
     const inputRef = useRef<HTMLInputElement>(null)
     const containerRef = useRef<HTMLDivElement>(null)
-    const hasFinanceAnalytics = features.net_revenue || features.budget || features.loans || features.crm || features.travel_agency || features.hr
+
     const hasLedgerSurface = features.pos || features.instant_pos || features.sales_history || features.crm || features.budget || features.hr || features.loans
     const hasPaymentsSurface = features.loans || features.crm || features.budget || features.hr
 
@@ -44,7 +44,7 @@ export function GlobalSearch({ className, placeholder }: GlobalSearchProps) {
         { id: 'nav-products', title: t('nav.products'), category: 'Navigation', icon: Package, action: () => setLocation('/products') },
         { id: 'nav-sales', title: t('nav.sales'), category: 'Navigation', icon: ListOrdered, action: () => setLocation('/sales') },
         { id: 'nav-settings', title: t('nav.settings'), category: 'Navigation', icon: SettingsIcon, action: () => setLocation('/settings') },
-        ...(hasFinanceAnalytics ? [{ id: 'nav-finance', title: t('nav.finance', { defaultValue: 'Finance' }), category: 'Navigation' as const, icon: TrendingUp, action: () => setLocation('/finance') }] : []),
+
         ...(hasLedgerSurface ? [{ id: 'nav-ledger', title: t('nav.ledger', { defaultValue: 'Ledger' }), category: 'Navigation' as const, icon: Wallet, action: () => setLocation('/ledger') }] : []),
         ...(hasPaymentsSurface ? [{ id: 'nav-payments', title: t('nav.payments', { defaultValue: 'Payments' }), category: 'Navigation' as const, icon: Wallet, action: () => setLocation('/payments') }] : []),
         ...(hasPaymentsSurface ? [{ id: 'nav-direct-transactions', title: t('nav.directTransactions', { defaultValue: 'Direct Transactions' }), category: 'Navigation' as const, icon: ArrowRightLeft, action: () => setLocation('/direct-transactions') }] : []),

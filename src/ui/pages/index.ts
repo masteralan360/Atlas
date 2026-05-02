@@ -12,7 +12,7 @@ export { Payments } from './Payments'
 export { DirectTransactions } from './DirectTransactions'
 export { ModuleLauncher } from './ModuleLauncher'
 export { TravelAgency } from './TravelAgency'
-export { Finance } from './Finance'
+
 export { InvoicesHistory } from './InvoicesHistory'
 export { Members } from './Members'
 export { Settings } from './Settings'

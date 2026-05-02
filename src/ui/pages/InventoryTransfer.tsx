@@ -12,7 +12,7 @@ import {
   useReorderTransferRules,
   useStorages,
 } from "@/local-db";
-import type { Product, ReorderTransferRule, Storage } from "@/local-db";
+import type { Product, ReorderTransferRule } from "@/local-db";
 import { useWorkspace } from "@/workspace";
 import { useAuth } from "@/auth";
 import { supabase } from "@/auth/supabase";
@@ -372,27 +372,27 @@ export default function InventoryTransfer() {
       activeWorkspace && sourceWorkspaceId && sourceWorkspaceId !== activeWorkspace.id
         ? remoteSourceProducts
         : inventory
-            .filter((row) => row.storageId === sourceStorageId)
-            .map((row) => {
-              const product = products.find((entry) => entry.id === row.productId);
-              if (!product || product.isDeleted) {
-                return null;
-              }
+          .filter((row) => row.storageId === sourceStorageId)
+          .map((row) => {
+            const product = products.find((entry) => entry.id === row.productId);
+            if (!product || product.isDeleted) {
+              return null;
+            }
 
-              return {
-                productId: product.id,
-                sku: product.sku,
-                name: product.name,
-                unit: product.unit,
-                availableQuantity: row.quantity,
-              };
-            })
-            .filter(
-              (
-                entry,
-              ): entry is TransferSourceProductOption => !!entry,
-            )
-            .sort((left, right) => left.name.localeCompare(right.name)),
+            return {
+              productId: product.id,
+              sku: product.sku,
+              name: product.name,
+              unit: product.unit,
+              availableQuantity: row.quantity,
+            };
+          })
+          .filter(
+            (
+              entry,
+            ): entry is TransferSourceProductOption => !!entry,
+          )
+          .sort((left, right) => left.name.localeCompare(right.name)),
     [
       activeWorkspace,
       inventory,
@@ -532,20 +532,19 @@ export default function InventoryTransfer() {
       option.relationType === "current"
         ? branchInfo?.isBranch
           ? t("inventoryTransfer.currentBranch", {
-              defaultValue: "Current Branch",
-            })
+            defaultValue: "Current Branch",
+          })
           : t("inventoryTransfer.currentWorkspace", {
-              defaultValue: "Current Workspace",
-            })
+            defaultValue: "Current Workspace",
+          })
         : option.relationType === "source"
           ? t("inventoryTransfer.sourceWorkspace", {
-              defaultValue: "Source Workspace",
-            })
+            defaultValue: "Source Workspace",
+          })
           : t("branches.title", { defaultValue: "Branch" });
 
-    return `${option.workspaceName}${
-      option.workspaceCode ? ` (${option.workspaceCode})` : ""
-    } - ${relationLabel}`;
+    return `${option.workspaceName}${option.workspaceCode ? ` (${option.workspaceCode})` : ""
+      } - ${relationLabel}`;
   };
 
   const getDefaultStorageId = (options: TransferWorkspaceOptionStorage[]) =>
@@ -1009,9 +1008,9 @@ export default function InventoryTransfer() {
           error instanceof Error
             ? error.message
             : t(
-                "inventoryTransfer.automation.ruleSaveError",
-                "Failed to save reorder rule",
-              ),
+              "inventoryTransfer.automation.ruleSaveError",
+              "Failed to save reorder rule",
+            ),
         variant: "destructive",
       });
       setIsSavingRule(false);
@@ -1050,9 +1049,9 @@ export default function InventoryTransfer() {
           error instanceof Error
             ? error.message
             : t(
-                "inventoryTransfer.automation.ruleDeleteError",
-                "Failed to delete reorder rule",
-              ),
+              "inventoryTransfer.automation.ruleDeleteError",
+              "Failed to delete reorder rule",
+            ),
         variant: "destructive",
       });
     } finally {
@@ -1650,14 +1649,14 @@ export default function InventoryTransfer() {
                                     <div className="text-xs text-muted-foreground">
                                       {remainingDays >= 0
                                         ? t(
-                                            "inventoryTransfer.automation.expiresInDays",
-                                            "Expires in {{count}} days",
-                                            { count: remainingDays },
-                                          )
+                                          "inventoryTransfer.automation.expiresInDays",
+                                          "Expires in {{count}} days",
+                                          { count: remainingDays },
+                                        )
                                         : t(
-                                            "inventoryTransfer.automation.expired",
-                                            "Expired",
-                                          )}
+                                          "inventoryTransfer.automation.expired",
+                                          "Expired",
+                                        )}
                                     </div>
                                   )}
                                 </>
@@ -1789,13 +1788,13 @@ export default function InventoryTransfer() {
                 <DialogTitle className="text-2xl">
                   {editingRuleId
                     ? t(
-                        "inventoryTransfer.automation.editRuleTitle",
-                        "Edit Automation Rule",
-                      )
+                      "inventoryTransfer.automation.editRuleTitle",
+                      "Edit Automation Rule",
+                    )
                     : t(
-                        "inventoryTransfer.automation.newRuleTitle",
-                        "New Automation Rule",
-                      )}
+                      "inventoryTransfer.automation.newRuleTitle",
+                      "New Automation Rule",
+                    )}
                 </DialogTitle>
                 <DialogDescription>
                   {t(
@@ -1884,11 +1883,10 @@ export default function InventoryTransfer() {
                                 productId: product.id,
                               }))
                             }
-                            className={`flex w-full items-center justify-between rounded-xl px-3 py-3 text-left transition-colors ${
-                              ruleForm.productId === product.id
+                            className={`flex w-full items-center justify-between rounded-xl px-3 py-3 text-left transition-colors ${ruleForm.productId === product.id
                                 ? "bg-primary text-primary-foreground"
                                 : "hover:bg-muted"
-                            }`}
+                              }`}
                           >
                             <div>
                               <div className="text-sm font-semibold">
@@ -2088,13 +2086,13 @@ export default function InventoryTransfer() {
                           >
                             {isSavingRule
                               ? t(
-                                  "inventoryTransfer.automation.savingRule",
-                                  "Saving Rule...",
-                                )
+                                "inventoryTransfer.automation.savingRule",
+                                "Saving Rule...",
+                              )
                               : t(
-                                  "inventoryTransfer.automation.saveRule",
-                                  "Save Rule",
-                                )}
+                                "inventoryTransfer.automation.saveRule",
+                                "Save Rule",
+                              )}
                           </Button>
                         </div>
                       </div>
@@ -2152,20 +2150,20 @@ export default function InventoryTransfer() {
                     <div className="mt-2 text-lg font-semibold">
                       {selectedProduct
                         ? t(
-                            "inventoryTransfer.automation.triggerPreview",
-                            "If stock in {{storage}} drops below {{min}}, move {{qty}} units.",
-                            {
-                              storage: getStorageDisplayName(
-                                storagesById.get(ruleForm.destinationStorageId),
-                              ),
-                              min: ruleForm.minStockLevel || 0,
-                              qty: ruleForm.transferQuantity || 0,
-                            },
-                          )
+                          "inventoryTransfer.automation.triggerPreview",
+                          "If stock in {{storage}} drops below {{min}}, move {{qty}} units.",
+                          {
+                            storage: getStorageDisplayName(
+                              storagesById.get(ruleForm.destinationStorageId),
+                            ),
+                            min: ruleForm.minStockLevel || 0,
+                            qty: ruleForm.transferQuantity || 0,
+                          },
+                        )
                         : t(
-                            "inventoryTransfer.automation.triggerPreviewFallback",
-                            "Select a product and storages to preview the rule behavior.",
-                          )}
+                          "inventoryTransfer.automation.triggerPreviewFallback",
+                          "Select a product and storages to preview the rule behavior.",
+                        )}
                     </div>
                   </div>
                 </div>

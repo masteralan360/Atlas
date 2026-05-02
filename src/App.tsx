@@ -227,9 +227,7 @@ const TravelAgencySaleView = lazy(() =>
     default: m.TravelAgencySaleView,
   })),
 );
-const Finance = lazy(() =>
-  import("@/ui/pages/Finance").then((m) => ({ default: m.Finance })),
-);
+
 const Ledger = lazy(() =>
   import("@/ui/pages/Ledger").then((m) => ({ default: m.Ledger })),
 );
@@ -933,15 +931,7 @@ function App() {
                           </Layout>
                         </ProtectedRoute>
                       </Route>
-                      <Route path="/finance">
-                        <ProtectedRoute
-                          allowedRoles={["admin", "staff", "viewer"]}
-                        >
-                          <Layout>
-                            <Finance />
-                          </Layout>
-                        </ProtectedRoute>
-                      </Route>
+
                       <Route path="/ledger">
                         <ProtectedRoute
                           allowedRoles={["admin", "staff", "viewer"]}
