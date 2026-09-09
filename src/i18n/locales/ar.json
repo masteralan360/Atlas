@@ -1585,6 +1585,7 @@
         "atLeastOneItem": "أضف بنداً واحداً على الأقل.",
         "saveSalesFailed": "تعذر حفظ طلب البيع.",
         "savePurchaseFailed": "تعذر حفظ طلب الشراء.",
+        "invalidQuantity": "أدخل كمية صالحة لـ {{productName}}.",
         "invalidFreeBonus": "أدخل بونصاً مجانياً صالحاً لـ {{productName}}.",
         "batchNotAvailable": "الدفعة المحددة للمنتج {{productName}} لم تعد متاحة.",
         "batchQuantityExceeded": "المصدر المحدد لا يحتوي على مخزون كافٍ للمنتج {{productName}}.",

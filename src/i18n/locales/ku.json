@@ -1588,6 +1588,7 @@
         "atLeastOneItem": "لانیکەم یەک بڕگە زیاد بکە.",
         "saveSalesFailed": "پاشەکەوتکردنی داواکاری فرۆشتن سەرکەوتوو نەبوو.",
         "savePurchaseFailed": "پاشەکەوتکردنی داواکاری کڕین سەرکەوتوو نەبوو.",
+        "invalidQuantity": "بڕێکی دروست بۆ {{productName}} بنووسە.",
         "invalidFreeBonus": "بۆنەسی خۆڕایی دروست بۆ {{productName}} بنووسە.",
         "batchNotAvailable": "بار هەڵبژێردراو بۆ {{productName}} چیتر بەردەست نییە.",
         "batchQuantityExceeded": "سەرچاوەی هەڵبژێردراو بۆ {{productName}} کۆگای بەسەری نییە.",

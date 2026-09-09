@@ -5,6 +5,7 @@ import {
   getOrderLineFulfilledQuantity,
   getOrderLineInventoryQuantity,
   getOrderLinePaidQuantity,
+  hasOrderLineInventoryQuantity,
   hasOrderLineFreeBonus,
   isFulfilledUnitsAvailableForOrder
 } from './orderLineItems'
@@ -26,6 +27,15 @@ describe('order line item quantity normalization', () => {
     expect(getOrderLineFreeBonusQuantity(item)).toBe(2)
     expect(getOrderLineInventoryQuantity(item)).toBe(7)
     expect(hasOrderLineFreeBonus([item])).toBe(true)
+  })
+
+  it('accepts a bonus-only line while rejecting lines with no valid inventory quantity', () => {
+    expect(hasOrderLineInventoryQuantity({ quantity: '', freeBonusQuantity: '2' })).toBe(true)
+    expect(hasOrderLineInventoryQuantity({ quantity: '2', freeBonusQuantity: '' })).toBe(true)
+    expect(hasOrderLineInventoryQuantity({ quantity: '', freeBonusQuantity: '' })).toBe(false)
+    expect(hasOrderLineInventoryQuantity({ quantity: '0', freeBonusQuantity: '0' })).toBe(false)
+    expect(hasOrderLineInventoryQuantity({ quantity: '-1', freeBonusQuantity: '-2' })).toBe(false)
+    expect(hasOrderLineInventoryQuantity({ quantity: 'invalid', freeBonusQuantity: 'invalid' })).toBe(false)
   })
 
   it('normalizes null and pre-release freeQuantity aliases to zero-safe values', () => {

@@ -2642,6 +2642,7 @@
         "atLeastOneItem": "Add at least one item.",
         "saveSalesFailed": "Failed to save sales order.",
         "savePurchaseFailed": "Failed to save purchase order.",
+        "invalidQuantity": "Enter a valid quantity for {{productName}}.",
         "invalidFreeBonus": "Enter a valid free bonus for {{productName}}.",
         "batchNotAvailable": "The selected batch for {{productName}} is no longer available.",
         "batchQuantityExceeded": "The selected source does not have enough stock for {{productName}}.",

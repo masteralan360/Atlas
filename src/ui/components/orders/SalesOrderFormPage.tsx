@@ -21,7 +21,7 @@ import {
     parseLocalDateValue,
     sanitizeNumericInput
 } from '@/lib/utils'
-import { getOrderLineFreeBonusQuantity } from '@/lib/orderLineItems'
+import { getOrderLineFreeBonusQuantity, hasOrderLineInventoryQuantity } from '@/lib/orderLineItems'
 import { ORDER_DECIMAL_STEP, roundOrderValue } from '@/lib/orderPrecision'
 import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import {
@@ -864,7 +864,7 @@ export function SalesOrderFormPage({
     }, [currency, discount, items, orderAdjustments, tax])
 
     const configuredItemsCount = useMemo(
-        () => items.filter((item) => item.productId && Number(item.quantity) > 0).length,
+        () => items.filter((item) => item.productId && hasOrderLineInventoryQuantity(item)).length,
         [items]
     )
 
@@ -872,7 +872,7 @@ export function SalesOrderFormPage({
     const isFinanced = paymentMethod === 'loan' || paymentMethod === 'installments'
     const isInstallmentBased = paymentMethod === 'installments'
     const canSubmit = Boolean(selectedCustomer) &&
-        items.some((item) => item.productId && Number(item.quantity) > 0) &&
+        items.some((item) => item.productId && hasOrderLineInventoryQuantity(item)) &&
         (!priceBooksEnabled || isPriceBookCatalogReady) &&
         (!isFinanced || initialPayment < preview) &&
         (!isInstallmentBased || (
@@ -902,7 +902,7 @@ export function SalesOrderFormPage({
         try {
             let usesPriceBookPricing = false
             const orderItems: SalesOrderItem[] = items
-                .filter((item) => item.productId && Number(item.quantity) > 0)
+                .filter((item) => item.productId && hasOrderLineInventoryQuantity(item))
                 .map((item) => {
                     const product = products.find((entry) => entry.id === item.productId)
                     if (!product) {
@@ -921,6 +921,12 @@ export function SalesOrderFormPage({
 
                     const quantity = Number(item.quantity)
                     const freeBonusQuantityValue = Number(item.freeBonusQuantity || 0)
+                    if (!Number.isFinite(quantity) || quantity < 0) {
+                        throw new Error(t('orders.form.errors.invalidQuantity', {
+                            productName: product.name,
+                            defaultValue: `Enter a valid quantity for ${product.name}.`
+                        }))
+                    }
                     const hasPriceBookProvenance = Boolean(item.priceBookId && item.priceBookItemId)
                     if (hasPriceBookProvenance) usesPriceBookPricing = true
                     const sourceCurrency = hasPriceBookProvenance && item.priceSourceCurrency

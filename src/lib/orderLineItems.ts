@@ -31,6 +31,14 @@ export function getOrderLineInventoryQuantity(item: OrderLineQuantityLike) {
 }
 
 /**
+ * Checks whether a line affects inventory. This includes a bonus-only line,
+ * whose paid quantity is zero but free quantity is positive.
+ */
+export function hasOrderLineInventoryQuantity(item: OrderLineQuantityLike) {
+  return getOrderLineInventoryQuantity(item) > 0
+}
+
+/**
  * Returns the quantity fulfilled from a sales-order line. Completed orders
  * saved before `fulfilledQuantity` was introduced fulfilled their whole line,
  * so use the inventory quantity as a read-only compatibility fallback.
