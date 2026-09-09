@@ -73,6 +73,7 @@ function installBrowserStorage() {
             localStorage: storage,
             sessionStorage: storage,
             location: { origin: 'http://localhost', hash: '', pathname: '/' },
+            URL: { createObjectURL: () => 'blob:test', revokeObjectURL: () => undefined },
             addEventListener: () => undefined,
             removeEventListener: () => undefined
         }
@@ -83,11 +84,18 @@ function installBrowserStorage() {
             visibilityState: 'visible',
             dir: 'ltr',
             documentElement: { lang: 'en', dir: 'ltr' },
+            head: { appendChild: () => undefined },
+            getElementsByTagName: () => [{ appendChild: () => undefined }],
+            createElement: () => ({ appendChild: () => undefined }),
+            createTextNode: () => ({}),
             addEventListener: () => undefined,
             removeEventListener: () => undefined
         }
     })
     Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { onLine: false } })
+    Object.defineProperty(globalThis, 'DOMMatrix', { configurable: true, value: class DOMMatrix {} })
+    Object.defineProperty(globalThis, 'ImageData', { configurable: true, value: class ImageData {} })
+    Object.defineProperty(globalThis, 'Path2D', { configurable: true, value: class Path2D {} })
 }
 
 async function createSupplier(payableCreditLimit: number | null) {
@@ -1158,6 +1166,63 @@ describe('order-linked financing', () => {
             paidAmount: 20,
             balanceAmount: 55,
             paymentStatus: 'partial'
+        })
+    })
+
+    it('records an unmapped sales-order loan refund as a positive outgoing cash transaction', async () => {
+        const customer = await createCustomer()
+        const { storage, product } = await createStockedSalesProduct(100)
+        const draft = await createSalesOrder(
+            WORKSPACE_ID,
+            salesOrderInput(customer.id, product, storage.id, {
+                method: 'installments',
+                total: 100,
+                initialPayment: 0,
+                firstDueDate: '2026-08-01'
+            })
+        )
+        const pending = await updateSalesOrderStatus(draft.id, 'pending')
+        const completed = await updateSalesOrderStatus(pending.id, 'completed')
+
+        await recordLoanPayment(WORKSPACE_ID, {
+            loanId: completed.linkedLoanId!,
+            amount: 30,
+            paymentMethod: 'cash',
+            paidAt: '2026-08-02T10:00:00.000Z'
+        })
+
+        const recordedLoanPayment = await db.payment_transactions
+            .where('sourceRecordId')
+            .equals(completed.linkedLoanId!)
+            .first()
+        expect(recordedLoanPayment).toMatchObject({
+            metadata: expect.objectContaining({
+                displaySourceLabel: 'order_loan',
+                orderId: completed.id,
+                orderType: 'sales'
+            })
+        })
+        await db.payment_transactions.delete(recordedLoanPayment!.id)
+
+        await returnSalesOrder({
+            orderId: completed.id,
+            items: [{ orderItemId: completed.items[0].id, quantity: 0.75 }],
+            reason: 'customer_returned',
+            actorRole: 'admin'
+        })
+
+        const fallbackRefund = await db.payment_transactions
+            .where('workspaceId')
+            .equals(WORKSPACE_ID)
+            .and((transaction) => transaction.sourceType === 'order_return' && transaction.metadata?.loanRepaymentRefund === true)
+            .first()
+        expect(fallbackRefund).toMatchObject({
+            direction: 'outgoing',
+            amount: 5,
+            metadata: expect.objectContaining({
+                orderId: completed.id,
+                loanRepaymentRefund: true
+            })
         })
     })
 

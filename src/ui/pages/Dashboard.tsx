@@ -1,7 +1,10 @@
 import { useMemo } from 'react'
-import { useDashboardStats, useSales, usePaymentTransactions, usePaymentObligations, useExpenseItems, useEmployees, usePayrollStatuses, useDividendStatuses } from '@/local-db'
+import { useDashboardStats, useSales, usePaymentTransactions, usePaymentObligations, useExpenseItems, useEmployees, usePayrollStatuses, useDividendStatuses, useExchangeTransactions, useLoans } from '@/local-db'
 import { convertToStoreBase } from '@/lib/currency'
 import { calculateNetProfitForMonth, buildPayrollItems, buildDividendItems } from '@/lib/budget'
+import { getLedgerCashMovementEntries } from '@/lib/ledgerCashMovementEntries'
+import { summarizeLedgerCashMovementsByCurrency } from '@/lib/ledgerCashSummary'
+import { isLedgerCashFlowDirection } from '@/lib/ledgerFlow'
 import { Card, CardContent, CardHeader, CardTitle } from '@/ui/components'
 import { cn, formatCurrency, formatDate, formatOriginLabel } from '@/lib/utils'
 import { Package, FileText, DollarSign, AlertTriangle, Receipt, ArrowUpRight, Wallet, ClipboardCheck } from 'lucide-react'
@@ -44,9 +47,11 @@ export function Dashboard() {
     const payrollStatuses = usePayrollStatuses(workspaceId)
     const dividendStatuses = useDividendStatuses(workspaceId)
 
-    // Additional data for Money Overview (Mobile)
-    const transactions = usePaymentTransactions(workspaceId, { includeReversals: false })
+    // Ledger-backed movements shared by the desktop headline and mobile money overview.
+    const transactions = usePaymentTransactions(workspaceId, { includeReversals: true }, { hydrateSourceTables: false })
     const obligations = usePaymentObligations(workspaceId)
+    const loans = useLoans(workspaceId)
+    const exchangeTransactions = useExchangeTransactions(workspaceId)
 
     const totalOutstanding = useMemo(() => {
         if (!workspaceId) return {}
@@ -86,45 +91,21 @@ export function Dashboard() {
         return { [baseCurrency]: Math.max(0, outstanding) }
     }, [workspaceId, expenseItems, employees, payrollStatuses, dividendStatuses, sales, currentMonth])
 
-    const netFlow = useMemo(() => {
-        const totals: Record<string, number> = {}
+    const netRecordedCashMovement = useMemo(() => {
         const now = new Date()
+        const entries = getLedgerCashMovementEntries({ sales, paymentTransactions: transactions, loans, exchangeTransactions })
+        const summaries = summarizeLedgerCashMovementsByCurrency(
+            entries.filter(
+                (entry) =>
+                    isLedgerCashFlowDirection(entry.direction) &&
+                    isEntryInDateRange(entry.date, dateRange, customDates, now),
+            ),
+        )
 
-        // 1. Add POS Sales (Incoming)
-        if (sales) {
-            sales.forEach(sale => {
-                if (sale.isDeleted || sale.isReturned) return
-                if (sale.origin !== 'pos' && sale.origin !== 'instant_pos') return
-                
-                // Exclude loan sales
-                const method = sale.payment_method || (sale as any).paymentMethod
-                if (method === 'loan') return
-
-                // Date Filter
-                if (!isEntryInDateRange(sale.createdAt, dateRange, customDates, now)) return
-
-                const amount = sale.totalAmount
-                const curr = sale.settlementCurrency
-                totals[curr] = (totals[curr] || 0) + amount
-            })
-        }
-
-        // 2. Add Payment Transactions
-        if (transactions) {
-            transactions.forEach((tx: any) => {
-                // Exclude loans and adjustments as Ledger does
-                if (tx.paymentMethod === 'loan' || tx.paymentMethod === 'loan_adjustment') return
-
-                // Date Filter
-                if (!isEntryInDateRange(tx.paidAt, dateRange, customDates, now)) return
-                
-                const amount = tx.direction === 'incoming' ? tx.amount : -tx.amount
-                totals[tx.currency] = (totals[tx.currency] || 0) + amount
-            })
-        }
-
-        return totals
-    }, [sales, transactions, dateRange, customDates])
+        return Object.fromEntries(
+            summaries.map(({ currency, summary }) => [currency, summary.netRecordedCashMovement]),
+        )
+    }, [sales, transactions, loans, exchangeTransactions, dateRange, customDates])
 
     const pendingPaymentsCount = obligations?.filter(o => o.status === 'open' || o.status === 'overdue').length || 0
     const stats = useDashboardStats(workspaceId)
@@ -164,13 +145,13 @@ export function Dashboard() {
             href: '/products'
         },
         {
-            title: t('revenue.grossRevenue'),
-            value: stats.grossRevenueByCurrency,
+            title: t('ledger.cashSummary.headline.title'),
+            value: netRecordedCashMovement,
             icon: DollarSign,
             color: 'text-primary',
             bgColor: 'bg-primary/10',
-            href: '/revenue',
-            isRevenue: true
+            href: '/ledger',
+            isCurrencySummary: true
         }
     ]
 
@@ -224,8 +205,8 @@ export function Dashboard() {
                                     </p>
                                 </div>
                                 <div className="w-full space-y-0.5">
-                                    {Object.keys(netFlow).length > 0 ? (
-                                        Object.entries(netFlow).map(([curr, val]) => (
+                                    {Object.keys(netRecordedCashMovement).length > 0 ? (
+                                        Object.entries(netRecordedCashMovement).map(([curr, val]) => (
                                             <p key={curr} className={cn(
                                                 "text-lg font-black tracking-tighter tabular-nums truncate",
                                                 val >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
@@ -316,7 +297,7 @@ export function Dashboard() {
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-black tracking-tight">
-                                    {stat.isRevenue ? (
+                                    {stat.isCurrencySummary ? (
                                         <div className="flex flex-col gap-0.5">
                                             {Object.entries(stat.value || {}).map(([curr, val]) => (
                                                 <div key={curr} className="text-lg md:text-xl text-primary line-clamp-1 tabular-nums">

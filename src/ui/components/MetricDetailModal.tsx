@@ -35,7 +35,7 @@ import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import { DollarSign, TrendingUp, BarChart3, PieChart as PieChartIcon, Printer } from 'lucide-react'
 import { useReactToPrint } from 'react-to-print'
 
-export type MetricType = 'grossRevenue' | 'totalCost' | 'netProfit' | 'profitMargin'
+export type MetricType = 'grossRevenue' | 'totalCost' | 'grossProfit' | 'profitMargin'
 
 interface CurrencyStats {
     revenue: number
@@ -74,7 +74,7 @@ export function MetricDetailModal({ isOpen, onClose, metricType, currency, iqdPr
         switch (metricType) {
             case 'grossRevenue': return t('revenue.grossRevenue')
             case 'totalCost': return t('revenue.totalCost')
-            case 'netProfit': return t('revenue.netProfit')
+            case 'grossProfit': return t('revenue.grossProfit')
             case 'profitMargin': return t('revenue.profitMargin')
             default: return ''
         }
@@ -84,7 +84,7 @@ export function MetricDetailModal({ isOpen, onClose, metricType, currency, iqdPr
         switch (metricType) {
             case 'grossRevenue': return <DollarSign className="w-5 h-5 text-blue-500" />
             case 'totalCost': return <BarChart3 className="w-5 h-5 text-orange-500" />
-            case 'netProfit': return <TrendingUp className="w-5 h-5 text-emerald-500" />
+            case 'grossProfit': return <TrendingUp className="w-5 h-5 text-emerald-500" />
             case 'profitMargin': return <PieChartIcon className="w-5 h-5 text-purple-500" />
         }
     }
@@ -119,7 +119,7 @@ export function MetricDetailModal({ isOpen, onClose, metricType, currency, iqdPr
                         // For percentage, normalized is the same
                         row[`${curr}_normalized`] = row[`${curr}_value`]
                     } else {
-                        const rawVal = metricType === 'netProfit' ? values.profit : metricType === 'totalCost' ? values.cost : values.revenue
+                        const rawVal = metricType === 'grossProfit' ? values.profit : metricType === 'totalCost' ? values.cost : values.revenue
                         row[`${curr}_value`] = rawVal
 
                         let normalized = rawVal
@@ -185,7 +185,7 @@ export function MetricDetailModal({ isOpen, onClose, metricType, currency, iqdPr
                     let val = 0
                     if (metricType === 'grossRevenue') val = currData.revenue
                     else if (metricType === 'totalCost') val = currData.cost
-                    else if (metricType === 'netProfit') val = currData.revenue - currData.cost
+                    else if (metricType === 'grossProfit') val = currData.revenue - currData.cost
                     else if (metricType === 'profitMargin') {
                         val = currData.revenue > 0 ? ((currData.revenue - currData.cost) / currData.revenue) * 100 : 0
                         return <div key={curr} className="text-3xl font-black tabular-nums tracking-tighter text-purple-600 dark:text-purple-400">{val.toFixed(1)}% ({curr.toUpperCase()})</div>
@@ -196,7 +196,7 @@ export function MetricDetailModal({ isOpen, onClose, metricType, currency, iqdPr
                             "text-3xl font-black tabular-nums tracking-tighter leading-none",
                             metricType === 'grossRevenue' && "text-blue-600 dark:text-blue-400",
                             metricType === 'totalCost' && "text-orange-600 dark:text-orange-400",
-                            metricType === 'netProfit' && "text-emerald-600 dark:text-emerald-400"
+                            metricType === 'grossProfit' && "text-emerald-600 dark:text-emerald-400"
                         )}>
                             {formatCurrency(val, curr as any, iqdPreference)}
                         </div>
@@ -213,7 +213,7 @@ export function MetricDetailModal({ isOpen, onClose, metricType, currency, iqdPr
                 "border-[3px]",
                 metricType === 'grossRevenue' && "border-blue-500/50 shadow-blue-500/10",
                 metricType === 'totalCost' && "border-orange-500/50 shadow-orange-500/10",
-                metricType === 'netProfit' && "border-emerald-500/50 shadow-emerald-500/10",
+                metricType === 'grossProfit' && "border-emerald-500/50 shadow-emerald-500/10",
                 metricType === 'profitMargin' && "border-purple-500/50 shadow-purple-500/10"
             )}>
                 <div ref={printRef} className="p-6 md:p-8 space-y-8 max-h-[90vh] overflow-y-auto custom-scrollbar [print-color-adjust:exact] -webkit-print-color-adjust:exact">
@@ -223,7 +223,7 @@ export function MetricDetailModal({ isOpen, onClose, metricType, currency, iqdPr
                                 "p-4 rounded-2xl shadow-inner",
                                 metricType === 'grossRevenue' && "bg-blue-500/10",
                                 metricType === 'totalCost' && "bg-orange-500/10",
-                                metricType === 'netProfit' && "bg-emerald-500/10",
+                                metricType === 'grossProfit' && "bg-emerald-500/10",
                                 metricType === 'profitMargin' && "bg-purple-500/10"
                             )}>
                                 {getMetricIcon()}
@@ -243,7 +243,7 @@ export function MetricDetailModal({ isOpen, onClose, metricType, currency, iqdPr
                                     "hidden md:flex w-9 h-9 rounded-xl transition-all duration-300 border-2 ml-2",
                                     metricType === 'grossRevenue' && "bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20",
                                     metricType === 'totalCost' && "bg-orange-500/10 border-orange-500/20 text-orange-600 dark:text-orange-400 hover:bg-orange-500/20",
-                                    metricType === 'netProfit' && "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20",
+                                    metricType === 'grossProfit' && "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20",
                                     metricType === 'profitMargin' && "bg-purple-500/10 border-purple-500/20 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20"
                                 )}
                             >
@@ -263,7 +263,7 @@ export function MetricDetailModal({ isOpen, onClose, metricType, currency, iqdPr
                                     "md:hidden w-9 h-9 rounded-xl transition-all duration-300 border-2",
                                     metricType === 'grossRevenue' && "bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400",
                                     metricType === 'totalCost' && "bg-orange-500/10 border-orange-500/20 text-orange-600 dark:text-orange-400",
-                                    metricType === 'netProfit' && "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400",
+                                    metricType === 'grossProfit' && "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400",
                                     metricType === 'profitMargin' && "bg-purple-500/10 border-purple-500/20 text-purple-600 dark:text-purple-400"
                                 )}
                             >

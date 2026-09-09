@@ -2217,6 +2217,122 @@
       "pointsChange": "points change",
       "entriesCount": "Entries Count"
     },
+    "cashSummary": {
+      "feedsNext": "Feeds the next calculation",
+      "fromPreviousCalculation": "Carried from the result above. Select to inspect its source movements.",
+      "currencySeparated": "Amounts separated by currency",
+      "completedMovementCount": "{{count}} completed cash movements",
+      "noCompletedMovements": "No completed cash movements in this period",
+      "notAccountingProfit": "Cash operating surplus is cash-based and is not accrual accounting profit.",
+      "result": "Result",
+      "headline": {
+        "title": "Net Recorded Cash Movement",
+        "description": "The signed total of completed cash movements for the selected date and currency scope. Loan principal affects cash, but never operating surplus."
+      },
+      "groups": {
+        "operating": {
+          "title": "Operating activity",
+          "description": "Completed operating receipts, refunds, and payments only.",
+          "formula": "Cash received − refunds − operating cash paid"
+        },
+        "borrowing": {
+          "title": "Borrowing activity",
+          "description": "Cash received from borrowing and principal repayments paid.",
+          "formula": "Loans received − loan repayments paid"
+        },
+        "lending": {
+          "title": "Lending activity",
+          "description": "Principal collected from borrowers and new cash advanced.",
+          "formula": "Repayments collected − loans advanced"
+        }
+      },
+      "metrics": {
+        "cashRevenueReceived": {
+          "title": "Cash Revenue Received",
+          "description": "Completed customer and service receipts, net of direct reversals."
+        },
+        "cashRefundsPaid": {
+          "title": "Cash Refunds Paid",
+          "description": "Completed customer refunds and reversed receipt cash."
+        },
+        "netCashRevenue": {
+          "title": "Net Cash Revenue",
+          "description": "Cash revenue received minus cash refunds paid."
+        },
+        "operatingCashPaid": {
+          "title": "Operating Cash Paid",
+          "description": "Completed expenses, payroll, supplier payments, and operating commissions."
+        },
+        "cashOperatingSurplus": {
+          "title": "Cash Operating Surplus",
+          "description": "Net cash revenue minus operating cash paid; not accrual profit."
+        },
+        "loansReceived": {
+          "title": "Loans Received",
+          "description": "Borrowed principal that actually entered the business."
+        },
+        "loanRepaymentsPaid": {
+          "title": "Loan Repayments Paid",
+          "description": "Borrowed principal repayments that actually left the business."
+        },
+        "netBorrowingMovement": {
+          "title": "Net Borrowing Movement",
+          "description": "Loans received minus principal repayments paid; never revenue or profit."
+        },
+        "repaymentsCollected": {
+          "title": "Repayments Collected",
+          "description": "Loan principal actually collected from borrowers."
+        },
+        "loansAdvanced": {
+          "title": "Loans Advanced",
+          "description": "Loan principal actually paid out to borrowers."
+        },
+        "netLendingMovement": {
+          "title": "Net Lending Movement",
+          "description": "Principal collected minus new principal advanced."
+        },
+        "otherCompletedMovement": {
+          "title": "Other Completed Movement",
+          "description": "Completed cash that cannot truthfully be labeled operating, borrowing, or lending, including pass-through and manual account movements."
+        }
+      },
+      "drilldown": {
+        "cashRevenueReceived": "Summary: Cash Revenue Received",
+        "cashRefundsPaid": "Summary: Cash Refunds Paid",
+        "operatingCashPaid": "Summary: Operating Cash Paid",
+        "loansReceived": "Summary: Loans Received",
+        "loanRepaymentsPaid": "Summary: Loan Repayments Paid",
+        "repaymentsCollected": "Summary: Repayments Collected",
+        "loansAdvanced": "Summary: Loans Advanced",
+        "otherCompletedMovement": "Summary: Other Completed Movement",
+        "netCashRevenue": "Summary: Net Cash Revenue",
+        "operating": "Summary: Operating Activity",
+        "borrowing": "Summary: Borrowing Activity",
+        "lending": "Summary: Lending Activity",
+        "netRecordedCashMovement": "Summary: Net Recorded Cash Movement"
+      },
+      "breakdown": {
+        "action": "View breakdown",
+        "title": "Cash movement reconciliation",
+        "description": "See which controlled calculation groups contribute to the headline.",
+        "accountingNote": "Borrowing and lending principal are shown because cash moved, but they are isolated from the operating result. Opening balances and audited adjustments are not period cash flow."
+      },
+      "customize": {
+        "action": "Customize Ledger",
+        "title": "Customize Ledger summary",
+        "description": "Show, hide, or reorder complete calculation groups. The application controls every formula.",
+        "saveError": "The Ledger summary could not be saved. Please try again.",
+        "hidden": "Hidden",
+        "shown": "Shown",
+        "alwaysShown": "Required · always shown",
+        "noCompletedData": "No completed movements yet",
+        "historicalData": "Historical data remains available",
+        "moveUp": "Move group up",
+        "moveDown": "Move group down",
+        "accountingGuardrail": "Cards cannot be added individually. Selecting a tile shows or hides the entire predefined calculation group, preventing incompatible formulas.",
+        "restoreDefaults": "Restore defaults"
+      }
+    },
     "charts": {
       "topSourcesSinks": "Top Sources/Sinks",
       "byNetValue": "By Net Value",
@@ -2237,52 +2353,71 @@
     "filters": {
       "title": "Filters",
       "clearFilters": "Clear Filters",
-      "exclusionNote": "Draft orders and manual direct transactions are intentionally excluded from the ledger. Delivered E-Commerce orders appear as receivables until payment is posted.",
+      "exclusionNote": "Unpaid obligations and delivered E-Commerce receivables are excluded. They enter the Ledger only when a real payment is posted.",
       "matchingEntries": "{{count}} matching entries",
       "filterPreview": "General filters preview before opening any record.",
-      "noFilters": "No advanced filters applied. Open the filter modal to narrow the ledger by direction, partner, method, amounts, or notes.",
+      "noFilters": "No Ledger filters applied. Filter by cash meaning, source, counterparty, payment trail, or currency.",
       "dialogTitle": "General Ledger Filters",
-      "dialogDescription": "Refine the ledger with a richer filter set before you inspect entries. Date range stays on the page, and changes here stay in the modal until you apply them.",
+      "dialogDescription": "Filter by what each recorded movement means and how it was paid. Every option shown comes from Ledger entries in the selected date range.",
       "preview": "Preview",
-      "previewDescription": "entries match the draft filters inside the current page range",
+      "previewDescription": "entries match these filters in the selected date range",
       "pageRange": "Page Range",
       "pageRangeDescription": "Controlled directly from the ledger page header",
-      "draftFilters": "Draft Filters",
-      "draftFiltersDescription": "advanced conditions configured",
-      "searchMovement": "Search & Movement",
-      "searchMovementDescription": "Search by IDs, partner, notes, reference, or module.",
+      "activeConditions": "Active Conditions",
+      "activeConditionsDescription": "filter groups currently configured",
       "keywordSearch": "Keyword Search",
-      "searchPlaceholder": "Search reference, partner, note, or ID",
+      "searchPlaceholder": "Search reference, transaction ID, counterparty, account, or note",
+      "searchHint": "Search also recognizes the localized movement category, entry type, source module, and reversal state.",
+      "movementMeaning": "Movement Meaning & Origin",
+      "movementMeaningDescription": "Use the same completed-cash classifications as the Ledger summary, then narrow by recorded source.",
+      "cashCategory": "Cash Category",
+      "allCashCategories": "All Cash Categories",
       "direction": "Direction",
+      "entryState": "Entry State",
+      "allEntryStates": "All Entry States",
       "sortBy": "Sort By",
-      "transactionType": "Transaction Type",
+      "exactEntryType": "Exact Entry Type",
       "sourceModule": "Source Module",
       "allTypes": "All Types",
       "allModules": "All Modules",
-      "partiesMethodAmount": "Parties, Method & Amount",
-      "partiesMethodAmountDescription": "Narrow the ledger to specific partners, currencies, methods, or ranges.",
-      "partner": "Partner",
-      "allPartners": "All Partners",
+      "paymentTrail": "Counterparty & Payment Trail",
+      "paymentTrailDescription": "Trace who was involved, which payment route was recorded, and in which currency.",
+      "counterparty": "Counterparty",
+      "allCounterparties": "All Counterparties",
+      "noCounterparty": "No Counterparty Recorded",
+      "unknownCounterparty": "Unknown Counterparty",
       "currency": "Currency",
       "allCurrencies": "All Currencies",
       "paymentMethod": "Payment Method",
       "anyMethod": "Any Method",
-      "notes": "Notes",
-      "anyNotesState": "Any Notes State",
-      "withNotes": "With Notes",
-      "withoutNotes": "Without Notes",
+      "paymentAccount": "Payment Account",
+      "allPaymentAccounts": "All Payment Accounts",
+      "unassignedPaymentAccount": "No Payment Account Assigned",
+      "unknownPaymentAccount": "Unknown Payment Account",
       "minimumAmount": "Minimum Amount",
       "maximumAmount": "Maximum Amount",
-      "noCap": "No cap",
+      "selectSingleCurrencyHint": "Select exactly one currency to compare or sort amounts safely.",
+      "amountRangeCurrencyHint": "Amount limits and amount sorting are applied in {{currency}} only.",
+      "invalidAmountRange": "The minimum amount cannot be greater than the maximum amount.",
+      "selectedCount": "{{count}} selected",
       "resetDraft": "Reset Draft",
       "cancel": "Cancel",
       "applyFilters": "Apply Filters ({{count}})",
       "chipSearch": "Search: {{term}}",
-      "chipPartner": "Partner: {{name}}",
+      "chipCounterparty": "Counterparty: {{name}}",
       "chipCurrency": "Currency: {{code}}",
       "chipMethod": "Method: {{name}}",
-      "chipMin": "Min: {{value}}",
-      "chipMax": "Max: {{value}}"
+      "chipPaymentAccount": "Account: {{name}}",
+      "chipMin": "Min: {{value}} {{currency}}",
+      "chipMax": "Max: {{value}} {{currency}}",
+      "category": {
+        "openingBalance": "Opening Balance",
+        "balanceAdjustment": "Balance Adjustment"
+      },
+      "transactionState": {
+        "standard": "Standard Entries",
+        "reversal": "Reversal Entries"
+      }
     },
     "direction": {
       "allDirections": "All Directions",
@@ -2311,6 +2446,8 @@
       "ecommerceReceivable": "E-Commerce Receivable",
       "ecommercePayment": "E-Commerce Payment",
       "salesOrderPayment": "Sales Order Payment",
+      "orderLoanCollection": "Order Loan Collection",
+      "orderLoanRefund": "Order Loan Refund",
       "purchaseOrderPayment": "Purchase Order Payment",
       "expense": "Expense",
       "payrollPayment": "Payroll Payment",
@@ -2329,6 +2466,8 @@
       "ecommerceReceivable": "E-Commerce Receivable",
       "ecommercePayment": "E-Commerce Payment",
       "salesOrderPayment": "Sales Order Payment",
+      "orderLoanCollection": "Order Loan Collection",
+      "orderLoanRefund": "Order Loan Refund",
       "purchaseOrderPayment": "Purchase Order Payment",
       "expense": "Expense",
       "payrollPayment": "Payroll Payment",
@@ -2359,6 +2498,7 @@
       "pos": "POS",
       "instantPos": "Instant POS",
       "orders": "Orders",
+      "orderFinancing": "Orders · Order Loan",
       "expenses": "Expenses",
       "payroll": "Payroll",
       "loans": "Loans",
@@ -2372,6 +2512,8 @@
       "installmentSaleDownPayment": "Down payment received for installment sale {{reference}}.",
       "installmentSaleCollection": "Installment payment received for installment sale {{reference}}.",
       "paymentReversal": "Reversal of payment transaction {{transactionId}}.",
+      "orderLoanCollectionRelation": "Sales order {{orderReference}} · financing record {{loanReference}}. Money was received from the customer.",
+      "orderLoanRefundRelation": "Sales order {{orderReference}} · financing record {{loanReference}}. Money was refunded to the customer.",
       "deliveryCourierRemittance": "Courier cash handover",
       "deliveryCourierFeePayout": "Courier fee payment",
       "deliveryCourierReimbursement": "Courier reimbursement",
@@ -4700,7 +4842,7 @@
     "subtitle": "Track your sales performance and profitability",
     "grossRevenue": "Gross Revenue",
     "totalCost": "Total Cost (COGS)",
-    "netProfit": "Net Profit",
+    "grossProfit": "Gross Profit",
     "profitMargin": "Profit Margin",
     "detailedAnalysis": "Detailed performance analysis and trends",
     "trendTitle": "Performance Trend",

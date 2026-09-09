@@ -143,7 +143,7 @@ export function SalesOverviewModal({ isOpen, onClose, data, iqdPreference }: Sal
                             <CardContent className="p-4 flex items-center gap-3">
                                 <TrendingUp className="w-6 h-6 text-emerald-500" />
                                 <div>
-                                    <p className="text-xs font-bold uppercase text-muted-foreground">{t('revenue.netProfit')}</p>
+                                    <p className="text-xs font-bold uppercase text-muted-foreground">{t('revenue.grossProfit')}</p>
                                     <p className="text-lg font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
                                         {formatCurrency(totals.profit, activeCurrencies[0] as any, iqdPreference)} ({margin}%)
                                     </p>
@@ -234,7 +234,7 @@ export function SalesOverviewModal({ isOpen, onClose, data, iqdPreference }: Sal
                                     <Area
                                         type="monotone"
                                         dataKey="profit"
-                                        name="netProfit"
+                                        name="grossProfit"
                                         stroke={METRIC_COLORS.profit.stroke}
                                         strokeWidth={3}
                                         fillOpacity={1}

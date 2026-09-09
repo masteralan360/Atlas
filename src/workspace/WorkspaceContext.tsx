@@ -34,6 +34,11 @@ import {
 } from './workspaceLocalSettings'
 import { runSupabaseAction, normalizeSupabaseActionError } from '@/lib/supabaseRequest'
 import {
+    DEFAULT_LEDGER_DASHBOARD_CONFIG,
+    normalizeLedgerDashboardConfig,
+    type LedgerDashboardConfig
+} from '@/lib/ledgerCashSummary'
+import {
     getWorkspacePaymentSummary,
     hasWorkspacePaymentAccessStateUpdate,
     isWorkspacePaymentAccessExpired,
@@ -117,6 +122,7 @@ export interface WorkspaceFeatures {
     store_slug: string | null
     store_description: string | null
     sales_agent_commission_sheet_type: SalesAgentCommissionSheetType
+    ledger_dashboard_config: LedgerDashboardConfig
     private_staff_customers: boolean
     private_staff_suppliers: boolean
     suppliers_admin_only: boolean
@@ -160,7 +166,7 @@ interface WorkspaceContextType {
     refreshFeatures: () => Promise<void>
     refreshPaymentSummary: () => Promise<WorkspacePaymentSummary | null>
     updateSettings: (
-        settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'pos_convert_to_workspace_currency' | 'iqd_display_preference' | 'allow_whatsapp' | 'logo_url' | 'coordination' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'thermal_printing' | 'visibility' | 'store_slug' | 'store_description' | 'sales_agent_commission_sheet_type' | 'private_staff_customers' | 'private_staff_suppliers' | 'suppliers_admin_only' | 'upload_limit_mb' | 'data_mode' | 'plan' | 'is_configured'>> & { name?: string },
+        settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'pos_convert_to_workspace_currency' | 'iqd_display_preference' | 'allow_whatsapp' | 'logo_url' | 'coordination' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'thermal_printing' | 'visibility' | 'store_slug' | 'store_description' | 'sales_agent_commission_sheet_type' | 'ledger_dashboard_config' | 'private_staff_customers' | 'private_staff_suppliers' | 'suppliers_admin_only' | 'upload_limit_mb' | 'data_mode' | 'plan' | 'is_configured'>> & { name?: string },
         options?: { requireRemoteSync?: boolean }
     ) => Promise<void>
     switchDataMode: (newMode: 'cloud' | 'hybrid') => Promise<{ error: string | null }>
@@ -278,6 +284,7 @@ const defaultFeatures: WorkspaceFeatures = {
     store_slug: null,
     store_description: null,
     sales_agent_commission_sheet_type: 'normal',
+    ledger_dashboard_config: { ...DEFAULT_LEDGER_DASHBOARD_CONFIG, groupOrder: [...DEFAULT_LEDGER_DASHBOARD_CONFIG.groupOrder] },
     private_staff_customers: false,
     private_staff_suppliers: false,
     suppliers_admin_only: false
@@ -307,6 +314,7 @@ const WORKSPACE_FEATURE_COLUMNS = [
     'store_slug',
     'store_description',
     'sales_agent_commission_sheet_type',
+    'ledger_dashboard_config',
     'private_staff_customers',
     'private_staff_suppliers',
     'suppliers_admin_only'
@@ -356,6 +364,7 @@ function mergeWorkspaceFeatures(
         thermal_printing: capSet.has('thermalPrinter')
             ? features?.thermal_printing ?? defaultFeatures.thermal_printing
             : false,
+        ledger_dashboard_config: normalizeLedgerDashboardConfig(features?.ledger_dashboard_config),
         print_quality: 'high' as const
     }
 }
@@ -414,6 +423,7 @@ function getFeaturesFromLocalWorkspace(localWorkspace: Workspace): WorkspaceFeat
         store_slug: localWorkspace.store_slug ?? null,
         store_description: localWorkspace.store_description ?? null,
         sales_agent_commission_sheet_type: localWorkspace.sales_agent_commission_sheet_type ?? 'normal',
+        ledger_dashboard_config: normalizeLedgerDashboardConfig(localWorkspace.ledger_dashboard_config),
         private_staff_customers: localWorkspace.private_staff_customers ?? false,
         private_staff_suppliers: localWorkspace.private_staff_suppliers ?? false,
         suppliers_admin_only: localWorkspace.suppliers_admin_only ?? false
@@ -598,6 +608,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             store_slug: nextFeatures.store_slug,
             store_description: nextFeatures.store_description,
             sales_agent_commission_sheet_type: nextFeatures.sales_agent_commission_sheet_type,
+            ledger_dashboard_config: nextFeatures.ledger_dashboard_config,
             private_staff_customers: nextFeatures.private_staff_customers,
             private_staff_suppliers: nextFeatures.private_staff_suppliers,
             suppliers_admin_only: nextFeatures.suppliers_admin_only,
@@ -810,6 +821,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 store_slug: workspaceRow.store_slug ?? currentFeatures.store_slug,
                 store_description: workspaceRow.store_description ?? currentFeatures.store_description,
                 sales_agent_commission_sheet_type: workspaceRow.sales_agent_commission_sheet_type ?? currentFeatures.sales_agent_commission_sheet_type,
+                ledger_dashboard_config: normalizeLedgerDashboardConfig(workspaceRow.ledger_dashboard_config ?? currentFeatures.ledger_dashboard_config),
                 private_staff_customers: workspaceRow.private_staff_customers ?? currentFeatures.private_staff_customers,
                 private_staff_suppliers: workspaceRow.private_staff_suppliers ?? currentFeatures.private_staff_suppliers,
                 suppliers_admin_only: workspaceRow.suppliers_admin_only ?? currentFeatures.suppliers_admin_only
@@ -1045,6 +1057,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                             store_slug: data.store_slug ?? currentFeatures.store_slug,
                             store_description: data.store_description ?? currentFeatures.store_description,
                             sales_agent_commission_sheet_type: data.sales_agent_commission_sheet_type ?? currentFeatures.sales_agent_commission_sheet_type,
+                            ledger_dashboard_config: normalizeLedgerDashboardConfig(data.ledger_dashboard_config ?? currentFeatures.ledger_dashboard_config),
                             private_staff_customers: data.private_staff_customers ?? currentFeatures.private_staff_customers,
                             private_staff_suppliers: data.private_staff_suppliers ?? currentFeatures.private_staff_suppliers,
                             suppliers_admin_only: data.suppliers_admin_only ?? currentFeatures.suppliers_admin_only
@@ -1262,7 +1275,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
 
     const updateSettings = async (
-        settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'pos_convert_to_workspace_currency' | 'iqd_display_preference' | 'allow_whatsapp' | 'logo_url' | 'coordination' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'thermal_printing' | 'visibility' | 'store_slug' | 'store_description' | 'private_staff_customers' | 'private_staff_suppliers' | 'suppliers_admin_only' | 'upload_limit_mb' | 'data_mode' | 'plan' | 'is_configured'>> & { name?: string },
+        settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'pos_convert_to_workspace_currency' | 'iqd_display_preference' | 'allow_whatsapp' | 'logo_url' | 'coordination' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'thermal_printing' | 'visibility' | 'store_slug' | 'store_description' | 'sales_agent_commission_sheet_type' | 'ledger_dashboard_config' | 'private_staff_customers' | 'private_staff_suppliers' | 'suppliers_admin_only' | 'upload_limit_mb' | 'data_mode' | 'plan' | 'is_configured'>> & { name?: string },
         options?: { requireRemoteSync?: boolean }
     ) => {
         const workspaceId = user?.workspaceId
@@ -1369,6 +1382,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 store_slug: newFeatures.store_slug,
                 store_description: newFeatures.store_description,
                 sales_agent_commission_sheet_type: newFeatures.sales_agent_commission_sheet_type,
+                ledger_dashboard_config: newFeatures.ledger_dashboard_config,
                 private_staff_customers: newFeatures.private_staff_customers,
                 private_staff_suppliers: newFeatures.private_staff_suppliers,
                 suppliers_admin_only: newFeatures.suppliers_admin_only,

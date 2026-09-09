@@ -6347,7 +6347,7 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
                 loanCategory: loan.loanCategory || 'standard',
                 loanDirection: loan.direction || 'lent',
                 ...(loan.source === 'order' && loan.orderId && loan.orderType ? {
-                    ...(loan.loanCategory || 'standard') === 'simple' ? { displaySourceLabel: 'order_loan' } : {},
+                    displaySourceLabel: 'order_loan',
                     orderId: loan.orderId,
                     orderType: loan.orderType
                 } : {}),

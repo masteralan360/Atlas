@@ -1475,10 +1475,10 @@ export function Revenue() {
                             </CardContent>
                         </Card>
 
-                        {/* Net Profit */}
+                        {/* Gross Profit */}
                         <Card
                             className="bg-card dark:bg-card border-border/50 shadow-sm cursor-pointer hover:shadow-md transition-all group relative overflow-hidden rounded-3xl"
-                            onClick={() => openMetricModal('netProfit')}
+                            onClick={() => openMetricModal('grossProfit')}
                         >
                             <CardHeader className="pb-2">
                                 <div className="flex justify-between items-start">
@@ -1486,7 +1486,7 @@ export function Revenue() {
                                         <div className="p-1.5 bg-emerald-500/10 rounded-lg">
                                             <TrendingUp className="w-3.5 h-3.5" />
                                         </div>
-                                        {t('revenue.netProfit')}
+                                        {t('revenue.grossProfit')}
                                     </CardTitle>
                                     <div className={cn(
                                         "px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1",

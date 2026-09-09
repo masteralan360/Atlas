@@ -2614,6 +2614,12 @@ export interface Workspace extends BaseEntity {
   store_slug?: string | null
   store_description?: string | null
   sales_agent_commission_sheet_type?: SalesAgentCommissionSheetType
+  /** Shared per-workspace presentation preferences for the Ledger cash summary. */
+  ledger_dashboard_config?: {
+    version: 1
+    hiddenGroups: Array<'operating' | 'borrowing' | 'lending'>
+    groupOrder: Array<'operating' | 'borrowing' | 'lending'>
+  }
   /** Opt-in: new non-admin customer partners are private to their creator. */
   private_staff_customers?: boolean
   /** Opt-in: new non-admin supplier partners are private to their creator. */

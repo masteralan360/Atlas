@@ -142,7 +142,7 @@ export function DashboardSalesOverview({ data, iqdPreference }: DashboardSalesOv
                                 <TrendingUp className="w-5 h-5 text-emerald-500" />
                             </div>
                             <div>
-                                <p className="text-[10px] font-black uppercase text-emerald-600/70 dark:text-emerald-400/70 tracking-wider font-mono">{t('revenue.netProfit')}</p>
+                                <p className="text-[10px] font-black uppercase text-emerald-600/70 dark:text-emerald-400/70 tracking-wider font-mono">{t('revenue.grossProfit')}</p>
                                 <div className="space-y-0.5">
                                     {Object.entries(data).map(([curr, d]) => {
                                         const margin = d.revenue > 0 ? ((d.profit / d.revenue) * 100).toFixed(1) : '0.0'
@@ -232,7 +232,7 @@ export function DashboardSalesOverview({ data, iqdPreference }: DashboardSalesOv
                         <Area
                             type="monotone"
                             dataKey="profit"
-                            name="netProfit"
+                            name="grossProfit"
                             stroke={METRIC_COLORS.profit.stroke}
                             strokeWidth={3}
                             fillOpacity={1}

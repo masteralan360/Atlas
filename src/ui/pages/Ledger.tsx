@@ -33,8 +33,38 @@ import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { buildConversionRates } from '@/lib/budget'
 import { convertToStoreBase } from '@/lib/currency'
 import { getLedgerFlowSign, isLedgerCashFlowDirection, summarizeLedgerCashFlow, type LedgerReportingDirection } from '@/lib/ledgerFlow'
+import {
+    getLedgerCashBucketId,
+    isLedgerCashDrilldownMatch,
+    normalizeLedgerDashboardConfig,
+    summarizeLedgerCashMovements,
+    summarizeLedgerCashMovementsByCurrency,
+    type LedgerCashDrilldownId,
+    type LedgerCashGroupId,
+    type LedgerDashboardConfig,
+} from '@/lib/ledgerCashSummary'
+import {
+    LEDGER_MOVEMENT_CATEGORY_IDS,
+    LEDGER_NO_COUNTERPARTY,
+    LEDGER_UNASSIGNED_PAYMENT_ACCOUNT,
+    applyGeneralLedgerFilters,
+    canCompareLedgerAmounts,
+    countActiveLedgerFilters,
+    getLedgerCounterpartyFilterKey,
+    getLedgerMovementCategory,
+    getLedgerPaymentAccountFilterKey,
+    getLedgerTransactionState,
+    hasInvalidLedgerAmountRange,
+    normalizeLedgerFiltersForCurrency,
+    type GeneralLedgerFilterState,
+    type LedgerMovementCategory,
+    type LedgerSortOption,
+    type LedgerTransactionState,
+} from '@/lib/ledgerFilters'
 import { getInstallmentSaleLedgerPayment } from '@/lib/installmentSaleLedger'
+import { getLedgerCashMovementEntries } from '@/lib/ledgerCashMovementEntries'
 import { getLedgerPaymentTransactionEffect, getLedgerPaymentTransactions } from '@/lib/ledgerPaymentTransactions'
+import { classifySalesOrderLoanCash } from '@/lib/ledgerOrderLoan'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { setPendingSaleDetailsId } from '@/lib/saleNavigation'
 import {
@@ -44,7 +74,6 @@ import {
     useRealEstateTransactions,
     useSales,
     useSalesOrders,
-    useStorages,
     usePurchaseOrders,
     useBusinessPartners,
     useExchangeTransactions,
@@ -61,8 +90,15 @@ import {
     type SalesOrder,
     type PurchaseOrder,
 } from '@/local-db'
-import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
+import { cn, formatCurrency, formatDate, formatDateTime, formatNumericInput, sanitizeNumericInput } from '@/lib/utils'
 import {
+    AppDialog,
+    AppDialogBody,
+    AppDialogContent,
+    AppDialogDescription,
+    AppDialogFooter,
+    AppDialogHeader,
+    AppDialogTitle,
     AppPagination,
     Button,
     Card,
@@ -70,12 +106,6 @@ import {
     CardHeader,
     CardTitle,
     DateRangeFilters,
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
     Input,
     Label,
     Progress,
@@ -107,6 +137,7 @@ import {
 import { useWorkspace } from '@/workspace'
 import { useTheme } from '@/ui/components/theme-provider'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
+import { LedgerCashSummaryDashboard } from '@/ui/components/ledger/LedgerCashSummaryDashboard'
 import { getDateRangeBounds, isDateInDateRange } from '@/lib/dateRangeFilters'
 
 type LedgerDirection = LedgerReportingDirection
@@ -114,6 +145,7 @@ type LedgerSourceModule =
     | 'pos'
     | 'instant_pos'
     | 'orders'
+    | 'order_financing'
     | 'expenses'
     | 'payroll'
     | 'loans'
@@ -134,6 +166,8 @@ type LedgerEntryType =
     | 'ecommerce_receivable'
     | 'ecommerce_payment'
     | 'sales_order_payment'
+    | 'order_loan_collection'
+    | 'order_loan_refund'
     | 'purchase_order_payment'
     | 'expense'
     | 'payroll_payment'
@@ -175,7 +209,6 @@ const LEDGER_FRESHNESS_TABLES = [
     'sales',
     'sales_orders',
     'purchase_orders',
-    'storages',
     'business_partners',
     'agents',
     'delivery_merchant_profiles',
@@ -200,6 +233,7 @@ interface LedgerEntry {
     partner: string | null
     businessPartnerId: string | null
     paymentMethod: string | null
+    paymentAccountId?: string | null
     paymentAccount?: string | null
     notes: string | null
     description: string | null
@@ -215,54 +249,22 @@ interface LedgerEntry {
     storageIds?: string[]
 }
 
-type LedgerNotesFilter = 'with_notes' | 'without_notes'
-type LedgerSortOption = 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc'
-
-interface LedgerFilterState {
-    search: string
-    direction: LedgerDirection[]
-    type: LedgerEntryType[]
-    source: LedgerSourceModule[]
-    partner: string[]
-    currency: CurrencyCode[]
-    paymentMethods: string[]
-    storage: string[]
-    notes: LedgerNotesFilter[]
-    minAmount: string
-    maxAmount: string
-    sort: LedgerSortOption
-}
+type LedgerFilterState = GeneralLedgerFilterState<LedgerEntryType, LedgerSourceModule, CurrencyCode>
 
 const DEFAULT_LEDGER_FILTERS: LedgerFilterState = {
     search: '',
     direction: [],
+    category: [],
+    transactionState: [],
     type: [],
     source: [],
-    partner: [],
+    counterparty: [],
     currency: [],
     paymentMethods: [],
-    storage: [],
-    notes: [],
+    paymentAccounts: [],
     minAmount: '',
     maxAmount: '',
     sort: 'date_desc',
-}
-
-function countActiveLedgerFilters(filters: LedgerFilterState) {
-    return [
-        !!filters.search.trim(),
-        filters.direction.length > 0,
-        filters.type.length > 0,
-        filters.source.length > 0,
-        filters.partner.length > 0,
-        filters.currency.length > 0,
-        filters.paymentMethods.length > 0,
-        filters.storage.length > 0,
-        filters.notes.length > 0,
-        !!filters.minAmount,
-        !!filters.maxAmount,
-        filters.sort !== 'date_desc',
-    ].filter(Boolean).length
 }
 
 function isEntryInDateRange(
@@ -356,6 +358,14 @@ function ledgerTypeLabel(type: LedgerEntryType, t: any) {
         case 'sales_order_payment':
             return t('ledger.type.salesOrderPayment', {
                 defaultValue: 'Sales Order Payment',
+            })
+        case 'order_loan_collection':
+            return t('ledger.type.orderLoanCollection', {
+                defaultValue: 'Order Loan Collection',
+            })
+        case 'order_loan_refund':
+            return t('ledger.type.orderLoanRefund', {
+                defaultValue: 'Order Loan Refund',
             })
         case 'purchase_order_payment':
             return t('ledger.type.purchaseOrderPayment', {
@@ -476,6 +486,8 @@ function sourceModuleLabel(module: LedgerSourceModule, t: any) {
             })
         case 'orders':
             return t('ledger.sourceModule.orders', { defaultValue: 'Orders' })
+        case 'order_financing':
+            return t('ledger.sourceModule.orderFinancing', { defaultValue: 'Orders · Order Loan' })
         case 'expenses':
             return t('ledger.sourceModule.expenses', { defaultValue: 'Expenses' })
         case 'payroll':
@@ -528,17 +540,6 @@ function directionFilterLabel(direction: LedgerDirection, t: any) {
     }
 }
 
-function notesFilterLabel(value: LedgerNotesFilter, t: any) {
-    switch (value) {
-        case 'with_notes':
-            return t('ledger.notesFilter.withNotes', { defaultValue: 'With Notes' })
-        case 'without_notes':
-            return t('ledger.notesFilter.withoutNotes', {
-                defaultValue: 'Without Notes',
-            })
-    }
-}
-
 function sortOptionLabel(value: LedgerSortOption, t: any) {
     switch (value) {
         case 'date_asc':
@@ -560,22 +561,22 @@ function sortOptionLabel(value: LedgerSortOption, t: any) {
     }
 }
 
-function sortLedgerEntries(entries: LedgerEntry[], sort: LedgerSortOption) {
-    return [...entries].sort((left, right) => {
-        if (sort === 'date_asc') {
-            return left.date.localeCompare(right.date) || left.transactionId.localeCompare(right.transactionId)
-        }
+function movementCategoryLabel(category: LedgerMovementCategory, t: any) {
+    if (category === 'openingBalance') return t('ledger.filters.category.openingBalance')
+    if (category === 'balanceAdjustment') return t('ledger.filters.category.balanceAdjustment')
+    return t(`ledger.cashSummary.metrics.${category}.title`)
+}
 
-        if (sort === 'amount_desc') {
-            return right.amount - left.amount || right.date.localeCompare(left.date)
-        }
+function transactionStateLabel(state: LedgerTransactionState, t: any) {
+    return t(`ledger.filters.transactionState.${state}`)
+}
 
-        if (sort === 'amount_asc') {
-            return left.amount - right.amount || right.date.localeCompare(left.date)
-        }
+function includeSelectedOptions<T extends string>(available: T[], selected: T[]) {
+    return [...available, ...selected.filter((option) => !available.includes(option))]
+}
 
-        return right.date.localeCompare(left.date) || right.transactionId.localeCompare(left.transactionId)
-    })
+function incrementFacetCount<T extends string>(counts: Map<T, number>, value: T) {
+    counts.set(value, (counts.get(value) || 0) + 1)
 }
 
 interface LedgerMultiSelectProps<T extends string> {
@@ -583,11 +584,21 @@ interface LedgerMultiSelectProps<T extends string> {
     options: T[]
     allLabel: string
     getOptionLabel: (option: T) => string
+    getOptionCount?: (option: T) => number
+    multipleLabel: string
     onChange: (value: T[]) => void
 }
 
-function LedgerMultiSelect<T extends string>({ value, options, allLabel, getOptionLabel, onChange }: LedgerMultiSelectProps<T>) {
-    const selectionLabel = value.length > 0 ? value.map(getOptionLabel).join(', ') : allLabel
+function LedgerMultiSelect<T extends string>({
+    value,
+    options,
+    allLabel,
+    getOptionLabel,
+    getOptionCount,
+    multipleLabel,
+    onChange,
+}: LedgerMultiSelectProps<T>) {
+    const selectionLabel = value.length === 0 ? allLabel : value.length === 1 ? getOptionLabel(value[0]) : multipleLabel
 
     return (
         <DropdownMenu>
@@ -620,79 +631,19 @@ function LedgerMultiSelect<T extends string>({ value, options, allLabel, getOpti
                         }
                         onSelect={(event) => event.preventDefault()}
                     >
-                        {getOptionLabel(option)}
+                        <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                            <span className="truncate">{getOptionLabel(option)}</span>
+                            {getOptionCount ? (
+                                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold tabular-nums text-muted-foreground">
+                                    {getOptionCount(option)}
+                                </span>
+                            ) : null}
+                        </span>
                     </DropdownMenuCheckboxItem>
                 ))}
             </DropdownMenuContent>
         </DropdownMenu>
     )
-}
-
-function applyLedgerFilters(entries: LedgerEntry[], filters: LedgerFilterState) {
-    const normalizedSearch = filters.search.trim().toLowerCase()
-    const minAmount = filters.minAmount ? Number(filters.minAmount) : null
-    const maxAmount = filters.maxAmount ? Number(filters.maxAmount) : null
-
-    const filtered = entries.filter((entry) => {
-        if (filters.direction.length > 0 && !filters.direction.includes(entry.direction)) {
-            return false
-        }
-
-        if (filters.type.length > 0 && !filters.type.includes(entry.type)) {
-            return false
-        }
-
-        if (filters.source.length > 0 && !filters.source.includes(entry.sourceModule)) {
-            return false
-        }
-
-        if (filters.partner.length > 0 && !filters.partner.includes(entry.partner || '')) {
-            return false
-        }
-
-        if (filters.currency.length > 0 && !filters.currency.includes(entry.currency)) {
-            return false
-        }
-
-        if (filters.paymentMethods.length > 0 && !filters.paymentMethods.includes(entry.paymentMethod || 'unknown')) {
-            return false
-        }
-
-        if (filters.storage.length > 0 && !filters.storage.some((storageId) => entry.storageIds?.includes(storageId))) {
-            return false
-        }
-
-        const notesState: LedgerNotesFilter = entry.notes?.trim() ? 'with_notes' : 'without_notes'
-        if (filters.notes.length > 0 && !filters.notes.includes(notesState)) {
-            return false
-        }
-
-        if (minAmount !== null && Number.isFinite(minAmount) && entry.amount < minAmount) {
-            return false
-        }
-
-        if (maxAmount !== null && Number.isFinite(maxAmount) && entry.amount > maxAmount) {
-            return false
-        }
-
-        if (!normalizedSearch) {
-            return true
-        }
-
-        return [
-            entry.transactionId,
-            entry.referenceId,
-            entry.partner,
-            entry.notes,
-            entry.description,
-            entry.paymentMethod,
-            entry.paymentAccount,
-            ledgerTypeLabel(entry.type, (_key: string, opts: any) => opts?.defaultValue || _key),
-            sourceModuleLabel(entry.sourceModule, (_key: string, opts: any) => opts?.defaultValue || _key),
-        ].some((value) => value?.toLowerCase().includes(normalizedSearch))
-    })
-
-    return sortLedgerEntries(filtered, filters.sort)
 }
 
 function formatAmountSummary(rows: Array<{ amount: number; currency: CurrencyCode }>, iqdPreference: IQDDisplayPreference): string[] {
@@ -1063,6 +1014,30 @@ function buildLedgerRelationDescriptor(
     t: any,
 ): Pick<LedgerEntry, 'relationKey' | 'relationRole' | 'relationTitle' | 'relationDescription' | 'relationIsCompleted'> {
     const reference = buildTransactionReference(transaction)
+    const sourceLoan = context.loanById.get(transaction.sourceRecordId)
+    const orderLoanCash = classifySalesOrderLoanCash(transaction, sourceLoan)
+
+    if (orderLoanCash) {
+        const salesOrder = context.salesOrderById.get(orderLoanCash.orderId)
+        const linkedLoan =
+            sourceLoan || (salesOrder?.linkedLoanId ? context.loanById.get(salesOrder.linkedLoanId) : undefined)
+        const orderReference = salesOrder?.orderNumber || transaction.referenceLabel || orderLoanCash.orderId
+        const loanReference = linkedLoan?.loanNo || reference
+        const isRefund = orderLoanCash.type === 'order_loan_refund'
+
+        return {
+            relationKey: `loan:${linkedLoan?.id || transaction.sourceRecordId}`,
+            relationRole: 'settlement',
+            relationTitle: t(isRefund ? 'ledger.type.orderLoanRefund' : 'ledger.type.orderLoanCollection'),
+            relationDescription: t(
+                isRefund
+                    ? 'ledger.description.orderLoanRefundRelation'
+                    : 'ledger.description.orderLoanCollectionRelation',
+                { orderReference, loanReference },
+            ),
+            relationIsCompleted: linkedLoan ? linkedLoan.balanceAmount <= 0 : false,
+        }
+    }
 
     switch (transaction.sourceType) {
         case 'loan_origination': {
@@ -1599,12 +1574,16 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction, context: Ledge
                 typeof transaction.metadata?.sourceChannel === 'string' ? transaction.metadata.sourceChannel.trim().toLowerCase() : null
             const isMarketplace = sourceChannel === 'marketplace'
             const isReceivable = Boolean(transaction.metadata?.receivable)
+            // Marketplace delivery can create a synthetic credit transaction to
+            // register a receivable. Ledger is a completed-cash surface, so the
+            // obligation stays in CRM/Payments until a real collection posts.
+            if (isReceivable) return null
             const salesOrder = context.salesOrderById.get(transaction.sourceRecordId)
             return {
                 id: `payment:${transaction.id}`,
                 transactionId: transaction.id,
                 date: transaction.paidAt,
-                type: isMarketplace ? (isReceivable ? 'ecommerce_receivable' : 'ecommerce_payment') : 'sales_order_payment',
+                type: isMarketplace ? 'ecommerce_payment' : 'sales_order_payment',
                 direction: 'incoming',
                 amount: transaction.amount,
                 currency: transaction.currency,
@@ -1805,16 +1784,18 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction, context: Ledge
             }
         case 'loan_installment': {
             const installmentLoan = context.loanById.get(transaction.sourceRecordId)
+            const orderLoanCash = classifySalesOrderLoanCash(transaction, installmentLoan)
+            const salesOrder = orderLoanCash ? context.salesOrderById.get(orderLoanCash.orderId) : undefined
             return {
                 id: `payment:${transaction.id}`,
                 transactionId: transaction.id,
                 date: transaction.paidAt,
-                type: transaction.direction === 'incoming' ? 'installment_received' : 'installment_paid',
-                direction: transaction.direction,
-                amount: transaction.amount,
+                type: orderLoanCash?.type || (transaction.direction === 'incoming' ? 'installment_received' : 'installment_paid'),
+                direction: orderLoanCash?.direction || transaction.direction,
+                amount: orderLoanCash?.amount ?? transaction.amount,
                 currency: transaction.currency,
-                sourceModule: 'loans',
-                referenceId: buildTransactionReference(transaction),
+                sourceModule: orderLoanCash ? 'order_financing' : 'loans',
+                referenceId: salesOrder?.orderNumber || buildTransactionReference(transaction),
                 partner: transaction.counterpartyName || null,
                 businessPartnerId:
                     installmentLoan?.linkedPartyId ??
@@ -1823,7 +1804,7 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction, context: Ledge
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction, t),
-                routePath: getPaymentTransactionRoutePath(transaction),
+                routePath: orderLoanCash ? `/orders/${orderLoanCash.orderId}` : getPaymentTransactionRoutePath(transaction),
                 storageIds: getSaleStorageIds(installmentLoan?.saleId ? context.saleById.get(installmentLoan.saleId) : undefined),
                 ...relation,
             }
@@ -1831,16 +1812,18 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction, context: Ledge
         case 'loan_payment':
         case 'simple_loan': {
             const loanPaymentLoan = context.loanById.get(transaction.sourceRecordId)
+            const orderLoanCash = classifySalesOrderLoanCash(transaction, loanPaymentLoan)
+            const salesOrder = orderLoanCash ? context.salesOrderById.get(orderLoanCash.orderId) : undefined
             return {
                 id: `payment:${transaction.id}`,
                 transactionId: transaction.id,
                 date: transaction.paidAt,
-                type: transaction.direction === 'incoming' ? 'loan_repayment_received' : 'loan_repayment_paid',
-                direction: transaction.direction,
-                amount: transaction.amount,
+                type: orderLoanCash?.type || (transaction.direction === 'incoming' ? 'loan_repayment_received' : 'loan_repayment_paid'),
+                direction: orderLoanCash?.direction || transaction.direction,
+                amount: orderLoanCash?.amount ?? transaction.amount,
                 currency: transaction.currency,
-                sourceModule: 'loans',
-                referenceId: buildTransactionReference(transaction),
+                sourceModule: orderLoanCash ? 'order_financing' : 'loans',
+                referenceId: salesOrder?.orderNumber || buildTransactionReference(transaction),
                 partner: transaction.counterpartyName || null,
                 businessPartnerId:
                     loanPaymentLoan?.linkedPartyId ??
@@ -1849,8 +1832,35 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction, context: Ledge
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction, t),
-                routePath: getPaymentTransactionRoutePath(transaction),
+                routePath: orderLoanCash ? `/orders/${orderLoanCash.orderId}` : getPaymentTransactionRoutePath(transaction),
                 storageIds: getSaleStorageIds(loanPaymentLoan?.saleId ? context.saleById.get(loanPaymentLoan.saleId) : undefined),
+                ...relation,
+            }
+        }
+        case 'order_return': {
+            const orderLoanCash = classifySalesOrderLoanCash(transaction)
+            if (!orderLoanCash) return null
+            const salesOrder = context.salesOrderById.get(orderLoanCash.orderId)
+            return {
+                id: `payment:${transaction.id}`,
+                transactionId: transaction.id,
+                date: transaction.paidAt,
+                type: orderLoanCash.type,
+                direction: orderLoanCash.direction,
+                amount: orderLoanCash.amount,
+                currency: transaction.currency,
+                sourceModule: 'order_financing',
+                referenceId: salesOrder?.orderNumber || buildTransactionReference(transaction),
+                partner: transaction.counterpartyName || null,
+                businessPartnerId:
+                    salesOrder?.businessPartnerId ??
+                    context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ??
+                    null,
+                paymentMethod: transaction.paymentMethod || 'unknown',
+                notes: transaction.note?.trim() || null,
+                description: buildTransactionDescription(transaction, t),
+                routePath: `/orders/${orderLoanCash.orderId}`,
+                storageIds: getSalesOrderStorageIds(salesOrder),
                 ...relation,
             }
         }
@@ -1901,7 +1911,7 @@ export function Ledger() {
             }, 1500)
         }
     }
-    const { features, hasCapability } = useWorkspace()
+    const { features, hasCapability, updateSettings } = useWorkspace()
     const { style } = useTheme()
     const [, setLocation] = useLocation()
     const workspaceId = user?.workspaceId
@@ -1932,7 +1942,6 @@ export function Ledger() {
     const loans = useLoans(workspaceId)
     const realEstateTransactions = useRealEstateTransactions(workspaceId)
     const sales = useSales(workspaceId, dateBounds.startDate, dateBounds.endDate)
-    const storages = useStorages(workspaceId)
     // Ledger already subscribes to every source table it needs below. Avoid the
     // generic payment hook's full source-table hydration here: it fans out into
     // many remote reads and Dexie writes during route entry, delaying the first
@@ -1949,6 +1958,16 @@ export function Ledger() {
     const deliveryShipments = useDeliveryShipments(workspaceId)
     const rawExchangeTransactions = useExchangeTransactions(workspaceId)
     const ledgerPaymentTransactions = useMemo(() => getLedgerPaymentTransactions(paymentTransactions), [paymentTransactions])
+    const ledgerCashMovementEntries = useMemo(
+        () =>
+            getLedgerCashMovementEntries({
+                sales,
+                paymentTransactions: ledgerPaymentTransactions,
+                loans,
+                exchangeTransactions: rawExchangeTransactions || [],
+            }),
+        [ledgerPaymentTransactions, loans, rawExchangeTransactions, sales],
+    )
     const rates = useMemo(() => buildConversionRates(exchangeData, eurRates, tryRates), [eurRates, exchangeData, tryRates])
 
     const [filters, setFilters] = useState<LedgerFilterState>(DEFAULT_LEDGER_FILTERS)
@@ -1957,6 +1976,7 @@ export function Ledger() {
     const [hoveredRelationKey, setHoveredRelationKey] = useState<string | null>(null)
     const [isDirectionSplitView, setIsDirectionSplitView] = useState(false)
     const [isExportModalOpen, setIsExportModalOpen] = useState(false)
+    const [summaryDrilldown, setSummaryDrilldown] = useState<LedgerCashDrilldownId | null>(null)
 
     const [currentPage, setCurrentPage] = useState(1)
     const [pageSize, setPageSize] = useState(() => {
@@ -2038,8 +2058,9 @@ export function Ledger() {
             .map<LedgerEntry | null>((transaction) => {
                 const entry = buildPaymentLedgerEntry(transaction, context, t)
                 return entry
-                    ? {
+                      ? {
                           ...applyPaymentReversalToLedgerEntry(entry, transaction, t),
+                          paymentAccountId: transaction.accountId || null,
                           paymentAccount: transaction.accountNameSnapshot || null,
                       }
                     : null
@@ -2073,39 +2094,6 @@ export function Ledger() {
         t,
     ])
 
-    const typeOptions = useMemo(
-        () =>
-            Array.from(new Set(allEntries.map((entry) => entry.type))).sort((left, right) =>
-                ledgerTypeLabel(left, t).localeCompare(ledgerTypeLabel(right, t)),
-            ),
-        [allEntries, t],
-    )
-    const sourceOptions = useMemo(
-        () =>
-            Array.from(new Set(allEntries.map((entry) => entry.sourceModule))).sort((left, right) =>
-                sourceModuleLabel(left, t).localeCompare(sourceModuleLabel(right, t)),
-            ),
-        [allEntries, t],
-    )
-    const currencyOptions = useMemo(
-        () => Array.from(new Set(allEntries.map((entry) => entry.currency))).sort((left, right) => left.localeCompare(right)),
-        [allEntries],
-    )
-    const paymentMethodOptions = useMemo(
-        () =>
-            Array.from(new Set(allEntries.map((entry) => entry.paymentMethod || 'unknown'))).sort((left, right) =>
-                paymentMethodLabel(left, t).localeCompare(paymentMethodLabel(right, t)),
-            ),
-        [allEntries, t],
-    )
-    const partnerOptions = useMemo(
-        () =>
-            Array.from(new Set(allEntries.map((entry) => entry.partner?.trim()).filter((value): value is string => !!value))).sort(
-                (left, right) => left.localeCompare(right),
-            ),
-        [allEntries],
-    )
-
     const isLoading = sales === undefined
     const [isDateLoading, setIsDateLoading] = useState(false)
     const prevDateBoundsRef = useRef(dateBounds)
@@ -2128,10 +2116,115 @@ export function Ledger() {
         () => allEntries.filter((entry) => isEntryInDateRange(entry.date, dateRange, customDates)),
         [allEntries, customDates, dateRange],
     )
+    const dateScopedCashMovementEntries = useMemo(
+        () => ledgerCashMovementEntries.filter((entry) => isEntryInDateRange(entry.date, dateRange, customDates)),
+        [customDates, dateRange, ledgerCashMovementEntries],
+    )
+
+    const filterFacets = useMemo(() => {
+        const directionCounts = new Map<LedgerDirection, number>()
+        const categoryCounts = new Map<LedgerMovementCategory, number>()
+        const transactionStateCounts = new Map<LedgerTransactionState, number>()
+        const typeCounts = new Map<LedgerEntryType, number>()
+        const sourceCounts = new Map<LedgerSourceModule, number>()
+        const counterpartyCounts = new Map<string, number>()
+        const currencyCounts = new Map<CurrencyCode, number>()
+        const paymentMethodCounts = new Map<string, number>()
+        const paymentAccountCounts = new Map<string, number>()
+        const counterpartyLabels = new Map<string, string>()
+        const paymentAccountLabels = new Map<string, string>()
+
+        allEntries.forEach((entry) => {
+            const counterpartyKey = getLedgerCounterpartyFilterKey(entry)
+            const paymentAccountKey = getLedgerPaymentAccountFilterKey(entry)
+            counterpartyLabels.set(
+                counterpartyKey,
+                counterpartyKey === LEDGER_NO_COUNTERPARTY
+                    ? t('ledger.filters.noCounterparty')
+                    : entry.partner?.trim() ||
+                          (entry.businessPartnerId ? businessPartnerNameById.get(entry.businessPartnerId) : null) ||
+                          t('ledger.filters.unknownCounterparty'),
+            )
+            paymentAccountLabels.set(
+                paymentAccountKey,
+                paymentAccountKey === LEDGER_UNASSIGNED_PAYMENT_ACCOUNT
+                    ? t('ledger.filters.unassignedPaymentAccount')
+                    : entry.paymentAccount?.trim() || t('ledger.filters.unknownPaymentAccount'),
+            )
+        })
+
+        dateScopedEntries.forEach((entry) => {
+            incrementFacetCount(directionCounts, entry.direction)
+            const category = getLedgerMovementCategory(entry)
+            if (category) incrementFacetCount(categoryCounts, category)
+            incrementFacetCount(transactionStateCounts, getLedgerTransactionState(entry))
+            incrementFacetCount(typeCounts, entry.type)
+            incrementFacetCount(sourceCounts, entry.sourceModule)
+            incrementFacetCount(counterpartyCounts, getLedgerCounterpartyFilterKey(entry))
+            incrementFacetCount(currencyCounts, entry.currency)
+            incrementFacetCount(paymentMethodCounts, entry.paymentMethod || 'unknown')
+            incrementFacetCount(paymentAccountCounts, getLedgerPaymentAccountFilterKey(entry))
+        })
+
+        const byLabel = (left: string, right: string) => left.localeCompare(right, i18n.language)
+
+        return {
+            direction: (['incoming', 'outgoing', 'opening', 'adjustment'] as LedgerDirection[]).filter((value) =>
+                directionCounts.has(value),
+            ),
+            category: LEDGER_MOVEMENT_CATEGORY_IDS.filter((value) => categoryCounts.has(value)),
+            transactionState: (['standard', 'reversal'] as LedgerTransactionState[]).filter((value) =>
+                transactionStateCounts.has(value),
+            ),
+            type: Array.from(typeCounts.keys()).sort((left, right) => byLabel(ledgerTypeLabel(left, t), ledgerTypeLabel(right, t))),
+            source: Array.from(sourceCounts.keys()).sort((left, right) =>
+                byLabel(sourceModuleLabel(left, t), sourceModuleLabel(right, t)),
+            ),
+            counterparty: Array.from(counterpartyCounts.keys()).sort((left, right) =>
+                byLabel(counterpartyLabels.get(left) || left, counterpartyLabels.get(right) || right),
+            ),
+            currency: Array.from(currencyCounts.keys()).sort((left, right) => left.localeCompare(right)),
+            paymentMethods: Array.from(paymentMethodCounts.keys()).sort((left, right) =>
+                byLabel(paymentMethodLabel(left, t), paymentMethodLabel(right, t)),
+            ),
+            paymentAccounts: Array.from(paymentAccountCounts.keys()).sort((left, right) =>
+                byLabel(paymentAccountLabels.get(left) || left, paymentAccountLabels.get(right) || right),
+            ),
+            counts: {
+                direction: directionCounts,
+                category: categoryCounts,
+                transactionState: transactionStateCounts,
+                type: typeCounts,
+                source: sourceCounts,
+                counterparty: counterpartyCounts,
+                currency: currencyCounts,
+                paymentMethods: paymentMethodCounts,
+                paymentAccounts: paymentAccountCounts,
+            },
+            counterpartyLabels,
+            paymentAccountLabels,
+        }
+    }, [allEntries, businessPartnerNameById, dateScopedEntries, i18n.language, t])
 
     const effectiveFilters = useMemo(() => ({ ...filters, search: deferredSearch }), [deferredSearch, filters])
 
-    const filteredEntries = useMemo(() => applyLedgerFilters(dateScopedEntries, effectiveFilters), [dateScopedEntries, effectiveFilters])
+    const baseFilteredEntries = useMemo(
+        () =>
+            applyGeneralLedgerFilters(dateScopedEntries, effectiveFilters, (entry) => {
+                const category = getLedgerMovementCategory(entry)
+                return [
+                    ledgerTypeLabel(entry.type, t),
+                    sourceModuleLabel(entry.sourceModule, t),
+                    category ? movementCategoryLabel(category, t) : null,
+                    transactionStateLabel(getLedgerTransactionState(entry), t),
+                ]
+            }),
+        [dateScopedEntries, effectiveFilters, t],
+    )
+    const filteredEntries = useMemo(
+        () => baseFilteredEntries.filter((entry) => isLedgerCashDrilldownMatch(entry, summaryDrilldown)),
+        [baseFilteredEntries, summaryDrilldown],
+    )
     const ledgerExportData = useMemo(() => {
         return filteredEntries.map((entry) => ({
             [t('ledger.table.date') || 'Date']: formatDateTime(entry.date),
@@ -2156,7 +2249,20 @@ export function Ledger() {
     const visibleOpeningEntries = useMemo(() => visibleEntries.filter((entry) => entry.direction === 'opening'), [visibleEntries])
     const visibleAdjustmentEntries = useMemo(() => visibleEntries.filter((entry) => entry.direction === 'adjustment'), [visibleEntries])
 
-    const draftPreviewEntries = useMemo(() => applyLedgerFilters(dateScopedEntries, draftFilters), [dateScopedEntries, draftFilters])
+    const draftPreviewEntries = useMemo(
+        () =>
+            applyGeneralLedgerFilters(dateScopedEntries, draftFilters, (entry) => {
+                const category = getLedgerMovementCategory(entry)
+                return [
+                    ledgerTypeLabel(entry.type, t),
+                    sourceModuleLabel(entry.sourceModule, t),
+                    category ? movementCategoryLabel(category, t) : null,
+                    transactionStateLabel(getLedgerTransactionState(entry), t),
+                ]
+            }),
+        [dateScopedEntries, draftFilters, t],
+    )
+    const isDraftAmountRangeInvalid = hasInvalidLedgerAmountRange(draftFilters)
 
     const dateDisplay = useMemo(() => {
         if (dateRange === 'today') {
@@ -2204,7 +2310,7 @@ export function Ledger() {
 
     useEffect(() => {
         setCurrentPage(1)
-    }, [dateRange, customDates, filters, pageSize])
+    }, [dateRange, customDates, filters, pageSize, summaryDrilldown])
 
     useEffect(() => {
         if (hoveredRelationKey && !visibleEntries.some((entry) => entry.relationKey === hoveredRelationKey)) {
@@ -2223,6 +2329,10 @@ export function Ledger() {
     const activeFilterChips = useMemo(() => {
         const chips: string[] = []
 
+        if (summaryDrilldown) {
+            chips.push(t(`ledger.cashSummary.drilldown.${summaryDrilldown}`))
+        }
+
         if (filters.search.trim()) {
             chips.push(
                 t('ledger.filters.chipSearch', {
@@ -2236,6 +2346,16 @@ export function Ledger() {
                 chips.push(directionFilterLabel(direction, t))
             })
         }
+        if (filters.category.length > 0) {
+            filters.category.forEach((category) => {
+                chips.push(movementCategoryLabel(category, t))
+            })
+        }
+        if (filters.transactionState.length > 0) {
+            filters.transactionState.forEach((state) => {
+                chips.push(transactionStateLabel(state, t))
+            })
+        }
         if (filters.type.length > 0) {
             filters.type.forEach((type) => {
                 chips.push(ledgerTypeLabel(type, t))
@@ -2246,12 +2366,11 @@ export function Ledger() {
                 chips.push(sourceModuleLabel(source, t))
             })
         }
-        if (filters.partner.length > 0) {
-            filters.partner.forEach((partner) => {
+        if (filters.counterparty.length > 0) {
+            filters.counterparty.forEach((counterparty) => {
                 chips.push(
-                    t('ledger.filters.chipPartner', {
-                        name: partner,
-                        defaultValue: `Partner: ${partner}`,
+                    t('ledger.filters.chipCounterparty', {
+                        name: filterFacets.counterpartyLabels.get(counterparty) || counterparty,
                     }),
                 )
             })
@@ -2276,35 +2395,28 @@ export function Ledger() {
                 )
             })
         }
-        if (filters.storage.length > 0) {
-            filters.storage.forEach((storageId) => {
-                const storageName = storages.find((storage) => storage.id === storageId)?.name || storageId
+        if (filters.paymentAccounts.length > 0) {
+            filters.paymentAccounts.forEach((account) => {
                 chips.push(
-                    t('ledger.filters.chipStorage', {
-                        name: storageName,
-                        defaultValue: `Storage: ${storageName}`,
+                    t('ledger.filters.chipPaymentAccount', {
+                        name: filterFacets.paymentAccountLabels.get(account) || account,
                     }),
                 )
-            })
-        }
-        if (filters.notes.length > 0) {
-            filters.notes.forEach((notes) => {
-                chips.push(notesFilterLabel(notes, t))
             })
         }
         if (filters.minAmount) {
             chips.push(
                 t('ledger.filters.chipMin', {
-                    value: filters.minAmount,
-                    defaultValue: `Min: ${filters.minAmount}`,
+                    value: formatNumericInput(filters.minAmount),
+                    currency: filters.currency[0]?.toUpperCase(),
                 }),
             )
         }
         if (filters.maxAmount) {
             chips.push(
                 t('ledger.filters.chipMax', {
-                    value: filters.maxAmount,
-                    defaultValue: `Max: ${filters.maxAmount}`,
+                    value: formatNumericInput(filters.maxAmount),
+                    currency: filters.currency[0]?.toUpperCase(),
                 }),
             )
         }
@@ -2313,12 +2425,13 @@ export function Ledger() {
         }
 
         return chips
-    }, [filters, storages, t])
+    }, [filterFacets.counterpartyLabels, filterFacets.paymentAccountLabels, filters, summaryDrilldown, t])
 
-    const activeFilterCount = useMemo(() => countActiveLedgerFilters(filters), [filters])
+    const activeFilterCount = useMemo(() => countActiveLedgerFilters(filters) + (summaryDrilldown ? 1 : 0), [filters, summaryDrilldown])
 
     const handleResetAllFilters = () => {
         setFilters(DEFAULT_LEDGER_FILTERS)
+        setSummaryDrilldown(null)
     }
 
     const handleResetDraftFilters = () => {
@@ -2326,9 +2439,67 @@ export function Ledger() {
     }
 
     const handleApplyFilters = () => {
-        setFilters(draftFilters)
+        if (isDraftAmountRangeInvalid) return
+        setFilters(normalizeLedgerFiltersForCurrency(draftFilters))
         setIsFilterDialogOpen(false)
         setCurrentPage(1)
+    }
+
+    const handleSummaryDrilldown = (drilldownId: LedgerCashDrilldownId) => {
+        const isClearingActiveDrilldown = summaryDrilldown === drilldownId
+        setSummaryDrilldown(isClearingActiveDrilldown ? null : drilldownId)
+        setCurrentPage(1)
+        if (!isClearingActiveDrilldown) {
+            window.setTimeout(() => document.getElementById('ledger-entries')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+        }
+    }
+
+    const summarySourceEntries = useMemo(
+        () =>
+            dateScopedCashMovementEntries.filter(
+                (entry) =>
+                    isLedgerCashFlowDirection(entry.direction) &&
+                    (filters.currency.length === 0 || filters.currency.includes(entry.currency)),
+            ),
+        [dateScopedCashMovementEntries, filters.currency],
+    )
+    const cashSummariesByCurrency = useMemo(() => {
+        const currenciesWithMovements = new Set(summarySourceEntries.map((entry) => entry.currency))
+        const availableCurrencyOrder = Array.from(
+            new Set([baseCurrency, ...features.allowed_currencies, ...currenciesWithMovements]),
+        ).filter((currency) => currenciesWithMovements.has(currency))
+        const currencyOrder = filters.currency.length > 0 ? filters.currency : availableCurrencyOrder
+        const separatedSummaries = summarizeLedgerCashMovementsByCurrency(
+            summarySourceEntries,
+            currencyOrder,
+        )
+
+        if (separatedSummaries.length > 0) return separatedSummaries
+
+        return [{ currency: baseCurrency, summary: summarizeLedgerCashMovements([]) }]
+    }, [baseCurrency, features.allowed_currencies, filters.currency, summarySourceEntries])
+    const eligibleCashGroups = useMemo<LedgerCashGroupId[]>(() => {
+        let hasBorrowing = false
+        let hasLending = false
+
+        ledgerCashMovementEntries.forEach((entry) => {
+            const bucketId = getLedgerCashBucketId(entry)
+            if (bucketId === 'loansReceived' || bucketId === 'loanRepaymentsPaid') hasBorrowing = true
+            if (bucketId === 'repaymentsCollected' || bucketId === 'loansAdvanced') hasLending = true
+        })
+
+        return ['operating', ...(hasBorrowing ? (['borrowing'] as const) : []), ...(hasLending ? (['lending'] as const) : [])]
+    }, [ledgerCashMovementEntries])
+    const enabledCashGroups = useMemo<LedgerCashGroupId[]>(
+        () => ['operating', ...(features.loans ? (['borrowing', 'lending'] as const) : [])],
+        [features.loans],
+    )
+    const ledgerDashboardConfig = useMemo(
+        () => normalizeLedgerDashboardConfig(features.ledger_dashboard_config),
+        [features.ledger_dashboard_config],
+    )
+    const handleSaveLedgerDashboardConfig = async (config: LedgerDashboardConfig) => {
+        await updateSettings({ ledger_dashboard_config: normalizeLedgerDashboardConfig(config) })
     }
 
     const cashFlowEntries = useMemo(() => filteredEntries.filter((entry) => isLedgerCashFlowDirection(entry.direction)), [filteredEntries])
@@ -2952,7 +3123,7 @@ export function Ledger() {
         )
     }
 
-    if (!hasLedgerSurface) {
+    if (!hasLedgerSurface && allEntries.length === 0) {
         return (
             <div className="p-6">
                 <Card>
@@ -3044,9 +3215,9 @@ export function Ledger() {
 
             {activeFilterChips.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
-                    {activeFilterChips.map((chip) => (
+                    {activeFilterChips.map((chip, index) => (
                         <span
-                            key={chip}
+                            key={`${chip}-${index}`}
                             className="rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-[11px] font-semibold text-primary"
                         >
                             {chip}
@@ -3055,7 +3226,19 @@ export function Ledger() {
                 </div>
             ) : null}
 
-            <TooltipProvider delayDuration={300}>
+            <LedgerCashSummaryDashboard
+                summaries={cashSummariesByCurrency}
+                iqdPreference={features.iqd_display_preference}
+                activeDrilldown={summaryDrilldown}
+                isLoading={isLoading || isDateLoading}
+                config={ledgerDashboardConfig}
+                eligibleGroups={eligibleCashGroups}
+                enabledGroups={enabledCashGroups}
+                onSaveConfig={handleSaveLedgerDashboardConfig}
+                onDrilldown={handleSummaryDrilldown}
+            />
+
+            {SHOW_LEDGER_ANALYTICS_WIDGETS ? <TooltipProvider delayDuration={300}>
                 <div className={cn('grid gap-4 sm:grid-cols-2', SHOW_LEDGER_ANALYTICS_WIDGETS ? 'lg:grid-cols-4' : 'lg:grid-cols-3')}>
                     <Card className="rounded-3xl border border-border/50 bg-card/60 overflow-hidden relative group dark:bg-zinc-950">
                         <div className="absolute top-0 end-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
@@ -3277,7 +3460,7 @@ export function Ledger() {
                         </Card>
                     )}
                 </div>
-            </TooltipProvider>
+            </TooltipProvider> : null}
 
             {SHOW_LEDGER_ANALYTICS_WIDGETS && (
                 <div className="grid gap-4 lg:grid-cols-4">
@@ -3520,7 +3703,7 @@ export function Ledger() {
                 </p>
             ) : null}
 
-            <Card>
+            <Card id="ledger-entries" className="scroll-mt-4">
                 <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 gap-4">
                     <div className="space-y-1">
                         <CardTitle>{t('ledger.table.title', { defaultValue: 'Ledger Entries' })}</CardTitle>
@@ -3726,378 +3909,304 @@ export function Ledger() {
                 </CardContent>
             </Card>
 
-            <Dialog open={isFilterDialogOpen} onOpenChange={setIsFilterDialogOpen}>
-                <DialogContent className="top-[calc(50%+var(--titlebar-height)/2+var(--safe-area-top)/2)] w-[calc(100vw-0.75rem)] max-w-5xl overflow-hidden rounded-[1.5rem] border border-border/60 p-0 sm:w-[calc(100vw-2rem)] sm:rounded-[2rem]">
-                    <div className="flex max-h-[calc(100dvh-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-1rem)] flex-col">
-                        <DialogHeader className="border-b border-border/60 bg-gradient-to-r from-primary/8 via-background to-emerald-500/5 px-6 py-5 text-start">
-                            <DialogTitle className="flex items-center gap-3 text-xl font-black tracking-tight">
-                                <div className="rounded-2xl bg-primary/10 p-2.5 text-primary">
-                                    <SlidersHorizontal className="h-5 w-5" />
-                                </div>
-                                {t('ledger.filters.dialogTitle', {
-                                    defaultValue: 'General Ledger Filters',
-                                })}
-                            </DialogTitle>
-                            <DialogDescription className="max-w-3xl">
-                                {t('ledger.filters.dialogDescription', {
-                                    defaultValue:
-                                        'Refine the ledger with a richer filter set before you inspect entries. Date range stays on the page, and changes here stay in the modal until you apply them.',
-                                })}
-                            </DialogDescription>
-                        </DialogHeader>
+            <AppDialog open={isFilterDialogOpen} onOpenChange={setIsFilterDialogOpen}>
+                <AppDialogContent className="max-w-5xl">
+                    <AppDialogHeader>
+                        <AppDialogTitle className="flex items-center gap-3">
+                            <span className="rounded-2xl bg-primary/10 p-2.5 text-primary">
+                                <SlidersHorizontal className="h-5 w-5" />
+                            </span>
+                            {t('ledger.filters.dialogTitle')}
+                        </AppDialogTitle>
+                        <AppDialogDescription>{t('ledger.filters.dialogDescription')}</AppDialogDescription>
+                    </AppDialogHeader>
 
-                        <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
-                            <div className="grid gap-3 md:grid-cols-3">
-                                <div className="rounded-2xl border border-emerald-500/15 bg-emerald-500/5 p-4">
-                                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-700">
-                                        {t('ledger.filters.preview', { defaultValue: 'Preview' })}
-                                    </div>
-                                    <div className="mt-2 text-2xl font-black text-emerald-700">{draftPreviewEntries.length}</div>
-                                    <div className="mt-1 text-xs text-muted-foreground">
-                                        {t('ledger.filters.previewDescription', {
-                                            defaultValue: 'entries match the draft filters inside the current page range',
-                                        })}
-                                    </div>
+                    <AppDialogBody className="space-y-6">
+                        <div className="grid gap-3 md:grid-cols-3">
+                            <div className="rounded-2xl border border-emerald-500/15 bg-emerald-500/5 p-4">
+                                <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-700">
+                                    {t('ledger.filters.preview')}
                                 </div>
-                                <div className="rounded-2xl border border-border/60 bg-secondary/20 p-4">
-                                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
-                                        {t('ledger.filters.pageRange', {
-                                            defaultValue: 'Page Range',
-                                        })}
-                                    </div>
-                                    <div className="mt-2 text-sm font-bold">
-                                        {dateDisplay ||
-                                            t('performance.filters.allTime', {
-                                                defaultValue: 'All Time',
-                                            })}
-                                    </div>
-                                    <div className="mt-1 text-xs text-muted-foreground">
-                                        {t('ledger.filters.pageRangeDescription', {
-                                            defaultValue: 'Controlled directly from the ledger page header',
-                                        })}
-                                    </div>
-                                </div>
-                                <div className="rounded-2xl border border-border/60 bg-secondary/20 p-4">
-                                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
-                                        {t('ledger.filters.draftFilters', {
-                                            defaultValue: 'Draft Filters',
-                                        })}
-                                    </div>
-                                    <div className="mt-2 text-2xl font-black">{countActiveLedgerFilters(draftFilters)}</div>
-                                    <div className="mt-1 text-xs text-muted-foreground">
-                                        {t('ledger.filters.draftFiltersDescription', {
-                                            defaultValue: 'advanced conditions configured',
-                                        })}
-                                    </div>
-                                </div>
+                                <div className="mt-2 text-2xl font-black tabular-nums text-emerald-700">{draftPreviewEntries.length}</div>
+                                <div className="mt-1 text-xs text-muted-foreground">{t('ledger.filters.previewDescription')}</div>
                             </div>
+                            <div className="rounded-2xl border border-border/60 bg-secondary/20 p-4">
+                                <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
+                                    {t('ledger.filters.pageRange')}
+                                </div>
+                                <div className="mt-2 text-sm font-bold">{dateDisplay || t('performance.filters.allTime')}</div>
+                                <div className="mt-1 text-xs text-muted-foreground">{t('ledger.filters.pageRangeDescription')}</div>
+                            </div>
+                            <div className="rounded-2xl border border-border/60 bg-secondary/20 p-4">
+                                <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
+                                    {t('ledger.filters.activeConditions')}
+                                </div>
+                                <div className="mt-2 text-2xl font-black tabular-nums">{countActiveLedgerFilters(draftFilters)}</div>
+                                <div className="mt-1 text-xs text-muted-foreground">{t('ledger.filters.activeConditionsDescription')}</div>
+                            </div>
+                        </div>
 
-                            <section className="grid gap-4 lg:grid-cols-2">
-                                <div className="space-y-4 rounded-[1.5rem] border border-border/60 bg-background/80 p-5">
-                                    <div className="space-y-1">
-                                        <h3 className="text-base font-black tracking-tight">
-                                            {t('ledger.filters.searchMovement', {
-                                                defaultValue: 'Search & Movement',
-                                            })}
-                                        </h3>
-                                        <p className="text-sm text-muted-foreground">
-                                            {t('ledger.filters.searchMovementDescription', {
-                                                defaultValue: 'Search by IDs, partner, notes, reference, or module.',
-                                            })}
-                                        </p>
-                                    </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="ledger-filter-search">{t('ledger.filters.keywordSearch')}</Label>
+                            <div className="relative">
+                                <Search className="pointer-events-none absolute start-3 top-3.5 h-4 w-4 text-muted-foreground" />
+                                <Input
+                                    id="ledger-filter-search"
+                                    value={draftFilters.search}
+                                    onChange={(event) => setDraftFilters((current) => ({ ...current, search: event.target.value }))}
+                                    placeholder={t('ledger.filters.searchPlaceholder')}
+                                    className="ps-9"
+                                />
+                            </div>
+                            <p className="text-xs text-muted-foreground">{t('ledger.filters.searchHint')}</p>
+                        </div>
 
-                                    <div className="space-y-2">
-                                        <Label htmlFor="ledger-filter-search">
-                                            {t('ledger.filters.keywordSearch', {
-                                                defaultValue: 'Keyword Search',
-                                            })}
-                                        </Label>
-                                        <div className="relative">
-                                            <Search className="pointer-events-none absolute start-3 top-3.5 h-4 w-4 text-muted-foreground" />
-                                            <Input
-                                                id="ledger-filter-search"
-                                                value={draftFilters.search}
-                                                onChange={(event) =>
-                                                    setDraftFilters((current) => ({
-                                                        ...current,
-                                                        search: event.target.value,
-                                                    }))
-                                                }
-                                                placeholder={t('ledger.filters.searchPlaceholder', {
-                                                    defaultValue: 'Search reference, partner, note, or ID',
-                                                })}
-                                                className="ps-9"
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <div className="grid gap-4 sm:grid-cols-2">
-                                        <div className="space-y-2">
-                                            <Label>
-                                                {t('ledger.filters.direction', {
-                                                    defaultValue: 'Direction',
-                                                })}
-                                            </Label>
-                                            <LedgerMultiSelect
-                                                value={draftFilters.direction}
-                                                options={['incoming', 'outgoing', 'opening', 'adjustment']}
-                                                allLabel={t('ledger.direction.allDirections', {
-                                                    defaultValue: 'All Directions',
-                                                })}
-                                                getOptionLabel={(direction) => directionFilterLabel(direction, t)}
-                                                onChange={(direction) =>
-                                                    setDraftFilters((current) => ({
-                                                        ...current,
-                                                        direction,
-                                                    }))
-                                                }
-                                            />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label>
-                                                {t('ledger.filters.sortBy', {
-                                                    defaultValue: 'Sort By',
-                                                })}
-                                            </Label>
-                                            <Select
-                                                value={draftFilters.sort}
-                                                onValueChange={(value: LedgerSortOption) =>
-                                                    setDraftFilters((current) => ({
-                                                        ...current,
-                                                        sort: value,
-                                                    }))
-                                                }
-                                            >
-                                                <SelectTrigger>
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="date_desc">{sortOptionLabel('date_desc', t)}</SelectItem>
-                                                    <SelectItem value="date_asc">{sortOptionLabel('date_asc', t)}</SelectItem>
-                                                    <SelectItem value="amount_desc">{sortOptionLabel('amount_desc', t)}</SelectItem>
-                                                    <SelectItem value="amount_asc">{sortOptionLabel('amount_asc', t)}</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                    </div>
-
-                                    <div className="grid gap-4 sm:grid-cols-2">
-                                        <div className="space-y-2">
-                                            <Label>
-                                                {t('ledger.filters.transactionType', {
-                                                    defaultValue: 'Transaction Type',
-                                                })}
-                                            </Label>
-                                            <LedgerMultiSelect
-                                                value={draftFilters.type}
-                                                options={typeOptions}
-                                                allLabel={t('ledger.filters.allTypes', {
-                                                    defaultValue: 'All Types',
-                                                })}
-                                                getOptionLabel={(type) => ledgerTypeLabel(type, t)}
-                                                onChange={(type) => setDraftFilters((current) => ({ ...current, type }))}
-                                            />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label>
-                                                {t('ledger.filters.sourceModule', {
-                                                    defaultValue: 'Source Module',
-                                                })}
-                                            </Label>
-                                            <LedgerMultiSelect
-                                                value={draftFilters.source}
-                                                options={sourceOptions}
-                                                allLabel={t('ledger.filters.allModules', {
-                                                    defaultValue: 'All Modules',
-                                                })}
-                                                getOptionLabel={(source) => sourceModuleLabel(source, t)}
-                                                onChange={(source) => setDraftFilters((current) => ({ ...current, source }))}
-                                            />
-                                        </div>
-                                    </div>
+                        <div className="grid gap-4 lg:grid-cols-2">
+                            <section className="space-y-4 rounded-[1.5rem] border border-border/60 bg-background/80 p-5">
+                                <div className="space-y-1">
+                                    <h3 className="flex items-center gap-2 text-base font-black tracking-tight">
+                                        <ArrowDownLeft className="h-4 w-4 text-primary" />
+                                        {t('ledger.filters.movementMeaning')}
+                                    </h3>
+                                    <p className="text-sm text-muted-foreground">{t('ledger.filters.movementMeaningDescription')}</p>
                                 </div>
 
-                                <div className="space-y-4 rounded-[1.5rem] border border-border/60 bg-background/80 p-5">
-                                    <div className="space-y-1">
-                                        <h3 className="text-base font-black tracking-tight">
-                                            {t('ledger.filters.partiesMethodAmount', {
-                                                defaultValue: 'Parties, Method & Amount',
-                                            })}
-                                        </h3>
-                                        <p className="text-sm text-muted-foreground">
-                                            {t('ledger.filters.partiesMethodAmountDescription', {
-                                                defaultValue: 'Narrow the ledger to specific partners, currencies, methods, or ranges.',
-                                            })}
-                                        </p>
-                                    </div>
+                                <div className="space-y-2">
+                                    <Label>{t('ledger.filters.cashCategory')}</Label>
+                                    <LedgerMultiSelect
+                                        value={draftFilters.category}
+                                        options={includeSelectedOptions(filterFacets.category, draftFilters.category)}
+                                        allLabel={t('ledger.filters.allCashCategories')}
+                                        multipleLabel={t('ledger.filters.selectedCount', { count: draftFilters.category.length })}
+                                        getOptionLabel={(category) => movementCategoryLabel(category, t)}
+                                        getOptionCount={(category) => filterFacets.counts.category.get(category) || 0}
+                                        onChange={(category) => setDraftFilters((current) => ({ ...current, category }))}
+                                    />
+                                </div>
 
-                                    <div className="grid gap-4 sm:grid-cols-2">
-                                        <div className="space-y-2">
-                                            <Label>
-                                                {t('ledger.filters.partner', {
-                                                    defaultValue: 'Partner',
-                                                })}
-                                            </Label>
-                                            <LedgerMultiSelect
-                                                value={draftFilters.partner}
-                                                options={partnerOptions}
-                                                allLabel={t('ledger.filters.allPartners', {
-                                                    defaultValue: 'All Partners',
-                                                })}
-                                                getOptionLabel={(partner) => partner}
-                                                onChange={(partner) =>
-                                                    setDraftFilters((current) => ({
-                                                        ...current,
-                                                        partner,
-                                                    }))
-                                                }
-                                            />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label>
-                                                {t('ledger.filters.currency', {
-                                                    defaultValue: 'Currency',
-                                                })}
-                                            </Label>
-                                            <LedgerMultiSelect
-                                                value={draftFilters.currency}
-                                                options={currencyOptions}
-                                                allLabel={t('ledger.filters.allCurrencies', {
-                                                    defaultValue: 'All Currencies',
-                                                })}
-                                                getOptionLabel={(currency) => currency.toUpperCase()}
-                                                onChange={(currency) =>
-                                                    setDraftFilters((current) => ({
-                                                        ...current,
-                                                        currency,
-                                                    }))
-                                                }
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <div className="grid gap-4 sm:grid-cols-2">
-                                        <div className="space-y-2">
-                                            <Label>
-                                                {t('ledger.filters.paymentMethod', {
-                                                    defaultValue: 'Payment Method',
-                                                })}
-                                            </Label>
-                                            <LedgerMultiSelect
-                                                value={draftFilters.paymentMethods}
-                                                options={paymentMethodOptions}
-                                                allLabel={t('ledger.filters.anyMethod', {
-                                                    defaultValue: 'Any Method',
-                                                })}
-                                                getOptionLabel={(method) => paymentMethodLabel(method, t)}
-                                                onChange={(paymentMethods) =>
-                                                    setDraftFilters((current) => ({
-                                                        ...current,
-                                                        paymentMethods,
-                                                    }))
-                                                }
-                                            />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label>{t('ledger.filters.notes', { defaultValue: 'Notes' })}</Label>
-                                            <LedgerMultiSelect
-                                                value={draftFilters.notes}
-                                                options={['with_notes', 'without_notes']}
-                                                allLabel={t('ledger.filters.anyNotesState', {
-                                                    defaultValue: 'Any Notes State',
-                                                })}
-                                                getOptionLabel={(notes) => notesFilterLabel(notes, t)}
-                                                onChange={(notes) => setDraftFilters((current) => ({ ...current, notes }))}
-                                            />
-                                        </div>
-                                    </div>
-
+                                <div className="grid gap-4 sm:grid-cols-2">
                                     <div className="space-y-2">
-                                        <Label>{t('ledger.filters.storage', { defaultValue: 'Storage' })}</Label>
+                                        <Label>{t('ledger.filters.direction')}</Label>
                                         <LedgerMultiSelect
-                                            value={draftFilters.storage}
-                                            options={storages.map((storage) => storage.id)}
-                                            allLabel={t('ledger.filters.allStorages', {
-                                                defaultValue: 'All Storages',
-                                            })}
-                                            getOptionLabel={(storageId) =>
-                                                storages.find((storage) => storage.id === storageId)?.name || storageId
-                                            }
-                                            onChange={(storage) => setDraftFilters((current) => ({ ...current, storage }))}
+                                            value={draftFilters.direction}
+                                            options={includeSelectedOptions(filterFacets.direction, draftFilters.direction)}
+                                            allLabel={t('ledger.direction.allDirections')}
+                                            multipleLabel={t('ledger.filters.selectedCount', { count: draftFilters.direction.length })}
+                                            getOptionLabel={(direction) => directionFilterLabel(direction, t)}
+                                            getOptionCount={(direction) => filterFacets.counts.direction.get(direction) || 0}
+                                            onChange={(direction) => setDraftFilters((current) => ({ ...current, direction }))}
                                         />
                                     </div>
+                                    <div className="space-y-2">
+                                        <Label>{t('ledger.filters.entryState')}</Label>
+                                        <LedgerMultiSelect
+                                            value={draftFilters.transactionState}
+                                            options={includeSelectedOptions(filterFacets.transactionState, draftFilters.transactionState)}
+                                            allLabel={t('ledger.filters.allEntryStates')}
+                                            multipleLabel={t('ledger.filters.selectedCount', { count: draftFilters.transactionState.length })}
+                                            getOptionLabel={(state) => transactionStateLabel(state, t)}
+                                            getOptionCount={(state) => filterFacets.counts.transactionState.get(state) || 0}
+                                            onChange={(transactionState) =>
+                                                setDraftFilters((current) => ({ ...current, transactionState }))
+                                            }
+                                        />
+                                    </div>
+                                </div>
 
-                                    <div className="grid gap-4 sm:grid-cols-2">
-                                        <div className="space-y-2">
-                                            <Label htmlFor="ledger-filter-min-amount">
-                                                {t('ledger.filters.minimumAmount', {
-                                                    defaultValue: 'Minimum Amount',
-                                                })}
-                                            </Label>
-                                            <Input
-                                                id="ledger-filter-min-amount"
-                                                type="number"
-                                                min="0"
-                                                value={draftFilters.minAmount}
-                                                onChange={(event) =>
-                                                    setDraftFilters((current) => ({
-                                                        ...current,
-                                                        minAmount: event.target.value,
-                                                    }))
-                                                }
-                                                placeholder="0"
-                                            />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="ledger-filter-max-amount">
-                                                {t('ledger.filters.maximumAmount', {
-                                                    defaultValue: 'Maximum Amount',
-                                                })}
-                                            </Label>
-                                            <Input
-                                                id="ledger-filter-max-amount"
-                                                type="number"
-                                                min="0"
-                                                value={draftFilters.maxAmount}
-                                                onChange={(event) =>
-                                                    setDraftFilters((current) => ({
-                                                        ...current,
-                                                        maxAmount: event.target.value,
-                                                    }))
-                                                }
-                                                placeholder={t('ledger.filters.noCap', {
-                                                    defaultValue: 'No cap',
-                                                })}
-                                            />
-                                        </div>
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                    <div className="space-y-2">
+                                        <Label>{t('ledger.filters.sourceModule')}</Label>
+                                        <LedgerMultiSelect
+                                            value={draftFilters.source}
+                                            options={includeSelectedOptions(filterFacets.source, draftFilters.source)}
+                                            allLabel={t('ledger.filters.allModules')}
+                                            multipleLabel={t('ledger.filters.selectedCount', { count: draftFilters.source.length })}
+                                            getOptionLabel={(source) => sourceModuleLabel(source, t)}
+                                            getOptionCount={(source) => filterFacets.counts.source.get(source) || 0}
+                                            onChange={(source) => setDraftFilters((current) => ({ ...current, source }))}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>{t('ledger.filters.exactEntryType')}</Label>
+                                        <LedgerMultiSelect
+                                            value={draftFilters.type}
+                                            options={includeSelectedOptions(filterFacets.type, draftFilters.type)}
+                                            allLabel={t('ledger.filters.allTypes')}
+                                            multipleLabel={t('ledger.filters.selectedCount', { count: draftFilters.type.length })}
+                                            getOptionLabel={(type) => ledgerTypeLabel(type, t)}
+                                            getOptionCount={(type) => filterFacets.counts.type.get(type) || 0}
+                                            onChange={(type) => setDraftFilters((current) => ({ ...current, type }))}
+                                        />
                                     </div>
                                 </div>
                             </section>
-                        </div>
 
-                        <DialogFooter className="border-t border-border/60 bg-background/95 px-6 py-4 sm:justify-between">
-                            <Button type="button" variant="ghost" onClick={handleResetDraftFilters} className="rounded-2xl">
-                                <RotateCcw className="me-2 h-4 w-4" />
-                                {t('ledger.filters.resetDraft', {
-                                    defaultValue: 'Reset Draft',
-                                })}
+                            <section className="space-y-4 rounded-[1.5rem] border border-border/60 bg-background/80 p-5">
+                                <div className="space-y-1">
+                                    <h3 className="flex items-center gap-2 text-base font-black tracking-tight">
+                                        <Wallet className="h-4 w-4 text-primary" />
+                                        {t('ledger.filters.paymentTrail')}
+                                    </h3>
+                                    <p className="text-sm text-muted-foreground">{t('ledger.filters.paymentTrailDescription')}</p>
+                                </div>
+
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                    <div className="space-y-2">
+                                        <Label>{t('ledger.filters.counterparty')}</Label>
+                                        <LedgerMultiSelect
+                                            value={draftFilters.counterparty}
+                                            options={includeSelectedOptions(filterFacets.counterparty, draftFilters.counterparty)}
+                                            allLabel={t('ledger.filters.allCounterparties')}
+                                            multipleLabel={t('ledger.filters.selectedCount', { count: draftFilters.counterparty.length })}
+                                            getOptionLabel={(counterparty) =>
+                                                filterFacets.counterpartyLabels.get(counterparty) || counterparty
+                                            }
+                                            getOptionCount={(counterparty) => filterFacets.counts.counterparty.get(counterparty) || 0}
+                                            onChange={(counterparty) => setDraftFilters((current) => ({ ...current, counterparty }))}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>{t('ledger.filters.paymentAccount')}</Label>
+                                        <LedgerMultiSelect
+                                            value={draftFilters.paymentAccounts}
+                                            options={includeSelectedOptions(filterFacets.paymentAccounts, draftFilters.paymentAccounts)}
+                                            allLabel={t('ledger.filters.allPaymentAccounts')}
+                                            multipleLabel={t('ledger.filters.selectedCount', { count: draftFilters.paymentAccounts.length })}
+                                            getOptionLabel={(account) => filterFacets.paymentAccountLabels.get(account) || account}
+                                            getOptionCount={(account) => filterFacets.counts.paymentAccounts.get(account) || 0}
+                                            onChange={(paymentAccounts) =>
+                                                setDraftFilters((current) => ({ ...current, paymentAccounts }))
+                                            }
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                    <div className="space-y-2">
+                                        <Label>{t('ledger.filters.paymentMethod')}</Label>
+                                        <LedgerMultiSelect
+                                            value={draftFilters.paymentMethods}
+                                            options={includeSelectedOptions(filterFacets.paymentMethods, draftFilters.paymentMethods)}
+                                            allLabel={t('ledger.filters.anyMethod')}
+                                            multipleLabel={t('ledger.filters.selectedCount', { count: draftFilters.paymentMethods.length })}
+                                            getOptionLabel={(method) => paymentMethodLabel(method, t)}
+                                            getOptionCount={(method) => filterFacets.counts.paymentMethods.get(method) || 0}
+                                            onChange={(paymentMethods) =>
+                                                setDraftFilters((current) => ({ ...current, paymentMethods }))
+                                            }
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>{t('ledger.filters.currency')}</Label>
+                                        <LedgerMultiSelect
+                                            value={draftFilters.currency}
+                                            options={includeSelectedOptions(filterFacets.currency, draftFilters.currency)}
+                                            allLabel={t('ledger.filters.allCurrencies')}
+                                            multipleLabel={t('ledger.filters.selectedCount', { count: draftFilters.currency.length })}
+                                            getOptionLabel={(currency) => currency.toUpperCase()}
+                                            getOptionCount={(currency) => filterFacets.counts.currency.get(currency) || 0}
+                                            onChange={(currency) =>
+                                                setDraftFilters((current) =>
+                                                    normalizeLedgerFiltersForCurrency({ ...current, currency }),
+                                                )
+                                            }
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="ledger-filter-min-amount">{t('ledger.filters.minimumAmount')}</Label>
+                                        <Input
+                                            id="ledger-filter-min-amount"
+                                            inputMode="decimal"
+                                            disabled={!canCompareLedgerAmounts(draftFilters)}
+                                            value={formatNumericInput(draftFilters.minAmount)}
+                                            onChange={(event) =>
+                                                setDraftFilters((current) => ({
+                                                    ...current,
+                                                    minAmount: sanitizeNumericInput(event.target.value, { allowDecimal: true }),
+                                                }))
+                                            }
+                                            placeholder="0"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="ledger-filter-max-amount">{t('ledger.filters.maximumAmount')}</Label>
+                                        <Input
+                                            id="ledger-filter-max-amount"
+                                            inputMode="decimal"
+                                            disabled={!canCompareLedgerAmounts(draftFilters)}
+                                            value={formatNumericInput(draftFilters.maxAmount)}
+                                            onChange={(event) =>
+                                                setDraftFilters((current) => ({
+                                                    ...current,
+                                                    maxAmount: sanitizeNumericInput(event.target.value, { allowDecimal: true }),
+                                                }))
+                                            }
+                                            placeholder="0"
+                                            aria-invalid={isDraftAmountRangeInvalid}
+                                        />
+                                    </div>
+                                </div>
+                                <p className={cn('text-xs', isDraftAmountRangeInvalid ? 'text-destructive' : 'text-muted-foreground')}>
+                                    {isDraftAmountRangeInvalid
+                                        ? t('ledger.filters.invalidAmountRange')
+                                        : canCompareLedgerAmounts(draftFilters)
+                                          ? t('ledger.filters.amountRangeCurrencyHint', {
+                                                currency: draftFilters.currency[0].toUpperCase(),
+                                            })
+                                          : t('ledger.filters.selectSingleCurrencyHint')}
+                                </p>
+
+                                <div className="space-y-2">
+                                    <Label>{t('ledger.filters.sortBy')}</Label>
+                                    <Select
+                                        value={draftFilters.sort}
+                                        onValueChange={(value: LedgerSortOption) =>
+                                            setDraftFilters((current) => ({ ...current, sort: value }))
+                                        }
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="date_desc">{sortOptionLabel('date_desc', t)}</SelectItem>
+                                            <SelectItem value="date_asc">{sortOptionLabel('date_asc', t)}</SelectItem>
+                                            <SelectItem value="amount_desc" disabled={!canCompareLedgerAmounts(draftFilters)}>
+                                                {sortOptionLabel('amount_desc', t)}
+                                            </SelectItem>
+                                            <SelectItem value="amount_asc" disabled={!canCompareLedgerAmounts(draftFilters)}>
+                                                {sortOptionLabel('amount_asc', t)}
+                                            </SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </section>
+                        </div>
+                    </AppDialogBody>
+
+                    <AppDialogFooter className="justify-between sm:justify-between">
+                        <Button type="button" variant="ghost" onClick={handleResetDraftFilters} className="rounded-2xl">
+                            <RotateCcw className="me-2 h-4 w-4" />
+                            {t('ledger.filters.resetDraft')}
+                        </Button>
+                        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+                            <Button type="button" variant="outline" onClick={() => setIsFilterDialogOpen(false)} className="rounded-2xl">
+                                {t('ledger.filters.cancel')}
                             </Button>
-                            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
-                                <Button type="button" variant="outline" onClick={() => setIsFilterDialogOpen(false)} className="rounded-2xl">
-                                    {t('ledger.filters.cancel', { defaultValue: 'Cancel' })}
-                                </Button>
-                                <Button type="button" onClick={handleApplyFilters} className="rounded-2xl">
-                                    {t('ledger.filters.applyFilters', {
-                                        count: draftPreviewEntries.length,
-                                        defaultValue: `Apply Filters (${draftPreviewEntries.length})`,
-                                    })}
-                                </Button>
-                            </div>
-                        </DialogFooter>
-                    </div>
-                </DialogContent>
-            </Dialog>
+                            <Button
+                                type="button"
+                                onClick={handleApplyFilters}
+                                disabled={isDraftAmountRangeInvalid}
+                                className="rounded-2xl"
+                            >
+                                {t('ledger.filters.applyFilters', { count: draftPreviewEntries.length })}
+                            </Button>
+                        </div>
+                    </AppDialogFooter>
+                </AppDialogContent>
+            </AppDialog>
         </div>
     )
 }
