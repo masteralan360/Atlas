@@ -64,12 +64,72 @@ export function roundInstallmentSaleAmount(value: number, currency: CurrencyCode
   return Math.round((Number(value) || 0) * factor) / factor
 }
 
-function normalizeDateKey(value: string | null | undefined) {
-  const parsed = value ? new Date(`${value.slice(0, 10)}T00:00:00.000Z`) : null
-  if (!parsed || Number.isNaN(parsed.valueOf())) {
-    throw new Error('A valid first due date is required')
+type ParsedInstallmentSaleDueAt = {
+  date: Date
+  hasTime: boolean
+}
+
+function padDueDatePart(value: number) {
+  return String(value).padStart(2, '0')
+}
+
+function formatDueDateParts(date: Date, hasTime: boolean) {
+  const dateKey = `${date.getUTCFullYear()}-${padDueDatePart(date.getUTCMonth() + 1)}-${padDueDatePart(date.getUTCDate())}`
+  return hasTime
+    ? `${dateKey}T${padDueDatePart(date.getUTCHours())}:${padDueDatePart(date.getUTCMinutes())}:${padDueDatePart(date.getUTCSeconds())}`
+    : dateKey
+}
+
+function parseInstallmentSaleDueAt(value: string | null | undefined): ParsedInstallmentSaleDueAt | null {
+  if (!value) return null
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?)?$/)
+  if (match) {
+    const [, yearValue, monthValue, dayValue, hourValue, minuteValue, secondValue] = match
+    const year = Number(yearValue)
+    const month = Number(monthValue)
+    const day = Number(dayValue)
+    const hour = Number(hourValue || 0)
+    const minute = Number(minuteValue || 0)
+    const second = Number(secondValue || 0)
+    const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second))
+    if (
+      date.getUTCFullYear() !== year ||
+      date.getUTCMonth() !== month - 1 ||
+      date.getUTCDate() !== day ||
+      date.getUTCHours() !== hour ||
+      date.getUTCMinutes() !== minute ||
+      date.getUTCSeconds() !== second
+    ) {
+      return null
+    }
+    return { date, hasTime: hourValue !== undefined }
   }
-  return parsed.toISOString().slice(0, 10)
+
+  const date = new Date(value)
+  if (Number.isNaN(date.valueOf())) return null
+  return {
+    date: new Date(
+      Date.UTC(
+        date.getFullYear(),
+        date.getMonth(),
+        date.getDate(),
+        date.getHours(),
+        date.getMinutes(),
+        date.getSeconds()
+      )
+    ),
+    hasTime: true
+  }
+}
+
+function normalizeInstallmentSaleDueAt(value: string | null | undefined) {
+  const parsed = parseInstallmentSaleDueAt(value)
+  if (!parsed) throw new Error('A valid first due date and time is required')
+  return formatDueDateParts(parsed.date, parsed.hasTime)
+}
+
+function getCurrentLocalDueAtKey(now = new Date()) {
+  return `${now.getFullYear()}-${padDueDatePart(now.getMonth() + 1)}-${padDueDatePart(now.getDate())}T${padDueDatePart(now.getHours())}:${padDueDatePart(now.getMinutes())}:${padDueDatePart(now.getSeconds())}`
 }
 
 export function addInstallmentSaleDueDate(
@@ -78,7 +138,9 @@ export function addInstallmentSaleDueDate(
   index: number
 ) {
   if (frequency === 'no_frequency') return null
-  const date = new Date(`${normalizeDateKey(firstDueDate)}T00:00:00.000Z`)
+  const firstDueAt = parseInstallmentSaleDueAt(firstDueDate)
+  if (!firstDueAt) throw new Error('A valid first due date and time is required')
+  const date = new Date(firstDueAt.date)
   if (frequency === 'daily') {
     date.setUTCDate(date.getUTCDate() + index)
   } else if (frequency === 'weekly') {
@@ -92,7 +154,63 @@ export function addInstallmentSaleDueDate(
     const endOfTargetMonth = new Date(Date.UTC(year, normalizedMonth + 1, 0)).getUTCDate()
     date.setUTCFullYear(year, normalizedMonth, Math.min(date.getUTCDate(), endOfTargetMonth))
   }
-  return date.toISOString().slice(0, 10)
+  return formatDueDateParts(date, firstDueAt.hasTime)
+}
+
+export function isInstallmentSaleDueOverdue(
+  dueDate: string | null | undefined,
+  nowKey = getCurrentLocalDueAtKey()
+) {
+  const dueAt = parseInstallmentSaleDueAt(dueDate)
+  const nowAt = parseInstallmentSaleDueAt(nowKey)
+  if (!dueAt || !nowAt) return false
+
+  // Legacy date-only sales remain due through the whole selected calendar day.
+  if (!dueAt.hasTime) {
+    return formatDueDateParts(dueAt.date, false) < formatDueDateParts(nowAt.date, false)
+  }
+
+  return dueAt.date.valueOf() < nowAt.date.valueOf()
+}
+
+export function getInstallmentSaleOverdueDays(
+  dueDate: string | null | undefined,
+  nowKey = getCurrentLocalDueAtKey()
+) {
+  const dueAt = parseInstallmentSaleDueAt(dueDate)
+  const nowAt = parseInstallmentSaleDueAt(nowKey)
+  if (!dueAt || !nowAt || !isInstallmentSaleDueOverdue(dueDate, nowKey)) return 0
+  return Math.floor((nowAt.date.valueOf() - dueAt.date.valueOf()) / (24 * 60 * 60 * 1000))
+}
+
+/**
+ * Open-ended frequency-based sales carry one balance rather than a growing
+ * schedule. Their overdue state must therefore be derived from the first due
+ * date at display time, even when no payment has been recorded that day.
+ */
+export function getInstallmentSaleDisplayStatus(
+  sale: Pick<
+    InstallmentSale,
+    | 'status'
+    | 'customerBalanceAmount'
+    | 'hasInstallmentCount'
+    | 'installmentFrequency'
+    | 'firstDueDate'
+  >,
+  nowKey = getCurrentLocalDueAtKey()
+): InstallmentSaleStatus {
+  if (
+    sale.status === 'cancelled' ||
+    sale.customerBalanceAmount <= 0 ||
+    sale.installmentFrequency === 'no_frequency' ||
+    sale.hasInstallmentCount !== false
+  ) {
+    return sale.status
+  }
+
+  return isInstallmentSaleDueOverdue(sale.firstDueDate, nowKey)
+    ? 'overdue'
+    : sale.status
 }
 
 export function buildInstallmentSaleSchedule(
@@ -100,12 +218,15 @@ export function buildInstallmentSaleSchedule(
   currency: CurrencyCode,
   count: number,
   frequency: InstallmentSaleFrequency,
-  firstDueDate: string | null
+  firstDueDate: string | null,
+  hasInstallmentCount = true
 ) {
   // An open-balance sale deliberately has one internal allocation row. It is
   // never presented as a schedule, but lets payment allocation and reversals
   // continue to use the established, auditable installment-sale flow.
-  const safeCount = frequency === 'no_frequency' ? 1 : Math.max(1, Math.trunc(Number(count) || 1))
+  const safeCount = frequency === 'no_frequency' || !hasInstallmentCount
+    ? 1
+    : Math.max(1, Math.trunc(Number(count) || 1))
   const safeAmount = roundInstallmentSaleAmount(Math.max(0, amount), currency)
   const base = roundInstallmentSaleAmount(safeAmount / safeCount, currency)
   const rows: Array<{
@@ -130,7 +251,7 @@ export function buildInstallmentSaleSchedule(
 
 function installmentStatus(dueDate: string | null, balance: number): InstallmentStatus {
   if (balance <= 0) return 'paid'
-  return dueDate && dueDate < new Date().toISOString().slice(0, 10) ? 'overdue' : 'unpaid'
+  return isInstallmentSaleDueOverdue(dueDate) ? 'overdue' : 'unpaid'
 }
 
 function saleStatus(
@@ -138,8 +259,7 @@ function saleStatus(
   installments: Array<Pick<InstallmentSaleInstallment, 'dueDate' | 'balanceAmount'>>
 ): InstallmentSaleStatus {
   if (balance <= 0) return 'completed'
-  const today = new Date().toISOString().slice(0, 10)
-  return installments.some((row) => row.balanceAmount > 0 && !!row.dueDate && row.dueDate < today)
+  return installments.some((row) => row.balanceAmount > 0 && isInstallmentSaleDueOverdue(row.dueDate))
     ? 'overdue'
     : 'active'
 }
@@ -217,6 +337,7 @@ export interface CreateInstallmentSaleInput {
   totalSalePrice: number
   downPaymentAmount?: number
   installmentCount: number
+  hasInstallmentCount?: boolean
   installmentFrequency: InstallmentSaleFrequency
   firstDueDate?: string | null
   downPaymentMethod?: WorkspacePaymentMethod
@@ -243,14 +364,16 @@ export async function createInstallmentSale(workspaceId: string, input: CreateIn
   }
 
   const isNoFrequency = input.installmentFrequency === 'no_frequency'
-  const firstDueDate = isNoFrequency ? null : normalizeDateKey(input.firstDueDate)
+  const hasInstallmentCount = !isNoFrequency && input.hasInstallmentCount !== false
+  const firstDueDate = isNoFrequency ? null : normalizeInstallmentSaleDueAt(input.firstDueDate)
   const scheduleAmount = roundInstallmentSaleAmount(totalSalePrice - downPaymentAmount, input.currency)
   const plan = buildInstallmentSaleSchedule(
     scheduleAmount,
     input.currency,
-    isNoFrequency ? 1 : input.installmentCount,
+    isNoFrequency || !hasInstallmentCount ? 1 : input.installmentCount,
     input.installmentFrequency,
-    firstDueDate
+    firstDueDate,
+    hasInstallmentCount
   )
   const id = generateId()
   const installments: InstallmentSaleInstallment[] = plan.map((item) => ({
@@ -286,6 +409,7 @@ export async function createInstallmentSale(workspaceId: string, input: CreateIn
     customerPaidAmount: downPaymentAmount,
     customerBalanceAmount: scheduleAmount,
     installmentCount: installments.length,
+    hasInstallmentCount,
     installmentFrequency: input.installmentFrequency,
     firstDueDate,
     nextDueDate: installments[0]?.dueDate ?? null,
@@ -605,7 +729,8 @@ export async function rebuildInstallmentSalePaymentState(workspaceId: string, sa
     sale.currency,
     sale.installmentCount,
     sale.installmentFrequency,
-    sale.firstDueDate
+    sale.firstDueDate,
+    sale.hasInstallmentCount !== false
   )
   const now = new Date().toISOString()
   let remainingPayment = Math.min(netInstallmentPayments, scheduleAmount)
@@ -781,6 +906,34 @@ export function useInstallmentSales(workspaceId: string | undefined) {
   return rows ?? []
 }
 
+export function useInstallmentSale(saleId: string | undefined, workspaceId?: string) {
+  const viewOwnScope = useViewOwnRecordScope('installments.view_own')
+  const sale = useLiveQuery(async () => {
+    if (!saleId) return undefined
+    const row = await db.installment_sales.get(saleId)
+    if (
+      !row ||
+      (workspaceId && row.workspaceId !== workspaceId) ||
+      !(await canAccessSaleInLocalCache(row, viewOwnScope))
+    ) {
+      return undefined
+    }
+    return row
+  }, [saleId, workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId])
+
+  useEffect(() => {
+    if (workspaceId && shouldUseCloudBusinessData(workspaceId) && isOnline(workspaceId)) {
+      void Promise.all([
+        fetchTableFromSupabase(SALES_TABLE, db.installment_sales, workspaceId),
+        fetchTableFromSupabase(INSTALLMENTS_TABLE, db.installment_sale_installments, workspaceId),
+        fetchTableFromSupabase(PAYMENTS_TABLE, db.installment_sale_payments, workspaceId)
+      ])
+    }
+  }, [workspaceId])
+
+  return sale
+}
+
 export function useInstallmentSaleInstallments(saleId: string | undefined) {
   const viewOwnScope = useViewOwnRecordScope('installments.view_own')
   return (
@@ -812,6 +965,33 @@ export function useInstallmentSalePayments(saleId: string | undefined) {
         .where('installmentSaleId')
         .equals(saleId)
         .and((row) => !row.isDeleted)
+        .reverse()
+        .sortBy('paidAt')
+    }, [saleId, viewOwnScope.isRestricted, viewOwnScope.userId]) ?? []
+  )
+}
+
+export function useInstallmentSalePaymentTransactions(saleId: string | undefined) {
+  const viewOwnScope = useViewOwnRecordScope('installments.view_own')
+  return (
+    useLiveQuery(async () => {
+      if (!saleId) return []
+      const sale = await db.installment_sales.get(saleId)
+      if (!sale || !(await canAccessSaleInLocalCache(sale, viewOwnScope))) {
+        return []
+      }
+      return db.payment_transactions
+        .where('workspaceId')
+        .equals(sale.workspaceId)
+        .and(
+          (row) =>
+            !row.isDeleted &&
+            row.sourceModule === 'installment_sales' &&
+            row.sourceRecordId === saleId &&
+            INSTALLMENT_SALE_PAYMENT_SOURCE_TYPES.has(
+              row.sourceType as typeof INSTALLMENT_SALE_PAYMENT_SOURCE_TYPES extends Set<infer T> ? T : never
+            )
+        )
         .reverse()
         .sortBy('paidAt')
     }, [saleId, viewOwnScope.isRestricted, viewOwnScope.userId]) ?? []

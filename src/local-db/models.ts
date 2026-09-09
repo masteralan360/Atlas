@@ -2028,6 +2028,8 @@ export interface InstallmentSale extends BaseEntity {
   customerPaidAmount: number
   customerBalanceAmount: number
   installmentCount: number
+  /** False when repayments are frequency-based but have no fixed ending count. */
+  hasInstallmentCount: boolean
   installmentFrequency: InstallmentSaleFrequency
   firstDueDate: string | null
   nextDueDate?: string | null

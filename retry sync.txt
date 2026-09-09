@@ -10,4 +10,12 @@ supabase backup
 Move Tabs in sidebar and add favorite
 SQLite Offline
 
+Production Log Folder
+
 Price books selector order form and quick order
+
+ALLOW FREE BONUS WITHOUT QUANTITY
+
+SALES HISTORY IN DASHBOARD
+
+One single Usage Request Payload

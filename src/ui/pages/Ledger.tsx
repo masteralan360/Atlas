@@ -1,6 +1,29 @@
 import { useDeferredValue, useEffect, useMemo, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowDownLeft, ArrowUpRight, FileSpreadsheet, Loader2, RotateCcw, Search, ShieldCheck, SlidersHorizontal, Wallet, TrendingUp, TrendingDown, DollarSign, Package, Percent, BarChart3, Clock, ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, UsersRound, FileText } from 'lucide-react'
+import {
+    ArrowDownLeft,
+    ArrowUpRight,
+    BookOpen,
+    FileSpreadsheet,
+    Loader2,
+    RotateCcw,
+    Search,
+    SlidersHorizontal,
+    Wallet,
+    TrendingUp,
+    TrendingDown,
+    DollarSign,
+    Package,
+    Percent,
+    BarChart3,
+    Clock,
+    ChevronUp,
+    ChevronDown,
+    ChevronsUp,
+    ChevronsDown,
+    UsersRound,
+    FileText,
+} from 'lucide-react'
 import { Area, AreaChart, Bar, BarChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis } from 'recharts'
 import { useLocation } from 'wouter'
 
@@ -10,10 +33,11 @@ import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { buildConversionRates } from '@/lib/budget'
 import { convertToStoreBase } from '@/lib/currency'
 import { getLedgerFlowSign, isLedgerCashFlowDirection, summarizeLedgerCashFlow, type LedgerReportingDirection } from '@/lib/ledgerFlow'
+import { getInstallmentSaleLedgerPayment } from '@/lib/installmentSaleLedger'
+import { getLedgerPaymentTransactionEffect, getLedgerPaymentTransactions } from '@/lib/ledgerPaymentTransactions'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { setPendingSaleDetailsId } from '@/lib/saleNavigation'
 import {
-    getRemainingPaymentTransactions,
     getPaymentTransactionRoutePath,
     usePaymentTransactions,
     useLoans,
@@ -35,7 +59,7 @@ import {
     type RealEstateTransaction,
     type Sale,
     type SalesOrder,
-    type PurchaseOrder
+    type PurchaseOrder,
 } from '@/local-db'
 import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import {
@@ -78,14 +102,31 @@ import {
     DropdownMenuCheckboxItem,
     DropdownMenuContent,
     DropdownMenuTrigger,
-    ExportPreviewModal
+    ExportPreviewModal,
 } from '@/ui/components'
 import { useWorkspace } from '@/workspace'
 import { useTheme } from '@/ui/components/theme-provider'
+import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { getDateRangeBounds, isDateInDateRange } from '@/lib/dateRangeFilters'
 
 type LedgerDirection = LedgerReportingDirection
-type LedgerSourceModule = 'pos' | 'instant_pos' | 'orders' | 'expenses' | 'payroll' | 'loans' | 'real_estate' | 'activities' | 'clinical_appointments' | 'manual' | 'payment_accounts' | 'exchange' | 'post_service' | 'car_rental' | 'travel_transportation'
+type LedgerSourceModule =
+    | 'pos'
+    | 'instant_pos'
+    | 'orders'
+    | 'expenses'
+    | 'payroll'
+    | 'loans'
+    | 'installment_sales'
+    | 'real_estate'
+    | 'activities'
+    | 'clinical_appointments'
+    | 'manual'
+    | 'payment_accounts'
+    | 'exchange'
+    | 'post_service'
+    | 'car_rental'
+    | 'travel_transportation'
 type LedgerRelationRole = 'origin' | 'repayment' | 'settlement'
 type LedgerEntryType =
     | 'pos_sale'
@@ -102,6 +143,8 @@ type LedgerEntryType =
     | 'loan_repayment_paid'
     | 'installment_received'
     | 'installment_paid'
+    | 'installment_sale_down_payment'
+    | 'installment_sale_collection'
     | 'real_estate_commission'
     | 'agent_commission_payout'
     | 'activity_transaction'
@@ -125,6 +168,25 @@ type LedgerEntryType =
     | 'rental_deposit_refund'
     | 'travel_booking_profit'
 
+const LEDGER_FRESHNESS_TABLES = [
+    'payment_transactions',
+    'loans',
+    'real_estate_transactions',
+    'sales',
+    'sales_orders',
+    'purchase_orders',
+    'storages',
+    'business_partners',
+    'agents',
+    'delivery_merchant_profiles',
+    'delivery_settlements',
+    'delivery_shipments',
+    'exchange_transactions',
+] as const
+
+// Set to true to restore the supplementary Ledger analytics and Gross Surplus widgets.
+const SHOW_LEDGER_ANALYTICS_WIDGETS = false
+
 interface LedgerEntry {
     id: string
     transactionId: string
@@ -142,6 +204,8 @@ interface LedgerEntry {
     notes: string | null
     description: string | null
     routePath: string
+    /** Present only for an immutable payment reversal and links its source payment. */
+    reversalOfTransactionId?: string | null
     relationKey?: string | null
     relationRole?: LedgerRelationRole | null
     relationTitle?: string | null
@@ -181,7 +245,7 @@ const DEFAULT_LEDGER_FILTERS: LedgerFilterState = {
     notes: [],
     minAmount: '',
     maxAmount: '',
-    sort: 'date_desc'
+    sort: 'date_desc',
 }
 
 function countActiveLedgerFilters(filters: LedgerFilterState) {
@@ -197,7 +261,7 @@ function countActiveLedgerFilters(filters: LedgerFilterState) {
         filters.notes.length > 0,
         !!filters.minAmount,
         !!filters.maxAmount,
-        filters.sort !== 'date_desc'
+        filters.sort !== 'date_desc',
     ].filter(Boolean).length
 }
 
@@ -205,7 +269,7 @@ function isEntryInDateRange(
     date: string,
     dateRange: 'today' | 'yesterday' | 'month' | 'lastMonth' | 'allTime' | 'custom',
     customDates: { start: string; end: string },
-    now = new Date()
+    now = new Date(),
 ) {
     return isDateInDateRange(date, dateRange, customDates, now)
 }
@@ -213,13 +277,17 @@ function isEntryInDateRange(
 function paymentMethodLabel(value: string | null | undefined, t: any) {
     switch (value) {
         case 'bank_transfer':
-            return t('ledger.paymentMethod.bankTransfer', { defaultValue: 'Bank Transfer' })
+            return t('ledger.paymentMethod.bankTransfer', {
+                defaultValue: 'Bank Transfer',
+            })
         case 'credit':
             return t('ledger.paymentMethod.credit', { defaultValue: 'Credit' })
         case 'hawala':
             return t('ledger.paymentMethod.hawala', { defaultValue: 'Hawala' })
         case 'loan_adjustment':
-            return t('ledger.paymentMethod.loanAdjustment', { defaultValue: 'Loan Adjustment' })
+            return t('ledger.paymentMethod.loanAdjustment', {
+                defaultValue: 'Loan Adjustment',
+            })
         case 'qicard':
             return t('ledger.paymentMethod.qicard', { defaultValue: 'QiCard' })
         case 'zaincash':
@@ -246,26 +314,20 @@ function resolveSalePaymentMethod(
         paymentMethod?: string | null
         paymentType?: string | null
         digitalProvider?: string | null
-    }
+    },
 ) {
-    const directMethod = typeof sale.payment_method === 'string' && sale.payment_method.trim()
-        ? sale.payment_method.trim()
-        : null
+    const directMethod = typeof sale.payment_method === 'string' && sale.payment_method.trim() ? sale.payment_method.trim() : null
     if (directMethod) {
         return directMethod
     }
 
-    const legacyMethod = typeof sale.paymentMethod === 'string' && sale.paymentMethod.trim()
-        ? sale.paymentMethod.trim()
-        : null
+    const legacyMethod = typeof sale.paymentMethod === 'string' && sale.paymentMethod.trim() ? sale.paymentMethod.trim() : null
     if (legacyMethod) {
         return legacyMethod
     }
 
     if (sale.paymentType === 'digital') {
-        return typeof sale.digitalProvider === 'string' && sale.digitalProvider.trim()
-            ? sale.digitalProvider.trim()
-            : null
+        return typeof sale.digitalProvider === 'string' && sale.digitalProvider.trim() ? sale.digitalProvider.trim() : null
     }
 
     if (sale.paymentType === 'cash' || sale.paymentType === 'loan') {
@@ -280,67 +342,117 @@ function ledgerTypeLabel(type: LedgerEntryType, t: any) {
         case 'pos_sale':
             return t('ledger.type.posSale', { defaultValue: 'POS Sale' })
         case 'instant_pos_sale':
-            return t('ledger.type.instantPosSale', { defaultValue: 'Instant POS Sale' })
+            return t('ledger.type.instantPosSale', {
+                defaultValue: 'Instant POS Sale',
+            })
         case 'ecommerce_receivable':
-            return t('ledger.type.ecommerceReceivable', { defaultValue: 'E-Commerce Receivable' })
+            return t('ledger.type.ecommerceReceivable', {
+                defaultValue: 'E-Commerce Receivable',
+            })
         case 'ecommerce_payment':
-            return t('ledger.type.ecommercePayment', { defaultValue: 'E-Commerce Payment' })
+            return t('ledger.type.ecommercePayment', {
+                defaultValue: 'E-Commerce Payment',
+            })
         case 'sales_order_payment':
-            return t('ledger.type.salesOrderPayment', { defaultValue: 'Sales Order Payment' })
+            return t('ledger.type.salesOrderPayment', {
+                defaultValue: 'Sales Order Payment',
+            })
         case 'purchase_order_payment':
-            return t('ledger.type.purchaseOrderPayment', { defaultValue: 'Purchase Order Payment' })
+            return t('ledger.type.purchaseOrderPayment', {
+                defaultValue: 'Purchase Order Payment',
+            })
         case 'expense':
             return t('ledger.type.expense', { defaultValue: 'Expense' })
         case 'payroll_payment':
-            return t('ledger.type.payrollPayment', { defaultValue: 'Payroll Payment' })
+            return t('ledger.type.payrollPayment', {
+                defaultValue: 'Payroll Payment',
+            })
         case 'loan_given':
             return t('ledger.type.loanGiven', { defaultValue: 'Loan Given' })
         case 'loan_taken':
             return t('ledger.type.loanTaken', { defaultValue: 'Loan Taken' })
         case 'loan_repayment_received':
-            return t('ledger.type.loanRepaymentReceived', { defaultValue: 'Loan Repayment Received' })
+            return t('ledger.type.loanRepaymentReceived', {
+                defaultValue: 'Loan Repayment Received',
+            })
         case 'loan_repayment_paid':
-            return t('ledger.type.loanRepaymentPaid', { defaultValue: 'Loan Repayment Paid' })
+            return t('ledger.type.loanRepaymentPaid', {
+                defaultValue: 'Loan Repayment Paid',
+            })
         case 'installment_received':
-            return t('ledger.type.installmentReceived', { defaultValue: 'Installment Received' })
+            return t('ledger.type.installmentReceived', {
+                defaultValue: 'Installment Received',
+            })
         case 'installment_paid':
-            return t('ledger.type.installmentPaid', { defaultValue: 'Installment Paid' })
+            return t('ledger.type.installmentPaid', {
+                defaultValue: 'Installment Paid',
+            })
+        case 'installment_sale_down_payment':
+            return t('ledger.type.installmentSaleDownPayment')
+        case 'installment_sale_collection':
+            return t('ledger.type.installmentSaleCollection')
         case 'real_estate_commission':
-            return t('ledger.type.realEstateCommission', { defaultValue: 'Real Estate Commission' })
+            return t('ledger.type.realEstateCommission', {
+                defaultValue: 'Real Estate Commission',
+            })
         case 'agent_commission_payout':
             return t('ledger.type.agentCommissionPayout')
         case 'activity_transaction':
-            return t('ledger.type.activityTransaction', { defaultValue: 'Activity Transaction' })
+            return t('ledger.type.activityTransaction', {
+                defaultValue: 'Activity Transaction',
+            })
         case 'activity_refund':
-            return t('ledger.type.activityRefund', { defaultValue: 'Activity Refund' })
+            return t('ledger.type.activityRefund', {
+                defaultValue: 'Activity Refund',
+            })
         case 'clinical_appointment_payment':
-            return t('ledger.type.clinicalAppointmentPayment', { defaultValue: 'Appointment Payment' })
+            return t('ledger.type.clinicalAppointmentPayment', {
+                defaultValue: 'Appointment Payment',
+            })
         case 'direct_inflow':
             return t('ledger.type.directInflow', { defaultValue: 'Direct Inflow' })
         case 'direct_outflow':
             return t('ledger.type.directOutflow', { defaultValue: 'Direct Outflow' })
         case 'payment_account_opening_balance':
-            return t('paymentAccounts.openingBalance', { defaultValue: 'Opening Balance' })
+            return t('paymentAccounts.openingBalance', {
+                defaultValue: 'Opening Balance',
+            })
         case 'payment_account_deposit':
             return t('paymentAccounts.deposit', { defaultValue: 'Deposit' })
         case 'payment_account_withdrawal':
             return t('paymentAccounts.withdraw', { defaultValue: 'Withdrawal' })
         case 'payment_account_adjustment':
-            return t('paymentAccounts.adjustBalance', { defaultValue: 'Balance Adjustment' })
+            return t('paymentAccounts.adjustBalance', {
+                defaultValue: 'Balance Adjustment',
+            })
         case 'exchange_profit':
-            return t('ledger.type.exchangeProfit', { defaultValue: 'Exchange Profit' })
+            return t('ledger.type.exchangeProfit', {
+                defaultValue: 'Exchange Profit',
+            })
         case 'delivery_courier_remittance':
-            return t('ledger.type.deliveryCourierRemittance', { defaultValue: 'Courier Remittance' })
+            return t('ledger.type.deliveryCourierRemittance', {
+                defaultValue: 'Courier Remittance',
+            })
         case 'delivery_courier_fee_payout':
-            return t('ledger.type.deliveryCourierFeePayout', { defaultValue: 'Courier Fee Payment' })
+            return t('ledger.type.deliveryCourierFeePayout', {
+                defaultValue: 'Courier Fee Payment',
+            })
         case 'delivery_courier_reimbursement':
-            return t('ledger.type.deliveryCourierReimbursement', { defaultValue: 'Courier Reimbursement' })
+            return t('ledger.type.deliveryCourierReimbursement', {
+                defaultValue: 'Courier Reimbursement',
+            })
         case 'delivery_merchant_payout':
-            return t('ledger.type.deliveryMerchantPayout', { defaultValue: 'Merchant Payout' })
+            return t('ledger.type.deliveryMerchantPayout', {
+                defaultValue: 'Merchant Payout',
+            })
         case 'delivery_recipient_payout':
-            return t('ledger.type.deliveryRecipientPayout', { defaultValue: 'Recipient Payout' })
+            return t('ledger.type.deliveryRecipientPayout', {
+                defaultValue: 'Recipient Payout',
+            })
         case 'delivery_merchant_repayment':
-            return t('ledger.type.deliveryMerchantRepayment', { defaultValue: 'Merchant Repayment' })
+            return t('ledger.type.deliveryMerchantRepayment', {
+                defaultValue: 'Merchant Repayment',
+            })
         case 'rental_payment':
             return t('ledger.type.rentalPayment')
         case 'rental_deposit':
@@ -359,7 +471,9 @@ function sourceModuleLabel(module: LedgerSourceModule, t: any) {
         case 'pos':
             return t('ledger.sourceModule.pos', { defaultValue: 'POS' })
         case 'instant_pos':
-            return t('ledger.sourceModule.instantPos', { defaultValue: 'Instant POS' })
+            return t('ledger.sourceModule.instantPos', {
+                defaultValue: 'Instant POS',
+            })
         case 'orders':
             return t('ledger.sourceModule.orders', { defaultValue: 'Orders' })
         case 'expenses':
@@ -368,12 +482,20 @@ function sourceModuleLabel(module: LedgerSourceModule, t: any) {
             return t('ledger.sourceModule.payroll', { defaultValue: 'Payroll' })
         case 'loans':
             return t('ledger.sourceModule.loans', { defaultValue: 'Loans' })
+        case 'installment_sales':
+            return t('ledger.sourceModule.installmentSales')
         case 'real_estate':
-            return t('ledger.sourceModule.realEstate', { defaultValue: 'Real Estate' })
+            return t('ledger.sourceModule.realEstate', {
+                defaultValue: 'Real Estate',
+            })
         case 'activities':
-            return t('ledger.sourceModule.activities', { defaultValue: 'Activities' })
+            return t('ledger.sourceModule.activities', {
+                defaultValue: 'Activities',
+            })
         case 'clinical_appointments':
-            return t('ledger.sourceModule.clinicalAppointments', { defaultValue: 'Appointments' })
+            return t('ledger.sourceModule.clinicalAppointments', {
+                defaultValue: 'Appointments',
+            })
         case 'manual':
             return t('ledger.sourceModule.manual', { defaultValue: 'Manual' })
         case 'payment_accounts':
@@ -381,7 +503,9 @@ function sourceModuleLabel(module: LedgerSourceModule, t: any) {
         case 'exchange':
             return t('ledger.sourceModule.exchange', { defaultValue: 'Exchange' })
         case 'post_service':
-            return t('ledger.sourceModule.postService', { defaultValue: 'Post Service' })
+            return t('ledger.sourceModule.postService', {
+                defaultValue: 'Post Service',
+            })
         case 'car_rental':
             return t('ledger.sourceModule.carRental')
         case 'travel_transportation':
@@ -409,20 +533,30 @@ function notesFilterLabel(value: LedgerNotesFilter, t: any) {
         case 'with_notes':
             return t('ledger.notesFilter.withNotes', { defaultValue: 'With Notes' })
         case 'without_notes':
-            return t('ledger.notesFilter.withoutNotes', { defaultValue: 'Without Notes' })
+            return t('ledger.notesFilter.withoutNotes', {
+                defaultValue: 'Without Notes',
+            })
     }
 }
 
 function sortOptionLabel(value: LedgerSortOption, t: any) {
     switch (value) {
         case 'date_asc':
-            return t('ledger.sortOption.dateAsc', { defaultValue: 'Date: Oldest First' })
+            return t('ledger.sortOption.dateAsc', {
+                defaultValue: 'Date: Oldest First',
+            })
         case 'amount_desc':
-            return t('ledger.sortOption.amountDesc', { defaultValue: 'Amount: Highest First' })
+            return t('ledger.sortOption.amountDesc', {
+                defaultValue: 'Amount: Highest First',
+            })
         case 'amount_asc':
-            return t('ledger.sortOption.amountAsc', { defaultValue: 'Amount: Lowest First' })
+            return t('ledger.sortOption.amountAsc', {
+                defaultValue: 'Amount: Lowest First',
+            })
         default:
-            return t('ledger.sortOption.dateDesc', { defaultValue: 'Date: Newest First' })
+            return t('ledger.sortOption.dateDesc', {
+                defaultValue: 'Date: Newest First',
+            })
     }
 }
 
@@ -452,16 +586,8 @@ interface LedgerMultiSelectProps<T extends string> {
     onChange: (value: T[]) => void
 }
 
-function LedgerMultiSelect<T extends string>({
-    value,
-    options,
-    allLabel,
-    getOptionLabel,
-    onChange
-}: LedgerMultiSelectProps<T>) {
-    const selectionLabel = value.length > 0
-        ? value.map(getOptionLabel).join(', ')
-        : allLabel
+function LedgerMultiSelect<T extends string>({ value, options, allLabel, getOptionLabel, onChange }: LedgerMultiSelectProps<T>) {
+    const selectionLabel = value.length > 0 ? value.map(getOptionLabel).join(', ') : allLabel
 
     return (
         <DropdownMenu>
@@ -471,10 +597,7 @@ function LedgerMultiSelect<T extends string>({
                     <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-                align="start"
-                className="max-h-64 w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto"
-            >
+            <DropdownMenuContent align="start" className="max-h-64 w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto">
                 <DropdownMenuCheckboxItem
                     checked={value.length === 0}
                     onCheckedChange={() => onChange([])}
@@ -486,11 +609,15 @@ function LedgerMultiSelect<T extends string>({
                     <DropdownMenuCheckboxItem
                         key={option}
                         checked={value.includes(option)}
-                        onCheckedChange={(checked) => onChange(
-                            checked
-                                ? (value.includes(option) ? value : [...value, option])
-                                : value.filter((selectedOption) => selectedOption !== option)
-                        )}
+                        onCheckedChange={(checked) =>
+                            onChange(
+                                checked
+                                    ? value.includes(option)
+                                        ? value
+                                        : [...value, option]
+                                    : value.filter((selectedOption) => selectedOption !== option),
+                            )
+                        }
                         onSelect={(event) => event.preventDefault()}
                     >
                         {getOptionLabel(option)}
@@ -561,17 +688,14 @@ function applyLedgerFilters(entries: LedgerEntry[], filters: LedgerFilterState) 
             entry.paymentMethod,
             entry.paymentAccount,
             ledgerTypeLabel(entry.type, (_key: string, opts: any) => opts?.defaultValue || _key),
-            sourceModuleLabel(entry.sourceModule, (_key: string, opts: any) => opts?.defaultValue || _key)
+            sourceModuleLabel(entry.sourceModule, (_key: string, opts: any) => opts?.defaultValue || _key),
         ].some((value) => value?.toLowerCase().includes(normalizedSearch))
     })
 
     return sortLedgerEntries(filtered, filters.sort)
 }
 
-function formatAmountSummary(
-    rows: Array<{ amount: number; currency: CurrencyCode }>,
-    iqdPreference: IQDDisplayPreference
-): string[] {
+function formatAmountSummary(rows: Array<{ amount: number; currency: CurrencyCode }>, iqdPreference: IQDDisplayPreference): string[] {
     if (rows.length === 0) {
         return ['0']
     }
@@ -672,7 +796,7 @@ function LedgerSparkline({
     data,
     dataKey,
     color,
-    gradientId
+    gradientId,
 }: {
     data: LedgerTrendPoint[]
     dataKey: 'inflow' | 'outflow' | 'net'
@@ -726,8 +850,9 @@ function buildExchangeLedgerEntry(tx: any): LedgerEntry | null {
         businessPartnerId: null,
         paymentMethod: tx.paymentMethod || null,
         notes: tx.notes || null,
-        description: tx.notes || `${tx.customerGivesAmount} ${tx.fromCurrency} → ${tx.customerReceivesAmount} ${tx.toCurrency} @ ${tx.exchangeRateUsed}`,
-        routePath: '/currency-exchange'
+        description:
+            tx.notes || `${tx.customerGivesAmount} ${tx.fromCurrency} → ${tx.customerReceivesAmount} ${tx.toCurrency} @ ${tx.exchangeRateUsed}`,
+        routePath: '/currency-exchange',
     }
 }
 
@@ -742,7 +867,9 @@ function ledgerRelationRoleLabel(role: LedgerRelationRole, t: any) {
         case 'repayment':
             return t('ledger.relationRole.repayment', { defaultValue: 'Repayment' })
         case 'settlement':
-            return t('ledger.relationRole.settlement', { defaultValue: 'Settlement' })
+            return t('ledger.relationRole.settlement', {
+                defaultValue: 'Settlement',
+            })
         default:
             return t('ledger.relationRole.linked', { defaultValue: 'Linked' })
     }
@@ -756,7 +883,15 @@ interface LedgerBuildContext {
     salesOrderById: Map<string, SalesOrder>
     purchaseOrderById: Map<string, PurchaseOrder>
     businessPartnerByName: Map<string, string>
-    deliverySettlementById: Map<string, { agentId?: string | null; merchantProfileId?: string | null; businessPartnerId?: string | null; shipmentId?: string | null }>
+    deliverySettlementById: Map<
+        string,
+        {
+            agentId?: string | null
+            merchantProfileId?: string | null
+            businessPartnerId?: string | null
+            shipmentId?: string | null
+        }
+    >
     deliveryShipmentById: Map<string, { trackingNumber: string; recipientPhone: string }>
     agentNameById: Map<string, string>
     agentBusinessPartnerIdById: Map<string, string>
@@ -765,25 +900,26 @@ interface LedgerBuildContext {
 }
 
 function getSaleStorageIds(sale: Sale | undefined) {
-    const enrichedItems = (sale as (Sale & {
-        _enrichedItems?: Array<{ storage_id?: string | null }>
-    }) | undefined)?._enrichedItems ?? []
+    const enrichedItems =
+        (
+            sale as
+                | (Sale & {
+                      _enrichedItems?: Array<{ storage_id?: string | null }>
+                  })
+                | undefined
+        )?._enrichedItems ?? []
 
-    return Array.from(new Set(
-        enrichedItems
-            .map((item) => item.storage_id)
-            .filter((storageId): storageId is string => !!storageId)
-    ))
+    return Array.from(new Set(enrichedItems.map((item) => item.storage_id).filter((storageId): storageId is string => !!storageId)))
 }
 
 function getSalesOrderStorageIds(order: SalesOrder | undefined) {
     if (!order) return []
 
-    return Array.from(new Set(
-        (order.items || [])
-            .map((item) => item.storageId || order.sourceStorageId)
-            .filter((storageId): storageId is string => !!storageId)
-    ))
+    return Array.from(
+        new Set(
+            (order.items || []).map((item) => item.storageId || order.sourceStorageId).filter((storageId): storageId is string => !!storageId),
+        ),
+    )
 }
 
 function buildSaleLedgerEntry(sale: Sale, t: any): LedgerEntry | null {
@@ -802,10 +938,9 @@ function buildSaleLedgerEntry(sale: Sale, t: any): LedgerEntry | null {
     }
 
     const isInstantPos = sale.origin === 'instant_pos'
-    const descriptionParts = [
-        paymentMethod ? `Paid via ${paymentMethodLabel(paymentMethod, t)}` : null,
-        sale.notes?.trim() || null
-    ].filter(Boolean)
+    const descriptionParts = [paymentMethod ? `Paid via ${paymentMethodLabel(paymentMethod, t)}` : null, sale.notes?.trim() || null].filter(
+        Boolean,
+    )
 
     return {
         id: `sale:${sale.id}`,
@@ -823,7 +958,7 @@ function buildSaleLedgerEntry(sale: Sale, t: any): LedgerEntry | null {
         notes: sale.notes?.trim() || null,
         description: descriptionParts.length > 0 ? descriptionParts.join(' | ') : null,
         routePath: '/sales',
-        storageIds: getSaleStorageIds(sale)
+        storageIds: getSaleStorageIds(sale),
     }
 }
 
@@ -913,9 +1048,7 @@ function buildTransactionDescription(transaction: PaymentTransaction, t: any) {
     }
 
     if (transaction.sourceType === 'clinical_appointment') {
-        const requestedService = typeof transaction.metadata?.requestedService === 'string'
-            ? transaction.metadata.requestedService.trim()
-            : null
+        const requestedService = typeof transaction.metadata?.requestedService === 'string' ? transaction.metadata.requestedService.trim() : null
         if (requestedService) {
             details.push(requestedService)
         }
@@ -927,7 +1060,7 @@ function buildTransactionDescription(transaction: PaymentTransaction, t: any) {
 function buildLedgerRelationDescriptor(
     transaction: PaymentTransaction,
     context: LedgerBuildContext,
-    t: any
+    t: any,
 ): Pick<LedgerEntry, 'relationKey' | 'relationRole' | 'relationTitle' | 'relationDescription' | 'relationIsCompleted'> {
     const reference = buildTransactionReference(transaction)
 
@@ -935,16 +1068,14 @@ function buildLedgerRelationDescriptor(
         case 'loan_origination': {
             const loan = context.loanById.get(transaction.sourceRecordId)
             const relationIsCompleted = loan ? loan.balanceAmount <= 0 : false
-            const movementLabel = transaction.direction === 'incoming'
-                ? 'Original loan cash receipt'
-                : 'Original loan cash disbursement'
+            const movementLabel = transaction.direction === 'incoming' ? 'Original loan cash receipt' : 'Original loan cash disbursement'
 
             return {
                 relationKey: `loan:${transaction.sourceRecordId}`,
                 relationRole: 'origin',
                 relationTitle: movementLabel,
                 relationDescription: `${reference} is the opening cash movement for this loan. Hover a linked repayment to trace the full chain.`,
-                relationIsCompleted
+                relationIsCompleted,
             }
         }
 
@@ -955,11 +1086,12 @@ function buildLedgerRelationDescriptor(
             const relationIsCompleted = loan ? loan.balanceAmount <= 0 : false
             const sourceLoanReference = loan?.loanNo || reference
             const hasManualOrigination = context.loanOriginationIds.has(transaction.sourceRecordId)
-            const repaymentLabel = transaction.sourceType === 'loan_installment'
-                ? 'Installment repayment'
-                : transaction.sourceType === 'simple_loan'
-                    ? 'Simple loan repayment'
-                    : 'Loan repayment'
+            const repaymentLabel =
+                transaction.sourceType === 'loan_installment'
+                    ? 'Installment repayment'
+                    : transaction.sourceType === 'simple_loan'
+                      ? 'Simple loan repayment'
+                      : 'Loan repayment'
 
             if (hasManualOrigination) {
                 return {
@@ -967,7 +1099,7 @@ function buildLedgerRelationDescriptor(
                     relationRole: 'repayment',
                     relationTitle: repaymentLabel,
                     relationDescription: `Original source: ${(loan?.direction || 'lent') === 'borrowed' ? 'Loan Taken' : 'Loan Given'} ${sourceLoanReference}. The matching origination row links to this repayment when it is visible in the ledger.`,
-                    relationIsCompleted
+                    relationIsCompleted,
                 }
             }
 
@@ -982,7 +1114,7 @@ function buildLedgerRelationDescriptor(
                     relationDescription: saleReference
                         ? `Original source: ${saleReference} credit sale. This loan started from a sale, so there is no separate cash origination row in the ledger.`
                         : 'Original source: POS credit sale. This loan started from a sale, so there is no separate cash origination row in the ledger.',
-                    relationIsCompleted
+                    relationIsCompleted,
                 }
             }
 
@@ -991,7 +1123,7 @@ function buildLedgerRelationDescriptor(
                 relationRole: 'repayment',
                 relationTitle: repaymentLabel,
                 relationDescription: `Original source: ${sourceLoanReference}.`,
-                relationIsCompleted
+                relationIsCompleted,
             }
         }
 
@@ -1002,7 +1134,7 @@ function buildLedgerRelationDescriptor(
                 relationRole: 'settlement',
                 relationTitle: 'Real estate commission',
                 relationDescription: `Original source: ${realEstateTransaction?.transactionNo || reference}.`,
-                relationIsCompleted: false
+                relationIsCompleted: false,
             }
         }
 
@@ -1013,7 +1145,7 @@ function buildLedgerRelationDescriptor(
                 relationRole: 'settlement',
                 relationTitle: transaction.sourceType === 'activity_refund' ? 'Activity refund' : 'Activity transaction',
                 relationDescription: `Original source: ${reference}.`,
-                relationIsCompleted: transaction.sourceType === 'activity_refund'
+                relationIsCompleted: transaction.sourceType === 'activity_refund',
             }
 
         case 'clinical_appointment':
@@ -1021,7 +1153,7 @@ function buildLedgerRelationDescriptor(
                 relationKey: `clinical-appointment:${transaction.sourceRecordId}`,
                 relationRole: 'settlement',
                 relationTitle: 'Appointment payment',
-                relationDescription: `Original source: Appointment ${reference}.`
+                relationDescription: `Original source: Appointment ${reference}.`,
             }
 
         case 'rental_payment':
@@ -1030,12 +1162,15 @@ function buildLedgerRelationDescriptor(
             return {
                 relationKey: `rental-contract:${transaction.sourceRecordId}`,
                 relationRole: 'settlement',
-                relationTitle: transaction.sourceType === 'rental_payment'
-                    ? t('ledger.type.rentalPayment')
-                    : transaction.sourceType === 'rental_deposit'
-                        ? t('ledger.type.rentalDeposit')
-                        : t('ledger.type.rentalDepositRefund'),
-                relationDescription: t('ledger.description.carRentalRelation', { reference })
+                relationTitle:
+                    transaction.sourceType === 'rental_payment'
+                        ? t('ledger.type.rentalPayment')
+                        : transaction.sourceType === 'rental_deposit'
+                          ? t('ledger.type.rentalDeposit')
+                          : t('ledger.type.rentalDepositRefund'),
+                relationDescription: t('ledger.description.carRentalRelation', {
+                    reference,
+                }),
             }
 
         case 'travel_booking_payment':
@@ -1043,20 +1178,19 @@ function buildLedgerRelationDescriptor(
                 relationKey: `travel-booking:${transaction.sourceRecordId}`,
                 relationRole: 'settlement',
                 relationTitle: t('travelTransportation.recordProfitPayment'),
-                relationDescription: `${t('travelTransportation.bookingDetails')} ${reference}.`
+                relationDescription: `${t('travelTransportation.bookingDetails')} ${reference}.`,
             }
 
         case 'sales_order': {
             const isReceivable = Boolean(transaction.metadata?.receivable)
-            const sourceChannel = typeof transaction.metadata?.sourceChannel === 'string'
-                ? transaction.metadata.sourceChannel.trim().toLowerCase()
-                : null
+            const sourceChannel =
+                typeof transaction.metadata?.sourceChannel === 'string' ? transaction.metadata.sourceChannel.trim().toLowerCase() : null
 
             return {
                 relationKey: `sales-order:${transaction.sourceRecordId}`,
                 relationRole: isReceivable ? 'origin' : 'settlement',
                 relationTitle: isReceivable ? 'Order receivable source' : 'Order settlement',
-                relationDescription: `Original source: ${sourceChannel === 'marketplace' ? 'E-Commerce order' : 'Sales order'} ${reference}.`
+                relationDescription: `Original source: ${sourceChannel === 'marketplace' ? 'E-Commerce order' : 'Sales order'} ${reference}.`,
             }
         }
 
@@ -1065,7 +1199,7 @@ function buildLedgerRelationDescriptor(
                 relationKey: `purchase-order:${transaction.sourceRecordId}`,
                 relationRole: 'settlement',
                 relationTitle: 'Purchase order settlement',
-                relationDescription: `Original source: Purchase Order ${reference}.`
+                relationDescription: `Original source: Purchase Order ${reference}.`,
             }
 
         case 'expense_item':
@@ -1073,7 +1207,7 @@ function buildLedgerRelationDescriptor(
                 relationKey: `expense:${transaction.sourceRecordId}`,
                 relationRole: 'settlement',
                 relationTitle: 'Expense settlement',
-                relationDescription: `Original source: Expense ${reference}.`
+                relationDescription: `Original source: Expense ${reference}.`,
             }
 
         case 'payroll_status': {
@@ -1083,9 +1217,7 @@ function buildLedgerRelationDescriptor(
                 relationKey: `payroll:${transaction.sourceRecordId}`,
                 relationRole: 'settlement',
                 relationTitle: 'Payroll settlement',
-                relationDescription: month
-                    ? `Original source: Payroll ${month}.`
-                    : `Original source: ${reference}.`
+                relationDescription: month ? `Original source: Payroll ${month}.` : `Original source: ${reference}.`,
             }
         }
 
@@ -1094,12 +1226,27 @@ function buildLedgerRelationDescriptor(
     }
 }
 
-function buildPaymentLedgerEntry(
-    transaction: PaymentTransaction,
-    context: LedgerBuildContext,
-    t: any
-): LedgerEntry | null {
-    if (transaction.isDeleted || transaction.reversalOfTransactionId) {
+function applyPaymentReversalToLedgerEntry(entry: LedgerEntry, transaction: PaymentTransaction, t: any): LedgerEntry {
+    if (!transaction.reversalOfTransactionId) {
+        return entry
+    }
+
+    const effect = getLedgerPaymentTransactionEffect(transaction)
+    const reversalDescription = t('ledger.description.paymentReversal', {
+        transactionId: transaction.reversalOfTransactionId,
+    })
+
+    return {
+        ...entry,
+        direction: effect.direction,
+        amount: effect.amount,
+        reversalOfTransactionId: transaction.reversalOfTransactionId,
+        description: [reversalDescription, entry.description].filter(Boolean).join(' | ') || null,
+    }
+}
+
+function buildPaymentLedgerEntry(transaction: PaymentTransaction, context: LedgerBuildContext, t: any): LedgerEntry | null {
+    if (transaction.isDeleted) {
         return null
     }
 
@@ -1108,10 +1255,7 @@ function buildPaymentLedgerEntry(
     }
 
     if (transaction.sourceType === 'direct_transaction') {
-        const descriptionParts = [
-            transaction.referenceLabel?.trim() || null,
-            transaction.note?.trim() || null
-        ].filter(Boolean)
+        const descriptionParts = [transaction.referenceLabel?.trim() || null, transaction.note?.trim() || null].filter(Boolean)
 
         return {
             id: `direct:${transaction.id}`,
@@ -1128,7 +1272,7 @@ function buildPaymentLedgerEntry(
             paymentMethod: transaction.paymentMethod,
             notes: transaction.note?.trim() || null,
             description: descriptionParts.length > 0 ? descriptionParts.join(' | ') : null,
-            routePath: '/direct-transactions'
+            routePath: '/direct-transactions',
         }
     }
 
@@ -1150,24 +1294,24 @@ function buildPaymentLedgerEntry(
             paymentMethod: transaction.paymentMethod,
             paymentAccount: transaction.accountNameSnapshot || null,
             notes: transaction.note?.trim() || null,
-            description: t('paymentAccounts.openingBalanceDescription', { defaultValue: 'Opening amount recorded when this payment account was created.' }),
-            routePath: '/payment-accounts'
+            description: t('paymentAccounts.openingBalanceDescription', {
+                defaultValue: 'Opening amount recorded when this payment account was created.',
+            }),
+            routePath: '/payment-accounts',
         }
     }
 
     if (
-        transaction.sourceType === 'payment_account_deposit'
-        || transaction.sourceType === 'payment_account_withdrawal'
-        || transaction.sourceType === 'payment_account_adjustment'
+        transaction.sourceType === 'payment_account_deposit' ||
+        transaction.sourceType === 'payment_account_withdrawal' ||
+        transaction.sourceType === 'payment_account_adjustment'
     ) {
         return {
             id: `payment:${transaction.id}`,
             transactionId: transaction.id,
             date: transaction.paidAt,
             type: transaction.sourceType,
-            direction: transaction.sourceType === 'payment_account_adjustment'
-                ? 'adjustment'
-                : transaction.direction,
+            direction: transaction.sourceType === 'payment_account_adjustment' ? 'adjustment' : transaction.direction,
             amount: transaction.amount,
             currency: transaction.currency,
             sourceModule: 'payment_accounts',
@@ -1177,10 +1321,52 @@ function buildPaymentLedgerEntry(
             paymentMethod: transaction.paymentMethod,
             paymentAccount: transaction.accountNameSnapshot || null,
             notes: transaction.note?.trim() || null,
-            description: transaction.sourceType === 'payment_account_adjustment'
-                ? t('paymentAccounts.adjustmentLedgerDescription', { defaultValue: 'Audited balance adjustment.' })
-                : t('paymentAccounts.manualOperationLedgerDescription', { defaultValue: 'Manual payment-account movement.' }),
+            description:
+                transaction.sourceType === 'payment_account_adjustment'
+                    ? t('paymentAccounts.adjustmentLedgerDescription', {
+                          defaultValue: 'Audited balance adjustment.',
+                      })
+                    : t('paymentAccounts.manualOperationLedgerDescription', {
+                          defaultValue: 'Manual payment-account movement.',
+                      }),
             routePath: '/payment-accounts',
+        }
+    }
+
+    const installmentSalePayment = getInstallmentSaleLedgerPayment(transaction)
+    if (installmentSalePayment) {
+        const description = [
+            t(`ledger.description.${installmentSalePayment.descriptionKey}`, {
+                reference: installmentSalePayment.referenceId,
+            }),
+            buildTransactionDescription(transaction, t),
+        ]
+            .filter(Boolean)
+            .join(' | ')
+
+        return {
+            id: `payment:${transaction.id}`,
+            transactionId: transaction.id,
+            date: transaction.paidAt,
+            type: installmentSalePayment.type,
+            direction: 'incoming',
+            amount: transaction.amount,
+            currency: transaction.currency,
+            sourceModule: 'installment_sales',
+            referenceId: installmentSalePayment.referenceId,
+            partner: installmentSalePayment.partner,
+            businessPartnerId:
+                installmentSalePayment.businessPartnerId ||
+                context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ||
+                null,
+            paymentMethod: transaction.paymentMethod || 'unknown',
+            notes: transaction.note?.trim() || null,
+            description: description || null,
+            routePath: getPaymentTransactionRoutePath(transaction),
+            relationKey: installmentSalePayment.relationKey,
+            relationRole: 'settlement',
+            relationTitle: ledgerTypeLabel(installmentSalePayment.type, t),
+            relationDescription: description || null,
         }
     }
 
@@ -1199,102 +1385,146 @@ function buildPaymentLedgerEntry(
             const isRecipientPayout = transaction.sourceType === 'delivery_recipient_payout'
             const isMerchantRepayment = transaction.sourceType === 'delivery_merchant_repayment'
             const settlement = context.deliverySettlementById.get(transaction.sourceRecordId)
-            const metadataAgentId = typeof transaction.metadata?.deliveryAgentId === 'string'
-                ? transaction.metadata.deliveryAgentId
-                : null
-            const metadataProfileId = typeof transaction.metadata?.deliveryMerchantProfileId === 'string'
-                ? transaction.metadata.deliveryMerchantProfileId
-                : null
-            const metadataShipmentId = typeof transaction.metadata?.deliveryShipmentId === 'string'
-                ? transaction.metadata.deliveryShipmentId
-                : null
+            const metadataAgentId = typeof transaction.metadata?.deliveryAgentId === 'string' ? transaction.metadata.deliveryAgentId : null
+            const metadataProfileId =
+                typeof transaction.metadata?.deliveryMerchantProfileId === 'string' ? transaction.metadata.deliveryMerchantProfileId : null
+            const metadataShipmentId =
+                typeof transaction.metadata?.deliveryShipmentId === 'string' ? transaction.metadata.deliveryShipmentId : null
             const agentId = settlement?.agentId || metadataAgentId
             const merchantProfileId = settlement?.merchantProfileId || metadataProfileId
             const shipmentId = settlement?.shipmentId || metadataShipmentId
             const shipment = shipmentId ? context.deliveryShipmentById.get(shipmentId) : null
             const linkedBusinessPartnerId = isRecipientPayout
                 ? null
-                : settlement?.businessPartnerId
-                || (typeof transaction.metadata?.businessPartnerId === 'string' ? transaction.metadata.businessPartnerId : null)
-                || (agentId ? context.agentBusinessPartnerIdById.get(agentId) : null)
-                || (merchantProfileId ? context.merchantBusinessPartnerIdByProfileId.get(merchantProfileId) : null)
-                || null
-            const partner = transaction.counterpartyName
-                || (agentId ? context.agentNameById.get(agentId) : null)
-                || (merchantProfileId ? context.merchantNameByProfileId.get(merchantProfileId) : null)
-                || null
+                : settlement?.businessPartnerId ||
+                  (typeof transaction.metadata?.businessPartnerId === 'string' ? transaction.metadata.businessPartnerId : null) ||
+                  (agentId ? context.agentBusinessPartnerIdById.get(agentId) : null) ||
+                  (merchantProfileId ? context.merchantBusinessPartnerIdByProfileId.get(merchantProfileId) : null) ||
+                  null
+            const partner =
+                transaction.counterpartyName ||
+                (agentId ? context.agentNameById.get(agentId) : null) ||
+                (merchantProfileId ? context.merchantNameByProfileId.get(merchantProfileId) : null) ||
+                null
             const relation = shipmentId
                 ? {
-                    // The two real cash movements for one post belong to the
-                    // same visual chain in Ledger, even when each is settled
-                    // in several partial payments.
-                    relationKey: `delivery-shipment:${shipmentId}`,
-                    relationRole: isCourierRemittance || isRecipientPayout ? 'origin' as const : 'settlement' as const,
-                    relationTitle: isCourierRemittance
-                        ? t('ledger.type.deliveryCourierRemittance', { defaultValue: 'Courier Remittance' })
-                        : isCourierFeePayout
-                            ? t('ledger.type.deliveryCourierFeePayout', { defaultValue: 'Courier Fee Payment' })
-                        : isCourierReimbursement
-                            ? t('ledger.type.deliveryCourierReimbursement', { defaultValue: 'Courier Reimbursement' })
-                        : isRecipientPayout
-                            ? t('ledger.type.deliveryRecipientPayout', { defaultValue: 'Recipient Payout' })
-                            : isMerchantRepayment
-                                ? t('ledger.type.deliveryMerchantRepayment', { defaultValue: 'Merchant Repayment' })
-                            : t('ledger.type.deliveryMerchantPayout', { defaultValue: 'Merchant Payout' }),
-                    relationDescription: isCourierRemittance
-                        ? t('ledger.description.deliveryPostCourierRelation', {
-                            defaultValue: 'Post {{tracking}} · courier cash handover for {{recipient}}.',
-                            tracking: shipment?.trackingNumber || shipmentId,
-                            recipient: shipment?.recipientPhone || t('common.unknown', { defaultValue: 'Unknown recipient' })
-                        })
-                        : isCourierFeePayout
-                            ? t('ledger.description.deliveryPostCourierFeePayoutRelation', {
-                                defaultValue: 'Post {{tracking}} · courier fee paid to {{recipient}}.',
-                                tracking: shipment?.trackingNumber || shipmentId,
-                                recipient: shipment?.recipientPhone || t('common.unknown', { defaultValue: 'Unknown recipient' })
+                      // The two real cash movements for one post belong to the
+                      // same visual chain in Ledger, even when each is settled
+                      // in several partial payments.
+                      relationKey: `delivery-shipment:${shipmentId}`,
+                      relationRole: isCourierRemittance || isRecipientPayout ? ('origin' as const) : ('settlement' as const),
+                      relationTitle: isCourierRemittance
+                          ? t('ledger.type.deliveryCourierRemittance', {
+                                defaultValue: 'Courier Remittance',
                             })
-                        : isCourierReimbursement
-                            ? t('ledger.description.deliveryPostCourierReimbursementRelation', {
-                                defaultValue: 'Post {{tracking}} · courier reimbursed for their advance to {{recipient}}.',
-                                tracking: shipment?.trackingNumber || shipmentId,
-                                recipient: shipment?.recipientPhone || t('common.unknown', { defaultValue: 'Unknown recipient' })
-                            })
-                        : isRecipientPayout
-                            ? t('ledger.description.deliveryPostRecipientPayoutRelation', {
-                                defaultValue: 'Post {{tracking}} · payout made to {{recipient}}.',
-                                tracking: shipment?.trackingNumber || shipmentId,
-                                recipient: shipment?.recipientPhone || t('common.unknown', { defaultValue: 'Unknown recipient' })
-                            })
-                            : isMerchantRepayment
-                                ? t('ledger.description.deliveryPostMerchantRepaymentRelation', {
-                                    defaultValue: 'Post {{tracking}} · payment received from the merchant for {{recipient}}.',
-                                    tracking: shipment?.trackingNumber || shipmentId,
-                                    recipient: shipment?.recipientPhone || t('common.unknown', { defaultValue: 'Unknown recipient' })
+                          : isCourierFeePayout
+                            ? t('ledger.type.deliveryCourierFeePayout', {
+                                  defaultValue: 'Courier Fee Payment',
+                              })
+                            : isCourierReimbursement
+                              ? t('ledger.type.deliveryCourierReimbursement', {
+                                    defaultValue: 'Courier Reimbursement',
                                 })
-                            : t('ledger.description.deliveryPostMerchantRelation', {
-                                defaultValue: 'Post {{tracking}} · merchant payout for {{recipient}}.',
+                              : isRecipientPayout
+                                ? t('ledger.type.deliveryRecipientPayout', {
+                                      defaultValue: 'Recipient Payout',
+                                  })
+                                : isMerchantRepayment
+                                  ? t('ledger.type.deliveryMerchantRepayment', {
+                                        defaultValue: 'Merchant Repayment',
+                                    })
+                                  : t('ledger.type.deliveryMerchantPayout', {
+                                        defaultValue: 'Merchant Payout',
+                                    }),
+                      relationDescription: isCourierRemittance
+                          ? t('ledger.description.deliveryPostCourierRelation', {
+                                defaultValue: 'Post {{tracking}} · courier cash handover for {{recipient}}.',
                                 tracking: shipment?.trackingNumber || shipmentId,
-                                recipient: shipment?.recipientPhone || t('common.unknown', { defaultValue: 'Unknown recipient' })
+                                recipient: shipment?.recipientPhone || t('common.unknown', { defaultValue: 'Unknown recipient' }),
                             })
-                }
+                          : isCourierFeePayout
+                            ? t('ledger.description.deliveryPostCourierFeePayoutRelation', {
+                                  defaultValue: 'Post {{tracking}} · courier fee paid to {{recipient}}.',
+                                  tracking: shipment?.trackingNumber || shipmentId,
+                                  recipient:
+                                      shipment?.recipientPhone ||
+                                      t('common.unknown', {
+                                          defaultValue: 'Unknown recipient',
+                                      }),
+                              })
+                            : isCourierReimbursement
+                              ? t('ledger.description.deliveryPostCourierReimbursementRelation', {
+                                    defaultValue: 'Post {{tracking}} · courier reimbursed for their advance to {{recipient}}.',
+                                    tracking: shipment?.trackingNumber || shipmentId,
+                                    recipient:
+                                        shipment?.recipientPhone ||
+                                        t('common.unknown', {
+                                            defaultValue: 'Unknown recipient',
+                                        }),
+                                })
+                              : isRecipientPayout
+                                ? t('ledger.description.deliveryPostRecipientPayoutRelation', {
+                                      defaultValue: 'Post {{tracking}} · payout made to {{recipient}}.',
+                                      tracking: shipment?.trackingNumber || shipmentId,
+                                      recipient:
+                                          shipment?.recipientPhone ||
+                                          t('common.unknown', {
+                                              defaultValue: 'Unknown recipient',
+                                          }),
+                                  })
+                                : isMerchantRepayment
+                                  ? t('ledger.description.deliveryPostMerchantRepaymentRelation', {
+                                        defaultValue: 'Post {{tracking}} · payment received from the merchant for {{recipient}}.',
+                                        tracking: shipment?.trackingNumber || shipmentId,
+                                        recipient:
+                                            shipment?.recipientPhone ||
+                                            t('common.unknown', {
+                                                defaultValue: 'Unknown recipient',
+                                            }),
+                                    })
+                                  : t('ledger.description.deliveryPostMerchantRelation', {
+                                        defaultValue: 'Post {{tracking}} · merchant payout for {{recipient}}.',
+                                        tracking: shipment?.trackingNumber || shipmentId,
+                                        recipient:
+                                            shipment?.recipientPhone ||
+                                            t('common.unknown', {
+                                                defaultValue: 'Unknown recipient',
+                                            }),
+                                    }),
+                  }
                 : {
-                    // A party-level settlement has no truthful per-post
-                    // relation, so retain an isolated settlement descriptor.
-                    relationKey: `delivery-settlement:${transaction.sourceRecordId}`,
-                    relationRole: 'settlement' as const,
-                    relationTitle: isCourierRemittance
-                        ? t('ledger.type.deliveryCourierRemittance', { defaultValue: 'Courier Remittance' })
-                        : isCourierFeePayout
-                            ? t('ledger.type.deliveryCourierFeePayout', { defaultValue: 'Courier Fee Payment' })
-                        : isCourierReimbursement
-                            ? t('ledger.type.deliveryCourierReimbursement', { defaultValue: 'Courier Reimbursement' })
-                        : isRecipientPayout
-                            ? t('ledger.type.deliveryRecipientPayout', { defaultValue: 'Recipient Payout' })
-                            : isMerchantRepayment
-                                ? t('ledger.type.deliveryMerchantRepayment', { defaultValue: 'Merchant Repayment' })
-                            : t('ledger.type.deliveryMerchantPayout', { defaultValue: 'Merchant Payout' }),
-                    relationDescription: t('ledger.description.deliverySettlementRelation', { defaultValue: 'Post Service settlement {{reference}}.', reference: buildTransactionReference(transaction) })
-                }
+                      // A party-level settlement has no truthful per-post
+                      // relation, so retain an isolated settlement descriptor.
+                      relationKey: `delivery-settlement:${transaction.sourceRecordId}`,
+                      relationRole: 'settlement' as const,
+                      relationTitle: isCourierRemittance
+                          ? t('ledger.type.deliveryCourierRemittance', {
+                                defaultValue: 'Courier Remittance',
+                            })
+                          : isCourierFeePayout
+                            ? t('ledger.type.deliveryCourierFeePayout', {
+                                  defaultValue: 'Courier Fee Payment',
+                              })
+                            : isCourierReimbursement
+                              ? t('ledger.type.deliveryCourierReimbursement', {
+                                    defaultValue: 'Courier Reimbursement',
+                                })
+                              : isRecipientPayout
+                                ? t('ledger.type.deliveryRecipientPayout', {
+                                      defaultValue: 'Recipient Payout',
+                                  })
+                                : isMerchantRepayment
+                                  ? t('ledger.type.deliveryMerchantRepayment', {
+                                        defaultValue: 'Merchant Repayment',
+                                    })
+                                  : t('ledger.type.deliveryMerchantPayout', {
+                                        defaultValue: 'Merchant Payout',
+                                    }),
+                      relationDescription: t('ledger.description.deliverySettlementRelation', {
+                          defaultValue: 'Post Service settlement {{reference}}.',
+                          reference: buildTransactionReference(transaction),
+                      }),
+                  }
 
             return {
                 id: `payment:${transaction.id}`,
@@ -1310,20 +1540,33 @@ function buildPaymentLedgerEntry(
                 businessPartnerId: linkedBusinessPartnerId,
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
-                description: buildTransactionDescription(transaction, t)
-                    || (isCourierRemittance
-                        ? t('ledger.description.deliveryCourierRemittance', { defaultValue: 'Courier cash handover' })
+                description:
+                    buildTransactionDescription(transaction, t) ||
+                    (isCourierRemittance
+                        ? t('ledger.description.deliveryCourierRemittance', {
+                              defaultValue: 'Courier cash handover',
+                          })
                         : isCourierFeePayout
-                            ? t('ledger.description.deliveryCourierFeePayout', { defaultValue: 'Courier fee payment' })
-                        : isCourierReimbursement
-                            ? t('ledger.description.deliveryCourierReimbursement', { defaultValue: 'Courier reimbursement' })
-                        : isRecipientPayout
-                            ? t('ledger.description.deliveryRecipientPayout', { defaultValue: 'Recipient payout' })
-                            : isMerchantRepayment
-                                ? t('ledger.description.deliveryMerchantRepayment', { defaultValue: 'Merchant repayment received' })
-                            : t('ledger.description.deliveryMerchantPayout', { defaultValue: 'Merchant payout' })),
+                          ? t('ledger.description.deliveryCourierFeePayout', {
+                                defaultValue: 'Courier fee payment',
+                            })
+                          : isCourierReimbursement
+                            ? t('ledger.description.deliveryCourierReimbursement', {
+                                  defaultValue: 'Courier reimbursement',
+                              })
+                            : isRecipientPayout
+                              ? t('ledger.description.deliveryRecipientPayout', {
+                                    defaultValue: 'Recipient payout',
+                                })
+                              : isMerchantRepayment
+                                ? t('ledger.description.deliveryMerchantRepayment', {
+                                      defaultValue: 'Merchant repayment received',
+                                  })
+                                : t('ledger.description.deliveryMerchantPayout', {
+                                      defaultValue: 'Merchant payout',
+                                  })),
                 routePath: getPaymentTransactionRoutePath(transaction),
-                ...relation
+                ...relation,
             }
         }
         case 'loan_origination': {
@@ -1339,18 +1582,21 @@ function buildPaymentLedgerEntry(
                 sourceModule: 'loans',
                 referenceId: buildTransactionReference(transaction),
                 partner: transaction.counterpartyName || null,
-                businessPartnerId: originationLoan?.linkedPartyId ?? context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ?? null,
+                businessPartnerId:
+                    originationLoan?.linkedPartyId ??
+                    context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ??
+                    null,
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
-                description: buildTransactionDescription(transaction, t) || (transaction.direction === 'incoming' ? 'Loan received' : 'Loan disbursed'),
+                description:
+                    buildTransactionDescription(transaction, t) || (transaction.direction === 'incoming' ? 'Loan received' : 'Loan disbursed'),
                 routePath: getPaymentTransactionRoutePath(transaction),
-                ...relation
+                ...relation,
             }
         }
         case 'sales_order': {
-            const sourceChannel = typeof transaction.metadata?.sourceChannel === 'string'
-                ? transaction.metadata.sourceChannel.trim().toLowerCase()
-                : null
+            const sourceChannel =
+                typeof transaction.metadata?.sourceChannel === 'string' ? transaction.metadata.sourceChannel.trim().toLowerCase() : null
             const isMarketplace = sourceChannel === 'marketplace'
             const isReceivable = Boolean(transaction.metadata?.receivable)
             const salesOrder = context.salesOrderById.get(transaction.sourceRecordId)
@@ -1358,22 +1604,23 @@ function buildPaymentLedgerEntry(
                 id: `payment:${transaction.id}`,
                 transactionId: transaction.id,
                 date: transaction.paidAt,
-                type: isMarketplace
-                    ? (isReceivable ? 'ecommerce_receivable' : 'ecommerce_payment')
-                    : 'sales_order_payment',
+                type: isMarketplace ? (isReceivable ? 'ecommerce_receivable' : 'ecommerce_payment') : 'sales_order_payment',
                 direction: 'incoming',
                 amount: transaction.amount,
                 currency: transaction.currency,
                 sourceModule: 'orders',
                 referenceId: buildTransactionReference(transaction),
                 partner: transaction.counterpartyName || null,
-                businessPartnerId: salesOrder?.businessPartnerId ?? context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ?? null,
+                businessPartnerId:
+                    salesOrder?.businessPartnerId ??
+                    context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ??
+                    null,
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
                 storageIds: getSalesOrderStorageIds(salesOrder),
-                ...relation
+                ...relation,
             }
         }
         case 'purchase_order': {
@@ -1389,12 +1636,15 @@ function buildPaymentLedgerEntry(
                 sourceModule: 'orders',
                 referenceId: buildTransactionReference(transaction),
                 partner: transaction.counterpartyName || null,
-                businessPartnerId: purchaseOrder?.businessPartnerId ?? context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ?? null,
+                businessPartnerId:
+                    purchaseOrder?.businessPartnerId ??
+                    context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ??
+                    null,
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
-                ...relation
+                ...relation,
             }
         }
         case 'expense_item':
@@ -1414,7 +1664,7 @@ function buildPaymentLedgerEntry(
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
-                ...relation
+                ...relation,
             }
         case 'payroll_status':
             return {
@@ -1433,7 +1683,7 @@ function buildPaymentLedgerEntry(
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
-                ...relation
+                ...relation,
             }
         case 'real_estate_payment':
         case 'real_estate_installment':
@@ -1441,9 +1691,8 @@ function buildPaymentLedgerEntry(
         case 'rental_payment':
         case 'rental_deposit':
         case 'rental_deposit_refund': {
-            const linkedBusinessPartnerId = typeof transaction.metadata?.businessPartnerId === 'string'
-                ? transaction.metadata.businessPartnerId
-                : null
+            const linkedBusinessPartnerId =
+                typeof transaction.metadata?.businessPartnerId === 'string' ? transaction.metadata.businessPartnerId : null
             return {
                 id: `payment:${transaction.id}`,
                 transactionId: transaction.id,
@@ -1455,14 +1704,15 @@ function buildPaymentLedgerEntry(
                 sourceModule: 'car_rental',
                 referenceId: buildTransactionReference(transaction),
                 partner: transaction.counterpartyName || null,
-                businessPartnerId: linkedBusinessPartnerId
-                    || context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '')
-                    || null,
+                businessPartnerId:
+                    linkedBusinessPartnerId ||
+                    context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ||
+                    null,
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
-                ...relation
+                ...relation,
             }
         }
         case 'travel_booking_payment':
@@ -1482,13 +1732,14 @@ function buildPaymentLedgerEntry(
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
-                ...relation
+                ...relation,
             }
         case 'real_estate_commission': {
             const realEstateTransaction = context.realEstateTransactionById.get(transaction.sourceRecordId)
-            const linkedBusinessPartnerId = typeof transaction.metadata?.businessPartnerId === 'string' && transaction.metadata.businessPartnerId
-                ? transaction.metadata.businessPartnerId
-                : null
+            const linkedBusinessPartnerId =
+                typeof transaction.metadata?.businessPartnerId === 'string' && transaction.metadata.businessPartnerId
+                    ? transaction.metadata.businessPartnerId
+                    : null
             return {
                 id: `payment:${transaction.id}`,
                 transactionId: transaction.id,
@@ -1500,16 +1751,17 @@ function buildPaymentLedgerEntry(
                 sourceModule: 'real_estate',
                 referenceId: buildTransactionReference(transaction),
                 partner: transaction.counterpartyName || null,
-                businessPartnerId: linkedBusinessPartnerId
-                    ?? realEstateTransaction?.buyerBusinessPartnerId
-                    ?? realEstateTransaction?.sellerBusinessPartnerId
-                    ?? context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '')
-                    ?? null,
+                businessPartnerId:
+                    linkedBusinessPartnerId ??
+                    realEstateTransaction?.buyerBusinessPartnerId ??
+                    realEstateTransaction?.sellerBusinessPartnerId ??
+                    context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ??
+                    null,
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
-                ...relation
+                ...relation,
             }
         }
         case 'activity_transaction':
@@ -1530,7 +1782,7 @@ function buildPaymentLedgerEntry(
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
-                ...relation
+                ...relation,
             }
         case 'clinical_appointment':
             return {
@@ -1549,7 +1801,7 @@ function buildPaymentLedgerEntry(
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
-                ...relation
+                ...relation,
             }
         case 'loan_installment': {
             const installmentLoan = context.loanById.get(transaction.sourceRecordId)
@@ -1564,13 +1816,16 @@ function buildPaymentLedgerEntry(
                 sourceModule: 'loans',
                 referenceId: buildTransactionReference(transaction),
                 partner: transaction.counterpartyName || null,
-                businessPartnerId: installmentLoan?.linkedPartyId ?? context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ?? null,
+                businessPartnerId:
+                    installmentLoan?.linkedPartyId ??
+                    context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ??
+                    null,
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
                 storageIds: getSaleStorageIds(installmentLoan?.saleId ? context.saleById.get(installmentLoan.saleId) : undefined),
-                ...relation
+                ...relation,
             }
         }
         case 'loan_payment':
@@ -1587,20 +1842,23 @@ function buildPaymentLedgerEntry(
                 sourceModule: 'loans',
                 referenceId: buildTransactionReference(transaction),
                 partner: transaction.counterpartyName || null,
-                businessPartnerId: loanPaymentLoan?.linkedPartyId ?? context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ?? null,
+                businessPartnerId:
+                    loanPaymentLoan?.linkedPartyId ??
+                    context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ??
+                    null,
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
                 storageIds: getSaleStorageIds(loanPaymentLoan?.saleId ? context.saleById.get(loanPaymentLoan.saleId) : undefined),
-                ...relation
+                ...relation,
             }
         }
         case 'agent_commission_payout': {
             const metadataAgentId = typeof transaction.metadata?.agentId === 'string' ? transaction.metadata.agentId : null
             const linkedBusinessPartnerId = metadataAgentId
-                ? context.agentBusinessPartnerIdById.get(metadataAgentId) ?? null
-                : context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ?? null
+                ? (context.agentBusinessPartnerIdById.get(metadataAgentId) ?? null)
+                : (context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ?? null)
             return {
                 id: `payment:${transaction.id}`,
                 transactionId: transaction.id,
@@ -1617,7 +1875,7 @@ function buildPaymentLedgerEntry(
                 notes: transaction.note?.trim() || null,
                 description: buildTransactionDescription(transaction, t),
                 routePath: getPaymentTransactionRoutePath(transaction),
-                ...relation
+                ...relation,
             }
         }
         default:
@@ -1648,25 +1906,26 @@ export function Ledger() {
     const [, setLocation] = useLocation()
     const workspaceId = user?.workspaceId
     const baseCurrency = (features.default_currency || 'usd') as CurrencyCode
-    const hasLedgerSurface = features.pos
-        || features.instant_pos
-        || features.sales_history
-        || features.crm
-        || features.budget
-        || features.hr
-        || features.loans
-        || features.real_estate
-        || features.activities
-        || features.clinical_appointments
-        || features.post_service
-        || features.car_rental
-        || features.travel_transportation
+    const hasLedgerSurface =
+        features.pos ||
+        features.instant_pos ||
+        features.sales_history ||
+        features.crm ||
+        features.budget ||
+        features.hr ||
+        features.loans ||
+        features.real_estate ||
+        features.activities ||
+        features.clinical_appointments ||
+        features.post_service ||
+        features.car_rental ||
+        features.travel_transportation
 
     const dateBounds = useMemo<{ startDate?: string; endDate?: string }>(() => {
         const { start, end } = getDateRangeBounds(dateRange, customDates)
         return {
             startDate: start?.toISOString(),
-            endDate: end ? new Date(end.getTime() - 1).toISOString() : undefined
+            endDate: end ? new Date(end.getTime() - 1).toISOString() : undefined,
         }
     }, [dateRange, customDates])
 
@@ -1678,27 +1937,19 @@ export function Ledger() {
     // generic payment hook's full source-table hydration here: it fans out into
     // many remote reads and Dexie writes during route entry, delaying the first
     // Ledger paint without adding data this page has not requested itself.
-    const paymentTransactions = usePaymentTransactions(
-        workspaceId,
-        { includeReversals: true },
-        { hydrateSourceTables: false },
-    )
+    const paymentTransactions = usePaymentTransactions(workspaceId, { includeReversals: true }, { hydrateSourceTables: false })
     const salesOrders = useSalesOrders(workspaceId, dateBounds.startDate, dateBounds.endDate)
     const purchaseOrders = usePurchaseOrders(workspaceId)
-    const businessPartners = useBusinessPartners(workspaceId, { includeAgentRoles: true })
+    const businessPartners = useBusinessPartners(workspaceId, {
+        includeAgentRoles: true,
+    })
     const agents = useAgents(workspaceId)
     const deliveryMerchantProfiles = useDeliveryMerchantProfiles(workspaceId)
     const deliverySettlements = useDeliverySettlements(workspaceId)
     const deliveryShipments = useDeliveryShipments(workspaceId)
     const rawExchangeTransactions = useExchangeTransactions(workspaceId)
-    const activePaymentTransactions = useMemo(
-        () => getRemainingPaymentTransactions(paymentTransactions),
-        [paymentTransactions]
-    )
-    const rates = useMemo(
-        () => buildConversionRates(exchangeData, eurRates, tryRates),
-        [eurRates, exchangeData, tryRates]
-    )
+    const ledgerPaymentTransactions = useMemo(() => getLedgerPaymentTransactions(paymentTransactions), [paymentTransactions])
+    const rates = useMemo(() => buildConversionRates(exchangeData, eurRates, tryRates), [eurRates, exchangeData, tryRates])
 
     const [filters, setFilters] = useState<LedgerFilterState>(DEFAULT_LEDGER_FILTERS)
     const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false)
@@ -1717,69 +1968,54 @@ export function Ledger() {
     }, [pageSize])
 
     const deferredSearch = useDeferredValue(filters.search)
-    const loanById = useMemo(
-        () => new Map(loans.map((loan) => [loan.id, loan])),
-        [loans]
-    )
+    const loanById = useMemo(() => new Map(loans.map((loan) => [loan.id, loan])), [loans])
     const realEstateTransactionById = useMemo(
         () => new Map(realEstateTransactions.map((transaction) => [transaction.id, transaction])),
-        [realEstateTransactions]
+        [realEstateTransactions],
     )
-    const saleById = useMemo(
-        () => new Map(sales.map((sale) => [sale.id, sale])),
-        [sales]
-    )
+    const saleById = useMemo(() => new Map(sales.map((sale) => [sale.id, sale])), [sales])
     const loanOriginationIds = useMemo(
-        () => new Set(
-            activePaymentTransactions
-                .filter((transaction) => transaction.sourceType === 'loan_origination')
-                .map((transaction) => transaction.sourceRecordId)
-        ),
-        [activePaymentTransactions]
+        () =>
+            new Set(
+                ledgerPaymentTransactions
+                    .filter((transaction) => transaction.sourceType === 'loan_origination')
+                    .map((transaction) => transaction.sourceRecordId),
+            ),
+        [ledgerPaymentTransactions],
     )
-    const salesOrderById = useMemo(
-        () => new Map(salesOrders.map((order) => [order.id, order])),
-        [salesOrders]
-    )
-    const purchaseOrderById = useMemo(
-        () => new Map(purchaseOrders.map((order) => [order.id, order])),
-        [purchaseOrders]
-    )
+    const salesOrderById = useMemo(() => new Map(salesOrders.map((order) => [order.id, order])), [salesOrders])
+    const purchaseOrderById = useMemo(() => new Map(purchaseOrders.map((order) => [order.id, order])), [purchaseOrders])
     const businessPartnerByName = useMemo(
-        () => new Map(
-            businessPartners
-                .filter((bp) => bp.partnerName.trim())
-                .map((bp) => [bp.partnerName.trim().toLowerCase(), bp.id])
-        ),
-        [businessPartners]
+        () => new Map(businessPartners.filter((bp) => bp.partnerName.trim()).map((bp) => [bp.partnerName.trim().toLowerCase(), bp.id])),
+        [businessPartners],
     )
     const businessPartnerNameById = useMemo(
         () => new Map(businessPartners.map((partner) => [partner.id, partner.partnerName] as const)),
-        [businessPartners]
+        [businessPartners],
     )
     const agentNameById = useMemo(
         () => new Map(agents.map((agent) => [agent.id, businessPartnerNameById.get(agent.businessPartnerId) || ''] as const)),
-        [agents, businessPartnerNameById]
+        [agents, businessPartnerNameById],
     )
-    const agentBusinessPartnerIdById = useMemo(
-        () => new Map(agents.map((agent) => [agent.id, agent.businessPartnerId] as const)),
-        [agents]
-    )
+    const agentBusinessPartnerIdById = useMemo(() => new Map(agents.map((agent) => [agent.id, agent.businessPartnerId] as const)), [agents])
     const merchantNameByProfileId = useMemo(
-        () => new Map(deliveryMerchantProfiles.map((profile) => [profile.id, businessPartnerNameById.get(profile.businessPartnerId) || ''] as const)),
-        [businessPartnerNameById, deliveryMerchantProfiles]
+        () =>
+            new Map(
+                deliveryMerchantProfiles.map((profile) => [profile.id, businessPartnerNameById.get(profile.businessPartnerId) || ''] as const),
+            ),
+        [businessPartnerNameById, deliveryMerchantProfiles],
     )
     const merchantBusinessPartnerIdByProfileId = useMemo(
         () => new Map(deliveryMerchantProfiles.map((profile) => [profile.id, profile.businessPartnerId] as const)),
-        [deliveryMerchantProfiles]
+        [deliveryMerchantProfiles],
     )
     const deliverySettlementById = useMemo(
         () => new Map(deliverySettlements.map((settlement) => [settlement.id, settlement] as const)),
-        [deliverySettlements]
+        [deliverySettlements],
     )
     const deliveryShipmentById = useMemo(
         () => new Map(deliveryShipments.map((shipment) => [shipment.id, shipment] as const)),
-        [deliveryShipments]
+        [deliveryShipments],
     )
 
     const allEntries = useMemo(() => {
@@ -1796,45 +2032,78 @@ export function Ledger() {
             agentNameById,
             agentBusinessPartnerIdById,
             merchantNameByProfileId,
-            merchantBusinessPartnerIdByProfileId
+            merchantBusinessPartnerIdByProfileId,
         }
-        const paymentEntries: LedgerEntry[] = activePaymentTransactions
+        const paymentEntries: LedgerEntry[] = ledgerPaymentTransactions
             .map<LedgerEntry | null>((transaction) => {
                 const entry = buildPaymentLedgerEntry(transaction, context, t)
-                return entry ? { ...entry, paymentAccount: transaction.accountNameSnapshot || null } : null
+                return entry
+                    ? {
+                          ...applyPaymentReversalToLedgerEntry(entry, transaction, t),
+                          paymentAccount: transaction.accountNameSnapshot || null,
+                      }
+                    : null
             })
             .filter((entry): entry is LedgerEntry => entry !== null)
 
         const rows: LedgerEntry[] = [
-            ...sales.map(s => buildSaleLedgerEntry(s, t)).filter((entry): entry is LedgerEntry => !!entry),
+            ...sales.map((s) => buildSaleLedgerEntry(s, t)).filter((entry): entry is LedgerEntry => !!entry),
             ...paymentEntries,
-            ...(rawExchangeTransactions || [])
-                .map(tx => buildExchangeLedgerEntry(tx))
-                .filter((entry): entry is LedgerEntry => !!entry)
+            ...(rawExchangeTransactions || []).map((tx) => buildExchangeLedgerEntry(tx)).filter((entry): entry is LedgerEntry => !!entry),
         ]
 
         return rows.sort((left, right) => right.date.localeCompare(left.date) || right.transactionId.localeCompare(left.transactionId))
-    }, [activePaymentTransactions, loanById, loanOriginationIds, realEstateTransactionById, saleById, sales, salesOrderById, purchaseOrderById, businessPartnerByName, deliverySettlementById, deliveryShipmentById, agentNameById, agentBusinessPartnerIdById, merchantNameByProfileId, merchantBusinessPartnerIdByProfileId, rawExchangeTransactions, t])
+    }, [
+        ledgerPaymentTransactions,
+        loanById,
+        loanOriginationIds,
+        realEstateTransactionById,
+        saleById,
+        sales,
+        salesOrderById,
+        purchaseOrderById,
+        businessPartnerByName,
+        deliverySettlementById,
+        deliveryShipmentById,
+        agentNameById,
+        agentBusinessPartnerIdById,
+        merchantNameByProfileId,
+        merchantBusinessPartnerIdByProfileId,
+        rawExchangeTransactions,
+        t,
+    ])
 
     const typeOptions = useMemo(
-        () => Array.from(new Set(allEntries.map((entry) => entry.type))).sort((left, right) => ledgerTypeLabel(left, t).localeCompare(ledgerTypeLabel(right, t))),
-        [allEntries, t]
+        () =>
+            Array.from(new Set(allEntries.map((entry) => entry.type))).sort((left, right) =>
+                ledgerTypeLabel(left, t).localeCompare(ledgerTypeLabel(right, t)),
+            ),
+        [allEntries, t],
     )
     const sourceOptions = useMemo(
-        () => Array.from(new Set(allEntries.map((entry) => entry.sourceModule))).sort((left, right) => sourceModuleLabel(left, t).localeCompare(sourceModuleLabel(right, t))),
-        [allEntries, t]
+        () =>
+            Array.from(new Set(allEntries.map((entry) => entry.sourceModule))).sort((left, right) =>
+                sourceModuleLabel(left, t).localeCompare(sourceModuleLabel(right, t)),
+            ),
+        [allEntries, t],
     )
     const currencyOptions = useMemo(
         () => Array.from(new Set(allEntries.map((entry) => entry.currency))).sort((left, right) => left.localeCompare(right)),
-        [allEntries]
+        [allEntries],
     )
     const paymentMethodOptions = useMemo(
-        () => Array.from(new Set(allEntries.map((entry) => entry.paymentMethod || 'unknown'))).sort((left, right) => paymentMethodLabel(left, t).localeCompare(paymentMethodLabel(right, t))),
-        [allEntries, t]
+        () =>
+            Array.from(new Set(allEntries.map((entry) => entry.paymentMethod || 'unknown'))).sort((left, right) =>
+                paymentMethodLabel(left, t).localeCompare(paymentMethodLabel(right, t)),
+            ),
+        [allEntries, t],
     )
     const partnerOptions = useMemo(
-        () => Array.from(new Set(allEntries.map((entry) => entry.partner?.trim()).filter((value): value is string => !!value))).sort((left, right) => left.localeCompare(right)),
-        [allEntries]
+        () =>
+            Array.from(new Set(allEntries.map((entry) => entry.partner?.trim()).filter((value): value is string => !!value))).sort(
+                (left, right) => left.localeCompare(right),
+            ),
+        [allEntries],
     )
 
     const isLoading = sales === undefined
@@ -1857,20 +2126,14 @@ export function Ledger() {
 
     const dateScopedEntries = useMemo(
         () => allEntries.filter((entry) => isEntryInDateRange(entry.date, dateRange, customDates)),
-        [allEntries, customDates, dateRange]
+        [allEntries, customDates, dateRange],
     )
 
-    const effectiveFilters = useMemo(
-        () => ({ ...filters, search: deferredSearch }),
-        [deferredSearch, filters]
-    )
+    const effectiveFilters = useMemo(() => ({ ...filters, search: deferredSearch }), [deferredSearch, filters])
 
-    const filteredEntries = useMemo(
-        () => applyLedgerFilters(dateScopedEntries, effectiveFilters),
-        [dateScopedEntries, effectiveFilters]
-    )
+    const filteredEntries = useMemo(() => applyLedgerFilters(dateScopedEntries, effectiveFilters), [dateScopedEntries, effectiveFilters])
     const ledgerExportData = useMemo(() => {
-        return filteredEntries.map(entry => ({
+        return filteredEntries.map((entry) => ({
             [t('ledger.table.date') || 'Date']: formatDateTime(entry.date),
             [t('ledger.table.type') || 'Type']: ledgerTypeLabel(entry.type, t),
             [t('ledger.table.direction') || 'Direction']: directionFilterLabel(entry.direction, t),
@@ -1886,29 +2149,14 @@ export function Ledger() {
     }, [filteredEntries, t])
     const visibleEntries = useMemo(
         () => filteredEntries.slice((currentPage - 1) * pageSize, currentPage * pageSize),
-        [currentPage, filteredEntries, pageSize]
+        [currentPage, filteredEntries, pageSize],
     )
-    const visibleIncomingEntries = useMemo(
-        () => visibleEntries.filter((entry) => entry.direction === 'incoming'),
-        [visibleEntries]
-    )
-    const visibleOutgoingEntries = useMemo(
-        () => visibleEntries.filter((entry) => entry.direction === 'outgoing'),
-        [visibleEntries]
-    )
-    const visibleOpeningEntries = useMemo(
-        () => visibleEntries.filter((entry) => entry.direction === 'opening'),
-        [visibleEntries]
-    )
-    const visibleAdjustmentEntries = useMemo(
-        () => visibleEntries.filter((entry) => entry.direction === 'adjustment'),
-        [visibleEntries]
-    )
+    const visibleIncomingEntries = useMemo(() => visibleEntries.filter((entry) => entry.direction === 'incoming'), [visibleEntries])
+    const visibleOutgoingEntries = useMemo(() => visibleEntries.filter((entry) => entry.direction === 'outgoing'), [visibleEntries])
+    const visibleOpeningEntries = useMemo(() => visibleEntries.filter((entry) => entry.direction === 'opening'), [visibleEntries])
+    const visibleAdjustmentEntries = useMemo(() => visibleEntries.filter((entry) => entry.direction === 'adjustment'), [visibleEntries])
 
-    const draftPreviewEntries = useMemo(
-        () => applyLedgerFilters(dateScopedEntries, draftFilters),
-        [dateScopedEntries, draftFilters]
-    )
+    const draftPreviewEntries = useMemo(() => applyLedgerFilters(dateScopedEntries, draftFilters), [dateScopedEntries, draftFilters])
 
     const dateDisplay = useMemo(() => {
         if (dateRange === 'today') {
@@ -1976,7 +2224,12 @@ export function Ledger() {
         const chips: string[] = []
 
         if (filters.search.trim()) {
-            chips.push(t('ledger.filters.chipSearch', { term: filters.search.trim(), defaultValue: `Search: ${filters.search.trim()}` }))
+            chips.push(
+                t('ledger.filters.chipSearch', {
+                    term: filters.search.trim(),
+                    defaultValue: `Search: ${filters.search.trim()}`,
+                }),
+            )
         }
         if (filters.direction.length > 0) {
             filters.direction.forEach((direction) => {
@@ -1995,23 +2248,43 @@ export function Ledger() {
         }
         if (filters.partner.length > 0) {
             filters.partner.forEach((partner) => {
-                chips.push(t('ledger.filters.chipPartner', { name: partner, defaultValue: `Partner: ${partner}` }))
+                chips.push(
+                    t('ledger.filters.chipPartner', {
+                        name: partner,
+                        defaultValue: `Partner: ${partner}`,
+                    }),
+                )
             })
         }
         if (filters.currency.length > 0) {
             filters.currency.forEach((currency) => {
-                chips.push(t('ledger.filters.chipCurrency', { code: currency.toUpperCase(), defaultValue: `Currency: ${currency.toUpperCase()}` }))
+                chips.push(
+                    t('ledger.filters.chipCurrency', {
+                        code: currency.toUpperCase(),
+                        defaultValue: `Currency: ${currency.toUpperCase()}`,
+                    }),
+                )
             })
         }
         if (filters.paymentMethods.length > 0) {
             filters.paymentMethods.forEach((method) => {
-                chips.push(t('ledger.filters.chipMethod', { name: paymentMethodLabel(method, t), defaultValue: `Method: ${paymentMethodLabel(method, t)}` }))
+                chips.push(
+                    t('ledger.filters.chipMethod', {
+                        name: paymentMethodLabel(method, t),
+                        defaultValue: `Method: ${paymentMethodLabel(method, t)}`,
+                    }),
+                )
             })
         }
         if (filters.storage.length > 0) {
             filters.storage.forEach((storageId) => {
                 const storageName = storages.find((storage) => storage.id === storageId)?.name || storageId
-                chips.push(t('ledger.filters.chipStorage', { name: storageName, defaultValue: `Storage: ${storageName}` }))
+                chips.push(
+                    t('ledger.filters.chipStorage', {
+                        name: storageName,
+                        defaultValue: `Storage: ${storageName}`,
+                    }),
+                )
             })
         }
         if (filters.notes.length > 0) {
@@ -2020,10 +2293,20 @@ export function Ledger() {
             })
         }
         if (filters.minAmount) {
-            chips.push(t('ledger.filters.chipMin', { value: filters.minAmount, defaultValue: `Min: ${filters.minAmount}` }))
+            chips.push(
+                t('ledger.filters.chipMin', {
+                    value: filters.minAmount,
+                    defaultValue: `Min: ${filters.minAmount}`,
+                }),
+            )
         }
         if (filters.maxAmount) {
-            chips.push(t('ledger.filters.chipMax', { value: filters.maxAmount, defaultValue: `Max: ${filters.maxAmount}` }))
+            chips.push(
+                t('ledger.filters.chipMax', {
+                    value: filters.maxAmount,
+                    defaultValue: `Max: ${filters.maxAmount}`,
+                }),
+            )
         }
         if (filters.sort !== 'date_desc') {
             chips.push(sortOptionLabel(filters.sort, t))
@@ -2032,10 +2315,7 @@ export function Ledger() {
         return chips
     }, [filters, storages, t])
 
-    const activeFilterCount = useMemo(
-        () => countActiveLedgerFilters(filters),
-        [filters]
-    )
+    const activeFilterCount = useMemo(() => countActiveLedgerFilters(filters), [filters])
 
     const handleResetAllFilters = () => {
         setFilters(DEFAULT_LEDGER_FILTERS)
@@ -2051,61 +2331,38 @@ export function Ledger() {
         setCurrentPage(1)
     }
 
-    const cashFlowEntries = useMemo(
-        () => filteredEntries.filter((entry) => isLedgerCashFlowDirection(entry.direction)),
-        [filteredEntries]
-    )
-    const inflowEntries = useMemo(
-        () => filteredEntries.filter((entry) => entry.direction === 'incoming'),
-        [filteredEntries]
-    )
-    const outflowEntries = useMemo(
-        () => filteredEntries.filter((entry) => entry.direction === 'outgoing'),
-        [filteredEntries]
-    )
+    const cashFlowEntries = useMemo(() => filteredEntries.filter((entry) => isLedgerCashFlowDirection(entry.direction)), [filteredEntries])
+    const inflowEntries = useMemo(() => filteredEntries.filter((entry) => entry.direction === 'incoming'), [filteredEntries])
+    const outflowEntries = useMemo(() => filteredEntries.filter((entry) => entry.direction === 'outgoing'), [filteredEntries])
     const totalInflow = useMemo(
         () => formatAmountSummary(inflowEntries, features.iqd_display_preference),
-        [features.iqd_display_preference, inflowEntries]
+        [features.iqd_display_preference, inflowEntries],
     )
     const totalOutflow = useMemo(
         () => formatAmountSummary(outflowEntries, features.iqd_display_preference),
-        [features.iqd_display_preference, outflowEntries]
+        [features.iqd_display_preference, outflowEntries],
     )
     const netFlow = useMemo(
         () => formatNetSummary(cashFlowEntries, features.iqd_display_preference),
-        [cashFlowEntries, features.iqd_display_preference]
+        [cashFlowEntries, features.iqd_display_preference],
     )
     const totalInflowInBaseCurrency = useMemo(
-        () => inflowEntries.reduce(
-            (total, entry) => total + convertToStoreBase(entry.amount, entry.currency, baseCurrency, rates),
-            0
-        ),
-        [baseCurrency, inflowEntries, rates]
+        () => inflowEntries.reduce((total, entry) => total + convertToStoreBase(entry.amount, entry.currency, baseCurrency, rates), 0),
+        [baseCurrency, inflowEntries, rates],
     )
     const totalOutflowInBaseCurrency = useMemo(
-        () => outflowEntries.reduce(
-            (total, entry) => total + convertToStoreBase(entry.amount, entry.currency, baseCurrency, rates),
-            0
-        ),
-        [baseCurrency, outflowEntries, rates]
+        () => outflowEntries.reduce((total, entry) => total + convertToStoreBase(entry.amount, entry.currency, baseCurrency, rates), 0),
+        [baseCurrency, outflowEntries, rates],
     )
     const netFlowInBaseCurrency = useMemo(
-        () => summarizeLedgerCashFlow(
-            cashFlowEntries,
-            (entry) => convertToStoreBase(entry.amount, entry.currency, baseCurrency, rates)
-        ).net,
-        [baseCurrency, cashFlowEntries, rates]
+        () => summarizeLedgerCashFlow(cashFlowEntries, (entry) => convertToStoreBase(entry.amount, entry.currency, baseCurrency, rates)).net,
+        [baseCurrency, cashFlowEntries, rates],
     )
     const hasMultipleInflowCurrencies = new Set(inflowEntries.map((entry) => entry.currency)).size > 1
     const hasMultipleOutflowCurrencies = new Set(outflowEntries.map((entry) => entry.currency)).size > 1
     const hasMultipleNetFlowCurrencies = new Set(cashFlowEntries.map((entry) => entry.currency)).size > 1
 
-    const renderCurrencySummary = (
-        values: string[],
-        convertedTotal: number,
-        hasMultipleCurrencies: boolean,
-        valueClassName: string
-    ) => {
+    const renderCurrencySummary = (values: string[], convertedTotal: number, hasMultipleCurrencies: boolean, valueClassName: string) => {
         const summary = (
             <div className={cn('space-y-1', hasMultipleCurrencies && 'cursor-help')}>
                 {values.map((value, index) => (
@@ -2141,7 +2398,7 @@ export function Ledger() {
         let previousStart = now
 
         if (cashFlowEntries.length > 0) {
-            const dates = cashFlowEntries.map(e => new Date(e.date).getTime())
+            const dates = cashFlowEntries.map((e) => new Date(e.date).getTime())
             const minDate = new Date(Math.min(...dates))
             const maxDate = new Date(Math.max(...dates))
             periodStart = minDate
@@ -2173,9 +2430,7 @@ export function Ledger() {
 
             if (!isCurrent && !isPrevious) return
 
-            const amount = entry.currency === baseCurrency
-                ? entry.amount
-                : convertToStoreBase(entry.amount, entry.currency, baseCurrency, rates)
+            const amount = entry.currency === baseCurrency ? entry.amount : convertToStoreBase(entry.amount, entry.currency, baseCurrency, rates)
 
             if (isCurrent) {
                 if (entry.direction === 'incoming') {
@@ -2185,7 +2440,11 @@ export function Ledger() {
                 }
 
                 // Compile module metrics
-                const mod = moduleFlows.get(entry.sourceModule) || { in: 0, out: 0, count: 0 }
+                const mod = moduleFlows.get(entry.sourceModule) || {
+                    in: 0,
+                    out: 0,
+                    count: 0,
+                }
                 if (entry.direction === 'incoming') mod.in += amount
                 else mod.out += amount
                 mod.count++
@@ -2224,7 +2483,7 @@ export function Ledger() {
                 revenue: stats.in,
                 cost: stats.out,
                 profit: stats.in - stats.out,
-                sold: stats.count
+                sold: stats.count,
             }))
             .sort((a, b) => b.revenue - a.revenue)
             .slice(0, 3)
@@ -2239,7 +2498,7 @@ export function Ledger() {
             surplusRatio: currentInflow === 0 ? 0 : (currentSurplus / currentInflow) * 100,
             previousSurplusRatio: previousInflow === 0 ? 0 : (previousSurplus / previousInflow) * 100,
             topModulesData,
-            hourlyData
+            hourlyData,
         }
     }, [allEntries, cashFlowEntries, baseCurrency, rates])
     const trendCurrencyMode = useMemo(() => {
@@ -2248,13 +2507,13 @@ export function Ledger() {
         if (currencies.length <= 1) {
             return {
                 currency: currencies[0] ?? baseCurrency,
-                usesBaseEquivalent: false
+                usesBaseEquivalent: false,
             }
         }
 
         return {
             currency: baseCurrency,
-            usesBaseEquivalent: true
+            usesBaseEquivalent: true,
         }
     }, [baseCurrency, cashFlowEntries])
     const ledgerTrendData = useMemo(() => {
@@ -2266,7 +2525,7 @@ export function Ledger() {
                 dateKey,
                 inflow: 0,
                 outflow: 0,
-                net: 0
+                net: 0,
             }
             const amount = trendCurrencyMode.usesBaseEquivalent
                 ? convertToStoreBase(entry.amount, entry.currency, baseCurrency, rates)
@@ -2286,10 +2545,7 @@ export function Ledger() {
         return Array.from(points.values()).sort((left, right) => left.dateKey.localeCompare(right.dateKey))
     }, [baseCurrency, cashFlowEntries, rates, trendCurrencyMode.usesBaseEquivalent])
     const usesEquivalentTrend = trendCurrencyMode.usesBaseEquivalent
-    const netFlowIsNegative = useMemo(
-        () => ledgerTrendData.reduce((sum, point) => sum + point.net, 0) < 0,
-        [ledgerTrendData]
-    )
+    const netFlowIsNegative = useMemo(() => ledgerTrendData.reduce((sum, point) => sum + point.net, 0) < 0, [ledgerTrendData])
     const renderEntriesTable = (
         rows: LedgerEntry[],
         emptyMessage: string,
@@ -2298,7 +2554,7 @@ export function Ledger() {
             compactColumns?: boolean
             hideDescriptionNotes?: boolean
             hideActions?: boolean
-        }
+        },
     ) => {
         const { counts: relationCounts, ranges: relationRanges } = buildVisibleRelationMaps(rows)
         const hoveredRange = hoveredRelationKey ? (relationRanges.get(hoveredRelationKey) ?? null) : null
@@ -2317,26 +2573,60 @@ export function Ledger() {
 
         return (
             <TooltipProvider delayDuration={120}>
-                <Table className={cn(
-                    "ms-6 w-[calc(100%-1.5rem)]",
-                    compactColumns && "ms-0 min-w-[760px] w-full table-fixed text-[11px] leading-tight"
-                )}>
+                <Table
+                    className={cn(
+                        'ms-6 w-[calc(100%-1.5rem)]',
+                        compactColumns && 'ms-0 min-w-[760px] w-full table-fixed text-[11px] leading-tight',
+                    )}
+                >
                     <TableHeader>
                         <TableRow>
-                            <TableHead className={cn(compactColumns && 'w-[92px] px-2 py-3')}>{t('ledger.table.transactionId', { defaultValue: 'Transaction ID' })}</TableHead>
-                            <TableHead className={cn(compactColumns && 'w-[78px] px-2 py-3')}>{t('ledger.table.date', { defaultValue: 'Date' })}</TableHead>
-                            <TableHead className={cn(compactColumns && 'w-[120px] px-2 py-3')}>{t('ledger.table.type', { defaultValue: 'Type' })}</TableHead>
-                            <TableHead className={cn(compactColumns && 'w-[74px] px-2 py-3')}>{t('ledger.table.direction', { defaultValue: 'Direction' })}</TableHead>
-                            <TableHead className={cn(compactColumns && 'w-[92px] px-2 py-3')}>{t('ledger.table.amount', { defaultValue: 'Amount' })}</TableHead>
-                            <TableHead className={cn(compactColumns && 'w-[72px] px-2 py-3')}>{t('ledger.table.sourceModule', { defaultValue: 'Source Module' })}</TableHead>
-                            <TableHead className={cn(compactColumns && 'w-[90px] px-2 py-3')}>{t('ledger.table.referenceId', { defaultValue: 'Reference ID' })}</TableHead>
-                            <TableHead className={cn(compactColumns && 'w-[90px] px-2 py-3')}>{t('ledger.table.partner', { defaultValue: 'Partner' })}</TableHead>
-                            <TableHead className={cn(compactColumns && 'w-[100px] px-2 py-3')}>{t('ledger.table.paymentAccount', { defaultValue: 'Payment Account' })}</TableHead>
+                            <TableHead className={cn(compactColumns && 'w-[92px] px-2 py-3')}>
+                                {t('ledger.table.transactionId', {
+                                    defaultValue: 'Transaction ID',
+                                })}
+                            </TableHead>
+                            <TableHead className={cn(compactColumns && 'w-[78px] px-2 py-3')}>
+                                {t('ledger.table.date', { defaultValue: 'Date' })}
+                            </TableHead>
+                            <TableHead className={cn(compactColumns && 'w-[120px] px-2 py-3')}>
+                                {t('ledger.table.type', { defaultValue: 'Type' })}
+                            </TableHead>
+                            <TableHead className={cn(compactColumns && 'w-[74px] px-2 py-3')}>
+                                {t('ledger.table.direction', { defaultValue: 'Direction' })}
+                            </TableHead>
+                            <TableHead className={cn(compactColumns && 'w-[92px] px-2 py-3')}>
+                                {t('ledger.table.amount', { defaultValue: 'Amount' })}
+                            </TableHead>
+                            <TableHead className={cn(compactColumns && 'w-[72px] px-2 py-3')}>
+                                {t('ledger.table.sourceModule', {
+                                    defaultValue: 'Source Module',
+                                })}
+                            </TableHead>
+                            <TableHead className={cn(compactColumns && 'w-[90px] px-2 py-3')}>
+                                {t('ledger.table.referenceId', {
+                                    defaultValue: 'Reference ID',
+                                })}
+                            </TableHead>
+                            <TableHead className={cn(compactColumns && 'w-[90px] px-2 py-3')}>
+                                {t('ledger.table.partner', { defaultValue: 'Partner' })}
+                            </TableHead>
+                            <TableHead className={cn(compactColumns && 'w-[100px] px-2 py-3')}>
+                                {t('ledger.table.paymentAccount', {
+                                    defaultValue: 'Payment Account',
+                                })}
+                            </TableHead>
                             {showDescriptionNotes ? (
-                                <TableHead className={cn(compactColumns && 'min-w-[140px] px-2 py-3')}>{t('ledger.table.descriptionNotes', { defaultValue: 'Description / Notes' })}</TableHead>
+                                <TableHead className={cn(compactColumns && 'min-w-[140px] px-2 py-3')}>
+                                    {t('ledger.table.descriptionNotes', {
+                                        defaultValue: 'Description / Notes',
+                                    })}
+                                </TableHead>
                             ) : null}
                             {showActions ? (
-                                <TableHead className={cn("text-right", compactColumns ? 'w-[72px] px-2 py-3' : 'w-[84px]')}>{t('ledger.table.actions', { defaultValue: 'Actions' })}</TableHead>
+                                <TableHead className={cn('text-right', compactColumns ? 'w-[72px] px-2 py-3' : 'w-[84px]')}>
+                                    {t('ledger.table.actions', { defaultValue: 'Actions' })}
+                                </TableHead>
                             ) : null}
                         </TableRow>
                     </TableHeader>
@@ -2347,251 +2637,315 @@ export function Ledger() {
                                     {emptyMessage}
                                 </TableCell>
                             </TableRow>
-                        ) : rows.map((entry, rowIndex) => {
-                            const isRelationHovered = !!hoveredRelationKey && entry.relationKey === hoveredRelationKey
-                            const relatedVisibleCount = entry.relationKey ? (relationCounts.get(entry.relationKey) || 0) : 0
-                            const hasVisibleLinkedPeer = relatedVisibleCount > 1
-                            const hoveredRelationIsCompleted = hoveredRange && rows[hoveredRange.firstIndex]
-                                ? rows[hoveredRange.firstIndex].relationIsCompleted
-                                : undefined
-                            const showHoverHierarchyLine = !!hoveredRange
-                                && hoveredRange.firstIndex !== hoveredRange.lastIndex
-                                && rowIndex >= hoveredRange.firstIndex
-                                && rowIndex <= hoveredRange.lastIndex
-                            const showHoverHierarchyTurn = isRelationHovered && hasVisibleLinkedPeer
-                            const relationAccentClass = entry.relationRole === 'origin'
-                                ? 'bg-sky-500/5'
-                                : entry.relationRole === 'repayment'
-                                    ? 'bg-amber-500/10'
-                                    : 'bg-violet-500/5'
-                            const hierarchyVerticalClass = hoveredRange && rowIndex === hoveredRange.firstIndex
-                                ? 'top-1/2 bottom-0'
-                                : hoveredRange && rowIndex === hoveredRange.lastIndex
-                                    ? 'top-0 bottom-1/2'
-                                    : 'top-0 bottom-0'
+                        ) : (
+                            rows.map((entry, rowIndex) => {
+                                const isRelationHovered = !!hoveredRelationKey && entry.relationKey === hoveredRelationKey
+                                const relatedVisibleCount = entry.relationKey ? relationCounts.get(entry.relationKey) || 0 : 0
+                                const hasVisibleLinkedPeer = relatedVisibleCount > 1
+                                const hoveredRelationIsCompleted =
+                                    hoveredRange && rows[hoveredRange.firstIndex] ? rows[hoveredRange.firstIndex].relationIsCompleted : undefined
+                                const showHoverHierarchyLine =
+                                    !!hoveredRange &&
+                                    hoveredRange.firstIndex !== hoveredRange.lastIndex &&
+                                    rowIndex >= hoveredRange.firstIndex &&
+                                    rowIndex <= hoveredRange.lastIndex
+                                const showHoverHierarchyTurn = isRelationHovered && hasVisibleLinkedPeer
+                                const relationAccentClass =
+                                    entry.relationRole === 'origin'
+                                        ? 'bg-sky-500/5'
+                                        : entry.relationRole === 'repayment'
+                                          ? 'bg-amber-500/10'
+                                          : 'bg-violet-500/5'
+                                const hierarchyVerticalClass =
+                                    hoveredRange && rowIndex === hoveredRange.firstIndex
+                                        ? 'top-1/2 bottom-0'
+                                        : hoveredRange && rowIndex === hoveredRange.lastIndex
+                                          ? 'top-0 bottom-1/2'
+                                          : 'top-0 bottom-0'
 
-                            const relatedRows = entry.relationKey ? rows.filter(r => r.relationKey === entry.relationKey) : []
-                            const currentIndex = entry.relationKey ? relatedRows.findIndex(r => r.id === entry.id) : -1
-                            const nextPayment = currentIndex > 0 ? relatedRows[currentIndex - 1] : null
-                            const previousPayment = currentIndex !== -1 && currentIndex < relatedRows.length - 1 ? relatedRows[currentIndex + 1] : null
-                            const latestPayment = currentIndex > 0 ? relatedRows[0] : null
-                            const firstPayment = currentIndex !== -1 && currentIndex < relatedRows.length - 1 ? relatedRows[relatedRows.length - 1] : null
+                                const relatedRows = entry.relationKey ? rows.filter((r) => r.relationKey === entry.relationKey) : []
+                                const currentIndex = entry.relationKey ? relatedRows.findIndex((r) => r.id === entry.id) : -1
+                                const nextPayment = currentIndex > 0 ? relatedRows[currentIndex - 1] : null
+                                const previousPayment =
+                                    currentIndex !== -1 && currentIndex < relatedRows.length - 1 ? relatedRows[currentIndex + 1] : null
+                                const latestPayment = currentIndex > 0 ? relatedRows[0] : null
+                                const firstPayment =
+                                    currentIndex !== -1 && currentIndex < relatedRows.length - 1 ? relatedRows[relatedRows.length - 1] : null
 
-                            const isRealEstateEntry = entry.sourceModule === 'real_estate'
-                            const hasContextMenu = Boolean(nextPayment || previousPayment || latestPayment || firstPayment || entry.businessPartnerId || isRealEstateEntry)
+                                const isRealEstateEntry = entry.sourceModule === 'real_estate'
+                                const hasContextMenu = Boolean(
+                                    nextPayment ||
+                                    previousPayment ||
+                                    latestPayment ||
+                                    firstPayment ||
+                                    entry.businessPartnerId ||
+                                    isRealEstateEntry,
+                                )
 
-                            const rowContent = (
-                                <TableRow
-                                    id={`ledger-row-${entry.id}`}
-                                    key={entry.id}
-                                    className={cn(
-                                        entry.relationKey && 'transition-colors duration-150',
-                                        isRelationHovered && relationAccentClass,
-                                        isRelationHovered && hasVisibleLinkedPeer && 'shadow-[inset_0_0_0_1px_rgba(148,163,184,0.35)]'
-                                    )}
-                                    onMouseEnter={() => {
-                                        if (entry.relationKey) {
-                                            setHoveredRelationKey(entry.relationKey)
-                                        }
-                                    }}
-                                    onMouseLeave={() => {
-                                        if (entry.relationKey) {
-                                            setHoveredRelationKey((current) => current === entry.relationKey ? null : current)
-                                        }
-                                    }}
-                                >
-                                    <TableCell className={cn(
-                                        "relative font-mono text-xs text-muted-foreground",
-                                        compactColumns ? "max-w-[92px] px-2 py-3" : "max-w-[170px]"
-                                    )}>
-                                        {showHoverHierarchyLine ? (
-                                            <div className="pointer-events-none absolute inset-y-0 -start-6 w-5">
-                                                <span
-                                                    className={cn(
-                                                        'absolute start-1.5 w-px',
-                                                        hoveredRelationIsCompleted === true ? 'bg-emerald-500' : hoveredRelationIsCompleted === false ? 'bg-amber-500' : 'bg-foreground/80',
-                                                        hierarchyVerticalClass
-                                                    )}
-                                                />
-                                                {showHoverHierarchyTurn ? (
+                                const rowContent = (
+                                    <TableRow
+                                        id={`ledger-row-${entry.id}`}
+                                        key={entry.id}
+                                        className={cn(
+                                            entry.relationKey && 'transition-colors duration-150',
+                                            isRelationHovered && relationAccentClass,
+                                            isRelationHovered && hasVisibleLinkedPeer && 'shadow-[inset_0_0_0_1px_rgba(148,163,184,0.35)]',
+                                        )}
+                                        onMouseEnter={() => {
+                                            if (entry.relationKey) {
+                                                setHoveredRelationKey(entry.relationKey)
+                                            }
+                                        }}
+                                        onMouseLeave={() => {
+                                            if (entry.relationKey) {
+                                                setHoveredRelationKey((current) => (current === entry.relationKey ? null : current))
+                                            }
+                                        }}
+                                    >
+                                        <TableCell
+                                            className={cn(
+                                                'relative font-mono text-xs text-muted-foreground',
+                                                compactColumns ? 'max-w-[92px] px-2 py-3' : 'max-w-[170px]',
+                                            )}
+                                        >
+                                            {showHoverHierarchyLine ? (
+                                                <div className="pointer-events-none absolute inset-y-0 -start-6 w-5">
                                                     <span
                                                         className={cn(
-                                                            "absolute start-1.5 top-1/2 h-px w-3 -translate-y-1/2",
-                                                            hoveredRelationIsCompleted === true ? 'bg-emerald-500' : hoveredRelationIsCompleted === false ? 'bg-amber-500' : 'bg-foreground/80'
+                                                            'absolute start-1.5 w-px',
+                                                            hoveredRelationIsCompleted === true
+                                                                ? 'bg-emerald-500'
+                                                                : hoveredRelationIsCompleted === false
+                                                                  ? 'bg-amber-500'
+                                                                  : 'bg-foreground/80',
+                                                            hierarchyVerticalClass,
                                                         )}
                                                     />
-                                                ) : null}
-                                            </div>
-                                        ) : null}
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <span className="block truncate cursor-help">
-                                                    {formatTransactionIdForDisplay(entry.transactionId, compactTransactionId)}
-                                                </span>
-                                            </TooltipTrigger>
-                                            <TooltipContent side="bottom" align="start" className="font-mono text-xs">
-                                                {entry.transactionId}
-                                            </TooltipContent>
-                                        </Tooltip>
-                                    </TableCell>
-                                    <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>{formatDateTime(entry.date)}</TableCell>
-                                    <TableCell className={cn("font-medium", compactColumns && "align-top px-2 py-3")}>
-                                        {entry.relationTitle ? (
+                                                    {showHoverHierarchyTurn ? (
+                                                        <span
+                                                            className={cn(
+                                                                'absolute start-1.5 top-1/2 h-px w-3 -translate-y-1/2',
+                                                                hoveredRelationIsCompleted === true
+                                                                    ? 'bg-emerald-500'
+                                                                    : hoveredRelationIsCompleted === false
+                                                                      ? 'bg-amber-500'
+                                                                      : 'bg-foreground/80',
+                                                            )}
+                                                        />
+                                                    ) : null}
+                                                </div>
+                                            ) : null}
                                             <Tooltip>
                                                 <TooltipTrigger asChild>
-                                                    <div className={cn("inline-flex max-w-full cursor-default items-center gap-2", compactColumns && "gap-1")}>
-                                                        <span className="truncate decoration-dotted underline-offset-4 hover:underline">
-                                                            {ledgerTypeLabel(entry.type, t)}
-                                                        </span>
-                                                        {entry.relationRole ? (
-                                                            <span className={cn(
-                                                                'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                                                                entry.relationRole === 'origin'
-                                                                    ? 'border-sky-200 bg-sky-50 text-sky-700'
-                                                                    : entry.relationRole === 'repayment'
-                                                                        ? 'border-amber-200 bg-amber-50 text-amber-700'
-                                                                        : 'border-violet-200 bg-violet-50 text-violet-700'
-                                                            )}>
-                                                                {ledgerRelationRoleLabel(entry.relationRole, t)}
-                                                            </span>
-                                                        ) : null}
-                                                    </div>
+                                                    <span className="block truncate cursor-help">
+                                                        {formatTransactionIdForDisplay(entry.transactionId, compactTransactionId)}
+                                                    </span>
                                                 </TooltipTrigger>
-                                                <TooltipContent className="max-w-sm p-3">
-                                                    <div className="space-y-1.5">
-                                                        <div className="font-semibold">{entry.relationTitle}</div>
-                                                        {entry.relationDescription ? (
-                                                            <p className="text-xs leading-relaxed text-muted-foreground">
-                                                                {entry.relationDescription}
-                                                            </p>
-                                                        ) : null}
-                                                        {hasVisibleLinkedPeer ? (
-                                                            <p className="text-[11px] font-semibold text-primary">
-                                                                {t('ledger.relation.hoverHint', { defaultValue: 'Related ledger rows on this page highlight together and reveal the linked hierarchy while you hover.' })}
-                                                            </p>
-                                                        ) : null}
-                                                    </div>
+                                                <TooltipContent side="bottom" align="start" className="font-mono text-xs">
+                                                    {entry.transactionId}
                                                 </TooltipContent>
                                             </Tooltip>
-                                        ) : ledgerTypeLabel(entry.type, t)}
-                                    </TableCell>
-                                    <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>
-                                        <span className={cn(
-                                            'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                                            compactColumns && 'gap-0.5 px-1.5 text-[9px]',
-                                            entry.direction === 'adjustment'
-                                                ? 'border-violet-200 bg-violet-50 text-violet-700'
-                                                : entry.direction === 'opening'
-                                                ? 'border-sky-200 bg-sky-50 text-sky-700'
-                                                : entry.direction === 'incoming'
-                                                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                                : 'border-amber-200 bg-amber-50 text-amber-700'
-                                        )}>
-                                            {entry.direction === 'adjustment'
-                                                ? <SlidersHorizontal className="h-3 w-3" />
-                                                : entry.direction === 'opening'
-                                                    ? <Wallet className="h-3 w-3" />
-                                                : entry.direction === 'incoming'
-                                                    ? <ArrowDownLeft className="h-3 w-3" />
-                                                    : <ArrowUpRight className="h-3 w-3" />}
-                                            {entry.direction === 'adjustment'
-                                                ? t('ledger.direction.adjust', { defaultValue: 'ADJ' })
-                                                : entry.direction === 'opening'
-                                                    ? t('ledger.direction.open', { defaultValue: 'OPEN' })
-                                                : entry.direction === 'incoming'
-                                                    ? t('ledger.direction.in', { defaultValue: 'IN' })
-                                                    : t('ledger.direction.out', { defaultValue: 'OUT' })}
-                                        </span>
-                                    </TableCell>
-                                    <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>{formatCurrency(entry.amount, entry.currency, features.iqd_display_preference)}</TableCell>
-                                    <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>{sourceModuleLabel(entry.sourceModule, t)}</TableCell>
-                                    <TableCell className={cn("font-medium", compactColumns && "align-top px-2 py-3")}>
-                                        <span className="block truncate" title={entry.referenceId}>
-                                            {entry.referenceId}
-                                        </span>
-                                    </TableCell>
-                                    <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>
-                                        <span className="block truncate" title={entry.partner || undefined}>
-                                            {entry.partner || '-'}
-                                        </span>
-                                    </TableCell>
-                                    <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>
-                                        <span className="block truncate" title={entry.paymentAccount || undefined}>
-                                            {entry.paymentAccount || '-'}
-                                        </span>
-                                    </TableCell>
-                                    {showDescriptionNotes ? (
-                                        <TableCell className={cn(compactColumns ? 'max-w-[140px] px-2 py-3' : 'max-w-[280px]')}>
-                                            <span className={cn(
-                                                "block truncate text-muted-foreground",
-                                                compactColumns ? "text-xs" : "text-sm"
-                                            )} title={entry.description || undefined}>
-                                                {entry.description || '-'}
+                                        </TableCell>
+                                        <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>
+                                            {formatDateTime(entry.date)}
+                                        </TableCell>
+                                        <TableCell className={cn('font-medium', compactColumns && 'align-top px-2 py-3')}>
+                                            {entry.relationTitle ? (
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <div
+                                                            className={cn(
+                                                                'inline-flex max-w-full cursor-default items-center gap-2',
+                                                                compactColumns && 'gap-1',
+                                                            )}
+                                                        >
+                                                            <span className="truncate decoration-dotted underline-offset-4 hover:underline">
+                                                                {ledgerTypeLabel(entry.type, t)}
+                                                            </span>
+                                                            {entry.relationRole ? (
+                                                                <span
+                                                                    className={cn(
+                                                                        'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                                                                        entry.relationRole === 'origin'
+                                                                            ? 'border-sky-200 bg-sky-50 text-sky-700'
+                                                                            : entry.relationRole === 'repayment'
+                                                                              ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                                                              : 'border-violet-200 bg-violet-50 text-violet-700',
+                                                                    )}
+                                                                >
+                                                                    {ledgerRelationRoleLabel(entry.relationRole, t)}
+                                                                </span>
+                                                            ) : null}
+                                                        </div>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent className="max-w-sm p-3">
+                                                        <div className="space-y-1.5">
+                                                            <div className="font-semibold">{entry.relationTitle}</div>
+                                                            {entry.relationDescription ? (
+                                                                <p className="text-xs leading-relaxed text-muted-foreground">
+                                                                    {entry.relationDescription}
+                                                                </p>
+                                                            ) : null}
+                                                            {hasVisibleLinkedPeer ? (
+                                                                <p className="text-[11px] font-semibold text-primary">
+                                                                    {t('ledger.relation.hoverHint', {
+                                                                        defaultValue:
+                                                                            'Related ledger rows on this page highlight together and reveal the linked hierarchy while you hover.',
+                                                                    })}
+                                                                </p>
+                                                            ) : null}
+                                                        </div>
+                                                    </TooltipContent>
+                                                </Tooltip>
+                                            ) : (
+                                                ledgerTypeLabel(entry.type, t)
+                                            )}
+                                        </TableCell>
+                                        <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>
+                                            <span
+                                                className={cn(
+                                                    'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                                                    compactColumns && 'gap-0.5 px-1.5 text-[9px]',
+                                                    entry.direction === 'adjustment'
+                                                        ? 'border-violet-200 bg-violet-50 text-violet-700'
+                                                        : entry.direction === 'opening'
+                                                          ? 'border-sky-200 bg-sky-50 text-sky-700'
+                                                          : entry.direction === 'incoming'
+                                                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                                            : 'border-amber-200 bg-amber-50 text-amber-700',
+                                                )}
+                                            >
+                                                {entry.direction === 'adjustment' ? (
+                                                    <SlidersHorizontal className="h-3 w-3" />
+                                                ) : entry.direction === 'opening' ? (
+                                                    <Wallet className="h-3 w-3" />
+                                                ) : entry.direction === 'incoming' ? (
+                                                    <ArrowDownLeft className="h-3 w-3" />
+                                                ) : (
+                                                    <ArrowUpRight className="h-3 w-3" />
+                                                )}
+                                                {entry.direction === 'adjustment'
+                                                    ? t('ledger.direction.adjust', {
+                                                          defaultValue: 'ADJ',
+                                                      })
+                                                    : entry.direction === 'opening'
+                                                      ? t('ledger.direction.open', {
+                                                            defaultValue: 'OPEN',
+                                                        })
+                                                      : entry.direction === 'incoming'
+                                                        ? t('ledger.direction.in', { defaultValue: 'IN' })
+                                                        : t('ledger.direction.out', {
+                                                              defaultValue: 'OUT',
+                                                          })}
                                             </span>
                                         </TableCell>
-                                    ) : null}
-                                    {showActions ? (
-                                        <TableCell className={cn("text-right", compactColumns && "px-2 py-3")}>
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => openEntry(entry)}
-                                                className={cn(compactColumns && "h-7 px-2 text-[10px]")}
-                                            >
-                                                {t('ledger.table.open', { defaultValue: 'Open' })}
-                                            </Button>
+                                        <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>
+                                            {formatCurrency(entry.amount, entry.currency, features.iqd_display_preference)}
                                         </TableCell>
-                                    ) : null}
-                                </TableRow>
-                            )
-
-                            if (!hasContextMenu) return rowContent
-
-                            return (
-                                <ContextMenu key={entry.id}>
-                                    <ContextMenuTrigger asChild>
-                                        {rowContent}
-                                    </ContextMenuTrigger>
-                                    <ContextMenuContent className="w-48">
-                                        {latestPayment && (
-                                            <ContextMenuItem onClick={() => scrollToRow(latestPayment.id)}>
-                                                <ChevronsUp className="mr-2 h-4 w-4" />
-                                                {t('ledger.context.scrollToLatest', { defaultValue: 'Latest payment' })}
-                                            </ContextMenuItem>
-                                        )}
-                                        {nextPayment && (
-                                            <ContextMenuItem onClick={() => scrollToRow(nextPayment.id)}>
-                                                <ChevronUp className="mr-2 h-4 w-4" />
-                                                {t('ledger.context.scrollToNext', { defaultValue: 'Next payment' })}
-                                            </ContextMenuItem>
-                                        )}
-                                        {previousPayment && (
-                                            <ContextMenuItem onClick={() => scrollToRow(previousPayment.id)}>
-                                                <ChevronDown className="mr-2 h-4 w-4" />
-                                                {t('ledger.context.scrollToPrevious', { defaultValue: 'Previous payment' })}
-                                            </ContextMenuItem>
-                                        )}
-                                        {firstPayment && (
-                                            <ContextMenuItem onClick={() => scrollToRow(firstPayment.id)}>
-                                                <ChevronsDown className="mr-2 h-4 w-4" />
-                                                {t('ledger.context.scrollToFirst', { defaultValue: 'First payment' })}
-                                            </ContextMenuItem>
-                                        )}
-                                        {isRealEstateEntry ? (
-                                            <ContextMenuItem onClick={() => openEntry(entry)}>
-                                                <FileText className="mr-2 h-4 w-4" />
-                                                {t('ledger.context.viewRealEstateContract', { defaultValue: 'View Real Estate Contract' })}
-                                            </ContextMenuItem>
-                                        ) : entry.businessPartnerId ? (
-                                            <ContextMenuItem onClick={() => setLocation(`/business-partners/${entry.businessPartnerId}`)}>
-                                                <UsersRound className="mr-2 h-4 w-4" />
-                                                {t('ledger.context.viewBusinessPartner', { defaultValue: 'View Business Partner' })}
-                                            </ContextMenuItem>
+                                        <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>
+                                            {sourceModuleLabel(entry.sourceModule, t)}
+                                        </TableCell>
+                                        <TableCell className={cn('font-medium', compactColumns && 'align-top px-2 py-3')}>
+                                            <span className="block truncate" title={entry.referenceId}>
+                                                {entry.referenceId}
+                                            </span>
+                                        </TableCell>
+                                        <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>
+                                            <span className="block truncate" title={entry.partner || undefined}>
+                                                {entry.partner || '-'}
+                                            </span>
+                                        </TableCell>
+                                        <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>
+                                            <span className="block truncate" title={entry.paymentAccount || undefined}>
+                                                {entry.paymentAccount || '-'}
+                                            </span>
+                                        </TableCell>
+                                        {showDescriptionNotes ? (
+                                            <TableCell className={cn(compactColumns ? 'max-w-[140px] px-2 py-3' : 'max-w-[280px]')}>
+                                                <span
+                                                    className={cn(
+                                                        'block truncate text-muted-foreground',
+                                                        compactColumns ? 'text-xs' : 'text-sm',
+                                                    )}
+                                                    title={entry.description || undefined}
+                                                >
+                                                    {entry.description || '-'}
+                                                </span>
+                                            </TableCell>
                                         ) : null}
-                                    </ContextMenuContent>
-                                </ContextMenu>
-                            )
-                        })}
+                                        {showActions ? (
+                                            <TableCell className={cn('text-right', compactColumns && 'px-2 py-3')}>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => openEntry(entry)}
+                                                    className={cn(compactColumns && 'h-7 px-2 text-[10px]')}
+                                                >
+                                                    {t('ledger.table.open', { defaultValue: 'Open' })}
+                                                </Button>
+                                            </TableCell>
+                                        ) : null}
+                                    </TableRow>
+                                )
+
+                                if (!hasContextMenu) return rowContent
+
+                                return (
+                                    <ContextMenu key={entry.id}>
+                                        <ContextMenuTrigger asChild>{rowContent}</ContextMenuTrigger>
+                                        <ContextMenuContent className="w-48">
+                                            {latestPayment && (
+                                                <ContextMenuItem onClick={() => scrollToRow(latestPayment.id)}>
+                                                    <ChevronsUp className="mr-2 h-4 w-4" />
+                                                    {t('ledger.context.scrollToLatest', {
+                                                        defaultValue: 'Latest payment',
+                                                    })}
+                                                </ContextMenuItem>
+                                            )}
+                                            {nextPayment && (
+                                                <ContextMenuItem onClick={() => scrollToRow(nextPayment.id)}>
+                                                    <ChevronUp className="mr-2 h-4 w-4" />
+                                                    {t('ledger.context.scrollToNext', {
+                                                        defaultValue: 'Next payment',
+                                                    })}
+                                                </ContextMenuItem>
+                                            )}
+                                            {previousPayment && (
+                                                <ContextMenuItem onClick={() => scrollToRow(previousPayment.id)}>
+                                                    <ChevronDown className="mr-2 h-4 w-4" />
+                                                    {t('ledger.context.scrollToPrevious', {
+                                                        defaultValue: 'Previous payment',
+                                                    })}
+                                                </ContextMenuItem>
+                                            )}
+                                            {firstPayment && (
+                                                <ContextMenuItem onClick={() => scrollToRow(firstPayment.id)}>
+                                                    <ChevronsDown className="mr-2 h-4 w-4" />
+                                                    {t('ledger.context.scrollToFirst', {
+                                                        defaultValue: 'First payment',
+                                                    })}
+                                                </ContextMenuItem>
+                                            )}
+                                            {isRealEstateEntry ? (
+                                                <ContextMenuItem onClick={() => openEntry(entry)}>
+                                                    <FileText className="mr-2 h-4 w-4" />
+                                                    {t('ledger.context.viewRealEstateContract', {
+                                                        defaultValue: 'View Real Estate Contract',
+                                                    })}
+                                                </ContextMenuItem>
+                                            ) : entry.businessPartnerId ? (
+                                                <ContextMenuItem onClick={() => setLocation(`/business-partners/${entry.businessPartnerId}`)}>
+                                                    <UsersRound className="mr-2 h-4 w-4" />
+                                                    {t('ledger.context.viewBusinessPartner', {
+                                                        defaultValue: 'View Business Partner',
+                                                    })}
+                                                </ContextMenuItem>
+                                            ) : null}
+                                        </ContextMenuContent>
+                                    </ContextMenu>
+                                )
+                            })
+                        )}
                     </TableBody>
                 </Table>
             </TooltipProvider>
@@ -2603,10 +2957,16 @@ export function Ledger() {
             <div className="p-6">
                 <Card>
                     <CardHeader>
-                        <CardTitle>{t('ledger.notAvailable', { defaultValue: 'Ledger is not available in this workspace' })}</CardTitle>
+                        <CardTitle>
+                            {t('ledger.notAvailable', {
+                                defaultValue: 'Ledger is not available in this workspace',
+                            })}
+                        </CardTitle>
                     </CardHeader>
                     <CardContent className="text-sm text-muted-foreground">
-                        {t('ledger.enableModules', { defaultValue: 'Enable POS, CRM, Loans, Accounting, or HR to use the central ledger.' })}
+                        {t('ledger.enableModules', {
+                            defaultValue: 'Enable POS, CRM, Loans, Accounting, or HR to use the central ledger.',
+                        })}
                     </CardContent>
                 </Card>
             </div>
@@ -2615,7 +2975,7 @@ export function Ledger() {
 
     if (isExportModalOpen) {
         return (
-            <div className="space-y-8 p-6">
+            <div className="space-y-6">
                 <ExportPreviewModal
                     isOpen={isExportModalOpen}
                     onClose={() => setIsExportModalOpen(false)}
@@ -2627,350 +2987,443 @@ export function Ledger() {
     }
 
     return (
-        <div className="space-y-8 p-6">
-            <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
-                <div className="space-y-4">
-                    <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-                        <ShieldCheck className="h-3.5 w-3.5" />
-                        {t('ledger.systemControlled', { defaultValue: 'System Controlled' })}
+        <div className="space-y-6">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <h1 className="flex items-center gap-2 text-2xl font-bold">
+                            <BookOpen className="h-6 w-6 text-primary" />
+                            {t('ledger.title')}
+                            {(isLoading || isDateLoading) && <Loader2 className="ms-1 h-4 w-4 animate-spin text-primary/50" />}
+                        </h1>
+                        {dateDisplay && (
+                            <div
+                                className={cn(
+                                    'animate-pop-in bg-primary px-3 py-1 text-sm font-bold text-primary-foreground shadow-sm',
+                                    style === 'neo-orange' ? 'rounded-[var(--radius)] neo-border' : 'rounded-lg',
+                                )}
+                            >
+                                {dateDisplay}
+                            </div>
+                        )}
                     </div>
-
-                    <div className="space-y-1.5">
-                        <div className="flex flex-wrap items-center gap-3">
-                            <h1 className="bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-4xl font-black tracking-tight text-transparent">{t('ledger.title', { defaultValue: 'General Ledger' })}{(isLoading || isDateLoading) && <Loader2 className="w-5 h-5 animate-spin text-muted-foreground inline-block ml-3" />}</h1>
-                            {dateDisplay && (
-                                <div className={cn(
-                                    "px-3 py-1 text-sm font-bold bg-primary text-primary-foreground shadow-sm animate-pop-in",
-                                    style === 'neo-orange' ? "rounded-[var(--radius)] neo-border" : "rounded-lg"
-                                )}>
-                                    {dateDisplay}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center rounded-full border border-border/40 bg-secondary/30 px-2.5 py-1 text-xs font-semibold text-secondary-foreground transition-colors hover:bg-secondary/50">{t('ledger.badges.postedOnly', { defaultValue: 'Posted movements only' })}</span>
-                        <span className="inline-flex items-center rounded-full border border-border/40 bg-secondary/30 px-2.5 py-1 text-xs font-semibold text-secondary-foreground transition-colors hover:bg-secondary/50">{t('ledger.badges.multiCurrency', { defaultValue: 'Multi-currency preserved' })}</span>
-                    </div>
-
-                    <div className="pt-2">
-                        <DateRangeFilters />
-                    </div>
+                    <p className="text-muted-foreground">
+                        {t('ledger.subtitle')} <ModulePageFreshness className="ms-2" tableNames={LEDGER_FRESHNESS_TABLES} />
+                    </p>
                 </div>
 
-                <Card className="relative overflow-hidden shadow-sm xl:w-[340px]">
-                    <div className="absolute -end-4 -top-8 text-primary opacity-[0.03] dark:opacity-5">
-                        <Wallet className="h-32 w-32" />
-                    </div>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-primary">
-                            <Wallet className="h-4 w-4" />
-                            {t('ledger.viewSummary', { defaultValue: 'Ledger View Summary' })}
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                        <div className="flex items-end gap-2">
-                            <span className="text-3xl font-black tabular-nums tracking-tight">{filteredEntries.length}</span>
-                            <span className="mb-1 text-sm font-medium text-muted-foreground">{t('ledger.activeEntries', { defaultValue: 'active entries' })}</span>
-                        </div>
-                        <p className="max-w-[280px] text-xs leading-relaxed text-muted-foreground">
-                            {t('ledger.summaryDescription', { defaultValue: 'Use the page date range with the general filter modal to refine direction, type, module, party, method, amount range, and sorting.' })}
-                        </p>
-                    </CardContent>
-                </Card>
+                <div className="flex flex-wrap items-center gap-3">
+                    <DateRangeFilters />
+                    <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setIsFilterDialogOpen(true)}
+                        className="h-11 rounded-2xl border-border/60 px-4"
+                    >
+                        <SlidersHorizontal className="me-2 h-4 w-4" />
+                        {t('ledger.filters.title')}
+                        {activeFilterCount > 0 ? (
+                            <span className="ms-2 inline-flex min-w-6 items-center justify-center rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">
+                                {activeFilterCount}
+                            </span>
+                        ) : null}
+                    </Button>
+                    {activeFilterCount > 0 ? (
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={handleResetAllFilters}
+                            className="h-11 rounded-2xl px-4 text-muted-foreground"
+                        >
+                            <RotateCcw className="me-2 h-4 w-4" />
+                            {t('ledger.filters.clearFilters')}
+                        </Button>
+                    ) : null}
+                </div>
             </div>
 
+            {activeFilterChips.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                    {activeFilterChips.map((chip) => (
+                        <span
+                            key={chip}
+                            className="rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-[11px] font-semibold text-primary"
+                        >
+                            {chip}
+                        </span>
+                    ))}
+                </div>
+            ) : null}
+
             <TooltipProvider delayDuration={300}>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <Card className="rounded-3xl border border-border/50 bg-card/60 overflow-hidden relative group dark:bg-zinc-950">
-                    <div className="absolute top-0 end-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
-                        <ArrowDownLeft className="w-24 h-24 text-emerald-500" />
-                    </div>
-                    <CardHeader className="pb-2 flex flex-row items-center justify-between z-10 relative">
-                        <CardTitle className="text-[13px] font-semibold tracking-tight text-emerald-600 uppercase">
-                            {t('ledger.kpis.totalInflow', { defaultValue: 'Total Inflow' })}
-                        </CardTitle>
-                        <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
-                            <DollarSign className="h-4 w-4 text-emerald-600" />
+                <div className={cn('grid gap-4 sm:grid-cols-2', SHOW_LEDGER_ANALYTICS_WIDGETS ? 'lg:grid-cols-4' : 'lg:grid-cols-3')}>
+                    <Card className="rounded-3xl border border-border/50 bg-card/60 overflow-hidden relative group dark:bg-zinc-950">
+                        <div className="absolute top-0 end-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
+                            <ArrowDownLeft className="w-24 h-24 text-emerald-500" />
                         </div>
-                    </CardHeader>
-                    <CardContent className="z-10 relative space-y-4">
-                        <div className="space-y-1">
-                            {renderCurrencySummary(
-                                totalInflow,
-                                totalInflowInBaseCurrency,
-                                hasMultipleInflowCurrencies,
-                                'text-2xl font-black tabular-nums tracking-tighter text-emerald-600 leading-none'
-                            )}
-                            <div className="flex items-center gap-2">
-                                <span className={cn(
-                                    "flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-full border",
-                                    trendStats.inflowOffset > 0 ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20" :
-                                        trendStats.inflowOffset < 0 ? "text-rose-600 bg-rose-500/10 border-rose-500/20" :
-                                            "text-muted-foreground bg-secondary/50 border-border"
-                                )}>
-                                    {trendStats.inflowOffset > 0 ? <TrendingUp className="w-3 h-3 me-1" /> :
-                                        trendStats.inflowOffset < 0 ? <TrendingDown className="w-3 h-3 me-1" /> : null}
-                                    {trendStats.inflowOffset > 0 ? '+' : ''}{trendStats.inflowOffset.toFixed(1)}%
-                                </span>
-                                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">{t('ledger.kpis.vsPriorPeriod', { defaultValue: 'vs prior period' })}</span>
+                        <CardHeader className="pb-2 flex flex-row items-center justify-between z-10 relative">
+                            <CardTitle className="text-[13px] font-semibold tracking-tight text-emerald-600 uppercase">
+                                {t('ledger.kpis.totalInflow', { defaultValue: 'Total Inflow' })}
+                            </CardTitle>
+                            <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
+                                <DollarSign className="h-4 w-4 text-emerald-600" />
                             </div>
-                        </div>
-                        <LedgerSparkline data={ledgerTrendData} dataKey="inflow" color="#10b981" gradientId="l-inflow" />
-                    </CardContent>
-                </Card>
+                        </CardHeader>
+                        <CardContent className="z-10 relative space-y-4">
+                            <div className="space-y-1">
+                                {renderCurrencySummary(
+                                    totalInflow,
+                                    totalInflowInBaseCurrency,
+                                    hasMultipleInflowCurrencies,
+                                    'text-2xl font-black tabular-nums tracking-tighter text-emerald-600 leading-none',
+                                )}
+                                <div className="flex items-center gap-2">
+                                    <span
+                                        className={cn(
+                                            'flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-full border',
+                                            trendStats.inflowOffset > 0
+                                                ? 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20'
+                                                : trendStats.inflowOffset < 0
+                                                  ? 'text-rose-600 bg-rose-500/10 border-rose-500/20'
+                                                  : 'text-muted-foreground bg-secondary/50 border-border',
+                                        )}
+                                    >
+                                        {trendStats.inflowOffset > 0 ? (
+                                            <TrendingUp className="w-3 h-3 me-1" />
+                                        ) : trendStats.inflowOffset < 0 ? (
+                                            <TrendingDown className="w-3 h-3 me-1" />
+                                        ) : null}
+                                        {trendStats.inflowOffset > 0 ? '+' : ''}
+                                        {trendStats.inflowOffset.toFixed(1)}%
+                                    </span>
+                                    <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                                        {t('ledger.kpis.vsPriorPeriod', {
+                                            defaultValue: 'vs prior period',
+                                        })}
+                                    </span>
+                                </div>
+                            </div>
+                            <LedgerSparkline data={ledgerTrendData} dataKey="inflow" color="#10b981" gradientId="l-inflow" />
+                        </CardContent>
+                    </Card>
 
-                <Card className="rounded-3xl border border-border/50 bg-card/60 overflow-hidden relative group dark:bg-zinc-950">
-                    <div className="absolute top-0 end-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
-                        <ArrowUpRight className="w-24 h-24 text-amber-500" />
-                    </div>
-                    <CardHeader className="pb-2 flex flex-row items-center justify-between z-10 relative">
-                        <CardTitle className="text-[13px] font-semibold tracking-tight text-amber-600 uppercase">
-                            {t('ledger.kpis.totalOutflow', { defaultValue: 'Total Outflow' })}
-                        </CardTitle>
-                        <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center border border-amber-500/20">
-                            <Package className="h-4 w-4 text-amber-600" />
+                    <Card className="rounded-3xl border border-border/50 bg-card/60 overflow-hidden relative group dark:bg-zinc-950">
+                        <div className="absolute top-0 end-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
+                            <ArrowUpRight className="w-24 h-24 text-amber-500" />
                         </div>
-                    </CardHeader>
-                    <CardContent className="z-10 relative space-y-4">
-                        <div className="space-y-1">
-                            {renderCurrencySummary(
-                                totalOutflow,
-                                totalOutflowInBaseCurrency,
-                                hasMultipleOutflowCurrencies,
-                                'text-2xl font-black tabular-nums tracking-tighter text-amber-600 leading-none'
-                            )}
-                            <div className="flex items-center gap-2">
-                                <span className={cn(
-                                    "flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-full border",
-                                    trendStats.outflowOffset > 0 ? "text-rose-600 bg-rose-500/10 border-rose-500/20" :
-                                        trendStats.outflowOffset < 0 ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20" :
-                                            "text-muted-foreground bg-secondary/50 border-border"
-                                )}>
-                                    {trendStats.outflowOffset > 0 ? <TrendingUp className="w-3 h-3 me-1" /> :
-                                        trendStats.outflowOffset < 0 ? <TrendingDown className="w-3 h-3 me-1" /> : null}
-                                    {trendStats.outflowOffset > 0 ? '+' : ''}{trendStats.outflowOffset.toFixed(1)}%
-                                </span>
-                                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">{t('ledger.kpis.vsPriorPeriod', { defaultValue: 'vs prior period' })}</span>
+                        <CardHeader className="pb-2 flex flex-row items-center justify-between z-10 relative">
+                            <CardTitle className="text-[13px] font-semibold tracking-tight text-amber-600 uppercase">
+                                {t('ledger.kpis.totalOutflow', {
+                                    defaultValue: 'Total Outflow',
+                                })}
+                            </CardTitle>
+                            <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center border border-amber-500/20">
+                                <Package className="h-4 w-4 text-amber-600" />
                             </div>
-                        </div>
-                        <LedgerSparkline data={ledgerTrendData} dataKey="outflow" color="#f59e0b" gradientId="l-outflow" />
-                    </CardContent>
-                </Card>
+                        </CardHeader>
+                        <CardContent className="z-10 relative space-y-4">
+                            <div className="space-y-1">
+                                {renderCurrencySummary(
+                                    totalOutflow,
+                                    totalOutflowInBaseCurrency,
+                                    hasMultipleOutflowCurrencies,
+                                    'text-2xl font-black tabular-nums tracking-tighter text-amber-600 leading-none',
+                                )}
+                                <div className="flex items-center gap-2">
+                                    <span
+                                        className={cn(
+                                            'flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-full border',
+                                            trendStats.outflowOffset > 0
+                                                ? 'text-rose-600 bg-rose-500/10 border-rose-500/20'
+                                                : trendStats.outflowOffset < 0
+                                                  ? 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20'
+                                                  : 'text-muted-foreground bg-secondary/50 border-border',
+                                        )}
+                                    >
+                                        {trendStats.outflowOffset > 0 ? (
+                                            <TrendingUp className="w-3 h-3 me-1" />
+                                        ) : trendStats.outflowOffset < 0 ? (
+                                            <TrendingDown className="w-3 h-3 me-1" />
+                                        ) : null}
+                                        {trendStats.outflowOffset > 0 ? '+' : ''}
+                                        {trendStats.outflowOffset.toFixed(1)}%
+                                    </span>
+                                    <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                                        {t('ledger.kpis.vsPriorPeriod', {
+                                            defaultValue: 'vs prior period',
+                                        })}
+                                    </span>
+                                </div>
+                            </div>
+                            <LedgerSparkline data={ledgerTrendData} dataKey="outflow" color="#f59e0b" gradientId="l-outflow" />
+                        </CardContent>
+                    </Card>
 
-                <Card className="rounded-3xl border border-border/50 bg-card/60 overflow-hidden relative group dark:bg-zinc-950">
-                    <div className="absolute top-0 end-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
-                        <Wallet className={cn("w-24 h-24", netFlowIsNegative ? "text-rose-500" : "text-sky-500")} />
-                    </div>
-                    <CardHeader className="pb-2 flex flex-row items-center justify-between z-10 relative">
-                        <CardTitle className={cn("text-[13px] font-semibold tracking-tight uppercase", netFlowIsNegative ? "text-rose-600" : "text-sky-600")}>
-                            {t('ledger.kpis.netFlow', { defaultValue: 'Net Flow' })}
-                        </CardTitle>
-                        <div className={cn("w-8 h-8 rounded-full flex items-center justify-center border",
-                            netFlowIsNegative ? "bg-rose-500/10 border-rose-500/20" : "bg-sky-500/10 border-sky-500/20"
-                        )}>
-                            <BarChart3 className={cn("h-4 w-4", netFlowIsNegative ? "text-rose-600" : "text-sky-600")} />
+                    <Card className="rounded-3xl border border-border/50 bg-card/60 overflow-hidden relative group dark:bg-zinc-950">
+                        <div className="absolute top-0 end-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
+                            <Wallet className={cn('w-24 h-24', netFlowIsNegative ? 'text-rose-500' : 'text-sky-500')} />
                         </div>
-                    </CardHeader>
-                    <CardContent className="z-10 relative space-y-4">
-                        <div className="space-y-1">
-                            {renderCurrencySummary(
-                                netFlow,
-                                netFlowInBaseCurrency,
-                                hasMultipleNetFlowCurrencies,
-                                cn(
-                                    'text-2xl font-black tabular-nums tracking-tighter leading-none',
-                                    netFlowIsNegative ? 'text-rose-600' : 'text-sky-600'
-                                )
-                            )}
-                            <div className="flex items-center gap-2">
-                                <span className={cn(
-                                    "flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-full border",
-                                    trendStats.netFlowOffset > 0 ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20" :
-                                        trendStats.netFlowOffset < 0 ? "text-rose-600 bg-rose-500/10 border-rose-500/20" :
-                                            "text-muted-foreground bg-secondary/50 border-border"
-                                )}>
-                                    {trendStats.netFlowOffset > 0 ? <TrendingUp className="w-3 h-3 me-1" /> :
-                                        trendStats.netFlowOffset < 0 ? <TrendingDown className="w-3 h-3 me-1" /> : null}
-                                    {trendStats.netFlowOffset > 0 ? '+' : ''}{trendStats.netFlowOffset.toFixed(1)}%
-                                </span>
-                                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">{t('ledger.kpis.vsPriorPeriod', { defaultValue: 'vs prior period' })}</span>
+                        <CardHeader className="pb-2 flex flex-row items-center justify-between z-10 relative">
+                            <CardTitle
+                                className={cn(
+                                    'text-[13px] font-semibold tracking-tight uppercase',
+                                    netFlowIsNegative ? 'text-rose-600' : 'text-sky-600',
+                                )}
+                            >
+                                {t('ledger.kpis.netFlow', { defaultValue: 'Net Flow' })}
+                            </CardTitle>
+                            <div
+                                className={cn(
+                                    'w-8 h-8 rounded-full flex items-center justify-center border',
+                                    netFlowIsNegative ? 'bg-rose-500/10 border-rose-500/20' : 'bg-sky-500/10 border-sky-500/20',
+                                )}
+                            >
+                                <BarChart3 className={cn('h-4 w-4', netFlowIsNegative ? 'text-rose-600' : 'text-sky-600')} />
                             </div>
-                        </div>
-                        <LedgerSparkline data={ledgerTrendData} dataKey="net" color={netFlowIsNegative ? "#ef4444" : "#0ea5e9"} gradientId="l-net" />
-                    </CardContent>
-                </Card>
+                        </CardHeader>
+                        <CardContent className="z-10 relative space-y-4">
+                            <div className="space-y-1">
+                                {renderCurrencySummary(
+                                    netFlow,
+                                    netFlowInBaseCurrency,
+                                    hasMultipleNetFlowCurrencies,
+                                    cn(
+                                        'text-2xl font-black tabular-nums tracking-tighter leading-none',
+                                        netFlowIsNegative ? 'text-rose-600' : 'text-sky-600',
+                                    ),
+                                )}
+                                <div className="flex items-center gap-2">
+                                    <span
+                                        className={cn(
+                                            'flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-full border',
+                                            trendStats.netFlowOffset > 0
+                                                ? 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20'
+                                                : trendStats.netFlowOffset < 0
+                                                  ? 'text-rose-600 bg-rose-500/10 border-rose-500/20'
+                                                  : 'text-muted-foreground bg-secondary/50 border-border',
+                                        )}
+                                    >
+                                        {trendStats.netFlowOffset > 0 ? (
+                                            <TrendingUp className="w-3 h-3 me-1" />
+                                        ) : trendStats.netFlowOffset < 0 ? (
+                                            <TrendingDown className="w-3 h-3 me-1" />
+                                        ) : null}
+                                        {trendStats.netFlowOffset > 0 ? '+' : ''}
+                                        {trendStats.netFlowOffset.toFixed(1)}%
+                                    </span>
+                                    <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                                        {t('ledger.kpis.vsPriorPeriod', {
+                                            defaultValue: 'vs prior period',
+                                        })}
+                                    </span>
+                                </div>
+                            </div>
+                            <LedgerSparkline
+                                data={ledgerTrendData}
+                                dataKey="net"
+                                color={netFlowIsNegative ? '#ef4444' : '#0ea5e9'}
+                                gradientId="l-net"
+                            />
+                        </CardContent>
+                    </Card>
 
-                <Card className="col-span-1 rounded-3xl border border-border/50 bg-card/60 overflow-hidden relative group dark:bg-zinc-950">
-                    <div className="absolute top-0 end-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
-                        <Percent className="w-24 h-24 text-indigo-500" />
-                    </div>
-                    <CardHeader className="pb-2 flex flex-row items-center justify-between z-10 relative">
-                        <CardTitle className="text-[13px] font-semibold tracking-tight text-indigo-600 uppercase">
-                            {t('ledger.kpis.grossSurplus', { defaultValue: 'Gross Surplus' })}
-                        </CardTitle>
-                        <div className="w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
-                            <Percent className="h-4 w-4 text-indigo-600" />
-                        </div>
-                    </CardHeader>
-                    <CardContent className="z-10 relative space-y-4">
-                        <div className="space-y-1">
-                            <div className="text-2xl font-black tabular-nums tracking-tighter text-indigo-600">
-                                {trendStats.surplusRatio.toFixed(1)}%
+                    {SHOW_LEDGER_ANALYTICS_WIDGETS && (
+                        <Card className="col-span-1 rounded-3xl border border-border/50 bg-card/60 overflow-hidden relative group dark:bg-zinc-950">
+                            <div className="absolute top-0 end-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
+                                <Percent className="w-24 h-24 text-indigo-500" />
                             </div>
-                            <div className="flex items-center gap-2">
-                                <span className="flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-full border text-muted-foreground bg-secondary/50 border-border">
-                                    {(trendStats.surplusRatio - trendStats.previousSurplusRatio).toFixed(1)}%
-                                </span>
-                                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">{t('ledger.kpis.pointsChange', { defaultValue: 'points change' })}</span>
-                            </div>
-                        </div>
-                        <div className="pt-4 h-12 flex flex-col justify-end">
-                            <Progress value={Math.max(0, trendStats.surplusRatio)} className="h-2 bg-secondary" indicatorClassName="bg-indigo-600" />
-                            <div className="flex justify-between mt-2 pt-1">
-                                <span className="text-[9px] font-bold uppercase text-muted-foreground tracking-wider">{t('ledger.kpis.entriesCount', { defaultValue: 'Entries Count' })}</span>
-                                <span className="text-[10px] font-black text-indigo-600">{filteredEntries.length}</span>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
+                            <CardHeader className="pb-2 flex flex-row items-center justify-between z-10 relative">
+                                <CardTitle className="text-[13px] font-semibold tracking-tight text-indigo-600 uppercase">
+                                    {t('ledger.kpis.grossSurplus', {
+                                        defaultValue: 'Gross Surplus',
+                                    })}
+                                </CardTitle>
+                                <div className="w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
+                                    <Percent className="h-4 w-4 text-indigo-600" />
+                                </div>
+                            </CardHeader>
+                            <CardContent className="z-10 relative space-y-4">
+                                <div className="space-y-1">
+                                    <div className="text-2xl font-black tabular-nums tracking-tighter text-indigo-600">
+                                        {trendStats.surplusRatio.toFixed(1)}%
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-full border text-muted-foreground bg-secondary/50 border-border">
+                                            {(trendStats.surplusRatio - trendStats.previousSurplusRatio).toFixed(1)}%
+                                        </span>
+                                        <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                                            {t('ledger.kpis.pointsChange', {
+                                                defaultValue: 'points change',
+                                            })}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="pt-4 h-12 flex flex-col justify-end">
+                                    <Progress
+                                        value={Math.max(0, trendStats.surplusRatio)}
+                                        className="h-2 bg-secondary"
+                                        indicatorClassName="bg-indigo-600"
+                                    />
+                                    <div className="flex justify-between mt-2 pt-1">
+                                        <span className="text-[9px] font-bold uppercase text-muted-foreground tracking-wider">
+                                            {t('ledger.kpis.entriesCount', {
+                                                defaultValue: 'Entries Count',
+                                            })}
+                                        </span>
+                                        <span className="text-[10px] font-black text-indigo-600">{filteredEntries.length}</span>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
                 </div>
             </TooltipProvider>
 
-            <div className="grid gap-4 lg:grid-cols-4">
-                <Card className="col-span-1 rounded-3xl border border-border/50 bg-card/60 dark:bg-zinc-950 flex flex-col relative overflow-hidden">
-                    <CardHeader className="border-b border-border/20 z-10 bg-background/50 backdrop-blur-sm relative">
-                        <CardTitle className="text-sm tracking-tight font-bold flex items-center justify-between">
-                            {t('ledger.charts.topSourcesSinks', { defaultValue: 'Top Sources/Sinks' })}
-                            <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{t('ledger.charts.byNetValue', { defaultValue: 'By Net Value' })}</span>
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-0 z-10 relative flex-1">
-                        {trendStats.topModulesData.length > 0 ? (
-                            <div className="flex flex-col h-full divide-y divide-border/20">
-                                {trendStats.topModulesData.map((item, idx) => (
-                                    <div key={item.id} className="p-4 flex items-center hover:bg-secondary/20 transition-colors duration-200">
-                                        <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-black text-sm shrink-0 me-4 border border-primary/20">
-                                            {idx + 1}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="font-bold text-sm truncate uppercase tracking-tight">{item.name}</div>
-                                            <div className="text-[10px] font-semibold text-muted-foreground tracking-wider uppercase">
-                                                {item.sold} {t('ledger.charts.entries', { defaultValue: 'entries' })}
+            {SHOW_LEDGER_ANALYTICS_WIDGETS && (
+                <div className="grid gap-4 lg:grid-cols-4">
+                    <Card className="col-span-1 rounded-3xl border border-border/50 bg-card/60 dark:bg-zinc-950 flex flex-col relative overflow-hidden">
+                        <CardHeader className="border-b border-border/20 z-10 bg-background/50 backdrop-blur-sm relative">
+                            <CardTitle className="text-sm tracking-tight font-bold flex items-center justify-between">
+                                {t('ledger.charts.topSourcesSinks', {
+                                    defaultValue: 'Top Sources/Sinks',
+                                })}
+                                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                                    {t('ledger.charts.byNetValue', {
+                                        defaultValue: 'By Net Value',
+                                    })}
+                                </span>
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-0 z-10 relative flex-1">
+                            {trendStats.topModulesData.length > 0 ? (
+                                <div className="flex flex-col h-full divide-y divide-border/20">
+                                    {trendStats.topModulesData.map((item, idx) => (
+                                        <div
+                                            key={item.id}
+                                            className="p-4 flex items-center hover:bg-secondary/20 transition-colors duration-200"
+                                        >
+                                            <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-black text-sm shrink-0 me-4 border border-primary/20">
+                                                {idx + 1}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="font-bold text-sm truncate uppercase tracking-tight">{item.name}</div>
+                                                <div className="text-[10px] font-semibold text-muted-foreground tracking-wider uppercase">
+                                                    {item.sold}{' '}
+                                                    {t('ledger.charts.entries', {
+                                                        defaultValue: 'entries',
+                                                    })}
+                                                </div>
+                                            </div>
+                                            <div className="text-right">
+                                                <div
+                                                    className={cn(
+                                                        'text-sm font-black tabular-nums tracking-tighter',
+                                                        item.profit > 0
+                                                            ? 'text-emerald-600'
+                                                            : item.profit < 0
+                                                              ? 'text-rose-600'
+                                                              : 'text-muted-foreground',
+                                                    )}
+                                                >
+                                                    {formatCurrency(item.profit, baseCurrency, features.iqd_display_preference)}
+                                                </div>
+                                                <div className="text-[9px] font-bold text-muted-foreground tracking-wider flex items-center justify-end gap-1 uppercase">
+                                                    {t('ledger.charts.netResult', {
+                                                        defaultValue: 'Net Result',
+                                                    })}
+                                                </div>
                                             </div>
                                         </div>
-                                        <div className="text-right">
-                                            <div className={cn("text-sm font-black tabular-nums tracking-tighter",
-                                                item.profit > 0 ? "text-emerald-600" : item.profit < 0 ? "text-rose-600" : "text-muted-foreground"
-                                            )}>
-                                                {formatCurrency(item.profit, baseCurrency, features.iqd_display_preference)}
-                                            </div>
-                                            <div className="text-[9px] font-bold text-muted-foreground tracking-wider flex items-center justify-end gap-1 uppercase">
-                                                {t('ledger.charts.netResult', { defaultValue: 'Net Result' })}
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="h-48 flex items-center justify-center text-sm font-medium text-muted-foreground">
-                                {t('ledger.charts.noEntryData', { defaultValue: 'No entry data available.' })}
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="h-48 flex items-center justify-center text-sm font-medium text-muted-foreground">
+                                    {t('ledger.charts.noEntryData', {
+                                        defaultValue: 'No entry data available.',
+                                    })}
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
 
-                <Card className="col-span-1 lg:col-span-2 rounded-3xl border border-border/50 bg-card/60 dark:bg-zinc-950 flex flex-col relative overflow-hidden">
-                    <CardHeader className="border-b border-border/20 z-10 bg-background/50 backdrop-blur-sm relative">
-                        <CardTitle className="text-sm font-bold tracking-tight">{t('ledger.charts.movementOverview', { defaultValue: 'Ledger Movement Overview' })}</CardTitle>
-                    </CardHeader>
-                    <CardContent className="flex-1 p-6 relative z-10">
-                        <div className="h-[240px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={ledgerTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                                    <XAxis
-                                        dataKey="dateKey"
-                                        tickLine={false}
-                                        axisLine={false}
-                                        tick={{ fontSize: 10, fill: '#888888', fontWeight: 600 }}
-                                        tickMargin={10}
-                                    />
-                                    <RechartsTooltip
-                                        cursor={{ fill: 'rgba(0,0,0,0.05)' }}
-                                        content={({ active, payload }) => {
-                                            if (active && payload && payload.length) {
-                                                return (
-                                                    <div className="bg-background border border-border p-3 rounded-lg shadow-xl shadow-black/5 dark:shadow-black/20 text-xs text-foreground">
-                                                        <div className="font-bold mb-2 uppercase tracking-wide text-[10px] text-muted-foreground">
-                                                            {payload[0].payload.dateKey}
-                                                        </div>
-                                                        <div className="space-y-1">
-                                                            <div className="flex justify-between gap-4 font-semibold text-emerald-600">
-                                                                <span>{t('ledger.tooltip.inflow', { defaultValue: 'Inflow:' })}</span>
-                                                                <span className="font-mono">{formatCurrency(payload[0].value as number, baseCurrency, features.iqd_display_preference)}</span>
-                                                            </div>
-                                                            <div className="flex justify-between gap-4 font-semibold text-rose-600">
-                                                                <span>{t('ledger.tooltip.outflow', { defaultValue: 'Outflow:' })}</span>
-                                                                <span className="font-mono">{formatCurrency(payload[1].value as number, baseCurrency, features.iqd_display_preference)}</span>
-                                                            </div>
-                                                            <div className="flex justify-between gap-4 font-bold border-t border-border mt-1 pt-1 text-foreground">
-                                                                <span>{t('ledger.tooltip.net', { defaultValue: 'Net:' })}</span>
-                                                                <span className={cn("font-mono", (payload[0].payload.net as number) < 0 ? "text-rose-600" : "text-sky-600")}>
-                                                                    {formatCurrency(payload[0].payload.net as number, baseCurrency, features.iqd_display_preference)}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                )
-                                            }
-                                            return null
-                                        }}
-                                    />
-                                    <Bar dataKey="inflow" fill="#10b981" radius={[4, 4, 4, 4]} maxBarSize={40} />
-                                    <Bar dataKey="outflow" fill="#f43f5e" radius={[4, 4, 4, 4]} maxBarSize={40} />
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                <Card className="col-span-1 border border-border/50 bg-card/60 dark:bg-zinc-950 rounded-3xl overflow-hidden flex flex-col">
-                    <CardHeader className="border-b border-border/20 z-10 bg-background/50 backdrop-blur-sm relative py-4">
-                        <CardTitle className="text-sm tracking-tight font-bold flex items-center justify-between">
-                            {t('ledger.charts.peakActivity', { defaultValue: 'Peak Activity' })}
-                            <Clock className="h-4 w-4 text-muted-foreground" />
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="flex-1 p-0 relative z-10 flex flex-col">
-                        <div className="flex-1 flex flex-col justify-center px-4 pt-6 pb-2">
-                            <div className="h-[180px] w-full">
+                    <Card className="col-span-1 lg:col-span-2 rounded-3xl border border-border/50 bg-card/60 dark:bg-zinc-950 flex flex-col relative overflow-hidden">
+                        <CardHeader className="border-b border-border/20 z-10 bg-background/50 backdrop-blur-sm relative">
+                            <CardTitle className="text-sm font-bold tracking-tight">
+                                {t('ledger.charts.movementOverview', {
+                                    defaultValue: 'Ledger Movement Overview',
+                                })}
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="flex-1 p-6 relative z-10">
+                            <div className="h-[240px] w-full">
                                 <ResponsiveContainer width="100%" height="100%">
-                                    <AreaChart data={trendStats.hourlyData} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
-                                        <defs>
-                                            <linearGradient id="ledger-peak-bg" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                                                <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                                            </linearGradient>
-                                        </defs>
+                                    <BarChart data={ledgerTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                                         <XAxis
-                                            dataKey="hour"
-                                            tick={{ fontSize: 9, fill: '#888' }}
-                                            axisLine={false}
+                                            dataKey="dateKey"
                                             tickLine={false}
-                                            interval={3}
+                                            axisLine={false}
+                                            tick={{ fontSize: 10, fill: '#888888', fontWeight: 600 }}
+                                            tickMargin={10}
                                         />
                                         <RechartsTooltip
-                                            cursor={false}
+                                            cursor={{ fill: 'rgba(0,0,0,0.05)' }}
                                             content={({ active, payload }) => {
                                                 if (active && payload && payload.length) {
-                                                    const hour = payload[0].payload;
                                                     return (
-                                                        <div className="bg-background border border-border p-2 rounded-lg shadow-xl shadow-black/5 dark:shadow-black/20 text-xs">
-                                                            <div className="font-bold mb-1 text-[10px] text-muted-foreground tracking-wide">{hour.hour} - {hour.hour.replace(':00', ':59')}</div>
-                                                            <div className="flex items-center justify-between gap-4">
-                                                                <span className="font-bold text-foreground">{t('ledger.charts.activityLevel', { defaultValue: 'Activity Level' })}</span>
-                                                                <span className="font-black text-indigo-500">{hour.count} tx</span>
+                                                        <div className="bg-background border border-border p-3 rounded-lg shadow-xl shadow-black/5 dark:shadow-black/20 text-xs text-foreground">
+                                                            <div className="font-bold mb-2 uppercase tracking-wide text-[10px] text-muted-foreground">
+                                                                {payload[0].payload.dateKey}
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                                <div className="flex justify-between gap-4 font-semibold text-emerald-600">
+                                                                    <span>
+                                                                        {t('ledger.tooltip.inflow', {
+                                                                            defaultValue: 'Inflow:',
+                                                                        })}
+                                                                    </span>
+                                                                    <span className="font-mono">
+                                                                        {formatCurrency(
+                                                                            payload[0].value as number,
+                                                                            baseCurrency,
+                                                                            features.iqd_display_preference,
+                                                                        )}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="flex justify-between gap-4 font-semibold text-rose-600">
+                                                                    <span>
+                                                                        {t('ledger.tooltip.outflow', {
+                                                                            defaultValue: 'Outflow:',
+                                                                        })}
+                                                                    </span>
+                                                                    <span className="font-mono">
+                                                                        {formatCurrency(
+                                                                            payload[1].value as number,
+                                                                            baseCurrency,
+                                                                            features.iqd_display_preference,
+                                                                        )}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="flex justify-between gap-4 font-bold border-t border-border mt-1 pt-1 text-foreground">
+                                                                    <span>
+                                                                        {t('ledger.tooltip.net', {
+                                                                            defaultValue: 'Net:',
+                                                                        })}
+                                                                    </span>
+                                                                    <span
+                                                                        className={cn(
+                                                                            'font-mono',
+                                                                            (payload[0].payload.net as number) < 0
+                                                                                ? 'text-rose-600'
+                                                                                : 'text-sky-600',
+                                                                        )}
+                                                                    >
+                                                                        {formatCurrency(
+                                                                            payload[0].payload.net as number,
+                                                                            baseCurrency,
+                                                                            features.iqd_display_preference,
+                                                                        )}
+                                                                    </span>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     )
@@ -2978,104 +3431,120 @@ export function Ledger() {
                                                 return null
                                             }}
                                         />
-                                        <Area type="monotone" dataKey="count" stroke="#6366f1" fillOpacity={1} fill="url(#ledger-peak-bg)" strokeWidth={2.5} />
-                                    </AreaChart>
+                                        <Bar dataKey="inflow" fill="#10b981" radius={[4, 4, 4, 4]} maxBarSize={40} />
+                                        <Bar dataKey="outflow" fill="#f43f5e" radius={[4, 4, 4, 4]} maxBarSize={40} />
+                                    </BarChart>
                                 </ResponsiveContainer>
                             </div>
-                        </div>
-                        <div className="p-3 bg-muted/30 border-t border-border/10 text-[11px] text-center font-semibold text-muted-foreground tracking-wide">
-                            {t('ledger.charts.hourlyVolume', { defaultValue: 'Hourly transaction volume' })}
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
+                        </CardContent>
+                    </Card>
+
+                    <Card className="col-span-1 border border-border/50 bg-card/60 dark:bg-zinc-950 rounded-3xl overflow-hidden flex flex-col">
+                        <CardHeader className="border-b border-border/20 z-10 bg-background/50 backdrop-blur-sm relative py-4">
+                            <CardTitle className="text-sm tracking-tight font-bold flex items-center justify-between">
+                                {t('ledger.charts.peakActivity', {
+                                    defaultValue: 'Peak Activity',
+                                })}
+                                <Clock className="h-4 w-4 text-muted-foreground" />
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="flex-1 p-0 relative z-10 flex flex-col">
+                            <div className="flex-1 flex flex-col justify-center px-4 pt-6 pb-2">
+                                <div className="h-[180px] w-full">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <AreaChart data={trendStats.hourlyData} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
+                                            <defs>
+                                                <linearGradient id="ledger-peak-bg" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                                                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                                                </linearGradient>
+                                            </defs>
+                                            <XAxis
+                                                dataKey="hour"
+                                                tick={{ fontSize: 9, fill: '#888' }}
+                                                axisLine={false}
+                                                tickLine={false}
+                                                interval={3}
+                                            />
+                                            <RechartsTooltip
+                                                cursor={false}
+                                                content={({ active, payload }) => {
+                                                    if (active && payload && payload.length) {
+                                                        const hour = payload[0].payload
+                                                        return (
+                                                            <div className="bg-background border border-border p-2 rounded-lg shadow-xl shadow-black/5 dark:shadow-black/20 text-xs">
+                                                                <div className="font-bold mb-1 text-[10px] text-muted-foreground tracking-wide">
+                                                                    {hour.hour} - {hour.hour.replace(':00', ':59')}
+                                                                </div>
+                                                                <div className="flex items-center justify-between gap-4">
+                                                                    <span className="font-bold text-foreground">
+                                                                        {t('ledger.charts.activityLevel', {
+                                                                            defaultValue: 'Activity Level',
+                                                                        })}
+                                                                    </span>
+                                                                    <span className="font-black text-indigo-500">{hour.count} tx</span>
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    }
+                                                    return null
+                                                }}
+                                            />
+                                            <Area
+                                                type="monotone"
+                                                dataKey="count"
+                                                stroke="#6366f1"
+                                                fillOpacity={1}
+                                                fill="url(#ledger-peak-bg)"
+                                                strokeWidth={2.5}
+                                            />
+                                        </AreaChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+                            <div className="p-3 bg-muted/30 border-t border-border/10 text-[11px] text-center font-semibold text-muted-foreground tracking-wide">
+                                {t('ledger.charts.hourlyVolume', {
+                                    defaultValue: 'Hourly transaction volume',
+                                })}
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+            )}
             {usesEquivalentTrend ? (
                 <p className="text-xs text-muted-foreground">
-                    {t('ledger.charts.sparklineNote', { currency: trendCurrencyMode.currency.toUpperCase(), defaultValue: `Sparkline charts use ${trendCurrencyMode.currency.toUpperCase()} equivalent when multiple currencies are included.` })}
+                    {t('ledger.charts.sparklineNote', {
+                        currency: trendCurrencyMode.currency.toUpperCase(),
+                        defaultValue: `Sparkline charts use ${trendCurrencyMode.currency.toUpperCase()} equivalent when multiple currencies are included.`,
+                    })}
                 </p>
             ) : null}
 
             <Card>
-                <CardContent className="pt-6">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="space-y-2">
-                            <div className="flex flex-wrap items-center gap-3">
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={() => setIsFilterDialogOpen(true)}
-                                    className="h-11 rounded-2xl border-border/60 px-4"
-                                >
-                                    <SlidersHorizontal className="me-2 h-4 w-4" />
-                                    {t('ledger.filters.title', { defaultValue: 'Filters' })}
-                                    {activeFilterCount > 0 ? (
-                                        <span className="ms-2 inline-flex min-w-6 items-center justify-center rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">
-                                            {activeFilterCount}
-                                        </span>
-                                    ) : null}
-                                </Button>
-                                {activeFilterCount > 0 ? (
-                                    <Button type="button" variant="ghost" onClick={handleResetAllFilters} className="h-11 rounded-2xl px-4 text-muted-foreground">
-                                        <RotateCcw className="me-2 h-4 w-4" />
-                                        {t('ledger.filters.clearFilters', { defaultValue: 'Clear Filters' })}
-                                    </Button>
-                                ) : null}
-                            </div>
-
-                        </div>
-
-                        <div className="rounded-2xl border border-border/60 bg-secondary/20 px-4 py-3 text-sm">
-                            <div className="font-semibold">{t('ledger.filters.matchingEntries', { count: filteredEntries.length, defaultValue: `${filteredEntries.length} matching entries` })}</div>
-                            <div className="text-xs text-muted-foreground">{t('ledger.filters.filterPreview', { defaultValue: 'General filters preview before opening any record.' })}</div>
-                        </div>
-                    </div>
-
-                    {activeFilterChips.length > 0 ? (
-                        <div className="mt-4 flex flex-wrap gap-2">
-                            {activeFilterChips.map((chip) => (
-                                <span
-                                    key={chip}
-                                    className="rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-[11px] font-semibold text-primary"
-                                >
-                                    {chip}
-                                </span>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="mt-4 rounded-2xl border border-dashed border-border/60 bg-background/50 px-4 py-3 text-xs text-muted-foreground">
-                            {t('ledger.filters.noFilters', { defaultValue: 'No advanced filters applied. Open the filter modal to narrow the ledger by direction, partner, method, amounts, or notes.' })}
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
-
-            <Card>
                 <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 gap-4">
-                    <CardTitle className="flex items-center gap-2 flex-wrap">
-                        {t('ledger.table.title', { defaultValue: 'Ledger Entries' })}
-                        {dateDisplay && (
-                            <span className="ms-2 px-2 py-0.5 text-xs font-semibold bg-primary/10 text-primary border border-primary/20 rounded-full">
-                                {dateDisplay}
-                            </span>
-                        )}
-                    </CardTitle>
+                    <div className="space-y-1">
+                        <CardTitle>{t('ledger.table.title', { defaultValue: 'Ledger Entries' })}</CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                            {t('ledger.filters.matchingEntries', {
+                                count: filteredEntries.length,
+                            })}
+                        </p>
+                    </div>
                     <div className="flex flex-col sm:flex-row items-center gap-4">
                         {hasCapability('excelExportLedger') && (
                             <Button
                                 onClick={() => setIsExportModalOpen(true)}
                                 disabled={filteredEntries.length === 0}
                                 className={cn(
-                                    "h-10 px-6 font-black transition-all flex gap-3 items-center group relative overflow-hidden",
+                                    'h-10 px-6 font-black transition-all flex gap-3 items-center group relative overflow-hidden',
                                     style === 'neo-orange'
-                                        ? "rounded-[var(--radius)] bg-emerald-500 text-black border-2 border-black dark:border-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-none translate-y-[-2px] active:translate-y-0"
-                                        : "rounded-full bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 hover:shadow-[0_0_20px_-5px_rgba(16,185,129,0.3)] hover:scale-[1.02] active:scale-95",
-                                    "uppercase tracking-widest text-[10px]"
+                                        ? 'rounded-[var(--radius)] bg-emerald-500 text-black border-2 border-black dark:border-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-none translate-y-[-2px] active:translate-y-0'
+                                        : 'rounded-full bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 hover:shadow-[0_0_20px_-5px_rgba(16,185,129,0.3)] hover:scale-[1.02] active:scale-95',
+                                    'uppercase tracking-widest text-[10px]',
                                 )}
                             >
                                 <FileSpreadsheet className="w-4 h-4 transition-transform group-hover:rotate-12" />
-                                <span className="hidden sm:inline">
-                                    {t('sales.export.button')}
-                                </span>
+                                <span className="hidden sm:inline">{t('sales.export.button')}</span>
                                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 dark:via-white/5 to-transparent -translate-x-full group-hover:animate-shimmer" />
                             </Button>
                         )}
@@ -3086,8 +3555,12 @@ export function Ledger() {
                             className="h-10 rounded-2xl px-4"
                         >
                             {isDirectionSplitView
-                                ? t('ledger.table.combinedView', { defaultValue: 'Show Original Ledger View' })
-                                : t('ledger.table.splitView', { defaultValue: 'Separate Inflows / Outflows' })}
+                                ? t('ledger.table.combinedView', {
+                                      defaultValue: 'Show Original Ledger View',
+                                  })
+                                : t('ledger.table.splitView', {
+                                      defaultValue: 'Separate Inflows / Outflows',
+                                  })}
                         </Button>
                         <AppPagination
                             currentPage={currentPage}
@@ -3102,14 +3575,18 @@ export function Ledger() {
                         />
                     </div>
                 </CardHeader>
-                <CardContent className={cn(isDirectionSplitView ? "overflow-hidden" : "overflow-x-auto")}>
-                    {(isLoading || isDateLoading) ? (
+                <CardContent className={cn(isDirectionSplitView ? 'overflow-hidden' : 'overflow-x-auto')}>
+                    {isLoading || isDateLoading ? (
                         <div className="flex justify-center py-8">
                             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                         </div>
-                    ) : filteredEntries.length === 0 ? renderEntriesTable(
-                        visibleEntries,
-                        t('ledger.table.noMatch', { defaultValue: 'No ledger entries match the current filters.' })
+                    ) : filteredEntries.length === 0 ? (
+                        renderEntriesTable(
+                            visibleEntries,
+                            t('ledger.table.noMatch', {
+                                defaultValue: 'No ledger entries match the current filters.',
+                            }),
+                        )
                     ) : isDirectionSplitView ? (
                         <div className="grid gap-6 xl:grid-cols-2">
                             <section className="min-w-0 overflow-x-auto rounded-3xl border border-emerald-500/15 bg-emerald-500/[0.03]">
@@ -3119,7 +3596,9 @@ export function Ledger() {
                                             {t('ledger.direction.inflow', { defaultValue: 'Inflow' })}
                                         </div>
                                         <p className="text-xs text-muted-foreground">
-                                            {t('ledger.table.splitViewDescription', { defaultValue: 'Current page entries grouped by flow direction.' })}
+                                            {t('ledger.table.splitViewDescription', {
+                                                defaultValue: 'Current page entries grouped by flow direction.',
+                                            })}
                                         </p>
                                     </div>
                                     <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-700">
@@ -3128,8 +3607,15 @@ export function Ledger() {
                                 </div>
                                 {renderEntriesTable(
                                     visibleIncomingEntries,
-                                    t('ledger.table.noIncoming', { defaultValue: 'No inflow entries on this page.' }),
-                                    { compactTransactionId: true, compactColumns: true, hideDescriptionNotes: true, hideActions: true }
+                                    t('ledger.table.noIncoming', {
+                                        defaultValue: 'No inflow entries on this page.',
+                                    }),
+                                    {
+                                        compactTransactionId: true,
+                                        compactColumns: true,
+                                        hideDescriptionNotes: true,
+                                        hideActions: true,
+                                    },
                                 )}
                             </section>
 
@@ -3137,10 +3623,14 @@ export function Ledger() {
                                 <div className="flex items-center justify-between border-b border-amber-500/15 px-5 py-4">
                                     <div>
                                         <div className="text-sm font-bold text-amber-700">
-                                            {t('ledger.direction.outflow', { defaultValue: 'Outflow' })}
+                                            {t('ledger.direction.outflow', {
+                                                defaultValue: 'Outflow',
+                                            })}
                                         </div>
                                         <p className="text-xs text-muted-foreground">
-                                            {t('ledger.table.splitViewDescription', { defaultValue: 'Current page entries grouped by flow direction.' })}
+                                            {t('ledger.table.splitViewDescription', {
+                                                defaultValue: 'Current page entries grouped by flow direction.',
+                                            })}
                                         </p>
                                     </div>
                                     <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-700">
@@ -3149,8 +3639,15 @@ export function Ledger() {
                                 </div>
                                 {renderEntriesTable(
                                     visibleOutgoingEntries,
-                                    t('ledger.table.noOutgoing', { defaultValue: 'No outflow entries on this page.' }),
-                                    { compactTransactionId: true, compactColumns: true, hideDescriptionNotes: true, hideActions: true }
+                                    t('ledger.table.noOutgoing', {
+                                        defaultValue: 'No outflow entries on this page.',
+                                    }),
+                                    {
+                                        compactTransactionId: true,
+                                        compactColumns: true,
+                                        hideDescriptionNotes: true,
+                                        hideActions: true,
+                                    },
                                 )}
                             </section>
 
@@ -3158,10 +3655,14 @@ export function Ledger() {
                                 <div className="flex items-center justify-between border-b border-sky-500/15 px-5 py-4">
                                     <div>
                                         <div className="text-sm font-bold text-sky-700">
-                                            {t('ledger.direction.opening', { defaultValue: 'Opening' })}
+                                            {t('ledger.direction.opening', {
+                                                defaultValue: 'Opening',
+                                            })}
                                         </div>
                                         <p className="text-xs text-muted-foreground">
-                                            {t('ledger.table.openingBalanceDescription', { defaultValue: 'Opening balances are retained for audit but do not affect cash-flow totals.' })}
+                                            {t('ledger.table.openingBalanceDescription', {
+                                                defaultValue: 'Opening balances are retained for audit but do not affect cash-flow totals.',
+                                            })}
                                         </p>
                                     </div>
                                     <span className="rounded-full border border-sky-500/20 bg-sky-500/10 px-3 py-1 text-xs font-bold text-sky-700">
@@ -3170,8 +3671,15 @@ export function Ledger() {
                                 </div>
                                 {renderEntriesTable(
                                     visibleOpeningEntries,
-                                    t('ledger.table.noOpening', { defaultValue: 'No opening-balance entries on this page.' }),
-                                    { compactTransactionId: true, compactColumns: true, hideDescriptionNotes: true, hideActions: true }
+                                    t('ledger.table.noOpening', {
+                                        defaultValue: 'No opening-balance entries on this page.',
+                                    }),
+                                    {
+                                        compactTransactionId: true,
+                                        compactColumns: true,
+                                        hideDescriptionNotes: true,
+                                        hideActions: true,
+                                    },
                                 )}
                             </section>
 
@@ -3179,10 +3687,14 @@ export function Ledger() {
                                 <div className="flex items-center justify-between border-b border-violet-500/15 px-5 py-4">
                                     <div>
                                         <div className="text-sm font-bold text-violet-700">
-                                            {t('ledger.direction.adjustment', { defaultValue: 'Adjustment' })}
+                                            {t('ledger.direction.adjustment', {
+                                                defaultValue: 'Adjustment',
+                                            })}
                                         </div>
                                         <p className="text-xs text-muted-foreground">
-                                            {t('ledger.table.adjustmentDescription', { defaultValue: 'Balance corrections are retained for audit but do not affect cash-flow totals.' })}
+                                            {t('ledger.table.adjustmentDescription', {
+                                                defaultValue: 'Balance corrections are retained for audit but do not affect cash-flow totals.',
+                                            })}
                                         </p>
                                     </div>
                                     <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-3 py-1 text-xs font-bold text-violet-700">
@@ -3191,14 +3703,25 @@ export function Ledger() {
                                 </div>
                                 {renderEntriesTable(
                                     visibleAdjustmentEntries,
-                                    t('ledger.table.noAdjustment', { defaultValue: 'No adjustment entries on this page.' }),
-                                    { compactTransactionId: true, compactColumns: true, hideDescriptionNotes: true, hideActions: true }
+                                    t('ledger.table.noAdjustment', {
+                                        defaultValue: 'No adjustment entries on this page.',
+                                    }),
+                                    {
+                                        compactTransactionId: true,
+                                        compactColumns: true,
+                                        hideDescriptionNotes: true,
+                                        hideActions: true,
+                                    },
                                 )}
                             </section>
                         </div>
-                    ) : renderEntriesTable(
-                        visibleEntries,
-                        t('ledger.table.noMatch', { defaultValue: 'No ledger entries match the current filters.' })
+                    ) : (
+                        renderEntriesTable(
+                            visibleEntries,
+                            t('ledger.table.noMatch', {
+                                defaultValue: 'No ledger entries match the current filters.',
+                            }),
+                        )
                     )}
                 </CardContent>
             </Card>
@@ -3211,48 +3734,99 @@ export function Ledger() {
                                 <div className="rounded-2xl bg-primary/10 p-2.5 text-primary">
                                     <SlidersHorizontal className="h-5 w-5" />
                                 </div>
-                                {t('ledger.filters.dialogTitle', { defaultValue: 'General Ledger Filters' })}
+                                {t('ledger.filters.dialogTitle', {
+                                    defaultValue: 'General Ledger Filters',
+                                })}
                             </DialogTitle>
                             <DialogDescription className="max-w-3xl">
-                                {t('ledger.filters.dialogDescription', { defaultValue: 'Refine the ledger with a richer filter set before you inspect entries. Date range stays on the page, and changes here stay in the modal until you apply them.' })}
+                                {t('ledger.filters.dialogDescription', {
+                                    defaultValue:
+                                        'Refine the ledger with a richer filter set before you inspect entries. Date range stays on the page, and changes here stay in the modal until you apply them.',
+                                })}
                             </DialogDescription>
                         </DialogHeader>
 
                         <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
                             <div className="grid gap-3 md:grid-cols-3">
                                 <div className="rounded-2xl border border-emerald-500/15 bg-emerald-500/5 p-4">
-                                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-700">{t('ledger.filters.preview', { defaultValue: 'Preview' })}</div>
+                                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-700">
+                                        {t('ledger.filters.preview', { defaultValue: 'Preview' })}
+                                    </div>
                                     <div className="mt-2 text-2xl font-black text-emerald-700">{draftPreviewEntries.length}</div>
-                                    <div className="mt-1 text-xs text-muted-foreground">{t('ledger.filters.previewDescription', { defaultValue: 'entries match the draft filters inside the current page range' })}</div>
+                                    <div className="mt-1 text-xs text-muted-foreground">
+                                        {t('ledger.filters.previewDescription', {
+                                            defaultValue: 'entries match the draft filters inside the current page range',
+                                        })}
+                                    </div>
                                 </div>
                                 <div className="rounded-2xl border border-border/60 bg-secondary/20 p-4">
-                                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted-foreground">{t('ledger.filters.pageRange', { defaultValue: 'Page Range' })}</div>
-                                    <div className="mt-2 text-sm font-bold">{dateDisplay || t('performance.filters.allTime', { defaultValue: 'All Time' })}</div>
-                                    <div className="mt-1 text-xs text-muted-foreground">{t('ledger.filters.pageRangeDescription', { defaultValue: 'Controlled directly from the ledger page header' })}</div>
+                                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
+                                        {t('ledger.filters.pageRange', {
+                                            defaultValue: 'Page Range',
+                                        })}
+                                    </div>
+                                    <div className="mt-2 text-sm font-bold">
+                                        {dateDisplay ||
+                                            t('performance.filters.allTime', {
+                                                defaultValue: 'All Time',
+                                            })}
+                                    </div>
+                                    <div className="mt-1 text-xs text-muted-foreground">
+                                        {t('ledger.filters.pageRangeDescription', {
+                                            defaultValue: 'Controlled directly from the ledger page header',
+                                        })}
+                                    </div>
                                 </div>
                                 <div className="rounded-2xl border border-border/60 bg-secondary/20 p-4">
-                                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted-foreground">{t('ledger.filters.draftFilters', { defaultValue: 'Draft Filters' })}</div>
+                                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
+                                        {t('ledger.filters.draftFilters', {
+                                            defaultValue: 'Draft Filters',
+                                        })}
+                                    </div>
                                     <div className="mt-2 text-2xl font-black">{countActiveLedgerFilters(draftFilters)}</div>
-                                    <div className="mt-1 text-xs text-muted-foreground">{t('ledger.filters.draftFiltersDescription', { defaultValue: 'advanced conditions configured' })}</div>
+                                    <div className="mt-1 text-xs text-muted-foreground">
+                                        {t('ledger.filters.draftFiltersDescription', {
+                                            defaultValue: 'advanced conditions configured',
+                                        })}
+                                    </div>
                                 </div>
                             </div>
 
                             <section className="grid gap-4 lg:grid-cols-2">
                                 <div className="space-y-4 rounded-[1.5rem] border border-border/60 bg-background/80 p-5">
                                     <div className="space-y-1">
-                                        <h3 className="text-base font-black tracking-tight">{t('ledger.filters.searchMovement', { defaultValue: 'Search & Movement' })}</h3>
-                                        <p className="text-sm text-muted-foreground">{t('ledger.filters.searchMovementDescription', { defaultValue: 'Search by IDs, partner, notes, reference, or module.' })}</p>
+                                        <h3 className="text-base font-black tracking-tight">
+                                            {t('ledger.filters.searchMovement', {
+                                                defaultValue: 'Search & Movement',
+                                            })}
+                                        </h3>
+                                        <p className="text-sm text-muted-foreground">
+                                            {t('ledger.filters.searchMovementDescription', {
+                                                defaultValue: 'Search by IDs, partner, notes, reference, or module.',
+                                            })}
+                                        </p>
                                     </div>
 
                                     <div className="space-y-2">
-                                        <Label htmlFor="ledger-filter-search">{t('ledger.filters.keywordSearch', { defaultValue: 'Keyword Search' })}</Label>
+                                        <Label htmlFor="ledger-filter-search">
+                                            {t('ledger.filters.keywordSearch', {
+                                                defaultValue: 'Keyword Search',
+                                            })}
+                                        </Label>
                                         <div className="relative">
                                             <Search className="pointer-events-none absolute start-3 top-3.5 h-4 w-4 text-muted-foreground" />
                                             <Input
                                                 id="ledger-filter-search"
                                                 value={draftFilters.search}
-                                                onChange={(event) => setDraftFilters((current) => ({ ...current, search: event.target.value }))}
-                                                placeholder={t('ledger.filters.searchPlaceholder', { defaultValue: 'Search reference, partner, note, or ID' })}
+                                                onChange={(event) =>
+                                                    setDraftFilters((current) => ({
+                                                        ...current,
+                                                        search: event.target.value,
+                                                    }))
+                                                }
+                                                placeholder={t('ledger.filters.searchPlaceholder', {
+                                                    defaultValue: 'Search reference, partner, note, or ID',
+                                                })}
                                                 className="ps-9"
                                             />
                                         </div>
@@ -3260,18 +3834,41 @@ export function Ledger() {
 
                                     <div className="grid gap-4 sm:grid-cols-2">
                                         <div className="space-y-2">
-                                            <Label>{t('ledger.filters.direction', { defaultValue: 'Direction' })}</Label>
+                                            <Label>
+                                                {t('ledger.filters.direction', {
+                                                    defaultValue: 'Direction',
+                                                })}
+                                            </Label>
                                             <LedgerMultiSelect
                                                 value={draftFilters.direction}
                                                 options={['incoming', 'outgoing', 'opening', 'adjustment']}
-                                                allLabel={t('ledger.direction.allDirections', { defaultValue: 'All Directions' })}
+                                                allLabel={t('ledger.direction.allDirections', {
+                                                    defaultValue: 'All Directions',
+                                                })}
                                                 getOptionLabel={(direction) => directionFilterLabel(direction, t)}
-                                                onChange={(direction) => setDraftFilters((current) => ({ ...current, direction }))}
+                                                onChange={(direction) =>
+                                                    setDraftFilters((current) => ({
+                                                        ...current,
+                                                        direction,
+                                                    }))
+                                                }
                                             />
                                         </div>
                                         <div className="space-y-2">
-                                            <Label>{t('ledger.filters.sortBy', { defaultValue: 'Sort By' })}</Label>
-                                            <Select value={draftFilters.sort} onValueChange={(value: LedgerSortOption) => setDraftFilters((current) => ({ ...current, sort: value }))}>
+                                            <Label>
+                                                {t('ledger.filters.sortBy', {
+                                                    defaultValue: 'Sort By',
+                                                })}
+                                            </Label>
+                                            <Select
+                                                value={draftFilters.sort}
+                                                onValueChange={(value: LedgerSortOption) =>
+                                                    setDraftFilters((current) => ({
+                                                        ...current,
+                                                        sort: value,
+                                                    }))
+                                                }
+                                            >
                                                 <SelectTrigger>
                                                     <SelectValue />
                                                 </SelectTrigger>
@@ -3287,21 +3884,33 @@ export function Ledger() {
 
                                     <div className="grid gap-4 sm:grid-cols-2">
                                         <div className="space-y-2">
-                                            <Label>{t('ledger.filters.transactionType', { defaultValue: 'Transaction Type' })}</Label>
+                                            <Label>
+                                                {t('ledger.filters.transactionType', {
+                                                    defaultValue: 'Transaction Type',
+                                                })}
+                                            </Label>
                                             <LedgerMultiSelect
                                                 value={draftFilters.type}
                                                 options={typeOptions}
-                                                allLabel={t('ledger.filters.allTypes', { defaultValue: 'All Types' })}
+                                                allLabel={t('ledger.filters.allTypes', {
+                                                    defaultValue: 'All Types',
+                                                })}
                                                 getOptionLabel={(type) => ledgerTypeLabel(type, t)}
                                                 onChange={(type) => setDraftFilters((current) => ({ ...current, type }))}
                                             />
                                         </div>
                                         <div className="space-y-2">
-                                            <Label>{t('ledger.filters.sourceModule', { defaultValue: 'Source Module' })}</Label>
+                                            <Label>
+                                                {t('ledger.filters.sourceModule', {
+                                                    defaultValue: 'Source Module',
+                                                })}
+                                            </Label>
                                             <LedgerMultiSelect
                                                 value={draftFilters.source}
                                                 options={sourceOptions}
-                                                allLabel={t('ledger.filters.allModules', { defaultValue: 'All Modules' })}
+                                                allLabel={t('ledger.filters.allModules', {
+                                                    defaultValue: 'All Modules',
+                                                })}
                                                 getOptionLabel={(source) => sourceModuleLabel(source, t)}
                                                 onChange={(source) => setDraftFilters((current) => ({ ...current, source }))}
                                             />
@@ -3311,88 +3920,155 @@ export function Ledger() {
 
                                 <div className="space-y-4 rounded-[1.5rem] border border-border/60 bg-background/80 p-5">
                                     <div className="space-y-1">
-                                        <h3 className="text-base font-black tracking-tight">{t('ledger.filters.partiesMethodAmount', { defaultValue: 'Parties, Method & Amount' })}</h3>
-                                        <p className="text-sm text-muted-foreground">{t('ledger.filters.partiesMethodAmountDescription', { defaultValue: 'Narrow the ledger to specific partners, currencies, methods, or ranges.' })}</p>
+                                        <h3 className="text-base font-black tracking-tight">
+                                            {t('ledger.filters.partiesMethodAmount', {
+                                                defaultValue: 'Parties, Method & Amount',
+                                            })}
+                                        </h3>
+                                        <p className="text-sm text-muted-foreground">
+                                            {t('ledger.filters.partiesMethodAmountDescription', {
+                                                defaultValue: 'Narrow the ledger to specific partners, currencies, methods, or ranges.',
+                                            })}
+                                        </p>
                                     </div>
 
                                     <div className="grid gap-4 sm:grid-cols-2">
                                         <div className="space-y-2">
-                                            <Label>{t('ledger.filters.partner', { defaultValue: 'Partner' })}</Label>
+                                            <Label>
+                                                {t('ledger.filters.partner', {
+                                                    defaultValue: 'Partner',
+                                                })}
+                                            </Label>
                                             <LedgerMultiSelect
                                                 value={draftFilters.partner}
                                                 options={partnerOptions}
-                                                allLabel={t('ledger.filters.allPartners', { defaultValue: 'All Partners' })}
+                                                allLabel={t('ledger.filters.allPartners', {
+                                                    defaultValue: 'All Partners',
+                                                })}
                                                 getOptionLabel={(partner) => partner}
-                                                onChange={(partner) => setDraftFilters((current) => ({ ...current, partner }))}
+                                                onChange={(partner) =>
+                                                    setDraftFilters((current) => ({
+                                                        ...current,
+                                                        partner,
+                                                    }))
+                                                }
                                             />
                                         </div>
                                         <div className="space-y-2">
-                                            <Label>{t('ledger.filters.currency', { defaultValue: 'Currency' })}</Label>
+                                            <Label>
+                                                {t('ledger.filters.currency', {
+                                                    defaultValue: 'Currency',
+                                                })}
+                                            </Label>
                                             <LedgerMultiSelect
                                                 value={draftFilters.currency}
                                                 options={currencyOptions}
-                                                allLabel={t('ledger.filters.allCurrencies', { defaultValue: 'All Currencies' })}
+                                                allLabel={t('ledger.filters.allCurrencies', {
+                                                    defaultValue: 'All Currencies',
+                                                })}
                                                 getOptionLabel={(currency) => currency.toUpperCase()}
-                                                onChange={(currency) => setDraftFilters((current) => ({ ...current, currency }))}
+                                                onChange={(currency) =>
+                                                    setDraftFilters((current) => ({
+                                                        ...current,
+                                                        currency,
+                                                    }))
+                                                }
                                             />
                                         </div>
                                     </div>
 
-                                        <div className="grid gap-4 sm:grid-cols-2">
-                                            <div className="space-y-2">
-                                                <Label>{t('ledger.filters.paymentMethod', { defaultValue: 'Payment Method' })}</Label>
-                                                <LedgerMultiSelect
-                                                    value={draftFilters.paymentMethods}
-                                                    options={paymentMethodOptions}
-                                                    allLabel={t('ledger.filters.anyMethod', { defaultValue: 'Any Method' })}
-                                                    getOptionLabel={(method) => paymentMethodLabel(method, t)}
-                                                    onChange={(paymentMethods) => setDraftFilters((current) => ({ ...current, paymentMethods }))}
-                                                />
-                                            </div>
+                                    <div className="grid gap-4 sm:grid-cols-2">
+                                        <div className="space-y-2">
+                                            <Label>
+                                                {t('ledger.filters.paymentMethod', {
+                                                    defaultValue: 'Payment Method',
+                                                })}
+                                            </Label>
+                                            <LedgerMultiSelect
+                                                value={draftFilters.paymentMethods}
+                                                options={paymentMethodOptions}
+                                                allLabel={t('ledger.filters.anyMethod', {
+                                                    defaultValue: 'Any Method',
+                                                })}
+                                                getOptionLabel={(method) => paymentMethodLabel(method, t)}
+                                                onChange={(paymentMethods) =>
+                                                    setDraftFilters((current) => ({
+                                                        ...current,
+                                                        paymentMethods,
+                                                    }))
+                                                }
+                                            />
+                                        </div>
                                         <div className="space-y-2">
                                             <Label>{t('ledger.filters.notes', { defaultValue: 'Notes' })}</Label>
                                             <LedgerMultiSelect
                                                 value={draftFilters.notes}
                                                 options={['with_notes', 'without_notes']}
-                                                allLabel={t('ledger.filters.anyNotesState', { defaultValue: 'Any Notes State' })}
+                                                allLabel={t('ledger.filters.anyNotesState', {
+                                                    defaultValue: 'Any Notes State',
+                                                })}
                                                 getOptionLabel={(notes) => notesFilterLabel(notes, t)}
                                                 onChange={(notes) => setDraftFilters((current) => ({ ...current, notes }))}
                                             />
-                                            </div>
                                         </div>
+                                    </div>
 
-                                        <div className="space-y-2">
-                                            <Label>{t('ledger.filters.storage', { defaultValue: 'Storage' })}</Label>
-                                            <LedgerMultiSelect
-                                                value={draftFilters.storage}
-                                                options={storages.map((storage) => storage.id)}
-                                                allLabel={t('ledger.filters.allStorages', { defaultValue: 'All Storages' })}
-                                                getOptionLabel={(storageId) => storages.find((storage) => storage.id === storageId)?.name || storageId}
-                                                onChange={(storage) => setDraftFilters((current) => ({ ...current, storage }))}
-                                            />
-                                        </div>
+                                    <div className="space-y-2">
+                                        <Label>{t('ledger.filters.storage', { defaultValue: 'Storage' })}</Label>
+                                        <LedgerMultiSelect
+                                            value={draftFilters.storage}
+                                            options={storages.map((storage) => storage.id)}
+                                            allLabel={t('ledger.filters.allStorages', {
+                                                defaultValue: 'All Storages',
+                                            })}
+                                            getOptionLabel={(storageId) =>
+                                                storages.find((storage) => storage.id === storageId)?.name || storageId
+                                            }
+                                            onChange={(storage) => setDraftFilters((current) => ({ ...current, storage }))}
+                                        />
+                                    </div>
 
-                                        <div className="grid gap-4 sm:grid-cols-2">
+                                    <div className="grid gap-4 sm:grid-cols-2">
                                         <div className="space-y-2">
-                                            <Label htmlFor="ledger-filter-min-amount">{t('ledger.filters.minimumAmount', { defaultValue: 'Minimum Amount' })}</Label>
+                                            <Label htmlFor="ledger-filter-min-amount">
+                                                {t('ledger.filters.minimumAmount', {
+                                                    defaultValue: 'Minimum Amount',
+                                                })}
+                                            </Label>
                                             <Input
                                                 id="ledger-filter-min-amount"
                                                 type="number"
                                                 min="0"
                                                 value={draftFilters.minAmount}
-                                                onChange={(event) => setDraftFilters((current) => ({ ...current, minAmount: event.target.value }))}
+                                                onChange={(event) =>
+                                                    setDraftFilters((current) => ({
+                                                        ...current,
+                                                        minAmount: event.target.value,
+                                                    }))
+                                                }
                                                 placeholder="0"
                                             />
                                         </div>
                                         <div className="space-y-2">
-                                            <Label htmlFor="ledger-filter-max-amount">{t('ledger.filters.maximumAmount', { defaultValue: 'Maximum Amount' })}</Label>
+                                            <Label htmlFor="ledger-filter-max-amount">
+                                                {t('ledger.filters.maximumAmount', {
+                                                    defaultValue: 'Maximum Amount',
+                                                })}
+                                            </Label>
                                             <Input
                                                 id="ledger-filter-max-amount"
                                                 type="number"
                                                 min="0"
                                                 value={draftFilters.maxAmount}
-                                                onChange={(event) => setDraftFilters((current) => ({ ...current, maxAmount: event.target.value }))}
-                                                placeholder={t('ledger.filters.noCap', { defaultValue: 'No cap' })}
+                                                onChange={(event) =>
+                                                    setDraftFilters((current) => ({
+                                                        ...current,
+                                                        maxAmount: event.target.value,
+                                                    }))
+                                                }
+                                                placeholder={t('ledger.filters.noCap', {
+                                                    defaultValue: 'No cap',
+                                                })}
                                             />
                                         </div>
                                     </div>
@@ -3403,21 +4079,25 @@ export function Ledger() {
                         <DialogFooter className="border-t border-border/60 bg-background/95 px-6 py-4 sm:justify-between">
                             <Button type="button" variant="ghost" onClick={handleResetDraftFilters} className="rounded-2xl">
                                 <RotateCcw className="me-2 h-4 w-4" />
-                                {t('ledger.filters.resetDraft', { defaultValue: 'Reset Draft' })}
+                                {t('ledger.filters.resetDraft', {
+                                    defaultValue: 'Reset Draft',
+                                })}
                             </Button>
                             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
                                 <Button type="button" variant="outline" onClick={() => setIsFilterDialogOpen(false)} className="rounded-2xl">
                                     {t('ledger.filters.cancel', { defaultValue: 'Cancel' })}
                                 </Button>
                                 <Button type="button" onClick={handleApplyFilters} className="rounded-2xl">
-                                    {t('ledger.filters.applyFilters', { count: draftPreviewEntries.length, defaultValue: `Apply Filters (${draftPreviewEntries.length})` })}
+                                    {t('ledger.filters.applyFilters', {
+                                        count: draftPreviewEntries.length,
+                                        defaultValue: `Apply Filters (${draftPreviewEntries.length})`,
+                                    })}
                                 </Button>
                             </div>
                         </DialogFooter>
                     </div>
                 </DialogContent>
             </Dialog>
-
         </div>
     )
 }

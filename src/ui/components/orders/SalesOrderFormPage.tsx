@@ -36,6 +36,7 @@ import {
     useDiscountPriceResolver,
     usePriceBookCatalogState,
     useProducts,
+    useWorkspaceProductBarcodes,
     useSalesOrderAgentAssignments,
     useSalesOrder,
     useStockBatches,
@@ -89,6 +90,7 @@ import { ProductsViewModal, ProductsViewModalTrigger } from '@/ui/components/Pro
 import { PaymentMethodSelect } from '@/ui/components/payments/PaymentMethodSelect'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import { ProductAutocompleteInput } from './ProductAutocompleteInput'
+import { useOrderBarcodeScanner } from './useOrderBarcodeScanner'
 import { LoanPartyPickerDialog } from '@/ui/components/loans/LoanPartyPickerDialog'
 import { OrderAdjustmentsDialog } from './OrderAdjustmentsDialog'
 import { OrderLineItemNoteDialog } from './OrderLineItemNoteDialog'
@@ -228,6 +230,7 @@ export function SalesOrderFormPage({
     const demoTutorial = useDemoTutorial()
 
     const products = useProducts(workspaceId)
+    const productBarcodes = useWorkspaceProductBarcodes(workspaceId, { syncProductCache: false })
     const inventory = useInventory(workspaceId)
     const resolveDiscountForPrice = useDiscountPriceResolver(workspaceId, { inventoryRows: inventory })
     const stockBatches = useStockBatches(workspaceId)
@@ -760,6 +763,56 @@ export function SalesOrderFormPage({
             })
         )
     }
+
+    const selectProductForItem = (index: number, product: typeof products[number]) => {
+        if (!isService(product) && !hasValidProductCost(product.costPrice)) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: getMissingProductCostMessage(product.name),
+                variant: 'destructive'
+            })
+            return
+        }
+        if (hasMissingPartnerPriceBookCost(selectedCustomer, product.id)) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: getMissingPriceBookCostMessage(product.name, getPartnerPriceBookName(selectedCustomer)),
+                variant: 'destructive'
+            })
+            return
+        }
+        updateItem(index, {
+            productId: product.id,
+            productSearch: product.name,
+            ...(isService(product) ? { storageId: SERVICES_VIRTUAL_STORAGE_ID, batchId: '' } : {})
+        })
+    }
+
+    useOrderBarcodeScanner({
+        enabled: !isCustomerSelectionRequired && !(priceBooksEnabled && (!isPriceBookCatalogReady || !selectedCustomer)),
+        items,
+        products,
+        productBarcodes,
+        onProductScanned: (product, index) => {
+            const item = items[index]
+            const isAvailableForLine = item && getSalesProductOptions(item.storageId, item.productId)
+                .some((candidate) => candidate.id === product.id)
+            if (!isAvailableForLine) {
+                toast({
+                    title: t('products.notFoundTitle', { defaultValue: 'Product not found' }),
+                    description: t('products.notFoundDescription', { defaultValue: 'This product could not be found. It may have been deleted or is no longer available.' }),
+                    variant: 'destructive'
+                })
+                return
+            }
+            selectProductForItem(index, product)
+        },
+        onProductNotFound: () => toast({
+            title: t('products.notFoundTitle', { defaultValue: 'Product not found' }),
+            description: t('products.notFoundDescription', { defaultValue: 'This product could not be found. It may have been deleted or is no longer available.' }),
+            variant: 'destructive'
+        })
+    })
 
     useEffect(() => {
         if (stockBatches.length === 0) return
@@ -1401,31 +1454,10 @@ export function SalesOrderFormPage({
                                                         <ProductAutocompleteInput
                                                             className="min-w-0 flex-1"
                                                             inputClassName={canOpenProductsView ? 'rounded-s-none' : undefined}
+                                                            scannerTargetIndex={index}
                                                             value={item.productSearch}
                                                             onChange={(value) => updateItem(index, { productSearch: value, productId: '' })}
-                                                            onSelectProduct={(product) => {
-                                                                if (!isService(product) && !hasValidProductCost(product.costPrice)) {
-                                                                    toast({
-                                                                        title: t('common.error') || 'Error',
-                                                                        description: getMissingProductCostMessage(product.name),
-                                                                        variant: 'destructive'
-                                                                    })
-                                                                    return
-                                                                }
-                                                                if (hasMissingPartnerPriceBookCost(selectedCustomer, product.id)) {
-                                                                    toast({
-                                                                        title: t('common.error') || 'Error',
-                                                                        description: getMissingPriceBookCostMessage(product.name, getPartnerPriceBookName(selectedCustomer)),
-                                                                        variant: 'destructive'
-                                                                    })
-                                                                    return
-                                                                }
-                                                                updateItem(index, {
-                                                                    productId: product.id,
-                                                                    productSearch: product.name,
-                                                                    ...(isService(product) ? { storageId: SERVICES_VIRTUAL_STORAGE_ID, batchId: '' } : {})
-                                                                })
-                                                            }}
+                                                            onSelectProduct={(product) => selectProductForItem(index, product)}
                                                             products={getSalesProductOptions(item.storageId, item.productId)}
                                                             disabled={priceBooksEnabled && (!isPriceBookCatalogReady || !selectedCustomer)}
                                                             placeholder={priceBooksEnabled && !selectedCustomer

@@ -5184,6 +5184,7 @@
   },
   "ledger": {
     "title": "دفتر الأستاذ العام",
+    "subtitle": "راجع الحركات المالية المنشورة عبر جميع العملات.",
     "systemControlled": "يتحكم فيه النظام",
     "notAvailable": "دفتر الأستاذ غير متوفر في مساحة العمل هذه",
     "enableModules": "فعّل نقاط البيع أو إدارة العملاء أو القروض أو المحاسبة أو الموارد البشرية لاستخدام دفتر الأستاذ المركزي.",
@@ -5309,7 +5310,9 @@
       "loanRepaymentReceived": "سداد قرض مستلم",
       "loanRepaymentPaid": "سداد قرض مدفوع",
       "installmentReceived": "قسط مستلم",
-      "installmentPaid": "قسط مدفوع"
+      "installmentPaid": "قسط مدفوع",
+      "installmentSaleDownPayment": "دفعة مقدمة لبيع بالتقسيط",
+      "installmentSaleCollection": "تحصيل بيع بالتقسيط"
     },
     "type": {
       "posSale": "بيع نقطة البيع",
@@ -5326,6 +5329,8 @@
       "loanRepaymentPaid": "سداد قرض مدفوع",
       "installmentReceived": "قسط مستلم",
       "installmentPaid": "قسط مدفوع",
+      "installmentSaleDownPayment": "دفعة مقدمة لبيع بالتقسيط",
+      "installmentSaleCollection": "تحصيل بيع بالتقسيط",
       "directInflow": "وارد مباشر",
       "directOutflow": "صادر مباشر",
       "agentCommissionPayout": "دفع نسبة الوكيل",
@@ -5348,12 +5353,16 @@
       "expenses": "المصروفات",
       "payroll": "الرواتب",
       "loans": "القروض",
+      "installmentSales": "مبيعات بالتقسيط",
       "manual": "يدوي",
       "activities": "الأنشطة",
       "postService": "خدمة التوصيل",
       "carRental": "خدمة تأجير السيارات"
     },
     "description": {
+      "installmentSaleDownPayment": "تم استلام الدفعة المقدمة لبيع بالتقسيط {{reference}}.",
+      "installmentSaleCollection": "تم استلام دفعة لبيع بالتقسيط {{reference}}.",
+      "paymentReversal": "عكس معاملة الدفع {{transactionId}}.",
       "deliveryCourierRemittance": "تسليم نقدي من المندوب",
       "deliveryCourierFeePayout": "دفع أجرة المندوب",
       "deliveryCourierReimbursement": "تعويض المندوب",
@@ -8523,6 +8532,9 @@
     "frequency": "التكرار",
     "noFrequency": "بلا تكرار",
     "noFrequencyHint": "يمكن تحصيل الدفعات في أي وقت؛ لن يتم إنشاء تاريخ استحقاق أو جدول سداد.",
+    "noSetInstallmentCount": "بدون عدد أقساط محدد",
+    "noSetInstallmentCountHint": "احتفظ برصيد واحد مفتوح. يصبح متأخراً بعد تاريخ الاستحقاق الأول دون إنشاء أقساط إضافية.",
+    "daysOverdue": "متأخر {{count}} أيام",
     "firstDueDate": "تاريخ الاستحقاق الأول",
     "repaymentSummary": "ملخص السداد",
     "customerReceivable": "ذمة العميل",
@@ -8541,6 +8553,18 @@
     "paymentBalance": "الرصيد المتبقي",
     "paymentDate": "تاريخ الدفع",
     "customerPayments": "دفعات العميل",
+    "paymentTableView": "عرض جدول الدفعات",
+    "paymentCardView": "عرض بطاقات الدفعات",
+    "reversePayment": "عكس الدفعة",
+    "saleCreated": "تم إنشاء مبيعة التقسيط",
+    "paidPercent": "اكتمل سداد {{percent}}%",
+    "notFound": "لم يتم العثور على مبيعة التقسيط.",
+    "cancelledSaleTitle": "تم إلغاء مبيعة التقسيط",
+    "cancelledSaleDescription": "أُلغيت هذه المبيعة وتم عكس دفعات العميل.",
+    "paymentStatuses": {
+      "recorded": "مسجلة",
+      "reversed": "معكوسة"
+    },
     "cancelSale": "إلغاء المبيعة",
     "cancelTitle": "إلغاء مبيعة التقسيط",
     "cancellationReason": "سبب الإلغاء",
@@ -8552,11 +8576,52 @@
       "completed": "مكتمل",
       "cancelled": "ملغي"
     },
+    "print": {
+      "documentTitle": "تفاصيل مبيعة التقسيط",
+      "customerDetails": "تفاصيل العميل",
+      "saleSummary": "ملخص المبيعة",
+      "paymentSchedule": "جدول الدفعات",
+      "paymentActivity": "سجل الدفعات",
+      "paymentMethod": "طريقة الدفع",
+      "amount": "المبلغ",
+      "installmentNumber": "القسط #{{number}}",
+      "installmentCollection": "تحصيل قسط",
+      "notes": "ملاحظات",
+      "continued": "(متابعة)",
+      "hideNextDue": "إخفاء الاستحقاق التالي",
+      "hideDueDate": "إخفاء تاريخ الاستحقاق",
+      "frequencyLabels": {
+        "no_frequency": "بلا تكرار",
+        "daily": "يومي",
+        "weekly": "أسبوعي",
+        "biweekly": "كل أسبوعين",
+        "monthly": "شهري"
+      },
+      "installmentStatuses": {
+        "unpaid": "غير مدفوع",
+        "partial": "مدفوع جزئياً",
+        "paid": "مدفوع",
+        "overdue": "متأخر",
+        "cancelled": "ملغي"
+      },
+      "paymentMethods": {
+        "cash": "نقدي",
+        "fib": "FIB",
+        "qicard": "QiCard",
+        "zaincash": "زين كاش",
+        "fastpay": "FastPay",
+        "credit": "آجل",
+        "bank_transfer": "تحويل بنكي",
+        "unknown": "غير معروف"
+      }
+    },
     "messages": {
       "created": "تم إنشاء مبيعة التقسيط.",
       "createFailed": "تعذر إنشاء مبيعة التقسيط.",
       "paymentRecorded": "تم تسجيل الدفعة.",
       "paymentFailed": "تعذر تسجيل الدفعة.",
+      "paymentReversed": "تم عكس دفعة العميل.",
+      "paymentReverseFailed": "تعذر عكس دفعة العميل.",
       "cancelled": "تم إلغاء مبيعة التقسيط وعكس الدفعات.",
       "cancelFailed": "تعذر إلغاء مبيعة التقسيط."
     }

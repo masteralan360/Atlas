@@ -23,8 +23,11 @@ let createBusinessPartner: typeof import("./businessPartners").createBusinessPar
 let createInstallmentSale: typeof import("./installmentSales").createInstallmentSale;
 let recordInstallmentSaleCustomerPayment: typeof import("./installmentSales").recordInstallmentSaleCustomerPayment;
 let buildInstallmentSaleSchedule: typeof import("./installmentSales").buildInstallmentSaleSchedule;
+let getInstallmentSaleOverdueDays: typeof import("./installmentSales").getInstallmentSaleOverdueDays;
+let getInstallmentSaleDisplayStatus: typeof import("./installmentSales").getInstallmentSaleDisplayStatus;
 let cancelInstallmentSale: typeof import("./installmentSales").cancelInstallmentSale;
 let savePaymentAccount: typeof import("./paymentAccounts").savePaymentAccount;
+let reversePaymentTransaction: typeof import("./payments").reversePaymentTransaction;
 
 function installBrowserStorage() {
   const values = new Map<string, string>();
@@ -96,9 +99,12 @@ describe("installment sales", () => {
       createInstallmentSale,
       recordInstallmentSaleCustomerPayment,
       buildInstallmentSaleSchedule,
+      getInstallmentSaleOverdueDays,
+      getInstallmentSaleDisplayStatus,
       cancelInstallmentSale,
     } = await import("./installmentSales"));
     ({ savePaymentAccount } = await import("./paymentAccounts"));
+    ({ reversePaymentTransaction } = await import("./payments"));
   }, 30_000);
 
   beforeEach(async () => {
@@ -158,6 +164,7 @@ describe("installment sales", () => {
 
     expect(sale).toMatchObject({
       installmentCount: 1,
+      hasInstallmentCount: false,
       installmentFrequency: "no_frequency",
       firstDueDate: null,
       nextDueDate: null,
@@ -205,6 +212,130 @@ describe("installment sales", () => {
         }),
       ]),
     );
+  });
+
+  it("keeps a frequency-based sale open-ended and shows the elapsed days after its first due date", async () => {
+    expect(
+      buildInstallmentSaleSchedule(1_500_000, "iqd", 12, "daily", "2000-01-01", false),
+    ).toEqual([
+      { installmentNo: 1, dueDate: "2000-01-01", plannedAmount: 1_500_000 },
+    ]);
+    expect(
+      buildInstallmentSaleSchedule(
+        1_500_000,
+        "iqd",
+        3,
+        "daily",
+        "2026-09-08T14:30",
+      ),
+    ).toEqual([
+      {
+        installmentNo: 1,
+        dueDate: "2026-09-08T14:30:00",
+        plannedAmount: 500_000,
+      },
+      {
+        installmentNo: 2,
+        dueDate: "2026-09-09T14:30:00",
+        plannedAmount: 500_000,
+      },
+      {
+        installmentNo: 3,
+        dueDate: "2026-09-10T14:30:00",
+        plannedAmount: 500_000,
+      },
+    ]);
+    expect(getInstallmentSaleOverdueDays("2026-09-06", "2026-09-09")).toBe(3);
+    expect(getInstallmentSaleOverdueDays("2026-09-09", "2026-09-09")).toBe(0);
+    expect(
+      getInstallmentSaleDisplayStatus(
+        {
+          status: "active",
+          customerBalanceAmount: 1_500_000,
+          hasInstallmentCount: false,
+          installmentFrequency: "daily",
+          firstDueDate: "2026-09-09T10:00",
+        },
+        "2026-09-09T10:01",
+      ),
+    ).toBe("overdue");
+    expect(
+      getInstallmentSaleOverdueDays(
+        "2026-09-09T10:00",
+        "2026-09-09T10:01",
+      ),
+    ).toBe(0);
+    expect(
+      getInstallmentSaleDisplayStatus(
+        {
+          status: "active",
+          customerBalanceAmount: 1_500_000,
+          hasInstallmentCount: false,
+          installmentFrequency: "daily",
+          firstDueDate: "2026-09-06",
+        },
+        "2026-09-09",
+      ),
+    ).toBe("overdue");
+
+    const customer = await createBusinessPartner(WORKSPACE_ID, {
+      partnerName: "Open-ended daily customer",
+      phone: "07500000004",
+      defaultCurrency: "iqd",
+      creditLimit: 0,
+      role: "customer",
+    });
+    const { sale, installments } = await createInstallmentSale(WORKSPACE_ID, {
+      customerBusinessPartnerId: customer.id,
+      description: "Open-ended daily sale",
+      currency: "iqd",
+      acquisitionCost: 1_000_000,
+      totalSalePrice: 1_500_000,
+      installmentCount: 12,
+      hasInstallmentCount: false,
+      installmentFrequency: "daily",
+      firstDueDate: "2000-01-01T09:30",
+    });
+
+    expect(sale).toMatchObject({
+      installmentCount: 1,
+      hasInstallmentCount: false,
+      firstDueDate: "2000-01-01T09:30:00",
+      nextDueDate: "2000-01-01T09:30:00",
+      customerBalanceAmount: 1_500_000,
+      status: "overdue",
+    });
+    expect(installments).toEqual([
+      expect.objectContaining({
+        dueDate: "2000-01-01T09:30:00",
+        plannedAmount: 1_500_000,
+        status: "overdue",
+      }),
+    ]);
+
+    await recordInstallmentSaleCustomerPayment(WORKSPACE_ID, {
+      installmentSaleId: sale.id,
+      amount: 300_000,
+      paymentMethod: "cash",
+    });
+    expect(await db.installment_sales.get(sale.id)).toMatchObject({
+      customerPaidAmount: 300_000,
+      customerBalanceAmount: 1_200_000,
+      status: "overdue",
+    });
+
+    await expect(
+      createInstallmentSale(WORKSPACE_ID, {
+        customerBusinessPartnerId: customer.id,
+        description: "Missing first due date",
+        currency: "iqd",
+        acquisitionCost: 100,
+        totalSalePrice: 150,
+        installmentCount: 1,
+        hasInstallmentCount: false,
+        installmentFrequency: "daily",
+      }),
+    ).rejects.toThrow("A valid first due date and time is required");
   });
 
   it("creates a customer receivable and records every collection through payment transactions", async () => {
@@ -447,5 +578,84 @@ describe("installment sales", () => {
     expect(
       (await db.business_partners.get(customer.id))?.receivableBalance,
     ).toBe(0);
+  });
+
+  it("reverses an individual customer payment through an immutable payment transaction", async () => {
+    const customer = await createBusinessPartner(WORKSPACE_ID, {
+      partnerName: "Customer D",
+      phone: "07500000006",
+      defaultCurrency: "iqd",
+      creditLimit: 0,
+      role: "customer",
+    });
+    const { sale, installments } = await createInstallmentSale(WORKSPACE_ID, {
+      customerBusinessPartnerId: customer.id,
+      description: "Reversible payment sale",
+      currency: "iqd",
+      acquisitionCost: 100,
+      totalSalePrice: 150,
+      installmentCount: 2,
+      installmentFrequency: "weekly",
+      firstDueDate: "2026-10-01",
+    });
+    const recorded = await recordInstallmentSaleCustomerPayment(WORKSPACE_ID, {
+      installmentSaleId: sale.id,
+      installmentId: installments[0].id,
+      amount: 40,
+      paymentMethod: "cash",
+    });
+    const originalTransaction = (
+      await db.payment_transactions
+        .where("workspaceId")
+        .equals(WORKSPACE_ID)
+        .toArray()
+    ).find(
+      (transaction) =>
+        transaction.sourceSubrecordId === recorded.payment.id &&
+        !transaction.reversalOfTransactionId,
+    );
+
+    expect(originalTransaction).toMatchObject({
+      sourceModule: "installment_sales",
+      sourceType: "installment_sale_installment",
+      amount: 40,
+    });
+
+    const reversal = await reversePaymentTransaction(
+      WORKSPACE_ID,
+      originalTransaction!.id,
+      { createdBy: "user-1" },
+    );
+
+    expect(reversal).toMatchObject({
+      sourceModule: "installment_sales",
+      sourceSubrecordId: recorded.payment.id,
+      amount: -40,
+      reversalOfTransactionId: originalTransaction!.id,
+    });
+    expect(await db.installment_sales.get(sale.id)).toMatchObject({
+      customerPaidAmount: 0,
+      customerBalanceAmount: 150,
+      status: "active",
+    });
+    expect(await db.installment_sale_installments.get(installments[0].id)).toMatchObject({
+      paidAmount: 0,
+      balanceAmount: 75,
+      status: "unpaid",
+    });
+    expect(
+      await db.payment_transactions
+        .where("sourceRecordId")
+        .equals(sale.id)
+        .toArray(),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: originalTransaction!.id, amount: 40 }),
+        expect.objectContaining({ id: reversal.id, amount: -40 }),
+      ]),
+    );
+    await expect(
+      reversePaymentTransaction(WORKSPACE_ID, reversal.id),
+    ).rejects.toThrow("Reversal entries cannot be reversed");
   });
 });

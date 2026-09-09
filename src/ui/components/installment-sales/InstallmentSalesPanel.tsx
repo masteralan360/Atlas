@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { useLocation } from "wouter";
 import {
   BadgeDollarSign,
   CalendarDays,
@@ -21,16 +22,21 @@ import { useDateRange } from "@/context/DateRangeContext";
 import { isDateInDateRange } from "@/lib/dateRangeFilters";
 import {
   formatCurrency,
-  formatLocalDateValue,
   formatDate,
+  formatDateTime,
+  formatLocalDateTimeValue,
   formatNumericInput,
   parseFormattedNumber,
   sanitizeNumericInput,
 } from "@/lib/utils";
 import { generateTemplatePdf, type PrintFormat } from "@/services/pdfGenerator";
+import { printPdfBlob } from "@/services/pdfPrintService";
+import type { TemplatePreview } from "@/lib/printPreviewEditorStore";
 import {
   cancelInstallmentSale,
   createInstallmentSale,
+  getInstallmentSaleDisplayStatus,
+  getInstallmentSaleOverdueDays,
   recordInstallmentSaleCustomerPayment,
   useInstallmentSaleInstallments,
   useInstallmentSalePayments,
@@ -72,6 +78,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -106,6 +113,21 @@ function statusTone(status: InstallmentSale["status"]) {
   if (status === "completed") return "secondary";
   if (status === "cancelled") return "outline";
   return "default";
+}
+
+function formatInstallmentSaleDueAt(value: string) {
+  return value.length > 10 ? formatDateTime(value) : formatDate(value);
+}
+
+function useInstallmentSaleDueStatusClock() {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  return now.toISOString();
 }
 
 function LinkPill({
@@ -168,6 +190,8 @@ function CreateInstallmentSaleDialog({
   const [downMethod, setDownMethod] = useState<WorkspacePaymentMethod>("cash");
   const [downAccount, setDownAccount] = useState<PaymentAccount | null>(null);
   const [count, setCount] = useState("1");
+  const [hasNoSetInstallmentCount, setHasNoSetInstallmentCount] =
+    useState(false);
   const [frequency, setFrequency] = useState<InstallmentSaleFrequency>("monthly");
   const [firstDueDate, setFirstDueDate] = useState<Date | undefined>(undefined);
 
@@ -187,6 +211,7 @@ function CreateInstallmentSaleDialog({
     setDownMethod("cash");
     setDownAccount(null);
     setCount("1");
+    setHasNoSetInstallmentCount(false);
     setFrequency("monthly");
     setFirstDueDate(undefined);
   }, [features.default_currency, open]);
@@ -198,6 +223,8 @@ function CreateInstallmentSaleDialog({
     : 0;
   const profit = numericPrice - numericCost;
   const isNoFrequency = frequency === "no_frequency";
+  const isOpenEndedFrequency =
+    !isNoFrequency && hasNoSetInstallmentCount;
   const canSubmit =
     !!customer &&
     description.trim().length > 0 &&
@@ -205,7 +232,8 @@ function CreateInstallmentSaleDialog({
     numericPrice >= numericCost &&
     numericDown >= 0 &&
     numericDown < numericPrice &&
-    (isNoFrequency || (Number(count) > 0 && !!firstDueDate));
+    (isNoFrequency ||
+      (!!firstDueDate && (isOpenEndedFrequency || Number(count) > 0)));
   const numericInput = (value: string) =>
     sanitizeNumericInput(value, { allowDecimal: currency !== "iqd" });
 
@@ -225,9 +253,13 @@ function CreateInstallmentSaleDialog({
         acquisitionCost: numericCost,
         totalSalePrice: numericPrice,
         downPaymentAmount: numericDown,
-        installmentCount: isNoFrequency ? 1 : Number(count),
+        installmentCount:
+          isNoFrequency || isOpenEndedFrequency ? 1 : Number(count),
+        hasInstallmentCount: !isNoFrequency && !isOpenEndedFrequency,
         installmentFrequency: frequency,
-        firstDueDate: isNoFrequency ? null : formatLocalDateValue(firstDueDate),
+        firstDueDate: isNoFrequency
+          ? null
+          : formatLocalDateTimeValue(firstDueDate),
         downPaymentMethod: downMethod,
         downPaymentAccountId: downAccount?.id ?? null,
         downPaymentAccountNameSnapshot: downAccount?.name ?? null,
@@ -467,23 +499,7 @@ function CreateInstallmentSaleDialog({
                 </div>
               ) : null}
             </div>
-            <div className="grid gap-4 md:grid-cols-3">
-              {!isNoFrequency ? <div className="grid gap-2">
-                <Label>
-                  {t("installmentSales.installmentCount")}{" "}
-                  <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="0"
-                  value={count}
-                  onChange={(event) =>
-                    setCount(event.target.value.replace(/\D/g, ""))
-                  }
-                  disabled={isSaving}
-                />
-              </div> : null}
+            <div className="grid gap-4 md:grid-cols-2">
               <div className="grid gap-2">
                 <Label>
                   {t("installmentSales.frequency")}{" "}
@@ -496,6 +512,7 @@ function CreateInstallmentSaleDialog({
                     setFrequency(nextFrequency);
                     if (nextFrequency === "no_frequency") {
                       setFirstDueDate(undefined);
+                      setHasNoSetInstallmentCount(false);
                     }
                   }}
                   disabled={isSaving}
@@ -535,12 +552,50 @@ function CreateInstallmentSaleDialog({
                 <DateTimePicker
                   date={firstDueDate}
                   setDate={setFirstDueDate}
-                  mode="date"
+                  mode="date-time"
                   disabled={isSaving}
                   placeholder={t("installmentSales.firstDueDate")}
                 />
               </div> : null}
             </div>
+            {!isNoFrequency ? (
+              <>
+                <div className="flex flex-col gap-3 rounded-2xl border bg-muted/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <Label htmlFor="installment-sale-no-set-count">
+                      {t("installmentSales.noSetInstallmentCount")}
+                    </Label>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {t("installmentSales.noSetInstallmentCountHint")}
+                    </p>
+                  </div>
+                  <Switch
+                    id="installment-sale-no-set-count"
+                    checked={hasNoSetInstallmentCount}
+                    onCheckedChange={setHasNoSetInstallmentCount}
+                    disabled={isSaving}
+                  />
+                </div>
+                {!hasNoSetInstallmentCount ? (
+                  <div className="grid gap-2">
+                    <Label>
+                      {t("installmentSales.installmentCount")}{" "}
+                      <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="0"
+                      value={count}
+                      onChange={(event) =>
+                        setCount(event.target.value.replace(/\D/g, ""))
+                      }
+                      disabled={isSaving}
+                    />
+                  </div>
+                ) : null}
+              </>
+            ) : null}
             <div className="grid gap-2">
               <Label>{t("common.notes")}</Label>
               <Textarea
@@ -875,14 +930,14 @@ function CancelSaleDialog({
   );
 }
 
-function SaleDetailsDialog({
+export function InstallmentSaleDetailsDialog({
   sale,
   onOpenChange,
 }: {
   sale: InstallmentSale | null;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { features, workspaceName } = useWorkspace();
   const { user } = useAuth();
   const [customerPayment, setCustomerPayment] =
@@ -891,8 +946,99 @@ function SaleDetailsDialog({
   const [cancelOpen, setCancelOpen] = useState(false);
   const installments = useInstallmentSaleInstallments(sale?.id);
   const customerPayments = useInstallmentSalePayments(sale?.id);
+  const dueStatusClock = useInstallmentSaleDueStatusClock();
   const isNoFrequency = sale?.installmentFrequency === "no_frequency";
+  const isOpenEndedFrequency =
+    !isNoFrequency && sale?.hasInstallmentCount === false;
+  const overdueDays =
+    sale && isOpenEndedFrequency && sale.customerBalanceAmount > 0
+      ? getInstallmentSaleOverdueDays(sale.firstDueDate, dueStatusClock)
+      : 0;
+  const displayStatus = sale
+    ? getInstallmentSaleDisplayStatus(sale, dueStatusClock)
+    : undefined;
   const readOnly = user?.role === "viewer";
+  const printLang =
+    features.print_lang && features.print_lang !== "auto"
+      ? features.print_lang
+      : i18n.language;
+  const installmentSaleTemplatePreview = useMemo<TemplatePreview | undefined>(
+    () => {
+      if (!sale) return undefined;
+
+      return {
+        fields: [
+          {
+            key: "customerName",
+            label: t("installmentSales.customer"),
+            value: sale.customerNameSnapshot,
+            type: "text",
+          },
+          {
+            key: "description",
+            label: t("installmentSales.description"),
+            value: sale.description,
+            type: "text",
+          },
+          {
+            key: "hideNextDue",
+            label: t("installmentSales.print.hideNextDue"),
+            value: "false",
+            type: "boolean",
+          },
+          {
+            key: "hideDueDate",
+            label: t("installmentSales.print.hideDueDate"),
+            value: "false",
+            type: "boolean",
+          },
+        ],
+        page: { widthMm: 210, heightMm: 297 },
+        createElement: (
+          data,
+          effectiveId,
+          printLangOverride,
+          renderOptions,
+        ) => (
+          <InstallmentSalePrintTemplate
+            workspaceName={workspaceName}
+            printLang={printLangOverride || printLang}
+            sale={{
+              ...sale,
+              customerNameSnapshot: data.customerName ?? sale.customerNameSnapshot,
+              description: data.description ?? sale.description,
+            }}
+            installments={installments}
+            payments={customerPayments}
+            iqdPreference={features.iqd_display_preference}
+            logoUrl={features.logo_url}
+            qrValue={features.print_qr && effectiveId ? effectiveId : undefined}
+            hideNextDue={data.hideNextDue === "true"}
+            hideDueDate={data.hideDueDate === "true"}
+            hiddenFields={renderOptions?.hiddenFields}
+            onHiddenFieldChange={renderOptions?.onHiddenFieldChange}
+          />
+        ),
+        buildPdf: async (element, printLangOverride) =>
+          generateTemplatePdf({
+            element,
+            format: "a4",
+            printLang: printLangOverride || printLang,
+          }),
+      };
+    },
+    [
+      customerPayments,
+      features.iqd_display_preference,
+      features.logo_url,
+      features.print_qr,
+      installments,
+      printLang,
+      sale,
+      t,
+      workspaceName,
+    ],
+  );
   return (
     <>
       <AppDialog open={!!sale} onOpenChange={onOpenChange}>
@@ -901,9 +1047,14 @@ function SaleDetailsDialog({
             <AppDialogTitle className="flex items-center gap-2">
               <ReceiptText className="h-5 w-5" />
               {sale?.saleNo}{" "}
-              <Badge variant={sale ? statusTone(sale.status) : "outline"}>
-                {sale ? t(`installmentSales.statuses.${sale.status}`) : ""}
+              <Badge variant={displayStatus ? statusTone(displayStatus) : "outline"}>
+                {displayStatus ? t(`installmentSales.statuses.${displayStatus}`) : ""}
               </Badge>
+              {overdueDays > 0 ? (
+                <span className="text-sm font-medium text-destructive">
+                  {t("installmentSales.daysOverdue", { count: overdueDays })}
+                </span>
+              ) : null}
             </AppDialogTitle>
           </AppDialogHeader>
           <AppDialogBody className="space-y-6">
@@ -943,13 +1094,19 @@ function SaleDetailsDialog({
                       <div className="text-xs text-muted-foreground">
                         {isNoFrequency
                           ? t("installmentSales.frequency")
+                          : isOpenEndedFrequency
+                            ? t("installmentSales.firstDueDate")
                           : t("installmentSales.nextDueDate")}
                       </div>
                       <strong>
                         {isNoFrequency
                           ? t("installmentSales.noFrequency")
+                          : isOpenEndedFrequency
+                            ? sale.firstDueDate
+                              ? formatInstallmentSaleDueAt(sale.firstDueDate)
+                              : "-"
                           : sale.nextDueDate
-                            ? formatDate(sale.nextDueDate)
+                            ? formatInstallmentSaleDueAt(sale.nextDueDate)
                             : "-"}
                       </strong>
                     </CardContent>
@@ -999,7 +1156,7 @@ function SaleDetailsDialog({
                     </Button>
                   ) : null}
                 </div>
-                {!isNoFrequency ? <div className="rounded-xl border overflow-x-auto">
+                {!isNoFrequency && !isOpenEndedFrequency ? <div className="rounded-xl border overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -1024,7 +1181,11 @@ function SaleDetailsDialog({
                       {installments.map((row) => (
                         <TableRow key={row.id}>
                           <TableCell>#{row.installmentNo}</TableCell>
-                          <TableCell>{row.dueDate ? formatDate(row.dueDate) : "-"}</TableCell>
+                          <TableCell>
+                            {row.dueDate
+                              ? formatInstallmentSaleDueAt(row.dueDate)
+                              : "-"}
+                          </TableCell>
                           <TableCell className="text-end">
                             {formatCurrency(
                               row.plannedAmount,
@@ -1148,30 +1309,46 @@ function SaleDetailsDialog({
               element: (
                 <InstallmentSalePrintTemplate
                   workspaceName={workspaceName}
+                  printLang={printLangOverride || printLang}
                   sale={sale}
                   installments={installments}
+                  payments={customerPayments}
                   iqdPreference={features.iqd_display_preference}
+                  logoUrl={features.logo_url}
                   qrValue={features.print_qr ? effectiveId : undefined}
                 />
               ),
               format,
-              printLang: printLangOverride,
+              printLang: printLangOverride || printLang,
             })
           }
           printTemplate={({ effectiveId }) => (
             <InstallmentSalePrintTemplate
               workspaceName={workspaceName}
+              printLang={printLang}
               sale={sale}
               installments={installments}
+              payments={customerPayments}
               iqdPreference={features.iqd_display_preference}
+              logoUrl={features.logo_url}
               qrValue={features.print_qr ? effectiveId : undefined}
             />
           )}
+          templatePreview={installmentSaleTemplatePreview}
+          customTemplate={{
+            moduleTypeKey: "installment_sales",
+            nativeTemplateKey: "installment-sales.details",
+            label: t("installmentSales.print.documentTitle"),
+          }}
+          onPreviewPrint={(blob) =>
+            printPdfBlob(blob, { title: t("installmentSales.print.documentTitle") })
+          }
+          previewPrintActionLabel={t("common.print")}
           printSelectionOptions={[
             {
               format: "a4",
-              nativeTemplateKey: "installment-sales.agreement",
-              label: t("installmentSales.title"),
+              nativeTemplateKey: "installment-sales.details",
+              label: t("installmentSales.print.documentTitle"),
               description: t("installmentSales.subtitle"),
             },
           ]}
@@ -1187,14 +1364,13 @@ export function InstallmentSalesPanel({
   workspaceId: string;
 }) {
   const { t } = useTranslation();
+  const [, navigate] = useLocation();
   const { features } = useWorkspace();
   const { user } = useAuth();
   const { dateRange, customDates } = useDateRange();
+  const dueStatusClock = useInstallmentSaleDueStatusClock();
   const sales = useInstallmentSales(workspaceId);
   const [createOpen, setCreateOpen] = useState(false);
-  const [selectedSale, setSelectedSale] = useState<InstallmentSale | null>(
-    null,
-  );
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<SaleFilter>("all");
   const scoped = useMemo(
@@ -1213,10 +1389,11 @@ export function InstallmentSalesPanel({
             [sale.saleNo, sale.customerNameSnapshot, sale.description].some(
               (value) => value.toLowerCase().includes(query),
             )) &&
-          (filter === "all" || sale.status === filter)
+          (filter === "all" ||
+            getInstallmentSaleDisplayStatus(sale, dueStatusClock) === filter)
         );
       }),
-    [filter, scoped, search],
+    [dueStatusClock, filter, scoped, search],
   );
   const metrics = useMemo(
     () => ({
@@ -1224,10 +1401,13 @@ export function InstallmentSalesPanel({
         scoped,
         (sale) => sale.customerBalanceAmount,
       ),
-      overdue: scoped.filter((sale) => sale.status === "overdue").length,
+      overdue: scoped.filter(
+        (sale) =>
+          getInstallmentSaleDisplayStatus(sale, dueStatusClock) === "overdue",
+      ).length,
       profit: groupSaleAmounts(scoped, (sale) => sale.grossProfit),
     }),
-    [scoped],
+    [dueStatusClock, scoped],
   );
   const readOnly = user?.role === "viewer";
   return (
@@ -1326,48 +1506,103 @@ export function InstallmentSalesPanel({
                   <TableHead>{t("installmentSales.customer")}</TableHead>
                   <TableHead>{t("installmentSales.description")}</TableHead>
                   <TableHead className="text-end">
+                    {t("installmentSales.totalSalePrice")}
+                  </TableHead>
+                  <TableHead className="text-end">
+                    {t("installmentSales.paid")}
+                  </TableHead>
+                  <TableHead className="text-end">
                     {t("installmentSales.customerReceivable")}
                   </TableHead>
                   <TableHead>{t("installmentSales.nextDueDate")}</TableHead>
                   <TableHead>{t("installmentSales.status")}</TableHead>
+                  <TableHead className="text-end print:hidden">
+                    {t("common.actions")}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {visible.length ? (
-                  visible.map((sale) => (
-                    <TableRow
-                      key={sale.id}
-                      className="cursor-pointer"
-                      onClick={() => setSelectedSale(sale)}
-                    >
-                      <TableCell className="font-medium">
-                        {sale.saleNo}
-                      </TableCell>
-                      <TableCell>{sale.customerNameSnapshot}</TableCell>
-                      <TableCell className="max-w-56 truncate">
-                        {sale.description}
-                      </TableCell>
-                      <TableCell className="text-end">
-                        {formatCurrency(
-                          sale.customerBalanceAmount,
-                          sale.currency,
-                          features.iqd_display_preference,
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {sale.nextDueDate ? formatDate(sale.nextDueDate) : "-"}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={statusTone(sale.status)}>
-                          {t(`installmentSales.statuses.${sale.status}`)}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  visible.map((sale) => {
+                    const displayStatus = getInstallmentSaleDisplayStatus(
+                      sale,
+                      dueStatusClock,
+                    );
+                    const overdueDays =
+                      displayStatus === "overdue" &&
+                      sale.hasInstallmentCount === false
+                        ? getInstallmentSaleOverdueDays(
+                            sale.firstDueDate,
+                            dueStatusClock,
+                          )
+                        : 0;
+                    return (
+                      <TableRow key={sale.id}>
+                        <TableCell className="font-medium">
+                          {sale.saleNo}
+                        </TableCell>
+                        <TableCell>{sale.customerNameSnapshot}</TableCell>
+                        <TableCell className="max-w-56 truncate">
+                          {sale.description}
+                        </TableCell>
+                        <TableCell className="text-end">
+                          {formatCurrency(
+                            sale.totalSalePrice,
+                            sale.currency,
+                            features.iqd_display_preference,
+                          )}
+                        </TableCell>
+                        <TableCell className="text-end text-emerald-500">
+                          {formatCurrency(
+                            sale.customerPaidAmount,
+                            sale.currency,
+                            features.iqd_display_preference,
+                          )}
+                        </TableCell>
+                        <TableCell className="text-end">
+                          {formatCurrency(
+                            sale.customerBalanceAmount,
+                            sale.currency,
+                            features.iqd_display_preference,
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {sale.nextDueDate
+                            ? formatInstallmentSaleDueAt(sale.nextDueDate)
+                            : "-"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={statusTone(displayStatus)}>
+                            {t(`installmentSales.statuses.${displayStatus}`)}
+                          </Badge>
+                          {overdueDays > 0 ? (
+                            <div className="mt-1 text-xs font-medium text-destructive">
+                              {t("installmentSales.daysOverdue", {
+                                count: overdueDays,
+                              })}
+                            </div>
+                          ) : null}
+                        </TableCell>
+                        <TableCell className="text-end print:hidden">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            allowViewer
+                            onClick={() =>
+                              navigate(`/installments/sales/${sale.id}`)
+                            }
+                          >
+                            <Search className="h-4 w-4" />
+                            {t("common.view")}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 ) : (
                   <TableRow>
                     <TableCell
-                      colSpan={6}
+                      colSpan={9}
                       className="py-12 text-center text-muted-foreground"
                     >
                       {t("common.noData")}
@@ -1383,10 +1618,6 @@ export function InstallmentSalesPanel({
         open={createOpen}
         onOpenChange={setCreateOpen}
         workspaceId={workspaceId}
-      />
-      <SaleDetailsDialog
-        sale={selectedSale}
-        onOpenChange={(open) => !open && setSelectedSale(null)}
       />
     </div>
   );

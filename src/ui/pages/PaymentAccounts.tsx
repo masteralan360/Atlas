@@ -517,9 +517,8 @@ export function PaymentAccounts() {
   const allMovementEntries = useMemo<AccountMovementEntry[]>(
     () => selectedAccountMovements.flatMap((movement) => {
       const transaction = transactionById.get(movement.paymentTransactionId) ?? null
-      // Ledger projects an original payment to its remaining amount and omits
-      // the signed reversal row. Keep that same financial view here, while the
-      // original account movement remains as a clearly marked audit row.
+      // Payment accounts retain a net balance view, while Ledger presents the
+      // immutable original and reversal rows separately for audit purposes.
       if (transaction?.reversalOfTransactionId) return []
       const presentation = getPaymentAccountMovementPresentation(movement, transaction, transactionReversalAmounts)
       const relationKey = paymentAccountMovementRelationKey(transaction)

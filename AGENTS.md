@@ -21,6 +21,7 @@ Any new module that reads remote data must use scoped `ModulePageFreshness` with
 ## Payment transactions
 
 Every incoming or outgoing payment MUST be recorded through `payment_transactions` and mirrored in the ledger. Do not update payment balances or ledger entries directly without the corresponding payment transaction.
+Every reversed payment MUST remain visible in the ledger as a separate counter-entry linked to its original payment; each counter-entry must reverse its exact portion, so linked entries net to zero after a full reversal and to the correct remaining amount after a partial reversal.
 Every UI flow that processes a real payment MUST require the user to proceed through a payment dialog, following the existing payment workflow.
 Every UI flow that records a real incoming or outgoing payment, rather than merely creating an unpaid obligation, MUST include the provided `PaymentAccountSelector`.
 The selector remains optional: with no selection, record the payment transaction and ledger entry normally; when selected, pass the account ID and name snapshot to the payment transaction so its account movement is created.

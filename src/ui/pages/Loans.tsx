@@ -93,6 +93,7 @@ import { LoanNoteActionButton } from '@/ui/components/loans/LoanNoteActionButton
 import { LoanNoteDialog } from '@/ui/components/loans/LoanNoteDialog'
 import { RealEstateInstallmentsMirror } from '@/ui/components/real-estate/RealEstateInstallmentsMirror'
 import { InstallmentSalesPanel } from '@/ui/components/installment-sales/InstallmentSalesPanel'
+import { InstallmentSaleDetailsView } from '@/ui/components/installment-sales/InstallmentSaleDetailsView'
 import { FilterDropdown } from '@/ui/components/FilterDropdown'
 import { ReverseTransactionCofirmationDialog } from '@/ui/components/payments/ReverseTransactionCofirmationDialog'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
@@ -2024,10 +2025,15 @@ export function Installments() {
 /** A sidebar child surface kept under the existing Installments permission. */
 export function InstallmentSales() {
     const { user } = useAuth()
+    const [detailMatch, params] = useRoute('/installments/sales/:saleId')
     const workspaceId = user?.workspaceId
 
     if (!workspaceId) {
         return null
+    }
+
+    if (detailMatch && params?.saleId) {
+        return <InstallmentSaleDetailsView workspaceId={workspaceId} saleId={params.saleId} />
     }
 
     return <InstallmentSalesPanel workspaceId={workspaceId} />

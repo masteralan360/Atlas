@@ -3,7 +3,7 @@ CREATE TABLE public.installment_sale_installments (
   workspace_id uuid NOT NULL,
   installment_sale_id uuid NOT NULL,
   installment_no integer NOT NULL,
-  due_date date NULL,
+  due_date timestamp without time zone NULL,
   planned_amount numeric NOT NULL,
   paid_amount numeric NOT NULL DEFAULT 0,
   balance_amount numeric NOT NULL,

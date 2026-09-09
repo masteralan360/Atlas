@@ -2187,6 +2187,7 @@
   },
   "ledger": {
     "title": "General Ledger",
+    "subtitle": "Review posted financial movements across all currencies.",
     "systemControlled": "System Controlled",
     "notAvailable": "Ledger is not available in this workspace",
     "enableModules": "Enable POS, CRM, Loans, Accounting, or HR to use the central ledger.",
@@ -2318,7 +2319,9 @@
       "loanRepaymentReceived": "Loan Repayment Received",
       "loanRepaymentPaid": "Loan Repayment Paid",
       "installmentReceived": "Installment Received",
-      "installmentPaid": "Installment Paid"
+      "installmentPaid": "Installment Paid",
+      "installmentSaleDownPayment": "Installment Sale Down Payment",
+      "installmentSaleCollection": "Installment Sale Collection"
     },
     "type": {
       "posSale": "POS Sale",
@@ -2335,6 +2338,8 @@
       "loanRepaymentPaid": "Loan Repayment Paid",
       "installmentReceived": "Installment Received",
       "installmentPaid": "Installment Paid",
+      "installmentSaleDownPayment": "Installment Sale Down Payment",
+      "installmentSaleCollection": "Installment Sale Collection",
       "directInflow": "Direct Inflow",
       "directOutflow": "Direct Outflow",
       "agentCommissionPayout": "Agent Commission Payout",
@@ -2357,12 +2362,16 @@
       "expenses": "Expenses",
       "payroll": "Payroll",
       "loans": "Loans",
+      "installmentSales": "Installment Sales",
       "manual": "Manual",
       "activities": "Activities",
       "postService": "Post Service",
       "carRental": "Car Rental Service"
     },
     "description": {
+      "installmentSaleDownPayment": "Down payment received for installment sale {{reference}}.",
+      "installmentSaleCollection": "Installment payment received for installment sale {{reference}}.",
+      "paymentReversal": "Reversal of payment transaction {{transactionId}}.",
       "deliveryCourierRemittance": "Courier cash handover",
       "deliveryCourierFeePayout": "Courier fee payment",
       "deliveryCourierReimbursement": "Courier reimbursement",
@@ -8770,6 +8779,9 @@
     "frequency": "Frequency",
     "noFrequency": "No frequency",
     "noFrequencyHint": "Payments can be collected at any time; no due date or repayment schedule will be created.",
+    "noSetInstallmentCount": "No set installment count",
+    "noSetInstallmentCountHint": "Keep one open balance. It becomes overdue after the first due date without creating additional installments.",
+    "daysOverdue": "{{count}} days overdue",
     "firstDueDate": "First due date",
     "repaymentSummary": "Repayment summary",
     "customerReceivable": "Customer receivable",
@@ -8788,6 +8800,18 @@
     "paymentBalance": "Remaining balance",
     "paymentDate": "Payment date",
     "customerPayments": "Customer payments",
+    "paymentTableView": "Payment table view",
+    "paymentCardView": "Payment card view",
+    "reversePayment": "Reverse Payment",
+    "saleCreated": "Installment sale created",
+    "paidPercent": "{{percent}}% repayment completed",
+    "notFound": "Installment sale not found.",
+    "cancelledSaleTitle": "Installment sale cancelled",
+    "cancelledSaleDescription": "This sale is cancelled and its customer payments have been reversed.",
+    "paymentStatuses": {
+      "recorded": "Recorded",
+      "reversed": "Reversed"
+    },
     "cancelSale": "Cancel sale",
     "cancelTitle": "Cancel installment sale",
     "cancellationReason": "Cancellation reason",
@@ -8799,11 +8823,52 @@
       "completed": "Completed",
       "cancelled": "Cancelled"
     },
+    "print": {
+      "documentTitle": "Installment Sale Details",
+      "customerDetails": "Customer Details",
+      "saleSummary": "Sale Summary",
+      "paymentSchedule": "Payment Schedule",
+      "paymentActivity": "Payment Activity",
+      "paymentMethod": "Payment Method",
+      "amount": "Amount",
+      "installmentNumber": "Installment #{{number}}",
+      "installmentCollection": "Installment collection",
+      "notes": "Notes",
+      "continued": "(continued)",
+      "hideNextDue": "Hide next due",
+      "hideDueDate": "Hide due date",
+      "frequencyLabels": {
+        "no_frequency": "No frequency",
+        "daily": "Daily",
+        "weekly": "Weekly",
+        "biweekly": "Every two weeks",
+        "monthly": "Monthly"
+      },
+      "installmentStatuses": {
+        "unpaid": "Unpaid",
+        "partial": "Partially paid",
+        "paid": "Paid",
+        "overdue": "Overdue",
+        "cancelled": "Cancelled"
+      },
+      "paymentMethods": {
+        "cash": "Cash",
+        "fib": "FIB",
+        "qicard": "QiCard",
+        "zaincash": "ZainCash",
+        "fastpay": "FastPay",
+        "credit": "Credit",
+        "bank_transfer": "Bank transfer",
+        "unknown": "Unknown"
+      }
+    },
     "messages": {
       "created": "Installment sale created.",
       "createFailed": "Unable to create the installment sale.",
       "paymentRecorded": "Payment recorded.",
       "paymentFailed": "Unable to record the payment.",
+      "paymentReversed": "Customer payment reversed.",
+      "paymentReverseFailed": "Unable to reverse the customer payment.",
       "cancelled": "Installment sale cancelled and payments reversed.",
       "cancelFailed": "Unable to cancel the installment sale."
     }

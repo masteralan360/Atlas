@@ -2343,6 +2343,17 @@ function App() {
                           </Layout>
                         </ProtectedRoute>
                       </Route>
+                      <Route path="/installments/sales/:saleId">
+                        <ProtectedRoute
+                          allowedRoles={["admin", "staff", "viewer"]}
+                          requiredFeature="installments"
+                          requiredPermission="installments.access"
+                        >
+                          <Layout>
+                            <InstallmentSales />
+                          </Layout>
+                        </ProtectedRoute>
+                      </Route>
                       <Route path="/installments/:loanId">
                         <ProtectedRoute
                           allowedRoles={["admin", "staff", "viewer"]}
