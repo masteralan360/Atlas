@@ -67,6 +67,7 @@ export interface WorkspaceNavigationItem {
 }
 
 export interface WorkspaceNavigationGroup {
+  sectionKey?: NavigationSectionKey;
   title: string;
   items: WorkspaceNavigationItem[];
   icon: LucideIcon;
@@ -729,6 +730,7 @@ export function buildWorkspaceNavigation({
   // 3. Convert map back to ordered array of WorkspaceNavigationGroup
   const launcherGroups = launcherSectionOrder
     .map((key) => ({
+      sectionKey: key,
       title: t(`nav.sections.${key}.title`, {
         defaultValue: launcherSections[key].title,
       }),

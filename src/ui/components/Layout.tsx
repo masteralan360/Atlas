@@ -50,7 +50,32 @@ import { LocalAccountSwitcher } from './LocalAccountSwitcher'
 import { DeploymentRefreshVersion } from './DeploymentRefreshVersion'
 import { ModuleLockerOverlay } from './module-locker/ModuleLockerOverlay'
 import { ModuleLockerPasskeyDialog, type ModuleLockerPasskeyAction } from './module-locker/ModuleLockerPasskeyDialog'
-import { buildWorkspaceNavigation } from '@/ui/navigation/workspaceNavigation'
+import { buildWorkspaceNavigation, type WorkspaceNavigationGroup, type WorkspaceNavigationItem } from '@/ui/navigation/workspaceNavigation'
+import { launcherSectionOrder, type NavigationSectionKey } from '@/ui/navigation/navigationMeta'
+import {
+  createSidebarSectionOrderStorageValue,
+  getSidebarSectionOrderStorageKey,
+  readSidebarSectionOrder,
+  reorderVisibleSidebarSections
+} from '@/ui/navigation/sidebarSectionOrder'
+import {
+  createSidebarModuleOrderStorageValue,
+  getSidebarModuleOrderStorageKey,
+  readSidebarModuleOrder,
+  reconcileSidebarModuleOrder,
+  reorderVisibleSidebarModuleItems,
+  type SidebarModuleOrderBySection
+} from '@/ui/navigation/sidebarModuleOrder'
+import {
+  addSidebarFavorite,
+  createSidebarFavoritesStorageValue,
+  getSidebarFavoritesStorageKey,
+  readSidebarFavorites,
+  removeSidebarFavorite,
+  reorderVisibleSidebarFavorites,
+  resetSidebarFavoritesOrder,
+  type SidebarFavorites
+} from '@/ui/navigation/sidebarFavorites'
 import {
   getModuleLockerLockForPath,
   getModuleLockerSnapshot,
@@ -89,8 +114,15 @@ import {
   LockKeyhole,
   Sun,
   Moon,
-  Monitor
+  Monitor,
+  GripVertical,
+  ListOrdered,
+  RotateCcw,
+  Settings2,
+  Star,
+  Search
 } from 'lucide-react'
+import { DragDropContext, Draggable, Droppable, type DropResult } from '@hello-pangea/dnd'
 import { Button } from './button'
 import {
   AppDialog,
@@ -109,6 +141,9 @@ import {
 } from './dialog'
 import { PressAndHoldButton } from './PressAndHoldButton'
 import { Textarea } from './textarea'
+import { Input } from './input'
+import { Checkbox } from './checkbox'
+import { DeleteConfirmationModal } from './DeleteConfirmationModal'
 import { useToast } from './use-toast'
 import {
   DropdownMenu,
@@ -131,6 +166,14 @@ interface LayoutProps {
 }
 
 type SidebarCashierShiftStatus = 'available' | 'active'
+type SidebarModuleOrderSection = NavigationSectionKey | 'favorites'
+
+interface SidebarFavoritesGroup {
+  sectionKey: 'favorites'
+  title: string
+  icon: typeof Star
+  items: WorkspaceNavigationItem[]
+}
 
 interface SidebarCashierShift {
   assignment: CashierShiftAssignment
@@ -332,11 +375,34 @@ export function Layout({ children }: LayoutProps) {
     }
     return false
   })
+  const [sidebarSectionOrder, setSidebarSectionOrder] = useState<NavigationSectionKey[]>(() => [...launcherSectionOrder])
+  const [sidebarModuleOrderBySection, setSidebarModuleOrderBySection] = useState<SidebarModuleOrderBySection>({})
+  const [sidebarFavorites, setSidebarFavorites] = useState<SidebarFavorites>({ order: [], firstAddedOrder: [] })
+  const [isSidebarCustomizationMode, setIsSidebarCustomizationMode] = useState(false)
+  const [isSidebarResetDialogOpen, setIsSidebarResetDialogOpen] = useState(false)
+  const [activeSidebarModuleOrderSection, setActiveSidebarModuleOrderSection] = useState<SidebarModuleOrderSection | null>(null)
+  const [sidebarModuleOrderResetSection, setSidebarModuleOrderResetSection] = useState<SidebarModuleOrderSection | null>(null)
+  const [isSidebarFavoritesDialogOpen, setIsSidebarFavoritesDialogOpen] = useState(false)
+  const [favoritePickerOrder, setFavoritePickerOrder] = useState<string[]>([])
+  const [favoritePickerQuery, setFavoritePickerQuery] = useState('')
+  const [isClearSidebarFavoritesDialogOpen, setIsClearSidebarFavoritesDialogOpen] = useState(false)
   const [isSidebarHeaderCompact, setIsSidebarHeaderCompact] = useState(false)
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1440))
   const showSidebarThemeSelector = !isTauri && !isMobile() && viewportWidth >= 1024
   const fullWorkspaceLabel = currentWorkspaceLabel || workspaceName || 'Atlas'
   const sidebarWorkspaceLabel = getSidebarWorkspaceLabel(fullWorkspaceLabel)
+  const sidebarSectionOrderStorageKey = useMemo(() => {
+    const workspaceId = activeWorkspace?.id ?? user?.workspaceId
+    return user?.id && workspaceId ? getSidebarSectionOrderStorageKey(user.id, workspaceId) : null
+  }, [activeWorkspace?.id, user?.id, user?.workspaceId])
+  const sidebarModuleOrderStorageKey = useMemo(() => {
+    const workspaceId = activeWorkspace?.id ?? user?.workspaceId
+    return user?.id && workspaceId ? getSidebarModuleOrderStorageKey(user.id, workspaceId) : null
+  }, [activeWorkspace?.id, user?.id, user?.workspaceId])
+  const sidebarFavoritesStorageKey = useMemo(() => {
+    const workspaceId = activeWorkspace?.id ?? user?.workspaceId
+    return user?.id && workspaceId ? getSidebarFavoritesStorageKey(user.id, workspaceId) : null
+  }, [activeWorkspace?.id, user?.id, user?.workspaceId])
 
   useEffect(() => {
     const handleResize = () => setViewportWidth(window.innerWidth)
@@ -356,6 +422,30 @@ export function Layout({ children }: LayoutProps) {
       localStorage.setItem('instant_pos_nav_open', String(Boolean(expandedNavGroups['/instant-pos'])))
     }
   }, [expandedNavGroups])
+
+  useEffect(() => {
+    setIsSidebarCustomizationMode(false)
+    setActiveSidebarModuleOrderSection(null)
+    setSidebarModuleOrderResetSection(null)
+    setIsSidebarFavoritesDialogOpen(false)
+    setFavoritePickerOrder([])
+    setFavoritePickerQuery('')
+
+    if (typeof window === 'undefined' || !sidebarSectionOrderStorageKey) {
+      setSidebarSectionOrder([...launcherSectionOrder])
+      setSidebarModuleOrderBySection({})
+      setSidebarFavorites({ order: [], firstAddedOrder: [] })
+      return
+    }
+
+    setSidebarSectionOrder(readSidebarSectionOrder(localStorage.getItem(sidebarSectionOrderStorageKey)))
+    setSidebarModuleOrderBySection(
+      sidebarModuleOrderStorageKey ? readSidebarModuleOrder(localStorage.getItem(sidebarModuleOrderStorageKey)) : {}
+    )
+    setSidebarFavorites(
+      sidebarFavoritesStorageKey ? readSidebarFavorites(localStorage.getItem(sidebarFavoritesStorageKey)) : { order: [], firstAddedOrder: [] }
+    )
+  }, [sidebarFavoritesStorageKey, sidebarModuleOrderStorageKey, sidebarSectionOrderStorageKey])
 
   const [members, setMembers] = useState<{ id: string; name: string; role: string; profile_url?: string | null }[]>([])
   const [logoError, setLogoError] = useState(false)
@@ -737,6 +827,96 @@ export function Layout({ children }: LayoutProps) {
     isDesktopDevice: isDesktop(),
     whatsappStatus
   })
+  const allVisibleSidebarModules = useMemo(
+    () =>
+      navigation.flatMap((group) => {
+        const sectionKey = group.sectionKey
+        if (!sectionKey) return []
+
+        return group.items.map((item) => ({ ...item, sectionKey, sectionTitle: group.title }))
+      }),
+    [navigation]
+  )
+  const sidebarFavoriteHrefSet = useMemo(() => new Set(sidebarFavorites.order), [sidebarFavorites.order])
+  const sidebarFavoritesGroup = useMemo<SidebarFavoritesGroup | null>(() => {
+    const modulesByHref = new Map(allVisibleSidebarModules.map((item) => [item.href, item]))
+    const favoriteItems = sidebarFavorites.order.flatMap((href) => {
+      const item = modulesByHref.get(href)
+      return item ? [{ ...item, children: undefined }] : []
+    })
+
+    return favoriteItems.length > 0
+      ? { sectionKey: 'favorites', title: t('nav.sidebarFavorites.title'), icon: Star, items: favoriteItems }
+      : null
+  }, [allVisibleSidebarModules, sidebarFavorites.order, t])
+  const sidebarFavoritePlacementGroup = useMemo<SidebarFavoritesGroup>(
+    () => sidebarFavoritesGroup ?? { sectionKey: 'favorites', title: t('nav.sidebarFavorites.title'), icon: Star, items: [] },
+    [sidebarFavoritesGroup, t]
+  )
+  const sidebarNavigation = useMemo(() => {
+    const standaloneGroups = navigation.filter((group) => !group.sectionKey)
+    const groupsBySectionKey = new Map(
+      navigation
+        .filter((group): group is WorkspaceNavigationGroup & { sectionKey: NavigationSectionKey } => Boolean(group.sectionKey))
+        .map((group) => [group.sectionKey, group])
+    )
+
+    return [
+      ...standaloneGroups,
+      ...sidebarSectionOrder.flatMap((sectionKey) => {
+        const favoritePlacement = sectionKey === 'sell-and-serve' ? [sidebarFavoritePlacementGroup] : []
+        const group = groupsBySectionKey.get(sectionKey)
+        if (!group) return favoritePlacement
+
+        const moduleOrder = reconcileSidebarModuleOrder(
+          sidebarModuleOrderBySection[sectionKey],
+          group.items.map((item) => item.href)
+        )
+        const moduleOrderIndex = new Map(moduleOrder.map((href, index) => [href, index]))
+
+        const items = [...group.items]
+          .filter((item) => !sidebarFavoriteHrefSet.has(item.href))
+          .sort(
+            (left, right) => (moduleOrderIndex.get(left.href) ?? 0) - (moduleOrderIndex.get(right.href) ?? 0)
+          )
+
+        return [
+          ...favoritePlacement,
+          ...(items.length > 0 ? [{ ...group, items }] : [])
+        ]
+      })
+    ]
+  }, [navigation, sidebarFavoriteHrefSet, sidebarFavoritePlacementGroup, sidebarModuleOrderBySection, sidebarSectionOrder])
+  const visibleSidebarSectionGroups = sidebarNavigation.filter(
+    (group): group is WorkspaceNavigationGroup & { sectionKey: NavigationSectionKey } =>
+      Boolean(group.sectionKey) && group.sectionKey !== 'favorites'
+  )
+  const activeSidebarModuleOrderGroup = useMemo(() => {
+    if (!activeSidebarModuleOrderSection) return null
+    if (activeSidebarModuleOrderSection === 'favorites') return sidebarFavoritesGroup
+    return visibleSidebarSectionGroups.find((group) => group.sectionKey === activeSidebarModuleOrderSection) ?? null
+  }, [activeSidebarModuleOrderSection, sidebarFavoritesGroup, visibleSidebarSectionGroups])
+  const visibleFavoritePickerGroups = useMemo(() => {
+    const query = favoritePickerQuery.trim().toLocaleLowerCase()
+    const bySection = new Map<NavigationSectionKey, WorkspaceNavigationItem[]>()
+
+    allVisibleSidebarModules.forEach((item) => {
+      if (query && !item.name.toLocaleLowerCase().includes(query)) return
+      const items = bySection.get(item.sectionKey) ?? []
+      items.push(item)
+      bySection.set(item.sectionKey, items)
+    })
+
+    return sidebarSectionOrder.flatMap((sectionKey) => {
+      const items = bySection.get(sectionKey)
+      if (!items?.length) return []
+      return [{
+        sectionKey,
+        title: navigation.find((group) => group.sectionKey === sectionKey)?.title ?? sectionKey,
+        items
+      }]
+    })
+  }, [allVisibleSidebarModules, favoritePickerQuery, navigation, sidebarSectionOrder])
   const activeModuleLock = getModuleLockerLockForPath(moduleLockerSnapshot?.locks ?? [], location)
   const isModuleLockerLoading = Boolean(user?.workspaceId && moduleLockerSnapshot === undefined)
   const isModuleLockerEnabled = Boolean(moduleLockerSnapshot?.settings)
@@ -1025,11 +1205,244 @@ export function Layout({ children }: LayoutProps) {
     defaultValue: 'Pending Orders'
   })
 
+  const openSidebarCustomization = () => {
+    setDesktopSidebarOpen(true)
+    setIsSidebarCustomizationMode(true)
+    triggerHaptic('medium')
+  }
+
+  const openSidebarFavoritesDialog = () => {
+    openSidebarCustomization()
+    setFavoritePickerOrder([...sidebarFavorites.order])
+    setFavoritePickerQuery('')
+    setIsSidebarFavoritesDialogOpen(true)
+  }
+
+  const openSidebarModuleOrder = (sectionKey: SidebarModuleOrderSection) => {
+    setActiveSidebarModuleOrderSection(sectionKey)
+    triggerHaptic('selection')
+  }
+
+  const saveSidebarFavorites = (nextFavorites: SidebarFavorites, savedMessage?: string) => {
+    setSidebarFavorites(nextFavorites)
+
+    if (typeof window === 'undefined' || !sidebarFavoritesStorageKey) return true
+
+    try {
+      localStorage.setItem(sidebarFavoritesStorageKey, createSidebarFavoritesStorageValue(nextFavorites))
+      if (savedMessage) toast({ description: savedMessage })
+      return true
+    } catch {
+      toast({
+        title: t('common.error'),
+        description: t('nav.sidebarCustomization.saveError'),
+        variant: 'destructive'
+      })
+      return false
+    }
+  }
+
+  const toggleSidebarFavorite = (item: WorkspaceNavigationItem) => {
+    const isFavorite = sidebarFavorites.order.includes(item.href)
+    const nextFavorites = isFavorite
+      ? removeSidebarFavorite(sidebarFavorites, item.href)
+      : addSidebarFavorite(sidebarFavorites, item.href)
+    if (saveSidebarFavorites(nextFavorites, t(isFavorite ? 'nav.sidebarFavorites.removed' : 'nav.sidebarFavorites.added', { tab: item.name }))) {
+      triggerHaptic('selection')
+    }
+  }
+
+  const saveFavoritePicker = () => {
+    const selectedHrefSet = new Set(favoritePickerOrder)
+    const visibleHrefSet = new Set(allVisibleSidebarModules.map((item) => item.href))
+    let nextFavorites = sidebarFavorites
+
+    sidebarFavorites.order.forEach((href) => {
+      if (visibleHrefSet.has(href) && !selectedHrefSet.has(href)) {
+        nextFavorites = removeSidebarFavorite(nextFavorites, href)
+      }
+    })
+    favoritePickerOrder.forEach((href) => {
+      if (visibleHrefSet.has(href) && !nextFavorites.order.includes(href)) {
+        nextFavorites = addSidebarFavorite(nextFavorites, href)
+      }
+    })
+
+    if (saveSidebarFavorites(nextFavorites, t('nav.sidebarFavorites.saved'))) {
+      setIsSidebarFavoritesDialogOpen(false)
+      triggerHaptic('success')
+    }
+  }
+
+  const saveSidebarSectionOrder = (nextOrder: NavigationSectionKey[], savedMessage: string) => {
+    setSidebarSectionOrder(nextOrder)
+
+    if (typeof window === 'undefined' || !sidebarSectionOrderStorageKey) return
+
+    try {
+      localStorage.setItem(sidebarSectionOrderStorageKey, createSidebarSectionOrderStorageValue(nextOrder))
+      toast({ description: savedMessage })
+    } catch {
+      toast({
+        title: t('common.error'),
+        description: t('nav.sidebarCustomization.saveError'),
+        variant: 'destructive'
+      })
+    }
+  }
+
+  const handleSidebarSectionDragEnd = ({ source, destination }: DropResult) => {
+    if (!destination) return
+
+    const nextOrder = reorderVisibleSidebarSections(
+      sidebarSectionOrder,
+      visibleSidebarSectionGroups.map((group) => group.sectionKey),
+      source.index,
+      destination.index
+    )
+
+    if (nextOrder.every((key, index) => key === sidebarSectionOrder[index])) return
+
+    saveSidebarSectionOrder(nextOrder, t('nav.sidebarCustomization.orderSaved'))
+    triggerHaptic('selection')
+  }
+
+  const saveSidebarModuleOrder = (
+    sectionKey: NavigationSectionKey,
+    nextOrder: string[],
+    savedMessage: string
+  ) => {
+    const nextModuleOrderBySection = {
+      ...sidebarModuleOrderBySection,
+      [sectionKey]: nextOrder
+    }
+    setSidebarModuleOrderBySection(nextModuleOrderBySection)
+
+    if (typeof window === 'undefined' || !sidebarModuleOrderStorageKey) return
+
+    try {
+      localStorage.setItem(
+        sidebarModuleOrderStorageKey,
+        createSidebarModuleOrderStorageValue(nextModuleOrderBySection)
+      )
+      toast({ description: savedMessage })
+    } catch {
+      toast({
+        title: t('common.error'),
+        description: t('nav.sidebarCustomization.saveError'),
+        variant: 'destructive'
+      })
+    }
+  }
+
+  const handleSidebarModuleDragEnd = ({ source, destination }: DropResult) => {
+    if (!destination || !activeSidebarModuleOrderGroup) return
+
+    const sectionKey = activeSidebarModuleOrderGroup.sectionKey
+    const visibleModuleHrefs = activeSidebarModuleOrderGroup.items.map((item) => item.href)
+    if (sectionKey === 'favorites') {
+      const nextFavorites = reorderVisibleSidebarFavorites(
+        sidebarFavorites,
+        visibleModuleHrefs,
+        source.index,
+        destination.index
+      )
+      if (nextFavorites.order.every((href, index) => href === sidebarFavorites.order[index])) return
+      if (saveSidebarFavorites(nextFavorites, t('nav.sidebarCustomization.tabsOrderSaved'))) {
+        triggerHaptic('selection')
+      }
+      return
+    }
+    const nextOrder = reorderVisibleSidebarModuleItems(
+      sidebarModuleOrderBySection[sectionKey],
+      visibleModuleHrefs,
+      source.index,
+      destination.index
+    )
+
+    if (
+      nextOrder.length === (sidebarModuleOrderBySection[sectionKey]?.length ?? 0) &&
+      nextOrder.every((href, index) => href === sidebarModuleOrderBySection[sectionKey]?.[index])
+    ) {
+      return
+    }
+
+    saveSidebarModuleOrder(sectionKey, nextOrder, t('nav.sidebarCustomization.tabsOrderSaved'))
+    triggerHaptic('selection')
+  }
+
+  const resetSidebarModuleOrder = (sectionKey: SidebarModuleOrderSection) => {
+    if (sectionKey === 'favorites') {
+      if (saveSidebarFavorites(resetSidebarFavoritesOrder(sidebarFavorites))) {
+        setSidebarModuleOrderResetSection(null)
+        toast({ description: t('nav.sidebarCustomization.tabsOrderReset') })
+        triggerHaptic('selection')
+      }
+      return
+    }
+    const nextModuleOrderBySection = { ...sidebarModuleOrderBySection }
+    delete nextModuleOrderBySection[sectionKey]
+
+    if (typeof window !== 'undefined' && sidebarModuleOrderStorageKey) {
+      try {
+        localStorage.setItem(
+          sidebarModuleOrderStorageKey,
+          createSidebarModuleOrderStorageValue(nextModuleOrderBySection)
+        )
+      } catch {
+        toast({
+          title: t('common.error'),
+          description: t('nav.sidebarCustomization.saveError'),
+          variant: 'destructive'
+        })
+        return
+      }
+    }
+
+    setSidebarModuleOrderBySection(nextModuleOrderBySection)
+    setSidebarModuleOrderResetSection(null)
+    toast({ description: t('nav.sidebarCustomization.tabsOrderReset') })
+    triggerHaptic('selection')
+  }
+
+  const resetSidebarSectionOrder = () => {
+    if (typeof window !== 'undefined') {
+      try {
+        if (sidebarSectionOrderStorageKey) {
+          localStorage.removeItem(sidebarSectionOrderStorageKey)
+        }
+        if (sidebarModuleOrderStorageKey) {
+          localStorage.removeItem(sidebarModuleOrderStorageKey)
+        }
+        if (sidebarFavoritesStorageKey) {
+          localStorage.removeItem(sidebarFavoritesStorageKey)
+        }
+      } catch {
+        toast({
+          title: t('common.error'),
+          description: t('nav.sidebarCustomization.saveError'),
+          variant: 'destructive'
+        })
+        return
+      }
+    }
+
+    setSidebarSectionOrder([...launcherSectionOrder])
+    setSidebarModuleOrderBySection({})
+    setSidebarFavorites({ order: [], firstAddedOrder: [] })
+    setIsSidebarResetDialogOpen(false)
+    setActiveSidebarModuleOrderSection(null)
+    setSidebarModuleOrderResetSection(null)
+    setIsSidebarFavoritesDialogOpen(false)
+    toast({ description: t('nav.sidebarCustomization.orderReset') })
+    triggerHaptic('selection')
+  }
+
   const isPosLikeRoute = location === '/pos' || location === '/instant-pos' || location === '/real-estate/new'
   // Android and iPad PWAs may expose a desktop-sized CSS width on a tablet.
   // Keep the actual sidebar in its compact rail whenever that happens.
   const isPosTabletLayout = isPosLikeRoute && viewportWidth >= 1024 && (viewportWidth < 1366 || isMobile())
-  const isSidebarMini = isMini || isPosTabletLayout
+  const isSidebarMini = !isSidebarCustomizationMode && (isMini || isPosTabletLayout)
   const showCompactWorkspaceHeader = isSidebarHeaderCompact && !isSidebarMini && !mobileSidebarOpen
   const isModuleLauncherRoute = location === '/modules'
 
@@ -1083,6 +1496,8 @@ export function Layout({ children }: LayoutProps) {
           )}
 
           {/* Sidebar */}
+          <ContextMenu>
+            <ContextMenuTrigger asChild>
           <aside
             className={cn(
               'fixed z-50 transition-all duration-300 ease-in-out flex flex-col',
@@ -1097,14 +1512,22 @@ export function Layout({ children }: LayoutProps) {
                   ? 'w-[70px] lg:translate-x-0 lg:rtl:translate-x-0'
                   : 'lg:-translate-x-full lg:rtl:translate-x-full w-[70px]'
                 : desktopSidebarOpen
-                  ? 'w-64 lg:translate-x-0 lg:rtl:translate-x-0'
-                  : 'lg:-translate-x-full lg:rtl:translate-x-full w-64',
+                  ? isSidebarCustomizationMode
+                    ? 'w-80 lg:translate-x-0 lg:rtl:translate-x-0'
+                    : 'w-64 lg:translate-x-0 lg:rtl:translate-x-0'
+                  : isSidebarCustomizationMode
+                    ? 'lg:-translate-x-full lg:rtl:translate-x-full w-80'
+                    : 'lg:-translate-x-full lg:rtl:translate-x-full w-64',
 
               // Positioning
               'left-0 rtl:left-auto rtl:right-0',
               'border-r rtl:border-r-0 rtl:border-l border-border',
               // Mobile state
-              mobileSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full rtl:translate-x-full'
+              mobileSidebarOpen
+                ? isSidebarCustomizationMode
+                  ? 'translate-x-0 w-80'
+                  : 'translate-x-0 w-64'
+                : '-translate-x-full rtl:translate-x-full'
             )}
           >
             {/* Logo */}
@@ -1350,7 +1773,168 @@ export function Layout({ children }: LayoutProps) {
                 setIsSidebarHeaderCompact((isCompact) => (isCompact === shouldCompact ? isCompact : shouldCompact))
               }}
             >
-              {navigation.map((group) => (
+              {isSidebarCustomizationMode ? (
+                  <div className="space-y-4 px-2 py-1">
+                    <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 shadow-sm">
+                      <div className="flex items-start gap-2">
+                        <Settings2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                        <div className="min-w-0">
+                          <h2 className="text-sm font-semibold text-foreground">
+                            {t('nav.sidebarCustomization.title')}
+                          </h2>
+                          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                            {t('nav.sidebarCustomization.description')}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => setIsSidebarCustomizationMode(false)}
+                          className="gap-2"
+                        >
+                          <Check className="h-4 w-4" />
+                          {t('nav.sidebarCustomization.done')}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setIsSidebarResetDialogOpen(true)}
+                          className="gap-2"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          {t('nav.sidebarCustomization.resetOrder')}
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 rounded-xl border border-amber-400/35 bg-amber-500/5 px-3 py-3 shadow-sm">
+                      <Star className="h-4 w-4 shrink-0 fill-amber-400 text-amber-500" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-foreground">{t('nav.sidebarFavorites.title')}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {sidebarFavoritesGroup
+                            ? t('nav.sidebarFavorites.customizationDescription')
+                            : t('nav.sidebarFavorites.emptyCustomizationDescription')}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-9 w-9 shrink-0 border-amber-400/50 p-0 text-amber-600 hover:bg-amber-500/10 hover:text-amber-700"
+                        onClick={openSidebarFavoritesDialog}
+                        aria-label={t('nav.sidebarFavorites.manage')}
+                        title={t('nav.sidebarFavorites.manage')}
+                      >
+                        <Star className="h-4 w-4 fill-current" />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-9 w-9 shrink-0 p-0"
+                        onClick={() => openSidebarModuleOrder('favorites')}
+                        disabled={!sidebarFavoritesGroup || sidebarFavoritesGroup.items.length < 2}
+                        aria-label={t('nav.sidebarCustomization.reorderTabs')}
+                        title={
+                          !sidebarFavoritesGroup || sidebarFavoritesGroup.items.length < 2
+                            ? t('nav.sidebarCustomization.notEnoughTabs')
+                            : t('nav.sidebarCustomization.reorderTabs')
+                        }
+                      >
+                        <ListOrdered className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    <DragDropContext onDragEnd={handleSidebarSectionDragEnd}>
+                      <Droppable droppableId="sidebar-section-groups" direction="vertical">
+                        {(provided) => (
+                          <div ref={provided.innerRef} {...provided.droppableProps} className="space-y-2">
+                            {visibleSidebarSectionGroups.map((group, index) => {
+                              const canReorderTabs = group.items.length >= 2
+
+                              return (
+                                <Draggable key={group.sectionKey} draggableId={group.sectionKey} index={index}>
+                                  {(draggableProvided, snapshot) => (
+                                    <div
+                                      ref={draggableProvided.innerRef}
+                                      {...draggableProvided.draggableProps}
+                                      className={cn(
+                                        'flex items-center gap-3 rounded-xl border bg-card px-3 py-3 shadow-sm transition-shadow',
+                                        snapshot.isDragging
+                                          ? 'border-primary/50 shadow-lg ring-2 ring-primary/20'
+                                          : 'border-border/70'
+                                      )}
+                                    >
+                                      <button
+                                        type="button"
+                                        {...draggableProvided.dragHandleProps}
+                                        aria-label={t('nav.sidebarCustomization.moveSection', { section: group.title })}
+                                        className="flex h-9 w-9 shrink-0 touch-none items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                                      >
+                                        <GripVertical className="h-5 w-5" />
+                                      </button>
+                                      <group.icon className="h-4 w-4 shrink-0 text-primary" />
+                                      <div className="min-w-0 flex-1">
+                                        <p className="truncate text-sm font-semibold text-foreground">{group.title}</p>
+                                        {!canReorderTabs && (
+                                          <p className="mt-0.5 text-xs text-muted-foreground">
+                                            {t('nav.sidebarCustomization.notEnoughTabs')}
+                                          </p>
+                                        )}
+                                      </div>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-9 w-9 shrink-0 p-0"
+                                        onClick={() => openSidebarModuleOrder(group.sectionKey)}
+                                        disabled={!canReorderTabs}
+                                        aria-label={t('nav.sidebarCustomization.reorderTabs')}
+                                        title={
+                                          !canReorderTabs
+                                            ? t('nav.sidebarCustomization.notEnoughTabs')
+                                            : t('nav.sidebarCustomization.reorderTabs')
+                                        }
+                                      >
+                                        <ListOrdered className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  )}
+                                </Draggable>
+                              )
+                            })}
+                            {provided.placeholder}
+                          </div>
+                        )}
+                      </Droppable>
+                    </DragDropContext>
+                  </div>
+              ) : (
+                <>
+              {sidebarNavigation.map((group) =>
+                group.sectionKey === 'favorites' && group.items.length === 0 ? (
+                  <Button
+                    key="sidebar-favorites-add"
+                    type="button"
+                    variant="ghost"
+                    onClick={openSidebarFavoritesDialog}
+                    className={cn(
+                      'mb-3 flex h-8 w-full items-center justify-start gap-2 rounded-lg border border-dashed border-amber-400/50 bg-amber-500/5 px-3 text-start text-xs font-medium text-amber-700 hover:bg-amber-500/10 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200',
+                      isSidebarMini && !mobileSidebarOpen && 'mx-auto h-8 w-8 justify-center px-0'
+                    )}
+                    aria-label={t('nav.sidebarFavorites.add')}
+                    title={t('nav.sidebarFavorites.add')}
+                  >
+                    <Star className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                    {!(isSidebarMini && !mobileSidebarOpen) && (
+                      <span>{t('nav.sidebarFavorites.add')}</span>
+                    )}
+                  </Button>
+                ) : (
                 <div key={group.title} className="space-y-1">
                   {!(isSidebarMini && !mobileSidebarOpen) && group.title && (
                     <div className="flex items-center gap-2 px-3 mb-4">
@@ -1364,6 +1948,7 @@ export function Layout({ children }: LayoutProps) {
 
                   <div className="space-y-1">
                     {group.items.map((item) => {
+                      const canFavoriteSidebarItem = Boolean(group.sectionKey)
                       const isExpandableGroup = Boolean(item.children?.length)
                       const showReorderAutomationBadge =
                         item.href === '/inventory-transfer' && reorderAutomationCount > 0
@@ -1538,7 +2123,7 @@ export function Layout({ children }: LayoutProps) {
                             item.popup && !item.mobileOnly && 'hidden lg:block'
                           )}
                         >
-                          {isDesktop() ? (
+                          {
                             <ContextMenu>
                               <ContextMenuTrigger asChild>
                                 {item.popup ? (
@@ -1598,39 +2183,30 @@ export function Layout({ children }: LayoutProps) {
                                     )}
                                   </>
                                 )}
+                                <ContextMenuSeparator />
+                                <ContextMenuItem className="gap-2" onSelect={openSidebarCustomization}>
+                                  <Settings2 className="h-4 w-4" />
+                                  {t('nav.sidebarCustomization.customize')}
+                                </ContextMenuItem>
+                                {canFavoriteSidebarItem && (
+                                  <>
+                                    <ContextMenuSeparator />
+                                    <ContextMenuItem
+                                      className="gap-2 text-amber-600 focus:text-amber-700 dark:text-amber-400 dark:focus:text-amber-300"
+                                      onSelect={() => toggleSidebarFavorite(item)}
+                                    >
+                                      <Star className={cn('h-4 w-4', sidebarFavoriteHrefSet.has(item.href) && 'fill-current')} />
+                                      {t(
+                                        sidebarFavoriteHrefSet.has(item.href)
+                                          ? 'nav.sidebarFavorites.remove'
+                                          : 'nav.sidebarFavorites.addToFavorites'
+                                      )}
+                                    </ContextMenuItem>
+                                  </>
+                                )}
                               </ContextMenuContent>
                             </ContextMenu>
-                          ) : item.popup ? (
-                            <button
-                              onClick={() => {
-                                setMobileSidebarOpen(false)
-                                setCurrencyConverterOpen(true)
-                                triggerHaptic('selection')
-                              }}
-                              className="w-full text-left"
-                            >
-                              {parentContent}
-                            </button>
-                          ) : (
-                            <Link
-                              href={item.href}
-                              onClick={() => {
-                                if (isExpandableGroup) {
-                                  setExpandedNavGroups((prev) => ({
-                                    ...prev,
-                                    [item.href]: !prev[item.href]
-                                  }))
-                                }
-                                if (!isExpandableGroup) {
-                                  setMobileSidebarOpen(false)
-                                }
-                                triggerHaptic('selection')
-                              }}
-                              onMouseEnter={() => !isMobile() && prefetchRoute(item.href)}
-                            >
-                              {parentContent}
-                            </Link>
-                          )}
+                          }
 
                           {showChildren && (
                             <div
@@ -1701,6 +2277,11 @@ export function Layout({ children }: LayoutProps) {
                                           defaultValue: 'Add to desktop as shortcut'
                                         })}
                                       </ContextMenuItem>
+                                      <ContextMenuSeparator />
+                                      <ContextMenuItem className="gap-2" onSelect={openSidebarCustomization}>
+                                        <Settings2 className="h-4 w-4" />
+                                        {t('nav.sidebarCustomization.customize')}
+                                      </ContextMenuItem>
                                     </ContextMenuContent>
                                   </ContextMenu>
                                 ) : (
@@ -1714,7 +2295,8 @@ export function Layout({ children }: LayoutProps) {
                     })}
                   </div>
                 </div>
-              ))}
+                )
+              )}
 
               {/* Workspace Members Section */}
               {(user?.role === 'admin' || user?.role === 'staff' || user?.role === 'viewer') && (
@@ -1861,6 +2443,8 @@ export function Layout({ children }: LayoutProps) {
                     })}
                   </div>
                 </div>
+              )}
+                </>
               )}
             </nav>
 
@@ -2185,6 +2769,268 @@ export function Layout({ children }: LayoutProps) {
               )}
             </div>
           </aside>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem
+                disabled={isSidebarCustomizationMode}
+                className="gap-2"
+                onSelect={openSidebarCustomization}
+              >
+                <Settings2 className="h-4 w-4" />
+                {t('nav.sidebarCustomization.customize')}
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
+
+          <AppDialog
+            open={Boolean(activeSidebarModuleOrderGroup)}
+            onOpenChange={(open) => !open && setActiveSidebarModuleOrderSection(null)}
+          >
+            <AppDialogContent className="max-w-xl">
+              <AppDialogHeader>
+                <AppDialogTitle className="flex items-center gap-2">
+                  <ListOrdered className="h-5 w-5 text-primary" />
+                  {t('nav.sidebarCustomization.reorderTabsTitle', {
+                    section: activeSidebarModuleOrderGroup?.title ?? ''
+                  })}
+                </AppDialogTitle>
+                <AppDialogDescription>
+                  {t('nav.sidebarCustomization.reorderTabsDescription')}
+                </AppDialogDescription>
+              </AppDialogHeader>
+              <AppDialogBody>
+                {activeSidebarModuleOrderGroup && (
+                  <DragDropContext onDragEnd={handleSidebarModuleDragEnd}>
+                    <Droppable droppableId={`sidebar-module-tabs:${activeSidebarModuleOrderGroup.sectionKey}`} direction="vertical">
+                      {(provided) => (
+                        <div ref={provided.innerRef} {...provided.droppableProps} className="space-y-2">
+                          {activeSidebarModuleOrderGroup.items.map((item, index) => (
+                            <Draggable
+                              key={item.href}
+                              draggableId={`sidebar-module-tab:${activeSidebarModuleOrderGroup.sectionKey}:${item.href}`}
+                              index={index}
+                            >
+                              {(draggableProvided, snapshot) => (
+                                <div
+                                  ref={draggableProvided.innerRef}
+                                  {...draggableProvided.draggableProps}
+                                  className={cn(
+                                    'flex min-h-14 items-center gap-3 rounded-xl border bg-card px-3 py-2.5 shadow-sm transition-shadow',
+                                    snapshot.isDragging
+                                      ? 'border-primary/50 shadow-lg ring-2 ring-primary/20'
+                                      : 'border-border/70'
+                                  )}
+                                >
+                                  <button
+                                    type="button"
+                                    {...draggableProvided.dragHandleProps}
+                                    aria-label={t('nav.sidebarCustomization.moveTab', { tab: item.name })}
+                                    className="flex h-10 w-10 shrink-0 touch-none items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                                  >
+                                    <GripVertical className="h-5 w-5" />
+                                  </button>
+                                  <item.icon className="h-5 w-5 shrink-0 text-primary" />
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-semibold text-foreground">{item.name}</p>
+                                    {item.children?.length ? (
+                                      <p className="mt-0.5 text-xs text-muted-foreground">
+                                        {t('nav.sidebarCustomization.nestedTabsStayWithParent')}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              )}
+                            </Draggable>
+                          ))}
+                          {provided.placeholder}
+                        </div>
+                      )}
+                    </Droppable>
+                  </DragDropContext>
+                )}
+              </AppDialogBody>
+              <AppDialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="gap-2"
+                  onClick={() =>
+                    activeSidebarModuleOrderGroup &&
+                    setSidebarModuleOrderResetSection(activeSidebarModuleOrderGroup.sectionKey)
+                  }
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  {t('nav.sidebarCustomization.resetTabsOrder')}
+                </Button>
+                <Button
+                  type="button"
+                  className="gap-2"
+                  onClick={() => setActiveSidebarModuleOrderSection(null)}
+                >
+                  <Check className="h-4 w-4" />
+                  {t('nav.sidebarCustomization.done')}
+                </Button>
+              </AppDialogFooter>
+            </AppDialogContent>
+          </AppDialog>
+
+          <AppDialog
+            open={isSidebarFavoritesDialogOpen}
+            onOpenChange={(open) => {
+              setIsSidebarFavoritesDialogOpen(open)
+              if (!open) setFavoritePickerQuery('')
+            }}
+          >
+            <AppDialogContent className="max-w-2xl">
+              <AppDialogHeader>
+                <AppDialogTitle className="flex items-center gap-2">
+                  <Star className="h-5 w-5 fill-amber-400 text-amber-500" />
+                  {t('nav.sidebarFavorites.manageTitle')}
+                </AppDialogTitle>
+                <AppDialogDescription>{t('nav.sidebarFavorites.manageDescription')}</AppDialogDescription>
+              </AppDialogHeader>
+              <AppDialogBody className="space-y-4">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={favoritePickerQuery}
+                    onChange={(event) => setFavoritePickerQuery(event.target.value)}
+                    placeholder={t('nav.sidebarFavorites.searchPlaceholder')}
+                    className="ps-9"
+                    aria-label={t('nav.sidebarFavorites.searchPlaceholder')}
+                  />
+                </div>
+                <p className="rounded-xl border border-amber-400/30 bg-amber-500/5 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                  {t('nav.sidebarFavorites.selectionOrderHint')}
+                </p>
+                {visibleFavoritePickerGroups.length > 0 ? (
+                  <div className="space-y-4">
+                    {visibleFavoritePickerGroups.map((group) => (
+                      <section key={group.sectionKey} className="overflow-hidden rounded-xl border border-border/70">
+                        <h3 className="border-b border-border/70 bg-muted/30 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          {group.title}
+                        </h3>
+                        <div className="divide-y divide-border/60">
+                          {group.items.map((item) => {
+                            const isSelected = favoritePickerOrder.includes(item.href)
+                            return (
+                              <label
+                                key={item.href}
+                                className="flex cursor-pointer items-center gap-3 px-3 py-3 transition-colors hover:bg-muted/40"
+                              >
+                                <Checkbox
+                                  checked={isSelected}
+                                  onCheckedChange={(checked) => {
+                                    setFavoritePickerOrder((current) =>
+                                      checked ? [...current, item.href] : current.filter((href) => href !== item.href)
+                                    )
+                                  }}
+                                  aria-label={item.name}
+                                />
+                                <item.icon className="h-4 w-4 shrink-0 text-primary" />
+                                <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{item.name}</span>
+                                {isSelected && <Star className="h-4 w-4 fill-amber-400 text-amber-500" />}
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+                    {t('nav.sidebarFavorites.noModulesFound')}
+                  </p>
+                )}
+              </AppDialogBody>
+              <AppDialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="gap-2"
+                  onClick={() => setIsClearSidebarFavoritesDialogOpen(true)}
+                  disabled={sidebarFavorites.order.length === 0}
+                >
+                  <Star className="h-4 w-4" />
+                  {t('nav.sidebarFavorites.clearAll')}
+                </Button>
+                <Button type="button" variant="outline" onClick={() => setIsSidebarFavoritesDialogOpen(false)}>
+                  {t('common.cancel')}
+                </Button>
+                <Button type="button" className="gap-2" onClick={saveFavoritePicker}>
+                  <Check className="h-4 w-4" />
+                  {t('common.save')}
+                </Button>
+              </AppDialogFooter>
+            </AppDialogContent>
+          </AppDialog>
+
+          <DeleteConfirmationModal
+            isOpen={isClearSidebarFavoritesDialogOpen}
+            onClose={() => setIsClearSidebarFavoritesDialogOpen(false)}
+            onConfirm={() => {
+              if (saveSidebarFavorites({ order: [], firstAddedOrder: [] }, t('nav.sidebarFavorites.cleared'))) {
+                setFavoritePickerOrder([])
+                setIsClearSidebarFavoritesDialogOpen(false)
+                triggerHaptic('success')
+              }
+            }}
+            title={t('nav.sidebarFavorites.clearTitle')}
+            description={t('nav.sidebarFavorites.clearDescription')}
+            itemName={t('nav.sidebarFavorites.title')}
+            simpleConfirmation
+          />
+
+          <AppDialog open={isSidebarResetDialogOpen} onOpenChange={setIsSidebarResetDialogOpen}>
+            <AppDialogContent className="max-w-md">
+              <AppDialogHeader>
+                <AppDialogTitle>{t('nav.sidebarCustomization.resetTitle')}</AppDialogTitle>
+                <AppDialogDescription>{t('nav.sidebarCustomization.resetDescription')}</AppDialogDescription>
+              </AppDialogHeader>
+              <AppDialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsSidebarResetDialogOpen(false)}>
+                  {t('common.cancel')}
+                </Button>
+                <Button type="button" variant="destructive" onClick={resetSidebarSectionOrder} className="gap-2">
+                  <RotateCcw className="h-4 w-4" />
+                  {t('nav.sidebarCustomization.confirmReset')}
+                </Button>
+              </AppDialogFooter>
+            </AppDialogContent>
+          </AppDialog>
+
+          <AppDialog
+            open={Boolean(sidebarModuleOrderResetSection)}
+            onOpenChange={(open) => !open && setSidebarModuleOrderResetSection(null)}
+          >
+            <AppDialogContent className="max-w-md">
+              <AppDialogHeader>
+                <AppDialogTitle>
+                  {t('nav.sidebarCustomization.resetTabsTitle', {
+                    section:
+                      sidebarModuleOrderResetSection === 'favorites'
+                        ? t('nav.sidebarFavorites.title')
+                        : visibleSidebarSectionGroups.find((group) => group.sectionKey === sidebarModuleOrderResetSection)?.title ?? ''
+                  })}
+                </AppDialogTitle>
+                <AppDialogDescription>{t('nav.sidebarCustomization.resetTabsDescription')}</AppDialogDescription>
+              </AppDialogHeader>
+              <AppDialogFooter>
+                <Button type="button" variant="outline" onClick={() => setSidebarModuleOrderResetSection(null)}>
+                  {t('common.cancel')}
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="gap-2"
+                  onClick={() => sidebarModuleOrderResetSection && resetSidebarModuleOrder(sidebarModuleOrderResetSection)}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  {t('nav.sidebarCustomization.confirmReset')}
+                </Button>
+              </AppDialogFooter>
+            </AppDialogContent>
+          </AppDialog>
 
           {sidebarCashierShift?.status === 'available' ? (
             <AppDialog
@@ -2386,7 +3232,9 @@ export function Layout({ children }: LayoutProps) {
               desktopSidebarOpen
                 ? isSidebarMini
                   ? 'lg:pl-[70px] lg:rtl:pl-0 lg:rtl:pr-[70px]'
-                  : 'lg:pl-64 lg:rtl:pl-0 lg:rtl:pr-64'
+                  : isSidebarCustomizationMode
+                    ? 'lg:pl-80 lg:rtl:pl-0 lg:rtl:pr-80'
+                    : 'lg:pl-64 lg:rtl:pl-0 lg:rtl:pr-64'
                 : 'lg:pl-0',
               'pb-[var(--safe-area-bottom)]'
             )}
