@@ -27,6 +27,7 @@ import {
     DEFAULT_LEDGER_DASHBOARD_CONFIG,
     LEDGER_CASH_GROUP_IDS,
     getLedgerCashGroupEntryCount,
+    getLedgerOperatingCashPresentation,
     normalizeLedgerDashboardConfig,
     type LedgerCashDrilldownId,
     type LedgerCashCurrencySummary,
@@ -95,10 +96,7 @@ function getGroupAmount(summary: LedgerCashSummary, groupId: LedgerCashGroupId) 
     return summary.netLendingMovement
 }
 
-function getGroupEntryCount(
-    summaries: readonly LedgerCashCurrencySummary<CurrencyCode>[],
-    groupId: LedgerCashGroupId,
-) {
+function getGroupEntryCount(summaries: readonly LedgerCashCurrencySummary<CurrencyCode>[], groupId: LedgerCashGroupId) {
     return summaries.reduce((total, { summary }) => total + getLedgerCashGroupEntryCount(summary, groupId), 0)
 }
 
@@ -108,7 +106,10 @@ function getCurrencyAmounts(
     summaries: readonly LedgerCashCurrencySummary<CurrencyCode>[],
     selectAmount: SummaryAmountSelector,
 ): CurrencyAmount[] {
-    return summaries.map(({ currency, summary }) => ({ currency, amount: selectAmount(summary) }))
+    return summaries.map(({ currency, summary }) => ({
+        currency,
+        amount: selectAmount(summary),
+    }))
 }
 
 function getCurrencyDisplayLabel(currency: CurrencyCode, iqdPreference: IQDDisplayPreference) {
@@ -131,7 +132,11 @@ function CurrencyAmountLines({
                     key={currency}
                     className={cn(
                         'flex min-w-0 items-baseline justify-between gap-3 rounded-xl border border-current/10 bg-background/55',
-                        size === 'hero' ? 'px-3 py-2' : size === 'card' ? 'px-2.5 py-2' : 'border-0 bg-transparent px-0 py-0',
+                        size === 'hero'
+                            ? 'px-3 py-2'
+                            : size === 'card'
+                              ? 'px-2.5 py-2'
+                              : 'border-0 bg-transparent px-0 py-0',
                     )}
                 >
                     <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-muted-foreground">
@@ -140,7 +145,11 @@ function CurrencyAmountLines({
                     <span
                         className={cn(
                             'min-w-0 break-words text-end font-black tabular-nums tracking-tight',
-                            size === 'hero' ? 'text-2xl sm:text-3xl' : size === 'card' ? 'text-lg sm:text-xl' : 'text-sm',
+                            size === 'hero'
+                                ? 'text-2xl sm:text-3xl'
+                                : size === 'card'
+                                  ? 'text-lg sm:text-xl'
+                                  : 'text-sm',
                             amount < 0 ? 'text-rose-600' : 'text-foreground',
                         )}
                     >
@@ -202,14 +211,18 @@ function MetricCard({
         >
             <span className="flex items-start justify-between gap-3">
                 <span className="min-w-0">
-                    <span className="block text-xs font-bold uppercase tracking-[0.12em] text-muted-foreground">{title}</span>
+                    <span className="block text-xs font-bold uppercase tracking-[0.12em] text-muted-foreground">
+                        {title}
+                    </span>
                     {result ? (
                         <span className="mt-1 inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
                             {resultLabel}
                         </span>
                     ) : null}
                 </span>
-                <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl', iconClasses[tone])}>
+                <span
+                    className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl', iconClasses[tone])}
+                >
                     <Icon className="h-4 w-4" />
                 </span>
             </span>
@@ -232,7 +245,11 @@ function FormulaOperator({ symbol }: { symbol: '−' | '=' | '+' }) {
 }
 
 function FormulaRow({ children }: { children: ReactNode }) {
-    return <div className="grid grid-cols-1 items-stretch gap-2 md:grid-cols-[minmax(0,1fr)_2.25rem_minmax(0,1fr)_2.25rem_minmax(0,1fr)]">{children}</div>
+    return (
+        <div className="grid grid-cols-1 items-stretch gap-2 md:grid-cols-[minmax(0,1fr)_2.25rem_minmax(0,1fr)_2.25rem_minmax(0,1fr)]">
+            {children}
+        </div>
+    )
 }
 
 function CalculationConnector({ label }: { label: string }) {
@@ -261,7 +278,10 @@ function CalculationConnector({ label }: { label: string }) {
                     vectorEffect="non-scaling-stroke"
                 />
             </svg>
-            <div className="pointer-events-none absolute inset-x-0 top-5 hidden -translate-y-1/2 items-center justify-center md:flex" aria-hidden="true">
+            <div
+                className="pointer-events-none absolute inset-x-0 top-5 hidden -translate-y-1/2 items-center justify-center md:flex"
+                aria-hidden="true"
+            >
                 <span className="bg-card px-3 text-[9px] font-black uppercase tracking-[0.12em] text-primary">
                     {label}
                 </span>
@@ -313,6 +333,25 @@ function CalculationGroup({ groupId, summaries, iqdPreference, activeDrilldown, 
     const { t } = useTranslation()
 
     if (groupId === 'operating') {
+        const rawOperatingCashAmounts = getCurrencyAmounts(
+            summaries,
+            (summary) => summary.buckets.operatingCashPaid.amount,
+        )
+        const operatingCashPresentation = getLedgerOperatingCashPresentation(
+            rawOperatingCashAmounts.map(({ amount }) => amount),
+        )
+        const operatingCashAmounts = rawOperatingCashAmounts.map(({ currency }, index) => ({
+            currency,
+            amount: operatingCashPresentation.amounts[index],
+        }))
+        const isOperatingCashRecovery = operatingCashPresentation.mode === 'recovered'
+        const isMixedOperatingCashMovement = operatingCashPresentation.mode === 'movement'
+        const operatingCashMetricKey = isOperatingCashRecovery
+            ? 'operatingCashRecovered'
+            : isMixedOperatingCashMovement
+              ? 'netOperatingCashMovement'
+              : 'operatingCashPaid'
+
         return (
             <GroupFrame
                 title={t('ledger.cashSummary.groups.operating.title')}
@@ -369,14 +408,22 @@ function CalculationGroup({ groupId, summaries, iqdPreference, activeDrilldown, 
                         selected={activeDrilldown === 'netCashRevenue'}
                         onClick={() => onDrilldown('netCashRevenue')}
                     />
-                    <FormulaOperator symbol="−" />
+                    <FormulaOperator symbol={operatingCashPresentation.operator} />
                     <MetricCard
-                        title={t('ledger.cashSummary.metrics.operatingCashPaid.title')}
-                        description={t('ledger.cashSummary.metrics.operatingCashPaid.description')}
-                        amounts={getCurrencyAmounts(summaries, (summary) => summary.buckets.operatingCashPaid.amount)}
+                        title={t(`ledger.cashSummary.metrics.${operatingCashMetricKey}.title`)}
+                        description={t(`ledger.cashSummary.metrics.${operatingCashMetricKey}.description`)}
+                        amounts={operatingCashAmounts}
                         iqdPreference={iqdPreference}
-                        icon={ArrowUpRight}
-                        tone="outgoing"
+                        icon={
+                            isOperatingCashRecovery
+                                ? ArrowDownLeft
+                                : isMixedOperatingCashMovement
+                                  ? CircleDollarSign
+                                  : ArrowUpRight
+                        }
+                        tone={
+                            isOperatingCashRecovery ? 'incoming' : isMixedOperatingCashMovement ? 'neutral' : 'outgoing'
+                        }
                         selected={activeDrilldown === 'operatingCashPaid'}
                         onClick={() => onDrilldown('operatingCashPaid')}
                     />
@@ -544,7 +591,9 @@ export function LedgerCashSummaryDashboard({
     const completedEntryCount = summaries.reduce((total, { summary }) => total + summary.completedEntryCount, 0)
     const hasCompletedMovements = completedEntryCount > 0
     const headlineAmounts = getCurrencyAmounts(summaries, (summary) => summary.netRecordedCashMovement)
-    const hasOtherCompletedMovement = summaries.some(({ summary }) => summary.buckets.otherCompletedMovement.entryCount > 0)
+    const hasOtherCompletedMovement = summaries.some(
+        ({ summary }) => summary.buckets.otherCompletedMovement.entryCount > 0,
+    )
 
     const openCustomize = () => {
         setDraftConfig(normalizedConfig)
@@ -589,7 +638,8 @@ export function LedgerCashSummaryDashboard({
                 className={cn(
                     'relative overflow-hidden rounded-[2rem] border-primary/30 bg-gradient-to-br from-primary/[0.09] via-card to-card shadow-sm',
                     isLoading && 'animate-pulse',
-                    activeDrilldown === 'netRecordedCashMovement' && 'ring-2 ring-primary/50 shadow-md shadow-primary/10',
+                    activeDrilldown === 'netRecordedCashMovement' &&
+                        'ring-2 ring-primary/50 shadow-md shadow-primary/10',
                 )}
             >
                 <div className="pointer-events-none absolute -end-10 -top-12 opacity-[0.055]">
@@ -611,7 +661,13 @@ export function LedgerCashSummaryDashboard({
                             {t('ledger.cashSummary.headline.description')}
                         </p>
                     </div>
-                    <Button type="button" variant="outline" size="sm" className="w-full shrink-0 rounded-xl sm:w-auto" onClick={openCustomize}>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="w-full shrink-0 rounded-xl sm:w-auto"
+                        onClick={openCustomize}
+                    >
                         <Settings2 className="me-2 h-4 w-4" />
                         {t('ledger.cashSummary.customize.action')}
                     </Button>
@@ -629,9 +685,15 @@ export function LedgerCashSummaryDashboard({
                             <CurrencyAmountLines amounts={headlineAmounts} iqdPreference={iqdPreference} size="hero" />
                         </div>
                         <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-                            {summaries.length > 1 ? <Layers3 className="h-4 w-4 text-primary" /> : getMovementDirectionIcon(headlineAmounts[0]?.amount ?? 0)}
+                            {summaries.length > 1 ? (
+                                <Layers3 className="h-4 w-4 text-primary" />
+                            ) : (
+                                getMovementDirectionIcon(headlineAmounts[0]?.amount ?? 0)
+                            )}
                             {hasCompletedMovements
-                                ? t('ledger.cashSummary.completedMovementCount', { count: completedEntryCount })
+                                ? t('ledger.cashSummary.completedMovementCount', {
+                                      count: completedEntryCount,
+                                  })
                                 : t('ledger.cashSummary.noCompletedMovements')}
                         </div>
                     </div>
@@ -643,9 +705,7 @@ export function LedgerCashSummaryDashboard({
                             iqdPreference={iqdPreference}
                             selected={activeDrilldown === 'operating'}
                         />
-                        {eligibleSet.has('borrowing') ? (
-                            <FormulaOperator symbol="+" />
-                        ) : null}
+                        {eligibleSet.has('borrowing') ? <FormulaOperator symbol="+" /> : null}
                         {eligibleSet.has('borrowing') ? (
                             <ContributionChip
                                 label={t('ledger.cashSummary.metrics.netBorrowingMovement.title')}
@@ -669,7 +729,10 @@ export function LedgerCashSummaryDashboard({
                         {hasOtherCompletedMovement ? (
                             <ContributionChip
                                 label={t('ledger.cashSummary.metrics.otherCompletedMovement.title')}
-                                amounts={getCurrencyAmounts(summaries, (summary) => summary.buckets.otherCompletedMovement.amount)}
+                                amounts={getCurrencyAmounts(
+                                    summaries,
+                                    (summary) => summary.buckets.otherCompletedMovement.amount,
+                                )}
                                 iqdPreference={iqdPreference}
                                 selected={activeDrilldown === 'otherCompletedMovement'}
                             />
@@ -681,7 +744,13 @@ export function LedgerCashSummaryDashboard({
                             <CircleDollarSign className="h-4 w-4 text-primary" />
                             {t('ledger.cashSummary.notAccountingProfit')}
                         </p>
-                        <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={() => setIsBreakdownOpen(true)}>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="rounded-xl"
+                            onClick={() => setIsBreakdownOpen(true)}
+                        >
                             <Layers3 className="me-2 h-4 w-4" />
                             {t('ledger.cashSummary.breakdown.action')}
                         </Button>
@@ -752,7 +821,9 @@ export function LedgerCashSummaryDashboard({
                                     </span>
                                     <span className="shrink-0">
                                         <CurrencyAmountLines
-                                            amounts={getCurrencyAmounts(summaries, (summary) => getGroupAmount(summary, groupId))}
+                                            amounts={getCurrencyAmounts(summaries, (summary) =>
+                                                getGroupAmount(summary, groupId),
+                                            )}
                                             iqdPreference={iqdPreference}
                                             size="compact"
                                         />
@@ -765,7 +836,8 @@ export function LedgerCashSummaryDashboard({
                             type="button"
                             className={cn(
                                 'flex w-full items-center gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/[0.04] p-4 text-start transition-colors hover:bg-amber-500/[0.08]',
-                                activeDrilldown === 'otherCompletedMovement' && 'border-primary bg-primary/[0.10] ring-2 ring-primary/35',
+                                activeDrilldown === 'otherCompletedMovement' &&
+                                    'border-primary bg-primary/[0.10] ring-2 ring-primary/35',
                             )}
                             aria-pressed={activeDrilldown === 'otherCompletedMovement'}
                             onClick={() => {
@@ -777,14 +849,19 @@ export function LedgerCashSummaryDashboard({
                                 <WalletCards className="h-4 w-4" />
                             </span>
                             <span className="min-w-0 flex-1">
-                                <span className="font-bold">{t('ledger.cashSummary.metrics.otherCompletedMovement.title')}</span>
+                                <span className="font-bold">
+                                    {t('ledger.cashSummary.metrics.otherCompletedMovement.title')}
+                                </span>
                                 <span className="mt-0.5 block text-xs text-muted-foreground">
                                     {t('ledger.cashSummary.metrics.otherCompletedMovement.description')}
                                 </span>
                             </span>
                             <span className="shrink-0">
                                 <CurrencyAmountLines
-                                    amounts={getCurrencyAmounts(summaries, (summary) => summary.buckets.otherCompletedMovement.amount)}
+                                    amounts={getCurrencyAmounts(
+                                        summaries,
+                                        (summary) => summary.buckets.otherCompletedMovement.amount,
+                                    )}
                                     iqdPreference={iqdPreference}
                                     size="compact"
                                 />
@@ -832,7 +909,9 @@ export function LedgerCashSummaryDashboard({
                                         key={groupId}
                                         className={cn(
                                             'relative flex min-h-52 flex-col rounded-3xl border p-4 transition-colors',
-                                            isSelected ? 'border-primary/45 bg-primary/[0.055]' : 'border-dashed border-border bg-muted/20',
+                                            isSelected
+                                                ? 'border-primary/45 bg-primary/[0.055]'
+                                                : 'border-dashed border-border bg-muted/20',
                                             !isEligible && !isFixed && 'opacity-65',
                                         )}
                                     >
@@ -843,7 +922,14 @@ export function LedgerCashSummaryDashboard({
                                             onClick={() => toggleDraftGroup(groupId)}
                                         >
                                             <span className="flex items-start justify-between gap-3">
-                                                <span className={cn('flex h-10 w-10 items-center justify-center rounded-2xl', isSelected ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground')}>
+                                                <span
+                                                    className={cn(
+                                                        'flex h-10 w-10 items-center justify-center rounded-2xl',
+                                                        isSelected
+                                                            ? 'bg-primary/10 text-primary'
+                                                            : 'bg-muted text-muted-foreground',
+                                                    )}
+                                                >
                                                     <Icon className="h-5 w-5" />
                                                 </span>
                                                 <span
@@ -854,10 +940,18 @@ export function LedgerCashSummaryDashboard({
                                                             : 'border-border bg-background text-muted-foreground',
                                                     )}
                                                 >
-                                                    {isFixed ? <LockKeyhole className="h-3.5 w-3.5" /> : isSelected ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                                                    {isFixed ? (
+                                                        <LockKeyhole className="h-3.5 w-3.5" />
+                                                    ) : isSelected ? (
+                                                        <Check className="h-4 w-4" />
+                                                    ) : (
+                                                        <Plus className="h-4 w-4" />
+                                                    )}
                                                 </span>
                                             </span>
-                                            <span className="mt-4 font-bold">{t(`ledger.cashSummary.groups.${groupId}.title`)}</span>
+                                            <span className="mt-4 font-bold">
+                                                {t(`ledger.cashSummary.groups.${groupId}.title`)}
+                                            </span>
                                             <span className="mt-1 text-xs leading-relaxed text-muted-foreground">
                                                 {t(`ledger.cashSummary.groups.${groupId}.formula`)}
                                             </span>
@@ -881,7 +975,9 @@ export function LedgerCashSummaryDashboard({
                                                 size="icon"
                                                 className="h-8 w-8"
                                                 disabled={index === 0 || isSaving}
-                                                onClick={() => setDraftConfig((current) => moveGroup(current, groupId, -1))}
+                                                onClick={() =>
+                                                    setDraftConfig((current) => moveGroup(current, groupId, -1))
+                                                }
                                                 aria-label={t('ledger.cashSummary.customize.moveUp')}
                                             >
                                                 <ChevronUp className="h-4 w-4" />
@@ -892,7 +988,9 @@ export function LedgerCashSummaryDashboard({
                                                 size="icon"
                                                 className="h-8 w-8"
                                                 disabled={index === draftConfig.groupOrder.length - 1 || isSaving}
-                                                onClick={() => setDraftConfig((current) => moveGroup(current, groupId, 1))}
+                                                onClick={() =>
+                                                    setDraftConfig((current) => moveGroup(current, groupId, 1))
+                                                }
                                                 aria-label={t('ledger.cashSummary.customize.moveDown')}
                                             >
                                                 <ChevronDown className="h-4 w-4" />
@@ -913,17 +1011,28 @@ export function LedgerCashSummaryDashboard({
                             type="button"
                             variant="ghost"
                             disabled={isSaving}
-                            onClick={() => setDraftConfig(normalizeLedgerDashboardConfig(DEFAULT_LEDGER_DASHBOARD_CONFIG))}
+                            onClick={() =>
+                                setDraftConfig(normalizeLedgerDashboardConfig(DEFAULT_LEDGER_DASHBOARD_CONFIG))
+                            }
                         >
                             <RotateCcw className="me-2 h-4 w-4" />
                             {t('ledger.cashSummary.customize.restoreDefaults')}
                         </Button>
                         <div className="flex gap-2">
-                            <Button type="button" variant="outline" disabled={isSaving} onClick={() => setIsCustomizeOpen(false)}>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                disabled={isSaving}
+                                onClick={() => setIsCustomizeOpen(false)}
+                            >
                                 {t('common.cancel')}
                             </Button>
                             <Button type="button" disabled={isSaving} onClick={() => void handleSave()}>
-                                {isSaving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Check className="me-2 h-4 w-4" />}
+                                {isSaving ? (
+                                    <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Check className="me-2 h-4 w-4" />
+                                )}
                                 {t('common.save')}
                             </Button>
                         </div>

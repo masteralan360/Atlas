@@ -2279,7 +2279,7 @@
         "operating": {
           "title": "Operating activity",
           "description": "Completed operating receipts, refunds, and payments only.",
-          "formula": "Cash received − refunds − operating cash paid"
+          "formula": "Cash received − refunds, adjusted by operating payments and recoveries"
         },
         "borrowing": {
           "title": "Borrowing activity",
@@ -2309,9 +2309,17 @@
           "title": "Operating Cash Paid",
           "description": "Completed expenses, payroll, supplier payments, and operating commissions."
         },
+        "operatingCashRecovered": {
+          "title": "Operating Cash Recovered",
+          "description": "Net completed operating-payment reversals and refunds that returned cash to the business."
+        },
+        "netOperatingCashMovement": {
+          "title": "Net Operating Cash Movement",
+          "description": "Signed cash effect by currency: recoveries are positive and payments are negative."
+        },
         "cashOperatingSurplus": {
           "title": "Cash Operating Surplus",
-          "description": "Net cash revenue minus operating cash paid; not accrual profit."
+          "description": "Net cash revenue adjusted for completed operating payments and recoveries; not accrual profit."
         },
         "loansReceived": {
           "title": "Loans Received",
@@ -2345,7 +2353,7 @@
       "drilldown": {
         "cashRevenueReceived": "Summary: Cash Revenue Received",
         "cashRefundsPaid": "Summary: Cash Refunds Paid",
-        "operatingCashPaid": "Summary: Operating Cash Paid",
+        "operatingCashPaid": "Summary: Operating Payments & Recoveries",
         "loansReceived": "Summary: Loans Received",
         "loanRepaymentsPaid": "Summary: Loan Repayments Paid",
         "repaymentsCollected": "Summary: Repayments Collected",

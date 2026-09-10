@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
     getLedgerCashBucketId,
+    getLedgerOperatingCashPresentation,
     isLedgerCashDrilldownMatch,
     normalizeLedgerDashboardConfig,
     summarizeLedgerCashMovements,
@@ -105,11 +106,19 @@ describe('summarizeLedgerCashMovementsByCurrency', () => {
         expect(summaries).toHaveLength(2)
         expect(summaries[0]).toMatchObject({
             currency: 'iqd',
-            summary: { netCashRevenue: 1_000, cashOperatingSurplus: 750, netRecordedCashMovement: 750 },
+            summary: {
+                netCashRevenue: 1_000,
+                cashOperatingSurplus: 750,
+                netRecordedCashMovement: 750,
+            },
         })
         expect(summaries[1]).toMatchObject({
             currency: 'usd',
-            summary: { netCashRevenue: 80, cashOperatingSurplus: 80, netRecordedCashMovement: 80 },
+            summary: {
+                netCashRevenue: 80,
+                cashOperatingSurplus: 80,
+                netRecordedCashMovement: 80,
+            },
         })
     })
 
@@ -122,6 +131,37 @@ describe('summarizeLedgerCashMovementsByCurrency', () => {
         expect(summaries.map(({ currency }) => currency)).toEqual(['usd', 'eur'])
         expect(summaries[1].summary.netRecordedCashMovement).toBe(0)
         expect(summaries[1].summary.completedEntryCount).toBe(0)
+    })
+})
+
+describe('getLedgerOperatingCashPresentation', () => {
+    it('shows normal net operating payments as a positive amount to subtract', () => {
+        expect(getLedgerOperatingCashPresentation([1_201_000, 0])).toEqual({
+            mode: 'paid',
+            operator: '−',
+            amounts: [1_201_000, 0],
+        })
+    })
+
+    it('shows a net operating recovery as a positive amount to add', () => {
+        expect(getLedgerOperatingCashPresentation([-1_201_000])).toEqual({
+            mode: 'recovered',
+            operator: '+',
+            amounts: [1_201_000],
+        })
+    })
+
+    it('uses signed contributions when currency lines move in opposite directions', () => {
+        const presentation = getLedgerOperatingCashPresentation([500, -200, 0])
+
+        expect(presentation).toEqual({
+            mode: 'movement',
+            operator: '+',
+            amounts: [-500, 200, 0],
+        })
+        expect(1_000 + presentation.amounts[0]).toBe(1_000 - 500)
+        expect(1_000 + presentation.amounts[1]).toBe(1_000 - -200)
+        expect(Object.is(presentation.amounts[2], -0)).toBe(false)
     })
 })
 

@@ -14,7 +14,8 @@ export const LEDGER_CASH_BUCKET_IDS = [
 ] as const
 
 export type LedgerCashBucketId = (typeof LEDGER_CASH_BUCKET_IDS)[number]
-export type LedgerCashDrilldownId = LedgerCashBucketId | LedgerCashGroupId | 'netCashRevenue' | 'netRecordedCashMovement'
+export type LedgerCashDrilldownId =
+    LedgerCashBucketId | LedgerCashGroupId | 'netCashRevenue' | 'netRecordedCashMovement'
 
 export interface LedgerDashboardConfig {
     version: 1
@@ -53,6 +54,14 @@ export interface LedgerCashSummary {
 export interface LedgerCashCurrencySummary<Currency extends string = string> {
     currency: Currency
     summary: LedgerCashSummary
+}
+
+export type LedgerOperatingCashPresentationMode = 'paid' | 'recovered' | 'movement'
+
+export interface LedgerOperatingCashPresentation {
+    mode: LedgerOperatingCashPresentationMode
+    operator: '−' | '+'
+    amounts: number[]
 }
 
 const OPERATING_REVENUE_TYPES = new Set([
@@ -95,17 +104,35 @@ function isCashDirection(direction: LedgerCashSummaryEntry['direction']): direct
 
 export function normalizeLedgerDashboardConfig(value: unknown): LedgerDashboardConfig {
     if (!value || typeof value !== 'object') {
-        return { ...DEFAULT_LEDGER_DASHBOARD_CONFIG, groupOrder: [...DEFAULT_LEDGER_DASHBOARD_CONFIG.groupOrder] }
+        return {
+            ...DEFAULT_LEDGER_DASHBOARD_CONFIG,
+            groupOrder: [...DEFAULT_LEDGER_DASHBOARD_CONFIG.groupOrder],
+        }
     }
 
     const candidate = value as Partial<LedgerDashboardConfig>
     const hiddenGroups = Array.isArray(candidate.hiddenGroups)
-        ? Array.from(new Set(candidate.hiddenGroups.filter((group): group is LedgerCashGroupId => LEDGER_CASH_GROUP_IDS.includes(group))))
+        ? Array.from(
+              new Set(
+                  candidate.hiddenGroups.filter((group): group is LedgerCashGroupId =>
+                      LEDGER_CASH_GROUP_IDS.includes(group),
+                  ),
+              ),
+          )
         : []
     const configuredOrder = Array.isArray(candidate.groupOrder)
-        ? Array.from(new Set(candidate.groupOrder.filter((group): group is LedgerCashGroupId => LEDGER_CASH_GROUP_IDS.includes(group))))
+        ? Array.from(
+              new Set(
+                  candidate.groupOrder.filter((group): group is LedgerCashGroupId =>
+                      LEDGER_CASH_GROUP_IDS.includes(group),
+                  ),
+              ),
+          )
         : []
-    const groupOrder = [...configuredOrder, ...LEDGER_CASH_GROUP_IDS.filter((group) => !configuredOrder.includes(group))]
+    const groupOrder = [
+        ...configuredOrder,
+        ...LEDGER_CASH_GROUP_IDS.filter((group) => !configuredOrder.includes(group)),
+    ]
 
     return {
         version: 1,
@@ -215,10 +242,7 @@ export function summarizeLedgerCashMovements<T extends LedgerCashSummaryEntry>(
 export function summarizeLedgerCashMovementsByCurrency<
     Currency extends string,
     T extends LedgerCashSummaryEntry & { currency: Currency },
->(
-    entries: readonly T[],
-    currencies: readonly Currency[] = [],
-): LedgerCashCurrencySummary<Currency>[] {
+>(entries: readonly T[], currencies: readonly Currency[] = []): LedgerCashCurrencySummary<Currency>[] {
     const entriesByCurrency = new Map<Currency, T[]>()
 
     currencies.forEach((currency) => {
@@ -238,6 +262,42 @@ export function summarizeLedgerCashMovementsByCurrency<
         currency,
         summary: summarizeLedgerCashMovements(currencyEntries),
     }))
+}
+
+/**
+ * Operating payment buckets are stored as net cash paid: outgoing payments add
+ * to the bucket and incoming reversals reduce it. Present a net recovery as an
+ * addition instead of rendering the confusing expression `A - (-B)`.
+ *
+ * When currencies have opposite signs, one shared subtraction/addition label
+ * cannot describe every line. In that case expose the signed cash contribution
+ * and add it to net cash revenue, preserving each currency equation.
+ */
+export function getLedgerOperatingCashPresentation(amounts: readonly number[]): LedgerOperatingCashPresentation {
+    const hasNetPayment = amounts.some((amount) => amount > 0)
+    const hasNetRecovery = amounts.some((amount) => amount < 0)
+
+    if (hasNetPayment && hasNetRecovery) {
+        return {
+            mode: 'movement',
+            operator: '+',
+            amounts: amounts.map((amount) => (amount === 0 ? 0 : -amount)),
+        }
+    }
+
+    if (hasNetRecovery) {
+        return {
+            mode: 'recovered',
+            operator: '+',
+            amounts: amounts.map((amount) => Math.abs(amount)),
+        }
+    }
+
+    return {
+        mode: 'paid',
+        operator: '−',
+        amounts: amounts.map((amount) => Math.abs(amount)),
+    }
 }
 
 export function isLedgerCashDrilldownMatch(entry: LedgerCashSummaryEntry, drilldownId: LedgerCashDrilldownId | null) {
