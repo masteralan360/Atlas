@@ -16,6 +16,16 @@ import { isOnline } from '@/lib/network'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { generateId, toSnakeCase } from '@/lib/utils'
+import { isReportablePaymentTransaction } from '@/lib/financialReportability'
+import {
+  getPaymentTransactionReversalState,
+} from '@/lib/paymentReversals'
+export {
+  getPaymentReversalAmountPolicy,
+  getPaymentTransactionReversalState,
+  type PaymentReversalAmountPolicy,
+  type PaymentTransactionReversalState,
+} from '@/lib/paymentReversals'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
@@ -62,6 +72,8 @@ export interface PaymentTransactionFilterOptions {
     sourceType?: PaymentTransactionSourceType | 'all'
     search?: string
     includeReversals?: boolean
+    /** Administrator audit surfaces only. Ordinary views always exclude voided rows. */
+    includeVoided?: boolean
 }
 
 export interface UsePaymentTransactionsOptions {
@@ -287,8 +299,8 @@ function getMetadataString(metadata: Record<string, unknown> | null | undefined,
 }
 
 function getTransactionRoutePath(transaction: Pick<PaymentTransaction, 'sourceModule' | 'sourceType' | 'sourceRecordId' | 'metadata'>) {
-    if (transaction.sourceType === 'agent_commission_payout') {
-        return '/agents'
+    if (transaction.sourceType === 'agent_commission_payout' || transaction.sourceType === 'agent_commission_recovery') {
+        return '/agents/commissions'
     }
 
     if (transaction.sourceModule === 'sales') {
@@ -421,9 +433,10 @@ const loanOriginationEnsureLocks = new Map<string, Promise<void>>()
 
 function filterTransactions(items: PaymentTransaction[], filters: PaymentTransactionFilterOptions) {
   const includeReversals = filters.includeReversals ?? true
+  const includeVoided = filters.includeVoided ?? false
 
   return items.filter((item) => {
-    if (item.isDeleted) {
+    if (item.isDeleted || (!includeVoided && item.voidId)) {
       return false
     }
 
@@ -499,7 +512,7 @@ const PAYMENT_AMOUNT_EPSILON = 0.000001
 export function getPaymentTransactionReversalAmounts(rows: PaymentTransaction[]) {
   const reversalAmounts = new Map<string, number>()
   for (const row of rows) {
-    if (row.isDeleted || !row.reversalOfTransactionId) continue
+    if (!isReportablePaymentTransaction(row) || !row.reversalOfTransactionId) continue
     reversalAmounts.set(
       row.reversalOfTransactionId,
       (reversalAmounts.get(row.reversalOfTransactionId) || 0) + Math.abs(Number(row.amount || 0))
@@ -517,7 +530,7 @@ export function getRemainingPaymentTransactions(rows: PaymentTransaction[]) {
   const reversalAmounts = getPaymentTransactionReversalAmounts(rows)
 
   return rows
-    .filter((row) => !row.isDeleted && !row.reversalOfTransactionId)
+    .filter((row) => isReportablePaymentTransaction(row) && !row.reversalOfTransactionId)
     .map((row) => {
       const amount = Number(row.amount || 0)
       const remainingMagnitude = Math.max(0, Math.abs(amount) - (reversalAmounts.get(row.id) || 0))
@@ -759,7 +772,7 @@ function buildExpenseObligation(
   series: ExpenseSeries | undefined,
   todayKey: string
 ): PaymentObligation | null {
-  if (item.isDeleted || item.status === 'paid') {
+  if (item.isDeleted || item.voidId || item.status === 'paid') {
     return null
   }
 
@@ -1118,7 +1131,7 @@ export async function buildPaymentObligations(workspaceId: string, filters: Paym
     db.workspaces.get(workspaceId)
   ])
 
-  const expenseSeriesMap = new Map(expenseSeries.filter((item) => !item.isDeleted).map((item) => [item.id, item]))
+  const expenseSeriesMap = new Map(expenseSeries.filter((item) => !item.isDeleted && !item.voidId).map((item) => [item.id, item]))
   const salesOrdersWithInstallments = new Set(
     orderInstallments.filter((item) => !item.isDeleted && item.orderType === 'sales').map((item) => item.orderId)
   )
@@ -1155,12 +1168,18 @@ export async function buildPaymentObligations(workspaceId: string, filters: Paym
     ...salesOrders.flatMap((order) => buildOrderInstallmentObligations(order, orderInstallments, todayKey)),
     ...purchaseOrders.flatMap((order) => buildOrderInstallmentObligations(order, orderInstallments, todayKey)),
     ...expenseItems
+      .filter((item) => !item.isDeleted && !item.voidId)
       .map((item) => buildExpenseObligation(item, expenseSeriesMap.get(item.seriesId), todayKey))
       .filter((item): item is PaymentObligation => !!item),
     ...buildPayrollObligations(employees, payrollStatuses, todayKey)
   ]
 
-  return filterObligations(obligations, filters).sort((left, right) => {
+  // Commission balances are not derived from order payment state. Add them to
+  // the shared source list so Open Items, Payable, Collectable, and partner
+  // settlement all see the identical per-assignment balance.
+  const agentCommissionObligations = await buildAgentCommissionObligations(workspaceId)
+
+  return filterObligations([...obligations, ...agentCommissionObligations], filters).sort((left, right) => {
     if (left.status !== right.status) {
       return left.status === 'overdue' ? -1 : 1
     }
@@ -1178,7 +1197,7 @@ export function usePaymentTransactions(
   const hydrateSourceTables = options.hydrateSourceTables ?? true
   const filterKey = useMemo(
     () => JSON.stringify(filters),
-    [filters.direction, filters.includeReversals, filters.search, filters.sourceModule, filters.sourceType]
+    [filters.direction, filters.includeReversals, filters.includeVoided, filters.search, filters.sourceModule, filters.sourceType]
   )
 
   const transactions = useLiveQuery(async () => {
@@ -1314,7 +1333,7 @@ export function useLockedPaymentSourceKeys(workspaceId: string | undefined) {
           })
         ),
       ...expenseItems
-        .filter((item) => !item.isDeleted && !!item.isLocked)
+        .filter((item) => !item.isDeleted && !item.voidId && !!item.isLocked)
         .map((item) =>
           getPaymentSourceKey({
             sourceType: 'expense_item',
@@ -1409,12 +1428,18 @@ export async function appendPaymentTransaction(
   }
   const now = new Date().toISOString()
   const paidAt = input.paidAt ? new Date(input.paidAt).toISOString() : now
-  const reversedTransaction =
-    input.reversalOfTransactionId && input.accountId === undefined
-      ? await db.payment_transactions.get(input.reversalOfTransactionId)
-      : undefined
-  const accountId = input.accountId ?? reversedTransaction?.accountId ?? null
-  const accountNameSnapshot = input.accountNameSnapshot ?? reversedTransaction?.accountNameSnapshot ?? null
+  const reversedTransaction = input.reversalOfTransactionId
+    ? await db.payment_transactions.get(input.reversalOfTransactionId)
+    : undefined
+  if (reversedTransaction?.voidId) {
+    throw new Error('Voided payment transactions cannot be reversed')
+  }
+  const accountId = input.accountId === undefined
+    ? reversedTransaction?.accountId ?? null
+    : input.accountId
+  const accountNameSnapshot = input.accountNameSnapshot === undefined
+    ? reversedTransaction?.accountNameSnapshot ?? null
+    : input.accountNameSnapshot
   const cashierShiftOccurrenceId = await resolveActiveCashierShiftOccurrenceId(workspaceId, {
     cashierUserId: input.createdBy,
     accountId
@@ -2076,6 +2101,7 @@ const PARTNER_SETTLEMENT_SOURCE_TYPES = new Set<PaymentTransactionSourceType>([
   'installment_sale_installment',
   'real_estate_commission',
   'agent_commission_payout',
+  'agent_commission_recovery',
   'sales_order',
   'purchase_order'
 ])
@@ -2088,58 +2114,59 @@ async function resolveSettlementPartner(workspaceId: string, partnerId: string) 
   return partner
 }
 
-type SalesAccountCommissionBalance = {
+type AgentCommissionBalance = {
   agentId: string
   assignmentId: string
   order: SalesOrder
+  partner: BusinessPartner
   currency: CurrencyCode
   amount: number
   occurredAt: string
 }
 
 /**
- * Sales-account commissions are kept in their own immutable ledger rather
- * than the generic payment-obligations table. Expose their positive, unpaid
- * assignment balances here so the standard partner settlement flow can pay
- * them with the same partial and multi-currency controls as other payables.
+ * Commission entries are immutable, while their net balance is an open item.
+ * A positive balance is payable to the agent; a negative balance is a
+ * recoverable amount owed by that agent's linked business partner.
  */
-async function buildSalesAccountCommissionObligations(
-  workspaceId: string,
-  partner: BusinessPartner
+export async function buildAgentCommissionObligations(
+  workspaceId: string
 ): Promise<PaymentObligation[]> {
-  const [agents, entries, orders, assignments] = await Promise.all([
+  const [agents, partners, entries, orders, assignments] = await Promise.all([
     db.agents.where('workspaceId').equals(workspaceId).toArray(),
+    db.business_partners.where('workspaceId').equals(workspaceId).toArray(),
     db.agent_commission_entries.where('workspaceId').equals(workspaceId).toArray(),
     db.sales_orders.where('workspaceId').equals(workspaceId).toArray(),
     db.sales_order_agent_assignments.where('workspaceId').equals(workspaceId).toArray()
   ])
 
-  const salesAccountAgents = new Map(
+  const partnersById = new Map(
+    partners
+      .filter((partner) => !partner.isDeleted && !partner.mergedIntoBusinessPartnerId)
+      .map((partner) => [partner.id, partner])
+  )
+  const commissionAgents = new Map(
     agents
       .filter((agent) => (
         !agent.isDeleted
-        && agent.businessPartnerId === partner.id
         && agent.agentType === 'field_agent'
-        && agent.status === 'active'
-        && agent.salesAccountEnabled
+        && partnersById.has(agent.businessPartnerId)
       ))
       .map((agent) => [agent.id, agent])
   )
-  if (salesAccountAgents.size === 0) {
+  if (commissionAgents.size === 0) {
     return []
   }
 
   const ordersById = new Map(
-    orders
-      .filter((order) => !order.isDeleted && order.status === 'completed')
-      .map((order) => [order.id, order])
+    orders.filter((order) => !order.isDeleted).map((order) => [order.id, order])
   )
   const assignmentsById = new Map(
     assignments
       .filter((assignment) => !assignment.isDeleted)
       .map((assignment) => [assignment.id, assignment])
   )
-  const balances = new Map<string, SalesAccountCommissionBalance>()
+  const balances = new Map<string, AgentCommissionBalance>()
 
   for (const entry of entries) {
     if (
@@ -2152,11 +2179,13 @@ async function buildSalesAccountCommissionObligations(
       continue
     }
 
-    const agent = salesAccountAgents.get(entry.agentId)
+    const agent = commissionAgents.get(entry.agentId)
     const order = ordersById.get(entry.orderId)
     const assignment = assignmentsById.get(entry.assignmentId)
+    const partner = agent ? partnersById.get(agent.businessPartnerId) : undefined
     if (
       !agent
+      || !partner
       || !order
       || !assignment
       || assignment.agentId !== agent.id
@@ -2184,6 +2213,7 @@ async function buildSalesAccountCommissionObligations(
       agentId: agent.id,
       assignmentId: assignment.id,
       order,
+      partner,
       currency: entry.currency,
       amount,
       occurredAt: entry.occurredAt
@@ -2192,29 +2222,30 @@ async function buildSalesAccountCommissionObligations(
 
   const todayKey = new Date().toISOString().slice(0, 10)
   return Array.from(balances.values())
-    .filter((balance) => balance.amount > PAYMENT_AMOUNT_EPSILON)
+    .filter((balance) => Math.abs(balance.amount) > PAYMENT_AMOUNT_EPSILON)
     .map((balance): PaymentObligation => {
       const dueDate = normalizeDateKey(balance.occurredAt)
+      const isPayout = balance.amount > 0
       return {
         id: `agent-commission:${balance.agentId}:${balance.assignmentId}:${balance.currency}`,
         workspaceId,
         sourceModule: 'orders',
-        sourceType: 'agent_commission_payout',
+        sourceType: isPayout ? 'agent_commission_payout' : 'agent_commission_recovery',
         sourceRecordId: balance.order.id,
         sourceSubrecordId: balance.assignmentId,
-        direction: 'outgoing',
-        amount: balance.amount,
+        direction: isPayout ? 'outgoing' : 'incoming',
+        amount: Math.abs(balance.amount),
         currency: balance.currency,
         dueDate,
         createdAt: balance.occurredAt,
-        counterpartyName: partner.partnerName,
+        counterpartyName: balance.partner.partnerName,
         referenceLabel: balance.order.orderNumber,
-        title: partner.partnerName,
+        title: balance.partner.partnerName,
         subtitle: balance.order.orderNumber,
         status: isDateOverdue(dueDate, todayKey) ? 'overdue' : 'open',
         routePath: `/orders/${balance.order.id}`,
         metadata: {
-          businessPartnerId: partner.id,
+          businessPartnerId: balance.partner.id,
           agentId: balance.agentId,
           commissionAssignmentId: balance.assignmentId,
           orderId: balance.order.id
@@ -2309,15 +2340,12 @@ export async function getPartnerSettlementBalance(
   direction: PaymentTransactionDirection
 ): Promise<PartnerSettlementBalance> {
   const partner = await resolveSettlementPartner(workspaceId, partnerId)
-  const [obligations, lockedSourceKeys, salesAccountCommissionObligations] = await Promise.all([
+  const [obligations, lockedSourceKeys] = await Promise.all([
     buildPaymentObligations(workspaceId, { direction }),
-    collectLockedOrderSourceKeys(workspaceId),
-    direction === 'outgoing'
-      ? buildSalesAccountCommissionObligations(workspaceId, partner)
-      : Promise.resolve([] as PaymentObligation[])
+    collectLockedOrderSourceKeys(workspaceId)
   ])
 
-  const eligibleObligations = [...obligations, ...salesAccountCommissionObligations]
+  const eligibleObligations = obligations
     .filter((item) => isEligiblePartnerObligation(item, partner.id, direction))
     .filter((item) => item.amount > PAYMENT_AMOUNT_EPSILON)
     .filter((item) => !lockedSourceKeys.has(getPaymentSourceKey(item)))
@@ -2551,6 +2579,30 @@ export async function settlePartnerBalance(
         break
       }
 
+      case 'agent_commission_recovery': {
+        const agentId = getMetadataString(obligation.metadata, 'agentId')
+        const assignmentId = getMetadataString(obligation.metadata, 'commissionAssignmentId')
+        if (!agentId || !assignmentId) {
+          throw new Error('Sales agent commission settlement metadata is incomplete')
+        }
+
+        const { recordAgentCommissionRecovery } = await import('./agentCommissions')
+        await recordAgentCommissionRecovery(workspaceId, {
+          agentId,
+          assignmentId,
+          orderId: obligation.sourceRecordId,
+          amount: applied,
+          currency: obligation.currency,
+          paymentMethod,
+          paidAt,
+          note,
+          createdBy,
+          accountId: input.accountId ?? null,
+          accountNameSnapshot: input.accountNameSnapshot ?? null
+        })
+        break
+      }
+
       default:
         continue
     }
@@ -2602,19 +2654,20 @@ export async function settlePartnerBalance(
 
 export async function findLatestUnreversedPaymentTransaction(workspaceId: string, locator: SourceLocator) {
   const relevant = (await listPaymentTransactionsForSource(workspaceId, locator)).filter((item) => {
-    if (item.isDeleted) {
+    if (!isReportablePaymentTransaction(item)) {
       return false
     }
 
     return true
   })
 
-  const reversedIds = new Set(
-    relevant.filter((item) => !!item.reversalOfTransactionId).map((item) => item.reversalOfTransactionId as string)
-  )
+  const reversalAmounts = getPaymentTransactionReversalAmounts(relevant)
 
   return relevant
-    .filter((item) => !item.reversalOfTransactionId && !reversedIds.has(item.id))
+    .filter((item) => {
+      if (item.reversalOfTransactionId) return false
+      return Math.abs(Number(item.amount || 0)) - (reversalAmounts.get(item.id) || 0) > PAYMENT_AMOUNT_EPSILON
+    })
     .sort((left, right) => right.paidAt.localeCompare(left.paidAt) || right.createdAt.localeCompare(left.createdAt))[0]
 }
 
@@ -2694,6 +2747,39 @@ export async function recordObligationSettlement(
         accountId: input.accountId ?? null,
         accountNameSnapshot: input.accountNameSnapshot ?? null
       })
+      return
+    }
+
+    case 'agent_commission_payout':
+    case 'agent_commission_recovery': {
+      assertStandardSettlementPaymentMethod(input.paymentMethod)
+      if (settlementAmount - obligation.amount > PAYMENT_AMOUNT_EPSILON) {
+        throw new Error('Settlement amount cannot exceed the commission balance')
+      }
+      const agentId = getMetadataString(obligation.metadata, 'agentId')
+      const assignmentId = getMetadataString(obligation.metadata, 'commissionAssignmentId')
+      if (!agentId || !assignmentId) {
+        throw new Error('Sales agent commission settlement metadata is incomplete')
+      }
+      const { recordAgentCommissionPayout, recordAgentCommissionRecovery } = await import('./agentCommissions')
+      const commissionInput = {
+        agentId,
+        assignmentId,
+        orderId: obligation.sourceRecordId,
+        amount: settlementAmount,
+        currency: obligation.currency,
+        paymentMethod: input.paymentMethod,
+        paidAt,
+        note,
+        createdBy,
+        accountId: input.accountId ?? null,
+        accountNameSnapshot: input.accountNameSnapshot ?? null
+      }
+      if (obligation.sourceType === 'agent_commission_payout') {
+        await recordAgentCommissionPayout(workspaceId, commissionInput)
+      } else {
+        await recordAgentCommissionRecovery(workspaceId, commissionInput)
+      }
       return
     }
 
@@ -2941,6 +3027,13 @@ export interface ReversePaymentTransactionInput {
   paidAt?: string
   note?: string
   createdBy?: string | null
+  /** Omitted means the complete remaining amount. */
+  amount?: number
+  /** Omitted preserves the original payment method. */
+  paymentMethod?: WorkspacePaymentMethod
+  /** Omitted inherits the original account; null explicitly posts ledger-only. */
+  accountId?: string | null
+  accountNameSnapshot?: string | null
 }
 
 export async function reversePaymentTransaction(
@@ -2953,12 +3046,43 @@ export async function reversePaymentTransaction(
     throw new Error('Payment transaction not found')
   }
 
+  if (!isReportablePaymentTransaction(transaction)) {
+    throw new Error('Voided payment transactions cannot be reversed')
+  }
+
   if (transaction.reversalOfTransactionId) {
     throw new Error('Reversal entries cannot be reversed')
   }
 
   if (!isReversiblePaymentSourceType(transaction.sourceType)) {
     throw new Error('This transaction type cannot be reversed in v1')
+  }
+
+  const relatedTransactions = await listPaymentTransactionsForSource(workspaceId, {
+    sourceType: transaction.sourceType,
+    sourceRecordId: transaction.sourceRecordId,
+    sourceSubrecordId: transaction.sourceSubrecordId ?? undefined,
+    metadata: transaction.metadata
+  })
+  const reversalState = getPaymentTransactionReversalState(transaction, relatedTransactions)
+  if (reversalState.status === 'fully_reversed') {
+    throw new Error('This payment has already been fully reversed')
+  }
+
+  const reversalAmount = input.amount === undefined
+    ? reversalState.remainingAmount
+    : Number(input.amount)
+  if (!Number.isFinite(reversalAmount) || reversalAmount <= PAYMENT_AMOUNT_EPSILON) {
+    throw new Error('Enter a valid reversal amount')
+  }
+  if (reversalAmount - reversalState.remainingAmount > PAYMENT_AMOUNT_EPSILON) {
+    throw new Error('The reversal amount cannot exceed the remaining payment amount')
+  }
+  if (
+    reversalState.amountPolicy === 'full_remaining' &&
+    Math.abs(reversalAmount - reversalState.remainingAmount) > PAYMENT_AMOUNT_EPSILON
+  ) {
+    throw new Error('This payment can only be reversed for its full remaining amount')
   }
 
   const latest = await findLatestUnreversedPaymentTransaction(workspaceId, {
@@ -2973,34 +3097,49 @@ export async function reversePaymentTransaction(
   }
 
   const note = input.note?.trim() || `Reversal of ${transaction.referenceLabel || transaction.sourceType}`
+  const reversalPaymentMethod = input.paymentMethod ?? transaction.paymentMethod
+  const reversalAccount = input.accountId === undefined
+    ? {}
+    : {
+        accountId: input.accountId,
+        accountNameSnapshot: input.accountNameSnapshot ?? null
+      }
 
   switch (transaction.sourceType) {
     case 'loan_payment':
     case 'simple_loan':
     case 'loan_installment': {
+      const loan = await db.loans.get(transaction.sourceRecordId)
+      if (!loan || loan.isDeleted) throw new Error('Loan not found')
       const { reverseLoanPayment } = await import('./hooks')
-      const { loan } = await reverseLoanPayment(workspaceId, transaction)
-
-      return appendPaymentTransaction(workspaceId, {
+      const reversal = await appendPaymentTransaction(workspaceId, {
         sourceModule: transaction.sourceModule,
         sourceType: transaction.sourceType,
         sourceRecordId: transaction.sourceRecordId,
         sourceSubrecordId: transaction.sourceSubrecordId ?? null,
         direction: transaction.direction,
-        amount: -Math.abs(transaction.amount),
+        amount: -reversalAmount,
         currency: transaction.currency,
-        paymentMethod: transaction.paymentMethod,
+        paymentMethod: reversalPaymentMethod,
         paidAt: input.paidAt ? new Date(input.paidAt).toISOString() : new Date().toISOString(),
         counterpartyName: transaction.counterpartyName || null,
         referenceLabel: loan.loanNo || transaction.referenceLabel || null,
         note,
         createdBy: input.createdBy || null,
+        ...reversalAccount,
         reversalOfTransactionId: transaction.id,
         metadata: {
           ...(transaction.metadata && typeof transaction.metadata === 'object' ? transaction.metadata : {}),
           reversal: true
         }
       })
+      try {
+        await reverseLoanPayment(workspaceId, transaction)
+        return reversal
+      } catch (error) {
+        await softDeletePaymentTransaction(reversal)
+        throw error
+      }
     }
 
     case 'sales_order': {
@@ -3010,14 +3149,15 @@ export async function reversePaymentTransaction(
         sourceRecordId: transaction.sourceRecordId,
         sourceSubrecordId: transaction.sourceSubrecordId ?? null,
         direction: transaction.direction,
-        amount: -Math.abs(transaction.amount),
+        amount: -reversalAmount,
         currency: transaction.currency,
-        paymentMethod: transaction.paymentMethod,
+        paymentMethod: reversalPaymentMethod,
         paidAt: input.paidAt ? new Date(input.paidAt).toISOString() : new Date().toISOString(),
         counterpartyName: transaction.counterpartyName || null,
         referenceLabel: transaction.referenceLabel || null,
         note,
         createdBy: input.createdBy || null,
+        ...reversalAccount,
         reversalOfTransactionId: transaction.id,
         metadata: {
           ...(transaction.metadata && typeof transaction.metadata === 'object' ? transaction.metadata : {}),
@@ -3036,14 +3176,15 @@ export async function reversePaymentTransaction(
         sourceRecordId: transaction.sourceRecordId,
         sourceSubrecordId: transaction.sourceSubrecordId ?? null,
         direction: transaction.direction,
-        amount: -Math.abs(transaction.amount),
+        amount: -reversalAmount,
         currency: transaction.currency,
-        paymentMethod: transaction.paymentMethod,
+        paymentMethod: reversalPaymentMethod,
         paidAt: input.paidAt ? new Date(input.paidAt).toISOString() : new Date().toISOString(),
         counterpartyName: transaction.counterpartyName || null,
         referenceLabel: transaction.referenceLabel || null,
         note,
         createdBy: input.createdBy || null,
+        ...reversalAccount,
         reversalOfTransactionId: transaction.id,
         metadata: {
           ...(transaction.metadata && typeof transaction.metadata === 'object' ? transaction.metadata : {}),
@@ -3062,14 +3203,15 @@ export async function reversePaymentTransaction(
         sourceRecordId: transaction.sourceRecordId,
         sourceSubrecordId: null,
         direction: 'incoming',
-        amount: -Math.abs(transaction.amount),
+        amount: -reversalAmount,
         currency: transaction.currency,
-        paymentMethod: transaction.paymentMethod,
+        paymentMethod: reversalPaymentMethod,
         paidAt: input.paidAt ? new Date(input.paidAt).toISOString() : new Date().toISOString(),
         counterpartyName: transaction.counterpartyName || null,
         referenceLabel: transaction.referenceLabel || null,
         note,
         createdBy: input.createdBy || null,
+        ...reversalAccount,
         reversalOfTransactionId: transaction.id,
         metadata: {
           ...(transaction.metadata && typeof transaction.metadata === 'object' ? transaction.metadata : {}),
@@ -3083,7 +3225,12 @@ export async function reversePaymentTransaction(
 
     case 'travel_booking_payment': {
       const { reverseTravelBookingPayment } = await import('./travelTransportation')
-      const { reversal } = await reverseTravelBookingPayment(workspaceId, transaction.id, input)
+      const { reversal } = await reverseTravelBookingPayment(workspaceId, transaction.id, {
+        ...input,
+        amount: reversalAmount,
+        paymentMethod: reversalPaymentMethod,
+        ...reversalAccount
+      })
       return reversal
     }
 
@@ -3096,13 +3243,6 @@ export async function reversePaymentTransaction(
         throw new Error('Locked paid expenses cannot be reversed')
       }
 
-      const { updateExpenseItem } = await import('./hooks')
-      await updateExpenseItem(item.id, {
-        status: 'pending',
-        paidAt: null,
-        snoozedUntil: null,
-        snoozedIndefinite: false
-      })
       break
     }
 
@@ -3121,13 +3261,6 @@ export async function reversePaymentTransaction(
         throw new Error('Locked paid payroll entries cannot be reversed')
       }
 
-      const { upsertPayrollStatus } = await import('./hooks')
-      await upsertPayrollStatus(workspaceId, employeeId, month, {
-        status: 'pending',
-        paidAt: null,
-        snoozedUntil: null,
-        snoozedIndefinite: false
-      })
       break
     }
 
@@ -3143,20 +3276,46 @@ export async function reversePaymentTransaction(
     sourceRecordId: transaction.sourceRecordId,
     sourceSubrecordId: transaction.sourceSubrecordId ?? null,
     direction: transaction.direction,
-    amount: -Math.abs(transaction.amount),
+    amount: -reversalAmount,
     currency: transaction.currency,
-    paymentMethod: transaction.paymentMethod,
+    paymentMethod: reversalPaymentMethod,
     paidAt: input.paidAt ? new Date(input.paidAt).toISOString() : new Date().toISOString(),
     counterpartyName: transaction.counterpartyName || null,
     referenceLabel: transaction.referenceLabel || null,
     note,
     createdBy: input.createdBy || null,
+    ...reversalAccount,
     reversalOfTransactionId: transaction.id,
     metadata: {
       ...(transaction.metadata && typeof transaction.metadata === 'object' ? transaction.metadata : {}),
       reversal: true
     }
   })
+
+  try {
+    if (transaction.sourceType === 'expense_item') {
+      const { updateExpenseItem } = await import('./hooks')
+      await updateExpenseItem(transaction.sourceRecordId, {
+        status: 'pending',
+        paidAt: null,
+        snoozedUntil: null,
+        snoozedIndefinite: false
+      })
+    } else if (transaction.sourceType === 'payroll_status') {
+      const employeeId = String(transaction.metadata?.employeeId || transaction.sourceSubrecordId || '')
+      const month = String(transaction.metadata?.month || '')
+      const { upsertPayrollStatus } = await import('./hooks')
+      await upsertPayrollStatus(workspaceId, employeeId, month, {
+        status: 'pending',
+        paidAt: null,
+        snoozedUntil: null,
+        snoozedIndefinite: false
+      })
+    }
+  } catch (error) {
+    await softDeletePaymentTransaction(reversal)
+    throw error
+  }
 
   if (
     transaction.sourceType === 'installment_sale_down_payment' ||

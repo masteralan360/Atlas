@@ -354,8 +354,7 @@ html[lang] pre {
 
   html,
   body {
-    @apply bg-transparent;
-    /* Transparent for acrylic */
+    @apply bg-background;
     overflow: hidden;
     /* Prevent global scroll */
   }

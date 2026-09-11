@@ -749,6 +749,7 @@ export function QuickOrderModal({
                         currency={settlementCurrency}
                         exchangeRates={commissionExchangeRates}
                         iqdPreference={iqdPreference}
+                        showTotal
                     />
                 ) : null}
 

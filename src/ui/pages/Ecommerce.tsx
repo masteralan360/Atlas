@@ -41,7 +41,8 @@ import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { isMobile } from '@/lib/platform'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { buildWorkflowGradientFill } from '@/lib/workflowProgressGradient'
-import { r2Service } from '@/services/r2Service'
+import { createJumlaKhaleejInquiryPdf } from '@/lib/jumlaKhaleejInquiryPdf'
+import { createJumlaKhaleejInquiryPdfData } from '@/lib/jumlaKhaleejInquiryPdfData'
 import { PdfJsViewer } from '@/ui/components/PdfJsViewer'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
 import {
@@ -62,6 +63,12 @@ import {
     CardHeader,
     CardTitle,
     DateRangeFilters,
+    AppDialog,
+    AppDialogBody,
+    AppDialogContent,
+    AppDialogFooter,
+    AppDialogHeader,
+    AppDialogTitle,
     Dialog,
     DialogContent,
     DialogFooter,
@@ -140,6 +147,7 @@ type MarketplaceOrderRecord = {
     inquiry_pdf_storage_id: string | null
     inquiry_pdf_document_number: string | null
     inquiry_pdf_uploaded_at: string | null
+    website_storefront_key: string | null
     items: MarketplaceOrderItemRecord[]
     delivery_fee: number | null
     subtotal: number
@@ -576,12 +584,55 @@ function marketplaceWorkflowFill(status: MarketplaceOrderStatus) {
 
 function MarketplaceInquiryPdfCard({ order }: { order: MarketplaceOrderRecord }) {
     const { t } = useTranslation()
+    const { workspaceName, features } = useWorkspace()
     const [isOpen, setIsOpen] = useState(false)
+    const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null)
+    const [isGenerating, setIsGenerating] = useState(false)
+    const [generationFailed, setGenerationFailed] = useState(false)
 
-    if (!order.inquiry_pdf_storage_id || !order.inquiry_pdf_document_number) return null
+    const document = useMemo(() => createJumlaKhaleejInquiryPdfData({
+        websiteStorefrontKey: order.website_storefront_key,
+        orderNumber: order.order_number,
+        createdAt: order.created_at,
+        customerName: order.customer_name,
+        customerPhone: order.customer_phone,
+        customerAddress: order.customer_address,
+        customerCity: order.customer_city,
+        customerNotes: order.customer_notes,
+        deliveryFee: order.delivery_fee,
+        currency: order.currency,
+        items: order.items
+    }), [order])
 
-    const pdfUrl = r2Service.getUrl(`${order.workspace_id}/inquiries/${order.inquiry_pdf_storage_id}.pdf`)
-    if (!pdfUrl) return null
+    useEffect(() => {
+        let cancelled = false
+        if (!isOpen || !document) {
+            setPdfBytes(null)
+            setGenerationFailed(false)
+            setIsGenerating(false)
+            return () => { cancelled = true }
+        }
+
+        setPdfBytes(null)
+        setGenerationFailed(false)
+        setIsGenerating(true)
+        void createJumlaKhaleejInquiryPdf(document, {
+            name: workspaceName || 'Jumla Khaleej',
+            logoUrl: features.logo_url
+        }).then(async (blob) => {
+            const bytes = new Uint8Array(await blob.arrayBuffer())
+            if (!cancelled) setPdfBytes(bytes)
+        }).catch((error) => {
+            console.error('[ecommerce] inquiry PDF generation failed', error)
+            if (!cancelled) setGenerationFailed(true)
+        }).finally(() => {
+            if (!cancelled) setIsGenerating(false)
+        })
+
+        return () => { cancelled = true }
+    }, [document, features.logo_url, isOpen, workspaceName])
+
+    if (!document) return null
 
     return (
         <Card className="border-border/60 bg-card/80">
@@ -589,8 +640,7 @@ function MarketplaceInquiryPdfCard({ order }: { order: MarketplaceOrderRecord })
                 <div>
                     <CardTitle>{t('ecommerce.inquiryPdf', { defaultValue: 'Inquiry PDF' })}</CardTitle>
                     <p className="mt-1 text-sm text-muted-foreground">
-                        {order.inquiry_pdf_document_number}
-                        {order.inquiry_pdf_uploaded_at ? ` • ${formatDateTime(order.inquiry_pdf_uploaded_at)}` : ''}
+                        {document.documentNumber} • {formatDateTime(document.createdAt)}
                     </p>
                 </div>
                 <Button variant="outline" className="gap-2 rounded-xl" onClick={() => setIsOpen(true)}>
@@ -599,20 +649,21 @@ function MarketplaceInquiryPdfCard({ order }: { order: MarketplaceOrderRecord })
                 </Button>
             </CardHeader>
 
-            <CardContent className="pt-0">
-                <div className="h-[min(76dvh,62rem)] min-h-[36rem] overflow-hidden rounded-2xl border border-border/60 bg-muted/30">
-                    <PdfJsViewer url={pdfUrl} title={order.inquiry_pdf_document_number} />
-                </div>
-            </CardContent>
-
-            <Dialog open={isOpen} onOpenChange={setIsOpen}>
-                <DialogContent className="top-[calc(50%+var(--titlebar-height)/2+var(--safe-area-top)/2)] flex h-[calc(100dvh-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-1rem)] w-[calc(100vw-1rem)] max-w-6xl flex-col overflow-hidden rounded-2xl border-border/60 p-0 shadow-2xl sm:h-[min(calc(100dvh-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-2rem),1080px)] sm:w-[calc(100vw-2rem)]">
-                    <DialogHeader className="sr-only">
-                        <DialogTitle>{`${t('ecommerce.inquiryPdf', { defaultValue: 'Inquiry PDF' })} ${order.inquiry_pdf_document_number}`}</DialogTitle>
-                    </DialogHeader>
-                    <PdfJsViewer url={pdfUrl} title={order.inquiry_pdf_document_number} />
-                </DialogContent>
-            </Dialog>
+            <AppDialog open={isOpen} onOpenChange={setIsOpen}>
+                <AppDialogContent className="h-[calc(100dvh-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-1rem)] max-w-6xl">
+                    <AppDialogHeader>
+                        <AppDialogTitle>{`${t('ecommerce.inquiryPdf', { defaultValue: 'Inquiry PDF' })} ${document.documentNumber}`}</AppDialogTitle>
+                    </AppDialogHeader>
+                    <AppDialogBody className="flex overflow-hidden p-0">
+                        {isGenerating && <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" />{t('ecommerce.generatingInquiryPdf', { defaultValue: 'Generating inquiry PDF…' })}</div>}
+                        {generationFailed && <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-destructive">{t('ecommerce.inquiryPdfUnavailable', { defaultValue: 'This inquiry PDF could not be generated.' })}</div>}
+                        {pdfBytes && <PdfJsViewer bytes={pdfBytes} title={document.documentNumber} allowPrint={false} />}
+                    </AppDialogBody>
+                    <AppDialogFooter>
+                        <Button variant="outline" onClick={() => setIsOpen(false)}>{t('common.close', { defaultValue: 'Close' })}</Button>
+                    </AppDialogFooter>
+                </AppDialogContent>
+            </AppDialog>
         </Card>
     )
 }

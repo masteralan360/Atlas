@@ -22,6 +22,8 @@ interface PaymentAccountSelectorProps {
   /** Payment forms can opt into their workspace's preselected account. */
   applyDefault?: boolean
   placeholder?: string
+  /** Marks the account used by the original transaction in reversal workflows. */
+  originAccountId?: string | null
 }
 
 /** Optional by design: leaving it empty preserves a normal ledger payment. */
@@ -35,6 +37,7 @@ export function PaymentAccountSelector({
   allowNoAccount = true,
   applyDefault = true,
   placeholder,
+  originAccountId,
 }: PaymentAccountSelectorProps) {
   const { t } = useTranslation()
   const { features } = useWorkspace()
@@ -174,6 +177,7 @@ export function PaymentAccountSelector({
               <span className="flex min-w-0 items-center gap-2">
                 <PaymentAccountIcon iconKey={selection.selectedAccount.iconKey} accountType={selection.selectedAccount.accountType} className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <span className="truncate">{selection.selectedAccount.name}</span>
+                {selection.selectedAccount.id === originAccountId ? <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">{t('paymentAccounts.originalTransactionAccount', { defaultValue: 'Original' })}</span> : null}
               </span>
               {!areBalancesReady ? balanceLoadingIndicator : selectedAccountBalances.length ? (
                 <span className="ml-auto flex shrink-0 items-center text-xs font-semibold tabular-nums text-foreground">
@@ -200,7 +204,7 @@ export function PaymentAccountSelector({
             return (
               <SelectItem key={account.id} value={account.id} disabled={requiresReview}>
                 <span className="flex w-full min-w-0 items-center gap-3">
-                  <span className="flex min-w-0 items-center gap-2"><PaymentAccountIcon iconKey={account.iconKey} accountType={account.accountType} className="h-4 w-4 shrink-0 text-muted-foreground" /><span className="truncate">{account.name}</span>{requiresReview ? <span className="text-xs text-amber-600 dark:text-amber-400">{t('paymentAccounts.selectedAccountNeedsReview', { defaultValue: 'Review selection' })}</span> : null}</span>
+                  <span className="flex min-w-0 items-center gap-2"><PaymentAccountIcon iconKey={account.iconKey} accountType={account.accountType} className="h-4 w-4 shrink-0 text-muted-foreground" /><span className="truncate">{account.name}</span>{account.id === originAccountId ? <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">{t('paymentAccounts.originalTransactionAccount', { defaultValue: 'Original' })}</span> : null}{requiresReview ? <span className="text-xs text-amber-600 dark:text-amber-400">{t('paymentAccounts.selectedAccountNeedsReview', { defaultValue: 'Review selection' })}</span> : null}</span>
                   {!areBalancesReady ? balanceLoadingIndicator : accountBalances.length ? (
                     <span className="ms-auto flex shrink-0 items-center text-xs font-semibold tabular-nums text-muted-foreground">
                       {accountBalances.map((balance, index) => (

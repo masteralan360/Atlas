@@ -24,6 +24,7 @@ CREATE TABLE crm.purchase_orders (
   paid_at timestamp with time zone NULL,
   payment_method text NULL,
   initial_payment_amount numeric NOT NULL DEFAULT 0,
+  partner_balance_snapshot jsonb NULL,
   linked_loan_id uuid NULL,
   is_installment_based boolean NOT NULL DEFAULT false,
   installment_count integer NOT NULL DEFAULT 0,

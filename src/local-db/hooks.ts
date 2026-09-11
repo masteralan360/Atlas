@@ -3862,14 +3862,17 @@ export async function setBudgetAllocation(
     return allocation
 }
 
-export function useExpenseSeries(workspaceId: string | undefined, options?: { includeDeleted?: boolean }) {
+export function useExpenseSeries(workspaceId: string | undefined, options?: { includeDeleted?: boolean; includeVoided?: boolean }) {
     const isOnline = useNetworkStatus()
     const includeDeleted = options?.includeDeleted ?? false
+    const includeVoided = options?.includeVoided ?? false
     const series = useLiveQuery(
         () => workspaceId
-            ? db.expense_series.where('workspaceId').equals(workspaceId).and(s => includeDeleted || !s.isDeleted).toArray()
+            ? db.expense_series.where('workspaceId').equals(workspaceId).and(s =>
+                (includeDeleted || !s.isDeleted) && (includeVoided || !s.voidId)
+            ).toArray()
             : [],
-        [workspaceId, includeDeleted]
+        [workspaceId, includeDeleted, includeVoided]
     )
 
     useEffect(() => {
@@ -4172,7 +4175,7 @@ export function useExpenseItems(workspaceId: string | undefined, month: string |
     const isOnline = useNetworkStatus()
     const items = useLiveQuery(
         () => workspaceId && month
-            ? db.expense_items.where('workspaceId').equals(workspaceId).and(i => !i.isDeleted && i.month === month).toArray()
+            ? db.expense_items.where('workspaceId').equals(workspaceId).and(i => !i.isDeleted && !i.voidId && i.month === month).toArray()
             : [],
         [workspaceId, month]
     )
@@ -4221,7 +4224,7 @@ export async function updateExpenseItem(id: string, data: Partial<ExpenseItem>):
 const expenseItemEnsuresInFlight = new Map<string, Promise<void>>()
 
 async function ensureExpenseItemsForMonthInternal(workspaceId: string, month: string): Promise<void> {
-    const series = await db.expense_series.where('workspaceId').equals(workspaceId).and(s => !s.isDeleted).toArray()
+    const series = await db.expense_series.where('workspaceId').equals(workspaceId).and(s => !s.isDeleted && !s.voidId).toArray()
     if (series.length === 0) return
 
     const existingItems = await db.expense_items.where('workspaceId').equals(workspaceId).and(i => i.month === month).toArray()

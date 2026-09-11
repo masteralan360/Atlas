@@ -131,6 +131,10 @@ export {
     ReverseTransactionCofirmationDialog,
     type ReverseTransactionDetails
 } from './payments/ReverseTransactionCofirmationDialog'
+export {
+    PaymentReversalDialog,
+    type PaymentReversalDialogInput
+} from './payments/PaymentReversalDialog'
 export { SettlementDialog } from './payments/SettlementDialog'
 export { PartnerSettlementDialog } from './payments/PartnerSettlementDialog'
 export { PaymentMethodSelect } from './payments/PaymentMethodSelect'

@@ -39,6 +39,26 @@ export function resolveAtlasStandardTableCapacities(productImageWidthValue?: str
     }
 }
 
+/**
+ * The first page shares space with the financial summary. Its filler must be
+ * made of complete item rows so a fractional remainder never renders as a
+ * thin, meaningless table strip above the totals row.
+ */
+export function getAtlasStandardFirstPageFillerRowCount(
+    tableDataAreaMm: number,
+    populatedRowCount: number,
+    tableItemRowMm: number
+) {
+    const safeRowHeight = Math.max(0, Number(tableItemRowMm) || 0)
+    if (safeRowHeight === 0) return 0
+
+    const emptyAreaMm = Math.max(
+        0,
+        (Number(tableDataAreaMm) || 0) - (Math.max(0, populatedRowCount) * safeRowHeight)
+    )
+    return Math.floor(emptyAreaMm / safeRowHeight)
+}
+
 export function chunkAtlasStandardTableRows<T>(
     rows: readonly T[],
     firstPageRows: number,

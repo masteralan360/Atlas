@@ -58,10 +58,33 @@ export interface CommissionEntrySummary {
     earned: CommissionCurrencyTotals
     approved: CommissionCurrencyTotals
     paid: CommissionCurrencyTotals
+    recovered: CommissionCurrencyTotals
     reversed: CommissionCurrencyTotals
     due: CommissionCurrencyTotals
     orderCount: number
     entryCount: number
+}
+
+export type CommissionHistoryStatus = 'earned' | 'paid' | 'recovered' | 'reversed' | 'outstanding' | 'recovery_due'
+
+/**
+ * A review dialog is an operational view, not the accounting journal. Group
+ * the append-only events by order and currency so internal reconciliation
+ * entries do not look like separate user actions.
+ */
+export interface CommissionHistoryGroup {
+    id: string
+    orderId: string | null
+    payoutReference: string | null
+    currency: string
+    entries: AgentCommissionEntry[]
+    earned: number
+    paid: number
+    recovered: number
+    reversed: number
+    outstanding: number
+    status: CommissionHistoryStatus
+    occurredAt: string
 }
 
 function addCurrencyAmount(totals: CommissionCurrencyTotals, currency: string, amount: number) {
@@ -75,6 +98,7 @@ export function summarizeCommissionEntries(entries: AgentCommissionEntry[]): Com
         earned: {},
         approved: {},
         paid: {},
+        recovered: {},
         reversed: {},
         due: {},
         orderCount: 0,
@@ -112,6 +136,10 @@ export function summarizeCommissionEntries(entries: AgentCommissionEntry[]): Com
             addCurrencyAmount(summary.paid, entry.currency, Math.abs(entry.amount))
             addCurrencyAmount(summary.due, entry.currency, entry.amount)
         }
+        if (entry.kind === 'recovery') {
+            addCurrencyAmount(summary.recovered, entry.currency, entry.amount)
+            addCurrencyAmount(summary.due, entry.currency, entry.amount)
+        }
     }
 
     const approvedEntryIds = new Set<string>()
@@ -132,6 +160,63 @@ export function summarizeCommissionEntries(entries: AgentCommissionEntry[]): Com
 
     summary.orderCount = orderIds.size
     return summary
+}
+
+export function buildCommissionHistoryGroups(entries: AgentCommissionEntry[]): CommissionHistoryGroup[] {
+    const groups = new Map<string, CommissionHistoryGroup>()
+
+    for (const entry of entries) {
+        if (entry.isDeleted || entry.kind === 'estimate' || entry.kind === 'approval') continue
+        const currency = entry.currency.toLowerCase()
+        const reference = entry.orderId || entry.payoutReference || entry.id
+        const id = `${entry.orderId ? 'order' : 'manual'}:${reference}:${currency}`
+        const group = groups.get(id) || {
+            id,
+            orderId: entry.orderId || null,
+            payoutReference: entry.payoutReference || null,
+            currency,
+            entries: [],
+            earned: 0,
+            paid: 0,
+            recovered: 0,
+            reversed: 0,
+            outstanding: 0,
+            status: 'earned' as CommissionHistoryStatus,
+            occurredAt: entry.occurredAt,
+        }
+
+        group.entries.push(entry)
+        group.outstanding += entry.amount
+        if (entry.kind === 'accrual' || entry.kind === 'reversal' || entry.kind === 'adjustment') {
+            group.earned += entry.amount
+        }
+        if (entry.kind === 'payout') group.paid += Math.abs(entry.amount)
+        if (entry.kind === 'recovery') group.recovered += Math.abs(entry.amount)
+        if (entry.kind === 'reversal') group.reversed += Math.abs(entry.amount)
+        if (new Date(entry.occurredAt).getTime() > new Date(group.occurredAt).getTime()) {
+            group.occurredAt = entry.occurredAt
+        }
+        groups.set(id, group)
+    }
+
+    return [...groups.values()]
+        .map((group) => {
+            group.earned = Math.round(group.earned * 1_000_000) / 1_000_000
+            group.paid = Math.round(group.paid * 1_000_000) / 1_000_000
+            group.recovered = Math.round(group.recovered * 1_000_000) / 1_000_000
+            group.reversed = Math.round(group.reversed * 1_000_000) / 1_000_000
+            group.outstanding = Math.round(group.outstanding * 1_000_000) / 1_000_000
+            group.entries.sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime())
+
+            if (group.outstanding > 0.000001) group.status = 'outstanding'
+            else if (group.outstanding < -0.000001) group.status = 'recovery_due'
+            else if (group.paid > 0.000001) group.status = 'paid'
+            else if (group.recovered > 0.000001) group.status = 'recovered'
+            else if (group.reversed > 0.000001) group.status = 'reversed'
+
+            return group
+        })
+        .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime())
 }
 
 /**

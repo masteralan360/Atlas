@@ -1666,7 +1666,7 @@ export function MonthlyComparison() {
     const dividendStatuses = useDividendStatuses(workspaceId)
     const expenseItems = useLiveQuery(
         () => workspaceId
-            ? db.expense_items.where('workspaceId').equals(workspaceId).and(item => !item.isDeleted).toArray()
+            ? db.expense_items.where('workspaceId').equals(workspaceId).and(item => !item.isDeleted && !item.voidId).toArray()
             : [],
         [workspaceId]
     ) ?? []

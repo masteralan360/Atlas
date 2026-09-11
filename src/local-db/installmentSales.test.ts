@@ -85,6 +85,8 @@ function installBrowserStorage() {
     configurable: true,
     value: class DOMMatrix {},
   });
+  Object.defineProperty(globalThis, "Element", { configurable: true, value: class Element {} });
+  Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: class HTMLElement {} });
   Object.defineProperty(URL, "createObjectURL", {
     configurable: true,
     value: () => "blob:test",
@@ -621,18 +623,34 @@ describe("installment sales", () => {
       amount: 40,
     });
 
-    const reversal = await reversePaymentTransaction(
+    const partialReversal = await reversePaymentTransaction(
       WORKSPACE_ID,
       originalTransaction!.id,
-      { createdBy: "user-1" },
+      { amount: 15, createdBy: "user-1" },
     );
 
-    expect(reversal).toMatchObject({
+    expect(partialReversal).toMatchObject({
       sourceModule: "installment_sales",
       sourceSubrecordId: recorded.payment.id,
-      amount: -40,
+      amount: -15,
       reversalOfTransactionId: originalTransaction!.id,
     });
+    expect(await db.installment_sales.get(sale.id)).toMatchObject({
+      customerPaidAmount: 25,
+      customerBalanceAmount: 125,
+      status: "active",
+    });
+    expect(await db.installment_sale_installments.get(installments[0].id)).toMatchObject({
+      paidAmount: 25,
+      balanceAmount: 50,
+      status: "partial",
+    });
+
+    const remainingReversal = await reversePaymentTransaction(
+      WORKSPACE_ID,
+      originalTransaction!.id,
+      { amount: 25, createdBy: "user-1" },
+    );
     expect(await db.installment_sales.get(sale.id)).toMatchObject({
       customerPaidAmount: 0,
       customerBalanceAmount: 150,
@@ -651,11 +669,12 @@ describe("installment sales", () => {
     ).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: originalTransaction!.id, amount: 40 }),
-        expect.objectContaining({ id: reversal.id, amount: -40 }),
+        expect.objectContaining({ id: partialReversal.id, amount: -15 }),
+        expect.objectContaining({ id: remainingReversal.id, amount: -25 }),
       ]),
     );
     await expect(
-      reversePaymentTransaction(WORKSPACE_ID, reversal.id),
+      reversePaymentTransaction(WORKSPACE_ID, partialReversal.id),
     ).rejects.toThrow("Reversal entries cannot be reversed");
   });
 });

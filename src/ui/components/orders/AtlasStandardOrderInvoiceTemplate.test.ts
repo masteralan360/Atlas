@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatAtlasStandardPartnerCurrentBalance } from '@/lib/atlasStandardPartnerBalance'
+import {
+    formatAtlasStandardPartnerBalanceSnapshot,
+    formatAtlasStandardPartnerCurrentBalance
+} from '@/lib/atlasStandardPartnerBalance'
 import {
     chunkAtlasStandardTableRows,
     resolveAtlasStandardTableCapacities
@@ -16,6 +19,26 @@ describe('formatAtlasStandardPartnerCurrentBalance', () => {
 
     it('uses a placeholder when the statement has no currency ledger to show', () => {
         expect(formatAtlasStandardPartnerCurrentBalance([], 'IQD')).toBe('-')
+    })
+})
+
+describe('formatAtlasStandardPartnerBalanceSnapshot', () => {
+    it('formats immutable before and after amounts independently for each currency', () => {
+        const snapshot = {
+            version: 1 as const,
+            capturedAt: '2026-09-11T10:00:00.000Z',
+            balances: [
+                { currency: 'iqd' as const, before: -50_000, after: -45_000 },
+                { currency: 'usd' as const, before: 12.34567, after: 10 }
+            ]
+        }
+
+        expect(formatAtlasStandardPartnerBalanceSnapshot(snapshot, 'before', 'IQD')).toBe('-50,000 IQD • $12.3457')
+        expect(formatAtlasStandardPartnerBalanceSnapshot(snapshot, 'after', 'IQD')).toBe('-45,000 IQD • $10')
+    })
+
+    it('does not infer a historical balance for legacy orders without a snapshot', () => {
+        expect(formatAtlasStandardPartnerBalanceSnapshot(null, 'before', 'IQD')).toBe('-')
     })
 })
 

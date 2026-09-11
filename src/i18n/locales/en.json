@@ -788,6 +788,8 @@
     "orderNumber": "E-commerce order number",
     "orderItems": "Order Items",
     "inquiryPdf": "Inquiry PDF",
+    "generatingInquiryPdf": "Generating inquiry PDF…",
+    "inquiryPdfUnavailable": "This inquiry PDF could not be generated.",
     "erpRegistration": "Registered in ERP",
     "lastUpdated": "Last Updated",
     "collectionRecorded": "Collection recorded and the order is now marked as paid.",
@@ -1527,6 +1529,7 @@
         "orderLoanDownPaymentReceived": "Order loan down payment received",
         "paymentMade": "Payment made",
         "commissionPaid": "Commission paid",
+        "commissionRecovered": "Commission recovered",
         "commissionSettledAutomatically": "Commission settled automatically",
         "commissionEarned": "Commission earned",
         "commissionReversed": "Commission reversed",
@@ -2074,6 +2077,38 @@
     "reversing": "Reversing…",
     "confirm": "Reverse transaction"
   },
+  "paymentReversal": {
+    "transaction": "Payment transaction",
+    "reverseCollection": "Reverse Collection",
+    "reversePayment": "Reverse Payment",
+    "description": "Record a linked counter-entry without deleting the original payment.",
+    "originalTransaction": "Original transaction",
+    "remainingValue": "{{amount}} remaining",
+    "alreadyReversed": "Already reversed: {{amount}}",
+    "originalCashEffect": "Original cash effect",
+    "reversalCashEffect": "Reversal cash effect",
+    "cashReceived": "Cash received",
+    "cashPaid": "Cash paid",
+    "cashReturned": "Cash returned",
+    "cashRestored": "Cash restored",
+    "amount": "Reversal amount",
+    "partialAllowed": "You may reverse part or all of the remaining payment.",
+    "fullOnly": "This source supports full remaining reversal only.",
+    "amountExceedsRemaining": "Amount cannot exceed the remaining payment.",
+    "dateTime": "Reversal date and time",
+    "paymentMethod": "Payment method",
+    "paymentAccount": "Payment Account (optional)",
+    "originalAccount": "Original transaction account: {{account}}",
+    "sameAccountEffect": "The counter-entry will return the cash effect to the original account.",
+    "differentAccountEffect": "The reversal will affect the newly selected account; the original account movement remains unchanged.",
+    "unavailableOriginalAccount": "The original account is no longer active. Select another account or choose ledger only.",
+    "reason": "Reversal reason",
+    "reasonPlaceholder": "Explain why this payment is being reversed",
+    "ledgerNotice": "The Ledger will keep both entries on their actual dates and link this reversal to the original payment.",
+    "noPostedPayment": "No posted payment was found.",
+    "reversing": "Reversing…",
+    "confirm": "Record Reversal"
+  },
   "settlementModal": {
     "recordCollection": "Record Collection",
     "recordPayment": "Record Payment",
@@ -2210,6 +2245,7 @@
       "directTransaction": "Direct Transaction",
       "clinicalAppointment": "Appointment",
       "agentCommissionPayout": "Agent Commission Payout",
+      "agentCommissionRecovery": "Agent Commission Recovery",
       "activityTransaction": "Activity Transaction",
       "activityRefund": "Activity Refund",
       "deliveryCourierRemittance": "Courier Remittance",
@@ -2240,6 +2276,11 @@
     "viewSummary": "Ledger View Summary",
     "activeEntries": "active entries",
     "summaryDescription": "Use the page date range with the general filter modal to refine direction, type, module, party, method, amount range, and sorting.",
+    "summaryMetrics": "Summary metrics",
+    "summaryModes": {
+      "cashActivity": "Cash activity",
+      "legacyFlow": "Inflow / Outflow"
+    },
     "incoming": "Incoming",
     "outgoing": "Outgoing",
     "netFlow": "Net Flow",
@@ -2482,7 +2523,9 @@
       "in": "IN",
       "out": "OUT",
       "open": "OPEN",
-      "adjust": "ADJ"
+      "adjust": "ADJ",
+      "cashRestored": "CASH RESTORED",
+      "cashReturned": "CASH RETURNED"
     },
     "directionFilter": {
       "incoming": "Inflow",
@@ -2536,6 +2579,7 @@
       "directInflow": "Direct Inflow",
       "directOutflow": "Direct Outflow",
       "agentCommissionPayout": "Agent Commission Payout",
+      "agentCommissionRecovery": "Agent Commission Recovery",
       "activityTransaction": "Activity Transaction",
       "activityRefund": "Activity Refund",
       "deliveryCourierRemittance": "Courier Remittance",
@@ -2601,14 +2645,51 @@
       "repayment": "Repayment",
       "settlement": "Settlement",
       "linked": "Linked",
-      "hoverHint": "Related ledger rows on this page highlight together and reveal the linked hierarchy while you hover."
+      "hoverHint": "Directly related ledger rows on this page highlight together while you hover."
+    },
+    "context": {
+      "openMenu": "Open entry menu",
+      "openSource": "Open source record",
+      "viewPaymentHistory": "View payment activity",
+      "scrollToLatest": "Latest related payment",
+      "scrollToNext": "Next related payment",
+      "scrollToPrevious": "Previous related payment",
+      "scrollToFirst": "First related payment",
+      "viewRealEstateContract": "View Real Estate Contract",
+      "viewBusinessPartner": "View Business Partner"
+    },
+    "settlement": {
+      "finalAllDates": "Final settlement · all dates",
+      "relatedTotal": "Related total",
+      "unavailable": "Unavailable",
+      "reversalMovement": "Reversal",
+      "linkedOutsidePeriod": "Linked movement outside period",
+      "historyTitle": "Payment activity",
+      "historyDescription": "All recorded cash movements for {{reference}}, shown in chronological order.",
+      "sourceCashNet": "Source cash net · all dates",
+      "sourceStatus": "Current source status",
+      "sourceStatusUnavailable": "Open the source record",
+      "chronology": "Recorded chronology",
+      "selected": "Selected",
+      "outsideDateRange": "Outside the selected date range",
+      "outsideFilters": "Hidden by the current Ledger filters",
+      "goToMovement": "Go to movement",
+      "accountingNote": "Final settlement nets every posted cash movement in a legitimate Ledger relation, with each reversal chain counted once. Unrelated movements remain standalone, and currencies are never mixed.",
+      "status": {
+        "posted": "Posted",
+        "partially_reversed": "Partially reversed",
+        "fully_reversed": "Fully reversed",
+        "inconsistent": "Needs review",
+        "relationship_missing": "Relationship unavailable",
+        "not_applicable": "Not cash flow"
+      }
     },
     "table": {
       "title": "Ledger Entries",
       "transactionId": "Transaction ID",
       "date": "Date",
       "type": "Type",
-      "direction": "Direction",
+      "direction": "Cash Effect",
       "amount": "Amount",
       "sourceModule": "Source Module",
       "referenceId": "Reference ID",
@@ -2708,7 +2789,11 @@
       "nativeAtlasStandardTemplate": "Orders Atlas Standard",
       "nativeAtlasStandardTemplateDescription": "Use the built-in Orders Atlas Standard order invoice A4 layout.",
       "nativeAtlasStandardReturnTemplate": "Orders Atlas Standard Return",
-      "nativeAtlasStandardReturnTemplateDescription": "Print only the returned items and their refunded amounts."
+      "nativeAtlasStandardReturnTemplateDescription": "Print only the returned items and their refunded amounts.",
+      "partnerBalanceSnapshot": "Partner balances",
+      "partnerBalanceBefore": "Partner's Balance Before Order",
+      "partnerBalanceAfter": "Partner's Balance After Order",
+      "partnerBalanceCurrent": "Partner's Current Balance"
     },
     "table": {
       "orderNumber": "Order #",
@@ -4758,6 +4843,11 @@
     "totalDue": "Total Due",
     "planned": "Planned",
     "summary": "Loan Summary",
+    "summaryMetrics": "Summary metrics",
+    "summaryModes": {
+      "principalPaid": "Principal & Paid",
+      "lentBorrowed": "Lent & Borrowed"
+    },
     "principalOnly": "Principal Only",
     "totalPrincipal": "Total Principal",
     "totalPaid": "Total Paid",
@@ -5783,9 +5873,9 @@
     "deleteAllMonths": "All months",
     "deleteAllMonthsDescription": "Remove the expense and every monthly occurrence.",
     "deleteThisMonthConfirmTitle": "Delete expense from this month?",
-    "deleteThisMonthWarning": "Only the selected month will be removed. Other recurring months will remain.",
+    "deleteThisMonthWarning": "Only the selected month will be removed. Other recurring months will remain. Any posted payment history stays in Payments → Transactions until it is reversed or voided there.",
     "deleteAllMonthsConfirmTitle": "Delete expense from all months?",
-    "deleteAllMonthsWarning": "This removes the expense and all of its monthly occurrences. This action cannot be undone.",
+    "deleteAllMonthsWarning": "This removes the expense and all of its monthly occurrences. Any posted payment history stays in Payments → Transactions until it is reversed or voided there.",
     "holdToDelete": "Hold to delete",
     "form": {
       "detailsTitle": "Expense details",
@@ -8108,8 +8198,18 @@
     "notEnabled": "Agent Sales Accounts is not enabled for this workspace.",
     "unavailable": "The selected agent does not have an active sales account."
   },
-  "salesAgentCommissions": {
+    "salesAgentCommissions": {
     "title": "Sales Agent Commissions",
+    "manualSettlementDescription": "Commission is paid or recovered only through a recorded payment.",
+    "totalOrderValue": "Total order value",
+    "netEarned": "Net earned",
+    "outstanding": "Outstanding",
+    "payCommission": "Pay commission",
+    "collectRecovery": "Collect recovery",
+    "payCommissionOnSave": "Pay commission on save",
+    "payCommissionOnSaveDescription": "After saving, record each due commission payment. Customer payment is not required.",
+    "paymentRecorded": "Commission payment recorded",
+    "recoveryRecorded": "Commission recovery recorded",
     "salesAccountBeneficiary": "Sales account beneficiary",
     "overviewDescription": "Workspace-wide assignment and commission pipeline. Currency totals remain separate.",
     "overviewEmpty": "Configure plans and assign sales orders to start the commission dashboard.",
@@ -8219,6 +8319,7 @@
     "paid": "Paid",
     "paidReversed": "Paid / reversed",
     "reversed": "Reversed",
+    "recovered": "Recovered",
     "due": "Due",
     "dueAmount": "Due: {{amount}}",
     "estimated": "Estimated",
@@ -8292,10 +8393,11 @@
     "view": "View",
     "entriesEmpty": "Commission entries will appear as assigned orders move through their lifecycle.",
     "manageAgentCommission": "Manage {{name}}'s commission",
-    "settlementDescription": "Review approvals and corrections. Eligible commission is automatically settled when its sales order is fully paid.",
+    "settlementDescription": "Review earned commission, payments, and recoveries. Commission is settled only when a user records the payment.",
     "reviewAgentCommission": "Review {{name}}'s commission",
-    "reviewDescription": "Commission is settled automatically when its completed sales order is fully paid. This view is read-only.",
+    "reviewDescription": "Each order is shown as one final commission result.",
     "commissionHistory": "Commission history",
+    "recoveryDue": "Recovery due",
     "close": "Close",
     "approve": "Approve",
     "approveCount": "Approve {{count}}",
@@ -8343,6 +8445,13 @@
       "orderBreakdown": "Product commission breakdown",
       "previewTitle": "Product commission preview",
       "previewHint": "Estimated from the current order. Final historical terms are locked when the order is completed.",
+      "paymentStatusUnpaid": "Unpaid",
+      "paymentStatusPartial": "Partially paid",
+      "paymentStatusPaid": "Paid",
+      "paymentStatusRecoveryDue": "Recovery due",
+      "paymentStatusRecovered": "Recovered",
+      "paidAmount": "Paid",
+      "remainingAmount": "Remaining",
       "previewRecipients_one": "{{count}} eligible agent",
       "previewRecipients_other": "{{count}} eligible agents",
       "percentage": "Commission percentage",
@@ -8448,6 +8557,7 @@
       }
     },
     "selectorLabel": "Payment Account (optional)",
+    "originalTransactionAccount": "Original",
     "selectorLoading": "Loading payment account selection",
     "balancesLoading": "Loading posted balances",
     "noAccount": "No account — ledger only",
@@ -8809,6 +8919,7 @@
     "movementStatusLabel": "Status",
     "movementStatus": {
       "posted": "Posted",
+      "reversal": "Reversal",
       "partiallyReversed": "Partially reversed",
       "reversed": "Reversed",
       "reversedAmount": "{{amount}} reversed"
@@ -8956,6 +9067,47 @@
       "zaincash": "ZainCash",
       "fastpay": "FastPay"
     }
+  },
+  "financialVoid": {
+    "action": "Void as entered in error",
+    "title": "Void transaction entered in error",
+    "description": "Remove the selected invalid payment chain from ordinary calculations without deleting the audit evidence.",
+    "transactionEnteredInError": "Transaction correction",
+    "paymentEntries": "{{count}} linked payment entries",
+    "originalEntry": "Original entry",
+    "reversalEntry": "Reversal entry",
+    "affectedMonths": "Affected reporting months: {{months}}",
+    "classificationLabel": "What happened",
+    "classification": {
+      "noMoneyMoved": {
+        "title": "No real money moved",
+        "description": "The transaction and any reversal were bookkeeping mistakes from the beginning. This is the only case that can be voided."
+      },
+      "moneyMoved": {
+        "title": "Money moved and was returned",
+        "description": "Keep the payment and refund in the cash history; use the existing reversal workflow."
+      },
+      "validCancelled": {
+        "title": "The transaction was valid, then cancelled",
+        "description": "Keep both dates in the ledger because the cancellation was a real later event."
+      }
+    },
+    "useReversal": "This is a real cash event. Keep the original and reversal so account and period reports remain truthful.",
+    "keepReversal": "This is a valid transaction followed by a later cancellation. Use or keep the linked reversal instead of voiding it.",
+    "reason": "Correction reason",
+    "reasonPlaceholder": "Explain why this transaction was invalid from the beginning",
+    "reasonHint": "Enter at least 10 characters. The reason is stored permanently in the administrator audit.",
+    "auditWarning": "This action is irreversible. The selected payment chain disappears from ordinary views and totals, but an immutable administrator audit is retained.",
+    "processing": "Voiding...",
+    "confirm": "Void transaction chain",
+    "success": "The invalid transaction chain no longer affects reports or account balances.",
+    "failed": "Unable to void this transaction.",
+    "auditTitle": "Voided transactions",
+    "auditDescription": "Administrator-only history. These entries have zero effect on all totals.",
+    "noAudits": "No financial transactions have been voided.",
+    "actorAndDate": "Voided by {{actor}} on {{date}}",
+    "zeroEffect": "VOIDED · ZERO EFFECT",
+    "sourceUnavailable": "Source record already deleted"
   },
   "installmentSales": {
     "title": "Installment Sales",

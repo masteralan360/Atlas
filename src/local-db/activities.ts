@@ -5,6 +5,7 @@ import { generateId, toSnakeCase } from '@/lib/utils'
 import { isOnline } from '@/lib/network'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
+import { getPaymentTransactionReversalState } from '@/lib/paymentReversals'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
@@ -523,7 +524,14 @@ export async function reverseActivityTransaction(
     transactionId: string,
     status: Extract<ActivityTransactionStatus, 'cancelled' | 'refunded'>,
     createdBy?: string | null,
-    selection: { accountId?: string | null; accountNameSnapshot?: string | null } = {}
+    selection: {
+        accountId?: string | null
+        accountNameSnapshot?: string | null
+        paidAt?: string
+        note?: string
+        amount?: number
+        paymentMethod?: PaymentTransaction['paymentMethod']
+    } = {}
 ) {
     const transaction = await db.activity_transactions.get(transactionId)
     if (!transaction || transaction.workspaceId !== workspaceId || transaction.isDeleted || transaction.status !== 'completed') {
@@ -536,6 +544,24 @@ export async function reverseActivityTransaction(
         .equals([workspaceId, 'activity_transaction', transactionId])
         .and((payment) => !payment.isDeleted && !payment.reversalOfTransactionId)
         .first()
+    const relatedPayments = originalPayment
+        ? await db.payment_transactions.where('workspaceId').equals(workspaceId).toArray()
+        : []
+    const reversalState = originalPayment
+        ? getPaymentTransactionReversalState(originalPayment, relatedPayments)
+        : null
+    const reversalAmount = Number(selection.amount ?? reversalState?.remainingAmount ?? 0)
+    if (reversalState?.status === 'fully_reversed') {
+        throw new Error('This payment has already been fully reversed')
+    }
+    if (
+        originalPayment
+        && (!Number.isFinite(reversalAmount)
+            || reversalAmount <= 0.000001
+            || Math.abs(reversalAmount - (reversalState?.remainingAmount ?? 0)) > 0.000001)
+    ) {
+        throw new Error('Activity payments can only be reversed for their full remaining amount')
+    }
     const now = new Date().toISOString()
     const updated: ActivityTransaction = {
         ...transaction,
@@ -557,13 +583,13 @@ export async function reverseActivityTransaction(
             sourceRecordId: transaction.id,
             sourceSubrecordId: originalPayment.id,
             direction: 'outgoing',
-            amount: transaction.totalAmount,
+            amount: reversalAmount,
             currency: transaction.currency,
-            paymentMethod: transaction.paymentMethod,
-            paidAt: now,
+            paymentMethod: selection.paymentMethod ?? transaction.paymentMethod,
+            paidAt: selection.paidAt ? new Date(selection.paidAt).toISOString() : now,
             counterpartyName: transaction.customerName || null,
             referenceLabel: `${transaction.transactionNo} / ${status === 'cancelled' ? 'Cancellation' : 'Refund'}`,
-            note: transaction.name,
+            note: normalizeOptionalText(selection.note) || transaction.name,
             createdBy: createdBy ?? transaction.createdBy ?? null,
             accountId: selection.accountId === undefined ? originalPayment.accountId ?? null : selection.accountId,
             accountNameSnapshot: selection.accountNameSnapshot === undefined

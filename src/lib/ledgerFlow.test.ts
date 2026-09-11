@@ -25,6 +25,13 @@ describe('ledger flow reporting', () => {
     ])).toEqual({ inflow: 250, outflow: 75, net: 175 })
   })
 
+  it('preserves the legacy inflow, outflow, and net-flow equation', () => {
+    expect(summarizeLedgerCashFlow([
+      { direction: 'incoming' as const, amount: 100 },
+      { direction: 'outgoing' as const, amount: 50 },
+    ])).toEqual({ inflow: 100, outflow: 50, net: 50 })
+  })
+
   it('keeps decimal cash-flow totals stable and reports zero for opening-only records', () => {
     expect(summarizeLedgerCashFlow([
       { direction: 'incoming' as const, amount: 0.1 },

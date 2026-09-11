@@ -22,6 +22,14 @@ function installBrowserEnvironment() {
     configurable: true,
     value: class DOMMatrix {},
   });
+  Object.defineProperty(globalThis, "Element", {
+    configurable: true,
+    value: class Element {},
+  });
+  Object.defineProperty(globalThis, "HTMLElement", {
+    configurable: true,
+    value: class HTMLElement extends (globalThis.Element as typeof Element) {},
+  });
   const rows = new Map<string, string>();
   const storage = {
     get length() { return rows.size; },
@@ -537,6 +545,10 @@ describe("sales agent commission lifecycle", () => {
       .where("assignmentId").equals(assignment!.id)
       .and((entry) => entry.kind === "accrual")
       .first();
+    const initialAggregateEntries = await db.agent_commission_entries
+      .where("assignmentId").equals(assignment!.id)
+      .and((entry) => !entry.isDeleted)
+      .toArray();
     const productAccrual = await db.agent_product_commission_entries
       .where("assignmentId").equals(assignment!.id)
       .and((entry) => entry.kind === "accrual")
@@ -545,6 +557,9 @@ describe("sales agent commission lifecycle", () => {
     // The 10% plan applies to the ordinary $300 line only; the configured
     // product earns $7 × 2 instead of another share of that plan.
     expect(accrual).toMatchObject({ planCommissionAmount: 30, productCommissionAmount: 14, amount: 44 });
+    expect(initialAggregateEntries).toEqual([
+      expect.objectContaining({ kind: "accrual", amount: 44 }),
+    ]);
     expect(productAccrual).toMatchObject({ quantity: 2, commissionPerUnit: 7, amount: 14 });
 
     const returnedAt = new Date().toISOString();
@@ -575,6 +590,234 @@ describe("sales agent commission lifecycle", () => {
       expect.objectContaining({ kind: "reversal", quantity: -1, commissionPerUnit: 7, amount: -7, orderReturnId: orderReturn.id }),
     ]));
     expect(recognizedProductCommission).toBe(7);
+  });
+
+  it("keeps a paid product commission return-linked through one reversal and makes the excess recoverable", async () => {
+    const productCommissions = await import("./productCommissions");
+    const agent = fieldAgent(crypto.randomUUID());
+    const order = completedOrder(crypto.randomUUID());
+    order.items = [{
+      ...order.items[0], id: "paid-product-return-line", quantity: 2,
+      convertedUnitPrice: 100, lineTotal: 200,
+    }];
+    order.subtotal = 200;
+    order.total = 200;
+    order.paidAmount = 200;
+    await db.agents.put(agent);
+    await db.business_partners.put({
+      id: agent.businessPartnerId,
+      workspaceId: WORKSPACE_ID,
+      partnerName: "Commission agent",
+      isDeleted: false,
+    } as any);
+    await db.sales_orders.put(order);
+    await productCommissions.replaceProductCommissionRule(WORKSPACE_ID, order.items[0].productId, {
+      commissionType: "fixed_amount",
+      fixedAmount: 7,
+      fixedCurrency: "usd",
+      recipientScope: "all_assigned",
+    });
+
+    const assignment = await commissions.assignSalesOrderAgent(WORKSPACE_ID, {
+      orderId: order.id,
+      agentId: agent.id,
+    });
+    if (!assignment) throw new Error("Expected a sales-agent assignment");
+    await commissions.recordAgentCommissionPayout(WORKSPACE_ID, {
+      agentId: agent.id,
+      assignmentId: assignment.id,
+      orderId: order.id,
+      amount: 14,
+      currency: "usd",
+      paymentMethod: "cash",
+    });
+
+    const returnedAt = new Date().toISOString();
+    const orderReturn: OrderReturn = {
+      id: crypto.randomUUID(), workspaceId: WORKSPACE_ID, orderId: order.id,
+      reason: "Partial return", status: "posted", refundAmount: 100,
+      returnedAt, createdAt: returnedAt, updatedAt: returnedAt,
+      syncStatus: "synced", lastSyncedAt: returnedAt, version: 1, isDeleted: false,
+    };
+    await db.sales_orders.put({
+      ...order,
+      items: [{ ...order.items[0], returnedQuantity: 1 }],
+      subtotal: 100,
+      total: 100,
+      returnedAmount: 100,
+      returnStatus: "partial",
+      updatedAt: returnedAt,
+      version: 2,
+    });
+    await db.order_returns.put(orderReturn);
+
+    const reversals = await commissions.reverseCommissionForOrderReturn(WORKSPACE_ID, orderReturn.id);
+    expect(reversals).toEqual([expect.objectContaining({
+      kind: "reversal",
+      status: "reversed",
+      amount: -7,
+      orderReturnId: orderReturn.id,
+    })]);
+
+    const outstanding = (await db.agent_commission_entries
+      .where("assignmentId").equals(assignment.id)
+      .and((entry) => !entry.isDeleted && entry.kind !== "estimate" && entry.kind !== "approval")
+      .toArray())
+      .reduce((sum, entry) => sum + entry.amount, 0);
+    expect(outstanding).toBe(-7);
+
+    const recovery = await commissions.recordAgentCommissionRecovery(WORKSPACE_ID, {
+      agentId: agent.id,
+      assignmentId: assignment.id,
+      orderId: order.id,
+      amount: 7,
+      currency: "usd",
+      paymentMethod: "cash",
+    });
+    expect(recovery).toMatchObject({ kind: "recovery", amount: 7 });
+    if (!recovery) throw new Error("Expected a commission recovery entry");
+    const recoveryPayment = await db.payment_transactions
+      .where("[workspaceId+sourceType+sourceRecordId]")
+      .equals([WORKSPACE_ID, "agent_commission_recovery", agent.id])
+      .first();
+    expect(recoveryPayment).toMatchObject({
+      direction: "incoming",
+      amount: 7,
+      sourceSubrecordId: recovery.id,
+    });
+  });
+
+  it("recovers only the amount paid when a 75,000 IQD product order is fully returned", async () => {
+    const productCommissions = await import("./productCommissions");
+    const agent = fieldAgent(crypto.randomUUID());
+    const order = completedOrder(crypto.randomUUID());
+    const productCommissionId = order.items[0].productId;
+    const ordinaryProductId = crypto.randomUUID();
+    order.currency = "iqd";
+    order.items = [
+      {
+        ...order.items[0],
+        id: "full-return-product-line",
+        productId: productCommissionId,
+        quantity: 1,
+        lineTotal: 25_000,
+        originalCurrency: "iqd",
+        originalUnitPrice: 25_000,
+        convertedUnitPrice: 25_000,
+        settlementCurrency: "iqd",
+      },
+      {
+        ...order.items[0],
+        id: "full-return-ordinary-line",
+        productId: ordinaryProductId,
+        quantity: 1,
+        lineTotal: 50_000,
+        originalCurrency: "iqd",
+        originalUnitPrice: 50_000,
+        convertedUnitPrice: 50_000,
+        settlementCurrency: "iqd",
+      },
+    ];
+    order.subtotal = 75_000;
+    order.total = 75_000;
+    order.paidAmount = 75_000;
+    await db.agents.put(agent);
+    await db.business_partners.put({
+      id: agent.businessPartnerId,
+      workspaceId: WORKSPACE_ID,
+      partnerName: "Commission agent",
+      isDeleted: false,
+    } as any);
+    await db.sales_orders.put(order);
+    const plan = await commissions.createAgentCommissionPlan(WORKSPACE_ID, {
+      name: "Full return plan component",
+      level: "full-return-plan-component",
+      ratePercent: 50,
+      calculationBasis: "net_revenue",
+    });
+    await commissions.setAgentCommissionMembership(WORKSPACE_ID, { agentId: agent.id, planId: plan.id });
+    await productCommissions.replaceProductCommissionRule(WORKSPACE_ID, productCommissionId, {
+      commissionType: "fixed_amount",
+      fixedAmount: 25_000,
+      fixedCurrency: "iqd",
+      recipientScope: "all_assigned",
+    });
+
+    const assignment = await commissions.assignSalesOrderAgent(WORKSPACE_ID, {
+      orderId: order.id,
+      agentId: agent.id,
+    });
+    if (!assignment) throw new Error("Expected a sales-agent assignment");
+    const accrual = await db.agent_commission_entries
+      .where("assignmentId").equals(assignment.id)
+      .and((entry) => !entry.isDeleted && entry.kind === "accrual")
+      .first();
+    expect(accrual).toMatchObject({
+      planCommissionAmount: 25_000,
+      productCommissionAmount: 25_000,
+      amount: 50_000,
+    });
+    await commissions.recordAgentCommissionPayout(WORKSPACE_ID, {
+      agentId: agent.id,
+      assignmentId: assignment.id,
+      orderId: order.id,
+      amount: 25_000,
+      currency: "iqd",
+      paymentMethod: "cash",
+    });
+
+    const returnedAt = new Date().toISOString();
+    const orderReturn: OrderReturn = {
+      id: crypto.randomUUID(), workspaceId: WORKSPACE_ID, orderId: order.id,
+      reason: "Full return", status: "posted", refundAmount: 75_000,
+      returnedAt, createdAt: returnedAt, updatedAt: returnedAt,
+      syncStatus: "synced", lastSyncedAt: returnedAt, version: 1, isDeleted: false,
+    };
+    await db.sales_orders.put({
+      ...order,
+      items: order.items.map((item) => ({ ...item, returnedQuantity: 1 })),
+      subtotal: 0,
+      total: 0,
+      returnedAmount: 75_000,
+      returnStatus: "full",
+      updatedAt: returnedAt,
+      version: 2,
+    });
+    await db.order_returns.put(orderReturn);
+
+    const reversals = await commissions.reverseCommissionForOrderReturn(WORKSPACE_ID, orderReturn.id);
+    expect(reversals).toEqual([expect.objectContaining({
+      kind: "reversal",
+      status: "reversed",
+      amount: -50_000,
+      orderReturnId: orderReturn.id,
+    })]);
+
+    const outstanding = (await db.agent_commission_entries
+      .where("assignmentId").equals(assignment.id)
+      .and((entry) => !entry.isDeleted && entry.kind !== "estimate" && entry.kind !== "approval")
+      .toArray())
+      .reduce((sum, entry) => sum + entry.amount, 0);
+    expect(outstanding).toBe(-25_000);
+
+    await expect(commissions.recordAgentCommissionRecovery(WORKSPACE_ID, {
+      agentId: agent.id,
+      assignmentId: assignment.id,
+      orderId: order.id,
+      amount: 25_001,
+      currency: "iqd",
+      paymentMethod: "cash",
+    })).rejects.toThrow("cannot exceed");
+
+    const recovery = await commissions.recordAgentCommissionRecovery(WORKSPACE_ID, {
+      agentId: agent.id,
+      assignmentId: assignment.id,
+      orderId: order.id,
+      amount: 25_000,
+      currency: "iqd",
+      paymentMethod: "cash",
+    });
+    expect(recovery).toMatchObject({ kind: "recovery", amount: 25_000 });
   });
 
   it("creates a payable product-only percentage commission using a rounded per-unit snapshot", async () => {
@@ -619,7 +862,7 @@ describe("sales agent commission lifecycle", () => {
     });
   });
 
-  it("automatically credits an all-assigned product commission to the linked staff creator only", async () => {
+  it("keeps an all-assigned product commission outstanding for the linked staff creator", async () => {
     const productCommissions = await import("./productCommissions");
     const order = completedOrder(crypto.randomUUID());
     const creatorAgent = {
@@ -699,7 +942,7 @@ describe("sales agent commission lifecycle", () => {
       .where("assignmentId").equals(assignments[0].id)
       .and((entry) => entry.kind === "payout")
       .first();
-    expect(payout).toMatchObject({ amount: -14, status: "paid" });
+    expect(payout).toBeUndefined();
   });
 
   it("credits a selected-assigned product rule to its linked staff creator with per-unit rounding", async () => {
@@ -909,7 +1152,7 @@ describe("sales agent commission lifecycle", () => {
     })).toMatchObject({ revenueAmount: 1010, commissionAmount: 101 });
   });
 
-  it("automatically settles earned commission once the completed order is paid", async () => {
+  it("keeps earned commission outstanding until a user records its payment", async () => {
     const agent = fieldAgent(crypto.randomUUID());
     const order = completedOrder(crypto.randomUUID());
     await db.agents.put(agent);
@@ -933,16 +1176,9 @@ describe("sales agent commission lifecycle", () => {
     expect(assignment).not.toBeNull();
 
     const initialEntries = await db.agent_commission_entries.where("orderId").equals(order.id).toArray();
-    expect(initialEntries).toEqual(expect.arrayContaining([
+    expect(initialEntries).toEqual([
       expect.objectContaining({ kind: "accrual", status: "earned", amount: 40 }),
-      expect.objectContaining({
-        kind: "payout",
-        status: "paid",
-        amount: -40,
-        payoutReference: order.orderNumber,
-        settlementSource: "automatic",
-      }),
-    ]));
+    ]);
 
     const returnedAt = new Date().toISOString();
     const updatedOrder: SalesOrder = {
@@ -982,31 +1218,139 @@ describe("sales agent commission lifecycle", () => {
     ]);
 
     const allEntries = await db.agent_commission_entries.where("agentId").equals(agent.id).toArray();
-    expect(allEntries.filter((entry) => entry.kind === "payout")).toHaveLength(1);
+    expect(allEntries.filter((entry) => entry.kind === "payout")).toHaveLength(0);
     const outstanding = allEntries
       .filter((entry) => entry.kind !== "approval" && entry.kind !== "estimate")
       .reduce((sum, entry) => sum + entry.amount, 0);
-    expect(outstanding).toBe(-20);
+    expect(outstanding).toBe(20);
 
     const payoutTransactions = await db.payment_transactions
       .where("[workspaceId+sourceType+sourceRecordId]")
       .equals([WORKSPACE_ID, "agent_commission_payout", agent.id])
       .toArray();
-    expect(payoutTransactions).toEqual([
-      expect.objectContaining({
-        sourceModule: "orders",
-        sourceType: "agent_commission_payout",
-        sourceRecordId: agent.id,
-        direction: "outgoing",
-        amount: 40,
-        currency: "usd",
-        paymentMethod: "unknown",
-        metadata: expect.objectContaining({ automaticSettlement: true }),
-      }),
-    ]);
+    expect(payoutTransactions).toEqual([]);
   });
 
-  it("funds automatic commission payouts from the order payment account", async () => {
+  it("allows a manual commission payment before the customer order is paid", async () => {
+    const agent = fieldAgent(crypto.randomUUID());
+    const order = {
+      ...completedOrder(crypto.randomUUID()),
+      status: 'draft' as const,
+      isPaid: false,
+      paymentStatus: 'unpaid' as const,
+      paidAmount: 0,
+      balanceAmount: 1_000,
+      paidAt: null,
+    };
+    await db.agents.put(agent);
+    await db.business_partners.put({
+      id: agent.businessPartnerId,
+      workspaceId: WORKSPACE_ID,
+      partnerName: 'Commission agent',
+      isDeleted: false,
+    } as any);
+    await db.sales_orders.put(order);
+    const { savePaymentAccount } = await import('./paymentAccounts');
+    const { appendPaymentTransaction } = await import('./payments');
+    const paymentAccount = await savePaymentAccount(WORKSPACE_ID, {
+      name: 'Commission till',
+      accountType: 'cash_drawer',
+      createdBy: order.createdBy,
+    });
+    await appendPaymentTransaction(WORKSPACE_ID, {
+      sourceModule: 'payments',
+      sourceType: 'direct_transaction',
+      sourceRecordId: crypto.randomUUID(),
+      direction: 'incoming',
+      amount: 40,
+      currency: 'usd',
+      paymentMethod: 'cash',
+      paidAt: order.createdAt,
+      counterpartyName: null,
+      referenceLabel: 'Commission float',
+      createdBy: order.createdBy,
+      accountId: paymentAccount.id,
+      accountNameSnapshot: paymentAccount.name,
+    });
+    const plan = await commissions.createAgentCommissionPlan(WORKSPACE_ID, {
+      name: 'Manual payment level', level: 'manual-payment-level', ratePercent: 10,
+    });
+    await commissions.setAgentCommissionMembership(WORKSPACE_ID, { agentId: agent.id, planId: plan.id });
+    const assignment = await commissions.assignSalesOrderAgent(WORKSPACE_ID, { orderId: order.id, agentId: agent.id });
+    if (!assignment) throw new Error('Expected a sales-agent assignment');
+
+    await expect(commissions.recordAgentCommissionPayout(WORKSPACE_ID, {
+      agentId: agent.id, assignmentId: assignment.id, orderId: order.id, amount: 41,
+      currency: 'usd', paymentMethod: 'cash',
+    })).rejects.toThrow('cannot exceed');
+    const payout = await commissions.recordAgentCommissionPayout(WORKSPACE_ID, {
+      agentId: agent.id, assignmentId: assignment.id, orderId: order.id, amount: 40,
+      currency: 'usd', paymentMethod: 'cash', accountId: paymentAccount.id, accountNameSnapshot: paymentAccount.name,
+    });
+    expect(payout).toMatchObject({ kind: 'payout', amount: -40, settlementSource: 'manual' });
+    if (!payout) throw new Error('Expected a commission payout entry');
+    const payment = await db.payment_transactions
+      .where('[workspaceId+sourceType+sourceRecordId]')
+      .equals([WORKSPACE_ID, 'agent_commission_payout', agent.id])
+      .first();
+    expect(payment).toMatchObject({
+      direction: 'outgoing',
+      amount: 40,
+      sourceSubrecordId: payout.id,
+      accountId: paymentAccount.id,
+      accountNameSnapshot: paymentAccount.name,
+    });
+    const accountBalance = await db.payment_account_balances
+      .where('[accountId+currency]')
+      .equals([paymentAccount.id, 'usd'])
+      .first();
+    expect(accountBalance?.balanceAmount).toBe(0);
+  });
+
+  it("records an incoming recovery when a paid commission is later reversed", async () => {
+    const agent = fieldAgent(crypto.randomUUID());
+    const order = completedOrder(crypto.randomUUID());
+    await db.agents.put(agent);
+    await db.business_partners.put({ id: agent.businessPartnerId, workspaceId: WORKSPACE_ID, partnerName: 'Commission agent', isDeleted: false } as any);
+    await db.sales_orders.put(order);
+    const plan = await commissions.createAgentCommissionPlan(WORKSPACE_ID, {
+      name: 'Recovery level', level: 'recovery-level', ratePercent: 10,
+    });
+    await commissions.setAgentCommissionMembership(WORKSPACE_ID, { agentId: agent.id, planId: plan.id });
+    const assignment = await commissions.assignSalesOrderAgent(WORKSPACE_ID, { orderId: order.id, agentId: agent.id });
+    if (!assignment) throw new Error('Expected a sales-agent assignment');
+    await commissions.recordAgentCommissionPayout(WORKSPACE_ID, {
+      agentId: agent.id, assignmentId: assignment.id, orderId: order.id, amount: 40, currency: 'usd', paymentMethod: 'cash',
+    });
+    const returnedAt = new Date().toISOString();
+    await db.sales_orders.put({
+      ...order, items: [{ ...order.items[0], returnedQuantity: 5 }], returnStatus: 'partial', total: 500,
+      subtotal: 500, returnedAmount: 500, updatedAt: returnedAt, version: 2,
+    });
+    const orderReturn: OrderReturn = {
+      id: crypto.randomUUID(), workspaceId: WORKSPACE_ID, orderId: order.id, reason: 'Customer return', status: 'posted',
+      refundAmount: 500, returnedBy: null, returnedAt, createdAt: returnedAt, updatedAt: returnedAt,
+      syncStatus: 'synced', lastSyncedAt: returnedAt, version: 1, isDeleted: false,
+    };
+    await db.order_returns.put(orderReturn);
+    await commissions.reverseCommissionForOrderReturn(WORKSPACE_ID, orderReturn.id);
+
+    await expect(commissions.recordAgentCommissionRecovery(WORKSPACE_ID, {
+      agentId: agent.id, assignmentId: assignment.id, orderId: order.id, amount: 21, currency: 'usd', paymentMethod: 'cash',
+    })).rejects.toThrow('cannot exceed');
+    const recovery = await commissions.recordAgentCommissionRecovery(WORKSPACE_ID, {
+      agentId: agent.id, assignmentId: assignment.id, orderId: order.id, amount: 20, currency: 'usd', paymentMethod: 'cash',
+    });
+    expect(recovery).toMatchObject({ kind: 'recovery', amount: 20, settlementSource: 'manual' });
+    if (!recovery) throw new Error('Expected a commission recovery entry');
+    const payment = await db.payment_transactions
+      .where('[workspaceId+sourceType+sourceRecordId]')
+      .equals([WORKSPACE_ID, 'agent_commission_recovery', agent.id])
+      .first();
+    expect(payment).toMatchObject({ direction: 'incoming', amount: 20, sourceSubrecordId: recovery.id });
+  });
+
+  it("does not spend the customer order receipt without a manual commission payment", async () => {
     const agent = fieldAgent(crypto.randomUUID());
     const order = completedOrder(crypto.randomUUID());
     const { savePaymentAccount } = await import("./paymentAccounts");
@@ -1051,34 +1395,19 @@ describe("sales agent commission lifecycle", () => {
       customerCitySnapshot: "Baghdad",
     });
 
-    const payout = await db.payment_transactions
+    const payouts = await db.payment_transactions
       .where("[workspaceId+sourceType+sourceRecordId]")
       .equals([WORKSPACE_ID, "agent_commission_payout", agent.id])
-      .first();
-    expect(payout).toMatchObject({
-      direction: "outgoing",
-      amount: 40,
-      currency: "usd",
-      paymentMethod: "cash",
-      accountId: account.id,
-      accountNameSnapshot: account.name,
-    });
-
-    const movement = await db.payment_account_movements.get(payout!.id);
-    expect(movement).toMatchObject({
-      accountId: account.id,
-      direction: "outgoing",
-      deltaAmount: -40,
-      currency: "usd",
-    });
+      .toArray();
+    expect(payouts).toEqual([]);
     const balance = await db.payment_account_balances
       .where("[accountId+currency]")
       .equals([account.id, "usd"])
       .first();
-    expect(balance?.balanceAmount).toBe(960);
+    expect(balance?.balanceAmount).toBe(1000);
   });
 
-  it("splits automatic commission settlement across the accounts that received the order payment", async () => {
+  it("does not split or create a commission payment from customer collection accounts", async () => {
     const agent = fieldAgent(crypto.randomUUID());
     const order = completedOrder(crypto.randomUUID());
     const { savePaymentAccount } = await import("./paymentAccounts");
@@ -1125,11 +1454,7 @@ describe("sales agent commission lifecycle", () => {
       .where("[workspaceId+sourceType+sourceRecordId]")
       .equals([WORKSPACE_ID, "agent_commission_payout", agent.id])
       .toArray();
-    expect(payouts).toHaveLength(2);
-    expect(payouts.map((payment) => [payment.accountId, payment.amount]).sort()).toEqual([
-      [firstAccount.id, 20],
-      [secondAccount.id, 20],
-    ].sort());
+    expect(payouts).toHaveLength(0);
   });
 
   it("leaves commission outstanding when the order payment account no longer has funds", async () => {
@@ -1458,8 +1783,8 @@ describe("sales agent commission lifecycle", () => {
       }, new Map<string, number>());
 
     expect(remainingAssignments.map((assignment) => assignment.agentId)).toEqual([firstAgent.id]);
-    expect(recognizedByAgent.get(firstAgent.id)).toBe(0);
-    expect(recognizedByAgent.get(secondAgent.id)).toBe(-40);
+    expect(recognizedByAgent.get(firstAgent.id)).toBe(40);
+    expect(recognizedByAgent.get(secondAgent.id)).toBe(0);
   });
 
   it("records same-agent snapshot edits as assignment history", async () => {
@@ -1495,7 +1820,7 @@ describe("sales agent commission lifecycle", () => {
     expect(history.filter((row) => !row.unassignedAt)).toHaveLength(1);
   });
 
-  it("reconciles payment reversal and repayment with signed immutable adjustments", async () => {
+  it("does not change commission entitlement when the customer payment is reversed or repaid", async () => {
     const agent = fieldAgent(crypto.randomUUID());
     const order = completedOrder(crypto.randomUUID());
     await db.agents.put(agent);
@@ -1525,14 +1850,11 @@ describe("sales agent commission lifecycle", () => {
       updatedAt: suspendedAt,
       version: 2,
     });
-    const suspended = await commissions.reconcileSalesOrderCommission(WORKSPACE_ID, order.id);
-    expect(suspended).toMatchObject({ kind: "adjustment", status: "reversed", amount: -40 });
     await expect(commissions.reconcileSalesOrderCommission(WORKSPACE_ID, order.id)).resolves.toBeNull();
 
     const repaidAt = new Date(Date.now() + 2_000).toISOString();
     await db.sales_orders.put({ ...order, updatedAt: repaidAt, version: 3 });
-    const restored = await commissions.reconcileSalesOrderCommission(WORKSPACE_ID, order.id);
-    expect(restored).toMatchObject({ kind: "adjustment", status: "earned", amount: 40 });
+    await expect(commissions.reconcileSalesOrderCommission(WORKSPACE_ID, order.id)).resolves.toBeNull();
     const recognized = (await db.agent_commission_entries.where("orderId").equals(order.id).toArray())
       .filter((entry) => ["accrual", "reversal", "adjustment"].includes(entry.kind))
       .reduce((sum, entry) => sum + entry.amount, 0);

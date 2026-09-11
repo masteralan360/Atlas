@@ -54,6 +54,7 @@ import {
     type CurrencyCode,
     type PaymentAccount,
     type PaymentObligation,
+    type PaymentTransaction,
     type PurchaseOrder,
     type PurchaseOrderItem,
     type PurchaseOrderStatus,
@@ -115,6 +116,7 @@ import {
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { FilterDropdown } from '@/ui/components/FilterDropdown'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
+import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
 import { OrderDetailsView } from '@/ui/components/orders/OrderDetailsView'
 import { OrderProductMosaic } from '@/ui/components/orders/OrderProductAvatars'
 import { OrderListPrintTemplate } from '@/ui/components/orders/OrderPrintTemplates'
@@ -429,6 +431,8 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     })
     const [settlementTarget, setSettlementTarget] = useState<PaymentObligation | null>(null)
     const [isSubmittingSettlement, setIsSubmittingSettlement] = useState(false)
+    const [transactionToReverse, setTransactionToReverse] = useState<PaymentTransaction | null>(null)
+    const [isReversingPayment, setIsReversingPayment] = useState(false)
     const [showPrintPreview, setShowPrintPreview] = useState(false)
 
     const [salesForm, setSalesForm] = useState<SalesFormState>({
@@ -862,16 +866,35 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                 throw new Error('No posted payment was found for this order.')
             }
 
-            await reversePaymentTransaction(workspaceId, transaction.id, {
-                createdBy: user?.id || null
-            })
-            toast({ title: 'Payment reversed' })
+            setTransactionToReverse(transaction)
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',
                 description: error?.message || 'Failed to reverse payment',
                 variant: 'destructive'
             })
+        }
+    }
+
+    async function confirmOrderPaymentReversal(input: PaymentReversalDialogInput) {
+        if (!workspaceId || !transactionToReverse || isReversingPayment) return
+
+        setIsReversingPayment(true)
+        try {
+            await reversePaymentTransaction(workspaceId, transactionToReverse.id, {
+                ...input,
+                createdBy: user?.id || null
+            })
+            toast({ title: t('payments.reversed', { defaultValue: 'Transaction reversed' }) })
+            setTransactionToReverse(null)
+        } catch (error: any) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: error?.message || t('payments.reverseFailed', { defaultValue: 'Failed to reverse payment.' }),
+                variant: 'destructive'
+            })
+        } finally {
+            setIsReversingPayment(false)
         }
     }
 
@@ -2601,6 +2624,18 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                 obligation={settlementTarget}
                 isSubmitting={isSubmittingSettlement}
                 onSubmit={handleOrderSettlement}
+            />
+
+            <PaymentReversalDialog
+                open={!!transactionToReverse}
+                onOpenChange={(open) => {
+                    if (!open) setTransactionToReverse(null)
+                }}
+                onSubmit={confirmOrderPaymentReversal}
+                isProcessing={isReversingPayment}
+                transaction={transactionToReverse}
+                workspaceId={workspaceId}
+                iqdPreference={features.iqd_display_preference}
             />
 
             <DeleteConfirmationModal

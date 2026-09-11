@@ -38,7 +38,6 @@ import { BusinessPartnerFormDialog, type BusinessPartnerFormPayload } from '@/ui
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { useWorkspace } from '@/workspace'
 import { hasEffectiveSalesAgentCommissionPermission, useWorkspacePermissions } from '@/permissions'
-import { AgentCommissionAdminOverview } from '@/ui/components/commissions/AgentCommissionAdminOverview'
 import {
     CommissionFeatureBoundary,
     useOptionalCommissionFeatureData
@@ -81,7 +80,6 @@ export function Agents() {
     const canAssignCommissionOrders = salesAgentCommissionsEnabled
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.assignOrders')
     const canShowCommissionPlanColumn = canViewAllCommissions || canViewOwnCommissions
-    const canMountCommissionOverview = canViewAllCommissions || canSettleCommissions
     const canReconcileCommissionLifecycle = canViewAllCommissions || canSettleCommissions || canAssignCommissionOrders
     const availableCurrencies = useMemo(
         () => Array.from(new Set([features.default_currency, ...features.allowed_currencies])) as CurrencyCode[],
@@ -184,14 +182,6 @@ export function Agents() {
                     <AgentMetric title={t('agents.drivers', { defaultValue: 'Drivers' })} value={driverCount} icon={Car} />
                     <AgentMetric title={t('agents.blocked', { defaultValue: 'Blocked' })} value={blockedCount} icon={UserRound} />
                 </div>
-
-                {canMountCommissionOverview && user?.workspaceId ? (
-                    <AgentCommissionAdminOverview
-                        workspaceId={user.workspaceId}
-                        iqdPreference={features.iqd_display_preference}
-                        canReview={canViewAllCommissions || canSettleCommissions}
-                    />
-                ) : null}
 
                 <Card>
                     <CardHeader className="gap-4 lg:flex-row lg:items-center lg:justify-between">

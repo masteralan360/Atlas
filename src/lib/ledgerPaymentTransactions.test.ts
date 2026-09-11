@@ -82,15 +82,16 @@ describe("ledger payment transactions", () => {
     );
   });
 
-  it("excludes only soft-deleted payment transactions", () => {
+  it("excludes soft-deleted and administrator-voided payment transactions", () => {
     const deleted = payment({ id: "deleted", isDeleted: true });
+    const voided = payment({ id: "voided", voidId: "void-1" });
     const reversal = payment({
       id: "reversal",
       amount: -100,
       reversalOfTransactionId: "original",
     });
 
-    expect(getLedgerPaymentTransactions([deleted, reversal])).toEqual([
+    expect(getLedgerPaymentTransactions([deleted, voided, reversal])).toEqual([
       reversal,
     ]);
   });

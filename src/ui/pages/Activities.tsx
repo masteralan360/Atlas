@@ -23,6 +23,7 @@ import {
     type ActivityTransactionInput
 } from '@/local-db/activities'
 import type { ActivityCatalogItem, ActivityTransaction, ActivityTransactionLine, IQDDisplayPreference, PaymentAccount, WorkspacePaymentMethod } from '@/local-db/models'
+import { usePaymentTransactions } from '@/local-db'
 import { isDateInDateRange } from '@/lib/dateRangeFilters'
 import { ACTIVITY_PAYMENT_METHODS } from '@/lib/paymentMethods'
 import { assetManager } from '@/lib/assetManager'
@@ -35,6 +36,7 @@ import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { PaymentMethodSelect } from '@/ui/components/payments/PaymentMethodSelect'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
+import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
 import {
     Badge,
     Button,
@@ -347,8 +349,6 @@ export function Activities() {
     const [receiptOpen, setReceiptOpen] = useState(false)
     const [activityPrintOpen, setActivityPrintOpen] = useState(false)
     const [reverseAction, setReverseAction] = useState<'cancelled' | 'refunded' | null>(null)
-    const [reversePaymentAccount, setReversePaymentAccount] = useState<PaymentAccount | null>(null)
-    const [hasReversePaymentAccountSelection, setHasReversePaymentAccountSelection] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
     const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -363,6 +363,13 @@ export function Activities() {
     const canEdit = hasPermission('activities.editTransaction')
     const canRefund = hasPermission('activities.refundTransaction')
     const canDelete = hasPermission('activities.deleteTransaction')
+    const paymentTransactions = usePaymentTransactions(workspaceId, { includeReversals: true })
+    const selectedOriginalPayment = paymentTransactions.find((payment) =>
+        payment.sourceType === 'activity_transaction'
+        && payment.sourceRecordId === selectedTransaction?.id
+        && !payment.isDeleted
+        && !payment.reversalOfTransactionId
+    ) || null
     const activeCatalog = catalog.filter((activity) => activity.isActive && !activity.isDeleted && activity.currency === features.default_currency)
     const infiniteActivityIds = useMemo(() => new Set(catalog
         .filter((activity) => activity.isInfinite && !activity.isDeleted)
@@ -631,7 +638,18 @@ export function Activities() {
         }
     }
 
-    const handleReverse = async () => {
+    const requestReversal = (action: 'cancelled' | 'refunded') => {
+        if (!selectedOriginalPayment) {
+            toast({
+                variant: 'destructive',
+                title: t('paymentReversal.noPostedPayment', { defaultValue: 'No posted payment was found.' })
+            })
+            return
+        }
+        setReverseAction(action)
+    }
+
+    const handleReverse = async (input: PaymentReversalDialogInput) => {
         const status = reverseAction
         if (!workspaceId || !selectedTransaction || !status) return
         const action = status === 'cancelled'
@@ -640,12 +658,8 @@ export function Activities() {
 
         setIsSubmitting(true)
         try {
-            await reverseActivityTransaction(workspaceId, selectedTransaction.id, status, user?.id ?? null, hasReversePaymentAccountSelection
-                ? { accountId: reversePaymentAccount?.id ?? null, accountNameSnapshot: reversePaymentAccount?.name ?? null }
-                : {})
+            await reverseActivityTransaction(workspaceId, selectedTransaction.id, status, user?.id ?? null, input)
             setReverseAction(null)
-            setReversePaymentAccount(null)
-            setHasReversePaymentAccountSelection(false)
             toast({ title: t(status === 'cancelled' ? 'activities.messages.transactionCancelled' : 'activities.messages.transactionRefunded', { defaultValue: status === 'cancelled' ? 'Transaction cancelled' : 'Transaction refunded' }) })
         } catch (error) {
             toast({
@@ -772,7 +786,7 @@ export function Activities() {
                             <div className="flex flex-wrap gap-2 border-t pt-4">
                                 {canPrint ? <Button variant="outline" onClick={() => setReceiptOpen(true)}><Printer className="mr-2 h-4 w-4" />{t('common.print', { defaultValue: 'Print receipt' })}</Button> : null}
                                 {canEdit && selectedTransaction.status === 'completed' ? <Button variant="outline" onClick={openEditTransaction}><Edit3 className="mr-2 h-4 w-4" />{t('common.edit', { defaultValue: 'Edit' })}</Button> : null}
-                                {canRefund && selectedTransaction.status === 'completed' ? <><Button variant="outline" onClick={() => { setReversePaymentAccount(null); setHasReversePaymentAccountSelection(false); setReverseAction('cancelled') }}><XCircle className="mr-2 h-4 w-4" />{t('activities.cancel', { defaultValue: 'Cancel' })}</Button><Button variant="outline" onClick={() => { setReversePaymentAccount(null); setHasReversePaymentAccountSelection(false); setReverseAction('refunded') }}><RotateCcw className="mr-2 h-4 w-4" />{t('activities.refund', { defaultValue: 'Refund' })}</Button></> : null}
+                                {canRefund && selectedTransaction.status === 'completed' ? <><Button variant="outline" onClick={() => requestReversal('cancelled')}><XCircle className="mr-2 h-4 w-4" />{t('activities.cancel', { defaultValue: 'Cancel' })}</Button><Button variant="outline" onClick={() => requestReversal('refunded')}><RotateCcw className="mr-2 h-4 w-4" />{t('activities.refund', { defaultValue: 'Refund' })}</Button></> : null}
                                 {canDelete ? <UiAccessGate><Button variant="destructive" onClick={() => setDeleteOpen(true)}><Trash2 className="mr-2 h-4 w-4" />{t('common.delete', { defaultValue: 'Delete' })}</Button></UiAccessGate> : null}
                             </div>
                         </CardContent>
@@ -899,49 +913,17 @@ export function Activities() {
                 printSelectionOptions={activityPrintSelectionOptions}
             />
 
-            <Dialog open={reverseAction !== null} onOpenChange={(open) => {
-                if (!open && !isSubmitting) setReverseAction(null)
-            }}>
-                <DialogContent layout="structured" className="sm:max-w-md">
-                    <DialogHeader layout="structured">
-                        <DialogTitle>{reverseAction === 'cancelled'
-                            ? t('activities.cancel', { defaultValue: 'Cancel' })
-                            : t('activities.refund', { defaultValue: 'Refund' })}</DialogTitle>
-                        <DialogDescription>{reverseAction && selectedTransaction ? t('activities.messages.reverseConfirmation', {
-                            defaultValue: 'Do you want to {{action}} {{transactionNo}}? Finite activity availability will be restored.',
-                            action: (reverseAction === 'cancelled'
-                                ? t('activities.cancel', { defaultValue: 'Cancel' })
-                                : t('activities.refund', { defaultValue: 'Refund' })).toLowerCase(),
-                            transactionNo: selectedTransaction.transactionNo
-                        }) : null}</DialogDescription>
-                    </DialogHeader>
-                    <DialogBody>
-                        <PaymentAccountSelector
-                            workspaceId={workspaceId}
-                            value={reversePaymentAccount?.id ?? null}
-                            onValueChange={(account) => {
-                                setReversePaymentAccount(account)
-                                setHasReversePaymentAccountSelection(true)
-                            }}
-                            disabled={isSubmitting}
-                            cashDrawerOnly={selectedTransaction?.paymentMethod === 'cash'}
-                        />
-                    </DialogBody>
-                    <DialogFooter layout="structured">
-                        <Button type="button" variant="outline" disabled={isSubmitting} onClick={() => setReverseAction(null)}>
-                            {t('common.cancel', { defaultValue: 'Cancel' })}
-                        </Button>
-                        <Button type="button" variant="destructive" disabled={isSubmitting} onClick={() => void handleReverse()}>
-                            {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : reverseAction === 'cancelled'
-                                ? <XCircle className="mr-2 h-4 w-4" />
-                                : <RotateCcw className="mr-2 h-4 w-4" />}
-                            {reverseAction === 'cancelled'
-                                ? t('activities.cancel', { defaultValue: 'Cancel' })
-                                : t('activities.refund', { defaultValue: 'Refund' })}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <PaymentReversalDialog
+                open={reverseAction !== null && !!selectedOriginalPayment}
+                onOpenChange={(open) => {
+                    if (!open && !isSubmitting) setReverseAction(null)
+                }}
+                onSubmit={handleReverse}
+                isProcessing={isSubmitting}
+                transaction={selectedOriginalPayment}
+                workspaceId={workspaceId}
+                iqdPreference={features.iqd_display_preference}
+            />
 
             <DeleteConfirmationModal
                 isOpen={deleteOpen}

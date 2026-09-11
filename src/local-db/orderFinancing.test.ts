@@ -96,6 +96,8 @@ function installBrowserStorage() {
     Object.defineProperty(globalThis, 'DOMMatrix', { configurable: true, value: class DOMMatrix {} })
     Object.defineProperty(globalThis, 'ImageData', { configurable: true, value: class ImageData {} })
     Object.defineProperty(globalThis, 'Path2D', { configurable: true, value: class Path2D {} })
+    Object.defineProperty(globalThis, 'Element', { configurable: true, value: class Element {} })
+    Object.defineProperty(globalThis, 'HTMLElement', { configurable: true, value: class HTMLElement {} })
 }
 
 async function createSupplier(payableCreditLimit: number | null) {
@@ -912,7 +914,18 @@ describe('order-linked financing', () => {
             paymentStatus: 'paid',
             isPaid: true
         })
-        expect(await db.payment_transactions.where('sourceRecordId').equals(order.id).count()).toBe(1)
+        const [payment] = await db.payment_transactions.where('sourceRecordId').equals(order.id).toArray()
+        expect(payment).toBeDefined()
+
+        await reversePaymentTransaction(WORKSPACE_ID, payment.id, { amount: 188.5 })
+
+        expect(await db.sales_orders.get(order.id)).toMatchObject({
+            paidAmount: 500,
+            balanceAmount: 188.5,
+            paymentStatus: 'partial',
+            isPaid: false
+        })
+        expect(await db.payment_transactions.where('sourceRecordId').equals(order.id).count()).toBe(2)
     })
 
     it('repairs an order if a stale rounded payment exists from a failed attempt', async () => {

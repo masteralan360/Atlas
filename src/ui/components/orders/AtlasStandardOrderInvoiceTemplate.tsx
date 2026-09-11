@@ -9,11 +9,15 @@ import {
     type BusinessPartner,
     type IQDDisplayPreference,
     type OrderInstallment,
+    type OrderPartnerBalanceSnapshot,
     type PurchaseOrder,
     type SalesOrder
 } from '@/local-db'
 import type { PartnerAccountStatementClosingBalance } from '@/lib/partnerAccountStatement'
-import { formatAtlasStandardPartnerCurrentBalance } from '@/lib/atlasStandardPartnerBalance'
+import {
+    formatAtlasStandardPartnerBalanceSnapshot,
+    formatAtlasStandardPartnerCurrentBalance
+} from '@/lib/atlasStandardPartnerBalance'
 import { getOrderLineFreeBonusQuantity, getOrderLineInventoryQuantity, getOrderLinePaidQuantity } from '@/lib/orderLineItems'
 import {
     getOrderTotalWithPostReturnAdjustments,
@@ -33,6 +37,7 @@ import {
     chunkAtlasStandardTableRows,
     clampProductImageColumnWidth,
     DEFAULT_PRODUCT_IMAGE_COLUMN_WIDTH,
+    getAtlasStandardFirstPageFillerRowCount,
     getProductImageSizeMm,
     MAX_PRODUCT_IMAGE_COLUMN_WIDTH,
     MIN_PRODUCT_IMAGE_COLUMN_WIDTH,
@@ -87,6 +92,8 @@ export interface AtlasStandardOrderInvoiceTemplateProps {
     businessPartner?: BusinessPartner | null
     /** All original-currency balances from the Partner Account Statement. */
     partnerAccountStatementBalances?: PartnerAccountStatementClosingBalance[]
+    /** Read-only Account Statement reconstruction for legacy orders without a saved snapshot. */
+    partnerBalanceFallbackSnapshot?: OrderPartnerBalanceSnapshot | null
     printedBy?: string | null
     componentPositions?: Record<string, CustomTemplateComponentPosition>
     editableComponents?: boolean
@@ -145,6 +152,8 @@ export const ATLAS_STANDARD_ORDER_HIDDEN_FIELD_KEYS = {
         amountInWords: 'atlasStandard.financialSummary.amountInWords',
         outstanding: 'atlasStandard.financialSummary.outstanding',
         paymentMethod: 'atlasStandard.financialSummary.paymentMethod',
+        balanceBefore: 'atlasStandard.financialSummary.balanceBefore',
+        balanceAfter: 'atlasStandard.financialSummary.balanceAfter',
         currentBalance: 'atlasStandard.financialSummary.currentBalance',
         printedBy: 'atlasStandard.financialSummary.printedBy',
         notes: 'atlasStandard.financialSummary.notes'
@@ -295,7 +304,16 @@ function getGridSpan(className?: string) {
     return 1
 }
 
-function orderFieldsForLayout(fields: HideablePrintField[], fieldOrder?: string[]) {
+type PrintFieldLayoutOptions = {
+    columns?: number
+    useFieldSpans?: boolean
+}
+
+function orderFieldsForLayout(
+    fields: HideablePrintField[],
+    fieldOrder?: string[],
+    { columns = 4, useFieldSpans = false }: PrintFieldLayoutOptions = {}
+) {
     const fieldsByKey = new Map(fields.map((field) => [field.key, field]))
     const usedKeys = new Set<string>()
     const orderedKeys = (fieldOrder || [])
@@ -305,24 +323,34 @@ function orderFieldsForLayout(fields: HideablePrintField[], fieldOrder?: string[
             return true
         })
 
-    fields.forEach((field) => {
-        if (!usedKeys.has(field.key)) orderedKeys.push(field.key)
+    fields.forEach((field, fieldIndex) => {
+        if (usedKeys.has(field.key)) return
+
+        const nextKnownField = fields
+            .slice(fieldIndex + 1)
+            .find((candidate) => orderedKeys.includes(candidate.key))
+        const insertionIndex = nextKnownField ? orderedKeys.indexOf(nextKnownField.key) : -1
+
+        if (insertionIndex >= 0) orderedKeys.splice(insertionIndex, 0, field.key)
+        else orderedKeys.push(field.key)
+        usedKeys.add(field.key)
     })
+
+    const orderedFields = orderedKeys.map((key) => fieldsByKey.get(key)!)
 
     let layoutRow = 0
     let usedColumns = 0
 
-    return orderedKeys.map((key, index) => {
-        const field = fieldsByKey.get(key)!
-        const slot = fields[index] || field
-        const layoutSpan = getGridSpan(slot.className)
-        if (usedColumns + layoutSpan > 4) {
+    return orderedFields.map((field, index) => {
+        const slot = useFieldSpans ? field : fields[index] || field
+        const layoutSpan = Math.min(columns, Math.max(1, slot.layoutSpan || getGridSpan(slot.className)))
+        if (usedColumns + layoutSpan > columns) {
             layoutRow += 1
             usedColumns = 0
         }
         const fieldLayoutRow = layoutRow
         usedColumns += layoutSpan
-        if (usedColumns === 4) {
+        if (usedColumns === columns) {
             layoutRow += 1
             usedColumns = 0
         }
@@ -661,6 +689,8 @@ function HideableSection({
     dialogClassName,
     dialogFieldsClassName,
     dialogFieldClassName,
+    layoutColumns = 4,
+    useFieldSpans = false,
     dragInstruction,
     renameTitleLabel = 'Rename title',
     resetTitleLabel = 'Reset title',
@@ -682,6 +712,8 @@ function HideableSection({
     dialogClassName?: string
     dialogFieldsClassName?: string
     dialogFieldClassName?: string
+    layoutColumns?: number
+    useFieldSpans?: boolean
     dragInstruction?: string
     renameTitleLabel?: string
     resetTitleLabel?: string
@@ -703,8 +735,11 @@ function HideableSection({
             label: labelOverride || field.label
         }
     })
-    const orderedFields = orderFieldsForLayout(titledFields, fieldOrder)
-    const visibleFields = orderedFields.filter((field) => !hiddenFields[field.key])
+    const layoutOptions = { columns: layoutColumns, useFieldSpans }
+    const orderedFields = orderFieldsForLayout(titledFields, fieldOrder, layoutOptions)
+    const visibleFields = useFieldSpans
+        ? orderFieldsForLayout(orderedFields.filter((field) => !hiddenFields[field.key]), undefined, layoutOptions)
+        : orderedFields.filter((field) => !hiddenFields[field.key])
     const visibleFieldRows = visibleFields.reduce<HideablePrintField[][]>((rows, field) => {
         const rowIndex = field.layoutRow || 0
         const row = rows[rowIndex] || []
@@ -712,6 +747,21 @@ function HideableSection({
         rows[rowIndex] = row
         return rows
     }, [])
+    const dialogSpanClassByFieldKey = new Map<string, string>()
+    if (useFieldSpans) {
+        const dialogRows = orderedFields.reduce<HideablePrintField[][]>((rows, field) => {
+            const rowIndex = field.layoutRow || 0
+            const row = rows[rowIndex] || []
+            row.push(field)
+            rows[rowIndex] = row
+            return rows
+        }, [])
+
+        dialogRows.forEach((row) => {
+            const span = 6 / row.length
+            row.forEach((field) => dialogSpanClassByFieldKey.set(field.key, `col-span-${span}`))
+        })
+    }
     const openDialog = () => setOpen(true)
     const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
         if (event.key !== 'Enter' && event.key !== ' ') return
@@ -793,12 +843,18 @@ function HideableSection({
     }
     const content = visibleFields.length > 0
         ? visibleFieldRows.filter(Boolean).map((row, rowIndex) => {
-            const baseSpan = Math.floor(4 / row.length)
-            const remainingColumns = 4 % row.length
             return (
-                <div key={`row-${rowIndex}`} className="col-span-4 grid grid-cols-4">
+                <div
+                    key={`row-${rowIndex}`}
+                    className="col-span-4 grid"
+                    style={{ gridTemplateColumns: `repeat(${useFieldSpans ? row.length : 4}, minmax(0, 1fr))` }}
+                >
                     {row.map((field, index) => {
-                        const span = baseSpan + (index < remainingColumns ? 1 : 0)
+                        const baseSpan = Math.floor(4 / row.length)
+                        const remainingColumns = 4 % row.length
+                        const span = useFieldSpans
+                            ? 1
+                            : baseSpan + (index < remainingColumns ? 1 : 0)
                         return (
                             <div
                                 key={field.key}
@@ -849,7 +905,7 @@ function HideableSection({
                         droppableId={fields[0]?.key || title}
                         items={orderedFields}
                         getItemId={(field) => field.key}
-                        getSlotClassName={(field) => field.dialogClassName}
+                        getSlotClassName={(field) => dialogSpanClassByFieldKey.get(field.key) || field.dialogClassName}
                         onItemsSwap={(nextFields) => onFieldOrderChange(nextFields.map((field) => field.key))}
                         renderItem={(field, dragHandleProps, isDragging) => renderPickerField(field, dragHandleProps, isDragging)}
                         className={cn('space-y-1', dialogFieldsClassName)}
@@ -1086,6 +1142,7 @@ export function AtlasStandardOrderInvoiceTemplate({
     workspaceFooterContacts,
     businessPartner,
     partnerAccountStatementBalances,
+    partnerBalanceFallbackSnapshot,
     printedBy,
     componentPositions,
     editableComponents,
@@ -1148,6 +1205,22 @@ export function AtlasStandardOrderInvoiceTemplate({
         partnerAccountStatementBalances,
         iqdPreference
     )
+    const historicalPartnerBalanceSnapshot = order.partnerBalanceSnapshot || partnerBalanceFallbackSnapshot
+    const partnerBalanceBeforeOrder = formatAtlasStandardPartnerBalanceSnapshot(
+        historicalPartnerBalanceSnapshot,
+        'before',
+        iqdPreference
+    )
+    const partnerBalanceAfterOrder = formatAtlasStandardPartnerBalanceSnapshot(
+        historicalPartnerBalanceSnapshot,
+        'after',
+        iqdPreference
+    )
+    const partnerBalanceLabels = {
+        before: t('orders.print.partnerBalanceBefore'),
+        after: t('orders.print.partnerBalanceAfter'),
+        current: t('orders.print.partnerBalanceCurrent')
+    }
     const salesperson = printedBy?.trim() || '-'
     const partnerAddress = businessPartner?.address?.trim() || '-'
     const partnerPhone = businessPartner?.phone?.trim() || '-'
@@ -1262,9 +1335,13 @@ export function AtlasStandardOrderInvoiceTemplate({
         rowStartIndex: number,
         tableKey: string,
         tableDataAreaMm: number,
-        centered = false
+        centered = false,
+        fillFirstPageWithWholeRows = false
     ) => {
         const tableEmptyAreaMm = Math.max(0, tableDataAreaMm - (tableItems.length * tableItemRowMm))
+        const firstPageFillerRowCount = fillFirstPageWithWholeRows
+            ? getAtlasStandardFirstPageFillerRowCount(tableDataAreaMm, tableItems.length, tableItemRowMm)
+            : 0
         return (
             <table
                 key={tableKey}
@@ -1427,7 +1504,25 @@ export function AtlasStandardOrderInvoiceTemplate({
                             </tr>
                         )
                     })}
-                    {tableEmptyAreaMm > 0 ? (
+                    {fillFirstPageWithWholeRows
+                        ? Array.from({ length: firstPageFillerRowCount }, (_, index) => (
+                            <tr
+                                key={`first-page-empty-row-${index}`}
+                                style={{ height: `${tableItemRowMm}mm` }}
+                                data-order-print-row-type="empty"
+                            >
+                                {visibleTableColumns.map((column) => (
+                                    <td
+                                        key={column.key}
+                                        className="border px-1 text-center align-middle"
+                                        style={{ borderColor: INK }}
+                                    >
+                                        {'\u00a0'}
+                                    </td>
+                                ))}
+                            </tr>
+                        ))
+                        : tableEmptyAreaMm > 0 ? (
                         <tr>
                             {visibleTableColumns.map((column) => (
                                     <td
@@ -1439,7 +1534,7 @@ export function AtlasStandardOrderInvoiceTemplate({
                                 </td>
                             ))}
                         </tr>
-                    ) : null}
+                        ) : null}
                     <tr className="h-[8mm] bg-[#f3f4f6] font-bold">
                         {visibleTableColumns.map((column) => {
                             const value = column.key === tableKeys.product
@@ -1549,7 +1644,6 @@ export function AtlasStandardOrderInvoiceTemplate({
             label: returnLabels.totalRefunded,
             value: formatCurrency(printTotal, currency, iqdPreference),
             className: 'col-span-4 border-l border-t border-[#1f2937]',
-            dialogClassName: 'col-span-2',
             render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong>{formatCurrency(printTotal, currency, iqdPreference)}</div>
         },
         {
@@ -1557,7 +1651,6 @@ export function AtlasStandardOrderInvoiceTemplate({
             label: returnLabels.refundAmountInWords,
             value: amountInWords,
             className: 'col-span-4 border-l border-t border-[#1f2937]',
-            dialogClassName: 'col-span-2',
             render: () => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate">{amountInWords}</div>
         },
         {
@@ -1573,7 +1666,8 @@ export function AtlasStandardOrderInvoiceTemplate({
             label: labels.paidAmount,
             value: formatCurrency(paidAmount, currency, iqdPreference),
             className: 'col-span-4 border-l border-t border-[#1f2937]',
-            dialogClassName: 'col-span-2',
+            layoutSpan: 6,
+            dialogClassName: 'col-span-6',
             render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong>{formatCurrency(paidAmount, currency, iqdPreference)}</div>
         },
         {
@@ -1581,7 +1675,8 @@ export function AtlasStandardOrderInvoiceTemplate({
             label: labels.outstanding,
             value: formatCurrency(outstanding, currency, iqdPreference),
             className: 'col-span-4 border-l border-t border-[#1f2937]',
-            dialogClassName: 'col-span-2',
+            layoutSpan: 6,
+            dialogClassName: 'col-span-6',
             render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong>{formatCurrency(outstanding, currency, iqdPreference)}</div>
         },
         {
@@ -1589,15 +1684,35 @@ export function AtlasStandardOrderInvoiceTemplate({
             label: labels.discount,
             value: formatCurrency(order.discount, currency, iqdPreference),
             className: 'col-span-4 border-l border-t border-[#1f2937]',
-            dialogClassName: 'col-span-2',
+            layoutSpan: 6,
+            dialogClassName: 'col-span-6',
             render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong>{formatCurrency(order.discount, currency, iqdPreference)}</div>
         },
         {
+            key: financialKeys.balanceBefore,
+            label: partnerBalanceLabels.before,
+            value: partnerBalanceBeforeOrder,
+            className: 'col-span-4 border-l border-t border-[#1f2937]',
+            layoutSpan: 6,
+            dialogClassName: 'col-span-6',
+            render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong>{partnerBalanceBeforeOrder}</div>
+        },
+        {
+            key: financialKeys.balanceAfter,
+            label: partnerBalanceLabels.after,
+            value: partnerBalanceAfterOrder,
+            className: 'col-span-4 border-l border-t border-[#1f2937]',
+            layoutSpan: 6,
+            dialogClassName: 'col-span-6',
+            render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong>{partnerBalanceAfterOrder}</div>
+        },
+        {
             key: financialKeys.currentBalance,
-            label: labels.currentBalance,
+            label: partnerBalanceLabels.current,
             value: currentPartnerBalance,
             className: 'col-span-4 border-l border-t border-[#1f2937]',
-            dialogClassName: 'col-span-2',
+            layoutSpan: 6,
+            dialogClassName: 'col-span-6',
             render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong>{currentPartnerBalance}</div>
         },
         {
@@ -1605,6 +1720,8 @@ export function AtlasStandardOrderInvoiceTemplate({
             label: labels.paymentMethod,
             value: paymentMethod,
             className: 'col-span-2 border-l border-t border-[#1f2937]',
+            layoutSpan: 3,
+            dialogClassName: 'col-span-3',
             render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong>{paymentMethod}</div>
         },
         {
@@ -1612,6 +1729,8 @@ export function AtlasStandardOrderInvoiceTemplate({
             label: labels.amountInWords,
             value: amountInWords,
             className: 'col-span-2 border-l border-t border-[#1f2937]',
+            layoutSpan: 3,
+            dialogClassName: 'col-span-3',
             render: () => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate">{amountInWords}</div>
         },
         {
@@ -1619,6 +1738,8 @@ export function AtlasStandardOrderInvoiceTemplate({
             label: labels.printedBy,
             value: salesperson,
             className: 'col-span-2 border-l border-t border-[#1f2937]',
+            layoutSpan: 3,
+            dialogClassName: 'col-span-3',
             render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong>{salesperson}</div>
         },
         {
@@ -1626,6 +1747,8 @@ export function AtlasStandardOrderInvoiceTemplate({
             label: labels.notes,
             value: noteValue,
             className: 'col-span-2 border-l border-t border-[#1f2937]',
+            layoutSpan: 3,
+            dialogClassName: 'col-span-3',
             render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong>{noteValue}</div>
         }
     ]
@@ -1763,7 +1886,9 @@ export function AtlasStandardOrderInvoiceTemplate({
                         itemChunks[0],
                         0,
                         'atlas-standard-order-items-page-1',
-                        ATLAS_STANDARD_FIRST_PAGE_TABLE_DATA_AREA_MM
+                        ATLAS_STANDARD_FIRST_PAGE_TABLE_DATA_AREA_MM,
+                        false,
+                        true
                     )
                 )}
             </HideableTable>
@@ -1781,9 +1906,11 @@ export function AtlasStandardOrderInvoiceTemplate({
                     : undefined}
                 onFieldLabelChange={onFieldLabelChange}
                 className="mb-2"
-                dialogClassName="max-w-2xl"
-                dialogFieldsClassName="grid grid-cols-2 gap-2"
+                dialogClassName="max-w-3xl"
+                dialogFieldsClassName={isReturnPrint ? 'grid grid-cols-3 gap-2' : 'grid grid-cols-6 gap-2'}
                 dialogFieldClassName="min-h-[68px] flex-col justify-start gap-1"
+                layoutColumns={6}
+                useFieldSpans={!isReturnPrint}
                 dragInstruction={labels.dragToSwap}
                 renameTitleLabel={labels.renameTitle}
                 resetTitleLabel={labels.resetTitle}

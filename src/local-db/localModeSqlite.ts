@@ -82,6 +82,7 @@ export const LOCAL_MODE_SQLITE_TABLES = [
   "installment_sale_installments",
   "installment_sale_payments",
   "payment_transactions",
+  "financial_transaction_voids",
   "payment_accounts",
   "capital_pools",
   "payment_account_balances",

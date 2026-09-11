@@ -68,8 +68,8 @@ function asCurrency(value: string | null | undefined, fallback: CurrencyCode): C
   return normalized && SUPPORTED_CURRENCIES.includes(normalized) ? normalized : fallback;
 }
 
-function active<T extends { isDeleted?: boolean }>(rows: T[]) {
-  return rows.filter((row) => !row.isDeleted);
+function active<T extends { isDeleted?: boolean; voidId?: string | null }>(rows: T[]) {
+  return rows.filter((row) => !row.isDeleted && !row.voidId);
 }
 
 function addAmount(target: AmountMap, currency: CurrencyCode, amount: number) {

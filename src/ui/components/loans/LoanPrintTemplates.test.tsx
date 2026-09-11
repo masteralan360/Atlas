@@ -1,4 +1,4 @@
-import { createElement } from 'react'
+import { createElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -52,7 +52,18 @@ vi.mock('./LoanNoDisplay', () => ({
 }))
 
 vi.mock('@/ui/components/print/HideablePrintFieldCard', () => ({
-    HideablePrintFieldCard: ({ title }: { title: string }) => <div>{title}</div>
+    HideablePrintFieldCard: ({
+        title,
+        fields
+    }: {
+        title: string
+        fields: Array<{ key: string; render: ReactNode }>
+    }) => (
+        <div>
+            <span>{title}</span>
+            {fields.map((field) => <div key={field.key}>{field.render}</div>)}
+        </div>
+    )
 }))
 
 import { LoanDetailsPrintTemplate, LoanListPrintTemplate } from './LoanPrintTemplates'
@@ -126,6 +137,59 @@ describe('LoanDetailsPrintTemplate', () => {
 })
 
 describe('LoanListPrintTemplate', () => {
+    it('keeps the newer principal, paid, active, and balance summary as the default', () => {
+        const html = renderToStaticMarkup(createElement(LoanListPrintTemplate, {
+            printLang: 'en',
+            loans: [],
+            filter: 'all',
+            variant: 'simple',
+            displayCurrency: 'usd',
+            metrics: {
+                totalPrincipalByCurrency: { usd: 1_000 },
+                totalPaidByCurrency: { usd: 250 },
+                totalBalanceByCurrency: { usd: 750 },
+                activeEntries: 1
+            }
+        }))
+
+        expect(html).toContain('Total Principal')
+        expect(html).toContain('Total Paid')
+        expect(html).toContain('Total Balance')
+        expect(html).toContain('1000 USD')
+        expect(html).toContain('250 USD')
+        expect(html).toContain('750 USD')
+        expect(html).not.toContain('Total Lent')
+        expect(html).not.toContain('Settled Entries')
+    })
+
+    it('prints the exact historical lent, borrowed, active, and settled summary when selected', () => {
+        const html = renderToStaticMarkup(createElement(LoanListPrintTemplate, {
+            printLang: 'en',
+            loans: [],
+            filter: 'all',
+            variant: 'simple',
+            simpleSummaryMode: 'lent_borrowed',
+            displayCurrency: 'iqd',
+            metrics: {
+                totalLentByCurrency: { iqd: 92_893_500 },
+                totalBorrowedByCurrency: { iqd: 37_367_190, usd: 650 },
+                activeEntries: 40,
+                settledEntries: 56
+            }
+        }))
+
+        expect(html).toContain('Total Lent')
+        expect(html).toContain('Total Borrowed')
+        expect(html).toContain('Active Entries')
+        expect(html).toContain('Settled Entries')
+        expect(html).toContain('92893500 IQD')
+        expect(html).toContain('37367190 IQD')
+        expect(html).toContain('650 USD')
+        expect(html).toContain('40')
+        expect(html).toContain('56')
+        expect(html).not.toContain('Total Balance')
+    })
+
     it('uses the shared A4 table pagination for the detailed full-page loans list', () => {
         const loans = Array.from({ length: 27 }, (_, index) => ({
             id: `loan-${index + 1}`,

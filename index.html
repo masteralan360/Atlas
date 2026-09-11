@@ -12,6 +12,15 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="manifest" href="/manifest.webmanifest" />
   <title>Atlas</title>
+  <style>
+    /* Covers the brief interval before Vite has loaded the application styles. */
+    html,
+    body {
+      min-height: 100%;
+      margin: 0;
+      background: #000;
+    }
+  </style>
 </head>
 
 <body>

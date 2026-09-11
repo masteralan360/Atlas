@@ -287,6 +287,7 @@ Deno.serve(async (req) => {
                     line_total: lineTotal,
                     cost_price: resolvedPrice.costPrice,
                     image_url: resolvePublicAssetUrl(product.image_url),
+                    unit: product.unit,
                     storage_id: source.storageId,
                     allocation_group_id: product.id,
                     allocation_group_quantity: quantity,

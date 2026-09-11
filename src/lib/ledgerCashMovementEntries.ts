@@ -1,5 +1,6 @@
 import type { CurrencyCode, Loan, PaymentTransaction, Sale } from '@/local-db/models'
 
+import { isReportablePaymentTransaction } from './financialReportability'
 import { getInstallmentSaleLedgerPayment } from './installmentSaleLedger'
 import { classifySalesOrderLoanCash } from './ledgerOrderLoan'
 import { getLedgerPaymentTransactionEffect } from './ledgerPaymentTransactions'
@@ -95,7 +96,7 @@ export function getLedgerCashMovementFromPayment(
     transaction: PaymentTransaction,
     loan?: Pick<Loan, 'source' | 'orderId' | 'orderType'> | null,
 ): LedgerCashMovementEntry | null {
-    if (transaction.isDeleted || transaction.paymentMethod === 'loan' || transaction.paymentMethod === 'loan_adjustment') {
+    if (!isReportablePaymentTransaction(transaction) || transaction.paymentMethod === 'loan' || transaction.paymentMethod === 'loan_adjustment') {
         return null
     }
 

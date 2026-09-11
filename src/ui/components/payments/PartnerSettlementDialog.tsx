@@ -48,7 +48,7 @@ interface PartnerSettlementDialogProps {
     onOpenChange: (open: boolean) => void
     workspaceId: string
     defaultDirection?: PaymentTransactionDirection | null
-    includeSalesAccountAgents?: boolean
+    includeSalesAgentCommissionPartners?: boolean
     isSubmitting?: boolean
     onSubmit: (input: {
         partner: BusinessPartner
@@ -70,7 +70,7 @@ export function PartnerSettlementDialog({
     onOpenChange,
     workspaceId,
     defaultDirection = null,
-    includeSalesAccountAgents = false,
+    includeSalesAgentCommissionPartners = false,
     isSubmitting = false,
     onSubmit
 }: PartnerSettlementDialogProps) {
@@ -88,14 +88,12 @@ export function PartnerSettlementDialog({
     const [balanceError, setBalanceError] = useState<string | null>(null)
     const [settleProgress, setSettleProgress] = useState<PartnerSettlementProgress | null>(null)
     const [amountInputs, setAmountInputs] = useState<Record<string, string>>({})
-    const agents = useAgents(includeSalesAccountAgents ? workspaceId : undefined)
-    const eligibleSalesAccountAgentPartnerIds = useMemo(
+    const agents = useAgents(includeSalesAgentCommissionPartners ? workspaceId : undefined)
+    const eligibleSalesAgentCommissionPartnerIds = useMemo(
         () => agents
             .filter((agent) => (
                 !agent.isDeleted
                 && agent.agentType === 'field_agent'
-                && agent.status === 'active'
-                && agent.salesAccountEnabled
             ))
             .map((agent) => agent.businessPartnerId),
         [agents]
@@ -381,8 +379,8 @@ export function PartnerSettlementDialog({
                                     placeholder={t('partnerSettlement.partnerPlaceholder', { defaultValue: 'Search business partner' })}
                                     disabled={isSubmitting}
                                     includeRealEstateRoles
-                                    includeAgentRoles={includeSalesAccountAgents}
-                                    eligibleAgentPartnerIds={eligibleSalesAccountAgentPartnerIds}
+                                    includeAgentRoles={includeSalesAgentCommissionPartners}
+                                    eligibleAgentPartnerIds={eligibleSalesAgentCommissionPartnerIds}
                                 />
                                 {partner ? (
                                     <div className="flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2">

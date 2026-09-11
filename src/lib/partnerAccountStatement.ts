@@ -78,6 +78,7 @@ export type PartnerAccountStatementEntryDescriptionKey =
   | 'orderLoanDownPaymentReceived'
   | 'paymentMade'
   | 'commissionPaid'
+  | 'commissionRecovered'
   | 'commissionSettledAutomatically'
   | 'commissionEarned'
   | 'commissionReversed'
@@ -281,6 +282,15 @@ function paymentStatementPresentation(
     return {
       description: 'Commission paid',
       descriptionKey: 'commissionPaid',
+      note,
+      returnReason: null
+    }
+  }
+
+  if (transaction.sourceType === 'agent_commission_recovery') {
+    return {
+      description: 'Commission recovered',
+      descriptionKey: 'commissionRecovered',
       note,
       returnReason: null
     }
@@ -626,7 +636,7 @@ function createPaymentEntries(data: PartnerAccountStatementData): PartnerAccount
         id: `payment:${transaction.id}`,
         date: transaction.paidAt || transaction.createdAt,
         reference:
-          transaction.sourceType === 'agent_commission_payout'
+          (transaction.sourceType === 'agent_commission_payout' || transaction.sourceType === 'agent_commission_recovery')
             ? data.linkedOrderCodes?.[metadataText(transaction.metadata, 'orderId') || ''] ||
               transaction.referenceLabel ||
               transaction.sourceRecordId

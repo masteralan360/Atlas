@@ -265,15 +265,27 @@ export function buildWorkspaceNavigation({
           name: t("agents.title", { defaultValue: "Agents" }),
           href: "/agents",
           icon: UserRound,
-          children: canAccessPermission("fleet.access")
-            ? [
-              {
+          children: [
+            ...(hasFeature("sales_agent_commissions")
+              && (
+                canAccessPermission("salesAgentCommissions.viewAll")
+                || canAccessPermission("salesAgentCommissions.viewOwn")
+                || canAccessPermission("salesAgentCommissions.pay")
+              )
+              ? [{
+                name: t("salesAgentCommissions.title", { defaultValue: "Sales Agent Commissions" }),
+                href: "/agents/commissions",
+                icon: HandCoins,
+              }]
+              : []),
+            ...(canAccessPermission("fleet.access")
+              ? [{
                 name: t("fleet.title", { defaultValue: "Fleet Management" }),
                 href: "/agents/fleet",
                 icon: MapPinned,
-              },
-            ]
-            : undefined,
+              }]
+              : []),
+          ],
         },
       ]
       : []),

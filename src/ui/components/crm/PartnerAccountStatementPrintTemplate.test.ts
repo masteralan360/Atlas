@@ -348,6 +348,58 @@ describe('buildPartnerAccountStatementLedger', () => {
         expect(ledger.closingBalance).toBe(0)
     })
 
+    it('nets a manual commission recovery against an overpaid, reversed commission exactly once', () => {
+        const data = statementData()
+        data.period = { type: 'allTime' }
+        data.statementOrders = []
+        data.linkedOrderCodes = { 'agent-sale': 'SO-AGENT-RECOVERY' }
+        data.agentCommissionEntries = [
+            {
+                id: 'earned-entry', orderId: 'agent-sale', assignmentId: 'assignment-1', agentId: 'agent-1',
+                kind: 'accrual', amount: 20_900, currency: 'iqd', occurredAt: '2026-01-04T10:00:00.000Z',
+                createdAt: '2026-01-04T10:00:00.000Z', isDeleted: false
+            },
+            {
+                id: 'payout-entry', orderId: 'agent-sale', assignmentId: 'assignment-1', agentId: 'agent-1',
+                kind: 'payout', amount: -20_900, currency: 'iqd', occurredAt: '2026-01-05T10:00:00.000Z',
+                createdAt: '2026-01-05T10:00:00.000Z', status: 'paid', settlementSource: 'manual', isDeleted: false
+            },
+            {
+                id: 'reversal-entry', orderId: 'agent-sale', assignmentId: 'assignment-1', agentId: 'agent-1',
+                kind: 'reversal', amount: -20_900, currency: 'iqd', occurredAt: '2026-01-06T10:00:00.000Z',
+                createdAt: '2026-01-06T10:00:00.000Z', status: 'reversed', isDeleted: false
+            },
+            {
+                id: 'recovery-entry', orderId: 'agent-sale', assignmentId: 'assignment-1', agentId: 'agent-1',
+                kind: 'recovery', amount: 20_900, currency: 'iqd', occurredAt: '2026-01-07T10:00:00.000Z',
+                createdAt: '2026-01-07T10:00:00.000Z', status: 'paid', settlementSource: 'manual', isDeleted: false
+            }
+        ] as any
+        data.settlementTransactions = [
+            {
+                id: 'payout-payment', sourceType: 'agent_commission_payout', sourceRecordId: 'agent-1',
+                sourceSubrecordId: 'payout-entry', direction: 'outgoing', amount: 20_900, currency: 'iqd',
+                paidAt: '2026-01-05T10:00:00.000Z', createdAt: '2026-01-05T10:00:00.000Z',
+                metadata: { orderId: 'agent-sale' }, isDeleted: false
+            },
+            {
+                id: 'recovery-payment', sourceType: 'agent_commission_recovery', sourceRecordId: 'agent-1',
+                sourceSubrecordId: 'recovery-entry', direction: 'incoming', amount: 20_900, currency: 'iqd',
+                paidAt: '2026-01-07T10:00:00.000Z', createdAt: '2026-01-07T10:00:00.000Z',
+                metadata: { orderId: 'agent-sale' }, isDeleted: false
+            }
+        ] as any
+
+        const [ledger] = buildPartnerAccountStatementLedger(data)
+        expect(ledger).toMatchObject({ currency: 'iqd', closingBalance: 0 })
+        expect(ledger.entries.map((entry) => [entry.descriptionKey, entry.delta])).toEqual([
+            ['commissionEarned', -20_900],
+            ['commissionPaid', 20_900],
+            ['commissionReversed', 20_900],
+            ['commissionRecovered', -20_900]
+        ])
+    })
+
     it('keeps normal partner sales and returns as one row per document by default', () => {
         const data = statementData()
         data.statementOrders = [{

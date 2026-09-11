@@ -95,7 +95,7 @@ import { RealEstateInstallmentsMirror } from '@/ui/components/real-estate/RealEs
 import { InstallmentSalesPanel } from '@/ui/components/installment-sales/InstallmentSalesPanel'
 import { InstallmentSaleDetailsView } from '@/ui/components/installment-sales/InstallmentSaleDetailsView'
 import { FilterDropdown } from '@/ui/components/FilterDropdown'
-import { ReverseTransactionCofirmationDialog } from '@/ui/components/payments/ReverseTransactionCofirmationDialog'
+import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 type LoanFilter = 'all' | 'active' | 'overdue' | 'completed'
@@ -1259,7 +1259,7 @@ function LoanDetailsView({
         }
     }
 
-    const confirmReverseRepayment = async () => {
+    const confirmReverseRepayment = async (input: PaymentReversalDialogInput) => {
         if (!transactionToReverse || reversingTransactionId) {
             return
         }
@@ -1267,6 +1267,7 @@ function LoanDetailsView({
         setReversingTransactionId(transactionToReverse.id)
         try {
             await reversePaymentTransaction(workspaceId, transactionToReverse.id, {
+                ...input,
                 createdBy: user?.id || null
             })
             toast({
@@ -1845,16 +1846,17 @@ function LoanDetailsView({
                 title={t('loans.confirmDelete')}
                 description={getLoanDeleteWarning(loan, t)}
             />
-            <ReverseTransactionCofirmationDialog
+            <PaymentReversalDialog
                 open={!!transactionToReverse}
                 onOpenChange={(open) => {
                     if (!open && !reversingTransactionId) {
                         setTransactionToReverse(null)
                     }
                 }}
-                onConfirm={confirmReverseRepayment}
+                onSubmit={confirmReverseRepayment}
                 isProcessing={!!reversingTransactionId}
                 transaction={transactionToReverse}
+                workspaceId={workspaceId}
                 iqdPreference={features.iqd_display_preference}
             />
             <PrintPreviewModal module="loans"

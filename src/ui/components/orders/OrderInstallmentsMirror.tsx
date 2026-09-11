@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'wouter'
 
 import { useAuth } from '@/auth'
-import { usePartnerAccountStatementClosingBalances } from '@/hooks/usePartnerAccountStatement'
+import { usePartnerAccountStatementPrintBalances } from '@/hooks/usePartnerAccountStatement'
 import {
     recordObligationSettlement,
     type OrderInstallment,
@@ -144,9 +144,13 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
             ? (printTarget.order as SalesOrder).customerId
             : (printTarget?.order as PurchaseOrder | undefined)?.supplierId)
     const printPartner = useBusinessPartner(printPartnerId)
-    const partnerAccountStatementBalances = usePartnerAccountStatementClosingBalances(
+    const {
+        currentBalances: partnerAccountStatementBalances,
+        legacyOrderBalanceSnapshot
+    } = usePartnerAccountStatementPrintBalances(
         printTarget ? workspaceId : undefined,
-        printTarget ? printPartnerId : undefined
+        printTarget ? printPartnerId : undefined,
+        printTarget?.order
     )
     const counterpartyPhone = printPartner?.phone || ''
     const counterpartyAddress = printPartner?.address || ''
@@ -282,6 +286,7 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
                 logoUrl={features.logo_url}
                 businessPartner={printPartner}
                 partnerAccountStatementBalances={partnerAccountStatementBalances}
+                partnerBalanceFallbackSnapshot={legacyOrderBalanceSnapshot}
                 printedBy={user?.name}
                 productImageUrls={productImageUrls}
             />
@@ -311,6 +316,8 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
         productUnits,
         counterpartyAddress,
         counterpartyPhone,
+        legacyOrderBalanceSnapshot,
+        partnerAccountStatementBalances,
         printPartner,
         user?.name,
         workspaceName
@@ -379,7 +386,6 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
         productUnits,
         counterpartyAddress,
         counterpartyPhone,
-        partnerAccountStatementBalances,
         t,
         workspaceName
     ])
@@ -473,6 +479,7 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
                     logoUrl={features.logo_url}
                     businessPartner={printPartner}
                     partnerAccountStatementBalances={partnerAccountStatementBalances}
+                    partnerBalanceFallbackSnapshot={legacyOrderBalanceSnapshot}
                     printedBy={user?.name}
                     productImageUrls={productImageUrls}
                     hiddenFields={renderOptions?.hiddenFields}
@@ -496,6 +503,7 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
         printLang,
         printPartner,
         partnerAccountStatementBalances,
+        legacyOrderBalanceSnapshot,
         printTarget,
         productImageUrls,
         user?.name,

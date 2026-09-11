@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { AgentCommissionEntry, AgentCommissionMembership, AgentCommissionPlan } from '@/local-db'
 import {
+    buildCommissionHistoryGroups,
     commissionEntryOrderReference,
     getActiveAgentCommissionMembership,
     getCurrentCommissionPlanRevision,
@@ -122,14 +123,16 @@ describe('agent commission presentation helpers', () => {
             entry({ id: 'earned-iqd', orderId: 'order-1', status: 'earned', amount: 5_000, currency: 'iqd' }),
             entry({ id: 'approval-iqd', orderId: 'order-1', kind: 'approval', status: 'approved', amount: 0, currency: 'iqd', relatedEntryId: 'earned-iqd' }),
             entry({ id: 'paid-usd', orderId: 'order-1', kind: 'payout', status: 'paid', amount: -4, currency: 'usd' }),
+            entry({ id: 'recovered-iqd', orderId: 'order-2', kind: 'recovery', status: 'paid', amount: 500, currency: 'iqd' }),
             entry({ id: 'reversed-iqd', orderId: 'order-2', kind: 'reversal', status: 'reversed', amount: -1_000, currency: 'iqd' })
         ])
 
         expect(result.earned).toEqual({ iqd: 4_000 })
         expect(result.paid).toEqual({ usd: 4 })
+        expect(result.recovered).toEqual({ iqd: 500 })
         expect(result.approved).toEqual({ iqd: 5_000 })
         expect(result.reversed).toEqual({ iqd: -1_000 })
-        expect(result.due).toEqual({ iqd: 5_000 - 1_000, usd: -4 })
+        expect(result.due).toEqual({ iqd: 5_000 - 1_000 + 500, usd: -4 })
         expect(result.orderCount).toBe(2)
     })
 
@@ -154,5 +157,33 @@ describe('agent commission presentation helpers', () => {
 
         expect(result.earned).toEqual({ iqd: 10 })
         expect(result.approved).toEqual({ iqd: 10 })
+    })
+
+    it('shows a normal product-commission replacement and payout as one paid order activity, not a reversal', () => {
+        const result = buildCommissionHistoryGroups([
+            entry({ id: 'original', orderId: 'order-1', kind: 'accrual', status: 'earned', amount: 10 }),
+            entry({ id: 'replace-plan', orderId: 'order-1', kind: 'adjustment', status: 'reversed', amount: -10, relatedEntryId: 'original' }),
+            entry({ id: 'product-commission', orderId: 'order-1', kind: 'adjustment', status: 'earned', amount: 10, relatedEntryId: 'original' }),
+            entry({ id: 'payout', orderId: 'order-1', kind: 'payout', status: 'paid', amount: -10 }),
+        ])
+
+        expect(result).toHaveLength(1)
+        expect(result[0]).toMatchObject({
+            orderId: 'order-1',
+            earned: 10,
+            paid: 10,
+            reversed: 0,
+            outstanding: 0,
+            status: 'paid',
+        })
+    })
+
+    it('retains a real reversal in the grouped order activity', () => {
+        const result = buildCommissionHistoryGroups([
+            entry({ id: 'earned', orderId: 'order-1', kind: 'accrual', amount: 10 }),
+            entry({ id: 'returned', orderId: 'order-1', kind: 'reversal', status: 'reversed', amount: -10, relatedEntryId: 'earned' }),
+        ])
+
+        expect(result[0]).toMatchObject({ earned: 0, reversed: 10, outstanding: 0, status: 'reversed' })
     })
 })

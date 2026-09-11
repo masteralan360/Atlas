@@ -13,7 +13,7 @@ import {
     cancelTravelBooking,
     deleteTravelBooking,
     getActiveTravelBookingPayments,
-    reverseTravelBookingPayment,
+    reversePaymentTransaction,
     type PaymentTransaction,
     type TravelBooking,
     type TravelPassenger
@@ -46,6 +46,7 @@ import {
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
 import { RecordTravelBookingPaymentDialog } from './RecordTravelBookingPaymentDialog'
 import { TravelBookingPrintTemplate } from './TravelBookingPrintTemplate'
+import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
 
 interface TravelBookingDetailsViewProps {
     booking: TravelBooking
@@ -73,6 +74,7 @@ export function TravelBookingDetailsView({ booking, passengers, payments, onBack
     const [isDeleteOpen, setIsDeleteOpen] = useState(false)
     const [isCancelOpen, setIsCancelOpen] = useState(false)
     const [isPrintOpen, setIsPrintOpen] = useState(false)
+    const [transactionToReverse, setTransactionToReverse] = useState<PaymentTransaction | null>(null)
     const [showAdvanceHoldTip, setShowAdvanceHoldTip] = useState(false)
     const advanceHoldMissCountRef = useRef(0)
     const advanceHoldTipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -124,6 +126,27 @@ export function TravelBookingDetailsView({ booking, passengers, payments, onBack
         try {
             await action()
             toast({ title: t('common.success'), description: successMessage })
+        } catch (error: unknown) {
+            toast({
+                title: t('common.error'),
+                description: error instanceof Error ? error.message : t('travelTransportation.errors.actionFailed'),
+                variant: 'destructive'
+            })
+        } finally {
+            setIsProcessing(false)
+        }
+    }
+
+    const handlePaymentReversal = async (input: PaymentReversalDialogInput) => {
+        if (!transactionToReverse || isProcessing) return
+        setIsProcessing(true)
+        try {
+            await reversePaymentTransaction(booking.workspaceId, transactionToReverse.id, {
+                ...input,
+                createdBy: user?.id ?? null
+            })
+            toast({ title: t('common.success'), description: t('travelTransportation.paymentReversed') })
+            setTransactionToReverse(null)
         } catch (error: unknown) {
             toast({
                 title: t('common.error'),
@@ -263,10 +286,7 @@ export function TravelBookingDetailsView({ booking, passengers, payments, onBack
                                                 size="sm"
                                                 className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                                                 disabled={isProcessing}
-                                                onClick={() => void runAction(
-                                                    () => reverseTravelBookingPayment(booking.workspaceId, payment.id, { createdBy: user?.id ?? null }).then(() => undefined),
-                                                    t('travelTransportation.paymentReversed')
-                                                )}
+                                                onClick={() => setTransactionToReverse(payment)}
                                             ><RotateCcw className="mr-1 h-4 w-4" />{t('travelTransportation.reversePayment')}</Button> : '-'}</TableCell>
                                         </TableRow>
                                     })}
@@ -330,6 +350,17 @@ export function TravelBookingDetailsView({ booking, passengers, payments, onBack
             />
 
             <RecordTravelBookingPaymentDialog open={isPaymentOpen} onOpenChange={setIsPaymentOpen} booking={booking} />
+            <PaymentReversalDialog
+                open={!!transactionToReverse}
+                onOpenChange={(open) => {
+                    if (!open) setTransactionToReverse(null)
+                }}
+                onSubmit={handlePaymentReversal}
+                isProcessing={isProcessing}
+                transaction={transactionToReverse}
+                workspaceId={booking.workspaceId}
+                iqdPreference={features.iqd_display_preference}
+            />
             <DeleteConfirmationModal
                 isOpen={isDeleteOpen}
                 onClose={() => { if (!isProcessing) setIsDeleteOpen(false) }}

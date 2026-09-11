@@ -10,6 +10,7 @@ import { mapSaleToUniversal } from '@/lib/mappings'
 import { clearPendingSaleDetailsId, readPendingSaleDetailsId } from '@/lib/saleNavigation'
 import { formatCurrency, formatDateTime, formatCompactDateTime, formatDate, formatOriginLabel, formatSaleDetailsForWhatsApp, cn } from '@/lib/utils'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
+import { getSalesHistoryRowTotal } from '@/lib/salesHistoryTotals'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { getLoanDetailsPath } from '@/lib/loanPresentation'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
@@ -740,35 +741,6 @@ export function Sales() {
             : pendingMessage
 
         return { loan, status, label, tooltipText }
-    }
-
-    const getEffectiveTotal = (sale: Sale) => {
-        // If the sale itself is marked returned
-        if (sale.is_returned) return 0
-
-        // If items are present, calculate sum of remaining (non-returned) value
-        if (sale.items && sale.items.length > 0) {
-            // Check if all items are fully returned (fail-safe)
-            const allItemsReturned = sale.items.every(item =>
-                item.is_returned || (item.returned_quantity || 0) >= item.quantity
-            )
-            if (allItemsReturned) return 0
-
-            return sale.items.reduce((sum, item) => {
-                const quantity = item.quantity || 0
-                const returnedQty = item.returned_quantity || 0
-                const remainingQty = Math.max(0, quantity - returnedQty)
-
-                if (remainingQty <= 0) return sum
-
-                // Use converted_unit_price as it's already in the settlement currency
-                const unitPrice = item.converted_unit_price || item.unit_price || 0
-
-                return sum + (unitPrice * remainingQty)
-            }, 0)
-        }
-
-        return sale.total_amount
     }
 
     const getDateDisplay = () => {
@@ -2742,7 +2714,7 @@ export function Sales() {
                                                         </div>
                                                         <div className="text-right">
                                                             <div className="text-xl font-black text-primary leading-none">
-                                                                {formatCurrency(getEffectiveTotal(sale), sale.settlement_currency || 'usd', features.iqd_display_preference)}
+                                                                {formatCurrency(getSalesHistoryRowTotal(sale), sale.settlement_currency || 'usd', features.iqd_display_preference)}
                                                             </div>
                                                             <div className="text-[10px] font-bold text-primary/40 uppercase tracking-widest mt-1">
                                                                 {sale.settlement_currency || 'usd'}
@@ -3137,7 +3109,7 @@ export function Sales() {
                                                         </TableCell>
 
                                                         <TableCell className="text-end font-bold">
-                                                            {formatCurrency(getEffectiveTotal(sale), sale.settlement_currency || 'usd', features.iqd_display_preference)}
+                                                            {formatCurrency(getSalesHistoryRowTotal(sale), sale.settlement_currency || 'usd', features.iqd_display_preference)}
                                                         </TableCell>
                                                         <TableCell className="text-end" data-tour-id={isTutorialSale ? 'tutorial-sales-sale-actions' : undefined}>
                                                             <Button

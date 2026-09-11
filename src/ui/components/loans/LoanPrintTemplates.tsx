@@ -1,5 +1,6 @@
 import { Loan, LoanInstallment, LoanPayment, type IQDDisplayPreference } from '@/local-db'
 import { getLoanLinkedPartySummary } from '@/lib/loanParties'
+import type { SimpleLoanSummaryMode } from '@/lib/loanListMetrics'
 import {
     getLoanCounterpartyLabel,
     getLoanDirection,
@@ -31,6 +32,7 @@ interface LoanListPrintTemplateProps {
     loans: Loan[]
     filter: LoanFilter
     variant?: 'standard' | 'simple'
+    simpleSummaryMode?: SimpleLoanSummaryMode
     displayCurrency: string
     iqdPreference?: IQDDisplayPreference
     metrics: {
@@ -41,7 +43,10 @@ interface LoanListPrintTemplateProps {
         totalPrincipalByCurrency?: Record<string, number>
         totalPaidByCurrency?: Record<string, number>
         totalBalanceByCurrency?: Record<string, number>
+        totalLentByCurrency?: Record<string, number>
+        totalBorrowedByCurrency?: Record<string, number>
         activeEntries?: number
+        settledEntries?: number
     }
     logoUrl?: string | null
     qrValue?: string | null
@@ -197,6 +202,7 @@ export function LoanListPrintTemplate({
     loans,
     filter,
     variant = 'standard',
+    simpleSummaryMode = 'principal_paid',
     displayCurrency,
     iqdPreference = 'IQD',
     metrics,
@@ -217,6 +223,22 @@ export function LoanListPrintTemplate({
         : (t('loans.borrower') || 'Borrower')
     const printTitle = titleOverride || (isSimpleVariant ? getSimpleLoanModuleTitle(t) : getStandardLoanModuleTitle(t))
     const continuedLabel = t('businessPartners.accountStatement.continued', { defaultValue: '(continued)' })
+    const isLegacySimpleSummary = isSimpleVariant && simpleSummaryMode === 'lent_borrowed'
+    const simplePrimaryLabel = isLegacySimpleSummary
+        ? t('loans.totalLent', { defaultValue: 'Total Lent' })
+        : t('loans.totalPrincipal', { defaultValue: 'Total Principal' })
+    const simpleSecondaryLabel = isLegacySimpleSummary
+        ? t('loans.totalBorrowed', { defaultValue: 'Total Borrowed' })
+        : t('loans.totalPaid', { defaultValue: 'Total Paid' })
+    const simpleStatusLabel = isLegacySimpleSummary
+        ? t('loans.settledEntries', { defaultValue: 'Settled Entries' })
+        : t('loans.totalBalance', { defaultValue: 'Total Balance' })
+    const simplePrimaryTotals = isLegacySimpleSummary
+        ? metrics.totalLentByCurrency
+        : metrics.totalPrincipalByCurrency
+    const simpleSecondaryTotals = isLegacySimpleSummary
+        ? metrics.totalBorrowedByCurrency
+        : metrics.totalPaidByCurrency
 
     return (
         <div
@@ -255,7 +277,7 @@ export function LoanListPrintTemplate({
             <div className="grid grid-cols-2 items-start gap-3 mb-4 text-xs" data-pdf-keep-together>
                 <HideablePrintFieldCard
                     title={isSimpleVariant
-                        ? t('loans.totalPrincipal', { defaultValue: 'Total Principal' })
+                        ? simplePrimaryLabel
                         : (t('loans.totalOutstanding') || 'Total Outstanding')}
                     className="border border-slate-300 rounded-md p-2"
                     titleClassName="text-slate-500 text-center font-normal mb-0"
@@ -265,11 +287,11 @@ export function LoanListPrintTemplate({
                         {
                             key: 'loans.list.totalPrimary',
                             label: isSimpleVariant
-                                ? t('loans.totalPrincipal', { defaultValue: 'Total Principal' })
+                                ? simplePrimaryLabel
                                 : (t('loans.totalOutstanding') || 'Total Outstanding'),
                             value: formatCurrency(isSimpleVariant ? 0 : (metrics.totalOutstanding || 0), displayCurrency as any, iqdPreference),
-                            render: isSimpleVariant && metrics.totalPrincipalByCurrency && Object.keys(metrics.totalPrincipalByCurrency).length > 0
-                                ? <div className="text-center">{Object.entries(metrics.totalPrincipalByCurrency).map(([curr, val]) => (
+                            render: isSimpleVariant && simplePrimaryTotals && Object.keys(simplePrimaryTotals).length > 0
+                                ? <div className="text-center">{Object.entries(simplePrimaryTotals).map(([curr, val]) => (
                                     <p key={curr} className="font-bold">{formatCurrency(val, curr as any, iqdPreference)}</p>
                                 ))}</div>
                                 : <p className="font-bold text-center">{formatCurrency(isSimpleVariant ? 0 : (metrics.totalOutstanding || 0), displayCurrency as any, iqdPreference)}</p>
@@ -278,7 +300,7 @@ export function LoanListPrintTemplate({
                 />
                 <HideablePrintFieldCard
                     title={isSimpleVariant
-                        ? t('loans.totalPaid', { defaultValue: 'Total Paid' })
+                        ? simpleSecondaryLabel
                         : (t('loans.dueToday') || 'Due Today')}
                     className="border border-slate-300 rounded-md p-2"
                     titleClassName="text-slate-500 text-center font-normal mb-0"
@@ -288,11 +310,11 @@ export function LoanListPrintTemplate({
                         {
                             key: 'loans.list.totalSecondary',
                             label: isSimpleVariant
-                                ? t('loans.totalPaid', { defaultValue: 'Total Paid' })
+                                ? simpleSecondaryLabel
                                 : (t('loans.dueToday') || 'Due Today'),
                             value: formatCurrency(isSimpleVariant ? 0 : (metrics.dueToday || 0), displayCurrency as any, iqdPreference),
-                            render: isSimpleVariant && metrics.totalPaidByCurrency && Object.keys(metrics.totalPaidByCurrency).length > 0
-                                ? <div className="text-center">{Object.entries(metrics.totalPaidByCurrency).map(([curr, val]) => (
+                            render: isSimpleVariant && simpleSecondaryTotals && Object.keys(simpleSecondaryTotals).length > 0
+                                ? <div className="text-center">{Object.entries(simpleSecondaryTotals).map(([curr, val]) => (
                                     <p key={curr} className="font-bold">{formatCurrency(val, curr as any, iqdPreference)}</p>
                                 ))}</div>
                                 : <p className="font-bold text-center">{formatCurrency(isSimpleVariant ? 0 : (metrics.dueToday || 0), displayCurrency as any, iqdPreference)}</p>
@@ -320,7 +342,7 @@ export function LoanListPrintTemplate({
                 />
                 <HideablePrintFieldCard
                     title={isSimpleVariant
-                        ? t('loans.totalBalance', { defaultValue: 'Total Balance' })
+                        ? simpleStatusLabel
                         : (t('loans.overdueLoans') || 'Overdue Loans')}
                     className="border border-slate-300 rounded-md p-2"
                     titleClassName="text-slate-500 text-center font-normal mb-0"
@@ -330,10 +352,14 @@ export function LoanListPrintTemplate({
                         {
                             key: 'loans.list.statusCount',
                             label: isSimpleVariant
-                                ? t('loans.totalBalance', { defaultValue: 'Total Balance' })
+                                ? simpleStatusLabel
                                 : (t('loans.overdueLoans') || 'Overdue Loans'),
-                            value: isSimpleVariant ? 0 : (metrics.overdueLoans || 0),
-                            render: isSimpleVariant && metrics.totalBalanceByCurrency && Object.keys(metrics.totalBalanceByCurrency).length > 0
+                            value: isLegacySimpleSummary
+                                ? (metrics.settledEntries || 0)
+                                : (isSimpleVariant ? 0 : (metrics.overdueLoans || 0)),
+                            render: isLegacySimpleSummary
+                                ? <p className="font-bold text-center">{metrics.settledEntries || 0}</p>
+                                : isSimpleVariant && metrics.totalBalanceByCurrency && Object.keys(metrics.totalBalanceByCurrency).length > 0
                                 ? <div className="text-center">{Object.entries(metrics.totalBalanceByCurrency).map(([curr, val]) => (
                                     <p key={curr} className="font-bold">{formatCurrency(val, curr as any, iqdPreference)}</p>
                                 ))}</div>

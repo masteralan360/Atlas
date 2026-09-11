@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useMemo, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
     ArrowDownLeft,
+    ArrowLeftRight,
     ArrowUpRight,
     BookOpen,
     FileSpreadsheet,
@@ -23,6 +24,9 @@ import {
     ChevronsDown,
     UsersRound,
     FileText,
+    History,
+    Link2,
+    MoreHorizontal,
 } from 'lucide-react'
 import { Area, AreaChart, Bar, BarChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis } from 'recharts'
 import { useLocation } from 'wouter'
@@ -33,6 +37,12 @@ import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { buildConversionRates } from '@/lib/budget'
 import { convertToStoreBase } from '@/lib/currency'
 import { getLedgerFlowSign, isLedgerCashFlowDirection, summarizeLedgerCashFlow, type LedgerReportingDirection } from '@/lib/ledgerFlow'
+import {
+    DEFAULT_LEDGER_SUMMARY_MODE,
+    getLedgerSummaryMode,
+    saveLedgerSummaryMode,
+    type LedgerSummaryMode,
+} from '@/lib/ledgerSummaryPreference'
 import {
     getLedgerCashBucketId,
     isLedgerCashDrilldownMatch,
@@ -64,6 +74,12 @@ import {
 import { getInstallmentSaleLedgerPayment } from '@/lib/installmentSaleLedger'
 import { getLedgerCashMovementEntries } from '@/lib/ledgerCashMovementEntries'
 import { getLedgerPaymentTransactionEffect, getLedgerPaymentTransactions } from '@/lib/ledgerPaymentTransactions'
+import {
+    buildLedgerFinalSettlementIndex,
+    buildLedgerSettlementIndex,
+    getPaymentTransactionSourceKey,
+    type LedgerSettlementStatus,
+} from '@/lib/ledgerSettlement'
 import { classifySalesOrderLoanCash } from '@/lib/ledgerOrderLoan'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { setPendingSaleDetailsId } from '@/lib/saleNavigation'
@@ -128,16 +144,26 @@ import {
     ContextMenuTrigger,
     ContextMenuContent,
     ContextMenuItem,
+    ContextMenuLabel,
+    ContextMenuSeparator,
     DropdownMenu,
     DropdownMenuCheckboxItem,
     DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
     DropdownMenuTrigger,
     ExportPreviewModal,
 } from '@/ui/components'
 import { useWorkspace } from '@/workspace'
 import { useTheme } from '@/ui/components/theme-provider'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
+import { FilterDropdown } from '@/ui/components/FilterDropdown'
 import { LedgerCashSummaryDashboard } from '@/ui/components/ledger/LedgerCashSummaryDashboard'
+import {
+    LedgerPaymentHistoryDialog,
+    type LedgerPaymentHistoryMovement,
+} from '@/ui/components/ledger/LedgerPaymentHistoryDialog'
 import { getDateRangeBounds, isDateInDateRange } from '@/lib/dateRangeFilters'
 
 type LedgerDirection = LedgerReportingDirection
@@ -181,6 +207,7 @@ type LedgerEntryType =
     | 'installment_sale_collection'
     | 'real_estate_commission'
     | 'agent_commission_payout'
+    | 'agent_commission_recovery'
     | 'activity_transaction'
     | 'activity_refund'
     | 'clinical_appointment_payment'
@@ -240,6 +267,8 @@ interface LedgerEntry {
     routePath: string
     /** Present only for an immutable payment reversal and links its source payment. */
     reversalOfTransactionId?: string | null
+    /** The original payment direction; the rendered cash effect is the opposite. */
+    reversalOriginalDirection?: PaymentTransaction['direction'] | null
     relationKey?: string | null
     relationRole?: LedgerRelationRole | null
     relationTitle?: string | null
@@ -407,6 +436,8 @@ function ledgerTypeLabel(type: LedgerEntryType, t: any) {
             })
         case 'agent_commission_payout':
             return t('ledger.type.agentCommissionPayout')
+        case 'agent_commission_recovery':
+            return t('ledger.type.agentCommissionRecovery')
         case 'activity_transaction':
             return t('ledger.type.activityTransaction', {
                 defaultValue: 'Activity Transaction',
@@ -685,16 +716,57 @@ function formatNetSummary(entries: LedgerEntry[], iqdPreference: IQDDisplayPrefe
         })
 }
 
+function getSignedLedgerEntryAmount(entry: Pick<LedgerEntry, 'amount' | 'direction'>) {
+    return getLedgerFlowSign(entry.direction) * entry.amount
+}
+
+function formatSignedLedgerAmount(
+    amount: number,
+    currency: CurrencyCode,
+    iqdPreference: IQDDisplayPreference,
+) {
+    if (amount === 0) return formatCurrency(0, currency, iqdPreference)
+    return `${amount > 0 ? '+' : '-'}${formatCurrency(Math.abs(amount), currency, iqdPreference)}`
+}
+
+function ledgerSettlementStatusLabel(status: LedgerSettlementStatus, t: any) {
+    return t(`ledger.settlement.status.${status}`, {
+        defaultValue:
+            status === 'fully_reversed'
+                ? 'Fully reversed'
+                : status === 'partially_reversed'
+                  ? 'Partially reversed'
+                  : status === 'relationship_missing'
+                    ? 'Relationship unavailable'
+                    : status === 'not_applicable'
+                      ? 'Not cash flow'
+                    : status === 'inconsistent'
+                      ? 'Needs review'
+                      : 'Posted',
+    })
+}
+
+function ledgerSettlementStatusClass(status: LedgerSettlementStatus) {
+    switch (status) {
+        case 'fully_reversed':
+            return 'border-violet-500/25 bg-violet-500/10 text-violet-700 dark:text-violet-300'
+        case 'partially_reversed':
+            return 'border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+        case 'inconsistent':
+        case 'relationship_missing':
+            return 'border-destructive/25 bg-destructive/10 text-destructive'
+        case 'not_applicable':
+            return 'border-border bg-muted text-muted-foreground'
+        default:
+            return 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+    }
+}
+
 interface LedgerTrendPoint {
     dateKey: string
     inflow: number
     outflow: number
     net: number
-}
-
-interface LedgerRelationRange {
-    firstIndex: number
-    lastIndex: number
 }
 
 function toLedgerDateKey(date: string) {
@@ -706,26 +778,19 @@ function toLedgerDateKey(date: string) {
 }
 
 function buildVisibleRelationMaps(entries: LedgerEntry[]) {
-    const counts = new Map<string, number>()
-    const ranges = new Map<string, LedgerRelationRange>()
+    const entriesByKey = new Map<string, LedgerEntry[]>()
 
-    entries.forEach((entry, index) => {
+    entries.forEach((entry) => {
         if (!entry.relationKey) {
             return
         }
 
-        counts.set(entry.relationKey, (counts.get(entry.relationKey) || 0) + 1)
-
-        const existingRange = ranges.get(entry.relationKey)
-        if (!existingRange) {
-            ranges.set(entry.relationKey, { firstIndex: index, lastIndex: index })
-            return
-        }
-
-        existingRange.lastIndex = index
+        const relatedEntries = entriesByKey.get(entry.relationKey) ?? []
+        relatedEntries.push(entry)
+        entriesByKey.set(entry.relationKey, relatedEntries)
     })
 
-    return { counts, ranges }
+    return entriesByKey
 }
 
 function formatTransactionIdForDisplay(transactionId: string, _compactTransactionId: boolean) {
@@ -1216,6 +1281,7 @@ function applyPaymentReversalToLedgerEntry(entry: LedgerEntry, transaction: Paym
         direction: effect.direction,
         amount: effect.amount,
         reversalOfTransactionId: transaction.reversalOfTransactionId,
+        reversalOriginalDirection: transaction.direction,
         description: [reversalDescription, entry.description].filter(Boolean).join(' | ') || null,
     }
 }
@@ -1864,7 +1930,8 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction, context: Ledge
                 ...relation,
             }
         }
-        case 'agent_commission_payout': {
+        case 'agent_commission_payout':
+        case 'agent_commission_recovery': {
             const metadataAgentId = typeof transaction.metadata?.agentId === 'string' ? transaction.metadata.agentId : null
             const linkedBusinessPartnerId = metadataAgentId
                 ? (context.agentBusinessPartnerIdById.get(metadataAgentId) ?? null)
@@ -1873,8 +1940,8 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction, context: Ledge
                 id: `payment:${transaction.id}`,
                 transactionId: transaction.id,
                 date: transaction.paidAt,
-                type: 'agent_commission_payout',
-                direction: 'outgoing',
+                type: transaction.sourceType,
+                direction: transaction.direction,
                 amount: transaction.amount,
                 currency: transaction.currency,
                 sourceModule: 'orders',
@@ -1896,7 +1963,7 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction, context: Ledge
 export function Ledger() {
     const { user } = useAuth()
     const { t, i18n } = useTranslation()
-    const { dateRange, customDates } = useDateRange()
+    const { dateRange, customDates, setDateRange } = useDateRange()
     const { exchangeData, eurRates, tryRates } = useExchangeRate()
 
     const scrollToRow = (id: string) => {
@@ -1977,6 +2044,11 @@ export function Ledger() {
     const [isDirectionSplitView, setIsDirectionSplitView] = useState(false)
     const [isExportModalOpen, setIsExportModalOpen] = useState(false)
     const [summaryDrilldown, setSummaryDrilldown] = useState<LedgerCashDrilldownId | null>(null)
+    const [summaryModeByWorkspace, setSummaryModeByWorkspace] = useState<Record<string, LedgerSummaryMode>>({})
+    const persistedSummaryMode = useMemo(() => getLedgerSummaryMode(workspaceId), [workspaceId])
+    const summaryMode = (workspaceId ? summaryModeByWorkspace[workspaceId] : undefined) ?? persistedSummaryMode
+    const [historyEntryId, setHistoryEntryId] = useState<string | null>(null)
+    const [pendingScrollEntryId, setPendingScrollEntryId] = useState<string | null>(null)
 
     const [currentPage, setCurrentPage] = useState(1)
     const [pageSize, setPageSize] = useState(() => {
@@ -1987,7 +2059,44 @@ export function Ledger() {
         localStorage.setItem('ledger_page_size', String(pageSize))
     }, [pageSize])
 
+    useEffect(() => {
+        if (summaryMode === 'legacy_flow') {
+            setSummaryDrilldown(null)
+        }
+    }, [summaryMode])
+
+    const handleSummaryModeChange = (mode: LedgerSummaryMode) => {
+        if (workspaceId) {
+            setSummaryModeByWorkspace((current) => ({ ...current, [workspaceId]: mode }))
+        }
+        saveLedgerSummaryMode(workspaceId, mode)
+        if (mode === 'legacy_flow') {
+            setSummaryDrilldown(null)
+        }
+    }
+
+    const summaryModeOptions = useMemo(
+        () => [
+            {
+                value: 'cash_activity' as const,
+                label: t('ledger.summaryModes.cashActivity'),
+                icon: BarChart3,
+            },
+            {
+                value: 'legacy_flow' as const,
+                label: t('ledger.summaryModes.legacyFlow'),
+                icon: ArrowLeftRight,
+            },
+        ],
+        [t],
+    )
+
     const deferredSearch = useDeferredValue(filters.search)
+    const settlementIndex = useMemo(() => buildLedgerSettlementIndex(ledgerPaymentTransactions), [ledgerPaymentTransactions])
+    const paymentTransactionById = useMemo(
+        () => new Map(ledgerPaymentTransactions.map((transaction) => [transaction.id, transaction] as const)),
+        [ledgerPaymentTransactions],
+    )
     const loanById = useMemo(() => new Map(loans.map((loan) => [loan.id, loan])), [loans])
     const realEstateTransactionById = useMemo(
         () => new Map(realEstateTransactions.map((transaction) => [transaction.id, transaction])),
@@ -2093,6 +2202,16 @@ export function Ledger() {
         rawExchangeTransactions,
         t,
     ])
+
+    const finalSettlementIndex = useMemo(() => {
+        const relationKeyByTransactionId = new Map<string, string | null>()
+        allEntries.forEach((entry) => {
+            if (paymentTransactionById.has(entry.transactionId)) {
+                relationKeyByTransactionId.set(entry.transactionId, entry.relationKey ?? null)
+            }
+        })
+        return buildLedgerFinalSettlementIndex(settlementIndex, relationKeyByTransactionId)
+    }, [allEntries, paymentTransactionById, settlementIndex])
 
     const isLoading = sales === undefined
     const [isDateLoading, setIsDateLoading] = useState(false)
@@ -2225,6 +2344,19 @@ export function Ledger() {
         () => baseFilteredEntries.filter((entry) => isLedgerCashDrilldownMatch(entry, summaryDrilldown)),
         [baseFilteredEntries, summaryDrilldown],
     )
+    const allTimeFilteredEntries = useMemo(
+        () =>
+            applyGeneralLedgerFilters(allEntries, effectiveFilters, (entry) => {
+                const category = getLedgerMovementCategory(entry)
+                return [
+                    ledgerTypeLabel(entry.type, t),
+                    sourceModuleLabel(entry.sourceModule, t),
+                    category ? movementCategoryLabel(category, t) : null,
+                    transactionStateLabel(getLedgerTransactionState(entry), t),
+                ]
+            }).filter((entry) => isLedgerCashDrilldownMatch(entry, summaryDrilldown)),
+        [allEntries, effectiveFilters, summaryDrilldown, t],
+    )
     const ledgerExportData = useMemo(() => {
         return filteredEntries.map((entry) => ({
             [t('ledger.table.date') || 'Date']: formatDateTime(entry.date),
@@ -2248,6 +2380,120 @@ export function Ledger() {
     const visibleOutgoingEntries = useMemo(() => visibleEntries.filter((entry) => entry.direction === 'outgoing'), [visibleEntries])
     const visibleOpeningEntries = useMemo(() => visibleEntries.filter((entry) => entry.direction === 'opening'), [visibleEntries])
     const visibleAdjustmentEntries = useMemo(() => visibleEntries.filter((entry) => entry.direction === 'adjustment'), [visibleEntries])
+    const paymentEntryByTransactionId = useMemo(
+        () =>
+            new Map(
+                allEntries
+                    .filter((entry) => paymentTransactionById.has(entry.transactionId))
+                    .map((entry) => [entry.transactionId, entry] as const),
+            ),
+        [allEntries, paymentTransactionById],
+    )
+    const allEntryById = useMemo(() => new Map(allEntries.map((entry) => [entry.id, entry] as const)), [allEntries])
+    const allTimeFilteredEntryIndexById = useMemo(
+        () => new Map(allTimeFilteredEntries.map((entry, index) => [entry.id, index] as const)),
+        [allTimeFilteredEntries],
+    )
+    const historySelectedEntry = useMemo(
+        () => (historyEntryId ? allEntryById.get(historyEntryId) ?? null : null),
+        [allEntryById, historyEntryId],
+    )
+    const historySelectedTransaction = historySelectedEntry
+        ? paymentTransactionById.get(historySelectedEntry.transactionId) ?? null
+        : null
+    const historyEntries = useMemo(() => {
+        if (!historySelectedEntry) return []
+        if (!historySelectedTransaction) return [historySelectedEntry]
+
+        const sourceKey = getPaymentTransactionSourceKey(historySelectedTransaction)
+        return (settlementIndex.sourceTransactionIds.get(sourceKey) ?? [])
+            .map((transactionId) => paymentEntryByTransactionId.get(transactionId))
+            .filter((entry): entry is LedgerEntry => !!entry)
+            .sort((left, right) => left.date.localeCompare(right.date) || left.transactionId.localeCompare(right.transactionId))
+    }, [historySelectedEntry, historySelectedTransaction, paymentEntryByTransactionId, settlementIndex.sourceTransactionIds])
+    const historyMovements = useMemo<LedgerPaymentHistoryMovement[]>(
+        () =>
+            historyEntries.map((entry) => {
+                const projection = settlementIndex.byTransactionId.get(entry.transactionId)
+                const isCashMovement = isLedgerCashFlowDirection(entry.direction)
+                return {
+                    id: entry.id,
+                    transactionId: entry.transactionId,
+                    date: entry.date,
+                    typeLabel: ledgerTypeLabel(entry.type, t),
+                    movementAmount: isCashMovement
+                        ? projection?.movementAmount ?? getSignedLedgerEntryAmount(entry)
+                        : entry.amount,
+                    currency: entry.currency,
+                    isCashMovement,
+                    isReversal: !!entry.reversalOfTransactionId,
+                    settlementStatus: isCashMovement ? projection?.status ?? 'posted' : 'not_applicable',
+                    isSelected: entry.id === historySelectedEntry?.id,
+                    isOutsideDateRange: !isEntryInDateRange(entry.date, dateRange, customDates),
+                    isOutsideCurrentFilters: !allTimeFilteredEntryIndexById.has(entry.id),
+                    canGoToMovement: allTimeFilteredEntryIndexById.has(entry.id),
+                }
+            }),
+        [
+            allTimeFilteredEntryIndexById,
+            customDates,
+            dateRange,
+            historyEntries,
+            historySelectedEntry?.id,
+            settlementIndex.byTransactionId,
+            t,
+        ],
+    )
+    const historySourceTotals = useMemo(() => {
+        const totals = new Map<CurrencyCode, number>()
+        historyMovements.forEach((movement) => {
+            if (!movement.isCashMovement) return
+            totals.set(movement.currency, (totals.get(movement.currency) ?? 0) + movement.movementAmount)
+        })
+        return Array.from(totals, ([currency, amount]) => ({ currency, amount: Math.abs(amount) < 0.000001 ? 0 : amount })).sort(
+            (left, right) => left.currency.localeCompare(right.currency),
+        )
+    }, [historyMovements])
+    const historySelectedProjection = historySelectedEntry
+        ? settlementIndex.byTransactionId.get(historySelectedEntry.transactionId) ?? null
+        : null
+    const historySelectedFinalProjection = historySelectedEntry
+        ? finalSettlementIndex.byTransactionId.get(historySelectedEntry.transactionId) ?? null
+        : null
+    const historySelectedMovement = historyMovements.find((movement) => movement.isSelected) ?? null
+    const historyFinalSettlementTotals = historySelectedEntry
+        ? !isLedgerCashFlowDirection(historySelectedEntry.direction)
+            ? []
+            : historySelectedFinalProjection
+              ? historySelectedFinalProjection.totals
+              : [
+                    {
+                        currency: historySelectedProjection?.currency ?? historySelectedEntry.currency,
+                        amount: historySelectedProjection?.finalSettlement ?? getSignedLedgerEntryAmount(historySelectedEntry),
+                    },
+                ]
+        : []
+    const historySourceStatus = useMemo(() => {
+        if (!historySelectedTransaction) return null
+
+        const salesOrder = salesOrderById.get(historySelectedTransaction.sourceRecordId)
+        if (salesOrder) {
+            const order = salesOrder
+            return `${t(`orders.status.${order.status}`, { defaultValue: order.status })} · ${t(`orders.status.${order.paymentStatus}`, {
+                defaultValue: order.paymentStatus,
+            })}`
+        }
+
+        const purchaseOrder = purchaseOrderById.get(historySelectedTransaction.sourceRecordId)
+        if (purchaseOrder) {
+            const order = purchaseOrder
+            return `${t(`orders.status.${order.status}`, { defaultValue: order.status })} · ${t(`orders.status.${order.paymentStatus}`, {
+                defaultValue: order.paymentStatus,
+            })}`
+        }
+
+        return null
+    }, [historySelectedTransaction, purchaseOrderById, salesOrderById, t])
 
     const draftPreviewEntries = useMemo(
         () =>
@@ -2313,10 +2559,51 @@ export function Ledger() {
     }, [dateRange, customDates, filters, pageSize, summaryDrilldown])
 
     useEffect(() => {
-        if (hoveredRelationKey && !visibleEntries.some((entry) => entry.relationKey === hoveredRelationKey)) {
+        if (!pendingScrollEntryId) return
+
+        const targetIndex = filteredEntries.findIndex((entry) => entry.id === pendingScrollEntryId)
+        if (targetIndex === -1) return
+
+        const targetPage = Math.floor(targetIndex / pageSize) + 1
+        if (currentPage !== targetPage) {
+            setCurrentPage(targetPage)
+            return
+        }
+
+        const timer = window.setTimeout(() => {
+            scrollToRow(pendingScrollEntryId)
+            setPendingScrollEntryId(null)
+        }, 50)
+        return () => window.clearTimeout(timer)
+    }, [currentPage, filteredEntries, pageSize, pendingScrollEntryId])
+
+    const goToLedgerMovement = (entryId: string) => {
+        const entryIndex = allTimeFilteredEntryIndexById.get(entryId)
+        const entry = entryIndex === undefined ? null : allTimeFilteredEntries[entryIndex]
+        if (!entry) return
+
+        if (!isEntryInDateRange(entry.date, dateRange, customDates)) {
+            setDateRange('allTime')
+        }
+        setPendingScrollEntryId(entryId)
+        setHistoryEntryId(null)
+    }
+
+    useEffect(() => {
+        if (
+            hoveredRelationKey &&
+            !visibleEntries.some((entry) => {
+                const projection = settlementIndex.byTransactionId.get(entry.transactionId)
+                const highlightKey =
+                    projection && projection.linkedTransactionIds.length > 1
+                        ? `payment-chain:${projection.rootTransactionId}`
+                        : entry.relationKey
+                return highlightKey === hoveredRelationKey
+            })
+        ) {
             setHoveredRelationKey(null)
         }
-    }, [hoveredRelationKey, visibleEntries])
+    }, [hoveredRelationKey, settlementIndex.byTransactionId, visibleEntries])
 
     useEffect(() => {
         if (!isFilterDialogOpen) {
@@ -2727,8 +3014,18 @@ export function Ledger() {
             hideActions?: boolean
         },
     ) => {
-        const { counts: relationCounts, ranges: relationRanges } = buildVisibleRelationMaps(rows)
-        const hoveredRange = hoveredRelationKey ? (relationRanges.get(hoveredRelationKey) ?? null) : null
+        const relationEntriesByKey = buildVisibleRelationMaps(rows)
+        const getEntryHighlightKey = (entry: LedgerEntry) => {
+            const projection = settlementIndex.byTransactionId.get(entry.transactionId)
+            return projection && projection.linkedTransactionIds.length > 1
+                ? `payment-chain:${projection.rootTransactionId}`
+                : entry.relationKey ?? null
+        }
+        const highlightCounts = new Map<string, number>()
+        rows.forEach((entry) => {
+            const key = getEntryHighlightKey(entry)
+            if (key) highlightCounts.set(key, (highlightCounts.get(key) ?? 0) + 1)
+        })
         const compactTransactionId = options?.compactTransactionId ?? false
         const compactColumns = options?.compactColumns ?? false
         const showDescriptionNotes = !options?.hideDescriptionNotes
@@ -2795,7 +3092,7 @@ export function Ledger() {
                                 </TableHead>
                             ) : null}
                             {showActions ? (
-                                <TableHead className={cn('text-right', compactColumns ? 'w-[72px] px-2 py-3' : 'w-[84px]')}>
+                                <TableHead className={cn('text-right', compactColumns ? 'w-[48px] px-2 py-3' : 'w-[128px]')}>
                                     {t('ledger.table.actions', { defaultValue: 'Actions' })}
                                 </TableHead>
                             ) : null}
@@ -2809,32 +3106,20 @@ export function Ledger() {
                                 </TableCell>
                             </TableRow>
                         ) : (
-                            rows.map((entry, rowIndex) => {
-                                const isRelationHovered = !!hoveredRelationKey && entry.relationKey === hoveredRelationKey
-                                const relatedVisibleCount = entry.relationKey ? relationCounts.get(entry.relationKey) || 0 : 0
+                            rows.map((entry) => {
+                                const projection = settlementIndex.byTransactionId.get(entry.transactionId) ?? null
+                                const finalProjection = finalSettlementIndex.byTransactionId.get(entry.transactionId) ?? null
+                                const entryHighlightKey = getEntryHighlightKey(entry)
+                                const isRelationHovered = !!hoveredRelationKey && entryHighlightKey === hoveredRelationKey
+                                const relatedVisibleCount = entryHighlightKey ? highlightCounts.get(entryHighlightKey) || 0 : 0
                                 const hasVisibleLinkedPeer = relatedVisibleCount > 1
-                                const hoveredRelationIsCompleted =
-                                    hoveredRange && rows[hoveredRange.firstIndex] ? rows[hoveredRange.firstIndex].relationIsCompleted : undefined
-                                const showHoverHierarchyLine =
-                                    !!hoveredRange &&
-                                    hoveredRange.firstIndex !== hoveredRange.lastIndex &&
-                                    rowIndex >= hoveredRange.firstIndex &&
-                                    rowIndex <= hoveredRange.lastIndex
-                                const showHoverHierarchyTurn = isRelationHovered && hasVisibleLinkedPeer
                                 const relationAccentClass =
                                     entry.relationRole === 'origin'
                                         ? 'bg-sky-500/5'
                                         : entry.relationRole === 'repayment'
                                           ? 'bg-amber-500/10'
                                           : 'bg-violet-500/5'
-                                const hierarchyVerticalClass =
-                                    hoveredRange && rowIndex === hoveredRange.firstIndex
-                                        ? 'top-1/2 bottom-0'
-                                        : hoveredRange && rowIndex === hoveredRange.lastIndex
-                                          ? 'top-0 bottom-1/2'
-                                          : 'top-0 bottom-0'
-
-                                const relatedRows = entry.relationKey ? rows.filter((r) => r.relationKey === entry.relationKey) : []
+                                const relatedRows = entry.relationKey ? relationEntriesByKey.get(entry.relationKey) ?? [] : []
                                 const currentIndex = entry.relationKey ? relatedRows.findIndex((r) => r.id === entry.id) : -1
                                 const nextPayment = currentIndex > 0 ? relatedRows[currentIndex - 1] : null
                                 const previousPayment =
@@ -2844,13 +3129,131 @@ export function Ledger() {
                                     currentIndex !== -1 && currentIndex < relatedRows.length - 1 ? relatedRows[relatedRows.length - 1] : null
 
                                 const isRealEstateEntry = entry.sourceModule === 'real_estate'
-                                const hasContextMenu = Boolean(
-                                    nextPayment ||
-                                    previousPayment ||
-                                    latestPayment ||
-                                    firstPayment ||
-                                    entry.businessPartnerId ||
-                                    isRealEstateEntry,
+                                const isCashMovement = isLedgerCashFlowDirection(entry.direction)
+                                const movementAmount = isCashMovement
+                                    ? projection?.movementAmount ?? getSignedLedgerEntryAmount(entry)
+                                    : entry.amount
+                                const finalSettlementTotals = !isCashMovement
+                                    ? []
+                                    : finalProjection
+                                      ? finalProjection.totals
+                                      : projection?.finalSettlement === null
+                                        ? []
+                                        : [
+                                              {
+                                                  currency: projection?.currency ?? entry.currency,
+                                                  amount: projection?.finalSettlement ?? movementAmount,
+                                              },
+                                          ]
+                                const settlementStatus: LedgerSettlementStatus = isCashMovement
+                                    ? projection?.status ?? 'posted'
+                                    : 'not_applicable'
+                                const finalSettlementStatus = finalProjection?.status ?? settlementStatus
+                                const isRelationTotal = finalProjection?.isRelationTotal ?? false
+                                const showRelationTotalStatus = isRelationTotal && finalSettlementTotals.length > 0
+                                const linkedOutsideDateRange = Boolean(
+                                    (finalProjection?.linkedTransactionIds ?? projection?.linkedTransactionIds)?.some((transactionId) => {
+                                        const linkedEntry = paymentEntryByTransactionId.get(transactionId)
+                                        return linkedEntry && !isEntryInDateRange(linkedEntry.date, dateRange, customDates)
+                                    }),
+                                )
+                                const menuActions = [
+                                    {
+                                        key: 'history',
+                                        icon: History,
+                                        label: t('ledger.context.viewPaymentHistory', { defaultValue: 'View payment activity' }),
+                                        action: () => setHistoryEntryId(entry.id),
+                                    },
+                                    {
+                                        key: 'open',
+                                        icon: FileText,
+                                        label: isRealEstateEntry
+                                            ? t('ledger.context.viewRealEstateContract', {
+                                                  defaultValue: 'View Real Estate Contract',
+                                              })
+                                            : t('ledger.context.openSource', { defaultValue: 'Open source record' }),
+                                        action: () => openEntry(entry),
+                                    },
+                                    latestPayment
+                                        ? {
+                                              key: 'latest',
+                                              icon: ChevronsUp,
+                                              label: t('ledger.context.scrollToLatest', { defaultValue: 'Latest payment' }),
+                                              action: () => scrollToRow(latestPayment.id),
+                                          }
+                                        : null,
+                                    nextPayment
+                                        ? {
+                                              key: 'next',
+                                              icon: ChevronUp,
+                                              label: t('ledger.context.scrollToNext', { defaultValue: 'Next payment' }),
+                                              action: () => scrollToRow(nextPayment.id),
+                                          }
+                                        : null,
+                                    previousPayment
+                                        ? {
+                                              key: 'previous',
+                                              icon: ChevronDown,
+                                              label: t('ledger.context.scrollToPrevious', { defaultValue: 'Previous payment' }),
+                                              action: () => scrollToRow(previousPayment.id),
+                                          }
+                                        : null,
+                                    firstPayment
+                                        ? {
+                                              key: 'first',
+                                              icon: ChevronsDown,
+                                              label: t('ledger.context.scrollToFirst', { defaultValue: 'First payment' }),
+                                              action: () => scrollToRow(firstPayment.id),
+                                          }
+                                        : null,
+                                    entry.businessPartnerId
+                                        ? {
+                                              key: 'partner',
+                                              icon: UsersRound,
+                                              label: t('ledger.context.viewBusinessPartner', {
+                                                  defaultValue: 'View Business Partner',
+                                              }),
+                                              action: () => setLocation(`/business-partners/${entry.businessPartnerId}`),
+                                          }
+                                        : null,
+                                ].filter((action): action is NonNullable<typeof action> => !!action)
+                                const renderMenuSummary = () => (
+                                    <div className="py-1">
+                                        <div>
+                                            <div className="text-[9px] font-black uppercase tracking-[0.16em] text-muted-foreground">
+                                                {t('ledger.settlement.finalAllDates', {
+                                                    defaultValue: 'Final settlement · all dates',
+                                                })}
+                                            </div>
+                                            <div className="mt-1 flex items-center justify-between gap-4">
+                                                <span
+                                                    className={cn(
+                                                        'rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-wide',
+                                                        showRelationTotalStatus
+                                                            ? 'border-sky-500/25 bg-sky-500/10 text-sky-700 dark:text-sky-300'
+                                                            : ledgerSettlementStatusClass(finalSettlementStatus),
+                                                    )}
+                                                >
+                                                    {showRelationTotalStatus
+                                                        ? t('ledger.settlement.relatedTotal', { defaultValue: 'Related total' })
+                                                        : ledgerSettlementStatusLabel(finalSettlementStatus, t)}
+                                                </span>
+                                                <div className="shrink-0 space-y-0.5 text-end text-sm font-black tabular-nums">
+                                                    {finalSettlementTotals.length === 0
+                                                        ? t('ledger.settlement.unavailable', { defaultValue: 'Unavailable' })
+                                                        : finalSettlementTotals.map((total) => (
+                                                              <div key={total.currency} className={cn(total.amount < 0 && 'text-rose-600')}>
+                                                                  {formatSignedLedgerAmount(
+                                                                      total.amount,
+                                                                      total.currency,
+                                                                      features.iqd_display_preference,
+                                                                  )}
+                                                              </div>
+                                                          ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 )
 
                                 const rowContent = (
@@ -2858,18 +3261,18 @@ export function Ledger() {
                                         id={`ledger-row-${entry.id}`}
                                         key={entry.id}
                                         className={cn(
-                                            entry.relationKey && 'transition-colors duration-150',
+                                            entryHighlightKey && 'transition-colors duration-150',
                                             isRelationHovered && relationAccentClass,
                                             isRelationHovered && hasVisibleLinkedPeer && 'shadow-[inset_0_0_0_1px_rgba(148,163,184,0.35)]',
                                         )}
                                         onMouseEnter={() => {
-                                            if (entry.relationKey) {
-                                                setHoveredRelationKey(entry.relationKey)
+                                            if (entryHighlightKey) {
+                                                setHoveredRelationKey(entryHighlightKey)
                                             }
                                         }}
                                         onMouseLeave={() => {
-                                            if (entry.relationKey) {
-                                                setHoveredRelationKey((current) => (current === entry.relationKey ? null : current))
+                                            if (entryHighlightKey) {
+                                                setHoveredRelationKey((current) => (current === entryHighlightKey ? null : current))
                                             }
                                         }}
                                     >
@@ -2879,33 +3282,6 @@ export function Ledger() {
                                                 compactColumns ? 'max-w-[92px] px-2 py-3' : 'max-w-[170px]',
                                             )}
                                         >
-                                            {showHoverHierarchyLine ? (
-                                                <div className="pointer-events-none absolute inset-y-0 -start-6 w-5">
-                                                    <span
-                                                        className={cn(
-                                                            'absolute start-1.5 w-px',
-                                                            hoveredRelationIsCompleted === true
-                                                                ? 'bg-emerald-500'
-                                                                : hoveredRelationIsCompleted === false
-                                                                  ? 'bg-amber-500'
-                                                                  : 'bg-foreground/80',
-                                                            hierarchyVerticalClass,
-                                                        )}
-                                                    />
-                                                    {showHoverHierarchyTurn ? (
-                                                        <span
-                                                            className={cn(
-                                                                'absolute start-1.5 top-1/2 h-px w-3 -translate-y-1/2',
-                                                                hoveredRelationIsCompleted === true
-                                                                    ? 'bg-emerald-500'
-                                                                    : hoveredRelationIsCompleted === false
-                                                                      ? 'bg-amber-500'
-                                                                      : 'bg-foreground/80',
-                                                            )}
-                                                        />
-                                                    ) : null}
-                                                </div>
-                                            ) : null}
                                             <Tooltip>
                                                 <TooltipTrigger asChild>
                                                     <span className="block truncate cursor-help">
@@ -2961,7 +3337,7 @@ export function Ledger() {
                                                                 <p className="text-[11px] font-semibold text-primary">
                                                                     {t('ledger.relation.hoverHint', {
                                                                         defaultValue:
-                                                                            'Related ledger rows on this page highlight together and reveal the linked hierarchy while you hover.',
+                                                                            'Directly related ledger rows on this page highlight together while you hover.',
                                                                     })}
                                                                 </p>
                                                             ) : null}
@@ -2973,44 +3349,73 @@ export function Ledger() {
                                             )}
                                         </TableCell>
                                         <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>
-                                            <span
-                                                className={cn(
-                                                    'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                                                    compactColumns && 'gap-0.5 px-1.5 text-[9px]',
-                                                    entry.direction === 'adjustment'
-                                                        ? 'border-violet-200 bg-violet-50 text-violet-700'
-                                                        : entry.direction === 'opening'
-                                                          ? 'border-sky-200 bg-sky-50 text-sky-700'
-                                                          : entry.direction === 'incoming'
-                                                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                                            : 'border-amber-200 bg-amber-50 text-amber-700',
-                                                )}
-                                            >
-                                                {entry.direction === 'adjustment' ? (
-                                                    <SlidersHorizontal className="h-3 w-3" />
-                                                ) : entry.direction === 'opening' ? (
-                                                    <Wallet className="h-3 w-3" />
-                                                ) : entry.direction === 'incoming' ? (
-                                                    <ArrowDownLeft className="h-3 w-3" />
-                                                ) : (
-                                                    <ArrowUpRight className="h-3 w-3" />
-                                                )}
-                                                {entry.direction === 'adjustment'
-                                                    ? t('ledger.direction.adjust', {
-                                                          defaultValue: 'ADJ',
-                                                      })
-                                                    : entry.direction === 'opening'
-                                                      ? t('ledger.direction.open', {
-                                                            defaultValue: 'OPEN',
-                                                        })
-                                                      : entry.direction === 'incoming'
-                                                        ? t('ledger.direction.in', { defaultValue: 'IN' })
-                                                        : t('ledger.direction.out', {
-                                                              defaultValue: 'OUT',
-                                                          })}
-                                            </span>
+                                            <div className="flex flex-col items-start gap-1.5">
+                                                <span
+                                                    className={cn(
+                                                        'inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase leading-4 tracking-wide',
+                                                        compactColumns && 'gap-0.5 px-1.5 text-[9px]',
+                                                        entry.reversalOfTransactionId
+                                                            ? 'gap-0.5 border-violet-200 bg-violet-50 px-1.5 text-[9px] tracking-normal text-violet-700 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300'
+                                                            : entry.direction === 'adjustment'
+                                                              ? 'border-violet-200 bg-violet-50 text-violet-700'
+                                                              : entry.direction === 'opening'
+                                                                ? 'border-sky-200 bg-sky-50 text-sky-700'
+                                                                : entry.direction === 'incoming'
+                                                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                                                  : 'border-amber-200 bg-amber-50 text-amber-700',
+                                                    )}
+                                                >
+                                                    {entry.reversalOfTransactionId ? (
+                                                        entry.reversalOriginalDirection === 'outgoing' ? (
+                                                            <ArrowDownLeft className="h-3 w-3 shrink-0" />
+                                                        ) : (
+                                                            <ArrowUpRight className="h-3 w-3 shrink-0" />
+                                                        )
+                                                    ) : entry.direction === 'adjustment' ? (
+                                                        <SlidersHorizontal className="h-3 w-3" />
+                                                    ) : entry.direction === 'opening' ? (
+                                                        <Wallet className="h-3 w-3" />
+                                                    ) : entry.direction === 'incoming' ? (
+                                                        <ArrowDownLeft className="h-3 w-3" />
+                                                    ) : (
+                                                        <ArrowUpRight className="h-3 w-3" />
+                                                    )}
+                                                    {entry.reversalOfTransactionId
+                                                        ? entry.reversalOriginalDirection === 'outgoing'
+                                                            ? t('ledger.direction.cashRestored', { defaultValue: 'CASH RESTORED' })
+                                                            : t('ledger.direction.cashReturned', { defaultValue: 'CASH RETURNED' })
+                                                        : entry.direction === 'adjustment'
+                                                          ? t('ledger.direction.adjust', { defaultValue: 'ADJ' })
+                                                          : entry.direction === 'opening'
+                                                            ? t('ledger.direction.open', { defaultValue: 'OPEN' })
+                                                            : entry.direction === 'incoming'
+                                                              ? t('ledger.direction.in', { defaultValue: 'IN' })
+                                                              : t('ledger.direction.out', { defaultValue: 'OUT' })}
+                                                </span>
+                                                <span
+                                                    className={cn(
+                                                        'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide',
+                                                        entry.reversalOfTransactionId
+                                                            ? 'border-violet-500/25 bg-violet-500/10 text-violet-700 dark:text-violet-300'
+                                                            : ledgerSettlementStatusClass(settlementStatus),
+                                                    )}
+                                                >
+                                                    {entry.reversalOfTransactionId
+                                                        ? t('ledger.settlement.reversalMovement', { defaultValue: 'Reversal' })
+                                                        : ledgerSettlementStatusLabel(settlementStatus, t)}
+                                                </span>
+                                                {linkedOutsideDateRange ? (
+                                                    <span className="inline-flex items-center gap-1 text-[8px] font-bold text-muted-foreground">
+                                                        <Link2 className="h-2.5 w-2.5" />
+                                                        {t('ledger.settlement.linkedOutsidePeriod', {
+                                                            defaultValue: 'Linked movement outside period',
+                                                        })}
+                                                    </span>
+                                                ) : null}
+                                            </div>
                                         </TableCell>
                                         <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>
+                                            {entry.reversalOfTransactionId ? (entry.direction === 'incoming' ? '+' : '-') : ''}
                                             {formatCurrency(entry.amount, entry.currency, features.iqd_display_preference)}
                                         </TableCell>
                                         <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>
@@ -3046,72 +3451,55 @@ export function Ledger() {
                                         ) : null}
                                         {showActions ? (
                                             <TableCell className={cn('text-right', compactColumns && 'px-2 py-3')}>
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => openEntry(entry)}
-                                                    className={cn(compactColumns && 'h-7 px-2 text-[10px]')}
-                                                >
-                                                    {t('ledger.table.open', { defaultValue: 'Open' })}
-                                                </Button>
+                                                <div className="inline-flex items-center gap-1">
+                                                    {!compactColumns ? (
+                                                        <Button variant="outline" size="sm" onClick={() => openEntry(entry)}>
+                                                            {t('ledger.table.open', { defaultValue: 'Open' })}
+                                                        </Button>
+                                                    ) : null}
+                                                    <DropdownMenu>
+                                                        <DropdownMenuTrigger asChild>
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                size="icon"
+                                                                className={cn('h-9 w-9', compactColumns && 'h-7 w-7')}
+                                                                aria-label={t('ledger.context.openMenu', {
+                                                                    defaultValue: 'Open entry menu',
+                                                                })}
+                                                            >
+                                                                <MoreHorizontal className="h-4 w-4" />
+                                                            </Button>
+                                                        </DropdownMenuTrigger>
+                                                        <DropdownMenuContent align="end" className="w-72">
+                                                            <DropdownMenuLabel className="font-normal">{renderMenuSummary()}</DropdownMenuLabel>
+                                                            <DropdownMenuSeparator />
+                                                            {menuActions.map(({ key, icon: Icon, label, action }) => (
+                                                                <DropdownMenuItem key={key} onSelect={action}>
+                                                                    <Icon className="me-2 h-4 w-4" />
+                                                                    {label}
+                                                                </DropdownMenuItem>
+                                                            ))}
+                                                        </DropdownMenuContent>
+                                                    </DropdownMenu>
+                                                </div>
                                             </TableCell>
                                         ) : null}
                                     </TableRow>
                                 )
 
-                                if (!hasContextMenu) return rowContent
-
                                 return (
                                     <ContextMenu key={entry.id}>
                                         <ContextMenuTrigger asChild>{rowContent}</ContextMenuTrigger>
-                                        <ContextMenuContent className="w-48">
-                                            {latestPayment && (
-                                                <ContextMenuItem onClick={() => scrollToRow(latestPayment.id)}>
-                                                    <ChevronsUp className="mr-2 h-4 w-4" />
-                                                    {t('ledger.context.scrollToLatest', {
-                                                        defaultValue: 'Latest payment',
-                                                    })}
+                                        <ContextMenuContent className="w-72">
+                                            <ContextMenuLabel className="font-normal">{renderMenuSummary()}</ContextMenuLabel>
+                                            <ContextMenuSeparator />
+                                            {menuActions.map(({ key, icon: Icon, label, action }) => (
+                                                <ContextMenuItem key={key} onSelect={action}>
+                                                    <Icon className="me-2 h-4 w-4" />
+                                                    {label}
                                                 </ContextMenuItem>
-                                            )}
-                                            {nextPayment && (
-                                                <ContextMenuItem onClick={() => scrollToRow(nextPayment.id)}>
-                                                    <ChevronUp className="mr-2 h-4 w-4" />
-                                                    {t('ledger.context.scrollToNext', {
-                                                        defaultValue: 'Next payment',
-                                                    })}
-                                                </ContextMenuItem>
-                                            )}
-                                            {previousPayment && (
-                                                <ContextMenuItem onClick={() => scrollToRow(previousPayment.id)}>
-                                                    <ChevronDown className="mr-2 h-4 w-4" />
-                                                    {t('ledger.context.scrollToPrevious', {
-                                                        defaultValue: 'Previous payment',
-                                                    })}
-                                                </ContextMenuItem>
-                                            )}
-                                            {firstPayment && (
-                                                <ContextMenuItem onClick={() => scrollToRow(firstPayment.id)}>
-                                                    <ChevronsDown className="mr-2 h-4 w-4" />
-                                                    {t('ledger.context.scrollToFirst', {
-                                                        defaultValue: 'First payment',
-                                                    })}
-                                                </ContextMenuItem>
-                                            )}
-                                            {isRealEstateEntry ? (
-                                                <ContextMenuItem onClick={() => openEntry(entry)}>
-                                                    <FileText className="mr-2 h-4 w-4" />
-                                                    {t('ledger.context.viewRealEstateContract', {
-                                                        defaultValue: 'View Real Estate Contract',
-                                                    })}
-                                                </ContextMenuItem>
-                                            ) : entry.businessPartnerId ? (
-                                                <ContextMenuItem onClick={() => setLocation(`/business-partners/${entry.businessPartnerId}`)}>
-                                                    <UsersRound className="mr-2 h-4 w-4" />
-                                                    {t('ledger.context.viewBusinessPartner', {
-                                                        defaultValue: 'View Business Partner',
-                                                    })}
-                                                </ContextMenuItem>
-                                            ) : null}
+                                            ))}
                                         </ContextMenuContent>
                                     </ContextMenu>
                                 )
@@ -3226,19 +3614,32 @@ export function Ledger() {
                 </div>
             ) : null}
 
-            <LedgerCashSummaryDashboard
-                summaries={cashSummariesByCurrency}
-                iqdPreference={features.iqd_display_preference}
-                activeDrilldown={summaryDrilldown}
-                isLoading={isLoading || isDateLoading}
-                config={ledgerDashboardConfig}
-                eligibleGroups={eligibleCashGroups}
-                enabledGroups={enabledCashGroups}
-                onSaveConfig={handleSaveLedgerDashboardConfig}
-                onDrilldown={handleSummaryDrilldown}
-            />
+            <div className="flex print:hidden">
+                <FilterDropdown
+                    value={summaryMode}
+                    label={t('ledger.summaryMetrics')}
+                    options={summaryModeOptions}
+                    onValueChange={handleSummaryModeChange}
+                    dir={i18n.dir() === 'rtl' ? 'rtl' : 'ltr'}
+                    hasActiveFilter={summaryMode !== DEFAULT_LEDGER_SUMMARY_MODE}
+                />
+            </div>
 
-            {SHOW_LEDGER_ANALYTICS_WIDGETS ? <TooltipProvider delayDuration={300}>
+            {summaryMode === 'cash_activity' ? (
+                <LedgerCashSummaryDashboard
+                    summaries={cashSummariesByCurrency}
+                    iqdPreference={features.iqd_display_preference}
+                    activeDrilldown={summaryDrilldown}
+                    isLoading={isLoading || isDateLoading}
+                    config={ledgerDashboardConfig}
+                    eligibleGroups={eligibleCashGroups}
+                    enabledGroups={enabledCashGroups}
+                    onSaveConfig={handleSaveLedgerDashboardConfig}
+                    onDrilldown={handleSummaryDrilldown}
+                />
+            ) : null}
+
+            {summaryMode === 'legacy_flow' ? <TooltipProvider delayDuration={300}>
                 <div className={cn('grid gap-4 sm:grid-cols-2', SHOW_LEDGER_ANALYTICS_WIDGETS ? 'lg:grid-cols-4' : 'lg:grid-cols-3')}>
                     <Card className="rounded-3xl border border-border/50 bg-card/60 overflow-hidden relative group dark:bg-zinc-950">
                         <div className="absolute top-0 end-0 p-4 opacity-5 pointer-events-none group-hover:scale-110 transition-transform duration-500">
@@ -3462,7 +3863,7 @@ export function Ledger() {
                 </div>
             </TooltipProvider> : null}
 
-            {SHOW_LEDGER_ANALYTICS_WIDGETS && (
+            {summaryMode === 'legacy_flow' && (
                 <div className="grid gap-4 lg:grid-cols-4">
                     <Card className="col-span-1 rounded-3xl border border-border/50 bg-card/60 dark:bg-zinc-950 flex flex-col relative overflow-hidden">
                         <CardHeader className="border-b border-border/20 z-10 bg-background/50 backdrop-blur-sm relative">
@@ -3797,7 +4198,6 @@ export function Ledger() {
                                         compactTransactionId: true,
                                         compactColumns: true,
                                         hideDescriptionNotes: true,
-                                        hideActions: true,
                                     },
                                 )}
                             </section>
@@ -3829,7 +4229,6 @@ export function Ledger() {
                                         compactTransactionId: true,
                                         compactColumns: true,
                                         hideDescriptionNotes: true,
-                                        hideActions: true,
                                     },
                                 )}
                             </section>
@@ -3861,7 +4260,6 @@ export function Ledger() {
                                         compactTransactionId: true,
                                         compactColumns: true,
                                         hideDescriptionNotes: true,
-                                        hideActions: true,
                                     },
                                 )}
                             </section>
@@ -3893,7 +4291,6 @@ export function Ledger() {
                                         compactTransactionId: true,
                                         compactColumns: true,
                                         hideDescriptionNotes: true,
-                                        hideActions: true,
                                     },
                                 )}
                             </section>
@@ -4207,6 +4604,23 @@ export function Ledger() {
                     </AppDialogFooter>
                 </AppDialogContent>
             </AppDialog>
+
+            <LedgerPaymentHistoryDialog
+                open={historyEntryId !== null}
+                onOpenChange={(open) => {
+                    if (!open) setHistoryEntryId(null)
+                }}
+                sourceReference={historySelectedEntry?.referenceId || historySelectedEntry?.transactionId || '-'}
+                sourceStatus={historySourceStatus}
+                selectedMovement={historySelectedMovement}
+                selectedFinalTotals={historyFinalSettlementTotals}
+                selectedFinalIsRelationTotal={historySelectedFinalProjection?.isRelationTotal ?? false}
+                selectedFinalStatus={historySelectedFinalProjection?.status ?? historySelectedMovement?.settlementStatus ?? 'not_applicable'}
+                sourceTotals={historySourceTotals}
+                movements={historyMovements}
+                iqdPreference={features.iqd_display_preference}
+                onGoToMovement={goToLedgerMovement}
+            />
         </div>
     )
 }

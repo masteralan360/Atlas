@@ -46,11 +46,14 @@ function sanitizeFileName(title: string | undefined) {
 }
 
 type PdfJsViewerProps = {
-    url: string
+    url?: string
+    bytes?: Uint8Array | null
     title?: string
+    allowPrint?: boolean
+    allowSave?: boolean
 }
 
-export function PdfJsViewer({ url, title }: PdfJsViewerProps) {
+export function PdfJsViewer({ url, bytes: suppliedBytes, title, allowPrint = true, allowSave = true }: PdfJsViewerProps) {
     const pagesContainerRef = useRef<HTMLDivElement>(null)
     const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
     const [errorMessage, setErrorMessage] = useState('')
@@ -70,7 +73,8 @@ export function PdfJsViewer({ url, title }: PdfJsViewerProps) {
         const render = async () => {
             try {
                 ensurePdfWorkerConfigured()
-                const bytes = await resolvePdfBytes(url)
+                const bytes = suppliedBytes ? suppliedBytes.slice() : url ? await resolvePdfBytes(url) : null
+                if (!bytes) throw new Error('No PDF source was provided.')
                 if (cancelled) return
 
                 setPdfBytes(bytes)
@@ -141,7 +145,7 @@ export function PdfJsViewer({ url, title }: PdfJsViewerProps) {
                 }
             }
         }
-    }, [url])
+    }, [url, suppliedBytes])
 
     const handlePrint = async () => {
         if (!pdfBytes || busy) return
@@ -191,7 +195,7 @@ export function PdfJsViewer({ url, title }: PdfJsViewerProps) {
     return (
         <div className="flex h-full w-full flex-col overflow-hidden bg-gray-100">
             <div className="z-10 flex shrink-0 items-center gap-1 border-b bg-card px-2 py-1.5 md:gap-2 md:px-4">
-                <button
+                {allowPrint && <button
                     className={toolbarButtonClass}
                     onClick={() => void handlePrint()}
                     disabled={!pdfBytes || busy}
@@ -200,8 +204,8 @@ export function PdfJsViewer({ url, title }: PdfJsViewerProps) {
                 >
                     <Printer className="h-3.5 w-3.5" />
                     <span className="hidden md:inline">Print</span>
-                </button>
-                <button
+                </button>}
+                {allowSave && <button
                     className={toolbarButtonClass}
                     onClick={() => void handleSave()}
                     disabled={!pdfBytes || busy}
@@ -210,7 +214,7 @@ export function PdfJsViewer({ url, title }: PdfJsViewerProps) {
                 >
                     <Save className="h-3.5 w-3.5" />
                     <span className="hidden md:inline">Save</span>
-                </button>
+                </button>}
             </div>
             <div className="relative min-h-0 flex-1 overflow-y-auto">
                 {status !== 'ready' && (

@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
 
-import { type BusinessPartner, type PaymentAccount, type PaymentObligation, type WorkspacePaymentMethod, useBusinessPartners } from '@/local-db'
+import { type BusinessPartner, type PaymentObligation, type WorkspacePaymentMethod, useBusinessPartners } from '@/local-db'
 import { formatCurrency, formatDate, formatLocalDateTimeValue, formatNumericInput, parseFormattedNumber, parseLocalDateTimeValue, sanitizeNumericInput } from '@/lib/utils'
 import { LOAN_ADJUSTMENT_PAYMENT_METHOD, STANDARD_PAYMENT_METHODS } from '@/lib/paymentMethods'
 import {
@@ -29,6 +29,8 @@ interface SettlementDialogProps {
     onOpenChange: (open: boolean) => void
     obligation: PaymentObligation | null
     initialPaidAt?: string
+    initialPaymentAccountId?: string | null
+    initialPaymentAccountNameSnapshot?: string | null
     isSubmitting?: boolean
     includeLoanAdjustment?: boolean
     onSubmit: (input: {
@@ -53,6 +55,8 @@ export function SettlementDialog({
     onOpenChange,
     obligation,
     initialPaidAt,
+    initialPaymentAccountId = null,
+    initialPaymentAccountNameSnapshot = null,
     isSubmitting = false,
     includeLoanAdjustment = false,
     onSubmit
@@ -60,7 +64,8 @@ export function SettlementDialog({
     const { t } = useTranslation()
     const { features } = useWorkspace()
     const [paymentMethod, setPaymentMethod] = useState<WorkspacePaymentMethod>('cash')
-    const [paymentAccount, setPaymentAccount] = useState<PaymentAccount | null>(null)
+    const [paymentAccountId, setPaymentAccountId] = useState<string | null>(null)
+    const [paymentAccountNameSnapshot, setPaymentAccountNameSnapshot] = useState<string | null>(null)
     const [paidAt, setPaidAt] = useState('')
     const [amount, setAmount] = useState('')
     const [note, setNote] = useState('')
@@ -71,20 +76,22 @@ export function SettlementDialog({
         || obligation?.sourceType === 'sales_order'
         || obligation?.sourceType === 'purchase_order'
         || obligation?.sourceType === 'clinical_appointment'
+        || obligation?.sourceType === 'agent_commission_payout'
+        || obligation?.sourceType === 'agent_commission_recovery'
     const businessPartners = useBusinessPartners(showsCounterpartyPicker ? obligation?.workspaceId : undefined, { includeRealEstateRoles: true }) || []
 
     const businessPartnerById = useMemo(() => new Map(businessPartners.map((partner) => [partner.id, partner])), [businessPartners])
     const defaultBusinessPartnerId = getMetadataString(obligation?.metadata, 'businessPartnerId')
     const defaultBusinessPartner = defaultBusinessPartnerId ? businessPartnerById.get(defaultBusinessPartnerId) : undefined
     const defaultCounterpartyName = defaultBusinessPartner?.partnerName || obligation?.counterpartyName || obligation?.title || ''
-
     useEffect(() => {
         if (!open) {
             return
         }
 
         setPaymentMethod('cash')
-        setPaymentAccount(null)
+        setPaymentAccountId(initialPaymentAccountId)
+        setPaymentAccountNameSnapshot(initialPaymentAccountNameSnapshot)
         setPaidAt(initialPaidAt || formatLocalDateTimeValue(new Date()))
         setAmount(String(obligation?.amount || ''))
         setNote('')
@@ -95,7 +102,7 @@ export function SettlementDialog({
                 name: defaultCounterpartyName
             }
             : null)
-    }, [defaultBusinessPartnerId, defaultCounterpartyName, initialPaidAt, open, obligation?.amount, obligation?.id])
+    }, [defaultBusinessPartnerId, defaultCounterpartyName, initialPaidAt, initialPaymentAccountId, initialPaymentAccountNameSnapshot, open, obligation?.amount, obligation?.id])
 
     const selectedPaidAt = parseLocalDateTimeValue(paidAt)
 
@@ -136,8 +143,8 @@ export function SettlementDialog({
             note: note.trim() || undefined,
             counterpartyName: counterpartyName.trim() || undefined,
             businessPartnerId: linkedCounterparty?.id || null,
-            accountId: paymentAccount?.id ?? null,
-            accountNameSnapshot: paymentAccount?.name ?? null
+            accountId: paymentAccountId,
+            accountNameSnapshot: paymentAccountNameSnapshot
         })
     }
 
@@ -268,7 +275,10 @@ export function SettlementDialog({
                                     <PaymentMethodSelector
                                         value={paymentMethod}
                                         onValueChange={(value) => setPaymentMethod(value as WorkspacePaymentMethod)}
-                                        onLinkedPaymentAccountSelect={setPaymentAccount}
+                                        onLinkedPaymentAccountSelect={(account) => {
+                                            setPaymentAccountId(account.id)
+                                            setPaymentAccountNameSnapshot(account.name)
+                                        }}
                                         workspaceId={obligation.workspaceId}
                                         methods={includeLoanAdjustment
                                             ? [...STANDARD_PAYMENT_METHODS, LOAN_ADJUSTMENT_PAYMENT_METHOD]
@@ -278,8 +288,11 @@ export function SettlementDialog({
 
                                 <PaymentAccountSelector
                                     workspaceId={obligation.workspaceId}
-                                    value={paymentAccount?.id}
-                                    onValueChange={setPaymentAccount}
+                                    value={paymentAccountId}
+                                    onValueChange={(account) => {
+                                        setPaymentAccountId(account?.id ?? null)
+                                        setPaymentAccountNameSnapshot(account?.name ?? null)
+                                    }}
                                     disabled={isSubmitting}
                                 />
 

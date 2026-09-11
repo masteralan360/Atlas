@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { BadgeCheck, BadgePercent, CircleDollarSign, Eye, ReceiptText, RotateCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { useAgentCommissionEntries, useSalesOrderAgentAssignments, useSalesOrders, type IQDDisplayPreference } from '@/local-db'
+import { useAgentCommissionEntries, usePaymentObligations, useSalesOrderAgentAssignments, useSalesOrders, type IQDDisplayPreference, type PaymentObligation } from '@/local-db'
 import {
     Badge,
     Button,
@@ -25,32 +25,46 @@ import { AgentCommissionSettlementDialog } from './AgentCommissionSettlementDial
 export function AgentCommissionAdminOverview({
     workspaceId,
     iqdPreference,
-    canReview = false
+    canReview = false,
+    canPay = false,
+    onSettleCommission
 }: {
     workspaceId: string
     iqdPreference: IQDDisplayPreference
     canReview?: boolean
+    canPay?: boolean
+    onSettleCommission?: (obligation: PaymentObligation) => void
 }) {
     const { t } = useTranslation()
     const entries = useAgentCommissionEntries(workspaceId)
     const assignments = useSalesOrderAgentAssignments(workspaceId)
     const salesOrders = useSalesOrders(workspaceId)
     const directory = useCommissionAgentDirectory(workspaceId)
+    const paymentObligations = usePaymentObligations(workspaceId)
     const [settlementAgentId, setSettlementAgentId] = useState<string | null>(null)
     const summary = useMemo(() => summarizeCommissionEntries(entries), [entries])
     const currentAssignments = useMemo(
         () => assignments.filter((assignment) => !assignment.isDeleted && !assignment.unassignedAt),
         [assignments]
     )
+    const assignedAssignments = useMemo(
+        () => assignments.filter((assignment) => !assignment.isDeleted),
+        [assignments]
+    )
     const salesOrderById = useMemo(() => new Map(salesOrders.map((order) => [order.id, order])), [salesOrders])
     const rows = useMemo(() => directory.agents
         .map((entry) => {
-            const agentOrders = currentAssignments
+            const agentOrders = Array.from(new Map(assignedAssignments
                 .filter((assignment) => assignment.agentId === entry.agent.id)
                 .flatMap((assignment) => {
                     const order = salesOrderById.get(assignment.orderId)
                     return order ? [order] : []
                 })
+                .map((order) => [order.id, order] as const)).values())
+            const totalOrderValue = agentOrders.reduce<Record<string, number>>((totals, order) => {
+                totals[order.currency] = (totals[order.currency] || 0) + Number(order.total || 0)
+                return totals
+            }, {})
             return {
                 entry,
                 summary: summarizeCommissionEntries(entries.filter((ledgerEntry) => ledgerEntry.agentId === entry.agent.id)),
@@ -58,12 +72,27 @@ export function AgentCommissionAdminOverview({
                 openOrders: agentOrders.filter((order) => order.status === 'draft' || order.status === 'pending').length,
                 cancelledOrders: agentOrders.filter((order) => order.status === 'cancelled').length,
                 returnedOrders: agentOrders.filter((order) => order.returnStatus === 'partial' || order.returnStatus === 'full').length,
-                zeroValueOrders: agentOrders.filter((order) => order.total <= 0).length
+                zeroValueOrders: agentOrders.filter((order) => order.total <= 0).length,
+                totalOrderValue
             }
         })
         .filter((row) => row.entry.membership || row.summary.entryCount > 0 || row.assignedOrders > 0)
         .sort((left, right) => right.assignedOrders - left.assignedOrders || left.entry.name.localeCompare(right.entry.name)),
-    [currentAssignments, directory.agents, entries, salesOrderById])
+    [assignedAssignments, directory.agents, entries, salesOrderById])
+    const settlementByAgentId = useMemo(() => {
+        const result = new Map<string, PaymentObligation>()
+        paymentObligations
+            .filter((obligation) => (
+                obligation.sourceType === 'agent_commission_payout'
+                || obligation.sourceType === 'agent_commission_recovery'
+            ))
+            .sort((left, right) => (left.createdAt || '').localeCompare(right.createdAt || ''))
+            .forEach((obligation) => {
+                const agentId = typeof obligation.metadata?.agentId === 'string' ? obligation.metadata.agentId : null
+                if (agentId && !result.has(agentId)) result.set(agentId, obligation)
+            })
+        return result
+    }, [paymentObligations])
 
     return (
         <Card className="border-violet-500/20 bg-violet-500/[0.02]">
@@ -122,15 +151,18 @@ export function AgentCommissionAdminOverview({
                                     <TableHead className="text-end">{t('salesAgentCommissions.open')}</TableHead>
                                     <TableHead className="text-end">{t('salesAgentCommissions.returned')}</TableHead>
                                     <TableHead className="text-end">{t('salesAgentCommissions.cancelledZero')}</TableHead>
-                                    <TableHead className="text-end">{t('salesAgentCommissions.recognized')}</TableHead>
+                                    <TableHead className="text-end">{t('salesAgentCommissions.totalOrderValue')}</TableHead>
+                                    <TableHead className="text-end">{t('salesAgentCommissions.netEarned')}</TableHead>
                                     <TableHead className="text-end">{t('salesAgentCommissions.paid')}</TableHead>
                                     <TableHead className="text-end">{t('salesAgentCommissions.reversed')}</TableHead>
-                                    <TableHead className="text-end">{t('salesAgentCommissions.due')}</TableHead>
-                                    {canReview ? <TableHead className="text-end">{t('salesAgentCommissions.action')}</TableHead> : null}
+                                    <TableHead className="text-end">{t('salesAgentCommissions.outstanding')}</TableHead>
+                                    {canReview || canPay ? <TableHead className="text-end">{t('salesAgentCommissions.action')}</TableHead> : null}
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {rows.map(({ entry, summary: agentSummary, assignedOrders, openOrders, returnedOrders, cancelledOrders, zeroValueOrders }) => (
+                                {rows.map(({ entry, summary: agentSummary, assignedOrders, openOrders, returnedOrders, cancelledOrders, zeroValueOrders, totalOrderValue }) => {
+                                    const settlement = settlementByAgentId.get(entry.agent.id)
+                                    return (
                                     <TableRow key={entry.agent.id}>
                                         <TableCell>
                                             <div className="font-semibold">{entry.name}</div>
@@ -147,19 +179,31 @@ export function AgentCommissionAdminOverview({
                                         <TableCell className="text-end font-semibold text-amber-600">{openOrders}</TableCell>
                                         <TableCell className="text-end font-semibold text-orange-600">{returnedOrders}</TableCell>
                                         <TableCell className="text-end font-semibold text-rose-600">{cancelledOrders} / {zeroValueOrders}</TableCell>
+                                        <TableCell className="text-end font-semibold"><CommissionCurrencyTotalsView totals={totalOrderValue} iqdPreference={iqdPreference} /></TableCell>
                                         <TableCell className="text-end font-semibold"><CommissionCurrencyTotalsView totals={agentSummary.earned} iqdPreference={iqdPreference} /></TableCell>
                                         <TableCell className="text-end font-semibold text-emerald-600"><CommissionCurrencyTotalsView totals={agentSummary.paid} iqdPreference={iqdPreference} /></TableCell>
                                         <TableCell className="text-end font-semibold text-rose-600"><CommissionCurrencyTotalsView totals={agentSummary.reversed} iqdPreference={iqdPreference} /></TableCell>
                                         <TableCell className="text-end font-black"><CommissionCurrencyTotalsView totals={agentSummary.due} iqdPreference={iqdPreference} /></TableCell>
-                                        {canReview ? (
+                                        {canReview || canPay ? (
                                             <TableCell className="text-end">
-                                                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setSettlementAgentId(entry.agent.id)}>
-                                                    <Eye className="h-3.5 w-3.5" /> {t('salesAgentCommissions.review')}
-                                                </Button>
+                                                {canReview ? (
+                                                    <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setSettlementAgentId(entry.agent.id)}>
+                                                        <Eye className="h-3.5 w-3.5" /> {t('salesAgentCommissions.review')}
+                                                    </Button>
+                                                ) : null}
+                                                {canPay && settlement && onSettleCommission ? (
+                                                    <Button size="sm" className="ms-2 gap-1.5" onClick={() => onSettleCommission(settlement)}>
+                                                        <CircleDollarSign className="h-3.5 w-3.5" />
+                                                        {settlement.direction === 'incoming'
+                                                            ? t('salesAgentCommissions.collectRecovery')
+                                                            : t('salesAgentCommissions.payCommission')}
+                                                    </Button>
+                                                ) : null}
                                             </TableCell>
                                         ) : null}
                                     </TableRow>
-                                ))}
+                                    )
+                                })}
                             </TableBody>
                         </Table>
                     </div>

@@ -254,7 +254,7 @@ export function usePaymentAccountBalances(workspaceId?: string) {
 export function usePaymentAccountMovements(workspaceId?: string) {
   const rows = usePaymentAccountTable<PaymentAccountMovement>('payment_account_movements', workspaceId)
   return useMemo(
-    () => rows.filter((row) => !row.isDeleted).sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)),
+    () => rows.filter((row) => !row.isDeleted && !row.voidId).sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)),
     [rows]
   )
 }
@@ -2124,9 +2124,9 @@ export async function resolveActiveCashierShiftOccurrenceId(
 
 /** The signed effect of a payment transaction on its selected payment account. */
 export function getPaymentAccountTransactionDelta(
-  transaction: Pick<PaymentTransaction, 'amount' | 'direction' | 'isDeleted'>
+  transaction: Pick<PaymentTransaction, 'amount' | 'direction' | 'isDeleted' | 'voidId'>
 ) {
-  if (transaction.isDeleted) return 0
+  if (transaction.isDeleted || transaction.voidId) return 0
   const amount = Number(transaction.amount)
   return transaction.direction === 'incoming' ? amount : -amount
 }
@@ -2215,6 +2215,7 @@ export async function mirrorPaymentAccountTransactionLocally(transaction: Paymen
     deltaAmount: delta,
     currency: transaction.currency,
     occurredAt: transaction.paidAt,
+    voidId: transaction.voidId ?? null,
     createdAt: previousMovement?.createdAt ?? transaction.createdAt,
     updatedAt: now,
     version: (previousMovement?.version ?? 0) + 1,

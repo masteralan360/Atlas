@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 
 import {
   db,
-  useAgent,
+  useAgents,
   useAgentCommissionEntries,
   useAgentProductCommissionEntries,
   useBusinessPartner,
@@ -19,7 +19,9 @@ import {
   useSalesOrderReturnsForWorkspace,
   useSalesOrders
 } from '@/local-db'
+import type { PurchaseOrder, SalesOrder } from '@/local-db/models'
 import { isDirectTransactionPartnerAccountEffect } from '@/local-db/payments'
+import { deriveLegacyOrderPartnerBalanceSnapshot } from '@/lib/orderPartnerBalanceSnapshot'
 import {
   getPartnerAccountStatementClosingBalances,
   type PartnerAccountStatementClosingBalance,
@@ -42,7 +44,7 @@ export function usePartnerAccountStatement(
   period: PartnerAccountStatementData['period']
 ) {
   const rawPartner = useBusinessPartner(partnerId || undefined)
-  const agent = useAgent(rawPartner?.agentFacetId)
+  const agents = useAgents(workspaceId)
   const commissionEntries = useAgentCommissionEntries(workspaceId)
   const productCommissionEntries = useAgentProductCommissionEntries(workspaceId)
   const salesOrders = useSalesOrders(workspaceId)
@@ -58,7 +60,21 @@ export function usePartnerAccountStatement(
   const deliverySettlements = useDeliverySettlements(workspaceId)
 
   const partner = rawPartner && rawPartner.workspaceId === workspaceId && !rawPartner.isDeleted ? rawPartner : undefined
-  const salesAccountAgent = agent && agent.workspaceId === workspaceId && agent.salesAccountEnabled ? agent : undefined
+  const commissionAgents = useMemo(
+    () => partnerId
+      ? agents.filter((agent) => (
+        !agent.isDeleted
+        && agent.workspaceId === workspaceId
+        && agent.agentType === 'field_agent'
+        && agent.businessPartnerId === partnerId
+      ))
+      : [],
+    [agents, partnerId, workspaceId]
+  )
+  const commissionAgentIds = useMemo(
+    () => new Set(commissionAgents.map((agent) => agent.id)),
+    [commissionAgents]
+  )
   const partnerSalesOrders = useMemo(
     () =>
       partnerId
@@ -103,16 +119,16 @@ export function usePartnerAccountStatement(
   )
   const loanPayments = useMemo(() => queriedLoanPayments ?? EMPTY_LOAN_PAYMENTS, [queriedLoanPayments])
   const salesAccountCommissionEntries = useMemo(
-    () => (salesAccountAgent ? commissionEntries.filter((entry) => entry.agentId === salesAccountAgent.id) : []),
-    [commissionEntries, salesAccountAgent]
+    () => commissionEntries.filter((entry) => commissionAgentIds.has(entry.agentId)),
+    [commissionAgentIds, commissionEntries]
   )
   const partnerInstallmentSales = useMemo(
     () => (partnerId ? installmentSales.filter((sale) => sale.customerBusinessPartnerId === partnerId) : []),
     [installmentSales, partnerId]
   )
   const salesAccountProductCommissionEntries = useMemo(
-    () => (salesAccountAgent ? productCommissionEntries.filter((entry) => entry.agentId === salesAccountAgent.id) : []),
-    [productCommissionEntries, salesAccountAgent]
+    () => productCommissionEntries.filter((entry) => commissionAgentIds.has(entry.agentId)),
+    [commissionAgentIds, productCommissionEntries]
   )
 
   const settlementTransactions = useMemo(() => {
@@ -133,8 +149,9 @@ export function usePartnerAccountStatement(
         transaction.metadata?.businessPartnerId === partnerId
       )
         return true
-      if (transaction.sourceType === 'agent_commission_payout') {
-        return transaction.sourceRecordId === salesAccountAgent?.id
+      if (transaction.sourceType === 'agent_commission_payout' || transaction.sourceType === 'agent_commission_recovery') {
+        return commissionAgentIds.has(transaction.sourceRecordId)
+          || transaction.metadata?.businessPartnerId === partnerId
       }
       return (
         transaction.sourceType === 'direct_transaction' &&
@@ -142,7 +159,7 @@ export function usePartnerAccountStatement(
         isDirectTransactionPartnerAccountEffect(transaction.metadata?.partnerAccountEffect)
       )
     })
-  }, [partnerId, partnerPurchaseOrders, partnerSalesOrders, paymentTransactions, salesAccountAgent?.id])
+  }, [commissionAgentIds, partnerId, partnerPurchaseOrders, partnerSalesOrders, paymentTransactions])
 
   const merchantDeliveryEntries = useMemo(() => {
     if (!partnerId) return []
@@ -197,7 +214,7 @@ export function usePartnerAccountStatement(
     return {
       partnerId: partner.id,
       period,
-      isAgentCommissionStatement: Boolean(salesAccountAgent),
+      isAgentCommissionStatement: commissionAgents.length > 0,
       salesOrders: partnerSalesOrders,
       salesOrderReturns: partnerSalesOrderReturns,
       salesOrderReturnItems: partnerSalesOrderReturnItems,
@@ -221,6 +238,7 @@ export function usePartnerAccountStatement(
     deliveryShipmentReferences,
     loanPayments,
     merchantDeliveryEntries,
+    commissionAgents,
     partner,
     partnerInstallmentSales,
     partnerLoans,
@@ -260,4 +278,26 @@ export function usePartnerAccountStatementClosingBalances(
     () => (statementData ? getPartnerAccountStatementClosingBalances(statementData) : undefined),
     [statementData]
   )
+}
+
+/**
+ * Supplies an invoice with both the live closing balance and a read-only
+ * account-statement reconstruction for legacy orders that predate immutable
+ * partner-balance snapshots.
+ */
+export function usePartnerAccountStatementPrintBalances(
+  workspaceId: string | undefined,
+  partnerId: string | null | undefined,
+  order: SalesOrder | PurchaseOrder | null | undefined
+) {
+  const { statementData } = usePartnerAccountStatement(workspaceId, partnerId, ALL_TIME_PERIOD)
+
+  return useMemo(() => ({
+    currentBalances: statementData
+      ? getPartnerAccountStatementClosingBalances(statementData)
+      : undefined,
+    legacyOrderBalanceSnapshot: statementData && order && !order.partnerBalanceSnapshot
+      ? deriveLegacyOrderPartnerBalanceSnapshot(statementData, order)
+      : null
+  }), [order, statementData])
 }

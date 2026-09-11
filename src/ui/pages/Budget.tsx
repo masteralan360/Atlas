@@ -53,7 +53,8 @@ import {
     toUISale,
     toUISaleFromExchangeTransaction,
     toUISaleFromRealEstateCommissionTransaction,
-    type PaymentAccount
+    type PaymentAccount,
+    type PaymentTransaction
 } from '@/local-db'
 import { db } from '@/local-db/database'
 import type { BudgetStatus, CurrencyCode, ExpenseItem, ExpenseRecurrence, ExpenseSeries, IQDDisplayPreference, PaymentObligation, WorkspacePaymentMethod } from '@/local-db/models'
@@ -111,10 +112,7 @@ import { BudgetLockPromptModal } from '@/ui/components/budget/BudgetLockPromptMo
 import { MonthlyBudgetAllocationModal } from '@/ui/components/budget/MonthlyBudgetAllocationModal'
 import { BudgetPrintTemplate } from '@/ui/components/budget/BudgetPrintTemplate'
 import { ExpenseCategoryManagerDialog } from '@/ui/components/budget/ExpenseCategoryManagerDialog'
-import {
-    ReverseTransactionCofirmationDialog,
-    type ReverseTransactionDetails
-} from '@/ui/components/payments/ReverseTransactionCofirmationDialog'
+import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
@@ -133,34 +131,6 @@ interface SnoozeTarget {
 interface LockTarget {
     type: 'expense' | 'payroll' | 'dividend'
     item: ExpenseItem | ReturnType<typeof buildPayrollItems>[number] | ReturnType<typeof buildDividendItems>['items'][number]
-}
-
-function buildBudgetReversalDetails(
-    target: LockTarget | null,
-    expenseSeries: ExpenseSeries[]
-): ReverseTransactionDetails | null {
-    if (target?.type === 'expense') {
-        const item = target.item as ExpenseItem
-        const series = expenseSeries.find((entry) => entry.id === item.seriesId)
-        return {
-            amount: item.amount,
-            currency: item.currency,
-            direction: 'outgoing',
-            referenceLabel: series?.name ?? null
-        }
-    }
-
-    if (target?.type === 'payroll') {
-        const item = target.item as ReturnType<typeof buildPayrollItems>[number]
-        return {
-            amount: item.amount,
-            currency: item.currency,
-            direction: 'outgoing',
-            referenceLabel: item.employee.name
-        }
-    }
-
-    return null
 }
 
 function buildExpensePaymentObligation(
@@ -589,7 +559,7 @@ export function Budget() {
     const [lockTarget, setLockTarget] = useState<LockTarget | null>(null)
     const [settlementTarget, setSettlementTarget] = useState<PaymentObligation | null>(null)
     const [isSubmittingSettlement, setIsSubmittingSettlement] = useState(false)
-    const [reverseTarget, setReverseTarget] = useState<LockTarget | null>(null)
+    const [reverseTransaction, setReverseTransaction] = useState<PaymentTransaction | null>(null)
     const [isReversingPayment, setIsReversingPayment] = useState(false)
     const [showPrintPreview, setShowPrintPreview] = useState(false)
 
@@ -597,8 +567,6 @@ export function Budget() {
         () => formatLocalDateTimeValue(getPaymentDateForMonth(selectedMonth)),
         [selectedMonth]
     )
-    const reverseTransactionDetails = buildBudgetReversalDetails(reverseTarget, expenseSeries)
-
     const expenseItems = useExpenseItems(workspaceId, selectedMonth)
 
     // Only open modal if we're not loading and settings are explicitly missing
@@ -647,7 +615,7 @@ export function Budget() {
             if (series.endMonth) candidates.push(series.endMonth as any)
         })
 
-        let maxMonth = candidates.reduce((max, value) => value > max ? value : max, candidates[0])
+        const maxMonth = candidates.reduce((max, value) => value > max ? value : max, candidates[0])
 
         const options: Array<{ value: string; label: string }> = []
         let cursor = startMonth
@@ -1162,26 +1130,65 @@ export function Budget() {
         }
     }
 
-    const requestMarkUnpaid = (target: LockTarget) => {
+    const requestMarkUnpaid = async (target: LockTarget) => {
         if (target.type === 'expense' || target.type === 'payroll') {
-            setReverseTarget(target)
+            if (!workspaceId) return
+            try {
+                const transaction = target.type === 'expense'
+                    ? await findLatestUnreversedPaymentTransaction(workspaceId, {
+                        sourceType: 'expense_item',
+                        sourceRecordId: (target.item as ExpenseItem).id,
+                        sourceSubrecordId: (target.item as ExpenseItem).seriesId
+                    })
+                    : await (() => {
+                        const item = target.item as ReturnType<typeof buildPayrollItems>[number]
+                        const existingStatus = payrollStatuses.find(
+                            (entry) => entry.employeeId === item.employee.id && entry.month === selectedMonth && !entry.isDeleted
+                        )
+                        return findLatestUnreversedPaymentTransaction(workspaceId, {
+                            sourceType: 'payroll_status',
+                            sourceRecordId: existingStatus?.id || `${item.employee.id}:${selectedMonth}`,
+                            sourceSubrecordId: item.employee.id,
+                            metadata: { employeeId: item.employee.id, month: selectedMonth }
+                        })
+                    })()
+                if (!transaction) throw new Error(t('paymentReversal.noPostedPayment', { defaultValue: 'No posted payment was found.' }))
+                setReverseTransaction(transaction)
+            } catch (error: any) {
+                toast({
+                    title: t('common.error') || 'Error',
+                    description: error?.message || t('payments.reverseFailed', { defaultValue: 'Failed to open payment reversal.' }),
+                    variant: 'destructive'
+                })
+            }
             return
         }
 
         void handleMarkUnpaid(target)
     }
 
-    const handleConfirmPaymentReversal = async () => {
-        if (!reverseTarget || isReversingPayment) {
+    const handleConfirmPaymentReversal = async (input: PaymentReversalDialogInput) => {
+        if (!workspaceId || !reverseTransaction || isReversingPayment) {
             return
         }
 
         setIsReversingPayment(true)
         try {
-            const wasReversed = await handleMarkUnpaid(reverseTarget)
-            if (wasReversed) {
-                setReverseTarget(null)
-            }
+            await reversePaymentTransaction(workspaceId, reverseTransaction.id, {
+                ...input,
+                createdBy: user?.id || null
+            })
+            toast({
+                title: t('common.success') || 'Success',
+                description: t('budget.reminder.unpaid') || 'Marked as unpaid.'
+            })
+            setReverseTransaction(null)
+        } catch (error: any) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: error?.message || t('budget.reminder.payFailed') || 'Failed to reverse payment.',
+                variant: 'destructive'
+            })
         } finally {
             setIsReversingPayment(false)
         }
@@ -1801,16 +1808,17 @@ export function Budget() {
                 onSubmit={handleBudgetSettlement}
             />
 
-            <ReverseTransactionCofirmationDialog
-                open={!!reverseTarget}
+            <PaymentReversalDialog
+                open={!!reverseTransaction}
                 onOpenChange={(open) => {
                     if (!open) {
-                        setReverseTarget(null)
+                        setReverseTransaction(null)
                     }
                 }}
-                onConfirm={() => { void handleConfirmPaymentReversal() }}
+                onSubmit={handleConfirmPaymentReversal}
                 isProcessing={isReversingPayment}
-                transaction={reverseTransactionDetails}
+                transaction={reverseTransaction}
+                workspaceId={workspaceId}
                 iqdPreference={iqdPreference}
             />
 

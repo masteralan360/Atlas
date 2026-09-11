@@ -1,13 +1,24 @@
 import type { Loan, LoanInstallment } from '@/local-db/models'
+import { getLoanDirection } from '@/lib/loanPresentation'
 
 type LoanMetricInput = Pick<Loan, 'id' | 'principalAmount' | 'totalPaidAmount' | 'balanceAmount' | 'status' | 'settlementCurrency'>
+type LegacySimpleLoanMetricInput = Pick<Loan, 'balanceAmount' | 'status' | 'settlementCurrency' | 'direction'>
 type InstallmentMetricInput = Pick<LoanInstallment, 'loanId' | 'balanceAmount' | 'dueDate' | 'status'>
+
+export type SimpleLoanSummaryMode = 'principal_paid' | 'lent_borrowed'
 
 export type SimpleLoanListMetrics = {
     totalPrincipalByCurrency: Record<string, number>
     totalPaidByCurrency: Record<string, number>
     totalBalanceByCurrency: Record<string, number>
     activeCount: number
+}
+
+export type LegacySimpleLoanListMetrics = {
+    totalLentByCurrency: Record<string, number>
+    totalBorrowedByCurrency: Record<string, number>
+    activeCount: number
+    settledCount: number
 }
 
 export type InstallmentLoanListMetrics = {
@@ -49,6 +60,41 @@ export function calculateSimpleLoanListMetrics(
         totalPaidByCurrency,
         totalBalanceByCurrency,
         activeCount: activeLoans.length
+    }
+}
+
+/**
+ * Preserves the original simple-loan card calculation exactly. These totals
+ * are date-scoped by the caller, ignore the table's other filters, include
+ * only active balances, and intentionally use plain JavaScript addition.
+ */
+export function calculateLegacySimpleLoanListMetrics(
+    dateScopedLoans: readonly LegacySimpleLoanMetricInput[],
+    defaultCurrency: string
+): LegacySimpleLoanListMetrics {
+    const activeLoans = dateScopedLoans.filter(
+        (loan) => loan.balanceAmount > 0 && loan.status !== 'completed'
+    )
+    const totalLentByCurrency: Record<string, number> = {}
+    const totalBorrowedByCurrency: Record<string, number> = {}
+
+    for (const loan of activeLoans) {
+        const currency = loan.settlementCurrency ?? defaultCurrency
+        const direction = getLoanDirection(loan)
+        if (direction === 'lent') {
+            totalLentByCurrency[currency] = (totalLentByCurrency[currency] || 0) + loan.balanceAmount
+        } else {
+            totalBorrowedByCurrency[currency] = (totalBorrowedByCurrency[currency] || 0) + loan.balanceAmount
+        }
+    }
+
+    return {
+        totalLentByCurrency,
+        totalBorrowedByCurrency,
+        activeCount: activeLoans.length,
+        settledCount: dateScopedLoans.filter(
+            (loan) => loan.balanceAmount <= 0 || loan.status === 'completed'
+        ).length
     }
 }
 

@@ -8,7 +8,9 @@ import { useAuth } from '@/auth'
 import { useDateRange } from '@/context/DateRangeContext'
 import {
     getPaymentSourceKey,
+    getPaymentTransactionReversalState,
     getPaymentTransactionRoutePath,
+    getRemainingPaymentTransactions,
     recordDirectTransaction,
     reversePaymentTransaction,
     usePaymentTransactions,
@@ -38,7 +40,7 @@ import {
 } from '@/ui/components'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { DirectTransactionDialog } from '@/ui/components/payments/DirectTransactionDialog'
-import { ReverseTransactionCofirmationDialog } from '@/ui/components/payments/ReverseTransactionCofirmationDialog'
+import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
 import { useWorkspace } from '@/workspace'
 
 type DirectionFilter = 'all' | 'incoming' | 'outgoing'
@@ -62,20 +64,6 @@ function paymentMethodLabel(value: PaymentTransaction['paymentMethod'], t: any) 
         default:
             return value.charAt(0).toUpperCase() + value.slice(1).replace('_', ' ')
     }
-}
-
-function collapseTransactionsBySource(items: PaymentTransaction[]) {
-    const seen = new Set<string>()
-
-    return items.filter((item) => {
-        const key = getPaymentSourceKey(item)
-        if (seen.has(key)) {
-            return false
-        }
-
-        seen.add(key)
-        return true
-    })
 }
 
 export function DirectTransactions() {
@@ -126,17 +114,11 @@ export function DirectTransactions() {
             })
             .sort((left, right) => right.paidAt.localeCompare(left.paidAt) || right.createdAt.localeCompare(left.createdAt))
     }, [allTransactions, customDates, dateRange, directionFilter, search])
-    const visibleDirectTransactions = useMemo(() => collapseTransactionsBySource(directTransactions), [directTransactions])
-
-    const reversedIds = useMemo(
-        () => new Set(allTransactions.filter((item) => !!item.reversalOfTransactionId).map((item) => item.reversalOfTransactionId as string)),
-        [allTransactions]
-    )
+    const visibleDirectTransactions = directTransactions
 
     const latestUnreversedBySource = useMemo(() => {
         const map = new Map<string, PaymentTransaction>()
-        const sourceRows = allTransactions
-            .filter((item) => !item.isDeleted && !item.reversalOfTransactionId && !reversedIds.has(item.id))
+        const sourceRows = getRemainingPaymentTransactions(allTransactions)
             .sort((left, right) => right.paidAt.localeCompare(left.paidAt) || right.createdAt.localeCompare(left.createdAt))
 
         sourceRows.forEach((item) => {
@@ -147,7 +129,7 @@ export function DirectTransactions() {
         })
 
         return map
-    }, [allTransactions, reversedIds])
+    }, [allTransactions])
 
     const handleCreateDirectTransaction = async (input: {
         direction: 'incoming' | 'outgoing'
@@ -185,7 +167,7 @@ export function DirectTransactions() {
         }
     }
 
-    const handleReverse = async () => {
+    const handleReverse = async (input: PaymentReversalDialogInput) => {
         if (!workspaceId || !transactionToReverse || reversingTransactionId) {
             return
         }
@@ -193,6 +175,7 @@ export function DirectTransactions() {
         setReversingTransactionId(transactionToReverse.id)
         try {
             await reversePaymentTransaction(workspaceId, transactionToReverse.id, {
+                ...input,
                 createdBy: user?.id || null
             })
             toast({ title: t('directTransactions.reversed', { defaultValue: 'Transaction reversed' }) })
@@ -318,10 +301,14 @@ export function DirectTransactions() {
                                 </TableRow>
                             ) : visibleDirectTransactions.map((item) => {
                                 const isReversal = !!item.reversalOfTransactionId
-                                const isReversed = reversedIds.has(item.id)
+                                const reversalState = isReversal ? null : getPaymentTransactionReversalState(item, allTransactions)
+                                const isReversed = reversalState?.status === 'fully_reversed'
+                                const isPartiallyReversed = reversalState?.status === 'partially_reversed'
                                 const isLatestUnreversed = latestUnreversedBySource.get(getPaymentSourceKey(item))?.id === item.id
                                 const canReverse = !isReversal && !isReversed && isLatestUnreversed
-                                const displayAmount = isReversal ? 0 : item.amount
+                                const displayAmount = isReversal
+                                    ? (item.direction === 'incoming' ? item.amount : -item.amount)
+                                    : item.amount
 
                                 return (
                                     <TableRow key={item.id}>
@@ -336,14 +323,20 @@ export function DirectTransactions() {
                                         <TableCell>
                                             <span className={cn(
                                                 'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                                                item.direction === 'incoming'
-                                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                                    : 'border-amber-200 bg-amber-50 text-amber-700'
+                                                isReversal
+                                                    ? 'border-violet-200 bg-violet-50 text-violet-700'
+                                                    : item.direction === 'incoming'
+                                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                                        : 'border-amber-200 bg-amber-50 text-amber-700'
                                             )}>
-                                                {item.direction === 'incoming' ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
-                                                {item.direction === 'incoming' 
-                                                    ? t('directTransactions.filters.incoming', { defaultValue: 'Incoming' })
-                                                    : t('directTransactions.filters.outgoing', { defaultValue: 'Outgoing' })}
+                                                {isReversal ? <RotateCcw className="h-3 w-3" /> : item.direction === 'incoming' ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
+                                                {isReversal
+                                                    ? item.direction === 'incoming'
+                                                        ? t('paymentReversal.cashReturned', { defaultValue: 'Cash returned' })
+                                                        : t('paymentReversal.cashRestored', { defaultValue: 'Cash restored' })
+                                                    : item.direction === 'incoming'
+                                                        ? t('directTransactions.filters.incoming', { defaultValue: 'Incoming' })
+                                                        : t('directTransactions.filters.outgoing', { defaultValue: 'Outgoing' })}
                                             </span>
                                         </TableCell>
                                         <TableCell>
@@ -357,13 +350,17 @@ export function DirectTransactions() {
                                                 'inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
                                                 isReversal
                                                     ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                                    : isPartiallyReversed
+                                                        ? 'border-amber-200 bg-amber-50 text-amber-700'
                                                     : isReversed
                                                         ? 'border-slate-200 bg-slate-50 text-slate-700'
                                                         : 'border-emerald-200 bg-emerald-50 text-emerald-700'
                                             )}>
                                                 {isReversal 
                                                     ? t('directTransactions.status.reversal', { defaultValue: 'Reversal' }) 
-                                                    : isReversed 
+                                                    : isPartiallyReversed
+                                                        ? t('payments.status.partialReversal', { defaultValue: 'Partially reversed' })
+                                                    : isReversed
                                                         ? t('directTransactions.status.reversed', { defaultValue: 'Reversed' }) 
                                                         : t('directTransactions.status.posted', { defaultValue: 'Posted' })}
                                             </span>
@@ -404,16 +401,17 @@ export function DirectTransactions() {
                 />
             ) : null}
 
-            <ReverseTransactionCofirmationDialog
+            <PaymentReversalDialog
                 open={!!transactionToReverse}
                 onOpenChange={(open) => {
                     if (!open) {
                         setTransactionToReverse(null)
                     }
                 }}
-                onConfirm={() => { void handleReverse() }}
+                onSubmit={handleReverse}
                 isProcessing={reversingTransactionId === transactionToReverse?.id}
                 transaction={transactionToReverse}
+                workspaceId={workspaceId}
                 iqdPreference={features.iqd_display_preference}
             />
         </div>

@@ -8,7 +8,7 @@ CREATE TABLE crm.agent_commission_entries (
   plan_id uuid NULL REFERENCES crm.agent_commission_plans(id) ON DELETE RESTRICT,
   order_return_id uuid NULL REFERENCES public.order_returns(id) ON DELETE RESTRICT,
   related_entry_id uuid NULL REFERENCES crm.agent_commission_entries(id) ON DELETE RESTRICT,
-  kind text NOT NULL CHECK (kind IN ('estimate', 'accrual', 'approval', 'reversal', 'payout', 'adjustment')),
+  kind text NOT NULL CHECK (kind IN ('estimate', 'accrual', 'approval', 'reversal', 'payout', 'recovery', 'adjustment')),
   status text NOT NULL CHECK (status IN ('estimated', 'earned', 'approved', 'paid', 'reversed')),
   currency text NOT NULL CHECK (currency IN ('usd', 'eur', 'iqd', 'try')),
   calculation_basis text NOT NULL DEFAULT 'net_profit' CHECK (calculation_basis IN ('net_profit', 'net_revenue')),
@@ -42,6 +42,7 @@ CREATE TABLE crm.agent_commission_entries (
     OR (kind = 'approval' AND status = 'approved' AND amount = 0)
     OR (kind = 'reversal' AND status = 'reversed' AND amount <= 0)
     OR (kind = 'payout' AND status = 'paid' AND amount <= 0 AND NULLIF(btrim(payout_reference), '') IS NOT NULL)
+    OR (kind = 'recovery' AND status = 'paid' AND amount >= 0 AND NULLIF(btrim(payout_reference), '') IS NOT NULL)
     OR (kind = 'adjustment' AND status IN ('earned', 'approved', 'reversed'))
   ),
   CONSTRAINT agent_commission_entries_return_kind_check CHECK (order_return_id IS NULL OR kind = 'reversal'),
@@ -72,5 +73,9 @@ CREATE INDEX agent_commission_entries_payout_order_idx
   ON crm.agent_commission_entries (
     workspace_id, agent_id, currency, order_id, occurred_at DESC
   ) WHERE kind = 'payout';
+CREATE INDEX agent_commission_entries_recovery_order_idx
+  ON crm.agent_commission_entries (
+    workspace_id, agent_id, currency, order_id, occurred_at DESC
+  ) WHERE kind = 'recovery';
 
 ALTER TABLE crm.agent_commission_entries ENABLE ROW LEVEL SECURITY;

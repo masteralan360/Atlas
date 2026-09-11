@@ -491,7 +491,15 @@ export async function recordTravelBookingPayment(workspaceId: string, input: Rec
 export async function reverseTravelBookingPayment(
     workspaceId: string,
     transactionId: string,
-    input: { paidAt?: string; note?: string; createdBy?: string | null } = {}
+    input: {
+        paidAt?: string
+        note?: string
+        createdBy?: string | null
+        amount?: number
+        paymentMethod?: PaymentTransaction['paymentMethod']
+        accountId?: string | null
+        accountNameSnapshot?: string | null
+    } = {}
 ) {
     const payment = await db.payment_transactions.get(transactionId)
     if (!payment || payment.workspaceId !== workspaceId || payment.isDeleted || payment.sourceType !== PAYMENT_SOURCE_TYPE || payment.reversalOfTransactionId) {
@@ -506,13 +514,17 @@ export async function reverseTravelBookingPayment(
         sourceRecordId: booking.id,
         sourceSubrecordId: payment.sourceSubrecordId ?? null,
         direction: 'incoming',
-        amount: -Math.abs(payment.amount),
+        amount: -Math.abs(input.amount ?? payment.amount),
         currency: payment.currency,
-        paymentMethod: payment.paymentMethod,
+        paymentMethod: input.paymentMethod ?? payment.paymentMethod,
         paidAt: input.paidAt ? new Date(input.paidAt).toISOString() : new Date().toISOString(),
         referenceLabel: booking.bookingNumber,
         note: normalizeOptionalText(input.note) || `Reversal of ${booking.bookingNumber}`,
         createdBy: input.createdBy || null,
+        ...(input.accountId === undefined ? {} : {
+            accountId: input.accountId,
+            accountNameSnapshot: input.accountNameSnapshot ?? null
+        }),
         reversalOfTransactionId: payment.id,
         metadata: { ...(payment.metadata || {}), reversal: true }
     })

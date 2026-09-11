@@ -96,4 +96,13 @@ describe('getLedgerCashMovementEntries', () => {
             amount: 42,
         })
     })
+
+    it('excludes administrator-voided payments from cash reporting', () => {
+        expect(getLedgerCashMovementFromPayment(payment({
+            sourceType: 'expense_item',
+            direction: 'outgoing',
+            amount: 100,
+            voidId: 'void-1',
+        }))).toBeNull()
+    })
 })

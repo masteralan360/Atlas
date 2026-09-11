@@ -1,4 +1,5 @@
 import type { PaymentTransaction } from "@/local-db";
+import { isReportablePaymentTransaction } from "./financialReportability";
 
 export type LedgerPaymentDirection = "incoming" | "outgoing";
 
@@ -7,7 +8,7 @@ export type LedgerPaymentDirection = "incoming" | "outgoing";
  * reversing transaction rather than collapsing them to a net settlement.
  */
 export function getLedgerPaymentTransactions(rows: PaymentTransaction[]) {
-  return rows.filter((row) => !row.isDeleted);
+  return rows.filter(isReportablePaymentTransaction);
 }
 
 /**

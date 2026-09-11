@@ -135,6 +135,7 @@ const SYNC_PULL_TABLES = [
   "cashier_shift_pause_requests",
   "cashier_shift_pause_periods",
   "payment_transactions",
+  "financial_transaction_voids",
   "clinical_presets",
   "manual_entry_templates",
   "manual_entries",

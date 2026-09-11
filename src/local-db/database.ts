@@ -74,6 +74,7 @@ import type {
   InstallmentSaleInstallment,
   InstallmentSalePayment,
   PaymentTransaction,
+  FinancialTransactionVoid,
   PaymentAccount,
   CapitalPool,
   PaymentAccountBalance,
@@ -476,6 +477,7 @@ export class AtlasDatabase extends Dexie {
   installment_sale_installments!: EntityTable<InstallmentSaleInstallment, 'id'>
   installment_sale_payments!: EntityTable<InstallmentSalePayment, 'id'>
   payment_transactions!: EntityTable<PaymentTransaction, 'id'>
+  financial_transaction_voids!: EntityTable<FinancialTransactionVoid, 'id'>
   payment_accounts!: EntityTable<PaymentAccount, 'id'>
   capital_pools!: EntityTable<CapitalPool, 'id'>
   payment_account_balances!: EntityTable<PaymentAccountBalance, 'id'>
@@ -3383,6 +3385,19 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, name, currency, updatedAt, isDeleted, syncStatus, [workspaceId+name], [workspaceId+currency], *accountIds'
     })
 
+    this.version(125).stores({
+      payment_transactions:
+        'id, workspaceId, paidAt, accountId, cashierShiftOccurrenceId, sourceModule, sourceType, sourceRecordId, sourceSubrecordId, direction, reversalOfTransactionId, voidId, updatedAt, isDeleted, syncStatus, [workspaceId+paidAt], [workspaceId+accountId], [workspaceId+cashierShiftOccurrenceId], [workspaceId+sourceType+sourceRecordId], [workspaceId+voidId]',
+      financial_transaction_voids:
+        'id, workspaceId, rootPaymentTransactionId, sourceModule, sourceType, sourceRecordId, voidedBy, voidedAt, updatedAt, [workspaceId+voidedAt], [workspaceId+sourceType+sourceRecordId]',
+      expense_series:
+        'id, workspaceId, name, recurrence, startMonth, endMonth, categoryId, voidId, updatedAt, isDeleted, syncStatus, [workspaceId+name], [workspaceId+voidId]',
+      expense_items:
+        'id, workspaceId, seriesId, month, dueDate, status, voidId, updatedAt, isDeleted, syncStatus, [seriesId+month], [workspaceId+month], [workspaceId+voidId]',
+      payment_account_movements:
+        'id, workspaceId, accountId, paymentTransactionId, currency, occurredAt, voidId, updatedAt, isDeleted, syncStatus, [workspaceId+accountId], [accountId+occurredAt], [workspaceId+occurredAt], [workspaceId+voidId]'
+    })
+
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
   }
@@ -3542,6 +3557,7 @@ export class AtlasDatabase extends Dexie {
       'installment_sale_installments',
       'installment_sale_payments',
       'payment_transactions',
+      'financial_transaction_voids',
       'payment_accounts',
       'capital_pools',
       'payment_account_balances',
@@ -3731,6 +3747,7 @@ export async function clearDatabase(): Promise<void> {
       db.delivery_settlements,
       db.delivery_ledger_entries,
       db.payment_transactions,
+      db.financial_transaction_voids,
       db.payment_accounts,
       db.capital_pools,
       db.payment_account_balances,
@@ -3803,6 +3820,7 @@ export async function clearDatabase(): Promise<void> {
       await db.delivery_settlements.clear()
       await db.delivery_ledger_entries.clear()
       await db.payment_transactions.clear()
+      await db.financial_transaction_voids.clear()
       await db.payment_accounts.clear()
       await db.capital_pools.clear()
       await db.payment_account_balances.clear()

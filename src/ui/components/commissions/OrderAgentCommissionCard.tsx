@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { BadgePercent, MapPin, Truck, UserRoundCheck } from 'lucide-react'
+import { BadgePercent, HandCoins, MapPin, Truck, UserRoundCheck } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { formatCurrency, formatDateTime } from '@/lib/utils'
@@ -9,9 +9,10 @@ import {
     useAgentProductCommissionEntries,
     useSalesOrderAgentAssignments,
     type CurrencyCode,
-    type IQDDisplayPreference
+    type IQDDisplayPreference,
+    type PaymentObligation
 } from '@/local-db'
-import { Badge, Card, CardContent, CardHeader, CardTitle } from '@/ui/components'
+import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from '@/ui/components'
 import { commissionStatusClass, commissionStatusLabel, formatCommissionPlanTerms } from './agentCommissionPresentation'
 import { useCommissionAgentDirectory } from './useCommissionAgentDirectory'
 
@@ -23,6 +24,8 @@ export function OrderAgentCommissionCard({
     canAssign,
     canViewAllCommission,
     canViewOwnCommission,
+    canPayCommission,
+    onSettleCommission,
     userId
 }: {
     workspaceId: string
@@ -32,6 +35,8 @@ export function OrderAgentCommissionCard({
     canAssign: boolean
     canViewAllCommission: boolean
     canViewOwnCommission: boolean
+    canPayCommission: boolean
+    onSettleCommission: (obligation: PaymentObligation) => void
     userId?: string | null
 }) {
     const { t } = useTranslation()
@@ -83,6 +88,34 @@ export function OrderAgentCommissionCard({
                                     .filter((entry) => entry.kind !== 'estimate' && entry.kind !== 'approval')
                                     .reduce((total, entry) => total + Number(entry.amount || 0), 0)
                                 const currency = (sourceEntry?.currency || latestEntry?.currency || orderCurrency) as CurrencyCode
+                                const partner = assignedAgent?.partner
+                                const commissionObligation: PaymentObligation | null = partner && Math.abs(outstandingAmount) > 0.000001
+                                    ? {
+                                        id: `agent-commission:${assignment.agentId}:${assignment.id}:${currency}`,
+                                        workspaceId,
+                                        sourceModule: 'orders',
+                                        sourceType: outstandingAmount > 0 ? 'agent_commission_payout' : 'agent_commission_recovery',
+                                        sourceRecordId: orderId,
+                                        sourceSubrecordId: assignment.id,
+                                        direction: outstandingAmount > 0 ? 'outgoing' : 'incoming',
+                                        amount: Math.abs(outstandingAmount),
+                                        currency,
+                                        dueDate: (sourceEntry?.occurredAt || latestEntry?.occurredAt || new Date().toISOString()).slice(0, 10),
+                                        createdAt: sourceEntry?.occurredAt,
+                                        counterpartyName: partner.partnerName,
+                                        referenceLabel: orderId,
+                                        title: partner.partnerName,
+                                        subtitle: orderId,
+                                        status: 'open',
+                                        routePath: `/orders/${orderId}`,
+                                        metadata: {
+                                            businessPartnerId: partner.id,
+                                            agentId: assignment.agentId,
+                                            commissionAssignmentId: assignment.id,
+                                            orderId
+                                        }
+                                    }
+                                    : null
                                 return (
                                     <div key={assignment.id} className="space-y-3 rounded-2xl border bg-background/50 p-4">
                                         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -139,6 +172,20 @@ export function OrderAgentCommissionCard({
                                                             <div className="text-muted-foreground">{t('salesAgentCommissions.due')}</div>
                                                             <div className="mt-1 font-semibold">{formatCurrency(outstandingAmount, currency, iqdPreference)}</div>
                                                         </div>
+                                                    ) : null}
+                                                    {canPayCommission && commissionObligation ? (
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            variant={commissionObligation.direction === 'incoming' ? 'outline' : 'default'}
+                                                            className="w-full gap-2"
+                                                            onClick={() => onSettleCommission(commissionObligation)}
+                                                        >
+                                                            <HandCoins className="h-4 w-4" />
+                                                            {commissionObligation.direction === 'incoming'
+                                                                ? t('salesAgentCommissions.collectRecovery')
+                                                                : t('salesAgentCommissions.payCommission')}
+                                                        </Button>
                                                     ) : null}
                                                     <div>
                                                         <div className="text-muted-foreground">{t('salesAgentCommissions.commissionBasis')}</div>

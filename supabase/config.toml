@@ -21,7 +21,7 @@ verify_jwt = false
 [functions.place-bound-storefront-order]
 verify_jwt = false
 
-[functions.attach-bound-storefront-inquiry-pdf]
+[functions.get-bound-storefront-inquiry-pdf]
 verify_jwt = false
 
 

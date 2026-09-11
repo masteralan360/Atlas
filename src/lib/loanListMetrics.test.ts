@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
     calculateInstallmentLoanListMetrics,
+    calculateLegacySimpleLoanListMetrics,
     calculateSimpleLoanListMetrics
 } from './loanListMetrics'
 
@@ -51,6 +52,41 @@ describe('calculateSimpleLoanListMetrics', () => {
             totalPaidByCurrency: { usd: 150, iqd: 10 },
             totalBalanceByCurrency: { usd: 50, iqd: 75 },
             activeCount: 1
+        })
+    })
+})
+
+describe('calculateLegacySimpleLoanListMetrics', () => {
+    it('preserves the original active-balance totals by direction and currency without rounding', () => {
+        const metrics = calculateLegacySimpleLoanListMetrics([
+            simpleLoan({ id: 'lent-1', balanceAmount: 0.1, direction: 'lent', settlementCurrency: 'usd' }),
+            simpleLoan({ id: 'lent-2', balanceAmount: 0.2, direction: 'lent', settlementCurrency: 'usd' }),
+            simpleLoan({ id: 'borrowed', balanceAmount: 250_000, direction: 'borrowed', settlementCurrency: 'iqd' }),
+            simpleLoan({ id: 'default-direction', balanceAmount: 25, direction: undefined, settlementCurrency: 'iqd' })
+        ], 'usd')
+
+        expect(metrics).toEqual({
+            totalLentByCurrency: { usd: 0.1 + 0.2, iqd: 25 },
+            totalBorrowedByCurrency: { iqd: 250_000 },
+            activeCount: 4,
+            settledCount: 0
+        })
+    })
+
+    it('uses the nullish currency fallback and the original active and settled boundaries', () => {
+        const metrics = calculateLegacySimpleLoanListMetrics([
+            simpleLoan({ id: 'fallback-currency', balanceAmount: 80, direction: 'lent', settlementCurrency: null }),
+            simpleLoan({ id: 'empty-currency', balanceAmount: 20, direction: 'borrowed', settlementCurrency: '' }),
+            simpleLoan({ id: 'zero-balance', balanceAmount: 0, direction: 'lent', status: 'active' }),
+            simpleLoan({ id: 'completed-with-balance', balanceAmount: 40, direction: 'borrowed', status: 'completed' }),
+            simpleLoan({ id: 'cancelled-with-balance', balanceAmount: 10, direction: 'lent', status: 'cancelled', settlementCurrency: null })
+        ], 'iqd')
+
+        expect(metrics).toEqual({
+            totalLentByCurrency: { iqd: 90 },
+            totalBorrowedByCurrency: { '': 20 },
+            activeCount: 3,
+            settledCount: 2
         })
     })
 })

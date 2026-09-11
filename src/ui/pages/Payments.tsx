@@ -1,23 +1,28 @@
 import { useMemo, useState } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
-import { ArrowDownLeft, ArrowUpRight, HandCoins, RotateCcw, Search } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, Ban, HandCoins, RotateCcw, Search, ShieldCheck } from 'lucide-react'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 
 import { useAuth } from '@/auth'
 import { useDateRange } from '@/context/DateRangeContext'
+import { UiAccessGate } from '@/context/UiAccessContext'
 import {
     getPaymentTransactionReversalAmounts,
+    getFinancialVoidTransactionChain,
     getPaymentSourceKey,
     getPaymentTransactionRoutePath,
     getRemainingPaymentTransactions,
     isReversiblePaymentSourceType,
+    isFinancialVoidSourceSupported,
     recordObligationSettlement,
     reversePaymentTransaction,
     settlePartnerBalance,
     useLockedPaymentSourceKeys,
+    useFinancialTransactionVoids,
     usePaymentObligations,
     usePaymentTransactions,
+    voidFinancialTransaction,
     type BusinessPartner,
     type CurrencySettlementAmount,
     type PaymentObligation,
@@ -54,7 +59,12 @@ import {
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { SettlementDialog } from '@/ui/components/payments/SettlementDialog'
 import { PartnerSettlementDialog } from '@/ui/components/payments/PartnerSettlementDialog'
-import { ReverseTransactionCofirmationDialog } from '@/ui/components/payments/ReverseTransactionCofirmationDialog'
+import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
+import {
+    FinancialTransactionVoidDialog,
+    type FinancialTransactionVoidDialogInput
+} from '@/ui/components/payments/FinancialTransactionVoidDialog'
+import { FinancialVoidAuditDialog } from '@/ui/components/payments/FinancialVoidAuditDialog'
 import { useWorkspace } from '@/workspace'
 import { hasEffectiveSalesAgentCommissionPermission, useWorkspacePermissions } from '@/permissions'
 
@@ -88,6 +98,8 @@ function sourceTypeLabel(
             return t('payments.sourceType.realEstateCommission', { defaultValue: 'Real Estate Commission' })
         case 'agent_commission_payout':
             return t('payments.sourceType.agentCommissionPayout', { defaultValue: 'Agent Commission Payout' })
+        case 'agent_commission_recovery':
+            return t('payments.sourceType.agentCommissionRecovery')
         case 'activity_transaction':
             return t('payments.sourceType.activityTransaction', { defaultValue: 'Activity Transaction' })
         case 'activity_refund':
@@ -241,8 +253,7 @@ export function Payments() {
     const [, setLocation] = useLocation()
     const workspaceId = user?.workspaceId
     const hasPaymentsSurface = features.loans || features.crm || features.budget || features.hr || features.real_estate || features.activities || features.clinical_appointments || features.car_rental || features.travel_transportation || hasFeature('payment_accounts')
-    const canSettleSalesAccountCommissions = hasFeature('agent_sales_accounts')
-        && hasFeature('sales_agent_commissions')
+    const canSettleSalesAgentCommissions = hasFeature('sales_agent_commissions')
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.pay')
 
     const [activeTab, setActiveTab] = useState<PaymentsTab>('open-items')
@@ -254,6 +265,9 @@ export function Payments() {
     const [isSubmittingSettlement, setIsSubmittingSettlement] = useState(false)
     const [reversingTransactionId, setReversingTransactionId] = useState<string | null>(null)
     const [transactionToReverse, setTransactionToReverse] = useState<PaymentTransaction | null>(null)
+    const [transactionToVoid, setTransactionToVoid] = useState<PaymentTransaction | null>(null)
+    const [voidingTransactionId, setVoidingTransactionId] = useState<string | null>(null)
+    const [isVoidAuditOpen, setIsVoidAuditOpen] = useState(false)
     const [isPartnerSettlementOpen, setIsPartnerSettlementOpen] = useState(false)
 
     const settlementAction = useMemo(() => {
@@ -293,6 +307,7 @@ export function Payments() {
     const lockedSourceKeys = useLockedPaymentSourceKeys(workspaceId)
 
     const allTransactions = usePaymentTransactions(workspaceId, { includeReversals: true })
+    const financialVoidAudits = useFinancialTransactionVoids(user?.role === 'admin' ? workspaceId : undefined)
     const transactions = usePaymentTransactions(workspaceId, {
         direction: directionFilter,
         sourceModule: sourceFilter,
@@ -340,6 +355,14 @@ export function Payments() {
         ),
         [customDates, dateRange, transactions, latestUnreversedBySource]
     )
+    const voidTransactionChain = useMemo(() => {
+        if (!transactionToVoid) return []
+        try {
+            return getFinancialVoidTransactionChain(allTransactions, transactionToVoid.id).transactions
+        } catch {
+            return [transactionToVoid]
+        }
+    }, [allTransactions, transactionToVoid])
 
     const kpis = useMemo(() => ({
         totalOpen: formatAmountSummary(obligations, features.iqd_display_preference),
@@ -450,7 +473,7 @@ export function Payments() {
         }
     }
 
-    const handleReverse = async () => {
+    const handleReverse = async (input: PaymentReversalDialogInput) => {
         if (!workspaceId || !transactionToReverse || reversingTransactionId) {
             return
         }
@@ -458,6 +481,7 @@ export function Payments() {
         setReversingTransactionId(transactionToReverse.id)
         try {
             await reversePaymentTransaction(workspaceId, transactionToReverse.id, {
+                ...input,
                 createdBy: user?.id || null
             })
             toast({ title: t('payments.reversed', { defaultValue: 'Transaction reversed' }) })
@@ -470,6 +494,35 @@ export function Payments() {
             })
         } finally {
             setReversingTransactionId(null)
+        }
+    }
+
+    const handleVoid = async (input: FinancialTransactionVoidDialogInput) => {
+        if (!workspaceId || !user || !transactionToVoid || voidingTransactionId) {
+            return
+        }
+
+        setVoidingTransactionId(transactionToVoid.id)
+        try {
+            await voidFinancialTransaction(workspaceId, transactionToVoid.id, {
+                ...input,
+                voidedBy: user.id,
+                voidedByName: user.name || user.email,
+                actorRole: user.role
+            })
+            toast({
+                title: t('common.success'),
+                description: t('financialVoid.success')
+            })
+            setTransactionToVoid(null)
+        } catch {
+            toast({
+                title: t('common.error'),
+                description: t('financialVoid.failed'),
+                variant: 'destructive'
+            })
+        } finally {
+            setVoidingTransactionId(null)
         }
     }
 
@@ -709,8 +762,25 @@ export function Payments() {
 
                 <TabsContent value="transactions">
                     <Card>
-                        <CardHeader>
+                        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
                             <CardTitle>{t('payments.tabs.transactions', { defaultValue: 'Transactions' })}</CardTitle>
+                            {user?.role === 'admin' ? (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setIsVoidAuditOpen(true)}
+                                    className="border-destructive/30 text-destructive hover:bg-destructive/5 hover:text-destructive"
+                                >
+                                    <ShieldCheck className="me-1.5 h-4 w-4" />
+                                    {t('financialVoid.auditTitle')}
+                                    {financialVoidAudits.length ? (
+                                        <span className="ms-2 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-bold">
+                                            {financialVoidAudits.length}
+                                        </span>
+                                    ) : null}
+                                </Button>
+                            ) : null}
                         </CardHeader>
                         <CardContent className="overflow-x-auto">
                             <Table>
@@ -742,8 +812,13 @@ export function Payments() {
                                         const isReversed = fullyReversedIds.has(item.id)
                                         const isLockedSource = lockedSourceKeys.has(getPaymentSourceKey(item))
                                         const isLatestUnreversed = latestUnreversedBySource.get(getPaymentSourceKey(item))?.id === item.id
-                                        const canReverse = !isReversal && !hasPartialReversal && !isReversed && !isLockedSource && isLatestUnreversed && isReversiblePaymentSourceType(item.sourceType)
-                                        const displayAmount = isReversal ? 0 : item.amount
+                                        const canReverse = !isReversal && !isReversed && !isLockedSource && isLatestUnreversed && isReversiblePaymentSourceType(item.sourceType)
+                                        const canVoid = user?.role === 'admin'
+                                            && !isLockedSource
+                                            && isFinancialVoidSourceSupported(item)
+                                        const displayAmount = isReversal
+                                            ? (item.direction === 'incoming' ? item.amount : -item.amount)
+                                            : item.amount
 
                                         return (
                                             <TableRow key={item.id}>
@@ -754,14 +829,20 @@ export function Payments() {
                                                 <TableCell>
                                                     <span className={cn(
                                                         'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                                                        item.direction === 'incoming'
-                                                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                                            : 'border-amber-200 bg-amber-50 text-amber-700'
+                                                        isReversal
+                                                            ? 'border-violet-200 bg-violet-50 text-violet-700'
+                                                            : item.direction === 'incoming'
+                                                                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                                                : 'border-amber-200 bg-amber-50 text-amber-700'
                                                     )}>
-                                                        {item.direction === 'incoming' ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
-                                                        {item.direction === 'incoming' 
-                                                            ? t('payments.filters.incoming', { defaultValue: 'Incoming' }) 
-                                                            : t('payments.filters.outgoing', { defaultValue: 'Outgoing' })}
+                                                        {isReversal ? <RotateCcw className="h-3 w-3" /> : item.direction === 'incoming' ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
+                                                        {isReversal
+                                                            ? item.direction === 'incoming'
+                                                                ? t('paymentReversal.cashReturned', { defaultValue: 'Cash returned' })
+                                                                : t('paymentReversal.cashRestored', { defaultValue: 'Cash restored' })
+                                                            : item.direction === 'incoming'
+                                                                ? t('payments.filters.incoming', { defaultValue: 'Incoming' })
+                                                                : t('payments.filters.outgoing', { defaultValue: 'Outgoing' })}
                                                     </span>
                                                 </TableCell>
                                                 <TableCell>
@@ -810,6 +891,20 @@ export function Payments() {
                                                                 {t('payments.actions.reverse')}
                                                             </Button>
                                                         ) : null}
+                                                        {canVoid ? (
+                                                            <UiAccessGate>
+                                                                <Button
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    onClick={() => setTransactionToVoid(item)}
+                                                                    disabled={voidingTransactionId === item.id}
+                                                                    className="border-destructive/30 text-destructive hover:bg-destructive/5 hover:text-destructive"
+                                                                >
+                                                                    <Ban className="me-1.5 h-3.5 w-3.5" />
+                                                                    {t('financialVoid.action')}
+                                                                </Button>
+                                                            </UiAccessGate>
+                                                        ) : null}
                                                     </div>
                                                 </TableCell>
                                             </TableRow>
@@ -836,17 +931,42 @@ export function Payments() {
                 onSubmit={handleSettle}
             />
 
-            <ReverseTransactionCofirmationDialog
+            <PaymentReversalDialog
                 open={!!transactionToReverse}
                 onOpenChange={(open) => {
                     if (!open) {
                         setTransactionToReverse(null)
                     }
                 }}
-                onConfirm={() => { void handleReverse() }}
+                onSubmit={handleReverse}
                 isProcessing={reversingTransactionId === transactionToReverse?.id}
                 transaction={transactionToReverse}
+                workspaceId={workspaceId}
                 iqdPreference={features.iqd_display_preference}
+            />
+
+            <FinancialTransactionVoidDialog
+                open={!!transactionToVoid}
+                onOpenChange={(open) => {
+                    if (!open && !voidingTransactionId) {
+                        setTransactionToVoid(null)
+                    }
+                }}
+                onSubmit={handleVoid}
+                isProcessing={voidingTransactionId === transactionToVoid?.id}
+                transaction={transactionToVoid}
+                transactions={voidTransactionChain}
+                sourceLabel={transactionToVoid
+                    ? sourceTypeLabel(transactionToVoid.sourceType, t, transactionToVoid.metadata)
+                    : ''}
+                iqdPreference={features.iqd_display_preference}
+            />
+
+            <FinancialVoidAuditDialog
+                open={isVoidAuditOpen}
+                onOpenChange={setIsVoidAuditOpen}
+                rows={financialVoidAudits}
+                getSourceLabel={(row) => sourceTypeLabel(row.sourceType, t)}
             />
 
             {workspaceId ? (
@@ -855,7 +975,7 @@ export function Payments() {
                     onOpenChange={setIsPartnerSettlementOpen}
                     workspaceId={workspaceId}
                     defaultDirection={settlementAction.direction}
-                    includeSalesAccountAgents={canSettleSalesAccountCommissions}
+                    includeSalesAgentCommissionPartners={canSettleSalesAgentCommissions}
                     isSubmitting={isSubmittingSettlement}
                     onSubmit={handlePartnerSettlement}
                 />

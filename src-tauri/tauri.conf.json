@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Atlas",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "identifier": "com.atlas.app",
   "build": {
     "frontendDist": "../dist",
@@ -23,6 +23,7 @@
         "visible": false,
         "decorations": false,
         "transparent": false,
+        "backgroundColor": "#000000",
         "devtools": false,
         "zoomHotkeysEnabled": false
       }

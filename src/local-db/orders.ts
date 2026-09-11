@@ -84,6 +84,7 @@ import type {
 } from './models'
 import { appendPaymentTransaction, synchronizeOrderPaymentReferences } from './payments'
 import { mirrorPaymentAccountTransactionLocally } from './paymentAccounts'
+import { calculateInitialOrderPartnerBalanceSnapshot } from './orderPartnerBalanceSnapshots'
 
 export function isOrderFinancingMethod(method?: OrderPaymentMethod | null): method is 'loan' | 'installments' {
     return method === 'loan' || method === 'installments'
@@ -365,6 +366,37 @@ async function syncUpsertEntities(
 
         await queueOfflineUpserts(tableName, entities, workspaceId)
     }
+}
+
+/**
+ * Persists a snapshot exactly once, after the order and any initial payment or
+ * financing records are already represented in the local partner ledger.
+ */
+async function persistInitialOrderPartnerBalanceSnapshot<T extends SalesOrder | PurchaseOrder>(
+    orderType: OrderType,
+    order: T
+): Promise<T> {
+    const capturedAt = new Date().toISOString()
+    const partnerBalanceSnapshot = await calculateInitialOrderPartnerBalanceSnapshot(orderType, order, capturedAt)
+    if (!partnerBalanceSnapshot) return order
+
+    const updated = {
+        ...order,
+        partnerBalanceSnapshot,
+        updatedAt: capturedAt,
+        version: order.version + 1,
+        ...getSyncMetadata(order.workspaceId, capturedAt)
+    } as T
+    const tableName: OrderTableName = orderType === 'sales' ? 'sales_orders' : 'purchase_orders'
+    const table = orderType === 'sales' ? db.sales_orders : db.purchase_orders
+
+    await table.put(updated as SalesOrder & PurchaseOrder)
+    await syncUpsertEntities(
+        tableName,
+        [updated as unknown as Record<string, unknown> & { id: string; version: number }],
+        order.workspaceId
+    )
+    return updated
 }
 
 async function syncSoftDelete(tableName: SimpleEntityTableName | OrderTableName | OrderInstallmentTableName, entityId: string, workspaceId: string) {
@@ -2314,7 +2346,7 @@ export async function createSalesOrder(
         await reconcileSalesOrderCommissionBestEffort(workspaceId, createdOrder.id, createdBy)
     }
 
-    return createdOrder
+    return persistInitialOrderPartnerBalanceSnapshot('sales', createdOrder)
 }
 
 type CompletedQuickSalesOrderRpcResult = {
@@ -2464,6 +2496,7 @@ async function completePaidQuickSalesOrderAtomically(
         completedOrder.id,
         completedOrder.createdBy
     )
+    const snapshotOrder = await persistInitialOrderPartnerBalanceSnapshot('sales', completedOrder)
 
     // Customer/partner totals and reorder suggestions are derived projections.
     // Refresh them after the authoritative transaction without holding the POS
@@ -2484,7 +2517,7 @@ async function completePaidQuickSalesOrderAtomically(
         console.error('[Orders] Failed to refresh Quick Order projections:', projectionError)
     })
 
-    return completedOrder
+    return snapshotOrder
 }
 
 export type QuickSalesOrderStatus = Extract<SalesOrderStatus, 'draft' | 'pending' | 'completed'>
@@ -2973,7 +3006,7 @@ export async function updateSalesOrderStatus(
     if (updated.status === 'completed') {
         await reconcileSalesOrderCommissionBestEffort(existing.workspaceId, updated.id, updated.createdBy)
     }
-    return updated
+    return persistInitialOrderPartnerBalanceSnapshot('sales', updated)
 }
 
 export async function approveSalesOrderRequest(id: string, reviewedBy?: string | null) {
@@ -4096,7 +4129,7 @@ export async function createPurchaseOrder(
         await appendInitialOrderPaymentTransaction('purchase', createdOrder)
     }
 
-    return createdOrder
+    return persistInitialOrderPartnerBalanceSnapshot('purchase', createdOrder)
 }
 
 export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrder>) {
@@ -4279,7 +4312,7 @@ export async function updatePurchaseOrderStatus(id: string, status: PurchaseOrde
             )
         })
     )
-    return updated
+    return persistInitialOrderPartnerBalanceSnapshot('purchase', updated)
 }
 
 export async function approvePurchaseOrderRequest(id: string, reviewedBy?: string | null) {

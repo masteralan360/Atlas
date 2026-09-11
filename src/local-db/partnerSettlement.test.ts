@@ -46,6 +46,11 @@ function installBrowserStorage() {
         }
     })
     Object.defineProperty(globalThis, 'DOMMatrix', { configurable: true, value: class DOMMatrix {} })
+    Object.defineProperty(globalThis, 'Element', { configurable: true, value: class Element {} })
+    Object.defineProperty(globalThis, 'HTMLElement', {
+        configurable: true,
+        value: class HTMLElement extends (globalThis.Element as typeof Element) {}
+    })
     Object.defineProperty(globalThis, 'document', {
         configurable: true,
         value: {
@@ -500,9 +505,9 @@ describe('partner settlement', () => {
         expect(remaining.eligibleObligations.map((item) => item.sourceRecordId)).toEqual([loanBId])
     })
 
-    it('pays a sales-account agent commission through the partner settlement flow and records the account movement', async () => {
+    it('pays a standard sales-agent commission through the partner settlement flow and records the account movement', async () => {
         const partner = await createBusinessPartner(WORKSPACE_ID, {
-            partnerName: 'Sales Account Agent',
+            partnerName: 'Commission Agent',
             phone: '07500000011',
             defaultCurrency: 'usd',
             creditLimit: 0,
@@ -511,7 +516,7 @@ describe('partner settlement', () => {
                 zone: 'Baghdad',
                 agentType: 'field_agent',
                 status: 'active',
-                salesAccountEnabled: true
+                salesAccountEnabled: false
             }
         }, { allowAgentRole: true })
         const agent = await db.agents.get(partner.agentFacetId!)
@@ -706,6 +711,43 @@ describe('partner settlement', () => {
             amountsByCurrency: [{ currency: 'usd', amount: 50 }]
         })
         expect((await getPartnerSettlementBalance(WORKSPACE_ID, partner.id, 'outgoing')).total).toBe(0)
+
+        await db.agent_commission_entries.put({
+            ...accrual,
+            id: 'sales-account-agent-reversal',
+            kind: 'reversal',
+            status: 'reversed',
+            amount: -20,
+            relatedEntryId: accrual.id,
+            occurredAt: '2026-08-03T12:00:00.000Z',
+            createdAt: '2026-08-03T12:00:00.000Z',
+            updatedAt: '2026-08-03T12:00:00.000Z'
+        })
+        const recoverable = await getPartnerSettlementBalance(WORKSPACE_ID, partner.id, 'incoming')
+        expect(recoverable).toMatchObject({ total: 20, items: 1 })
+        expect(recoverable.eligibleObligations).toEqual([
+            expect.objectContaining({
+                sourceType: 'agent_commission_recovery',
+                sourceRecordId: order.id,
+                sourceSubrecordId: assignment.id,
+                direction: 'incoming',
+                amount: 20,
+                currency: 'usd'
+            })
+        ])
+
+        await settlePartnerBalance(WORKSPACE_ID, {
+            partnerId: partner.id,
+            direction: 'incoming',
+            paymentMethod: 'cash',
+            amountsByCurrency: [{ currency: 'usd', amount: 20 }]
+        })
+        const recoveryPayment = await db.payment_transactions
+            .where('[workspaceId+sourceType+sourceRecordId]')
+            .equals([WORKSPACE_ID, 'agent_commission_recovery', agent!.id])
+            .first()
+        expect(recoveryPayment).toMatchObject({ direction: 'incoming', amount: 20, currency: 'usd' })
+        expect((await getPartnerSettlementBalance(WORKSPACE_ID, partner.id, 'incoming')).total).toBe(0)
     })
 
     it('refreshes the partner summary after settling without error', async () => {

@@ -859,7 +859,7 @@ export type SalesAgentCommissionSheetType = 'normal' | 'tier_based'
 export type ManualSalesAgentCommissionType = CommissionPlanType
 /** Product rules use the same fixed/percentage terms as commission plans. */
 export type ProductCommissionRecipientScope = 'all_assigned' | 'selected_assigned'
-export type CommissionEntryKind = 'estimate' | 'accrual' | 'approval' | 'reversal' | 'payout' | 'adjustment'
+export type CommissionEntryKind = 'estimate' | 'accrual' | 'approval' | 'reversal' | 'payout' | 'recovery' | 'adjustment'
 export type CommissionEntryStatus = 'estimated' | 'earned' | 'approved' | 'paid' | 'reversed'
 export type SalesOrderAgentAssignmentSource = 'manual' | 'sales_account' | 'order_creator_product'
 
@@ -1107,6 +1107,21 @@ export interface CommissionCalculation {
   commissionAmount: number
 }
 
+/**
+ * Immutable per-currency partner-statement balances captured with an order's
+ * first financially active posting. Later payments and ledger activity must
+ * never overwrite this historical print value.
+ */
+export interface OrderPartnerBalanceSnapshot {
+  version: 1
+  capturedAt: string
+  balances: Array<{
+    currency: CurrencyCode
+    before: number
+    after: number
+  }>
+}
+
 export interface SalesOrder extends BaseEntity {
   orderNumber: string
   businessPartnerId?: string | null
@@ -1150,6 +1165,7 @@ export interface SalesOrder extends BaseEntity {
   /** Account selected for the first posted order payment, if any. */
   initialPaymentAccountId?: string | null
   initialPaymentAccountNameSnapshot?: string | null
+  partnerBalanceSnapshot?: OrderPartnerBalanceSnapshot | null
   linkedLoanId?: string | null
   isInstallmentBased: boolean
   installmentCount: number
@@ -1206,6 +1222,7 @@ export interface PurchaseOrder extends BaseEntity {
   /** Account selected for the first posted order payment, if any. */
   initialPaymentAccountId?: string | null
   initialPaymentAccountNameSnapshot?: string | null
+  partnerBalanceSnapshot?: OrderPartnerBalanceSnapshot | null
   linkedLoanId?: string | null
   isInstallmentBased: boolean
   installmentCount: number
@@ -1676,6 +1693,8 @@ export interface ExpenseSeries extends BaseEntity {
   category?: string | null
   /** @deprecated Kept so existing expense records remain readable. */
   subcategory?: string | null
+  /** Immutable correction audit that removes a one-time entry from reporting. */
+  voidId?: string | null
 }
 
 export interface ExpenseItem extends BaseEntity {
@@ -1690,6 +1709,8 @@ export interface ExpenseItem extends BaseEntity {
   snoozeCount?: number
   paidAt?: string | null
   isLocked?: boolean
+  /** Immutable correction audit that removes this invalid item from reporting. */
+  voidId?: string | null
 }
 
 export interface PayrollStatus extends BaseEntity {
@@ -2087,6 +2108,7 @@ export type PaymentTransactionSourceType =
   | 'real_estate_installment'
   | 'real_estate_commission'
   | 'agent_commission_payout'
+  | 'agent_commission_recovery'
   | 'activity_transaction'
   | 'activity_refund'
   | 'clinical_appointment'
@@ -2135,7 +2157,31 @@ export interface PaymentTransaction extends BaseEntity {
   /** The active cashier-shift occurrence that owned this payment when it was posted. */
   cashierShiftOccurrenceId?: string | null
   reversalOfTransactionId?: string | null
+  /** Immutable correction audit. Voided transactions remain stored but have no reporting effect. */
+  voidId?: string | null
   metadata?: Record<string, unknown> | null
+}
+
+export const FINANCIAL_VOID_CASH_DECLARATIONS = ['no_money_moved'] as const
+export type FinancialVoidCashDeclaration = (typeof FINANCIAL_VOID_CASH_DECLARATIONS)[number]
+
+/** Immutable administrator audit for a transaction entered in error. */
+export interface FinancialTransactionVoid extends BaseEntity {
+  rootPaymentTransactionId: string
+  requestedPaymentTransactionId: string
+  sourceModule: PaymentTransactionSourceModule
+  sourceType: PaymentTransactionSourceType
+  sourceRecordId: string
+  sourceSubrecordId?: string | null
+  sourceUnavailable: boolean
+  affectedTransactionIds: string[]
+  reason: string
+  cashMovementDeclaration: FinancialVoidCashDeclaration
+  voidedBy: string
+  voidedByNameSnapshot: string
+  voidedAt: string
+  sourceSnapshot: Record<string, unknown>
+  transactionSnapshots: unknown[]
 }
 
 export type PaymentAccountType = 'cash_drawer' | 'bank_account' | 'digital_wallet' | 'other'
@@ -2207,6 +2253,8 @@ export interface PaymentAccountMovement extends BaseEntity {
   deltaAmount: number
   currency: CurrencyCode
   occurredAt: string
+  /** Mirrors the immutable correction audit on its source payment. */
+  voidId?: string | null
 }
 
 /**
@@ -2480,6 +2528,7 @@ export interface SyncQueueItem {
     | 'installment_sale_installments'
     | 'installment_sale_payments'
     | 'payment_transactions'
+    | 'financial_transaction_voids'
     | 'payment_accounts'
     | 'capital_pools'
     | 'payment_account_balances'
@@ -2708,6 +2757,7 @@ export interface OfflineMutation {
     | 'installment_sale_installments'
     | 'installment_sale_payments'
     | 'payment_transactions'
+    | 'financial_transaction_voids'
     | 'payment_accounts'
     | 'capital_pools'
     | 'payment_account_balances'

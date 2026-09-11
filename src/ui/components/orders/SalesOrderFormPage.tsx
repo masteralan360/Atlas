@@ -26,10 +26,12 @@ import { ORDER_DECIMAL_STEP, roundOrderValue } from '@/lib/orderPrecision'
 import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import {
     createSalesOrder,
+    buildAgentCommissionObligations,
     findPartnerProductPriceBookItem,
     getActiveSalesOrderAgentAssignments,
     getPrimaryStorageFromList,
     updateSalesOrder,
+    recordObligationSettlement,
     useAgents,
     useBusinessPartners,
     useInventory,
@@ -48,6 +50,8 @@ import {
     type SalesOrder,
     type SalesOrderItem,
     type SalesOrderStatus,
+    type PaymentObligation,
+    type WorkspacePaymentMethod,
     type StockBatch
 } from '@/local-db'
 import { useWorkspace } from '@/workspace'
@@ -89,6 +93,7 @@ import { QuickCustomerButton } from '@/ui/components/crm/QuickCustomerButton'
 import { ProductsViewModal, ProductsViewModalTrigger } from '@/ui/components/ProductsViewModal'
 import { PaymentMethodSelect } from '@/ui/components/payments/PaymentMethodSelect'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
+import { SettlementDialog } from '@/ui/components/payments/SettlementDialog'
 import { ProductAutocompleteInput } from './ProductAutocompleteInput'
 import { useOrderBarcodeScanner } from './useOrderBarcodeScanner'
 import { LoanPartyPickerDialog } from '@/ui/components/loans/LoanPartyPickerDialog'
@@ -246,6 +251,8 @@ export function SalesOrderFormPage({
     const canAssignSalesAgents = OLD_SALES_AGENT_CONFIGURATION.showSalesAgentBeneficiaries
         && salesAgentCommissionsEnabled
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.assignOrders')
+    const canPaySalesAgentCommissions = salesAgentCommissionsEnabled
+        && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.pay')
     const defaultStorageId = getPrimaryStorageFromList(storages)?.id || ''
     const storageOptionsForModal = useMemo(() => {
         if (!hasFeature('services')) return storages
@@ -278,7 +285,14 @@ export function SalesOrderFormPage({
     const { isAccessKeyHeld } = useUiAccess()
     const formOpenedAtRef = useRef(new Date().toISOString())
     const commissionAssignmentRef = useRef<SalesOrderCommissionAssignmentHandle>(null)
+    const finalizedOrderIdRef = useRef<string | null>(null)
     const [commissionAssignmentSummaries, setCommissionAssignmentSummaries] = useState<SalesOrderCommissionAssignmentSummary[]>([])
+    const [paidCommissionOnSave, setPaidCommissionOnSave] = useState(false)
+    const [commissionPaymentAccountId, setCommissionPaymentAccountId] = useState<string | null>(null)
+    const [commissionPaymentAccountNameSnapshot, setCommissionPaymentAccountNameSnapshot] = useState<string | null>(null)
+    const [commissionSettlementQueue, setCommissionSettlementQueue] = useState<PaymentObligation[]>([])
+    const [savedOrderAwaitingCommissionSettlement, setSavedOrderAwaitingCommissionSettlement] = useState<string | null>(null)
+    const [isSubmittingCommissionSettlement, setIsSubmittingCommissionSettlement] = useState(false)
     const [isOrderCreationPickerOpen, setIsOrderCreationPickerOpen] = useState(false)
     const canEditOrderCreation = user?.role === 'admin' && (isAccessKeyHeld || isOrderCreationPickerOpen)
     const [prioritizedMethod, setPrioritizedMethod] = useState<string | null>(getPrioritizedPaymentMethod)
@@ -386,6 +400,7 @@ export function SalesOrderFormPage({
         setTax(editingOrder.tax ? String(editingOrder.tax) : '')
         setNotes(editingOrder.notes || '')
         setIsPaid(editingOrder.isPaid)
+        setPaidCommissionOnSave(false)
         setPaymentMethod(editingOrder.paymentMethod || 'cash')
         setInstallmentCount(String(editingOrder.installmentCount || 3))
         setInstallmentFrequency(editingOrder.installmentFrequency || 'monthly')
@@ -880,6 +895,55 @@ export function SalesOrderFormPage({
             && Boolean(firstDueDate)
         ))
 
+    const finishSavedOrder = useCallback((orderId: string) => {
+        if (finalizedOrderIdRef.current === orderId) return
+        finalizedOrderIdRef.current = orderId
+        if (!editingOrderId) {
+            demoTutorial.completeOrderCreated(orderId, 'sales')
+        }
+        onCreated?.(orderId)
+    }, [demoTutorial, editingOrderId, onCreated])
+
+    const closeCommissionSettlement = useCallback(() => {
+        const orderId = savedOrderAwaitingCommissionSettlement
+        setCommissionSettlementQueue([])
+        setSavedOrderAwaitingCommissionSettlement(null)
+        if (orderId) finishSavedOrder(orderId)
+    }, [finishSavedOrder, savedOrderAwaitingCommissionSettlement])
+
+    const recordCommissionSettlement = async (input: {
+        paymentMethod: WorkspacePaymentMethod
+        paidAt: string
+        amount?: number
+        note?: string
+        accountId?: string | null
+        accountNameSnapshot?: string | null
+    }) => {
+        const obligation = commissionSettlementQueue[0]
+        if (!obligation) return
+        setIsSubmittingCommissionSettlement(true)
+        try {
+            await recordObligationSettlement(workspaceId, obligation, {
+                ...input,
+                createdBy: user?.id || null
+            })
+            const remaining = commissionSettlementQueue.slice(1)
+            setCommissionSettlementQueue(remaining)
+            toast({ title: t('salesAgentCommissions.paymentRecorded') })
+            if (remaining.length === 0) {
+                closeCommissionSettlement()
+            }
+        } catch (error: any) {
+            toast({
+                title: t('common.error', { defaultValue: 'Error' }),
+                description: error?.message || t('payments.settlementFailed'),
+                variant: 'destructive'
+            })
+        } finally {
+            setIsSubmittingCommissionSettlement(false)
+        }
+    }
+
     const submitOrder = async (skipLossWarning = false) => {
         if (priceBooksEnabled && !isPriceBookCatalogReady) return
         if (!user?.workspaceId || isSaving) return
@@ -1114,10 +1178,19 @@ export function SalesOrderFormPage({
                         : editingOrderId ? (t('common.save') || 'Saved') : (t('common.create') || 'Created')
                 })
             }
-            if (!editingOrderId) {
-                demoTutorial.completeOrderCreated(savedOrder.id, 'sales')
+            const dueCommissionPayments = paidCommissionOnSave && !commissionAssignmentError
+                ? (await buildAgentCommissionObligations(workspaceId))
+                    .filter((obligation) => (
+                        obligation.sourceType === 'agent_commission_payout'
+                        && obligation.sourceRecordId === savedOrder.id
+                    ))
+                : []
+            if (dueCommissionPayments.length > 0) {
+                setSavedOrderAwaitingCommissionSettlement(savedOrder.id)
+                setCommissionSettlementQueue(dueCommissionPayments)
+            } else {
+                finishSavedOrder(savedOrder.id)
             }
-            onCreated?.(savedOrder.id)
         } catch (error: any) {
             const message = error?.message === 'agent_sales_accounts_not_enabled'
                 ? t('agentSalesAccounts.notEnabled')
@@ -1766,6 +1839,34 @@ export function SalesOrderFormPage({
                                             onCheckedChange={setIsPaid}
                                         />
                                     </div> : null}
+                                    {canPaySalesAgentCommissions ? (
+                                        <div className="space-y-3 rounded-2xl border border-violet-500/20 bg-violet-500/[0.03] p-4">
+                                            <div className="flex items-center justify-between gap-4">
+                                                <div>
+                                                    <div className="text-sm font-medium">
+                                                        {t('salesAgentCommissions.payCommissionOnSave')}
+                                                    </div>
+                                                    <div className="text-xs text-muted-foreground">
+                                                        {t('salesAgentCommissions.payCommissionOnSaveDescription')}
+                                                    </div>
+                                                </div>
+                                                <Switch
+                                                    checked={paidCommissionOnSave}
+                                                    onCheckedChange={setPaidCommissionOnSave}
+                                                    disabled={isSaving}
+                                                />
+                                            </div>
+                                            {paidCommissionOnSave ? <PaymentAccountSelector
+                                                workspaceId={workspaceId}
+                                                value={commissionPaymentAccountId}
+                                                onValueChange={(account) => {
+                                                    setCommissionPaymentAccountId(account?.id ?? null)
+                                                    setCommissionPaymentAccountNameSnapshot(account?.name ?? null)
+                                                }}
+                                                disabled={isSaving}
+                                            /> : null}
+                                        </div>
+                                    ) : null}
                                     {isFinanced ? (
                                         <div className="grid gap-4 rounded-2xl border p-4 sm:grid-cols-2">
                                             {isInstallmentBased ? <><div className="space-y-2">
@@ -1899,6 +2000,7 @@ export function SalesOrderFormPage({
                                 currency={currency}
                                 exchangeRates={adjustmentExchangeRates}
                                 iqdPreference={features.iqd_display_preference}
+                                showTotal
                             />
                         ) : null}
                         <Card className="border-border/60 shadow-sm">
@@ -2055,6 +2157,17 @@ export function SalesOrderFormPage({
                     })
                     setProductsViewItemIndex(null)
                 }}
+            />
+            <SettlementDialog
+                open={commissionSettlementQueue.length > 0}
+                onOpenChange={(open) => {
+                    if (!open && !isSubmittingCommissionSettlement) closeCommissionSettlement()
+                }}
+                obligation={commissionSettlementQueue[0] || null}
+                initialPaymentAccountId={commissionPaymentAccountId}
+                initialPaymentAccountNameSnapshot={commissionPaymentAccountNameSnapshot}
+                isSubmitting={isSubmittingCommissionSettlement}
+                onSubmit={recordCommissionSettlement}
             />
         </div>
     )

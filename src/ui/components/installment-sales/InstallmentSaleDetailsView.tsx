@@ -25,6 +25,7 @@ import { useAuth } from "@/auth";
 import {
   getInstallmentSaleDisplayStatus,
   getInstallmentSaleOverdueDays,
+  getPaymentTransactionReversalState,
   reversePaymentTransaction,
   useInstallmentSale,
   useInstallmentSaleInstallments,
@@ -39,7 +40,7 @@ import type { TemplatePreview } from "@/lib/printPreviewEditorStore";
 import { generateTemplatePdf, type PrintFormat } from "@/services/pdfGenerator";
 import { printPdfBlob } from "@/services/pdfPrintService";
 import { useWorkspace } from "@/workspace";
-import { ReverseTransactionCofirmationDialog } from "@/ui/components/payments/ReverseTransactionCofirmationDialog";
+import { PaymentReversalDialog, type PaymentReversalDialogInput } from "@/ui/components/payments/PaymentReversalDialog";
 import {
   Badge,
   Button,
@@ -159,28 +160,24 @@ export function InstallmentSaleDetailsView({
 
   const {
     reversibleTransactionByPaymentId,
-    originalTransactionIdsByPaymentId,
+    reversalStatusByPaymentId,
   } = useMemo(() => {
-    const reversedTransactionIds = new Set(
-      paymentTransactions
-        .map((transaction) => transaction.reversalOfTransactionId)
-        .filter((transactionId): transactionId is string => !!transactionId),
-    );
     const reversible = new Map<string, PaymentTransaction>();
-    const originals = new Map<string, string>();
+    const statuses = new Map<string, 'available' | 'partially_reversed' | 'fully_reversed'>();
 
     for (const transaction of paymentTransactions) {
       const paymentId = transaction.sourceSubrecordId;
       if (!paymentId || transaction.reversalOfTransactionId) continue;
-      originals.set(paymentId, transaction.id);
-      if (!reversedTransactionIds.has(transaction.id)) {
+      const reversalState = getPaymentTransactionReversalState(transaction, paymentTransactions);
+      statuses.set(paymentId, reversalState.status);
+      if (reversalState.status !== 'fully_reversed') {
         reversible.set(paymentId, transaction);
       }
     }
 
     return {
       reversibleTransactionByPaymentId: reversible,
-      originalTransactionIdsByPaymentId: originals,
+      reversalStatusByPaymentId: statuses,
     };
   }, [paymentTransactions]);
 
@@ -298,12 +295,13 @@ export function InstallmentSaleDetailsView({
     ],
   );
 
-  const handleReversePayment = async () => {
+  const handleReversePayment = async (input: PaymentReversalDialogInput) => {
     if (!transactionToReverse || reversingTransactionId) return;
 
     setReversingTransactionId(transactionToReverse.id);
     try {
       await reversePaymentTransaction(workspaceId, transactionToReverse.id, {
+        ...input,
         createdBy: user?.id ?? null,
       });
       toast({
@@ -579,8 +577,8 @@ export function InstallmentSaleDetailsView({
                   }
 
                   const reversed =
-                    originalTransactionIdsByPaymentId.has(row.payment.id) &&
-                    !reversibleTransactionByPaymentId.has(row.payment.id);
+                    reversalStatusByPaymentId.get(row.payment.id) === 'fully_reversed';
+                  const partiallyReversed = reversalStatusByPaymentId.get(row.payment.id) === 'partially_reversed';
                   return (
                     <PaymentActivityItem
                       key={row.id}
@@ -595,6 +593,8 @@ export function InstallmentSaleDetailsView({
                       suffix={
                         reversed
                           ? t("installmentSales.paymentStatuses.reversed")
+                          : partiallyReversed
+                            ? t('payments.status.partialReversal', { defaultValue: 'Partially reversed' })
                           : undefined
                       }
                     />
@@ -664,8 +664,7 @@ export function InstallmentSaleDetailsView({
                           const transaction =
                             reversibleTransactionByPaymentId.get(payment.id);
                           const reversed =
-                            originalTransactionIdsByPaymentId.has(payment.id) &&
-                            !transaction;
+                            reversalStatusByPaymentId.get(payment.id) === 'fully_reversed';
                           return (
                             <PaymentCard
                               key={payment.id}
@@ -720,9 +719,8 @@ export function InstallmentSaleDetailsView({
                             const transaction =
                               reversibleTransactionByPaymentId.get(payment.id);
                             const reversed =
-                              originalTransactionIdsByPaymentId.has(
-                                payment.id,
-                              ) && !transaction;
+                              reversalStatusByPaymentId.get(payment.id) === 'fully_reversed';
+                            const partiallyReversed = reversalStatusByPaymentId.get(payment.id) === 'partially_reversed';
                             return (
                               <TableRow key={payment.id}>
                                 <TableCell>
@@ -751,6 +749,8 @@ export function InstallmentSaleDetailsView({
                                       ? t(
                                           "installmentSales.paymentStatuses.reversed",
                                         )
+                                      : partiallyReversed
+                                        ? t('payments.status.partialReversal', { defaultValue: 'Partially reversed' })
                                       : t(
                                           "installmentSales.paymentStatuses.recorded",
                                         )}
@@ -795,16 +795,17 @@ export function InstallmentSaleDetailsView({
         open={cancelOpen}
         onOpenChange={setCancelOpen}
       />
-      <ReverseTransactionCofirmationDialog
+      <PaymentReversalDialog
         open={!!transactionToReverse}
         onOpenChange={(open) => {
           if (!open && !reversingTransactionId) {
             setTransactionToReverse(null);
           }
         }}
-        onConfirm={handleReversePayment}
+        onSubmit={handleReversePayment}
         isProcessing={!!reversingTransactionId}
         transaction={transactionToReverse}
+        workspaceId={workspaceId}
         iqdPreference={features.iqd_display_preference}
       />
       <PrintPreviewModal

@@ -231,6 +231,7 @@ function movementTypeLabel(transaction: PaymentTransaction | null, t: ReturnType
       : t('ledger.type.installmentPaid', { defaultValue: 'Installment Paid' })
     case 'real_estate_commission': return t('ledger.type.realEstateCommission', { defaultValue: 'Real Estate Commission' })
     case 'agent_commission_payout': return t('ledger.type.agentCommissionPayout')
+    case 'agent_commission_recovery': return t('ledger.type.agentCommissionRecovery')
     case 'activity_transaction': return t('ledger.type.activityTransaction', { defaultValue: 'Activity Transaction' })
     case 'activity_refund': return t('ledger.type.activityRefund', { defaultValue: 'Activity Refund' })
     case 'clinical_appointment': return t('ledger.type.clinicalAppointmentPayment', { defaultValue: 'Appointment Payment' })
@@ -517,9 +518,9 @@ export function PaymentAccounts() {
   const allMovementEntries = useMemo<AccountMovementEntry[]>(
     () => selectedAccountMovements.flatMap((movement) => {
       const transaction = transactionById.get(movement.paymentTransactionId) ?? null
-      // Payment accounts retain a net balance view, while Ledger presents the
-      // immutable original and reversal rows separately for audit purposes.
-      if (transaction?.reversalOfTransactionId) return []
+      // Keep reversal movements on the account and date where they were
+      // actually posted. Same-account rows net naturally; cross-account
+      // reversals must not rewrite the original account's history.
       const presentation = getPaymentAccountMovementPresentation(movement, transaction, transactionReversalAmounts)
       const relationKey = paymentAccountMovementRelationKey(transaction)
       const relationRole: AccountMovementRelationRole | null = transaction
@@ -1176,12 +1177,17 @@ export function PaymentAccounts() {
                     const transactionId = entry.transaction?.id || entry.movement.paymentTransactionId
                     const isNetIncoming = entry.presentation.deltaAmount > PAYMENT_ACCOUNT_REVERSAL_EPSILON
                     const isNetOutgoing = entry.presentation.deltaAmount < -PAYMENT_ACCOUNT_REVERSAL_EPSILON
-                    const statusLabel = entry.presentation.reversalStatus === 'reversed'
+                    const isReversalMovement = Boolean(entry.transaction?.reversalOfTransactionId)
+                    const statusLabel = isReversalMovement
+                      ? t('paymentAccounts.movementStatus.reversal', { defaultValue: 'Reversal' })
+                      : entry.presentation.reversalStatus === 'reversed'
                       ? t('paymentAccounts.movementStatus.reversed', { defaultValue: 'Reversed' })
                       : entry.presentation.reversalStatus === 'partially_reversed'
                         ? t('paymentAccounts.movementStatus.partiallyReversed', { defaultValue: 'Partially reversed' })
                         : t('paymentAccounts.movementStatus.posted', { defaultValue: 'Posted' })
-                    const statusClass = entry.presentation.reversalStatus === 'reversed'
+                    const statusClass = isReversalMovement
+                      ? 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300'
+                      : entry.presentation.reversalStatus === 'reversed'
                       ? 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300'
                       : entry.presentation.reversalStatus === 'partially_reversed'
                         ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300'

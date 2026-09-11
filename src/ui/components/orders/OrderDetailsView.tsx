@@ -8,7 +8,7 @@ import { Link, useLocation } from 'wouter'
 
 import { useAuth } from '@/auth'
 import { useDemoTutorial } from '@/demo'
-import { usePartnerAccountStatementClosingBalances } from '@/hooks/usePartnerAccountStatement'
+import { usePartnerAccountStatementPrintBalances } from '@/hooks/usePartnerAccountStatement'
 import { useProfileData } from '@/hooks/useProfileData'
 import { getOrderLineFreeBonusQuantity, getOrderLineFulfilledQuantity, getOrderLineInventoryQuantity, getOrderLinePaidQuantity, hasOrderLineFreeBonus, isFulfilledUnitsAvailableForOrder } from '@/lib/orderLineItems'
 import {
@@ -59,6 +59,7 @@ import {
     useStorages,
     useWorkspaceContacts,
     type PaymentObligation,
+    type PaymentTransaction,
     type OrderInstallment,
     type PaymentAccount,
     type PurchaseOrder,
@@ -95,6 +96,7 @@ import {
 } from '@/ui/components'
 
 import { useLiveQuery } from 'dexie-react-hooks'
+import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
 import { platformService } from '@/services/platformService'
 import { getStoredLocalInvoicePdfPath } from '@/services/localInvoiceStorage'
 import { r2Service } from '@/services/r2Service'
@@ -113,13 +115,11 @@ import { OrderStatusBadge } from './OrderStatusBadge'
 import { OrderProductAvatar } from './OrderProductAvatars'
 import { useOrderCustomPrint } from './useOrderCustomPrint'
 import { PostReturnAdjustmentDialog } from './PostReturnAdjustmentDialog'
-import { OrderAgentCommissionCard } from '@/ui/components/commissions/OrderAgentCommissionCard'
 import {
     ProductCommissionPreview,
     type ProductCommissionPreviewAgent
 } from '@/ui/components/commissions/ProductCommissionPreview'
 import { findOwnedOrderCreatorProductCommissionAgent } from '@/ui/components/commissions/productCommissionAgent'
-import { OLD_SALES_AGENT_CONFIGURATION } from '@/ui/components/commissions/oldSalesAgentConfiguration'
 import { useCommissionAgentDirectory } from '@/ui/components/commissions/useCommissionAgentDirectory'
 
 function statusLabel(t: (key: string) => string, status: string) {
@@ -309,6 +309,8 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const [isCancelling, setIsCancelling] = useState(false)
     const [settlementTarget, setSettlementTarget] = useState<PaymentObligation | null>(null)
     const [isSubmittingSettlement, setIsSubmittingSettlement] = useState(false)
+    const [transactionToReverse, setTransactionToReverse] = useState<PaymentTransaction | null>(null)
+    const [isReversingPayment, setIsReversingPayment] = useState(false)
     const [isLoadingOrderInvoice, setIsLoadingOrderInvoice] = useState(false)
     const [returnTarget, setReturnTarget] = useState<{ orderItemId: string | null; maxQuantity: number; itemName: string } | null>(null)
     const [isReturning, setIsReturning] = useState(false)
@@ -346,9 +348,13 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const partnerId = resolved?.order.businessPartnerId
         || (resolved?.kind === 'sales' ? (resolved?.order as SalesOrder)?.customerId : (resolved?.order as PurchaseOrder)?.supplierId)
     const bizPartner = useBusinessPartner(partnerId)
-    const partnerAccountStatementBalances = usePartnerAccountStatementClosingBalances(
+    const {
+        currentBalances: partnerAccountStatementBalances,
+        legacyOrderBalanceSnapshot
+    } = usePartnerAccountStatementPrintBalances(
         showPrintPreview ? workspaceId : undefined,
-        showPrintPreview ? partnerId : undefined
+        showPrintPreview ? partnerId : undefined,
+        showPrintPreview ? resolved?.order : undefined
     )
     const counterpartyPhone = bizPartner?.phone || ''
     const counterpartyAddress = bizPartner?.address || ''
@@ -367,9 +373,8 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.viewAll')
     const canViewOwnAgentCommissions = salesAgentCommissionsEnabled
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.viewOwn')
-    const canAccessSalesAgentCommissions = canAssignSalesAgents
-        || canViewAllAgentCommissions
-        || canViewOwnAgentCommissions
+    const canPaySalesAgentCommissions = salesAgentCommissionsEnabled
+        && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.pay')
     const ownedOrderCreatorProductCommissionAgent = useMemo(() => (
         findOwnedOrderCreatorProductCommissionAgent(
             commissionAgentDirectory.agents.map((entry) => entry.agent),
@@ -752,6 +757,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                         workspaceFooterContacts={renderOptions?.workspaceFooterContacts || workspaceFooterContacts}
                         businessPartner={bizPartner}
                         partnerAccountStatementBalances={partnerAccountStatementBalances}
+                        partnerBalanceFallbackSnapshot={legacyOrderBalanceSnapshot}
                         printedBy={creatorName}
                         productImageUrls={productImageUrls}
                         hiddenFields={renderOptions?.hiddenFields}
@@ -771,7 +777,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 return generateTemplatePdf({ element, format: 'a4', printLang: printLangOverride || baseLang })
             }
         }
-    }, [resolved, features, installments, workspaceName, t, i18n, bizPartner, partnerAccountStatementBalances, workspaceFooterContacts, creatorName, productImageUrls, customOrderPrint.selectedPrintVersion])
+    }, [resolved, features, installments, workspaceName, t, i18n, bizPartner, partnerAccountStatementBalances, legacyOrderBalanceSnapshot, workspaceFooterContacts, creatorName, productImageUrls, customOrderPrint.selectedPrintVersion])
 
     const orderAtlasStandardReturnPreview = useMemo<TemplatePreview | undefined>(() => {
         if (!resolved || resolved.kind !== 'sales' || !returnPrintData) return undefined
@@ -793,6 +799,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                         workspaceFooterContacts={renderOptions?.workspaceFooterContacts || workspaceFooterContacts}
                         businessPartner={bizPartner}
                         partnerAccountStatementBalances={partnerAccountStatementBalances}
+                        partnerBalanceFallbackSnapshot={legacyOrderBalanceSnapshot}
                         printedBy={creatorName}
                         productImageUrls={productImageUrls}
                         hiddenFields={renderOptions?.hiddenFields}
@@ -812,7 +819,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 return generateTemplatePdf({ element, format: 'a4', printLang: printLangOverride || baseLang })
             }
         }
-    }, [resolved, features, installments, workspaceName, i18n, bizPartner, partnerAccountStatementBalances, workspaceFooterContacts, creatorName, productImageUrls, returnPrintData])
+    }, [resolved, features, installments, workspaceName, i18n, bizPartner, partnerAccountStatementBalances, legacyOrderBalanceSnapshot, workspaceFooterContacts, creatorName, productImageUrls, returnPrintData])
 
     if (!resolved) {
         return (
@@ -1018,17 +1025,35 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 throw new Error('No posted payment was found for this order.')
             }
 
-            await reversePaymentTransaction(workspaceId, transaction.id, {
-                createdBy: user?.id || null
-            })
-
-            toast({ title: 'Payment reversed' })
+            setTransactionToReverse(transaction)
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',
                 description: error?.message || 'Failed to reverse payment',
                 variant: 'destructive'
             })
+        }
+    }
+
+    const confirmOrderPaymentReversal = async (input: PaymentReversalDialogInput) => {
+        if (!transactionToReverse || isReversingPayment) return
+
+        setIsReversingPayment(true)
+        try {
+            await reversePaymentTransaction(workspaceId, transactionToReverse.id, {
+                ...input,
+                createdBy: user?.id || null
+            })
+            toast({ title: t('payments.reversed', { defaultValue: 'Transaction reversed' }) })
+            setTransactionToReverse(null)
+        } catch (error: any) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: error?.message || t('payments.reverseFailed', { defaultValue: 'Failed to reverse payment.' }),
+                variant: 'destructive'
+            })
+        } finally {
+            setIsReversingPayment(false)
         }
     }
 
@@ -1352,19 +1377,11 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             currency={currency}
                             exchangeRates={(order as SalesOrder).exchangeRates ?? []}
                             iqdPreference={iqd}
-                        />
-                    ) : null}
-
-                    {isSales && canAccessSalesAgentCommissions && OLD_SALES_AGENT_CONFIGURATION.showSalesAgentBeneficiaries ? (
-                        <OrderAgentCommissionCard
-                            workspaceId={workspaceId}
+                            showTotal
                             orderId={order.id}
-                            iqdPreference={iqd}
-                            orderCurrency={currency}
-                            canAssign={canAssignSalesAgents}
-                            canViewAllCommission={canViewAllAgentCommissions}
-                            canViewOwnCommission={canViewOwnAgentCommissions}
-                            userId={user?.id}
+                            orderReference={(order as SalesOrder).orderNumber}
+                            canPayCommission={canPaySalesAgentCommissions}
+                            onSettleCommission={setSettlementTarget}
                         />
                     ) : null}
 
@@ -2137,6 +2154,18 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 onSubmit={handleOrderSettlement}
             />
 
+            <PaymentReversalDialog
+                open={!!transactionToReverse}
+                onOpenChange={(open) => {
+                    if (!open) setTransactionToReverse(null)
+                }}
+                onSubmit={confirmOrderPaymentReversal}
+                isProcessing={isReversingPayment}
+                transaction={transactionToReverse}
+                workspaceId={workspaceId}
+                iqdPreference={features.iqd_display_preference}
+            />
+
             <Dialog open={lockConfirm.isOpen} onOpenChange={(open) => !isLocking && setLockConfirm({ isOpen: open })}>
                 <DialogContent className="sm:max-w-[425px]">
                     <DialogHeader>
@@ -2289,6 +2318,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                         printVersion={customOrderPrint.selectedPrintVersion}
                                         businessPartner={bizPartner}
                                         partnerAccountStatementBalances={partnerAccountStatementBalances}
+                                        partnerBalanceFallbackSnapshot={legacyOrderBalanceSnapshot}
                                         printedBy={creatorName}
                                         productImageUrls={productImageUrls}
                                         returnPrintData={customOrderPrint.isAtlasStandardReturnSelected ? returnPrintData : undefined}
@@ -2345,6 +2375,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             printVersion={customOrderPrint.selectedPrintVersion}
                             businessPartner={bizPartner}
                             partnerAccountStatementBalances={partnerAccountStatementBalances}
+                            partnerBalanceFallbackSnapshot={legacyOrderBalanceSnapshot}
                             printedBy={creatorName}
                             productImageUrls={productImageUrls}
                             returnPrintData={customOrderPrint.isAtlasStandardReturnSelected ? returnPrintData : undefined}

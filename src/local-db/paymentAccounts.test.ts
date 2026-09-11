@@ -55,6 +55,8 @@ function installBrowserStorage() {
   Object.defineProperty(globalThis, 'DOMMatrix', { configurable: true, value: class DOMMatrix {} })
   Object.defineProperty(globalThis, 'ImageData', { configurable: true, value: class ImageData {} })
   Object.defineProperty(globalThis, 'Path2D', { configurable: true, value: class Path2D {} })
+  Object.defineProperty(globalThis, 'Element', { configurable: true, value: class Element {} })
+  Object.defineProperty(globalThis, 'HTMLElement', { configurable: true, value: class HTMLElement {} })
 }
 
 async function createFundedAccount(openingAmount = 50_000) {
@@ -188,6 +190,35 @@ describe('payment-account availability', () => {
     expect(reversal).toMatchObject({ accountId: account.id, reversalOfTransactionId: original.id, amount: -50_000 })
   })
 
+  it('supports repeated partial reversal and an explicit ledger-only counter-entry', async () => {
+    const account = await createFundedAccount()
+    const original = await appendPaymentTransaction(WORKSPACE_ID, {
+      ...outgoing(account.id, 50_000),
+      sourceModule: 'payments',
+      sourceType: 'direct_transaction',
+      sourceRecordId: 'direct-partial-1',
+    })
+
+    await expect(reversePaymentTransaction(WORKSPACE_ID, original.id, { amount: -1 }))
+      .rejects.toThrow('valid reversal amount')
+
+    const partial = await reversePaymentTransaction(WORKSPACE_ID, original.id, {
+      amount: 20_000,
+      accountId: null,
+      accountNameSnapshot: null,
+      note: 'Partial refund outside the drawer',
+    })
+    expect(partial).toMatchObject({ amount: -20_000, accountId: null, reversalOfTransactionId: original.id })
+    expect((await db.payment_account_balances.where('[accountId+currency]').equals([account.id, 'iqd']).first())?.balanceAmount).toBe(0)
+
+    await expect(reversePaymentTransaction(WORKSPACE_ID, original.id, { amount: 30_001 }))
+      .rejects.toThrow('cannot exceed the remaining payment amount')
+
+    const remainder = await reversePaymentTransaction(WORKSPACE_ID, original.id, { amount: 30_000 })
+    expect(remainder).toMatchObject({ amount: -30_000, accountId: account.id, reversalOfTransactionId: original.id })
+    expect((await db.payment_account_balances.where('[accountId+currency]').equals([account.id, 'iqd']).first())?.balanceAmount).toBe(30_000)
+  })
+
   it('reverses a standard-loan repayment through payment transactions and restores its schedule and account ledger', async () => {
     const account = await createFundedAccount()
     const { loan, installments } = await createManualLoan(WORKSPACE_ID, {
@@ -228,6 +259,9 @@ describe('payment-account availability', () => {
     })
     expect(await db.loans.get(loan.id)).toMatchObject({ totalPaidAmount: 50_000, balanceAmount: 50_000 })
     expect(await db.payment_account_movements.get(original!.id)).toMatchObject({ deltaAmount: 50_000 })
+
+    await expect(reversePaymentTransaction(WORKSPACE_ID, original!.id, { amount: 25_000 }))
+      .rejects.toThrow('full remaining amount')
 
     const reversal = await reversePaymentTransaction(WORKSPACE_ID, original!.id)
 

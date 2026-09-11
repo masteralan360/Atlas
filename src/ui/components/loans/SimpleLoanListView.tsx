@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from 're
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
-import { ArrowDownLeft, ArrowUpRight, BadgeCheck, CircleDashed, CreditCard, Eye, LayoutGrid, List, ListFilter, Plus, Printer, Search, Trash2, MessageCircle, Wallet, type LucideIcon } from 'lucide-react'
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, BadgeCheck, CircleDashed, CreditCard, Eye, LayoutGrid, List, ListFilter, Plus, Printer, Search, Trash2, MessageCircle, Wallet, type LucideIcon } from 'lucide-react'
 
 import { useAuth } from '@/auth'
 import { useDateRange } from '@/context/DateRangeContext'
 import { isDateInDateRange } from '@/lib/dateRangeFilters'
 import { getLoanLinkedPartySummary } from '@/lib/loanParties'
-import { calculateSimpleLoanListMetrics } from '@/lib/loanListMetrics'
+import { calculateLegacySimpleLoanListMetrics, calculateSimpleLoanListMetrics, type SimpleLoanSummaryMode } from '@/lib/loanListMetrics'
 import { getReportOriginId } from '@/lib/printIdentity'
 import { isMobile } from '@/lib/platform'
 import { getLoanDeleteWarning, getLoanDetailsTitle, getLoanDirection, getLoanDirectionLabel, getSimpleLoanModuleTitle, matchesLoanPaymentFilter, type LoanPaymentFilter } from '@/lib/loanPresentation'
@@ -18,6 +18,7 @@ import { deleteLoan, isLoanDeletionAllowed, type Loan, useLoanInstallments, useL
 import { db } from '@/local-db/database'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import type { TemplatePreview, TemplatePreviewRenderOptions } from '@/lib/printPreviewEditorStore'
+import { DEFAULT_SIMPLE_LOAN_SUMMARY_MODE, getSimpleLoanSummaryMode, saveSimpleLoanSummaryMode } from '@/lib/simpleLoanSummaryPreference'
 import {
     AppPagination,
     Button,
@@ -103,6 +104,12 @@ export function SimpleLoanListView({
     const [search, setSearch] = useState('')
     const [filter, setFilter] = useState<SimpleLoanFilter>('all')
     const [paymentFilter, setPaymentFilter] = useState<LoanPaymentFilter>('all')
+    const [summaryModeByWorkspace, setSummaryModeByWorkspace] = useState<Record<string, SimpleLoanSummaryMode>>({})
+    const persistedSummaryMode = useMemo(
+        () => getSimpleLoanSummaryMode(workspaceId),
+        [workspaceId]
+    )
+    const summaryMode = summaryModeByWorkspace[workspaceId] ?? persistedSummaryMode
     const [currentPage, setCurrentPage] = useState(1)
     const [pageSize, setPageSize] = useState(() => {
         return Number(localStorage.getItem('simple_loans_page_size')) || 10
@@ -140,6 +147,24 @@ export function SimpleLoanListView({
     useEffect(() => {
         localStorage.setItem('simple_loans_view_mode', viewMode)
     }, [viewMode])
+
+    const handleSummaryModeChange = useCallback((mode: SimpleLoanSummaryMode) => {
+        setSummaryModeByWorkspace((current) => ({ ...current, [workspaceId]: mode }))
+        saveSimpleLoanSummaryMode(workspaceId, mode)
+    }, [workspaceId])
+
+    const summaryModeOptions = useMemo(() => ([
+        {
+            value: 'principal_paid' as const,
+            label: t('loans.summaryModes.principalPaid'),
+            icon: CreditCard
+        },
+        {
+            value: 'lent_borrowed' as const,
+            label: t('loans.summaryModes.lentBorrowed'),
+            icon: ArrowLeftRight
+        }
+    ]), [t])
 
     const loans = useLoans(workspaceId)
     const simpleLoans = useMemo(
@@ -187,6 +212,18 @@ export function SimpleLoanListView({
         () => calculateSimpleLoanListMetrics(filtered, features.default_currency),
         [features.default_currency, filtered]
     )
+    const legacyMetrics = useMemo(
+        () => calculateLegacySimpleLoanListMetrics(dateScopedSimpleLoans, features.default_currency),
+        [dateScopedSimpleLoans, features.default_currency]
+    )
+    const usesLegacyMetrics = summaryMode === 'lent_borrowed'
+    const primaryTotalsByCurrency = usesLegacyMetrics
+        ? legacyMetrics.totalLentByCurrency
+        : metrics.totalPrincipalByCurrency
+    const secondaryTotalsByCurrency = usesLegacyMetrics
+        ? legacyMetrics.totalBorrowedByCurrency
+        : metrics.totalPaidByCurrency
+    const activeEntries = usesLegacyMetrics ? legacyMetrics.activeCount : metrics.activeCount
 
     const paginated = useMemo(() => {
         const from = (currentPage - 1) * pageSize
@@ -209,19 +246,23 @@ export function SimpleLoanListView({
             loans={filtered}
             filter={filter}
             variant="simple"
+            simpleSummaryMode={summaryMode}
             displayCurrency={features.default_currency}
             iqdPreference={features.iqd_display_preference}
             metrics={{
                 totalPrincipalByCurrency: metrics.totalPrincipalByCurrency,
                 totalPaidByCurrency: metrics.totalPaidByCurrency,
                 totalBalanceByCurrency: metrics.totalBalanceByCurrency,
-                activeEntries: metrics.activeCount
+                totalLentByCurrency: legacyMetrics.totalLentByCurrency,
+                totalBorrowedByCurrency: legacyMetrics.totalBorrowedByCurrency,
+                activeEntries,
+                settledEntries: legacyMetrics.settledCount
             }}
             logoUrl={features.logo_url}
             qrValue={effectiveId ? buildQrValue(effectiveId) : undefined}
             hideNextDue={localStorage.getItem('atlas_print_hide_next_due') === 'true'}
         />
-    ), [buildQrValue, features.default_currency, features.iqd_display_preference, features.logo_url, filter, filtered, metrics.activeCount, metrics.totalBalanceByCurrency, metrics.totalPaidByCurrency, metrics.totalPrincipalByCurrency, printLang, workspaceName])
+    ), [activeEntries, buildQrValue, features.default_currency, features.iqd_display_preference, features.logo_url, filter, filtered, legacyMetrics.settledCount, legacyMetrics.totalBorrowedByCurrency, legacyMetrics.totalLentByCurrency, metrics.totalBalanceByCurrency, metrics.totalPaidByCurrency, metrics.totalPrincipalByCurrency, printLang, summaryMode, workspaceName])
     const buildSimpleLoanListPdf = useCallback(async ({ format, effectiveId }: { format: PrintFormat; effectiveId: string }) => {
         return generateTemplatePdf({
             element: renderSimpleLoanListTemplate(effectiveId),
@@ -245,13 +286,17 @@ export function SimpleLoanListView({
                 loans={filtered}
                 filter={filter}
                 variant="simple"
+                simpleSummaryMode={summaryMode}
                 displayCurrency={features.default_currency}
                 iqdPreference={features.iqd_display_preference}
                 metrics={{
                     totalPrincipalByCurrency: metrics.totalPrincipalByCurrency,
                     totalPaidByCurrency: metrics.totalPaidByCurrency,
                     totalBalanceByCurrency: metrics.totalBalanceByCurrency,
-                    activeEntries: metrics.activeCount
+                    totalLentByCurrency: legacyMetrics.totalLentByCurrency,
+                    totalBorrowedByCurrency: legacyMetrics.totalBorrowedByCurrency,
+                    activeEntries,
+                    settledEntries: legacyMetrics.settledCount
                 }}
                 logoUrl={features.logo_url}
                 qrValue={effectiveId ? buildQrValue(effectiveId) : undefined}
@@ -268,7 +313,7 @@ export function SimpleLoanListView({
             format: 'a4',
             printLang: printLangOverride || printLang,
         }),
-    }), [workspaceName, printLang, filtered, filter, features.default_currency, features.iqd_display_preference, metrics, features.logo_url, buildQrValue, t])
+    }), [activeEntries, workspaceName, printLang, filtered, filter, features.default_currency, features.iqd_display_preference, legacyMetrics, metrics, features.logo_url, buildQrValue, summaryMode, t])
 
     const loanPrintInstallments = useLoanInstallments(loanToPrint?.id, workspaceId)
     const loanPrintPayments = useLoanPayments(loanToPrint?.id, workspaceId)
@@ -333,13 +378,16 @@ export function SimpleLoanListView({
     }, [loanToPrint, workspaceName, printLang, features, loanPrintInstallments, loanPrintPayments, t, buildQrValue])
 
     const simpleLoanListInvoiceData = useMemo(() => ({
-        totalAmount: Object.values(metrics.totalBalanceByCurrency).reduce((a, b) => a + b, 0),
+        totalAmount: usesLegacyMetrics
+            ? Object.values(legacyMetrics.totalLentByCurrency).reduce((a, b) => a + b, 0)
+                + Object.values(legacyMetrics.totalBorrowedByCurrency).reduce((a, b) => a + b, 0)
+            : Object.values(metrics.totalBalanceByCurrency).reduce((a, b) => a + b, 0),
         settlementCurrency: features.default_currency,
         origin: 'loan_report' as const,
         createdByName: user?.name || 'Unknown',
         cashierName: user?.name || 'Unknown',
         printFormat: 'a4' as const
-    }), [features.default_currency, metrics.totalBalanceByCurrency, user?.name])
+    }), [features.default_currency, legacyMetrics.totalBorrowedByCurrency, legacyMetrics.totalLentByCurrency, metrics.totalBalanceByCurrency, user?.name, usesLegacyMetrics])
     const canDeleteLoanRecord = (loan: Loan) => loan.source !== 'order'
         && isLoanDeletionAllowed(loan, false, loanPaymentHistoryIdSet.has(loan.id))
 
@@ -371,7 +419,17 @@ export function SimpleLoanListView({
 
     return (
         <div className="space-y-4">
-            <div className="flex min-h-10 items-center justify-end">
+            <div className="flex min-h-10 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="print:hidden">
+                    <FilterDropdown
+                        value={summaryMode}
+                        label={t('loans.summaryMetrics')}
+                        options={summaryModeOptions}
+                        onValueChange={handleSummaryModeChange}
+                        dir={i18n.dir()}
+                        hasActiveFilter={summaryMode !== DEFAULT_SIMPLE_LOAN_SUMMARY_MODE}
+                    />
+                </div>
                 {!isReadOnly && (
                     <Button onClick={() => setCreateOpen(true)} className="gap-2 print:hidden h-10 rounded-xl px-4">
                         <Plus className="h-4 w-4" />
@@ -382,10 +440,14 @@ export function SimpleLoanListView({
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <Card>
                     <CardContent className="pt-6">
-                        <div className="text-xs text-muted-foreground mb-1">{t('loans.totalPrincipal', { defaultValue: 'Total Principal' })}</div>
+                        <div className="text-xs text-muted-foreground mb-1">
+                            {usesLegacyMetrics
+                                ? t('loans.totalLent', { defaultValue: 'Total Lent' })
+                                : t('loans.totalPrincipal', { defaultValue: 'Total Principal' })}
+                        </div>
                         <div className="space-y-1">
-                            {Object.keys(metrics.totalPrincipalByCurrency).length > 0
-                                ? Object.entries(metrics.totalPrincipalByCurrency).map(([curr, val]) => (
+                            {Object.keys(primaryTotalsByCurrency).length > 0
+                                ? Object.entries(primaryTotalsByCurrency).map(([curr, val]) => (
                                     <div key={curr} className="text-2xl font-bold tabular-nums leading-none">
                                         {formatCurrency(val, curr as any, features.iqd_display_preference)}
                                     </div>
@@ -397,10 +459,14 @@ export function SimpleLoanListView({
                 </Card>
                 <Card>
                     <CardContent className="pt-6">
-                        <div className="text-xs text-muted-foreground mb-1">{t('loans.totalPaid', { defaultValue: 'Total Paid' })}</div>
+                        <div className="text-xs text-muted-foreground mb-1">
+                            {usesLegacyMetrics
+                                ? t('loans.totalBorrowed', { defaultValue: 'Total Borrowed' })
+                                : t('loans.totalPaid', { defaultValue: 'Total Paid' })}
+                        </div>
                         <div className="space-y-1">
-                            {Object.keys(metrics.totalPaidByCurrency).length > 0
-                                ? Object.entries(metrics.totalPaidByCurrency).map(([curr, val]) => (
+                            {Object.keys(secondaryTotalsByCurrency).length > 0
+                                ? Object.entries(secondaryTotalsByCurrency).map(([curr, val]) => (
                                     <div key={curr} className="text-2xl font-bold tabular-nums leading-none">
                                         {formatCurrency(val, curr as any, features.iqd_display_preference)}
                                     </div>
@@ -413,21 +479,29 @@ export function SimpleLoanListView({
                 <Card>
                     <CardContent className="pt-6">
                         <div className="text-xs text-muted-foreground mb-1">{t('loans.activeEntries', { defaultValue: 'Active Entries' })}</div>
-                        <div className="text-2xl font-bold">{metrics.activeCount}</div>
+                        <div className="text-2xl font-bold">{activeEntries}</div>
                     </CardContent>
                 </Card>
                 <Card>
                     <CardContent className="pt-6">
-                        <div className="text-xs text-muted-foreground mb-1">{t('loans.totalBalance', { defaultValue: 'Total Balance' })}</div>
-                        <div className="space-y-1">
-                            {Object.keys(metrics.totalBalanceByCurrency).length > 0
-                                ? Object.entries(metrics.totalBalanceByCurrency).map(([curr, val]) => (
-                                    <div key={curr} className="text-2xl font-bold tabular-nums leading-none">
-                                        {formatCurrency(val, curr as any, features.iqd_display_preference)}
-                                    </div>
-                                ))
-                                : <div className="text-2xl font-bold">0</div>}
+                        <div className="text-xs text-muted-foreground mb-1">
+                            {usesLegacyMetrics
+                                ? t('loans.settledEntries', { defaultValue: 'Settled Entries' })
+                                : t('loans.totalBalance', { defaultValue: 'Total Balance' })}
                         </div>
+                        {usesLegacyMetrics ? (
+                            <div className="text-2xl font-bold">{legacyMetrics.settledCount}</div>
+                        ) : (
+                            <div className="space-y-1">
+                                {Object.keys(metrics.totalBalanceByCurrency).length > 0
+                                    ? Object.entries(metrics.totalBalanceByCurrency).map(([curr, val]) => (
+                                        <div key={curr} className="text-2xl font-bold tabular-nums leading-none">
+                                            {formatCurrency(val, curr as any, features.iqd_display_preference)}
+                                        </div>
+                                    ))
+                                    : <div className="text-2xl font-bold">0</div>}
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
             </div>

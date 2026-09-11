@@ -20,6 +20,7 @@ export interface EditableMarketplaceOrderItem {
     sku: string
     unit_price: number
     currency: string
+    unit?: string | null
     quantity: number
     line_total: number
     image_url?: string | null
