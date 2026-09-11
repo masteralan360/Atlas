@@ -41,7 +41,9 @@ import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { isMobile } from '@/lib/platform'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { buildWorkflowGradientFill } from '@/lib/workflowProgressGradient'
-import { requestJumlaKhaleejInquiryPdf } from '@/lib/jumlaKhaleejInquiryPdf'
+import { generateJumlaKhaleejInquiryPdf } from '@/lib/jumlaKhaleejInquiryPdf'
+import { setPrintPreviewEditorSource } from '@/lib/printPreviewEditorStore'
+import { printPdfBlob } from '@/services/pdfPrintService'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
 import { PdfJsViewer } from '@/ui/components/PdfJsViewer'
 import {
@@ -62,12 +64,6 @@ import {
     CardHeader,
     CardTitle,
     DateRangeFilters,
-    AppDialog,
-    AppDialogBody,
-    AppDialogContent,
-    AppDialogFooter,
-    AppDialogHeader,
-    AppDialogTitle,
     Dialog,
     DialogContent,
     DialogFooter,
@@ -584,9 +580,10 @@ function marketplaceWorkflowFill(status: MarketplaceOrderStatus) {
 function MarketplaceInquiryPdfCard({ order }: { order: MarketplaceOrderRecord }) {
     const { t } = useTranslation()
     const { session } = useAuth()
-    const [isOpen, setIsOpen] = useState(false)
+    const [, navigate] = useLocation()
     const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null)
     const [isGenerating, setIsGenerating] = useState(false)
+    const [isOpeningEditor, setIsOpeningEditor] = useState(false)
     const [generationFailed, setGenerationFailed] = useState(false)
 
     const documentNumber = order.inquiry_pdf_document_number || order.order_number
@@ -604,11 +601,11 @@ function MarketplaceInquiryPdfCard({ order }: { order: MarketplaceOrderRecord })
         setPdfBytes(null)
         setGenerationFailed(false)
         setIsGenerating(true)
-        void requestJumlaKhaleejInquiryPdf({
+        void generateJumlaKhaleejInquiryPdf({
             accessToken: session.access_token,
             orderId: order.id
-        }).then((bytes) => {
-            if (!cancelled) setPdfBytes(bytes)
+        }).then((result) => {
+            if (!cancelled) setPdfBytes(result.bytes)
         }).catch((error) => {
             console.error('[ecommerce] inquiry viewer preparation failed', error)
             if (!cancelled) setGenerationFailed(true)
@@ -617,7 +614,37 @@ function MarketplaceInquiryPdfCard({ order }: { order: MarketplaceOrderRecord })
         })
 
         return () => { cancelled = true }
-    }, [documentNumber, isJumlaKhaleejInquiry, order.id, session?.access_token])
+    }, [documentNumber, isJumlaKhaleejInquiry, order.id, order.updated_at, session?.access_token])
+
+    const handleView = async () => {
+        if (!session?.access_token || isOpeningEditor) return
+
+        setIsOpeningEditor(true)
+        setGenerationFailed(false)
+        try {
+            // View intentionally generates again instead of reusing the card's
+            // bytes, so the editor always receives the newest order/branding.
+            const result = await generateJumlaKhaleejInquiryPdf({
+                accessToken: session.access_token,
+                orderId: order.id
+            })
+            setPdfBytes(result.bytes)
+            setPrintPreviewEditorSource({
+                title: `${t('ecommerce.inquiryPdf')} ${result.documentNumber}`,
+                pdfBytes: result.bytes,
+                interactionMode: 'read-only-print',
+                onPrint: (blob) => printPdfBlob(blob, { title: result.documentNumber }),
+                printActionLabel: t('common.print')
+            })
+            navigate('/print-preview-editor')
+        } catch (error) {
+            console.error('[ecommerce] inquiry editor preparation failed', error)
+            setPdfBytes(null)
+            setGenerationFailed(true)
+        } finally {
+            setIsOpeningEditor(false)
+        }
+    }
 
     if (!isJumlaKhaleejInquiry) return null
 
@@ -630,8 +657,13 @@ function MarketplaceInquiryPdfCard({ order }: { order: MarketplaceOrderRecord })
                         {documentNumber} • {formatDateTime(order.created_at)}
                     </p>
                 </div>
-                <Button variant="outline" className="gap-2 rounded-xl" onClick={() => setIsOpen(true)}>
-                    <FileText className="h-4 w-4" />
+                <Button
+                    variant="outline"
+                    className="gap-2 rounded-xl"
+                    onClick={() => void handleView()}
+                    disabled={isGenerating || isOpeningEditor || !session?.access_token}
+                >
+                    {isOpeningEditor ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
                     {t('common.view', { defaultValue: 'View' })}
                 </Button>
             </CardHeader>
@@ -639,24 +671,8 @@ function MarketplaceInquiryPdfCard({ order }: { order: MarketplaceOrderRecord })
             <CardContent className="h-[min(72dvh,900px)] min-h-[28rem] overflow-hidden border-t border-border/60 p-0">
                 {isGenerating && <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" />{t('ecommerce.generatingInquiryPdf', { defaultValue: 'Generating inquiry PDF…' })}</div>}
                 {generationFailed && <div className="flex h-full items-center justify-center px-6 text-center text-sm text-destructive">{t('ecommerce.inquiryPdfUnavailable', { defaultValue: 'This inquiry PDF could not be generated.' })}</div>}
-                {pdfBytes && !isOpen && <PdfJsViewer bytes={pdfBytes} title={documentNumber} />}
+                {pdfBytes && <PdfJsViewer bytes={pdfBytes} title={documentNumber} allowSave={false} />}
             </CardContent>
-
-            <AppDialog open={isOpen} onOpenChange={setIsOpen}>
-                <AppDialogContent className="h-[calc(100dvh-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-1rem)] max-w-6xl">
-                    <AppDialogHeader>
-                        <AppDialogTitle>{`${t('ecommerce.inquiryPdf', { defaultValue: 'Inquiry PDF' })} ${documentNumber}`}</AppDialogTitle>
-                    </AppDialogHeader>
-                    <AppDialogBody className="flex overflow-hidden p-0">
-                        {isGenerating && <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" />{t('ecommerce.generatingInquiryPdf', { defaultValue: 'Generating inquiry PDF…' })}</div>}
-                        {generationFailed && <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-destructive">{t('ecommerce.inquiryPdfUnavailable', { defaultValue: 'This inquiry PDF could not be generated.' })}</div>}
-                        {pdfBytes && <PdfJsViewer bytes={pdfBytes} title={documentNumber} />}
-                    </AppDialogBody>
-                    <AppDialogFooter>
-                        <Button variant="outline" onClick={() => setIsOpen(false)}>{t('common.close', { defaultValue: 'Close' })}</Button>
-                    </AppDialogFooter>
-                </AppDialogContent>
-            </AppDialog>
         </Card>
     )
 }

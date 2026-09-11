@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url'
-import { Loader2, Printer, Save } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, Printer, Save, ZoomIn, ZoomOut } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { isTauri } from '@/lib/platform'
 import { platformService } from '@/services/platformService'
@@ -51,22 +52,43 @@ type PdfJsViewerProps = {
     title?: string
     allowPrint?: boolean
     allowSave?: boolean
+    showNavigation?: boolean
+    onPrint?: (blob: Blob) => Promise<void> | void
 }
 
-export function PdfJsViewer({ url, bytes: suppliedBytes, title, allowPrint = true, allowSave = true }: PdfJsViewerProps) {
+export function PdfJsViewer({
+    url,
+    bytes: suppliedBytes,
+    title,
+    allowPrint = true,
+    allowSave = true,
+    showNavigation = false,
+    onPrint
+}: PdfJsViewerProps) {
+    const { t } = useTranslation()
     const pagesContainerRef = useRef<HTMLDivElement>(null)
+    const scrollContainerRef = useRef<HTMLDivElement>(null)
+    const currentPageRef = useRef(1)
     const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-    const [errorMessage, setErrorMessage] = useState('')
     const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null)
     const [busy, setBusy] = useState(false)
+    const [pageCount, setPageCount] = useState(0)
+    const [currentPage, setCurrentPage] = useState(1)
+    const [zoom, setZoom] = useState(100)
+
+    useEffect(() => {
+        currentPageRef.current = 1
+        setCurrentPage(1)
+        setZoom(100)
+    }, [url, suppliedBytes])
 
     useEffect(() => {
         let cancelled = false
         let loadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null
 
         setStatus('loading')
-        setErrorMessage('')
         setPdfBytes(null)
+        setPageCount(0)
         const container = pagesContainerRef.current
         if (container) container.innerHTML = ''
 
@@ -83,7 +105,7 @@ export function PdfJsViewer({ url, bytes: suppliedBytes, title, allowPrint = tru
                 const pdf = await loadingTask.promise
                 if (cancelled) return
 
-                const containerWidth = pagesContainerRef.current?.clientWidth || 900
+                const containerWidth = scrollContainerRef.current?.clientWidth || pagesContainerRef.current?.clientWidth || 900
                 // Render at the display scale multiplied by the device pixel ratio. This keeps
                 // inline previews crisp on high-density displays without changing their layout.
                 const outputScale = Math.min(window.devicePixelRatio || 1, 3)
@@ -91,14 +113,17 @@ export function PdfJsViewer({ url, bytes: suppliedBytes, title, allowPrint = tru
                     if (cancelled) return
                     const page = await pdf.getPage(pageNumber)
                     const baseViewport = page.getViewport({ scale: 1 })
-                    const scale = Math.max(1, Math.min(3, containerWidth / baseViewport.width))
+                    const fitScale = Math.max(0.25, Math.min(3, (containerWidth - 32) / baseViewport.width))
+                    const scale = showNavigation
+                        ? Math.max(0.25, Math.min(6, fitScale * (zoom / 100)))
+                        : fitScale
                     const viewport = page.getViewport({ scale })
                     const canvas = document.createElement('canvas')
                     canvas.width = Math.ceil(viewport.width * outputScale)
                     canvas.height = Math.ceil(viewport.height * outputScale)
                     canvas.style.width = `${Math.ceil(viewport.width)}px`
                     canvas.style.height = `${Math.ceil(viewport.height)}px`
-                    canvas.className = 'block h-auto w-full'
+                    canvas.className = showNavigation ? 'block h-auto max-w-none' : 'block h-auto w-full'
                     const context = canvas.getContext('2d', { alpha: false })
                     if (!context) throw new Error('Unable to create a canvas context for PDF viewing.')
                     context.fillStyle = '#ffffff'
@@ -112,14 +137,28 @@ export function PdfJsViewer({ url, bytes: suppliedBytes, title, allowPrint = tru
                     if (cancelled) return
 
                     const wrapper = document.createElement('div')
-                    wrapper.className = 'mb-4 w-full bg-white p-2 shadow-sm last:mb-0'
+                    wrapper.className = showNavigation
+                        ? 'mx-auto mb-4 w-fit bg-white p-2 shadow-sm last:mb-0'
+                        : 'mb-4 w-full bg-white p-2 shadow-sm last:mb-0'
+                    wrapper.dataset.pdfPage = String(pageNumber)
                     wrapper.appendChild(canvas)
                     pagesContainerRef.current?.appendChild(wrapper)
                 }
-                if (!cancelled) setStatus('ready')
+                if (!cancelled) {
+                    setPageCount(pdf.numPages)
+                    setStatus('ready')
+                    window.requestAnimationFrame(() => {
+                        const scrollContainer = scrollContainerRef.current
+                        const pageContainer = pagesContainerRef.current
+                        const page = pageContainer?.children.item(Math.min(currentPageRef.current, pdf.numPages) - 1) as HTMLElement | null
+                        if (scrollContainer && pageContainer && page) {
+                            scrollContainer.scrollTop = pageContainer.offsetTop + page.offsetTop
+                        }
+                    })
+                }
             } catch (err) {
                 if (!cancelled) {
-                    setErrorMessage(err instanceof Error ? err.message : 'Unknown error')
+                    console.error('[PdfJsViewer] Unable to render PDF:', err)
                     setStatus('error')
                 }
             } finally {
@@ -145,13 +184,43 @@ export function PdfJsViewer({ url, bytes: suppliedBytes, title, allowPrint = tru
                 }
             }
         }
-    }, [url, suppliedBytes])
+    }, [showNavigation, suppliedBytes, url, zoom])
+
+    const scrollToPage = (pageNumber: number) => {
+        const nextPage = Math.max(1, Math.min(pageCount, pageNumber))
+        const scrollContainer = scrollContainerRef.current
+        const pageContainer = pagesContainerRef.current
+        const page = pageContainer?.children.item(nextPage - 1) as HTMLElement | null
+        if (!scrollContainer || !pageContainer || !page) return
+        currentPageRef.current = nextPage
+        setCurrentPage(nextPage)
+        scrollContainer.scrollTo({
+            top: pageContainer.offsetTop + page.offsetTop,
+            behavior: 'smooth'
+        })
+    }
+
+    const handleScroll = () => {
+        if (!showNavigation || !pageCount) return
+        const scrollContainer = scrollContainerRef.current
+        const pageContainer = pagesContainerRef.current
+        if (!scrollContainer || !pageContainer) return
+        const target = scrollContainer.scrollTop - pageContainer.offsetTop + scrollContainer.clientHeight * 0.25
+        let visiblePage = 1
+        Array.from(pageContainer.children).forEach((page, index) => {
+            if ((page as HTMLElement).offsetTop <= target) visiblePage = index + 1
+        })
+        currentPageRef.current = visiblePage
+        setCurrentPage(visiblePage)
+    }
 
     const handlePrint = async () => {
         if (!pdfBytes || busy) return
         setBusy(true)
         try {
-            await printPdfBlob(new Blob([pdfBytes], { type: 'application/pdf' }), { title })
+            const blob = new Blob([pdfBytes], { type: 'application/pdf' })
+            if (onPrint) await onPrint(blob)
+            else await printPdfBlob(blob, { title })
         } catch (error) {
             console.error('[PdfJsViewer] Print failed:', error)
         } finally {
@@ -195,38 +264,94 @@ export function PdfJsViewer({ url, bytes: suppliedBytes, title, allowPrint = tru
     return (
         <div className="flex h-full w-full flex-col overflow-hidden bg-gray-100">
             <div className="z-10 flex shrink-0 items-center gap-1 border-b bg-card px-2 py-1.5 md:gap-2 md:px-4">
+                {showNavigation && <>
+                    <button
+                        className={toolbarButtonClass}
+                        onClick={() => scrollToPage(currentPage - 1)}
+                        disabled={status !== 'ready' || currentPage <= 1}
+                        title={t('printPreviewEditor.previousPage')}
+                        aria-label={t('printPreviewEditor.previousPage')}
+                    >
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                    </button>
+                    <span className="min-w-[4.5rem] text-center text-xs font-medium text-muted-foreground">
+                        {t('printPreviewEditor.pageOf', { page: currentPage, total: pageCount || 1 })}
+                    </span>
+                    <button
+                        className={toolbarButtonClass}
+                        onClick={() => scrollToPage(currentPage + 1)}
+                        disabled={status !== 'ready' || currentPage >= pageCount}
+                        title={t('printPreviewEditor.nextPage')}
+                        aria-label={t('printPreviewEditor.nextPage')}
+                    >
+                        <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+                    <div className="mx-1 h-5 w-px bg-border" />
+                    <button
+                        className={toolbarButtonClass}
+                        onClick={() => setZoom((value) => Math.max(50, value - 25))}
+                        disabled={status === 'loading' || zoom <= 50}
+                        title={t('printPreviewEditor.zoomOut')}
+                        aria-label={t('printPreviewEditor.zoomOut')}
+                    >
+                        <ZoomOut className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                        className={toolbarButtonClass}
+                        onClick={() => setZoom(100)}
+                        disabled={status === 'loading' || zoom === 100}
+                        title={t('printPreviewEditor.resetZoom')}
+                        aria-label={t('printPreviewEditor.resetZoom')}
+                    >
+                        <span>{zoom}%</span>
+                    </button>
+                    <button
+                        className={toolbarButtonClass}
+                        onClick={() => setZoom((value) => Math.min(300, value + 25))}
+                        disabled={status === 'loading' || zoom >= 300}
+                        title={t('printPreviewEditor.zoomIn')}
+                        aria-label={t('printPreviewEditor.zoomIn')}
+                    >
+                        <ZoomIn className="h-3.5 w-3.5" />
+                    </button>
+                    <div className="mx-1 h-5 w-px bg-border" />
+                </>}
                 {allowPrint && <button
                     className={toolbarButtonClass}
                     onClick={() => void handlePrint()}
                     disabled={!pdfBytes || busy}
-                    title="Print"
-                    aria-label="Print"
+                    title={t('common.print')}
+                    aria-label={t('common.print')}
                 >
                     <Printer className="h-3.5 w-3.5" />
-                    <span className="hidden md:inline">Print</span>
+                    <span className="hidden md:inline">{t('common.print')}</span>
                 </button>}
                 {allowSave && <button
                     className={toolbarButtonClass}
                     onClick={() => void handleSave()}
                     disabled={!pdfBytes || busy}
-                    title="Save"
-                    aria-label="Save"
+                    title={t('common.save')}
+                    aria-label={t('common.save')}
                 >
                     <Save className="h-3.5 w-3.5" />
-                    <span className="hidden md:inline">Save</span>
+                    <span className="hidden md:inline">{t('common.save')}</span>
                 </button>}
             </div>
-            <div className="relative min-h-0 flex-1 overflow-y-auto">
+            <div
+                ref={scrollContainerRef}
+                className="relative min-h-0 flex-1 overflow-auto"
+                onScroll={handleScroll}
+            >
                 {status !== 'ready' && (
                     <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-gray-100 px-6 text-center">
                         {status === 'loading' ? (
                             <>
                                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                                <span className="text-sm text-muted-foreground">Loading PDF…</span>
+                                <span className="text-sm text-muted-foreground">{t('printPreviewEditor.loadingPdf')}</span>
                             </>
                         ) : (
                             <div className="flex flex-col gap-1">
-                                <p className="text-sm font-medium text-destructive">{errorMessage}</p>
+                                <p className="text-sm font-medium text-destructive">{t('printPreviewEditor.pdfUnavailable')}</p>
                                 {title ? <p className="text-xs text-muted-foreground">{title}</p> : null}
                             </div>
                         )}
@@ -234,7 +359,7 @@ export function PdfJsViewer({ url, bytes: suppliedBytes, title, allowPrint = tru
                 )}
                 <div
                     ref={pagesContainerRef}
-                    className={cn('mx-auto w-full max-w-[1100px] p-4', status === 'loading' && 'invisible')}
+                    className={cn('mx-auto w-full p-4', !showNavigation && 'max-w-[1100px]', status !== 'ready' && 'invisible')}
                 />
             </div>
         </div>

@@ -2886,7 +2886,15 @@
   "printPreviewEditor": {
     "title": "محرر معاينة الطباعة",
     "fitPage": "ملائمة",
-    "bottomWarning": "تجنب وضع المكونات هنا — قد يتم قصها عند الطباعة على A4."
+    "bottomWarning": "تجنب وضع المكونات هنا — قد يتم قصها عند الطباعة على A4.",
+    "loadingPdf": "جارٍ تحميل ملف PDF…",
+    "pdfUnavailable": "معاينة ملف PDF هذه غير متاحة.",
+    "previousPage": "الصفحة السابقة",
+    "nextPage": "الصفحة التالية",
+    "pageOf": "{{page}} / {{total}}",
+    "zoomOut": "تصغير",
+    "zoomIn": "تكبير",
+    "resetZoom": "إعادة ضبط التكبير"
   },
   "invoice": {
     "date": "التاريخ",

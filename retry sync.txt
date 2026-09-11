@@ -17,3 +17,7 @@ Price books selector order form and quick order
 SALES HISTORY IN DASHBOARD
 
 One single Usage Request Payload
+
+Restric Phone number in khaleej cosmetic
+
+Show POS loan products in print, HIBR

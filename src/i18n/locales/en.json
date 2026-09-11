@@ -4451,7 +4451,15 @@
   "printPreviewEditor": {
     "title": "Print Preview Editor",
     "fitPage": "Fit",
-    "bottomWarning": "Avoid placing components here — they may be cut off when printing on A4."
+    "bottomWarning": "Avoid placing components here — they may be cut off when printing on A4.",
+    "loadingPdf": "Loading PDF…",
+    "pdfUnavailable": "This PDF preview is unavailable.",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "pageOf": "{{page}} / {{total}}",
+    "zoomOut": "Zoom out",
+    "zoomIn": "Zoom in",
+    "resetZoom": "Reset zoom"
   },
   "invoice": {
     "date": "Date",

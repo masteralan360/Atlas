@@ -193,6 +193,57 @@ async function streamJumlaKhaleejInquiryPdf(request, env, orderId) {
     }
 }
 
+async function streamJumlaKhaleejInquirySnapshot(request, env, orderId) {
+    if (request.method === 'OPTIONS') {
+        return new Response(null, {
+            status: 204,
+            headers: atlasInquiryCorsHeaders(request)
+        })
+    }
+    if (request.method !== 'GET') return methodNotAllowed(new Set(['GET']))
+
+    let order
+    try {
+        order = await loadJumlaKhaleejInquiryOrder(request, env, orderId)
+    } catch (error) {
+        return atlasInquiryJsonResponse(request, 502, { error: errorMessage(error, 'Unable to load the marketplace inquiry') })
+    }
+    if (order.error) return order.error
+
+    try {
+        const serviceToken = configuredValue(env, 'ATLAS_INQUIRY_PDF_SERVICE_TOKEN')
+        const service = env.JUMLA_KHALEEJ_FILES
+        if (!service || typeof service.fetch !== 'function') throw new Error('Jumla Khaleej Files service binding is unavailable')
+
+        const upstreamUrl = new URL('https://jumla-khaleej-storefront/api/inquiries/atlas-snapshot')
+        upstreamUrl.searchParams.set('orderId', orderId)
+        upstreamUrl.searchParams.set('documentNumber', order.documentNumber)
+        const upstream = await service.fetch(upstreamUrl, {
+            method: 'GET',
+            headers: {
+                Accept: 'application/json',
+                'X-Atlas-Inquiry-Pdf-Token': serviceToken
+            }
+        })
+        if (!upstream.ok || !upstream.body) throw new Error(`Jumla Khaleej Files returned ${upstream.status}`)
+        if (!upstream.headers.get('content-type')?.toLowerCase().startsWith('application/json')) {
+            throw new Error('Jumla Khaleej Files returned an unexpected response')
+        }
+
+        return new Response(upstream.body, {
+            headers: {
+                ...atlasInquiryCorsHeaders(request),
+                'Cache-Control': 'private, no-store, max-age=0',
+                'Content-Type': 'application/json; charset=utf-8',
+                'Referrer-Policy': 'no-referrer',
+                'X-Content-Type-Options': 'nosniff'
+            }
+        })
+    } catch (error) {
+        return atlasInquiryJsonResponse(request, 502, { error: errorMessage(error, 'Unable to load the inquiry snapshot') })
+    }
+}
+
 function copyRequestHeaders(request, body) {
     const headers = new Headers()
     for (const name of PASS_THROUGH_REQUEST_HEADERS) {
@@ -482,10 +533,12 @@ export default {
     async fetch(request, env) {
         const url = new URL(request.url)
 
-        const inquiryMatch = url.pathname.match(/^\/api-ecommerce\/inquiries\/([0-9a-f-]+)\/pdf$/i)
+        const inquiryMatch = url.pathname.match(/^\/api-ecommerce\/inquiries\/([0-9a-f-]+)\/(pdf|snapshot)$/i)
         if (inquiryMatch) {
             if (!MARKETPLACE_ORDER_ID_PATTERN.test(inquiryMatch[1])) return atlasInquiryJsonResponse(request, 400, { error: 'A valid marketplace order is required' })
-            return streamJumlaKhaleejInquiryPdf(request, env, inquiryMatch[1])
+            return inquiryMatch[2].toLowerCase() === 'snapshot'
+                ? streamJumlaKhaleejInquirySnapshot(request, env, inquiryMatch[1])
+                : streamJumlaKhaleejInquiryPdf(request, env, inquiryMatch[1])
         }
 
         for (const route of workspaceRoutes) {

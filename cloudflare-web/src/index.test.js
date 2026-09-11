@@ -28,6 +28,70 @@ afterEach(() => {
 })
 
 describe('Atlas Cloudflare web Worker', () => {
+    it('streams the authenticated current inquiry snapshot through the JumlaKhaleej service binding', async () => {
+        vi.stubGlobal('fetch', vi.fn(async (input) => {
+            const url = String(input)
+            if (url.includes('/rest/v1/marketplace_orders')) {
+                return Response.json([{
+                    id: '123e4567-e89b-42d3-a456-426614174000',
+                    order_number: 'MKT-12345',
+                    inquiry_pdf_document_number: 'MKT-12345',
+                    website_storefront_key: 'jumla-khaleej'
+                }])
+            }
+            throw new Error(`Unexpected fetch: ${url}`)
+        }))
+
+        const snapshot = {
+            documentNumber: 'MKT-12345',
+            items: [{ product_id: 'product-1', quantity: 1 }]
+        }
+        const serviceFetch = vi.fn(async () => Response.json(snapshot))
+        const response = await worker.fetch(new Request(
+            'https://atlaserp.dev/api-ecommerce/inquiries/123e4567-e89b-42d3-a456-426614174000/snapshot',
+            {
+                headers: {
+                    Authorization: 'Bearer user-token',
+                    Origin: 'http://tauri.localhost'
+                }
+            }
+        ), createEnv({
+            ATLAS_INQUIRY_PDF_SERVICE_TOKEN: 'service-token',
+            JUMLA_KHALEEJ_FILES: { fetch: serviceFetch }
+        }))
+
+        expect(response.status).toBe(200)
+        await expect(response.json()).resolves.toEqual(snapshot)
+        expect(response.headers.get('Access-Control-Allow-Origin')).toBe('http://tauri.localhost')
+        expect(response.headers.get('Cache-Control')).toContain('no-store')
+        expect(serviceFetch).toHaveBeenCalledTimes(1)
+        const [serviceUrl, serviceInit] = serviceFetch.mock.calls[0]
+        expect(String(serviceUrl)).toBe('https://jumla-khaleej-storefront/api/inquiries/atlas-snapshot?orderId=123e4567-e89b-42d3-a456-426614174000&documentNumber=MKT-12345')
+        expect(new Headers(serviceInit.headers).get('X-Atlas-Inquiry-Pdf-Token')).toBe('service-token')
+    })
+
+    it('marks the snapshot unavailable when JumlaKhaleej fails without requesting the legacy PDF', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => Response.json([{
+            id: '123e4567-e89b-42d3-a456-426614174000',
+            order_number: 'MKT-12345',
+            inquiry_pdf_document_number: 'MKT-12345',
+            website_storefront_key: 'jumla-khaleej'
+        }])))
+        const serviceFetch = vi.fn(async () => Response.json({ error: 'Unavailable' }, { status: 502 }))
+
+        const response = await worker.fetch(new Request(
+            'https://atlaserp.dev/api-ecommerce/inquiries/123e4567-e89b-42d3-a456-426614174000/snapshot',
+            { headers: { Authorization: 'Bearer user-token' } }
+        ), createEnv({
+            ATLAS_INQUIRY_PDF_SERVICE_TOKEN: 'service-token',
+            JUMLA_KHALEEJ_FILES: { fetch: serviceFetch }
+        }))
+
+        expect(response.status).toBe(502)
+        expect(String(serviceFetch.mock.calls[0][0])).toContain('/api/inquiries/atlas-snapshot')
+        expect(String(serviceFetch.mock.calls[0][0])).not.toContain('/api/inquiries/atlas-pdf')
+    })
+
     it('proxies authenticated Supabase REST traffic and meters successful Web Live usage', async () => {
         const calls = []
         vi.stubGlobal('fetch', vi.fn(async (input, init) => {
