@@ -267,8 +267,6 @@ export type PrintPreviewEditorSource = {
     url?: string
     /** In-memory PDF bytes for read-only viewing without creating a long-lived object URL. */
     pdfBytes?: Uint8Array
-    /** Restricts a native PDF source to navigation, zoom, back, and print controls. */
-    interactionMode?: 'default' | 'read-only-print'
     /** Template preview mode for editable inline preview of custom templates (loans, orders, budget) */
     templatePreview?: TemplatePreview
     customTemplate?: CustomTemplatePreviewTarget

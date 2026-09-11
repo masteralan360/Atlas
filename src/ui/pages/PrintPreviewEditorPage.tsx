@@ -1,6 +1,6 @@
 import { type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, ExternalLink, Printer, Loader2, Edit3, X, ZoomIn, ZoomOut, Maximize, ImagePlus, Trash2, PenTool, Brush, Palette, Eraser, Hand, Type, RotateCw, Scaling, Move, Languages, Check, Shapes } from 'lucide-react'
+import { ArrowLeft, Printer, Loader2, Edit3, X, ZoomIn, ZoomOut, Maximize, ImagePlus, Trash2, PenTool, Brush, Palette, Eraser, Hand, Type, RotateCw, Scaling, Move, Languages, Check, Shapes } from 'lucide-react'
 import {
     A4_PAGE_HEIGHT_MM,
     getPrintPreviewEditorSource,
@@ -54,6 +54,8 @@ import { PdfJsViewer } from '@/ui/components/PdfJsViewer'
 import { useToast } from '@/ui/components/use-toast'
 import { ProgressToast } from '@/ui/components/ProgressToast'
 import { subscribePdfProgress } from '@/services/pdfProgress'
+import { printPdfBlob } from '@/services/pdfPrintService'
+import { resolvePdfBytes } from '@/lib/pdfViewerBytes'
 import type { PdfShapeKind } from '@/types'
 
 const PREVIEW_PAGE_BREAK_SELECTOR = [
@@ -981,7 +983,6 @@ export function PrintPreviewEditorPage() {
     ])
 
     const showNativePdf = Boolean((source?.url || source?.pdfBytes) && !source?.data)
-    const isReadOnlyPrint = source?.interactionMode === 'read-only-print'
     const hasTemplatePrimaryAction = Boolean(
         source?.onSaveTemplateLayout
         || source?.onSave
@@ -1027,39 +1028,18 @@ export function PrintPreviewEditorPage() {
         )
     }
 
-    const handleNativeSave = useCallback(async () => {
-        if (!source || isSaving) return
-        setIsSaving(true)
-        try {
-            const invoiceId = await source.onSave?.(new Blob([]))
-            const viewUrl = source.url
-            if (viewUrl) {
-                setPendingPrintPreviewEditorView({ url: viewUrl, title: invoiceId ? `Invoice ${invoiceId}` : title })
-            }
-            setIsSaving(false)
-            clearPrintPreviewEditorSource()
-            window.history.back()
-            return
-        } catch (err) {
-            console.error('Failed to save:', err)
-        }
-        setIsSaving(false)
-        clearPrintPreviewEditorSource()
-        window.history.back()
-    }, [source, isSaving])
-
     const handleNativePrint = async () => {
-        if ((!source?.url && !source?.pdfBytes) || !source?.onPrint || isSaving) return
+        if ((!source?.url && !source?.pdfBytes) || isSaving) return
 
         setIsSaving(true)
         try {
-            if (source.pdfBytes) {
-                await source.onPrint(new Blob([source.pdfBytes], { type: 'application/pdf' }))
-            } else if (source.url) {
-                const response = await fetch(source.url)
-                if (!response.ok) throw new Error('Failed to load PDF for printing.')
-                await source.onPrint(await response.blob())
-            }
+            const bytes = source.pdfBytes?.slice()
+                || (source.url ? await resolvePdfBytes(source.url) : null)
+            if (!bytes) throw new Error('Failed to load PDF for printing.')
+
+            const blob = new Blob([bytes], { type: 'application/pdf' })
+            if (source.onPrint) await source.onPrint(blob)
+            else await printPdfBlob(blob, { title })
         } catch (err) {
             console.error('Failed to print PDF:', err)
         } finally {
@@ -2450,38 +2430,15 @@ export function PrintPreviewEditorPage() {
                             <h1 className="text-sm font-semibold truncate">{title}</h1>
                         </div>
                         <div className="flex shrink-0 items-center gap-1 md:gap-2">
-                            {!isReadOnlyPrint && source.onSave && (
-                                <button
-                                    className="inline-flex items-center justify-center rounded-md h-8 w-8 px-0 text-xs font-medium transition-colors gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:w-auto md:px-3"
-                                    onClick={handleNativeSave}
-                                    disabled={isSaving}
-                                    aria-label={t('print.printAndSave') || 'Print & Save'}
-                                >
-                                    {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
-                                    <span className="hidden md:inline">{t('print.printAndSave') || 'Print & Save'}</span>
-                                </button>
-                            )}
-                            {!isReadOnlyPrint && source.onPrint && (
-                                <button
-                                    className="inline-flex items-center justify-center rounded-md h-8 w-8 px-0 text-xs font-medium transition-colors gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:w-auto md:px-3"
-                                    onClick={handleNativePrint}
-                                    disabled={isSaving}
-                                    aria-label={source.printActionLabel || t('common.print') || 'Print'}
-                                >
-                                    {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
-                                    <span className="hidden md:inline">{source.printActionLabel || t('common.print') || 'Print'}</span>
-                                </button>
-                            )}
-                            {!isReadOnlyPrint && source.url && (
-                                <button
-                                    onClick={() => window.open(source.url, '_blank')}
-                                    className="inline-flex items-center justify-center rounded-md h-8 w-8 px-0 text-xs font-medium transition-colors gap-1.5 bg-secondary text-secondary-foreground hover:bg-secondary/90 md:w-auto md:px-3"
-                                    aria-label={t('common.open') || 'Open'}
-                                >
-                                    <ExternalLink className="h-3.5 w-3.5" />
-                                    <span className="hidden md:inline">{t('common.open') || 'Open'}</span>
-                                </button>
-                            )}
+                            <button
+                                className="inline-flex items-center justify-center rounded-md h-8 w-8 px-0 text-xs font-medium transition-colors gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:w-auto md:px-3"
+                                onClick={handleNativePrint}
+                                disabled={isSaving}
+                                aria-label={source.printActionLabel || t('common.print') || 'Print'}
+                            >
+                                {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
+                                <span className="hidden md:inline">{source.printActionLabel || t('common.print') || 'Print'}</span>
+                            </button>
                         </div>
                     </header>
                     <div className="min-h-0 flex-1">
@@ -2489,10 +2446,8 @@ export function PrintPreviewEditorPage() {
                             url={source.url}
                             bytes={source.pdfBytes}
                             title={title}
-                            allowPrint={isReadOnlyPrint ? Boolean(source.onPrint) : true}
-                            allowSave={!isReadOnlyPrint}
-                            showNavigation={isReadOnlyPrint}
-                            onPrint={isReadOnlyPrint ? source.onPrint : undefined}
+                            allowPrint={false}
+                            showZoom
                         />
                     </div>
                 </div>

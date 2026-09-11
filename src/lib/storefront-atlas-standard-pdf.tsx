@@ -6,6 +6,7 @@ import { flushSync } from 'react-dom'
 import type { CartItem, CustomerForm } from '@/components/storefront-ui-types'
 import { getJumlaKhaleejDeliveryCity } from '@/lib/storefront-delivery'
 import { storefrontApiUrl } from '@/lib/storefront-runtime'
+import './storefront-atlas-standard-pdf.css'
 
 type StorefrontPrintStore = {
   name: string
@@ -27,7 +28,6 @@ type PrintInput = {
 
 const PAGE_WIDTH_MM = 210
 const PAGE_HEIGHT_MM = 297
-const INK = '#1f2937'
 const RENDER_SCALE = 2.5
 const TABLE_DATA_AREA_MM = 145
 const PDF_IMAGE_CACHE_LIMIT = 96
@@ -386,39 +386,6 @@ function StorefrontAtlasStandardTemplate({ input, createdAt, documentNumber }: {
 
   return (
     <div className="storefront-atlas-standard" dir="rtl">
-      <style>{`
-        .storefront-atlas-standard { box-sizing: border-box; width: 210mm; margin: 0 auto; color: ${INK}; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 10px; }
-        .storefront-atlas-standard *, .storefront-atlas-standard *::before, .storefront-atlas-standard *::after { box-sizing: border-box; }
-        .storefront-atlas-page { box-sizing: border-box; width: 210mm; min-height: 297mm; padding: 8mm; position: relative; isolation: isolate; background: #fff; }
-        .storefront-atlas-continuation-page { display: flex; align-items: center; }
-        .storefront-atlas-continuation-page .storefront-atlas-table { margin-bottom: 0; }
-        .storefront-atlas-standard header { display: flex; min-height: 13mm; align-items: center; justify-content: space-between; border-bottom: 2px solid ${INK}; padding: 0 1mm 1mm; margin-bottom: 1mm; }
-        .storefront-atlas-standard h1 { max-width: 150mm; margin: 0; overflow: hidden; color: ${INK}; font-family: Tahoma, Arial, sans-serif; font-size: 18px; font-weight: 700; letter-spacing: 0; text-overflow: ellipsis; white-space: nowrap; }
-        .storefront-atlas-component { position: relative; z-index: 20; transform-origin: top left; }
-        .storefront-atlas-logo { display: grid; width: 11mm; height: 11mm; place-items: center; overflow: hidden; border: 2px solid ${INK}; color: ${INK}; font-size: 9px; font-weight: 700; letter-spacing: .1em; }
-        .storefront-atlas-logo img { width: 24mm; max-width: 24mm; height: 11mm; max-height: 11mm; object-fit: contain; }
-        .storefront-atlas-details { border-right: 1px solid ${INK}; border-bottom: 1px solid ${INK}; margin-bottom: 2mm; background: #fff; }
-        .storefront-atlas-field-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-        .storefront-atlas-field { min-width: 0; min-height: 6.5mm; overflow: hidden; border-left: 1px solid ${INK}; border-top: 1px solid ${INK}; padding: 1.5mm 2mm; font-size: 12px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
-        .storefront-atlas-field.is-multiline { min-height: 8mm; overflow-wrap: anywhere; text-overflow: clip; white-space: pre-wrap; }
-        .storefront-atlas-field strong { font-weight: 700; }
-        .storefront-atlas-table { width: 100%; table-layout: fixed; border-collapse: collapse; color: ${INK}; font-size: 10px; line-height: 1; margin-bottom: 2mm; }
-        .storefront-atlas-table th { height: 8mm; overflow: hidden; border: 1px solid ${INK}; padding: .75mm .5mm; color: #111827; background: #e5e7eb; font-size: 9px; font-weight: 700; line-height: 1.2; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
-        .storefront-atlas-table td { overflow: hidden; border: 1px solid ${INK}; padding: 1mm 1.2mm; font-size: 12px; line-height: 1.15; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
-        .storefront-atlas-table td.image { padding: .5mm; }
-        .storefront-atlas-product-image { display: inline-block; width: ${PRODUCT_IMAGE_SIZE_MM}mm; height: ${PRODUCT_IMAGE_SIZE_MM}mm; object-fit: contain; vertical-align: middle; }
-        .storefront-atlas-product-image.placeholder { padding-top: 3mm; color: #6b7280; background: #f3f4f6; font-size: 9px; font-weight: 700; }
-        .storefront-atlas-table tr.item { height: ${TABLE_ITEM_ROW_MM}mm; }
-        .storefront-atlas-table tr.empty td { border-top: 0; border-bottom: 0; }
-        .storefront-atlas-table tr.total td { height: 8mm; padding: 1mm 1.2mm; background: #f3f4f6; font-weight: 700; }
-        .storefront-atlas-footer-copy { display: flex; min-height: 13mm; align-items: flex-start; justify-content: space-between; gap: 4mm; color: #374151; font-size: 10px; }
-        .storefront-atlas-footer-copy > div:first-child { padding-top: 1mm; overflow: hidden; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-        .storefront-atlas-footer-copy > div:last-child { max-width: 125mm; overflow: hidden; line-height: 1.6; text-align: end; text-overflow: ellipsis; white-space: nowrap; }
-        .storefront-atlas-footer { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid ${INK}; padding-top: 1mm; color: #374151; font-size: 10px; font-weight: 700; text-align: center; }
-        .storefront-atlas-overlay { pointer-events: none; position: absolute; inset-inline-start: 0; top: 0; width: 100%; height: ${PAGE_HEIGHT_MM}mm; overflow: visible; }
-        .storefront-atlas-overlay-text { position: absolute; color: #000; font-size: 16px; font-weight: 700; line-height: 1.375; white-space: pre-wrap; overflow-wrap: break-word; transform-origin: top left; }
-        @media print { @page { margin: 0; size: A4; } body { margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-      `}</style>
 
       <section className="storefront-atlas-page">
         <header>

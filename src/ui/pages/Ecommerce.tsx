@@ -632,7 +632,6 @@ function MarketplaceInquiryPdfCard({ order }: { order: MarketplaceOrderRecord })
             setPrintPreviewEditorSource({
                 title: `${t('ecommerce.inquiryPdf')} ${result.documentNumber}`,
                 pdfBytes: result.bytes,
-                interactionMode: 'read-only-print',
                 onPrint: (blob) => printPdfBlob(blob, { title: result.documentNumber }),
                 printActionLabel: t('common.print')
             })
@@ -671,7 +670,7 @@ function MarketplaceInquiryPdfCard({ order }: { order: MarketplaceOrderRecord })
             <CardContent className="h-[min(72dvh,900px)] min-h-[28rem] overflow-hidden border-t border-border/60 p-0">
                 {isGenerating && <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" />{t('ecommerce.generatingInquiryPdf', { defaultValue: 'Generating inquiry PDF…' })}</div>}
                 {generationFailed && <div className="flex h-full items-center justify-center px-6 text-center text-sm text-destructive">{t('ecommerce.inquiryPdfUnavailable', { defaultValue: 'This inquiry PDF could not be generated.' })}</div>}
-                {pdfBytes && <PdfJsViewer bytes={pdfBytes} title={documentNumber} allowSave={false} />}
+                {pdfBytes && <PdfJsViewer bytes={pdfBytes} title={documentNumber} />}
             </CardContent>
         </Card>
     )
