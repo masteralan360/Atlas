@@ -1,4 +1,6 @@
 const WORKSPACE_TRANSFER_LIMIT_MESSAGE = 'Workspace monthly data transfer limit exceeded'
+const MARKETPLACE_ORDER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const INQUIRY_DOCUMENT_NUMBER_PATTERN = /^MKT-[0-9]{5,}$/
 
 const REST_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
 const STORAGE_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH'])
@@ -50,6 +52,34 @@ function jsonResponse(status, payload, headers = {}) {
     return new Response(JSON.stringify(payload), { status, headers: responseHeaders })
 }
 
+function atlasInquiryCorsHeaders(request) {
+    const origin = request.headers.get('Origin')
+    if (!origin) return {}
+
+    try {
+        const url = new URL(origin)
+        const isTauriOrigin = (url.protocol === 'http:' || url.protocol === 'https:')
+            && (url.hostname === 'tauri.localhost' || url.hostname === 'localhost' || url.hostname === '127.0.0.1')
+        if (isTauriOrigin) {
+            return {
+                'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+                'Access-Control-Allow-Methods': 'GET, OPTIONS',
+                'Access-Control-Allow-Origin': origin,
+                'Access-Control-Max-Age': '600',
+                Vary: 'Origin'
+            }
+        }
+    } catch {
+        // A malformed Origin never receives CORS access.
+    }
+
+    return {}
+}
+
+function atlasInquiryJsonResponse(request, status, payload) {
+    return jsonResponse(status, payload, atlasInquiryCorsHeaders(request))
+}
+
 function errorMessage(error, fallback) {
     return error instanceof Error && error.message ? error.message : fallback
 }
@@ -82,6 +112,85 @@ function routePath(url, prefix) {
 
     if (!path || path.split('/').some((segment) => segment === '..')) return null
     return path
+}
+
+async function loadJumlaKhaleejInquiryOrder(request, env, orderId) {
+    const authorization = bearerToken(request)
+    if (!authorization) return { error: atlasInquiryJsonResponse(request, 401, { error: 'Workspace authentication is required' }) }
+
+    const { url: supabaseUrl, anonKey } = supabaseConfig(env)
+    const url = new URL(`${supabaseUrl}/rest/v1/marketplace_orders`)
+    url.searchParams.set('select', 'id,order_number,inquiry_pdf_document_number,website_storefront_key')
+    url.searchParams.set('id', `eq.${orderId}`)
+    url.searchParams.set('website_storefront_key', 'eq.jumla-khaleej')
+    url.searchParams.set('limit', '1')
+
+    const response = await fetch(url, {
+        headers: {
+            apikey: anonKey,
+            Authorization: authorization
+        }
+    })
+    if (response.status === 401) return { error: atlasInquiryJsonResponse(request, 401, { error: 'Workspace authentication is required' }) }
+    if (!response.ok) throw new Error(`Unable to load the marketplace inquiry (${response.status})`)
+
+    const orders = await response.json()
+    const order = Array.isArray(orders) ? orders[0] : null
+    const documentNumber = typeof order?.inquiry_pdf_document_number === 'string' && order.inquiry_pdf_document_number
+        ? order.inquiry_pdf_document_number
+        : order?.order_number
+    if (!order || !INQUIRY_DOCUMENT_NUMBER_PATTERN.test(documentNumber || '')) {
+        return { error: atlasInquiryJsonResponse(request, 404, { error: 'Inquiry document not found' }) }
+    }
+
+    return { authorization, documentNumber }
+}
+
+async function streamJumlaKhaleejInquiryPdf(request, env, orderId) {
+    if (request.method === 'OPTIONS') {
+        return new Response(null, {
+            status: 204,
+            headers: atlasInquiryCorsHeaders(request)
+        })
+    }
+    if (request.method !== 'GET') return methodNotAllowed(new Set(['GET']))
+
+    let order
+    try {
+        order = await loadJumlaKhaleejInquiryOrder(request, env, orderId)
+    } catch (error) {
+        return atlasInquiryJsonResponse(request, 502, { error: errorMessage(error, 'Unable to load the marketplace inquiry') })
+    }
+    if (order.error) return order.error
+
+    try {
+        const serviceToken = configuredValue(env, 'ATLAS_INQUIRY_PDF_SERVICE_TOKEN')
+        const service = env.JUMLA_KHALEEJ_FILES
+        if (!service || typeof service.fetch !== 'function') throw new Error('Jumla Khaleej Files service binding is unavailable')
+
+        const upstream = await service.fetch('https://jumla-khaleej-storefront/api/inquiries/atlas-pdf', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Atlas-Inquiry-Pdf-Token': serviceToken
+            },
+            body: JSON.stringify({ orderId, documentNumber: order.documentNumber })
+        })
+        if (!upstream.ok || !upstream.body) throw new Error(`Jumla Khaleej Files returned ${upstream.status}`)
+
+        return new Response(upstream.body, {
+            headers: {
+                ...atlasInquiryCorsHeaders(request),
+                'Cache-Control': 'no-store',
+                'Content-Disposition': `inline; filename="${order.documentNumber}.pdf"`,
+                'Content-Type': 'application/pdf',
+                'Cross-Origin-Resource-Policy': 'same-origin',
+                'X-Content-Type-Options': 'nosniff'
+            }
+        })
+    } catch (error) {
+        return atlasInquiryJsonResponse(request, 502, { error: errorMessage(error, 'Unable to stream the inquiry document') })
+    }
 }
 
 function copyRequestHeaders(request, body) {
@@ -372,6 +481,12 @@ const workspaceRoutes = [
 export default {
     async fetch(request, env) {
         const url = new URL(request.url)
+
+        const inquiryMatch = url.pathname.match(/^\/api-ecommerce\/inquiries\/([0-9a-f-]+)\/pdf$/i)
+        if (inquiryMatch) {
+            if (!MARKETPLACE_ORDER_ID_PATTERN.test(inquiryMatch[1])) return atlasInquiryJsonResponse(request, 400, { error: 'A valid marketplace order is required' })
+            return streamJumlaKhaleejInquiryPdf(request, env, inquiryMatch[1])
+        }
 
         for (const route of workspaceRoutes) {
             if (url.pathname === route.prefix || url.pathname.startsWith(`${route.prefix}/`)) {

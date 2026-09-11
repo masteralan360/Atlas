@@ -20,6 +20,10 @@ run_worker_first = true
 [vars]
 MARKETPLACE_HOST = "shop.atlaserp.dev"
 
+[[services]]
+binding = "JUMLA_KHALEEJ_FILES"
+service = "jumla-khaleej-storefront"
+
 # Keep this list in sync with the production Worker configuration. Values are
 # intentionally not stored here: they must be added as Cloudflare secrets.
 [secrets]
@@ -27,5 +31,6 @@ required = [
   "SUPABASE_URL",
   "SUPABASE_ANON_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
-  "R2_WORKER_URL"
+  "R2_WORKER_URL",
+  "ATLAS_INQUIRY_PDF_SERVICE_TOKEN"
 ]
