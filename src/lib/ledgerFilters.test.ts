@@ -12,6 +12,7 @@ import {
     type GeneralLedgerFilterEntry,
     type GeneralLedgerFilterState,
 } from './ledgerFilters'
+import { summarizeLedgerCashMovements } from './ledgerCashSummary'
 
 const entries: GeneralLedgerFilterEntry[] = [
     {
@@ -126,5 +127,42 @@ describe('general Ledger filters', () => {
         expect(
             applyGeneralLedgerFilters(entries, filters({ search: 'cash revenue' }), () => ['Cash Revenue']),
         ).toHaveLength(3)
+    })
+
+    it('scopes cash-summary inputs with the active ledger filters while ignoring sort order', () => {
+        const summarizeFilteredCash = (activeFilters: GeneralLedgerFilterState) =>
+            summarizeLedgerCashMovements(
+                applyGeneralLedgerFilters(entries, activeFilters).filter(
+                    (entry) => entry.direction === 'incoming' || entry.direction === 'outgoing',
+                ),
+            )
+
+        const unfiltered = summarizeFilteredCash(filters())
+        const sorted = summarizeFilteredCash(filters({ sort: 'amount_asc' }))
+        const supplierPayment = summarizeFilteredCash(
+            filters({
+                search: 'September',
+                direction: ['outgoing'],
+                category: ['operatingCashPaid'],
+                transactionState: ['standard'],
+                type: ['expense'],
+                source: ['expenses'],
+                currency: ['usd'],
+                counterparty: ['partner:supplier-1'],
+                paymentMethods: ['bank_transfer'],
+                paymentAccounts: [LEDGER_UNASSIGNED_PAYMENT_ACCOUNT],
+                minAmount: '40',
+                maxAmount: '40',
+            }),
+        )
+
+        expect(unfiltered.netRecordedCashMovement).toBe(35)
+        expect(sorted.netRecordedCashMovement).toBe(unfiltered.netRecordedCashMovement)
+        expect(supplierPayment).toMatchObject({
+            cashOperatingSurplus: -40,
+            netBorrowingMovement: 0,
+            netLendingMovement: 0,
+            netRecordedCashMovement: -40,
+        })
     })
 })

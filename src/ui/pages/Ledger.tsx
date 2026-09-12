@@ -769,6 +769,11 @@ interface LedgerTrendPoint {
     net: number
 }
 
+interface LedgerRelationRange {
+    firstIndex: number
+    lastIndex: number
+}
+
 function toLedgerDateKey(date: string) {
     if (/^\d{4}-\d{2}-\d{2}/.test(date)) {
         return date.slice(0, 10)
@@ -791,6 +796,29 @@ function buildVisibleRelationMaps(entries: LedgerEntry[]) {
     })
 
     return entriesByKey
+}
+
+function buildVisibleRelationRanges(
+    entries: LedgerEntry[],
+    getRelationKey: (entry: LedgerEntry) => string | null,
+) {
+    const counts = new Map<string, number>()
+    const ranges = new Map<string, LedgerRelationRange>()
+
+    entries.forEach((entry, index) => {
+        const relationKey = getRelationKey(entry)
+        if (!relationKey) return
+
+        counts.set(relationKey, (counts.get(relationKey) ?? 0) + 1)
+        const range = ranges.get(relationKey)
+        if (range) {
+            range.lastIndex = index
+        } else {
+            ranges.set(relationKey, { firstIndex: index, lastIndex: index })
+        }
+    })
+
+    return { counts, ranges }
 }
 
 function formatTransactionIdForDisplay(transactionId: string, _compactTransactionId: boolean) {
@@ -2235,11 +2263,6 @@ export function Ledger() {
         () => allEntries.filter((entry) => isEntryInDateRange(entry.date, dateRange, customDates)),
         [allEntries, customDates, dateRange],
     )
-    const dateScopedCashMovementEntries = useMemo(
-        () => ledgerCashMovementEntries.filter((entry) => isEntryInDateRange(entry.date, dateRange, customDates)),
-        [customDates, dateRange, ledgerCashMovementEntries],
-    )
-
     const filterFacets = useMemo(() => {
         const directionCounts = new Map<LedgerDirection, number>()
         const categoryCounts = new Map<LedgerMovementCategory, number>()
@@ -2743,12 +2766,8 @@ export function Ledger() {
 
     const summarySourceEntries = useMemo(
         () =>
-            dateScopedCashMovementEntries.filter(
-                (entry) =>
-                    isLedgerCashFlowDirection(entry.direction) &&
-                    (filters.currency.length === 0 || filters.currency.includes(entry.currency)),
-            ),
-        [dateScopedCashMovementEntries, filters.currency],
+            baseFilteredEntries.filter((entry) => isLedgerCashFlowDirection(entry.direction)),
+        [baseFilteredEntries],
     )
     const cashSummariesByCurrency = useMemo(() => {
         const currenciesWithMovements = new Set(summarySourceEntries.map((entry) => entry.currency))
@@ -3021,11 +3040,8 @@ export function Ledger() {
                 ? `payment-chain:${projection.rootTransactionId}`
                 : entry.relationKey ?? null
         }
-        const highlightCounts = new Map<string, number>()
-        rows.forEach((entry) => {
-            const key = getEntryHighlightKey(entry)
-            if (key) highlightCounts.set(key, (highlightCounts.get(key) ?? 0) + 1)
-        })
+        const { counts: highlightCounts, ranges: highlightRanges } = buildVisibleRelationRanges(rows, getEntryHighlightKey)
+        const hoveredRange = hoveredRelationKey ? highlightRanges.get(hoveredRelationKey) ?? null : null
         const compactTransactionId = options?.compactTransactionId ?? false
         const compactColumns = options?.compactColumns ?? false
         const showDescriptionNotes = !options?.hideDescriptionNotes
@@ -3106,13 +3122,34 @@ export function Ledger() {
                                 </TableCell>
                             </TableRow>
                         ) : (
-                            rows.map((entry) => {
+                            rows.map((entry, rowIndex) => {
                                 const projection = settlementIndex.byTransactionId.get(entry.transactionId) ?? null
                                 const finalProjection = finalSettlementIndex.byTransactionId.get(entry.transactionId) ?? null
                                 const entryHighlightKey = getEntryHighlightKey(entry)
                                 const isRelationHovered = !!hoveredRelationKey && entryHighlightKey === hoveredRelationKey
                                 const relatedVisibleCount = entryHighlightKey ? highlightCounts.get(entryHighlightKey) || 0 : 0
                                 const hasVisibleLinkedPeer = relatedVisibleCount > 1
+                                const hoveredRelationIsCompleted = hoveredRange
+                                    ? rows[hoveredRange.firstIndex]?.relationIsCompleted
+                                    : undefined
+                                const showHoverHierarchyLine =
+                                    !!hoveredRange &&
+                                    hoveredRange.firstIndex !== hoveredRange.lastIndex &&
+                                    rowIndex >= hoveredRange.firstIndex &&
+                                    rowIndex <= hoveredRange.lastIndex
+                                const showHoverHierarchyTurn = isRelationHovered && hasVisibleLinkedPeer
+                                const hierarchyVerticalClass =
+                                    hoveredRange && rowIndex === hoveredRange.firstIndex
+                                        ? 'top-1/2 bottom-0'
+                                        : hoveredRange && rowIndex === hoveredRange.lastIndex
+                                          ? 'top-0 bottom-1/2'
+                                          : 'top-0 bottom-0'
+                                const hierarchyLineClass =
+                                    hoveredRelationIsCompleted === true
+                                        ? 'bg-emerald-500'
+                                        : hoveredRelationIsCompleted === false
+                                          ? 'bg-amber-500'
+                                          : 'bg-foreground/80'
                                 const relationAccentClass =
                                     entry.relationRole === 'origin'
                                         ? 'bg-sky-500/5'
@@ -3282,6 +3319,25 @@ export function Ledger() {
                                                 compactColumns ? 'max-w-[92px] px-2 py-3' : 'max-w-[170px]',
                                             )}
                                         >
+                                            {showHoverHierarchyLine ? (
+                                                <div className="pointer-events-none absolute inset-y-0 -start-6 w-5">
+                                                    <span
+                                                        className={cn(
+                                                            'absolute start-1.5 w-px',
+                                                            hierarchyLineClass,
+                                                            hierarchyVerticalClass,
+                                                        )}
+                                                    />
+                                                    {showHoverHierarchyTurn ? (
+                                                        <span
+                                                            className={cn(
+                                                                'absolute start-1.5 top-1/2 h-px w-3 -translate-y-1/2',
+                                                                hierarchyLineClass,
+                                                            )}
+                                                        />
+                                                    ) : null}
+                                                </div>
+                                            ) : null}
                                             <Tooltip>
                                                 <TooltipTrigger asChild>
                                                     <span className="block truncate cursor-help">

@@ -14,28 +14,20 @@ import {
     useProductCommissionRuleAgents,
     useProductCommissionRules
 } from '@/local-db'
-import { getAppliedCurrencyConversion } from '@/lib/orderCurrency'
 import { cn, formatCurrency } from '@/lib/utils'
 import { Button } from '@/ui/components/button'
+import {
+    buildProductCommissionPreviewRows,
+    type ProductCommissionPreviewItem,
+    type ProductCommissionPreviewRow
+} from './productCommissionCalculation'
 import { useCommissionAgentDirectory } from './useCommissionAgentDirectory'
 
-export type ProductCommissionPreviewItem = {
-    id?: string
-    productId: string
-    productName: string
-    quantity: number
-    convertedUnitPrice?: number
-    lineTotal?: number
-}
+export type { ProductCommissionPreviewItem, ProductCommissionPreviewRow } from './productCommissionCalculation'
 
 export type ProductCommissionPreviewAgent = {
     id: string
     name: string
-}
-
-type ProductCommissionPreviewRow = {
-    total: number
-    unavailableConversion: boolean
 }
 
 type ProductCommissionBalance = {
@@ -243,7 +235,7 @@ export function buildProductCommissionSettlementActions({
 }
 
 /** A total is only meaningful when every qualifying line has an exchange rate. */
-export function getProductCommissionPreviewTotal(rows: readonly ProductCommissionPreviewRow[]) {
+export function getProductCommissionPreviewTotal(rows: readonly Pick<ProductCommissionPreviewRow, 'total' | 'unavailableConversion'>[]) {
     if (rows.some((row) => row.unavailableConversion)) return null
     return rows.reduce((sum, row) => sum + row.total, 0)
 }
@@ -341,31 +333,15 @@ export function ProductCommissionPreview({
     const commissionDirectory = useCommissionAgentDirectory(orderId ? workspaceId : undefined)
     const now = new Date().toISOString()
     const agentNameById = useMemo(() => new Map(agents.map((agent) => [agent.id, agent.name])), [agents])
-    const rows = useMemo(() => items.flatMap((item) => {
-        const rule = activeProductCommissionRule(rules, item.productId, now)
-        if (!rule || Number(item.quantity || 0) <= 0) return []
-        const allowed = rule.recipientScope === 'all_assigned'
-            ? agentIds
-            : agentIds.filter((agentId) => recipients.some((recipient) => recipient.ruleId === rule.id && recipient.agentId === agentId))
-        if (allowed.length === 0) return []
-        const basePerUnit = Math.max(0, Number(item.convertedUnitPrice || 0))
-        const fixedConversion = rule.commissionType === 'fixed_amount' && rule.fixedCurrency
-            ? getAppliedCurrencyConversion(Number(rule.fixedAmount || 0), rule.fixedCurrency, currency, exchangeRates)
-            : null
-        const unavailableConversion = rule.commissionType === 'fixed_amount' && !fixedConversion
-        const perUnit = rule.commissionType === 'fixed_amount'
-            ? Number(fixedConversion?.convertedAmount || 0)
-            : basePerUnit * Number(rule.ratePercent || 0) / 100
-        return allowed.map((agentId) => ({
-            item,
-            agentId,
-            agentName: agentNameById.get(agentId) || t('salesAgentCommissions.salesAgent'),
-            perUnit,
-            total: perUnit * Number(item.quantity || 0),
-            rule,
-            unavailableConversion
-        }))
-    }), [agentIds, agentNameById, currency, exchangeRates, items, now, recipients, rules, t])
+    const rows = useMemo(() => buildProductCommissionPreviewRows({
+        items,
+        agentIds,
+        rules,
+        recipients,
+        currency,
+        exchangeRates,
+        at: now
+    }), [agentIds, currency, exchangeRates, items, now, recipients, rules])
     const total = useMemo(() => getProductCommissionPreviewTotal(rows), [rows])
     const paymentSummaries = useMemo(() => (
         orderId
@@ -422,13 +398,13 @@ export function ProductCommissionPreview({
             </div>
             <p className="text-xs text-muted-foreground">{t('salesAgentCommissions.productCommission.previewHint')}</p>
             <div className="space-y-2">
-                {rows.map(({ item, agentId, agentName, perUnit, total, rule, unavailableConversion }) => (
+                {rows.map(({ item, agentId, perUnit, total, rule, unavailableConversion }) => (
                     <div key={`${item.id || item.productId}:${rule.id}:${agentId}`} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-background/70 px-3 py-2 text-sm">
                         <div>
                             <div className="font-medium">{item.productName}</div>
                             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                                 <UserRound className="h-3 w-3" />
-                                <span>{agentName}</span>
+                                <span>{agentNameById.get(agentId) || t('salesAgentCommissions.salesAgent')}</span>
                                 <span>·</span>
                                 <span>{unavailableConversion
                                     ? t('salesAgentCommissions.errors.commissionExchangeRateUnavailable')

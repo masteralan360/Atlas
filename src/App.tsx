@@ -131,6 +131,9 @@ const Members = lazy(() =>
 const Settings = lazy(() =>
   import("@/ui/pages/Settings").then((m) => ({ default: m.Settings })),
 );
+const Logs = lazy(() =>
+  import("@/ui/pages/Logs").then((m) => ({ default: m.Logs })),
+);
 const Help = lazy(() =>
   import("@/ui/pages/Help").then((m) => ({ default: m.Help })),
 );
@@ -2445,6 +2448,13 @@ function App() {
                         >
                           <Layout>
                             <Settings />
+                          </Layout>
+                        </ProtectedRoute>
+                      </Route>
+                      <Route path="/logs">
+                        <ProtectedRoute allowedRoles={["admin"]}>
+                          <Layout>
+                            <Logs />
                           </Layout>
                         </ProtectedRoute>
                       </Route>

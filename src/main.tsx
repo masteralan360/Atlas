@@ -1,3 +1,4 @@
+import '@/lib/consoleErrorCapture'
 import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { requestPersistentStorage } from '@/local-db/storagePersist'

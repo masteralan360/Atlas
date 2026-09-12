@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
-import { BadgeCheck, CalendarDays, ChevronDown, CircleCheck, CircleDashed, CircleDollarSign, Clock3, CreditCard, EllipsisVertical, Eye, LayoutGrid, List, ListFilter, Loader2, Lock, Package, PackageCheck, PackagePlus, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse, XCircle, type LucideIcon } from 'lucide-react'
+import { BadgeCheck, CalendarDays, ChevronDown, CircleCheck, CircleDashed, CircleDollarSign, Clock3, CreditCard, EllipsisVertical, Eye, HandCoins, LayoutGrid, List, ListFilter, Loader2, Lock, Package, PackageCheck, PackagePlus, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse, XCircle, type LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLocalizedOrderError } from '@/lib/orderErrors'
 import type { PaymentMethodOption } from '@/lib/paymentMethods'
@@ -47,6 +47,8 @@ import {
     useCustomers,
     useInventory,
     useProducts,
+    useProductCommissionRuleAgents,
+    useProductCommissionRules,
     usePurchaseOrders,
     useSalesOrders,
     useStorages,
@@ -126,6 +128,9 @@ import {
     CommissionFeatureBoundary,
     useOptionalCommissionFeatureData
 } from '@/ui/components/commissions/useCommissionAgentDirectory'
+import { getProductCommissionPreviewTotal } from '@/ui/components/commissions/ProductCommissionPreview'
+import { buildProductCommissionPreviewRows } from '@/ui/components/commissions/productCommissionCalculation'
+import { getProductCommissionPreviewAgentIds } from '@/ui/components/commissions/productCommissionAgent'
 
 type OrderTab = 'sales' | 'purchase'
 type StatusFilter = 'all' | 'draft' | 'pending' | 'ordered' | 'received' | 'completed' | 'cancelled'
@@ -359,15 +364,18 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const purchaseOrders = usePurchaseOrders(workspaceId)
     const commissionData = useOptionalCommissionFeatureData()
     const salesAgentCommissionsEnabled = Boolean(commissionData)
-    const canViewAllSalesAgentAssignments = hasEffectiveSalesAgentCommissionPermission(
-        user?.role,
-        permissionKeys,
-        'salesAgentCommissions.viewAll'
-    ) || hasEffectiveSalesAgentCommissionPermission(
+    const productCommissionRules = useProductCommissionRules(salesAgentCommissionsEnabled ? workspaceId : undefined)
+    const productCommissionRecipients = useProductCommissionRuleAgents(salesAgentCommissionsEnabled ? workspaceId : undefined)
+    const canAssignSalesAgentCommissions = hasEffectiveSalesAgentCommissionPermission(
         user?.role,
         permissionKeys,
         'salesAgentCommissions.assignOrders'
     )
+    const canViewAllSalesAgentAssignments = hasEffectiveSalesAgentCommissionPermission(
+        user?.role,
+        permissionKeys,
+        'salesAgentCommissions.viewAll'
+    ) || canAssignSalesAgentCommissions
     const canViewOwnSalesAgentAssignments = hasEffectiveSalesAgentCommissionPermission(
         user?.role,
         permissionKeys,
@@ -386,6 +394,50 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         })
         return [orderId, agents] as const
     })), [activeSalesAgentAssignmentsByOrderId, canViewAllSalesAgentAssignments, canViewOwnSalesAgentAssignments, commissionData?.agentById, user?.id])
+    const productCommissionPreviewAgentIdsByOrderId = useMemo(() => new Map(salesOrders.map((order) => [
+        order.id,
+        getProductCommissionPreviewAgentIds({
+            activeAssignments: activeSalesAgentAssignmentsByOrderId.get(order.id) || [],
+            agents: commissionData?.agents.map((entry) => entry.agent) || [],
+            getAgent: (agentId) => commissionData?.agentById.get(agentId)?.agent,
+            userId: user?.id,
+            orderCreatedBy: order.createdBy,
+            canAssignSalesAgents: canAssignSalesAgentCommissions,
+            canViewAllAgentCommissions: canViewAllSalesAgentAssignments,
+            canViewOwnAgentCommissions: canViewOwnSalesAgentAssignments
+        })
+    ])), [
+        activeSalesAgentAssignmentsByOrderId,
+        canAssignSalesAgentCommissions,
+        canViewAllSalesAgentAssignments,
+        canViewOwnSalesAgentAssignments,
+        commissionData?.agentById,
+        commissionData?.agents,
+        salesOrders,
+        user?.id
+    ])
+    const productCommissionTotalBySalesOrderId = useMemo(() => {
+        if (!salesAgentCommissionsEnabled) return new Map<string, number | null>()
+        const at = new Date().toISOString()
+        return new Map(salesOrders.map((order) => [
+            order.id,
+            getProductCommissionPreviewTotal(buildProductCommissionPreviewRows({
+                items: order.items,
+                agentIds: productCommissionPreviewAgentIdsByOrderId.get(order.id) || [],
+                rules: productCommissionRules,
+                recipients: productCommissionRecipients,
+                currency: order.currency,
+                exchangeRates: order.exchangeRates || [],
+                at
+            }))
+        ]))
+    }, [
+        productCommissionPreviewAgentIdsByOrderId,
+        productCommissionRecipients,
+        productCommissionRules,
+        salesAgentCommissionsEnabled,
+        salesOrders
+    ])
     const defaultStorageId = getPrimaryStorageFromList(storages)?.id || ''
     const unitRegistry = useUnitRegistry(workspaceId)
 
@@ -595,8 +647,8 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     }, [dateFilteredPurchaseOrders, search, statusFilter, paymentFilter])
 
     const summaryOrders = useMemo(
-        () => [...dateFilteredSalesOrders, ...dateFilteredPurchaseOrders],
-        [dateFilteredSalesOrders, dateFilteredPurchaseOrders]
+        () => activeTab === 'sales' ? filteredSalesOrders : filteredPurchaseOrders,
+        [activeTab, filteredPurchaseOrders, filteredSalesOrders]
     )
     const orderValueOrders = useMemo(
         () => summaryOrders.filter((order) => order.status !== 'cancelled'),
@@ -619,9 +671,39 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         () => orderValueOrders.reduce((total, order) => total + convertCurrencyAmountWithLiveRates(order.total, order.currency, workspaceCurrency, liveRates), 0),
         [orderValueOrders, workspaceCurrency, liveRates]
     )
+    const productCommissionValueEntries = useMemo(() => {
+        if (activeTab !== 'sales' || !salesAgentCommissionsEnabled) return []
+        const totalsByCurrency = new Map<string, { total: number; unavailableConversion: boolean }>()
+        for (const order of filteredSalesOrders) {
+            const summary = totalsByCurrency.get(order.currency) || { total: 0, unavailableConversion: false }
+            const total = productCommissionTotalBySalesOrderId.get(order.id)
+            if (total === null) summary.unavailableConversion = true
+            else summary.total += total || 0
+            totalsByCurrency.set(order.currency, summary)
+        }
+        return [...totalsByCurrency.entries()]
+            .map(([currency, summary]) => ({ currency, ...summary }))
+            .sort((left, right) => {
+                if (left.currency === workspaceCurrency) return -1
+                if (right.currency === workspaceCurrency) return 1
+                return left.currency.localeCompare(right.currency)
+            })
+    }, [
+        activeTab,
+        filteredSalesOrders,
+        productCommissionTotalBySalesOrderId,
+        salesAgentCommissionsEnabled,
+        workspaceCurrency
+    ])
+    const productCommissionValueInWorkspaceCurrency = useMemo(() => {
+        if (productCommissionValueEntries.some((entry) => entry.unavailableConversion)) return null
+        return productCommissionValueEntries.reduce((total, entry) => (
+            total + convertCurrencyAmountWithLiveRates(entry.total, entry.currency as CurrencyCode, workspaceCurrency, liveRates)
+        ), 0)
+    }, [liveRates, productCommissionValueEntries, workspaceCurrency])
     const pendingFulfillmentCount = useMemo(
-        () => dateFilteredSalesOrders.filter((order) => order.status === 'pending').length,
-        [dateFilteredSalesOrders]
+        () => activeTab === 'sales' ? summaryOrders.filter((order) => order.status === 'pending').length : 0,
+        [activeTab, summaryOrders]
     )
     const outstandingPayments = useMemo(() => summaryOrders.reduce((summary, order) => {
         if (order.status === 'draft' || order.status === 'cancelled' || ('returnStatus' in order && order.returnStatus === 'full')) {
@@ -645,12 +727,18 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     )
     const previousOrderCount = useMemo(() => {
         if (!previousDateRange) return null
-        return [...salesOrders, ...purchaseOrders].filter((order) => {
+        const orders = activeTab === 'sales' ? salesOrders : purchaseOrders
+        return orders.filter((order) => {
             const createdAt = new Date(order.createdAt)
             return createdAt >= previousDateRange.start && createdAt < previousDateRange.end
         }).length
-    }, [previousDateRange, salesOrders, purchaseOrders])
-    const totalOrdersTrend = previousOrderCount && previousOrderCount > 0
+    }, [activeTab, previousDateRange, purchaseOrders, salesOrders])
+    const hasAdditionalTableFilters = statusFilter !== 'all'
+        || paymentFilter !== 'all'
+        || ecommerceFilter !== 'all'
+        || Boolean(search.trim())
+        || fulfillmentDateRange !== 'allTime'
+    const totalOrdersTrend = !hasAdditionalTableFilters && previousOrderCount && previousOrderCount > 0
         ? ((summaryOrders.length - previousOrderCount) / previousOrderCount) * 100
         : null
 
@@ -1424,6 +1512,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                             {activeTab === 'sales' && salesAgentCommissionsEnabled ? <TableHead>{t('salesAgentCommissions.salesAgent')}</TableHead> : null}
                             <TableHead>{t('orders.table.items') || 'Items'}</TableHead>
                             <TableHead>{t('common.status') || 'Status'}</TableHead>
+                            {activeTab === 'sales' && salesAgentCommissionsEnabled ? <TableHead>{t('orders.table.totalCommission')}</TableHead> : null}
                             <TableHead>{t('common.total') || 'Total'}</TableHead>
                             <TableHead>{t('orders.form.date') || 'Date'}</TableHead>
                             <TableHead>{t('orders.table.fulfilledDate', { defaultValue: 'Fulfilled date' })}</TableHead>
@@ -1434,7 +1523,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                     <TableBody>
                         {rows.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={9 + (activeTab === 'sales' && salesAgentCommissionsEnabled ? 1 : 0)} className="py-12 text-center text-muted-foreground">
+                                <TableCell colSpan={9 + (activeTab === 'sales' && salesAgentCommissionsEnabled ? 2 : 0)} className="py-12 text-center text-muted-foreground">
                                     {t('common.noData') || 'No data available'}
                                 </TableCell>
                             </TableRow>
@@ -1446,6 +1535,9 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                             const canDelete = canDeleteOrders && isDraft
                             const returnStatus = activeTab === 'sales' ? (row as SalesOrder).returnStatus : 'none'
                             const isFullyReturnedSalesOrder = activeTab === 'sales' && returnStatus === 'full'
+                            const productCommissionTotal = activeTab === 'sales' && salesAgentCommissionsEnabled
+                                ? productCommissionTotalBySalesOrderId.get(row.id)
+                                : undefined
 
                             return (
                                 <TableRow key={row.id} className={isApprovalRequested ? 'bg-violet-50/70 hover:bg-violet-50 dark:bg-violet-950/20 dark:hover:bg-violet-950/30' : undefined}>
@@ -1500,6 +1592,13 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                             ) : null}
                                         </div>
                                     </TableCell>
+                                    {activeTab === 'sales' && salesAgentCommissionsEnabled ? (
+                                        <TableCell className="font-semibold tabular-nums">
+                                            {productCommissionTotal === null
+                                                ? '—'
+                                                : formatCurrency(productCommissionTotal || 0, row.currency, features.iqd_display_preference)}
+                                        </TableCell>
+                                    ) : null}
                                     <TableCell>{formatCurrency(row.total, row.currency, features.iqd_display_preference)}</TableCell>
                                     <TableCell>{formatDate(row.createdAt)}</TableCell>
                                     <TableCell>{row.actualDeliveryDate ? formatDate(row.actualDeliveryDate) : '—'}</TableCell>
@@ -1564,6 +1663,9 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                     const canDelete = canDeleteOrders && isDraft
                     const returnStatus = activeTab === 'sales' ? (row as SalesOrder).returnStatus : 'none'
                     const isFullyReturnedSalesOrder = activeTab === 'sales' && returnStatus === 'full'
+                    const productCommissionTotal = activeTab === 'sales' && salesAgentCommissionsEnabled
+                        ? productCommissionTotalBySalesOrderId.get(row.id)
+                        : undefined
 
                     return (
                         <div
@@ -1635,11 +1737,24 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-3 gap-2 py-3 border-y border-border/50">
+                            <div className={cn(
+                                'grid gap-2 border-y border-border/50 py-3',
+                                activeTab === 'sales' && salesAgentCommissionsEnabled ? 'grid-cols-4' : 'grid-cols-3'
+                            )}>
                                 <div className="text-center">
                                     <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-tight">{t('orders.table.items') || 'Items'}</div>
                                     <div className="text-[11px] font-bold">{row.items.length}</div>
                                 </div>
+                                {activeTab === 'sales' && salesAgentCommissionsEnabled ? (
+                                    <div className="text-center border-s border-border/50">
+                                        <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-tight">{t('orders.table.totalCommission')}</div>
+                                        <div className="text-[11px] font-bold text-violet-700 dark:text-violet-300">
+                                            {productCommissionTotal === null
+                                                ? '—'
+                                                : formatCurrency(productCommissionTotal || 0, row.currency, features.iqd_display_preference)}
+                                        </div>
+                                    </div>
+                                ) : null}
                                 <div className="text-center border-s border-border/50">
                                     <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-tight">{t('common.total') || 'Total'}</div>
                                     <div className="text-[11px] font-bold text-primary">{formatCurrency(row.total, row.currency, features.iqd_display_preference)}</div>
@@ -1796,7 +1911,10 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                 </div>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className={cn(
+                'grid gap-4 sm:grid-cols-2',
+                salesAgentCommissionsEnabled ? 'xl:grid-cols-5' : 'xl:grid-cols-4'
+            )}>
                 <Card className="rounded-2xl border-border/80 shadow-none">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                         <CardTitle className="text-sm font-semibold text-muted-foreground">
@@ -1821,12 +1939,62 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                             ) : null}
                         </div>
                         <p className="mt-1.5 text-xs text-muted-foreground">
-                            {dateFilteredSalesOrders.length} {t('orders.summary.sales', { defaultValue: 'sales' })}
-                            <span className="px-1.5">·</span>
-                            {dateFilteredPurchaseOrders.length} {t('orders.summary.purchase', { defaultValue: 'purchase' })}
+                            {summaryOrders.length} {activeTab === 'sales'
+                                ? t('orders.summary.sales', { defaultValue: 'sales' })
+                                : t('orders.summary.purchase', { defaultValue: 'purchase' })}
                         </p>
                     </CardContent>
                 </Card>
+
+                {salesAgentCommissionsEnabled ? (
+                    <Card className="rounded-2xl border-violet-500/20 bg-violet-500/[0.025] shadow-none">
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                            <CardTitle className="text-sm font-semibold text-muted-foreground">
+                                {t('orders.summary.agentCommissionTotal')}
+                            </CardTitle>
+                            <span className="rounded-xl bg-violet-500/10 p-2 text-violet-700 dark:text-violet-300">
+                                <HandCoins className="h-4 w-4" />
+                            </span>
+                        </CardHeader>
+                        <CardContent className="pt-0">
+                            <TooltipProvider delayDuration={300}>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <div className="cursor-help">
+                                            {productCommissionValueEntries.length > 0 ? productCommissionValueEntries.map((entry, index) => (
+                                                <div
+                                                    key={entry.currency}
+                                                    className={cn(
+                                                        'font-black leading-tight tracking-tight',
+                                                        index === 0 ? 'text-3xl' : 'mt-1 text-base text-muted-foreground'
+                                                    )}
+                                                >
+                                                    {entry.unavailableConversion
+                                                        ? '—'
+                                                        : formatCurrency(entry.total, entry.currency, features.iqd_display_preference)}
+                                                </div>
+                                            )) : (
+                                                <div className="text-3xl font-black tracking-tight">
+                                                    {formatCurrency(0, workspaceCurrency, features.iqd_display_preference)}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="bottom" align="start" className="space-y-1 p-3">
+                                        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                                            {t('orders.summary.totalIn', { currency: workspaceCurrency.toUpperCase() })}
+                                        </div>
+                                        <div className="text-base font-black">
+                                            {productCommissionValueInWorkspaceCurrency === null
+                                                ? '—'
+                                                : formatCurrency(productCommissionValueInWorkspaceCurrency, workspaceCurrency, features.iqd_display_preference)}
+                                        </div>
+                                    </TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                        </CardContent>
+                    </Card>
+                ) : null}
 
                 <Card className="rounded-2xl border-border/80 shadow-none">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">

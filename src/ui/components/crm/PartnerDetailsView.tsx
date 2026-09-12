@@ -119,7 +119,7 @@ type AgentCurrencyPerformance = CurrencyAmountItem & {
 }
 type RelatedTransaction = {
     id: string
-    source: 'sales_order' | 'purchase_order' | 'loan' | 'simple_loan' | 'direct_transaction' | 'clinical_appointment' | 'delivery_shipment' | 'delivery_settlement' | 'delivery_recipient_payout'
+    source: 'sales_order' | 'purchase_order' | 'loan' | 'simple_loan' | 'pos_sale_loan' | 'pos_sale_installment_loan' | 'direct_transaction' | 'clinical_appointment' | 'delivery_shipment' | 'delivery_settlement' | 'delivery_recipient_payout'
     reference: string
     displayDate: string
     sortDate: string
@@ -205,6 +205,10 @@ function sourceLabel(source: ActivitySource, t: TranslationFn) {
             return t('orders.tabs.purchase', { defaultValue: 'Purchase Order' })
         case 'simple_loan':
             return t('loans.simpleTab', { defaultValue: 'Loans' })
+        case 'pos_sale_loan':
+            return t('loans.posSaleLoan', { defaultValue: 'POS Sale Loan' })
+        case 'pos_sale_installment_loan':
+            return t('loans.posSaleInstallmentLoan', { defaultValue: 'POS Sale Installment Loan' })
         case 'direct_transaction':
             return t('ledger.type.direct_transaction', { defaultValue: 'Direct Transaction' })
         case 'clinical_appointment':
@@ -224,6 +228,9 @@ function sourceBadgeClass(source: ActivitySource) {
     switch (source) {
         case 'pos_sale':
             return 'border-indigo-200 bg-indigo-500/10 text-indigo-700'
+        case 'pos_sale_loan':
+        case 'pos_sale_installment_loan':
+            return 'border-indigo-200 bg-indigo-500/10 text-indigo-700'
         case 'sales_order':
             return 'border-emerald-200 bg-emerald-500/10 text-emerald-700'
         case 'purchase_order':
@@ -241,6 +248,10 @@ function sourceBadgeClass(source: ActivitySource) {
         default:
             return 'border-orange-200 bg-orange-500/10 text-orange-700'
     }
+}
+
+function isPosSaleLoanSource(source: ActivitySource) {
+    return source === 'pos_sale_loan' || source === 'pos_sale_installment_loan'
 }
 
 function statusBadgeClass(status: string) {
@@ -404,11 +415,20 @@ function normalizeLoan(
         : ''
     const installmentSourceReference = linkedSaleReference
         || (loan.saleId ? `SALE-${loan.saleId.slice(0, 8).toUpperCase()}` : loan.loanNo)
+    const reference = loan.source === 'pos' && linkedSaleReference
+        ? `${linkedSaleReference} · ${loan.loanNo}`
+        : loan.loanNo
 
     return {
         id: loan.id,
-        source: isSimpleLoan(loan) ? 'simple_loan' : 'loan',
-        reference: loan.loanNo,
+        source: loan.source === 'pos'
+            ? isSimpleLoan(loan)
+                ? 'pos_sale_loan'
+                : 'pos_sale_installment_loan'
+            : isSimpleLoan(loan)
+                ? 'simple_loan'
+                : 'loan',
+        reference,
         displayDate: loan.createdAt,
         sortDate: loan.updatedAt || loan.createdAt,
         activityDate: loan.updatedAt || loan.createdAt,
@@ -2875,9 +2895,15 @@ export function PartnerDetailsView({
                                                         <TableCell>{formatDate(tx.displayDate)}</TableCell>
                                                         <TableCell>
                                                             <div className="flex flex-col items-start gap-1">
-                                                                <span className={cn('inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide', sourceBadgeClass(tx.source))}>
-                                                                    {sourceLabel(tx.source, t)}
-                                                                </span>
+                                                                {isPosSaleLoanSource(tx.source) ? (
+                                                                    <span className="text-xs font-bold text-foreground">
+                                                                        {sourceLabel(tx.source, t)}
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className={cn('inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide', sourceBadgeClass(tx.source))}>
+                                                                        {sourceLabel(tx.source, t)}
+                                                                    </span>
+                                                                )}
                                                                 {tx.financingLabel ? (
                                                                     <span className="inline-flex rounded-full border border-orange-200 bg-orange-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-orange-700">
                                                                         {tx.financingLabel}

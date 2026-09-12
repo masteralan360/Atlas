@@ -119,7 +119,7 @@ import {
     ProductCommissionPreview,
     type ProductCommissionPreviewAgent
 } from '@/ui/components/commissions/ProductCommissionPreview'
-import { findOwnedOrderCreatorProductCommissionAgent } from '@/ui/components/commissions/productCommissionAgent'
+import { getProductCommissionPreviewAgentIds } from '@/ui/components/commissions/productCommissionAgent'
 import { useCommissionAgentDirectory } from '@/ui/components/commissions/useCommissionAgentDirectory'
 
 function statusLabel(t: (key: string) => string, status: string) {
@@ -375,32 +375,24 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.viewOwn')
     const canPaySalesAgentCommissions = salesAgentCommissionsEnabled
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.pay')
-    const ownedOrderCreatorProductCommissionAgent = useMemo(() => (
-        findOwnedOrderCreatorProductCommissionAgent(
-            commissionAgentDirectory.agents.map((entry) => entry.agent),
-            user?.id,
-            salesOrder?.createdBy
-        )
-    ), [commissionAgentDirectory.agents, salesOrder?.createdBy, user?.id])
     const productCommissionPreviewAgentIds = useMemo(() => {
         if (!salesOrder) return []
-        const agentIds = new Set(getActiveSalesOrderAgentAssignments(salesOrderAgentAssignments, salesOrder.id)
-            .filter((assignment) => {
-                if (canAssignSalesAgents || canViewAllAgentCommissions) return true
-                const userId = user?.id
-                if (!canViewOwnAgentCommissions || !userId) return false
-                const agent = commissionAgentDirectory.agentById.get(assignment.agentId)
-                return agent?.agent.linkedUserId === userId
-            })
-            .map((assignment) => assignment.agentId))
-        if (ownedOrderCreatorProductCommissionAgent) agentIds.add(ownedOrderCreatorProductCommissionAgent.id)
-        return [...agentIds]
+        return getProductCommissionPreviewAgentIds({
+            activeAssignments: getActiveSalesOrderAgentAssignments(salesOrderAgentAssignments, salesOrder.id),
+            agents: commissionAgentDirectory.agents.map((entry) => entry.agent),
+            getAgent: (agentId) => commissionAgentDirectory.agentById.get(agentId)?.agent,
+            userId: user?.id,
+            orderCreatedBy: salesOrder.createdBy,
+            canAssignSalesAgents,
+            canViewAllAgentCommissions,
+            canViewOwnAgentCommissions
+        })
     }, [
         canAssignSalesAgents,
         canViewAllAgentCommissions,
         canViewOwnAgentCommissions,
         commissionAgentDirectory.agentById,
-        ownedOrderCreatorProductCommissionAgent,
+        commissionAgentDirectory.agents,
         salesOrder,
         salesOrderAgentAssignments,
         user?.id

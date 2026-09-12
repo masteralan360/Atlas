@@ -4,7 +4,7 @@ import { Link, useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 import type { i18n as I18n } from 'i18next'
 
-import { isSupabaseConfigured, useAuth } from '@/auth'
+import { isSupabaseConfigured, supabase, useAuth } from '@/auth'
 import {
     PARTNER_ACCOUNT_STATEMENT_TEMPLATE_KEY,
     buildCustomTemplateLayoutPdf,
@@ -19,6 +19,18 @@ import {
 } from '@/lib/customTemplates'
 import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
 import {
+    createPartnerAccountStatementTemplateConfiguration,
+    DEFAULT_PARTNER_ACCOUNT_STATEMENT_TEMPLATE_CONFIGURATION,
+    getPartnerAccountStatementSummaryLabelColumn,
+    getPartnerAccountStatementVisibleColumns,
+    PARTNER_ACCOUNT_STATEMENT_ACTIVITY_TEMPLATE_KEY,
+    readPartnerAccountStatementTemplate,
+    serializePartnerAccountStatementTemplate,
+    type PartnerAccountStatementColumnId,
+    type PartnerAccountStatementTemplate,
+    type PartnerAccountStatementTemplateConfiguration
+} from '@/lib/partnerAccountStatementTemplates'
+import {
     buildPartnerAccountStatementLedger,
     type PartnerAccountStatementCurrencyLedger,
     type PartnerAccountStatementEntry,
@@ -31,19 +43,19 @@ import {
 } from '@/lib/partnerAccountStatementPresentation'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { getLoanDetailsPath } from '@/lib/loanPresentation'
+import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import type { CustomTemplateLayout } from '@/lib/printPreviewEditorStore'
 import { cn, formatCurrency, formatDate } from '@/lib/utils'
 import { usePartnerAccountStatement } from '@/hooks/usePartnerAccountStatement'
-import { isAgentBusinessPartnerRole, useWorkspaceContacts } from '@/local-db'
+import {
+    deleteLocalCustomTemplate,
+    isAgentBusinessPartnerRole,
+    saveLocalCustomTemplate,
+    useWorkspaceContacts
+} from '@/local-db'
 import type { DateRangeType } from '@/context/DateRangeContext'
 import type { PrintFormat } from '@/services/pdfGenerator'
 import {
-    AppDialog,
-    AppDialogBody,
-    AppDialogContent,
-    AppDialogFooter,
-    AppDialogHeader,
-    AppDialogTitle,
     Button,
     Card,
     CardContent,
@@ -60,18 +72,14 @@ import {
     TableCell,
     TableHead,
     TableHeader,
-    TableRow,
-    Switch
+    TableRow
 } from '@/ui/components'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
+import { PartnerAccountStatementTemplateDialog } from '@/ui/components/crm/PartnerAccountStatementTemplateDialog'
 import type { PartnerAccountStatementPrintData } from '@/ui/components/crm/PartnerAccountStatementPrintTemplate'
 import { useWorkspace } from '@/workspace'
 
 const ACCOUNT_STATEMENT_PATH = '/business-partners/account-statement'
-
-function orderItemDisplayPreferenceKey(workspaceId: string, partnerId: string) {
-    return `atlas:partner-account-statement:show-order-items:${workspaceId}:${partnerId}`
-}
 
 function readPartnerSelection(location: string) {
     const searchParams = new URLSearchParams(location.split('?')[1] || '')
@@ -94,6 +102,8 @@ function entryLabel(
         direct_transaction: t('ledger.type.direct_transaction', { defaultValue: 'Direct Transaction' }),
         loan_disbursal: t('businessPartners.accountStatement.loanMovement', { defaultValue: 'Loan movement' }),
         loan_repayment: t('businessPartners.accountStatement.loanRepayment', { defaultValue: 'Loan repayment' }),
+        pos_sale_loan: t('loans.posSaleLoan', { defaultValue: 'POS Sale Loan' }),
+        pos_sale_installment_loan: t('loans.posSaleInstallmentLoan', { defaultValue: 'POS Sale Installment Loan' }),
         installment_sale: t('businessPartners.accountStatement.installmentSale', { defaultValue: 'Installment sale' }),
         agent_commission: t('salesAgentCommissions.title', { defaultValue: 'Sales agent commission' }),
         delivery_post: t('postService.title', { defaultValue: 'Post Service' })
@@ -135,14 +145,38 @@ function entrySourcePath(entry: PartnerAccountStatementEntry) {
     return null
 }
 
+function statementColumnLabel(
+    columnId: PartnerAccountStatementColumnId,
+    t: (key: string, options?: Record<string, unknown>) => string
+) {
+    const labels: Record<PartnerAccountStatementColumnId, [string, string]> = {
+        date: ['common.date', 'Date'],
+        reference: ['common.reference', 'Reference'],
+        type: ['common.type', 'Type'],
+        description: ['common.description', 'Description'],
+        item: ['businessPartners.accountStatement.item', 'Item'],
+        quantity: ['businessPartners.accountStatement.quantity', 'Quantity'],
+        commissionPerProduct: ['salesAgentCommissions.productCommission.perUnit', 'Product commission / unit'],
+        totalProductCommission: ['salesAgentCommissions.productCommission.lineTotal', 'Total product commission'],
+        debit: ['businessPartners.accountStatement.debit', 'Debit'],
+        credit: ['businessPartners.accountStatement.credit', 'Credit'],
+        balance: ['businessPartners.accountStatement.balance', 'Balance']
+    }
+    const [key, defaultValue] = labels[columnId]
+    return t(key, { defaultValue })
+}
+
+function statementColumnIsNumeric(columnId: PartnerAccountStatementColumnId) {
+    return ['quantity', 'commissionPerProduct', 'totalProductCommission', 'debit', 'credit', 'balance'].includes(columnId)
+}
+
 function LedgerCard({
     ledger,
     iqdPreference,
     t,
     i18n,
     language,
-    showItemColumns,
-    showProductCommissionColumns,
+    columns,
     onNavigate
 }: {
     ledger: PartnerAccountStatementCurrencyLedger
@@ -150,11 +184,22 @@ function LedgerCard({
     t: (key: string, options?: Record<string, unknown>) => string
     i18n: I18n
     language: string
-    showItemColumns: boolean
-    showProductCommissionColumns: boolean
+    columns: PartnerAccountStatementColumnId[]
     onNavigate: (path: string) => void
 }) {
     const display = (amount: number) => formatCurrency(Math.abs(amount), ledger.currency, iqdPreference)
+    const summaryLabelColumn = getPartnerAccountStatementSummaryLabelColumn(columns)
+    const summaryValue = (columnId: PartnerAccountStatementColumnId, kind: 'opening' | 'total') => {
+        if (columnId === 'debit') return kind === 'opening'
+            ? ledger.openingBalance > 0 ? display(ledger.openingBalance) : '—'
+            : display(ledger.debitTotal)
+        if (columnId === 'credit') return kind === 'opening'
+            ? ledger.openingBalance < 0 ? display(ledger.openingBalance) : '—'
+            : display(ledger.creditTotal)
+        if (columnId === 'balance') return display(kind === 'opening' ? ledger.openingBalance : ledger.closingBalance)
+        if (columnId === 'totalProductCommission' && kind === 'total') return display(ledger.productCommissionTotal)
+        return null
+    }
     return (
         <Card className="overflow-hidden">
             <CardHeader className="flex-row items-center justify-between gap-3 border-b bg-muted/20 py-4">
@@ -195,36 +240,46 @@ function LedgerCard({
                     <Table>
                         <TableHeader>
                             <TableRow className="bg-muted/30 hover:bg-muted/30">
-                                <TableHead>{t('common.date', { defaultValue: 'Date' })}</TableHead>
-                                <TableHead>{t('common.reference', { defaultValue: 'Reference' })}</TableHead>
-                                <TableHead>{t('common.type', { defaultValue: 'Type' })}</TableHead>
-                                <TableHead>{t('common.description', { defaultValue: 'Description' })}</TableHead>
-                                {showItemColumns ? (
-                                    <>
-                                        <TableHead>{t('businessPartners.accountStatement.item', { defaultValue: 'Item' })}</TableHead>
-                                        <TableHead className="text-right">{t('businessPartners.accountStatement.quantity', { defaultValue: 'Quantity' })}</TableHead>
-                                    </>
-                                ) : null}
-                                {showProductCommissionColumns ? (
-                                    <>
-                                        <TableHead className="min-w-32 text-right">{t('salesAgentCommissions.productCommission.perUnit')}</TableHead>
-                                        <TableHead className="min-w-36 text-right">{t('salesAgentCommissions.productCommission.lineTotal')}</TableHead>
-                                    </>
-                                ) : null}
-                                <TableHead className="text-right">{t('businessPartners.accountStatement.debit', { defaultValue: 'Debit' })}</TableHead>
-                                <TableHead className="text-right">{t('businessPartners.accountStatement.credit', { defaultValue: 'Credit' })}</TableHead>
-                                <TableHead className="text-right">{t('businessPartners.accountStatement.balance', { defaultValue: 'Balance' })}</TableHead>
+                                {columns.map((columnId) => (
+                                    <TableHead
+                                        key={columnId}
+                                        className={cn(
+                                            statementColumnIsNumeric(columnId) && 'text-right',
+                                            columnId === 'description' && 'min-w-48',
+                                            columnId === 'item' && 'min-w-40',
+                                            columnId === 'totalProductCommission' && 'min-w-36',
+                                            columnId === 'commissionPerProduct' && 'min-w-32'
+                                        )}
+                                    >
+                                        {statementColumnLabel(columnId, t)}
+                                    </TableHead>
+                                ))}
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {Math.abs(ledger.openingBalance) > 0.000001 ? (
                                 <TableRow className="bg-muted/20 font-medium">
-                                    <TableCell colSpan={showItemColumns ? showProductCommissionColumns ? 8 : 6 : 4}>{t('businessPartners.accountStatement.openingBalance', { defaultValue: 'Opening balance' })}</TableCell>
-                                    <TableCell className="text-right tabular-nums">{ledger.openingBalance > 0 ? display(ledger.openingBalance) : '—'}</TableCell>
-                                    <TableCell className="text-right tabular-nums">{ledger.openingBalance < 0 ? display(ledger.openingBalance) : '—'}</TableCell>
-                                    <TableCell className={cn('text-right font-bold tabular-nums', balanceClass(ledger.openingBalance))}>
-                                        {display(ledger.openingBalance)}
-                                    </TableCell>
+                                    {columns.map((columnId) => {
+                                        const value = summaryValue(columnId, 'opening')
+                                        const isLabel = columnId === summaryLabelColumn
+                                        return (
+                                            <TableCell
+                                                key={columnId}
+                                                className={cn(
+                                                    statementColumnIsNumeric(columnId) && 'text-right tabular-nums',
+                                                    columnId === 'balance' && balanceClass(ledger.openingBalance),
+                                                    isLabel && value && 'font-semibold'
+                                                )}
+                                            >
+                                                {isLabel && value ? (
+                                                    <span className="flex items-center justify-between gap-3">
+                                                        <span>{t('businessPartners.accountStatement.openingBalance', { defaultValue: 'Opening balance' })}</span>
+                                                        <span className="tabular-nums">{value}</span>
+                                                    </span>
+                                                ) : isLabel ? t('businessPartners.accountStatement.openingBalance', { defaultValue: 'Opening balance' }) : value || null}
+                                            </TableCell>
+                                        )
+                                    })}
                                 </TableRow>
                             ) : null}
                             {ledger.entries.map((entry) => {
@@ -233,36 +288,32 @@ function LedgerCard({
                                 const detail = getPartnerAccountStatementEntryDetail(entry, { t, i18n, language })
                                 const row = (
                                     <TableRow className="cursor-context-menu">
-                                        <TableCell className="whitespace-nowrap">{formatDate(entry.date)}</TableCell>
-                                        <TableCell className="max-w-40 font-medium break-words">{entry.reference}</TableCell>
-                                        <TableCell className="whitespace-nowrap text-muted-foreground">{entryLabel(entry.kind, t)}</TableCell>
-                                        <TableCell className="min-w-48 whitespace-pre-wrap">
-                                            <div>{description}</div>
-                                            {detail ? <div className="mt-0.5 text-xs text-muted-foreground">{detail}</div> : null}
-                                        </TableCell>
-                                        {showItemColumns ? (
-                                            <>
-                                                <TableCell className="min-w-40 whitespace-pre-wrap">{entry.itemName || '—'}</TableCell>
-                                                <TableCell className="text-right tabular-nums whitespace-nowrap">
-                                                    {formatStatementQuantity(entry.quantity, entry.unit, language)}
-                                                </TableCell>
-                                            </>
-                                        ) : null}
-                                        {showProductCommissionColumns ? (
-                                            <>
-                                                <TableCell className="text-right font-medium tabular-nums whitespace-nowrap">
-                                                    {entry.commissionPerProduct == null ? '—' : display(entry.commissionPerProduct)}
-                                                </TableCell>
-                                                <TableCell className="text-right font-medium tabular-nums whitespace-nowrap">
-                                                    {entry.totalProductCommission == null ? '—' : display(entry.totalProductCommission)}
-                                                </TableCell>
-                                            </>
-                                        ) : null}
-                                        <TableCell className="text-right font-medium tabular-nums">{entry.delta > 0 ? display(entry.delta) : '—'}</TableCell>
-                                        <TableCell className="text-right font-medium tabular-nums">{entry.delta < 0 ? display(entry.delta) : '—'}</TableCell>
-                                        <TableCell className={cn('text-right font-bold tabular-nums', balanceClass(entry.runningBalance))}>
-                                            {display(entry.runningBalance)}
-                                        </TableCell>
+                                        {columns.map((columnId) => {
+                                            switch (columnId) {
+                                                case 'date':
+                                                    return <TableCell key={columnId} className="whitespace-nowrap">{formatDate(entry.date)}</TableCell>
+                                                case 'reference':
+                                                    return <TableCell key={columnId} className="max-w-40 font-medium break-words">{entry.reference}</TableCell>
+                                                case 'type':
+                                                    return <TableCell key={columnId} className="whitespace-nowrap text-muted-foreground">{entryLabel(entry.kind, t)}</TableCell>
+                                                case 'description':
+                                                    return <TableCell key={columnId} className="min-w-48 whitespace-pre-wrap"><div>{description}</div>{detail ? <div className="mt-0.5 text-xs text-muted-foreground">{detail}</div> : null}</TableCell>
+                                                case 'item':
+                                                    return <TableCell key={columnId} className="min-w-40 whitespace-pre-wrap">{entry.itemName || '—'}</TableCell>
+                                                case 'quantity':
+                                                    return <TableCell key={columnId} className="text-right tabular-nums whitespace-nowrap">{formatStatementQuantity(entry.quantity, entry.unit, language)}</TableCell>
+                                                case 'commissionPerProduct':
+                                                    return <TableCell key={columnId} className="text-right font-medium tabular-nums whitespace-nowrap">{entry.commissionPerProduct == null ? '—' : display(entry.commissionPerProduct)}</TableCell>
+                                                case 'totalProductCommission':
+                                                    return <TableCell key={columnId} className="text-right font-medium tabular-nums whitespace-nowrap">{entry.totalProductCommission == null ? '—' : display(entry.totalProductCommission)}</TableCell>
+                                                case 'debit':
+                                                    return <TableCell key={columnId} className="text-right font-medium tabular-nums">{entry.delta > 0 ? display(entry.delta) : '—'}</TableCell>
+                                                case 'credit':
+                                                    return <TableCell key={columnId} className="text-right font-medium tabular-nums">{entry.delta < 0 ? display(entry.delta) : '—'}</TableCell>
+                                                case 'balance':
+                                                    return <TableCell key={columnId} className={cn('text-right font-bold tabular-nums', balanceClass(entry.runningBalance))}>{display(entry.runningBalance)}</TableCell>
+                                            }
+                                        })}
                                     </TableRow>
                                 )
 
@@ -270,13 +321,7 @@ function LedgerCard({
                                     <ContextMenu key={entry.id}>
                                         <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
                                         <ContextMenuContent className="w-52">
-                                            <ContextMenuItem
-                                                className="gap-2"
-                                                disabled={!sourcePath}
-                                                onSelect={() => {
-                                                    if (sourcePath) onNavigate(sourcePath)
-                                                }}
-                                            >
+                                            <ContextMenuItem className="gap-2" disabled={!sourcePath} onSelect={() => { if (sourcePath) onNavigate(sourcePath) }}>
                                                 <FileText className="h-4 w-4" />
                                                 {sourcePath
                                                     ? t('common.view', { defaultValue: 'View' })
@@ -287,12 +332,24 @@ function LedgerCard({
                                 )
                             })}
                             <TableRow className="bg-muted/30 font-bold hover:bg-muted/30">
-                                <TableCell colSpan={showItemColumns ? showProductCommissionColumns ? 8 : 6 : 4} className="text-right">{t('common.total', { defaultValue: 'Total' })}</TableCell>
-                                <TableCell className="text-right tabular-nums">{display(ledger.debitTotal)}</TableCell>
-                                <TableCell className="text-right tabular-nums">{display(ledger.creditTotal)}</TableCell>
-                                <TableCell className={cn('text-right tabular-nums', balanceClass(ledger.closingBalance))}>
-                                    {display(ledger.closingBalance)}
-                                </TableCell>
+                                {columns.map((columnId) => {
+                                    const value = summaryValue(columnId, 'total')
+                                    const isLabel = columnId === summaryLabelColumn
+                                    return (
+                                        <TableCell key={columnId} className={cn(
+                                            statementColumnIsNumeric(columnId) && 'text-right tabular-nums',
+                                            columnId === 'balance' && balanceClass(ledger.closingBalance),
+                                            isLabel && value && 'font-semibold'
+                                        )}>
+                                            {isLabel && value ? (
+                                                <span className="flex items-center justify-between gap-3">
+                                                    <span>{t('common.total', { defaultValue: 'Total' })}</span>
+                                                    <span className="tabular-nums">{value}</span>
+                                                </span>
+                                            ) : isLabel ? t('common.total', { defaultValue: 'Total' }) : value || null}
+                                        </TableCell>
+                                    )
+                                })}
                             </TableRow>
                         </TableBody>
                     </Table>
@@ -317,8 +374,9 @@ export function AccountStatements() {
     const [selectedPrintTemplate, setSelectedPrintTemplate] = useState<StoredCustomTemplateRow | null>(null)
     const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState(false)
     const [isStatementSettingsOpen, setIsStatementSettingsOpen] = useState(false)
-    const [showOrderItems, setShowOrderItems] = useState(false)
+    const [selectedStatementTemplateId, setSelectedStatementTemplateId] = useState<string | null>(null)
     const workspaceContacts = useWorkspaceContacts(workspaceId)
+    const canManageStatementTemplates = user?.role === 'admin' && (isLocalMode || isSupabaseConfigured)
 
     useEffect(() => {
         setSelectedPartnerId(urlPartnerSelection.id)
@@ -351,12 +409,67 @@ export function AccountStatements() {
             end: end ? new Date(end.getTime() - 1).toISOString() : undefined
         }
     }, [customDates, dateRange])
+    const loadCustomTemplates = useCallback(async () => {
+        if (!workspaceId || (!isLocalMode && !isSupabaseConfigured)) {
+            setCustomTemplates([])
+            return
+        }
+        const templates = await fetchCachedCustomTemplates(workspaceId, {
+            moduleTypePrefix: 'businessPartners.',
+            activeOnly: true
+        })
+        setCustomTemplates(templates as StoredCustomTemplateRow[])
+    }, [isLocalMode, workspaceId])
+
+    useEffect(() => {
+        let cancelled = false
+        void loadCustomTemplates().catch((error) => {
+            console.error('[AccountStatements] Failed to load statement templates:', error)
+            if (!cancelled) setCustomTemplates([])
+        })
+        return () => { cancelled = true }
+    }, [loadCustomTemplates])
+
+    const statementTemplates = useMemo(() => customTemplates
+        .filter((template) => template.module_type_key === PARTNER_ACCOUNT_STATEMENT_ACTIVITY_TEMPLATE_KEY && template.active)
+        .flatMap((template) => {
+            const statementTemplate = readPartnerAccountStatementTemplate(template)
+            return statementTemplate ? [statementTemplate] : []
+        })
+        .sort((left, right) => Number(right.primary) - Number(left.primary) || left.label.localeCompare(right.label)),
+        [customTemplates]
+    )
+    const builtInStatementTemplate = useMemo<PartnerAccountStatementTemplate>(() => ({
+        id: '__partner-account-statement-built-in-default__',
+        label: t('businessPartners.accountStatement.builtInDefaultTemplate', { defaultValue: 'Default Account Statement' }),
+        primary: true,
+        active: true,
+        version: 1,
+        configuration: createPartnerAccountStatementTemplateConfiguration(DEFAULT_PARTNER_ACCOUNT_STATEMENT_TEMPLATE_CONFIGURATION)
+    }), [t])
+    const defaultStatementTemplate = statementTemplates.find((template) => template.primary)
+        || statementTemplates[0]
+        || builtInStatementTemplate
+    const activeStatementTemplate = statementTemplates.find((template) => template.id === selectedStatementTemplateId)
+        || defaultStatementTemplate
+
+    useEffect(() => {
+        if (selectedStatementTemplateId && !statementTemplates.some((template) => template.id === selectedStatementTemplateId)) {
+            setSelectedStatementTemplateId(null)
+        }
+    }, [selectedStatementTemplateId, statementTemplates])
+
     const { partner, statementData } = usePartnerAccountStatement(workspaceId, selectedPartnerId, statementPeriod)
     const isAgentStatement = isAgentBusinessPartnerRole(partner?.role)
-    const itemizeSalesOrders = isAgentStatement || showOrderItems
+    const itemizeSalesOrders = activeStatementTemplate.configuration.showOrderItems
+    const itemizePosSaleLoans = activeStatementTemplate.configuration.showPosSaleItems
+    const statementColumns = getPartnerAccountStatementVisibleColumns(activeStatementTemplate.configuration, {
+        showItemColumns: itemizeSalesOrders || itemizePosSaleLoans,
+        showProductCommissionColumns: isAgentStatement
+    })
     const statementDataForDisplay = useMemo(
-        () => statementData ? { ...statementData, itemizeSalesOrders } : null,
-        [itemizeSalesOrders, statementData]
+        () => statementData ? { ...statementData, itemizeSalesOrders, itemizePosSaleLoans } : null,
+        [itemizePosSaleLoans, itemizeSalesOrders, statementData]
     )
     const ledgers = useMemo(
         () => statementDataForDisplay ? buildPartnerAccountStatementLedger(statementDataForDisplay) : [],
@@ -364,28 +477,6 @@ export function AccountStatements() {
     )
     const printLang = features.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
     const currentTemplatePrintLanguage = resolveCustomTemplatePrintLanguage(printLang)
-
-    useEffect(() => {
-        if (!workspaceId || (!isLocalMode && !isSupabaseConfigured)) {
-            setCustomTemplates([])
-            return
-        }
-
-        let cancelled = false
-        void fetchCachedCustomTemplates(workspaceId, {
-            moduleTypePrefix: 'businessPartners.',
-            activeOnly: true
-        }).then((templates) => {
-            if (!cancelled) setCustomTemplates(templates as StoredCustomTemplateRow[])
-        }).catch((error) => {
-            console.error('[AccountStatements] Failed to load custom print templates:', error)
-            if (!cancelled) setCustomTemplates([])
-        })
-
-        return () => {
-            cancelled = true
-        }
-    }, [isLocalMode, workspaceId])
 
     const workspacePrintContacts = useMemo(() => {
         const primaryContact = (type: 'phone' | 'address' | 'email') => {
@@ -402,6 +493,7 @@ export function AccountStatements() {
         if (!partner || !statementDataForDisplay) return null
         return {
             ...statementDataForDisplay,
+            tableColumns: statementColumns,
             workspace: workspacePrintContacts,
             partner: {
                 partnerName: partner.partnerName,
@@ -411,7 +503,7 @@ export function AccountStatements() {
             },
             generatedAt: new Date().toISOString()
         }
-    }, [partner, statementDataForDisplay, workspacePrintContacts])
+    }, [partner, statementColumns, statementDataForDisplay, workspacePrintContacts])
     const printTarget = useMemo(
         () => getCustomTemplateTarget(PARTNER_ACCOUNT_STATEMENT_TEMPLATE_KEY),
         []
@@ -543,36 +635,123 @@ export function AccountStatements() {
         if (partner && selectedPartnerId === partner.id) setPartnerQuery(partner.partnerName)
     }, [partner, selectedPartnerId])
 
-    // Ordinary partners can choose the old document-level view or the new
-    // itemized view. Keep that choice per partner; sales-account agents remain
-    // itemized because their statement is their sales activity record.
-    useEffect(() => {
-        if (!workspaceId || !selectedPartnerId) {
-            setShowOrderItems(false)
-            return
-        }
-        try {
-            setShowOrderItems(window.localStorage.getItem(
-                orderItemDisplayPreferenceKey(workspaceId, selectedPartnerId)
-            ) === 'true')
-        } catch {
-            setShowOrderItems(false)
-        }
-    }, [selectedPartnerId, workspaceId])
+    const saveStatementTemplate = useCallback(async (input: {
+        id?: string
+        label: string
+        configuration: PartnerAccountStatementTemplateConfiguration
+    }) => {
+        if (!workspaceId || !user?.id) throw new Error('Missing workspace context.')
+        const existingTemplate = input.id
+            ? statementTemplates.find((template) => template.id === input.id)
+            : undefined
+        const layoutJson = serializePartnerAccountStatementTemplate(input.configuration)
 
-    const setOrderItemDisplayPreference = useCallback((enabled: boolean) => {
-        setShowOrderItems(enabled)
-        if (!workspaceId || !selectedPartnerId) return
-        try {
-            window.localStorage.setItem(
-                orderItemDisplayPreferenceKey(workspaceId, selectedPartnerId),
-                String(enabled)
-            )
-        } catch {
-            // The preference is optional. Rendering the current selection is
-            // still correct when browser storage is unavailable.
+        if (isLocalMode) {
+            const saved = await saveLocalCustomTemplate({
+                id: existingTemplate?.id,
+                workspaceId,
+                moduleTypeKey: PARTNER_ACCOUNT_STATEMENT_ACTIVITY_TEMPLATE_KEY,
+                label: input.label,
+                layoutJson,
+                active: true,
+                primary: existingTemplate?.primary ?? statementTemplates.length === 0,
+                userId: user.id
+            })
+            await loadCustomTemplates()
+            return saved.id
         }
-    }, [selectedPartnerId, workspaceId])
+
+        if (!isSupabaseConfigured) throw new Error('Template storage is unavailable.')
+        const payload = {
+            workspace_id: workspaceId,
+            module_type_key: PARTNER_ACCOUNT_STATEMENT_ACTIVITY_TEMPLATE_KEY,
+            label: input.label,
+            layout_json: layoutJson,
+            updated_by: user.id
+        }
+        const { data, error } = existingTemplate
+            ? await runSupabaseAction('partnerAccountStatementTemplates.update', () =>
+                supabase
+                    .from('custom_templates')
+                    .update(payload)
+                    .eq('id', existingTemplate.id)
+                    .eq('workspace_id', workspaceId)
+                    .select('id')
+                    .single()
+            )
+            : await runSupabaseAction('partnerAccountStatementTemplates.create', () =>
+                supabase
+                    .from('custom_templates')
+                    .insert({
+                        ...payload,
+                        created_by: user.id,
+                        active: true,
+                        primary: statementTemplates.length === 0
+                    })
+                    .select('id')
+                    .single()
+            )
+        if (error) throw normalizeSupabaseActionError(error)
+        await loadCustomTemplates()
+        if (!data?.id) throw new Error('Template was saved without an identifier.')
+        return data.id
+    }, [isLocalMode, loadCustomTemplates, statementTemplates, user?.id, workspaceId])
+
+    const setDefaultStatementTemplate = useCallback(async (templateId: string) => {
+        if (!workspaceId || !user?.id) throw new Error('Missing workspace context.')
+        const template = statementTemplates.find((candidate) => candidate.id === templateId)
+        if (!template) throw new Error('Statement template not found.')
+
+        if (isLocalMode) {
+            await saveLocalCustomTemplate({
+                id: template.id,
+                workspaceId,
+                moduleTypeKey: PARTNER_ACCOUNT_STATEMENT_ACTIVITY_TEMPLATE_KEY,
+                label: template.label,
+                layoutJson: serializePartnerAccountStatementTemplate(template.configuration),
+                active: true,
+                primary: true,
+                userId: user.id
+            })
+        } else {
+            const { error } = await runSupabaseAction('partnerAccountStatementTemplates.setDefault', () =>
+                supabase
+                    .from('custom_templates')
+                    .update({ primary: true, updated_by: user.id })
+                    .eq('id', template.id)
+                    .eq('workspace_id', workspaceId)
+            )
+            if (error) throw normalizeSupabaseActionError(error)
+        }
+        await loadCustomTemplates()
+    }, [isLocalMode, loadCustomTemplates, statementTemplates, user?.id, workspaceId])
+
+    const deleteStatementTemplate = useCallback(async (templateId: string) => {
+        if (!workspaceId || !user?.id) throw new Error('Missing workspace context.')
+        const template = statementTemplates.find((candidate) => candidate.id === templateId)
+        if (!template) throw new Error('Statement template not found.')
+        if (template.primary || statementTemplates.length <= 1) {
+            throw new Error('Set another template as default before deleting this template.')
+        }
+
+        if (isLocalMode) {
+            await deleteLocalCustomTemplate(workspaceId, template.id, user.id)
+        } else {
+            const { data, error } = await runSupabaseAction('partnerAccountStatementTemplates.delete', () =>
+                supabase
+                    .from('custom_templates')
+                    .delete()
+                    .eq('id', template.id)
+                    .eq('workspace_id', workspaceId)
+                    .select('id')
+            )
+            if (error) throw normalizeSupabaseActionError(error)
+            if (!data?.some((row) => row.id === template.id)) {
+                throw new Error('The statement template was not found or you do not have permission to delete it.')
+            }
+        }
+        await loadCustomTemplates()
+    }, [isLocalMode, loadCustomTemplates, statementTemplates, user?.id, workspaceId])
 
     if (!workspaceId) return null
 
@@ -697,8 +876,7 @@ export function AccountStatements() {
                                 t={t}
                                 i18n={i18n}
                                 language={i18n.language}
-                                showItemColumns={itemizeSalesOrders}
-                                showProductCommissionColumns={isAgentStatement}
+                                columns={statementColumns}
                                 onNavigate={navigate}
                             />
                         ))}
@@ -706,40 +884,18 @@ export function AccountStatements() {
                 </>
             )}
 
-            <AppDialog open={isStatementSettingsOpen} onOpenChange={setIsStatementSettingsOpen}>
-                <AppDialogContent className="max-w-xl">
-                    <AppDialogHeader>
-                        <AppDialogTitle>{t('businessPartners.accountStatement.settingsTitle')}</AppDialogTitle>
-                    </AppDialogHeader>
-                    <AppDialogBody className="space-y-4">
-                        <div className="rounded-xl border bg-muted/20 p-4">
-                            <div className="flex items-start justify-between gap-4">
-                                <div className="space-y-1">
-                                    <label htmlFor="partner-statement-order-item-detail" className="text-sm font-semibold">
-                                        {t('businessPartners.accountStatement.showOrderItems')}
-                                    </label>
-                                    <p className="text-sm text-muted-foreground">
-                                        {isAgentStatement
-                                            ? t('businessPartners.accountStatement.agentOrderItemsRequired')
-                                            : t('businessPartners.accountStatement.showOrderItemsDescription')}
-                                    </p>
-                                </div>
-                                <Switch
-                                    id="partner-statement-order-item-detail"
-                                    checked={itemizeSalesOrders}
-                                    disabled={isAgentStatement}
-                                    onCheckedChange={setOrderItemDisplayPreference}
-                                />
-                            </div>
-                        </div>
-                    </AppDialogBody>
-                    <AppDialogFooter>
-                        <Button type="button" onClick={() => setIsStatementSettingsOpen(false)}>
-                            {t('common.close')}
-                        </Button>
-                    </AppDialogFooter>
-                </AppDialogContent>
-            </AppDialog>
+            <PartnerAccountStatementTemplateDialog
+                open={isStatementSettingsOpen}
+                onOpenChange={setIsStatementSettingsOpen}
+                templates={statementTemplates}
+                activeTemplate={activeStatementTemplate}
+                hasStoredTemplates={statementTemplates.length > 0}
+                canManageTemplates={canManageStatementTemplates}
+                onSelectTemplate={setSelectedStatementTemplateId}
+                onSaveTemplate={saveStatementTemplate}
+                onSetDefault={setDefaultStatementTemplate}
+                onDeleteTemplate={deleteStatementTemplate}
+            />
 
             {printPreview && printTarget && activePrintLayout && partner && printData ? (
                 <PrintPreviewModal

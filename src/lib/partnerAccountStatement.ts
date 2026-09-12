@@ -20,6 +20,15 @@ export type PartnerAccountStatementPeriod = {
   end?: string
 }
 
+/** Immutable product-line snapshot used to present a financed POS sale. */
+export type PartnerAccountStatementPosSaleItem = {
+  id: string
+  productName: string | null
+  quantity: number
+  unit: string | null
+  lineTotal: number
+}
+
 /**
  * The source records needed to create a partner subledger. This deliberately
  * contains source data rather than stored balances: both the screen and the
@@ -34,6 +43,8 @@ export type PartnerAccountStatementData = {
    * keep the historical one-row-per-document presentation by default.
    */
   itemizeSalesOrders?: boolean
+  /** Expands active POS-sale loans into their original sold product lines. */
+  itemizePosSaleLoans?: boolean
   /** Enables product-commission columns on an eligible agent statement. */
   isAgentCommissionStatement?: boolean
   salesOrders: SalesOrder[]
@@ -45,6 +56,10 @@ export type PartnerAccountStatementData = {
   loanPayments?: LoanPayment[]
   installmentSales?: InstallmentSale[]
   linkedOrderCodes?: Record<string, string>
+  /** POS-sale references for loans created from a POS sale. */
+  linkedPosSaleCodes?: Record<string, string>
+  /** Original POS sale lines, keyed by POS sale ID. */
+  posSaleItemsBySaleId?: Record<string, PartnerAccountStatementPosSaleItem[]>
   settlementTransactions?: PaymentTransaction[]
   /** Commission activity is included only for a sales-account agent's own statement. */
   agentCommissionEntries?: AgentCommissionEntry[]
@@ -65,6 +80,8 @@ export type PartnerAccountStatementEntryKind =
   | 'direct_transaction'
   | 'loan_disbursal'
   | 'loan_repayment'
+  | 'pos_sale_loan'
+  | 'pos_sale_installment_loan'
   | 'installment_sale'
   | 'agent_commission'
   | 'delivery_post'
@@ -87,6 +104,8 @@ export type PartnerAccountStatementEntryDescriptionKey =
   | 'directPayment'
   | 'orderLoanProvided'
   | 'orderLoanReceived'
+  | 'posSaleLoanProvided'
+  | 'posSaleLoanReceived'
   | 'loanProvided'
   | 'loanReceived'
   | 'loanRepaymentReceived'
@@ -141,6 +160,8 @@ export type PartnerAccountStatementEntry = {
 export type PartnerAccountStatementCurrencyLedger = {
   currency: string
   openingBalance: number
+  /** Net total of the period's product commission snapshots in this currency. */
+  productCommissionTotal: number
   debitTotal: number
   creditTotal: number
   closingBalance: number
@@ -746,35 +767,86 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
     if (loan.isDeleted || loan.status === 'cancelled') continue
     const lent = loan.direction !== 'borrowed'
     const linkedOrderCode = loan.orderId ? data.linkedOrderCodes?.[loan.orderId]?.trim() : undefined
-    const reference = linkedOrderCode ? `${linkedOrderCode} · ${loan.loanNo}` : loan.loanNo
-    entries.push({
-      id: `loan:${loan.id}`,
+    const linkedPosSaleCode = loan.saleId ? data.linkedPosSaleCodes?.[loan.saleId]?.trim() : undefined
+    const linkedDocumentCode = linkedOrderCode || linkedPosSaleCode
+    const isPosSaleLoan = loan.source === 'pos'
+    const kind: PartnerAccountStatementEntryKind = isPosSaleLoan
+      ? loan.loanCategory === 'simple'
+        ? 'pos_sale_loan'
+        : 'pos_sale_installment_loan'
+      : 'loan_disbursal'
+    const reference = linkedDocumentCode ? `${linkedDocumentCode} · ${loan.loanNo}` : loan.loanNo
+    const descriptionKey: PartnerAccountStatementEntryDescriptionKey =
+      loan.source === 'order'
+        ? lent
+          ? 'orderLoanProvided'
+          : 'orderLoanReceived'
+        : isPosSaleLoan
+          ? lent
+            ? 'posSaleLoanProvided'
+            : 'posSaleLoanReceived'
+          : lent
+            ? 'loanProvided'
+            : 'loanReceived'
+    const loanEntry = {
       date: loan.createdAt,
       reference,
-      kind: 'loan_disbursal',
+      kind,
       description:
         loan.source === 'order'
           ? lent
             ? 'Order loan provided'
             : 'Order loan received'
+          : isPosSaleLoan
+            ? lent
+              ? 'POS sale loan provided'
+              : 'POS sale loan received'
           : lent
             ? 'Loan provided'
             : 'Loan received',
-      descriptionKey:
-        loan.source === 'order'
-          ? lent
-            ? 'orderLoanProvided'
-            : 'orderLoanReceived'
-          : lent
-            ? 'loanProvided'
-            : 'loanReceived',
+      descriptionKey,
       currency: loan.settlementCurrency,
       delta: lent ? Math.abs(Number(loan.principalAmount || 0)) : -Math.abs(Number(loan.principalAmount || 0)),
       source: {
-        recordType: 'loan',
+        recordType: 'loan' as const,
         recordId: loan.id,
         loanCategory: loan.loanCategory
       }
+    }
+    const posSaleItems = isPosSaleLoan && loan.saleId && data.itemizePosSaleLoans === true
+      ? (data.posSaleItemsBySaleId?.[loan.saleId] || []).filter((item) => Number(item.quantity || 0) > 0)
+      : []
+
+    if (posSaleItems.length === 0) {
+      entries.push({
+        id: `loan:${loan.id}`,
+        ...loanEntry,
+        delta: lent ? Math.abs(Number(loan.principalAmount || 0)) : -Math.abs(Number(loan.principalAmount || 0))
+      })
+      continue
+    }
+
+    // The loan principal remains the accounting authority. Allocate it over
+    // immutable original POS lines and reserve the rounded remainder for the
+    // final line so itemized presentation always nets to the original row.
+    const principalAmount = Math.abs(Number(loan.principalAmount || 0))
+    const totalLineValue = posSaleItems.reduce((sum, item) => sum + Math.max(0, Number(item.lineTotal || 0)), 0)
+    let remainingPrincipal = principalAmount
+    posSaleItems.forEach((item, index) => {
+      const isLastItem = index === posSaleItems.length - 1
+      const weightedAmount = totalLineValue > 0
+        ? (principalAmount * Math.max(0, Number(item.lineTotal || 0))) / totalLineValue
+        : principalAmount / posSaleItems.length
+      const lineAmount = isLastItem ? remainingPrincipal : roundStatementAmount(weightedAmount)
+      remainingPrincipal = roundStatementAmount(remainingPrincipal - lineAmount)
+      entries.push({
+        id: `loan:${loan.id}:item:${item.id}`,
+        ...loanEntry,
+        itemName: item.productName,
+        quantity: Number(item.quantity || 0),
+        unit: item.unit,
+        delta: lent ? Math.abs(lineAmount) : -Math.abs(lineAmount)
+      })
     })
   }
 
@@ -783,7 +855,9 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
     if (!loan || payment.isDeleted || loan.isDeleted || loan.status === 'cancelled') continue
     const lent = loan.direction !== 'borrowed'
     const linkedOrderCode = loan.orderId ? data.linkedOrderCodes?.[loan.orderId]?.trim() : undefined
-    const reference = linkedOrderCode ? `${linkedOrderCode} · ${loan.loanNo}` : loan.loanNo
+    const linkedPosSaleCode = loan.saleId ? data.linkedPosSaleCodes?.[loan.saleId]?.trim() : undefined
+    const linkedDocumentCode = linkedOrderCode || linkedPosSaleCode
+    const reference = linkedDocumentCode ? `${linkedDocumentCode} · ${loan.loanNo}` : loan.loanNo
     const presentation = loanPaymentStatementPresentation(payment, lent)
     entries.push({
       id: `loan-payment:${payment.id}`,
@@ -942,10 +1016,18 @@ export function buildPartnerAccountStatementLedger(
           else creditTotal += Math.abs(entry.delta)
           return { ...entry, runningBalance }
         })
+      // Product-commission snapshots are informational only, so they must
+      // never affect the partner balance. Their signed amounts are still
+      // summed for the statement footer: accruals add and return/reversal
+      // snapshots reduce the displayed total.
+      const productCommissionTotal = roundStatementAmount(
+        periodEntries.reduce((sum, entry) => sum + Number(entry.totalProductCommission ?? 0), 0)
+      )
 
       return {
         currency,
         openingBalance,
+        productCommissionTotal,
         debitTotal,
         creditTotal,
         closingBalance: runningBalance,

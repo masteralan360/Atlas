@@ -14,6 +14,7 @@ import {
   CreditCard,
   FileSpreadsheet,
   FileText,
+  FileWarning,
   HandCoins,
   History,
   LayoutDashboard,
@@ -715,6 +716,15 @@ export function buildWorkspaceNavigation({
               name: t("nav.currencyConverter", { defaultValue: "Currency Converter" }),
               href: "/currency-converter",
               icon: Calculator,
+            },
+          ]
+          : []),
+        ...(role === "admin"
+          ? [
+            {
+              name: t("nav.logs", { defaultValue: "Logs" }),
+              href: "/logs",
+              icon: FileWarning,
             },
           ]
           : []),

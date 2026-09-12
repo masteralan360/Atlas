@@ -49,6 +49,12 @@
         {
           "path": "$APPDATA/**/*",
           "baseDir": "AppData"
+        },
+        {
+          "path": "$APPDATA/Logs"
+        },
+        {
+          "path": "$APPDATA/Logs/**/*"
         }
       ]
     },
@@ -68,6 +74,22 @@
         },
         {
           "path": "**/*"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [
+        {
+          "path": "$APPDATA/Logs/**/*"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [
+        {
+          "path": "$APPDATA/Logs/**/*"
         }
       ]
     },

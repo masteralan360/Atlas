@@ -292,6 +292,54 @@ describe('buildPartnerAccountStatementLedger', () => {
         const ledger = buildPartnerAccountStatementLedger(data)[0]
         const entry = ledger.entries.find((row) => row.id === 'sales-order:commissioned-sale:item:product-line')
         expect(entry).toMatchObject({ commissionPerProduct: 5, totalProductCommission: 15, delta: 30, runningBalance: 30 })
+        expect(ledger.productCommissionTotal).toBe(15)
+
+        const html = renderToStaticMarkup(createElement(PartnerAccountStatementPrintTemplate, {
+            printLang: 'en',
+            data: data as any
+        }))
+        const footer = html.match(/<tfoot>(.*?)<\/tfoot>/)?.[1]
+        expect(footer).toContain('>Total</td>')
+        expect(footer).toContain('>15 iqd</td>')
+    })
+
+    it('nets returned product commission in the period total and rounds decimal totals', () => {
+        const data = statementData()
+        data.itemizeSalesOrders = true
+        data.isAgentCommissionStatement = true
+        data.statementOrders = [{
+            id: 'commissioned-sale', orderNumber: 'SO-PRODUCT-1', customerId: 'agent-partner',
+            total: 30, currency: 'iqd', status: 'completed', createdAt: '2026-01-04T10:00:00.000Z',
+            isDeleted: false, linkedLoanId: null,
+            items: [{ id: 'product-line', productName: 'Service pack', quantity: 3, unit: 'pcs', lineTotal: 30 }]
+        }] as any
+        data.settlementTransactions = []
+        data.salesOrderReturns = [{
+            id: 'return-1', orderId: 'commissioned-sale', refundAmount: 10,
+            status: 'posted', returnedAt: '2026-01-05T10:00:00.000Z', createdAt: '2026-01-05T10:00:00.000Z', isDeleted: false
+        }] as any
+        data.salesOrderReturnItems = [{
+            id: 'return-line-1', returnId: 'return-1', orderId: 'commissioned-sale', orderItemId: 'product-line',
+            quantity: 1, refundAmount: 10, isDeleted: false
+        }] as any
+        data.agentProductCommissionEntries = [
+            {
+                id: 'product-commission-accrual', orderId: 'commissioned-sale', assignmentId: 'assignment-1', agentId: 'agent-1',
+                orderItemId: 'product-line', productId: 'product-1', kind: 'accrual', status: 'earned', currency: 'iqd',
+                commissionType: 'fixed_amount', ratePercent: 0, quantity: 3, basisAmountPerUnit: 10,
+                commissionPerUnit: 0.1, amount: 0.3, occurredAt: '2026-01-04T10:00:00.000Z', isDeleted: false
+            },
+            {
+                id: 'product-commission-return', orderId: 'commissioned-sale', orderReturnId: 'return-1', assignmentId: 'assignment-1', agentId: 'agent-1',
+                orderItemId: 'product-line', productId: 'product-1', kind: 'reversal', status: 'reversed', currency: 'iqd',
+                commissionType: 'fixed_amount', ratePercent: 0, quantity: -1, basisAmountPerUnit: 10,
+                commissionPerUnit: 0.1, amount: -0.1, occurredAt: '2026-01-05T10:00:00.000Z', isDeleted: false
+            }
+        ] as any
+
+        const [ledger] = buildPartnerAccountStatementLedger(data)
+        expect(ledger.entries.map((entry) => entry.totalProductCommission)).toEqual([0.3, -0.1])
+        expect(ledger.productCommissionTotal).toBe(0.2)
     })
 
     it('presents a fully automatic agent commission settlement as one zero-net statement row', () => {
@@ -478,6 +526,38 @@ describe('buildPartnerAccountStatementLedger', () => {
         expect(itemizedHtml).toContain('>Quantity</th>')
     })
 
+    it('uses the selected statement template columns and keeps the total label separate from amounts', () => {
+        const data = statementData()
+        data.statementOrders = [{
+            id: 'template-sale',
+            orderNumber: 'SO-TEMPLATE-1',
+            customerId: 'partner-1',
+            total: 100,
+            currency: 'usd',
+            status: 'completed',
+            createdAt: '2026-01-04T10:00:00.000Z',
+            isDeleted: false,
+            linkedLoanId: null
+        }] as any
+        data.settlementTransactions = []
+
+        const html = renderToStaticMarkup(createElement(PartnerAccountStatementPrintTemplate, {
+            printLang: 'en',
+            data: {
+                ...data,
+                tableColumns: ['description', 'credit', 'debit', 'balance']
+            }
+        }))
+        const footer = html.match(/<tfoot>(.*?)<\/tfoot>/)?.[1]
+
+        expect(html).not.toContain('>Date</th>')
+        expect(html).not.toContain('>Reference</th>')
+        expect(html).toContain('>Description</th>')
+        expect(html.indexOf('>Description</th>')).toBeLessThan(html.indexOf('>Credit</th>'))
+        expect(footer).toContain('>Total</td>')
+        expect(footer).toContain('>100 usd</td>')
+    })
+
     it('keeps a single-currency running balance from opening activity through payments and reversals', () => {
         const [ledger] = buildPartnerAccountStatementLedger(statementData())
 
@@ -628,6 +708,125 @@ describe('buildPartnerAccountStatementLedger', () => {
             runningBalance: 200000
         }])
         expect(iqdLedger?.entries).toHaveLength(1)
+    })
+
+    it('names a POS sale loan and pairs it with its POS sale reference', () => {
+        const data = statementData()
+        data.statementOrders = []
+        data.settlementTransactions = []
+        data.loans = [{
+            id: 'pos-sale-loan', loanNo: 'SL-POS-0001', source: 'pos', saleId: 'pos-sale-1',
+            loanCategory: 'simple', direction: 'lent', borrowerName: 'Sample Partner',
+            principalAmount: 80, totalPaidAmount: 0, balanceAmount: 80, settlementCurrency: 'usd',
+            installmentCount: 1, installmentFrequency: 'monthly', firstDueDate: null, nextDueDate: null,
+            status: 'active', createdAt: '2026-01-04T10:00:00.000Z', updatedAt: '2026-01-04T10:00:00.000Z',
+            isDeleted: false
+        }] as any
+        data.linkedPosSaleCodes = { 'pos-sale-1': 'SALE-42' }
+
+        const [ledger] = buildPartnerAccountStatementLedger(data)
+        expect(ledger.entries).toContainEqual(expect.objectContaining({
+            reference: 'SALE-42 · SL-POS-0001',
+            kind: 'pos_sale_loan',
+            description: 'POS sale loan provided',
+            descriptionKey: 'posSaleLoanProvided'
+        }))
+    })
+
+    it('expands an active POS sale loan by original item quantities while preserving its exact amount and return credit row', () => {
+        const data = statementData()
+        data.statementOrders = []
+        data.settlementTransactions = []
+        data.itemizePosSaleLoans = true
+        data.loans = [{
+            id: 'pos-sale-loan', loanNo: 'SL-POS-0002', source: 'pos', saleId: 'pos-sale-1',
+            loanCategory: 'simple', direction: 'lent', borrowerName: 'Sample Partner',
+            principalAmount: 100, totalPaidAmount: 10, balanceAmount: 90, settlementCurrency: 'usd',
+            installmentCount: 1, installmentFrequency: 'monthly', firstDueDate: null, nextDueDate: null,
+            status: 'active', createdAt: '2026-01-04T10:00:00.000Z', updatedAt: '2026-01-04T10:00:00.000Z',
+            isDeleted: false
+        }] as any
+        data.loanPayments = [{
+            id: 'return-credit', loanId: 'pos-sale-loan', amount: 10, paymentMethod: 'loan_adjustment',
+            paidAt: '2026-01-05T10:00:00.000Z', createdAt: '2026-01-05T10:00:00.000Z', isDeleted: false,
+            note: 'Return Credit (Reason: customer_returned)'
+        }] as any
+        data.linkedPosSaleCodes = { 'pos-sale-1': 'SALE-43' }
+        data.posSaleItemsBySaleId = {
+            'pos-sale-1': [
+                { id: 'coffee', productName: 'Coffee', quantity: 2, unit: 'pcs', lineTotal: 1 },
+                { id: 'tea', productName: 'Tea', quantity: 1, unit: 'pcs', lineTotal: 1 },
+                { id: 'sugar', productName: 'Sugar', quantity: 3, unit: 'pcs', lineTotal: 1 }
+            ]
+        }
+
+        const [ledger] = buildPartnerAccountStatementLedger(data)
+        const loanRows = ledger.entries.filter((entry) => entry.id.startsWith('loan:pos-sale-loan:item:'))
+        expect(loanRows.map((entry) => [entry.itemName, entry.quantity, entry.delta]).sort()).toEqual([
+            ['Coffee', 2, 33.333333],
+            ['Sugar', 3, 33.333334],
+            ['Tea', 1, 33.333333]
+        ])
+        expect(loanRows.reduce((sum, entry) => sum + entry.delta, 0)).toBe(100)
+        const returnCredit = ledger.entries.find((entry) => entry.id === 'loan-payment:return-credit')
+        expect(returnCredit).toMatchObject({ descriptionKey: 'returnCredit', delta: -10 })
+        expect(returnCredit).not.toHaveProperty('itemName')
+        expect(returnCredit).not.toHaveProperty('quantity')
+
+        const html = renderToStaticMarkup(createElement(PartnerAccountStatementPrintTemplate, {
+            printLang: 'en',
+            data: data as any
+        }))
+        expect(html).toContain('>Item</th>')
+        expect(html).toContain('>Quantity</th>')
+        expect(html).toContain('>Coffee</td>')
+        expect(html).toContain('>Tea</td>')
+        expect(html).toContain('>Sugar</td>')
+    })
+
+    it('keeps a POS sale loan as one row when its original POS item snapshot is unavailable', () => {
+        const data = statementData()
+        data.statementOrders = []
+        data.settlementTransactions = []
+        data.itemizePosSaleLoans = true
+        data.loans = [{
+            id: 'pos-sale-without-items', loanNo: 'SL-POS-0003', source: 'pos', saleId: 'pos-sale-missing',
+            loanCategory: 'installment', direction: 'lent', borrowerName: 'Sample Partner',
+            principalAmount: 80, totalPaidAmount: 0, balanceAmount: 80, settlementCurrency: 'usd',
+            installmentCount: 2, installmentFrequency: 'monthly', firstDueDate: null, nextDueDate: null,
+            status: 'active', createdAt: '2026-01-04T10:00:00.000Z', updatedAt: '2026-01-04T10:00:00.000Z',
+            isDeleted: false
+        }] as any
+        data.linkedPosSaleCodes = { 'pos-sale-missing': 'SALE-44' }
+        data.posSaleItemsBySaleId = {}
+
+        const [ledger] = buildPartnerAccountStatementLedger(data)
+        expect(ledger.entries).toContainEqual(expect.objectContaining({
+            id: 'loan:pos-sale-without-items',
+            reference: 'SALE-44 · SL-POS-0003',
+            kind: 'pos_sale_installment_loan',
+            delta: 80
+        }))
+        const entry = ledger.entries.find((row) => row.id === 'loan:pos-sale-without-items')
+        expect(entry).not.toHaveProperty('itemName')
+        expect(entry).not.toHaveProperty('quantity')
+    })
+
+    it('does not reintroduce a cancelled POS sale loan when POS item detail is enabled', () => {
+        const data = statementData()
+        data.statementOrders = []
+        data.settlementTransactions = []
+        data.itemizePosSaleLoans = true
+        data.loans = [{
+            id: 'cancelled-pos-sale-loan', loanNo: 'SL-POS-0004', source: 'pos', saleId: 'fully-returned-sale',
+            loanCategory: 'simple', direction: 'lent', principalAmount: 50, settlementCurrency: 'usd',
+            status: 'cancelled', createdAt: '2026-01-04T10:00:00.000Z', isDeleted: false
+        }] as any
+        data.posSaleItemsBySaleId = {
+            'fully-returned-sale': [{ id: 'returned-item', productName: 'Returned item', quantity: 1, unit: 'pcs', lineTotal: 50 }]
+        }
+
+        expect(buildPartnerAccountStatementLedger(data)).toEqual([])
     })
 
     it('replaces generated return and reversal notes with structured statement events', () => {

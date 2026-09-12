@@ -13,6 +13,12 @@ import {
     getPartnerAccountStatementEntryDescription,
     getPartnerAccountStatementEntryDetail
 } from '@/lib/partnerAccountStatementPresentation'
+import {
+    DEFAULT_PARTNER_ACCOUNT_STATEMENT_TEMPLATE_CONFIGURATION,
+    getPartnerAccountStatementSummaryLabelColumn,
+    getPartnerAccountStatementVisibleColumns,
+    type PartnerAccountStatementColumnId
+} from '@/lib/partnerAccountStatementTemplates'
 import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { platformService } from '@/services/platformService'
 export {
@@ -25,6 +31,7 @@ export {
 } from '@/lib/partnerAccountStatement'
 
 export type PartnerAccountStatementPrintData = PartnerAccountStatementData & {
+    tableColumns?: PartnerAccountStatementColumnId[]
     workspace?: {
         phone?: string
         address?: string
@@ -82,6 +89,8 @@ function entryLabel(kind: PartnerAccountStatementEntryKind, t: (key: string, opt
         direct_transaction: t('ledger.type.direct_transaction', { defaultValue: 'Direct Transaction' }),
         loan_disbursal: t('businessPartners.accountStatement.loanMovement', { defaultValue: 'Loan movement' }),
         loan_repayment: t('businessPartners.accountStatement.loanRepayment', { defaultValue: 'Loan repayment' }),
+        pos_sale_loan: t('loans.posSaleLoan', { defaultValue: 'POS Sale Loan' }),
+        pos_sale_installment_loan: t('loans.posSaleInstallmentLoan', { defaultValue: 'POS Sale Installment Loan' }),
         agent_commission: t('salesAgentCommissions.title', { defaultValue: 'Sales agent commission' }),
         delivery_post: t('postService.title', { defaultValue: 'Post Service' }),
         installment_sale: t('businessPartners.accountStatement.installmentSale', { defaultValue: 'Installment sale' })
@@ -140,8 +149,7 @@ function LedgerTableChunk({
     t,
     i18n,
     language,
-    showItemColumns,
-    showProductCommissionColumns,
+    columns,
     iqdPreference
 }: {
     ledger: PartnerAccountStatementCurrencyLedger
@@ -153,11 +161,47 @@ function LedgerTableChunk({
     t: (key: string, options?: Record<string, unknown>) => string
     i18n: I18n
     language: string
-    showItemColumns: boolean
-    showProductCommissionColumns: boolean
+    columns: PartnerAccountStatementColumnId[]
     iqdPreference: IQDDisplayPreference
 }) {
     const displayAmount = (amount: number) => formatCurrency(Math.abs(amount), ledger.currency, iqdPreference)
+    const summaryLabelColumn = getPartnerAccountStatementSummaryLabelColumn(columns)
+    const summaryValue = (columnId: PartnerAccountStatementColumnId, kind: 'opening' | 'total') => {
+        if (columnId === 'debit') return kind === 'opening'
+            ? ledger.openingBalance > 0 ? displayAmount(ledger.openingBalance) : '—'
+            : displayAmount(ledger.debitTotal)
+        if (columnId === 'credit') return kind === 'opening'
+            ? ledger.openingBalance < 0 ? displayAmount(ledger.openingBalance) : '—'
+            : displayAmount(ledger.creditTotal)
+        if (columnId === 'balance') return displayAmount(kind === 'opening' ? ledger.openingBalance : ledger.closingBalance)
+        if (columnId === 'totalProductCommission' && kind === 'total') return displayAmount(ledger.productCommissionTotal)
+        return null
+    }
+    const headerLabel = (columnId: PartnerAccountStatementColumnId) => {
+        const labels: Record<PartnerAccountStatementColumnId, [string, string]> = {
+            date: ['common.date', 'Date'],
+            reference: ['common.reference', 'Reference'],
+            type: ['common.type', 'Type'],
+            description: ['common.description', 'Description'],
+            item: ['businessPartners.accountStatement.item', 'Item'],
+            quantity: ['businessPartners.accountStatement.quantity', 'Quantity'],
+            commissionPerProduct: ['salesAgentCommissions.productCommission.perUnit', 'Product commission / unit'],
+            totalProductCommission: ['salesAgentCommissions.productCommission.lineTotal', 'Total product commission'],
+            debit: ['businessPartners.accountStatement.debit', 'Debit'],
+            credit: ['businessPartners.accountStatement.credit', 'Credit'],
+            balance: ['businessPartners.accountStatement.balance', 'Balance']
+        }
+        const [key, defaultValue] = labels[columnId]
+        return t(key, { defaultValue })
+    }
+    const numericColumn = (columnId: PartnerAccountStatementColumnId) => [
+        'quantity',
+        'commissionPerProduct',
+        'totalProductCommission',
+        'debit',
+        'credit',
+        'balance'
+    ].includes(columnId)
 
     return (
         <table
@@ -168,47 +212,43 @@ function LedgerTableChunk({
             <thead>
                 {showTableHeading ? (
                     <tr className="bg-slate-50">
-                        <th className="border border-slate-400 px-1.5 py-1 text-start text-[10px] font-bold" colSpan={showItemColumns ? showProductCommissionColumns ? 11 : 9 : 7}>
+                        <th className="border border-slate-400 px-1.5 py-1 text-start text-[10px] font-bold" colSpan={columns.length}>
                             {t('businessPartners.accountStatement.accountActivity', { defaultValue: 'Account Activity' })} · {ledger.currency.toUpperCase()} {!isFirst ? t('businessPartners.accountStatement.continued', { defaultValue: '(continued)' }) : null}
                         </th>
                     </tr>
                 ) : null}
                 <tr className="bg-slate-200 font-bold uppercase">
-                    <th className={`${showItemColumns ? 'w-[9%]' : 'w-[11%]'} border border-slate-400 px-1.5 py-1 text-start`}>{t('common.date', { defaultValue: 'Date' })}</th>
-                    <th className={`${showItemColumns ? 'w-[13%]' : 'w-[17%]'} border border-slate-400 px-1.5 py-1 text-start`}>{t('common.reference', { defaultValue: 'Reference' })}</th>
-                    <th className={`${showItemColumns ? 'w-[11%]' : 'w-[13%]'} border border-slate-400 px-1.5 py-1 text-start`}>{t('common.type', { defaultValue: 'Type' })}</th>
-                    <th className={`${showItemColumns ? 'w-[15%]' : 'w-[23%]'} border border-slate-400 px-1.5 py-1 text-start`}>{t('common.description', { defaultValue: 'Description' })}</th>
-                    {showItemColumns ? (
-                        <>
-                            <th className="w-[15%] border border-slate-400 px-1.5 py-1 text-start">{t('businessPartners.accountStatement.item', { defaultValue: 'Item' })}</th>
-                            <th className="w-[7%] border border-slate-400 px-1.5 py-1 text-end">{t('businessPartners.accountStatement.quantity', { defaultValue: 'Quantity' })}</th>
-                        </>
-                    ) : null}
-                    {showProductCommissionColumns ? (
-                        <>
-                            <th className="w-[10%] border border-slate-400 px-1.5 py-1 text-end">{t('salesAgentCommissions.productCommission.perUnit')}</th>
-                            <th className="w-[10%] border border-slate-400 px-1.5 py-1 text-end">{t('salesAgentCommissions.productCommission.lineTotal')}</th>
-                        </>
-                    ) : null}
-                    <th className={`${showItemColumns ? 'w-[10%]' : 'w-[12%]'} border border-slate-400 px-1.5 py-1 text-end`}>{t('businessPartners.accountStatement.debit', { defaultValue: 'Debit' })}</th>
-                    <th className={`${showItemColumns ? 'w-[10%]' : 'w-[12%]'} border border-slate-400 px-1.5 py-1 text-end`}>{t('businessPartners.accountStatement.credit', { defaultValue: 'Credit' })}</th>
-                    <th className={`${showItemColumns ? 'w-[10%]' : 'w-[12%]'} border border-slate-400 px-1.5 py-1 text-end`}>{t('businessPartners.accountStatement.balance', { defaultValue: 'Balance' })}</th>
+                    {columns.map((columnId) => (
+                        <th key={columnId} className={cn(
+                            'border border-slate-400 px-1.5 py-1',
+                            numericColumn(columnId) ? 'text-end' : 'text-start',
+                            columnId === 'date' && 'w-[10%]',
+                            columnId === 'reference' && 'w-[14%]',
+                            columnId === 'type' && 'w-[12%]',
+                            columnId === 'description' && 'w-[18%]',
+                            columnId === 'item' && 'w-[14%]',
+                            (columnId === 'commissionPerProduct' || columnId === 'totalProductCommission') && 'w-[11%]'
+                        )}>{headerLabel(columnId)}</th>
+                    ))}
                 </tr>
             </thead>
             <tbody>
                 {isFirst && Math.abs(ledger.openingBalance) > 0.000001 ? (
                     <tr className="bg-slate-50 font-semibold" data-pdf-keep-together style={{ height: `${PARTNER_STATEMENT_TABLE_ROW_HEIGHT_MM}mm` }}>
-                        <td className="border border-slate-300 px-1.5 py-1" colSpan={showItemColumns ? showProductCommissionColumns ? 8 : 6 : 4}>{t('businessPartners.accountStatement.openingBalance', { defaultValue: 'Opening balance' })}</td>
-                        <td className="border border-slate-300 px-1.5 py-1 text-end">{ledger.openingBalance > 0 ? displayAmount(ledger.openingBalance) : '—'}</td>
-                        <td className="border border-slate-300 px-1.5 py-1 text-end">{ledger.openingBalance < 0 ? displayAmount(ledger.openingBalance) : '—'}</td>
-                        <td className={cn('border border-slate-300 px-1.5 py-1 text-end', balanceClass(ledger.openingBalance))}>
-                            {displayAmount(ledger.openingBalance)}
-                        </td>
+                        {columns.map((columnId) => {
+                            const value = summaryValue(columnId, 'opening')
+                            const isLabel = columnId === summaryLabelColumn
+                            return <td key={columnId} className={cn(
+                                'border border-slate-300 px-1.5 py-1',
+                                numericColumn(columnId) && 'text-end',
+                                columnId === 'balance' && balanceClass(ledger.openingBalance)
+                            )}>{isLabel && value ? <span className="flex items-center justify-between gap-2"><span>{t('businessPartners.accountStatement.openingBalance', { defaultValue: 'Opening balance' })}</span><span>{value}</span></span> : isLabel ? t('businessPartners.accountStatement.openingBalance', { defaultValue: 'Opening balance' }) : value || null}</td>
+                        })}
                     </tr>
                 ) : null}
                 {entries.length === 0 ? (
                     <tr style={{ height: `${PARTNER_STATEMENT_TABLE_ROW_HEIGHT_MM}mm` }}>
-                        <td className="border border-slate-300 p-3 text-center text-slate-500" colSpan={showItemColumns ? showProductCommissionColumns ? 11 : 9 : 7}>
+                        <td className="border border-slate-300 p-3 text-center text-slate-500" colSpan={columns.length}>
                             {t('businessPartners.noActivity', { defaultValue: 'No related activity yet.' })}
                         </td>
                     </tr>
@@ -217,30 +257,32 @@ function LedgerTableChunk({
                     const detail = getPartnerAccountStatementEntryDetail(entry, { t, i18n, language })
                     return (
                         <tr key={entry.id} data-pdf-keep-together style={{ height: `${PARTNER_STATEMENT_TABLE_ROW_HEIGHT_MM}mm` }}>
-                            <td className="border border-slate-300 px-1.5 py-1 align-top whitespace-nowrap">{formatDate(entry.date)}</td>
-                            <td className="border border-slate-300 px-1.5 py-1 align-top font-semibold break-words">{entry.reference}</td>
-                            <td className="border border-slate-300 px-1.5 py-1 align-top">{entryLabel(entry.kind, t)}</td>
-                            <td className="border border-slate-300 px-1.5 py-1 align-top whitespace-pre-wrap">
-                                <div>{description}</div>
-                                {detail ? <div className="mt-0.5 text-[8px] text-slate-600">{detail}</div> : null}
-                            </td>
-                            {showItemColumns ? (
-                                <>
-                                    <td className="border border-slate-300 px-1.5 py-1 align-top whitespace-pre-wrap">{entry.itemName || '—'}</td>
-                                    <td className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{formatStatementQuantity(entry.quantity, entry.unit, language)}</td>
-                                </>
-                            ) : null}
-                            {showProductCommissionColumns ? (
-                                <>
-                                    <td className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{entry.commissionPerProduct == null ? '—' : displayAmount(entry.commissionPerProduct)}</td>
-                                    <td className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{entry.totalProductCommission == null ? '—' : displayAmount(entry.totalProductCommission)}</td>
-                                </>
-                            ) : null}
-                            <td className="border border-slate-300 px-1.5 py-1 text-end align-top font-semibold whitespace-nowrap">{entry.delta > 0 ? displayAmount(entry.delta) : '—'}</td>
-                            <td className="border border-slate-300 px-1.5 py-1 text-end align-top font-semibold whitespace-nowrap">{entry.delta < 0 ? displayAmount(entry.delta) : '—'}</td>
-                            <td className={cn('border border-slate-300 px-1.5 py-1 text-end align-top font-bold whitespace-nowrap', balanceClass(entry.runningBalance))}>
-                                {displayAmount(entry.runningBalance)}
-                            </td>
+                            {columns.map((columnId) => {
+                                switch (columnId) {
+                                    case 'date':
+                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 align-top whitespace-nowrap">{formatDate(entry.date)}</td>
+                                    case 'reference':
+                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 align-top font-semibold break-words">{entry.reference}</td>
+                                    case 'type':
+                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 align-top">{entryLabel(entry.kind, t)}</td>
+                                    case 'description':
+                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 align-top whitespace-pre-wrap"><div>{description}</div>{detail ? <div className="mt-0.5 text-[8px] text-slate-600">{detail}</div> : null}</td>
+                                    case 'item':
+                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 align-top whitespace-pre-wrap">{entry.itemName || '—'}</td>
+                                    case 'quantity':
+                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{formatStatementQuantity(entry.quantity, entry.unit, language)}</td>
+                                    case 'commissionPerProduct':
+                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{entry.commissionPerProduct == null ? '—' : displayAmount(entry.commissionPerProduct)}</td>
+                                    case 'totalProductCommission':
+                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{entry.totalProductCommission == null ? '—' : displayAmount(entry.totalProductCommission)}</td>
+                                    case 'debit':
+                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top font-semibold whitespace-nowrap">{entry.delta > 0 ? displayAmount(entry.delta) : '—'}</td>
+                                    case 'credit':
+                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top font-semibold whitespace-nowrap">{entry.delta < 0 ? displayAmount(entry.delta) : '—'}</td>
+                                    case 'balance':
+                                        return <td key={columnId} className={cn('border border-slate-300 px-1.5 py-1 text-end align-top font-bold whitespace-nowrap', balanceClass(entry.runningBalance))}>{displayAmount(entry.runningBalance)}</td>
+                                }
+                            })}
                         </tr>
                     )
                 })}
@@ -248,12 +290,15 @@ function LedgerTableChunk({
             {isLast ? (
                 <tfoot>
                     <tr className="bg-slate-100 font-bold" style={{ height: `${PARTNER_STATEMENT_TABLE_ROW_HEIGHT_MM}mm` }}>
-                        <td className="border border-slate-400 px-1.5 py-1.5 text-end" colSpan={showItemColumns ? showProductCommissionColumns ? 8 : 6 : 4}>{t('common.total', { defaultValue: 'Total' })}</td>
-                        <td className="border border-slate-400 px-1.5 py-1.5 text-end whitespace-nowrap">{displayAmount(ledger.debitTotal)}</td>
-                        <td className="border border-slate-400 px-1.5 py-1.5 text-end whitespace-nowrap">{displayAmount(ledger.creditTotal)}</td>
-                        <td className={cn('border border-slate-400 px-1.5 py-1.5 text-end whitespace-nowrap', balanceClass(ledger.closingBalance))}>
-                            {displayAmount(ledger.closingBalance)}
-                        </td>
+                        {columns.map((columnId) => {
+                            const value = summaryValue(columnId, 'total')
+                            const isLabel = columnId === summaryLabelColumn
+                            return <td key={columnId} className={cn(
+                                'border border-slate-400 px-1.5 py-1.5',
+                                numericColumn(columnId) && 'text-end whitespace-nowrap',
+                                columnId === 'balance' && balanceClass(ledger.closingBalance)
+                            )}>{isLabel && value ? <span className="flex items-center justify-between gap-2"><span>{t('common.total', { defaultValue: 'Total' })}</span><span>{value}</span></span> : isLabel ? t('common.total', { defaultValue: 'Total' }) : value || null}</td>
+                        })}
                     </tr>
                 </tfoot>
             ) : null}
@@ -267,8 +312,7 @@ function LedgerTable({
     t,
     i18n,
     language,
-    showItemColumns,
-    showProductCommissionColumns,
+    columns,
     iqdPreference
 }: {
     ledger: PartnerAccountStatementCurrencyLedger
@@ -276,8 +320,7 @@ function LedgerTable({
     t: (key: string, options?: Record<string, unknown>) => string
     i18n: I18n
     language: string
-    showItemColumns: boolean
-    showProductCommissionColumns: boolean
+    columns: PartnerAccountStatementColumnId[]
     iqdPreference: IQDDisplayPreference
 }) {
     const displayAmount = (amount: number) => formatCurrency(Math.abs(amount), ledger.currency, iqdPreference)
@@ -307,8 +350,7 @@ function LedgerTable({
                     t={t}
                     i18n={i18n}
                     language={language}
-                    showItemColumns={showItemColumns}
-                    showProductCommissionColumns={showProductCommissionColumns}
+                    columns={columns}
                     iqdPreference={iqdPreference}
                 />
             ))}
@@ -331,8 +373,14 @@ export function PartnerAccountStatementPrintTemplate({
     const { i18n } = useTranslation()
     const t = i18n.getFixedT(printLang)
     const isRtl = isRTL(printLang)
-    const showItemColumns = data.itemizeSalesOrders === true
+    const showItemColumns = data.itemizeSalesOrders === true || data.itemizePosSaleLoans === true
     const showProductCommissionColumns = data.isAgentCommissionStatement === true
+    const columns = data.tableColumns && data.tableColumns.length > 0
+        ? data.tableColumns
+        : getPartnerAccountStatementVisibleColumns(DEFAULT_PARTNER_ACCOUNT_STATEMENT_TEMPLATE_CONFIGURATION, {
+            showItemColumns,
+            showProductCommissionColumns
+        })
     const logoSrc = resolveLogoSrc(logoUrl)
     const ledgers = buildPartnerAccountStatementLedger(data)
     const partnerAddress = [data.partner.address, data.partner.city].filter(Boolean).join(', ')
@@ -402,8 +450,7 @@ export function PartnerAccountStatementPrintTemplate({
                         t={t}
                         i18n={i18n}
                         language={printLang}
-                        showItemColumns={showItemColumns}
-                        showProductCommissionColumns={showProductCommissionColumns}
+                        columns={columns}
                         iqdPreference={iqdPreference}
                     />
                 ))}

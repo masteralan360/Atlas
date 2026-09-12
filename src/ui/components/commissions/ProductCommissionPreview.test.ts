@@ -5,7 +5,8 @@ import type { AgentCommissionEntry, ProductCommissionRule, ProductCommissionRule
 import type { ProductCommissionPreviewItem } from './ProductCommissionPreview'
 import {
     findLinkedProductCommissionAgent,
-    findOwnedOrderCreatorProductCommissionAgent
+    findOwnedOrderCreatorProductCommissionAgent,
+    getProductCommissionPreviewAgentIds
 } from './productCommissionAgent'
 
 vi.mock('@/local-db', () => ({
@@ -40,6 +41,7 @@ vi.mock('@/lib/utils', () => ({
 const AT = '2026-08-29T12:00:00.000Z'
 let hasEligibleProductCommission: typeof import('./ProductCommissionPreview').hasEligibleProductCommission
 let getProductCommissionPreviewTotal: typeof import('./ProductCommissionPreview').getProductCommissionPreviewTotal
+let buildProductCommissionPreviewRows: typeof import('./productCommissionCalculation').buildProductCommissionPreviewRows
 let buildProductCommissionPaymentSummaries: typeof import('./ProductCommissionPreview').buildProductCommissionPaymentSummaries
 let buildProductCommissionSettlementActions: typeof import('./ProductCommissionPreview').buildProductCommissionSettlementActions
 
@@ -106,6 +108,7 @@ beforeAll(async () => {
         buildProductCommissionPaymentSummaries,
         buildProductCommissionSettlementActions
     } = await import('./ProductCommissionPreview'))
+    ;({ buildProductCommissionPreviewRows } = await import('./productCommissionCalculation'))
 })
 
 function rule(scope: ProductCommissionRule['recipientScope']): ProductCommissionRule {
@@ -206,6 +209,26 @@ describe('hasEligibleProductCommission', () => {
     })
 })
 
+describe('getProductCommissionPreviewAgentIds', () => {
+    it('keeps only the viewer assignment and adds their creator attribution once', () => {
+        const agents = [
+            { id: 'agent-owner', linkedUserId: 'user-1', agentType: 'field_agent', status: 'active', isDeleted: false },
+            { id: 'agent-other', linkedUserId: 'user-2', agentType: 'field_agent', status: 'active', isDeleted: false }
+        ]
+
+        expect(getProductCommissionPreviewAgentIds({
+            activeAssignments: [{ agentId: 'agent-owner' }, { agentId: 'agent-other' }],
+            agents,
+            getAgent: (agentId) => agents.find((agent) => agent.id === agentId),
+            userId: 'user-1',
+            orderCreatedBy: 'user-1',
+            canAssignSalesAgents: false,
+            canViewAllAgentCommissions: false,
+            canViewOwnAgentCommissions: true
+        })).toEqual(['agent-owner'])
+    })
+})
+
 describe('getProductCommissionPreviewTotal', () => {
     it('adds every eligible recipient and line amount without rounding early', () => {
         expect(getProductCommissionPreviewTotal([
@@ -220,6 +243,58 @@ describe('getProductCommissionPreviewTotal', () => {
             { total: 12, unavailableConversion: false },
             { total: 0, unavailableConversion: true }
         ])).toBeNull()
+    })
+})
+
+describe('buildProductCommissionPreviewRows', () => {
+    it('calculates the same percentage total for every assigned beneficiary', () => {
+        const rows = buildProductCommissionPreviewRows({
+            items,
+            agentIds: ['agent-1', 'agent-2'],
+            rules: [{
+                ...rule('all_assigned'),
+                commissionType: 'percentage',
+                ratePercent: 12.5,
+                fixedAmount: null,
+                fixedCurrency: null
+            }],
+            recipients: [],
+            currency: 'iqd',
+            exchangeRates: [],
+            at: AT
+        })
+
+        expect(rows).toHaveLength(2)
+        expect(rows.map((row) => row.perUnit)).toEqual([1875, 1875])
+        expect(getProductCommissionPreviewTotal(rows)).toBe(7500)
+    })
+
+    it('honors selected-recipient boundaries and marks missing fixed conversions unavailable', () => {
+        const recipients: ProductCommissionRuleAgent[] = [{
+            id: 'recipient-1',
+            workspaceId: 'workspace-1',
+            ruleId: 'rule-1',
+            agentId: 'agent-allowed',
+            createdAt: AT,
+            updatedAt: AT,
+            version: 1,
+            isDeleted: false,
+            syncStatus: 'synced',
+            lastSyncedAt: AT
+        }]
+        const rows = buildProductCommissionPreviewRows({
+            items,
+            agentIds: ['agent-allowed', 'agent-other'],
+            rules: [rule('selected_assigned')],
+            recipients,
+            currency: 'usd',
+            exchangeRates: [],
+            at: AT
+        })
+
+        expect(rows).toHaveLength(1)
+        expect(rows[0]).toMatchObject({ agentId: 'agent-allowed', unavailableConversion: true })
+        expect(getProductCommissionPreviewTotal(rows)).toBeNull()
     })
 })
 

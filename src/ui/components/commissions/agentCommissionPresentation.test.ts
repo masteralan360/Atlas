@@ -130,10 +130,27 @@ describe('agent commission presentation helpers', () => {
         expect(result.earned).toEqual({ iqd: 4_000 })
         expect(result.paid).toEqual({ usd: 4 })
         expect(result.recovered).toEqual({ iqd: 500 })
+        expect(result.netPaid).toEqual({ iqd: -500, usd: 4 })
         expect(result.approved).toEqual({ iqd: 5_000 })
         expect(result.reversed).toEqual({ iqd: -1_000 })
         expect(result.due).toEqual({ iqd: 5_000 - 1_000 + 500, usd: -4 })
         expect(result.orderCount).toBe(2)
+    })
+
+    it('reports net paid after a recovery so a settled commission agrees with net earned', () => {
+        const result = summarizeCommissionEntries([
+            entry({ id: 'accrual', kind: 'accrual', amount: 66_450 }),
+            entry({ id: 'earned-adjustment', kind: 'adjustment', amount: 62_700 }),
+            entry({ id: 'reversed-adjustment', kind: 'adjustment', status: 'reversed', amount: -83_600 }),
+            entry({ id: 'payout', kind: 'payout', status: 'paid', amount: -66_450 }),
+            entry({ id: 'recovery', kind: 'recovery', status: 'paid', amount: 20_900 })
+        ])
+
+        expect(result.earned).toEqual({ iqd: 45_550 })
+        expect(result.paid).toEqual({ iqd: 66_450 })
+        expect(result.recovered).toEqual({ iqd: 20_900 })
+        expect(result.netPaid).toEqual({ iqd: 45_550 })
+        expect(result.due).toEqual({ iqd: 0 })
     })
 
     it('nets linked return reversals into the approved source amount', () => {

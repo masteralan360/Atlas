@@ -57,8 +57,12 @@ export interface CommissionEntrySummary {
     estimated: CommissionCurrencyTotals
     earned: CommissionCurrencyTotals
     approved: CommissionCurrencyTotals
+    /** Gross outgoing commission settlements. */
     paid: CommissionCurrencyTotals
+    /** Incoming recoveries of previously paid commission. */
     recovered: CommissionCurrencyTotals
+    /** Cash paid to the agent after recoveries are deducted. */
+    netPaid: CommissionCurrencyTotals
     reversed: CommissionCurrencyTotals
     due: CommissionCurrencyTotals
     orderCount: number
@@ -99,6 +103,7 @@ export function summarizeCommissionEntries(entries: AgentCommissionEntry[]): Com
         approved: {},
         paid: {},
         recovered: {},
+        netPaid: {},
         reversed: {},
         due: {},
         orderCount: 0,
@@ -140,6 +145,11 @@ export function summarizeCommissionEntries(entries: AgentCommissionEntry[]): Com
             addCurrencyAmount(summary.recovered, entry.currency, entry.amount)
             addCurrencyAmount(summary.due, entry.currency, entry.amount)
         }
+    }
+
+    for (const currency of new Set([...Object.keys(summary.paid), ...Object.keys(summary.recovered)])) {
+        const netPaid = (summary.paid[currency] || 0) - (summary.recovered[currency] || 0)
+        if (Math.abs(netPaid) > 0.000001) summary.netPaid[currency] = netPaid
     }
 
     const approvedEntryIds = new Set<string>()

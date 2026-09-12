@@ -41,7 +41,7 @@ export interface AppliedCurrencyConversion {
     exchangeRates: ExchangeRateSnapshot[]
 }
 
-function normalizeSnapshot(snapshot?: ExchangeRateSnapshot[] | null) {
+function normalizeSnapshot(snapshot?: readonly ExchangeRateSnapshot[] | null) {
     if (!Array.isArray(snapshot)) {
         return []
     }
@@ -171,7 +171,7 @@ export function getAppliedCurrencyConversion(
     amount: number,
     fromCurrency: CurrencyCode,
     toCurrency: CurrencyCode,
-    snapshot?: ExchangeRateSnapshot[] | null
+    snapshot?: readonly ExchangeRateSnapshot[] | null
 ): AppliedCurrencyConversion | null {
     if (!Number.isFinite(amount) || amount < 0) return null
 

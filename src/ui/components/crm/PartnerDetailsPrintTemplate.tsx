@@ -15,6 +15,8 @@ export type PartnerDetailsPrintTransactionSource =
     | 'simple_loan'
     | 'direct_transaction'
     | 'clinical_appointment'
+    | 'pos_sale_loan'
+    | 'pos_sale_installment_loan'
     | 'delivery_shipment'
     | 'delivery_settlement'
     | 'delivery_recipient_payout'
@@ -194,6 +196,10 @@ function resolveSourceLabel(
             return t('ledger.type.direct_transaction', { defaultValue: 'Direct Transaction' })
         case 'clinical_appointment':
             return t('clinicalAppointments.title', { defaultValue: 'Appointment' })
+        case 'pos_sale_loan':
+            return t('loans.posSaleLoan', { defaultValue: 'POS Sale Loan' })
+        case 'pos_sale_installment_loan':
+            return t('loans.posSaleInstallmentLoan', { defaultValue: 'POS Sale Installment Loan' })
         case 'delivery_shipment':
             return t('postService.title', { defaultValue: 'Post Service' })
         case 'delivery_settlement':

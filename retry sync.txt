@@ -8,16 +8,10 @@ Fix SQLITE loading
 Transaction Reconciliation & Integrity Audit, Expandable, Plain English Explanation, AGENTS.md guide
 supabase backup
 Move Tabs in sidebar and add favorite
-SQLite Offline
-
-Production Log Folder
+SQLite Offline queue
 
 Price books selector order form and quick order
-
-SALES HISTORY IN DASHBOARD
 
 One single Usage Request Payload
 
 Restric Phone number in khaleej cosmetic
-
-Show POS loan products in print, HIBR

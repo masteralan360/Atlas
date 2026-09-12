@@ -523,4 +523,9 @@ export const moduleMetaByHref: Record<string, ModuleMeta> = {
       "Adjust workspace configuration, behavior, and system preferences.",
     badge: "Control",
   },
+  "/logs": {
+    section: "people-and-workspace",
+    description: "Review console errors recorded locally on this device.",
+    badge: "Errors",
+  },
 };

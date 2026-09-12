@@ -106,7 +106,7 @@ export function AgentCommissionAdminOverview({
                 </p>
             </CardHeader>
             <CardContent className="space-y-5">
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
                     <OverviewMetric
                         label={t('salesAgentCommissions.assignedOrders')}
                         icon={ReceiptText}
@@ -118,16 +118,19 @@ export function AgentCommissionAdminOverview({
                         value={<CommissionCurrencyTotalsView totals={summary.earned} iqdPreference={iqdPreference} />}
                     />
                     <OverviewMetric
-                        label={t('salesAgentCommissions.paidReversed')}
+                        label={t('salesAgentCommissions.netPaid')}
+                        icon={CircleDollarSign}
+                        value={<CommissionCurrencyTotalsView totals={summary.netPaid} iqdPreference={iqdPreference} />}
+                    />
+                    <OverviewMetric
+                        label={t('salesAgentCommissions.recovered')}
                         icon={RotateCcw}
-                        value={(
-                            <span className="flex flex-col gap-0.5">
-                                <CommissionCurrencyTotalsView totals={summary.paid} iqdPreference={iqdPreference} />
-                                <span className="text-xs font-medium text-rose-600">
-                                    <CommissionCurrencyTotalsView totals={summary.reversed} iqdPreference={iqdPreference} />
-                                </span>
-                            </span>
-                        )}
+                        value={<CommissionCurrencyTotalsView totals={summary.recovered} iqdPreference={iqdPreference} />}
+                    />
+                    <OverviewMetric
+                        label={t('salesAgentCommissions.reversed')}
+                        icon={RotateCcw}
+                        value={<CommissionCurrencyTotalsView totals={summary.reversed} iqdPreference={iqdPreference} />}
                     />
                     <OverviewMetric
                         label={t('salesAgentCommissions.due')}
@@ -153,7 +156,8 @@ export function AgentCommissionAdminOverview({
                                     <TableHead className="text-end">{t('salesAgentCommissions.cancelledZero')}</TableHead>
                                     <TableHead className="text-end">{t('salesAgentCommissions.totalOrderValue')}</TableHead>
                                     <TableHead className="text-end">{t('salesAgentCommissions.netEarned')}</TableHead>
-                                    <TableHead className="text-end">{t('salesAgentCommissions.paid')}</TableHead>
+                                    <TableHead className="text-end">{t('salesAgentCommissions.netPaid')}</TableHead>
+                                    <TableHead className="text-end">{t('salesAgentCommissions.recovered')}</TableHead>
                                     <TableHead className="text-end">{t('salesAgentCommissions.reversed')}</TableHead>
                                     <TableHead className="text-end">{t('salesAgentCommissions.outstanding')}</TableHead>
                                     {canReview || canPay ? <TableHead className="text-end">{t('salesAgentCommissions.action')}</TableHead> : null}
@@ -181,7 +185,8 @@ export function AgentCommissionAdminOverview({
                                         <TableCell className="text-end font-semibold text-rose-600">{cancelledOrders} / {zeroValueOrders}</TableCell>
                                         <TableCell className="text-end font-semibold"><CommissionCurrencyTotalsView totals={totalOrderValue} iqdPreference={iqdPreference} /></TableCell>
                                         <TableCell className="text-end font-semibold"><CommissionCurrencyTotalsView totals={agentSummary.earned} iqdPreference={iqdPreference} /></TableCell>
-                                        <TableCell className="text-end font-semibold text-emerald-600"><CommissionCurrencyTotalsView totals={agentSummary.paid} iqdPreference={iqdPreference} /></TableCell>
+                                        <TableCell className="text-end font-semibold text-emerald-600"><CommissionCurrencyTotalsView totals={agentSummary.netPaid} iqdPreference={iqdPreference} /></TableCell>
+                                        <TableCell className="text-end font-semibold text-sky-600"><CommissionCurrencyTotalsView totals={agentSummary.recovered} iqdPreference={iqdPreference} /></TableCell>
                                         <TableCell className="text-end font-semibold text-rose-600"><CommissionCurrencyTotalsView totals={agentSummary.reversed} iqdPreference={iqdPreference} /></TableCell>
                                         <TableCell className="text-end font-black"><CommissionCurrencyTotalsView totals={agentSummary.due} iqdPreference={iqdPreference} /></TableCell>
                                         {canReview || canPay ? (

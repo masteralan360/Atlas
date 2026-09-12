@@ -17,20 +17,80 @@ import {
   usePurchaseOrders,
   useSalesOrderReturnItemsForWorkspace,
   useSalesOrderReturnsForWorkspace,
+  useSales,
   useSalesOrders
 } from '@/local-db'
-import type { PurchaseOrder, SalesOrder } from '@/local-db/models'
+import type { PurchaseOrder, Sale, SalesOrder } from '@/local-db/models'
 import { isDirectTransactionPartnerAccountEffect } from '@/local-db/payments'
 import { deriveLegacyOrderPartnerBalanceSnapshot } from '@/lib/orderPartnerBalanceSnapshot'
 import {
   getPartnerAccountStatementClosingBalances,
   type PartnerAccountStatementClosingBalance,
-  type PartnerAccountStatementData
+  type PartnerAccountStatementData,
+  type PartnerAccountStatementPosSaleItem
 } from '@/lib/partnerAccountStatement'
 
 const EMPTY_LOAN_PAYMENTS: NonNullable<PartnerAccountStatementData['loanPayments']> = []
 const ALL_TIME_PERIOD: PartnerAccountStatementData['period'] = {
   type: 'allTime'
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function readRecordString(record: Record<string, unknown>, key: string): string {
+  const value = record[key]
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function readRecordNumber(record: Record<string, unknown>, key: string): number | null {
+  const value = record[key]
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function posSaleItemsForStatement(sale: Sale): PartnerAccountStatementPosSaleItem[] {
+  const rawItems = (sale as Sale & { _enrichedItems?: unknown })._enrichedItems
+  if (!Array.isArray(rawItems)) return []
+
+  return rawItems.flatMap((rawItem, index) => {
+    const item = asRecord(rawItem)
+    if (!item) return []
+    const quantity = readRecordNumber(item, 'quantity') ?? 0
+    if (quantity <= 0) return []
+    const product = asRecord(item.product)
+    const productName =
+      readRecordString(item, 'product_name')
+      || readRecordString(item, 'productName')
+      || readRecordString(product || {}, 'name')
+      || null
+    const unit =
+      readRecordString(item, 'product_unit')
+      || readRecordString(item, 'unit')
+      || readRecordString(product || {}, 'unit')
+      || null
+    const storedLineTotal = readRecordNumber(item, 'total_price') ?? readRecordNumber(item, 'totalPrice')
+    const unitPrice =
+      readRecordNumber(item, 'converted_unit_price')
+      ?? readRecordNumber(item, 'convertedUnitPrice')
+      ?? readRecordNumber(item, 'unit_price')
+      ?? readRecordNumber(item, 'unitPrice')
+
+    return [{
+      id: readRecordString(item, 'id') || `line-${index + 1}`,
+      productName,
+      quantity,
+      unit,
+      lineTotal: Math.abs(storedLineTotal ?? (unitPrice ?? 0) * quantity)
+    }]
+  })
 }
 
 /**
@@ -48,6 +108,7 @@ export function usePartnerAccountStatement(
   const commissionEntries = useAgentCommissionEntries(workspaceId)
   const productCommissionEntries = useAgentProductCommissionEntries(workspaceId)
   const salesOrders = useSalesOrders(workspaceId)
+  const sales = useSales(workspaceId)
   const salesOrderReturns = useSalesOrderReturnsForWorkspace(workspaceId)
   const salesOrderReturnItems = useSalesOrderReturnItemsForWorkspace(workspaceId)
   const purchaseOrders = usePurchaseOrders(workspaceId)
@@ -129,6 +190,12 @@ export function usePartnerAccountStatement(
   const salesAccountProductCommissionEntries = useMemo(
     () => productCommissionEntries.filter((entry) => commissionAgentIds.has(entry.agentId)),
     [commissionAgentIds, productCommissionEntries]
+  )
+  const posSaleItemsBySaleId = useMemo<Record<string, PartnerAccountStatementPosSaleItem[]>>(
+    () => Object.fromEntries(sales.flatMap((sale) => (
+      !sale.isDeleted ? [[sale.id, posSaleItemsForStatement(sale)]] : []
+    ))),
+    [sales]
   )
 
   const settlementTransactions = useMemo(() => {
@@ -226,6 +293,17 @@ export function usePartnerAccountStatement(
       linkedOrderCodes: Object.fromEntries(
         allOrders.filter((order) => !order.isDeleted).map((order) => [order.id, order.orderNumber])
       ),
+      linkedPosSaleCodes: Object.fromEntries(
+        sales
+          .filter((sale) => !sale.isDeleted)
+          .map((sale) => [
+            sale.id,
+            sale.sequenceId
+              ? `SALE-${sale.sequenceId}`
+              : `SALE-${sale.id.slice(0, 8).toUpperCase()}`
+          ])
+      ),
+      posSaleItemsBySaleId,
       settlementTransactions,
       agentCommissionEntries: salesAccountCommissionEntries,
       agentProductCommissionEntries: salesAccountProductCommissionEntries,
@@ -247,8 +325,10 @@ export function usePartnerAccountStatement(
     partnerSalesOrderReturns,
     partnerSalesOrders,
     period,
+    posSaleItemsBySaleId,
     salesAccountCommissionEntries,
     salesAccountProductCommissionEntries,
+    sales,
     settlementTransactions
   ])
 
