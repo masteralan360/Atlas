@@ -26,6 +26,78 @@ function payloadId(payload: Record<string, unknown>, camelCase: string, snakeCas
     return typeof value === 'string' && value.length > 0 ? value : null
 }
 
+/**
+ * Older desktop clients could leave an assignment mutation under the workspace
+ * that was active when it was queued, even though its order belongs to another
+ * workspace. Supabase correctly rejects that payload. Before an explicit retry,
+ * recover it from the local order only when the complete relationship is still
+ * valid. This preserves the assignment and never guesses across workspaces.
+ */
+async function repairSalesOrderAgentAssignmentWorkspaceMutations(
+    mutations: OfflineMutation[]
+) {
+    const unrepairedMutationIds = new Set<string>()
+    for (const mutation of mutations) {
+        if (
+            mutation.entityType !== 'sales_order_agent_assignments'
+            || mutation.operation === 'delete'
+            || !/sales order must belong to the assignment workspace/i.test(mutation.error ?? '')
+        ) {
+            continue
+        }
+
+        const orderId = payloadId(mutation.payload, 'orderId', 'order_id')
+        const agentId = payloadId(mutation.payload, 'agentId', 'agent_id')
+        if (!orderId || !agentId) {
+            unrepairedMutationIds.add(mutation.id)
+            continue
+        }
+
+        const [order, agent, assignment] = await Promise.all([
+            db.sales_orders.get(orderId),
+            db.agents.get(agentId),
+            db.sales_order_agent_assignments.get(mutation.entityId),
+        ])
+        if (
+            !order
+            || order.isDeleted
+            || !agent
+            || agent.isDeleted
+            || agent.workspaceId !== order.workspaceId
+            || (assignment && (
+                assignment.isDeleted
+                || assignment.orderId !== orderId
+                || assignment.agentId !== agentId
+            ))
+        ) {
+            unrepairedMutationIds.add(mutation.id)
+            continue
+        }
+
+        const workspaceId = order.workspaceId
+        const payload = {
+            ...mutation.payload,
+            workspaceId,
+            workspace_id: workspaceId,
+            orderId,
+            order_id: orderId,
+            agentId,
+            agent_id: agentId,
+        }
+
+        if (assignment) {
+            await db.sales_order_agent_assignments.update(assignment.id, {
+                workspaceId,
+                syncStatus: 'pending',
+                lastSyncedAt: null,
+            })
+        }
+        await db.offline_mutations.update(mutation.id, { workspaceId, payload })
+    }
+
+    return unrepairedMutationIds
+}
+
 async function queueRedispatchedPostponedVoiceCleanup(
     workspaceId: string,
     mutations: OfflineMutation[]
@@ -224,8 +296,10 @@ export async function retrySyncIntegrityMutations(workspaceId: string): Promise<
 
     await requeueDeliveryShipmentParents(workspaceId, rows)
     await queueRedispatchedPostponedVoiceCleanup(workspaceId, rows)
+    const unrepairedAssignmentMutationIds = await repairSalesOrderAgentAssignmentWorkspaceMutations(rows)
+    const rowsToRetry = rows.filter((mutation) => !unrepairedAssignmentMutationIds.has(mutation.id))
 
-    await db.offline_mutations.bulkUpdate(rows.map((mutation) => ({
+    await db.offline_mutations.bulkUpdate(rowsToRetry.map((mutation) => ({
         key: mutation.id,
         changes: {
             status: 'pending' as const,
@@ -233,5 +307,5 @@ export async function retrySyncIntegrityMutations(workspaceId: string): Promise<
         }
     })))
 
-    return rows.length
+    return rowsToRetry.length
 }

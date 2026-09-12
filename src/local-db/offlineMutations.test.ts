@@ -6,6 +6,9 @@ const mutationStore = vi.hoisted(() => {
     const businessPartners: Array<Record<string, any>> = []
     const deliveryShipments: Array<Record<string, any>> = []
     const deliveryShipmentEvents: Array<Record<string, any>> = []
+    const salesOrders: Array<Record<string, any>> = []
+    const agents: Array<Record<string, any>> = []
+    const salesOrderAgentAssignments: Array<Record<string, any>> = []
 
     const table = {
         where: vi.fn((indexName: string) => ({
@@ -88,6 +91,20 @@ const mutationStore = vi.hoisted(() => {
         }))
     }
 
+    const byIdTable = (rows: Array<Record<string, any>>) => ({
+        get: vi.fn(async (id: string) => rows.find((row) => row.id === id)),
+        update: vi.fn(async (id: string, patch: Record<string, any>) => {
+            const row = rows.find((item) => item.id === id)
+            if (!row) return 0
+
+            Object.assign(row, patch)
+            return 1
+        })
+    })
+    const salesOrdersTable = byIdTable(salesOrders)
+    const agentsTable = byIdTable(agents)
+    const salesOrderAgentAssignmentsTable = byIdTable(salesOrderAgentAssignments)
+
     return {
         rows,
         table,
@@ -95,16 +112,25 @@ const mutationStore = vi.hoisted(() => {
         businessPartners,
         deliveryShipments,
         deliveryShipmentEvents,
+        salesOrders,
+        agents,
+        salesOrderAgentAssignments,
         merchantProfilesTable,
         businessPartnersTable,
         deliveryShipmentsTable,
         deliveryShipmentEventsTable,
+        salesOrdersTable,
+        agentsTable,
+        salesOrderAgentAssignmentsTable,
         reset() {
             rows.splice(0)
             deliveryMerchantProfiles.splice(0)
             businessPartners.splice(0)
             deliveryShipments.splice(0)
             deliveryShipmentEvents.splice(0)
+            salesOrders.splice(0)
+            agents.splice(0)
+            salesOrderAgentAssignments.splice(0)
             table.where.mockClear()
             table.add.mockClear()
             table.update.mockClear()
@@ -112,6 +138,10 @@ const mutationStore = vi.hoisted(() => {
             table.bulkUpdate.mockClear()
             merchantProfilesTable.get.mockClear()
             businessPartnersTable.get.mockClear()
+            salesOrdersTable.get.mockClear()
+            agentsTable.get.mockClear()
+            salesOrderAgentAssignmentsTable.get.mockClear()
+            salesOrderAgentAssignmentsTable.update.mockClear()
         }
     }
 })
@@ -140,6 +170,9 @@ vi.mock('./database', () => ({
         business_partners: mutationStore.businessPartnersTable,
         delivery_shipments: mutationStore.deliveryShipmentsTable,
         delivery_shipment_events: mutationStore.deliveryShipmentEventsTable,
+        sales_orders: mutationStore.salesOrdersTable,
+        agents: mutationStore.agentsTable,
+        sales_order_agent_assignments: mutationStore.salesOrderAgentAssignmentsTable,
     }
 }))
 
@@ -388,6 +421,62 @@ describe('addToOfflineMutations', () => {
         expect(mutationStore.rows[0]).toMatchObject({ status: 'pending', error: undefined })
         expect(mutationStore.rows[1]).toMatchObject({ status: 'pending', error: undefined })
         expect(mutationStore.rows[2]).toMatchObject({ status: 'failed', error: 'network timeout' })
+    })
+
+    it('repairs an assignment mutation from its valid local order before retrying it', async () => {
+        mutationStore.salesOrders.push({
+            id: 'order-1', workspaceId: 'workspace-correct', isDeleted: false
+        })
+        mutationStore.agents.push({
+            id: 'agent-1', workspaceId: 'workspace-correct', isDeleted: false
+        })
+        mutationStore.salesOrderAgentAssignments.push({
+            id: 'assignment-1', workspaceId: 'workspace-stale', orderId: 'order-1',
+            agentId: 'agent-1', isDeleted: false, syncStatus: 'conflict', lastSyncedAt: '2026-09-01T00:00:00.000Z'
+        })
+        mutationStore.rows.push({
+            id: 'assignment-failure', workspaceId: 'workspace-stale',
+            entityType: 'sales_order_agent_assignments', entityId: 'assignment-1', operation: 'create',
+            payload: { id: 'assignment-1', workspace_id: 'workspace-stale', order_id: 'order-1', agent_id: 'agent-1' },
+            createdAt: '2026-09-12T00:00:00.000Z', status: 'failed',
+            error: 'Sync integrity issue: Sales order must belong to the assignment workspace'
+        })
+
+        await expect(retrySyncIntegrityMutations('workspace-stale')).resolves.toBe(1)
+
+        expect(mutationStore.rows[0]).toMatchObject({
+            workspaceId: 'workspace-correct', status: 'pending', error: undefined,
+            payload: {
+                workspaceId: 'workspace-correct', workspace_id: 'workspace-correct',
+                orderId: 'order-1', order_id: 'order-1', agentId: 'agent-1', agent_id: 'agent-1'
+            }
+        })
+        expect(mutationStore.salesOrderAgentAssignments[0]).toMatchObject({
+            workspaceId: 'workspace-correct', syncStatus: 'pending', lastSyncedAt: null
+        })
+    })
+
+    it('does not rewrite an assignment when its local agent is from another workspace', async () => {
+        mutationStore.salesOrders.push({
+            id: 'order-1', workspaceId: 'workspace-correct', isDeleted: false
+        })
+        mutationStore.agents.push({
+            id: 'agent-1', workspaceId: 'workspace-other', isDeleted: false
+        })
+        mutationStore.rows.push({
+            id: 'assignment-failure', workspaceId: 'workspace-stale',
+            entityType: 'sales_order_agent_assignments', entityId: 'assignment-1', operation: 'create',
+            payload: { orderId: 'order-1', agentId: 'agent-1' },
+            createdAt: '2026-09-12T00:00:00.000Z', status: 'failed',
+            error: 'Sync integrity issue: Sales order must belong to the assignment workspace'
+        })
+
+        await expect(retrySyncIntegrityMutations('workspace-stale')).resolves.toBe(0)
+
+        expect(mutationStore.rows[0]).toMatchObject({
+            workspaceId: 'workspace-stale', status: 'failed',
+            payload: { orderId: 'order-1', agentId: 'agent-1' }
+        })
     })
 
     it('requeues the local merchant profile before retrying a failed shipment', async () => {
