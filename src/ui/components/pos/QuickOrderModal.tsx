@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { BadgePercent, CircleDollarSign, ClipboardList, Link2, Loader2, ShoppingCart, UserRound, X } from 'lucide-react'
+import { BadgeDollarSign, BadgePercent, CircleDollarSign, ClipboardList, Link2, Loader2, ShoppingCart, UserRound, X } from 'lucide-react'
 
 import type { CartItem } from '@/types'
 import {
@@ -14,6 +14,7 @@ import {
     type ExchangeRateSnapshot,
     type InstallmentFrequency,
     type PaymentAccount,
+    type SalesAgentCommissionMode,
     type SalesOrder
 } from '@/local-db'
 import { formatCurrency } from '@/lib/utils'
@@ -186,6 +187,7 @@ interface QuickOrderModalProps {
     agentSalesAccountsEnabled: boolean
     productCommissionsEnabled: boolean
     commissionAssignmentsEnabled: boolean
+    commissionMode: SalesAgentCommissionMode
     commissionExchangeRates: ExchangeRateSnapshot[]
     commissionCurrencies: CurrencyCode[]
     commissionAssignedBy?: string | null
@@ -209,6 +211,7 @@ export function QuickOrderModal({
     agentSalesAccountsEnabled,
     productCommissionsEnabled,
     commissionAssignmentsEnabled,
+    commissionMode,
     commissionExchangeRates,
     commissionCurrencies,
     commissionAssignedBy,
@@ -704,20 +707,34 @@ export function QuickOrderModal({
                 ) : null}
 
                 {showCustomerCommissionAssignments ? (
-                    <SalesOrderCommissionAssignmentSection
-                        ref={commissionAssignmentRef}
-                        workspaceId={workspaceId}
-                        customerCity={customer?.city || ''}
-                        assignedBy={commissionAssignedBy}
-                        orderCurrency={settlementCurrency}
-                        orderTotal={totalAmount}
-                        exchangeRates={commissionExchangeRates}
-                        availableCurrencies={commissionCurrencies}
-                        iqdDisplayPreference={iqdPreference}
-                        allowPlanCommissionAmountOverride
-                        onCommissionSummaryChange={handleCommissionSummaryChange}
-                        disabled={isSubmitting}
-                    />
+                    <div className="space-y-3">
+                        {commissionMode === 'tracked' ? (
+                            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-sky-500/20 bg-sky-500/[0.05] px-4 py-3 text-sm text-sky-800 dark:text-sky-200">
+                                <BadgeDollarSign className="h-4 w-4" />
+                                <span className="font-semibold">{t('salesAgentCommissions.trackedCommission')}</span>
+                                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold uppercase text-muted-foreground">
+                                    {t('salesAgentCommissions.nonpayable')}
+                                </span>
+                                <span className="basis-full text-xs text-muted-foreground sm:basis-auto">
+                                    {t('salesAgentCommissions.trackedOrderDescription')}
+                                </span>
+                            </div>
+                        ) : null}
+                        <SalesOrderCommissionAssignmentSection
+                            ref={commissionAssignmentRef}
+                            workspaceId={workspaceId}
+                            customerCity={customer?.city || ''}
+                            assignedBy={commissionAssignedBy}
+                            orderCurrency={settlementCurrency}
+                            orderTotal={totalAmount}
+                            exchangeRates={commissionExchangeRates}
+                            availableCurrencies={commissionCurrencies}
+                            iqdDisplayPreference={iqdPreference}
+                            allowPlanCommissionAmountOverride
+                            onCommissionSummaryChange={handleCommissionSummaryChange}
+                            disabled={isSubmitting}
+                        />
+                    </div>
                 ) : null}
 
                 {isInstallmentBased ? (
@@ -749,6 +766,7 @@ export function QuickOrderModal({
                         currency={settlementCurrency}
                         exchangeRates={commissionExchangeRates}
                         iqdPreference={iqdPreference}
+                        commissionMode={commissionMode}
                         showTotal
                     />
                 ) : null}

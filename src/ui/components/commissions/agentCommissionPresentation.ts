@@ -3,8 +3,10 @@ import type {
     AgentCommissionMembership,
     AgentCommissionPlan,
     CommissionEntryStatus,
-    CommissionPlanLevel
+    CommissionPlanLevel,
+    SalesAgentCommissionMode
 } from '@/local-db'
+import { getCommissionEntryMode } from '@/local-db/commissionMode'
 import { formatCurrency } from '@/lib/utils'
 
 export function formatCommissionPlanTerms(
@@ -69,7 +71,7 @@ export interface CommissionEntrySummary {
     entryCount: number
 }
 
-export type CommissionHistoryStatus = 'earned' | 'paid' | 'recovered' | 'reversed' | 'outstanding' | 'recovery_due'
+export type CommissionHistoryStatus = 'tracked' | 'earned' | 'paid' | 'recovered' | 'reversed' | 'outstanding' | 'recovery_due'
 
 /**
  * A review dialog is an operational view, not the accounting journal. Group
@@ -81,6 +83,7 @@ export interface CommissionHistoryGroup {
     orderId: string | null
     payoutReference: string | null
     currency: string
+    commissionMode: SalesAgentCommissionMode
     entries: AgentCommissionEntry[]
     earned: number
     paid: number
@@ -96,7 +99,10 @@ function addCurrencyAmount(totals: CommissionCurrencyTotals, currency: string, a
     totals[normalizedCurrency] = (totals[normalizedCurrency] || 0) + amount
 }
 
-export function summarizeCommissionEntries(entries: AgentCommissionEntry[]): CommissionEntrySummary {
+export function summarizeCommissionEntries(
+    entries: AgentCommissionEntry[],
+    commissionMode: SalesAgentCommissionMode = 'payable'
+): CommissionEntrySummary {
     const summary: CommissionEntrySummary = {
         estimated: {},
         earned: {},
@@ -107,11 +113,11 @@ export function summarizeCommissionEntries(entries: AgentCommissionEntry[]): Com
         reversed: {},
         due: {},
         orderCount: 0,
-        entryCount: entries.filter((entry) => !entry.isDeleted).length
+        entryCount: entries.filter((entry) => !entry.isDeleted && getCommissionEntryMode(entry) === commissionMode).length
     }
     const orderIds = new Set<string>()
 
-    const activeEntries = entries.filter((entry) => !entry.isDeleted)
+    const activeEntries = entries.filter((entry) => !entry.isDeleted && getCommissionEntryMode(entry) === commissionMode)
     const entryById = new Map(activeEntries.map((entry) => [entry.id, entry]))
     const approvedSourceIds = new Set(activeEntries
         .filter((entry) => entry.kind === 'approval' && entry.relatedEntryId)
@@ -132,7 +138,7 @@ export function summarizeCommissionEntries(entries: AgentCommissionEntry[]): Com
         }
         if (entry.kind === 'accrual' || entry.kind === 'reversal' || entry.kind === 'adjustment') {
             addCurrencyAmount(summary.earned, entry.currency, entry.amount)
-            addCurrencyAmount(summary.due, entry.currency, entry.amount)
+            if (commissionMode === 'payable') addCurrencyAmount(summary.due, entry.currency, entry.amount)
         }
         if (entry.kind === 'reversal') {
             addCurrencyAmount(summary.reversed, entry.currency, entry.amount)
@@ -178,13 +184,15 @@ export function buildCommissionHistoryGroups(entries: AgentCommissionEntry[]): C
     for (const entry of entries) {
         if (entry.isDeleted || entry.kind === 'estimate' || entry.kind === 'approval') continue
         const currency = entry.currency.toLowerCase()
+        const commissionMode = getCommissionEntryMode(entry)
         const reference = entry.orderId || entry.payoutReference || entry.id
-        const id = `${entry.orderId ? 'order' : 'manual'}:${reference}:${currency}`
+        const id = `${commissionMode}:${entry.orderId ? 'order' : 'manual'}:${reference}:${currency}`
         const group = groups.get(id) || {
             id,
             orderId: entry.orderId || null,
             payoutReference: entry.payoutReference || null,
             currency,
+            commissionMode,
             entries: [],
             earned: 0,
             paid: 0,
@@ -196,7 +204,7 @@ export function buildCommissionHistoryGroups(entries: AgentCommissionEntry[]): C
         }
 
         group.entries.push(entry)
-        group.outstanding += entry.amount
+        if (commissionMode === 'payable') group.outstanding += entry.amount
         if (entry.kind === 'accrual' || entry.kind === 'reversal' || entry.kind === 'adjustment') {
             group.earned += entry.amount
         }
@@ -218,7 +226,8 @@ export function buildCommissionHistoryGroups(entries: AgentCommissionEntry[]): C
             group.outstanding = Math.round(group.outstanding * 1_000_000) / 1_000_000
             group.entries.sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime())
 
-            if (group.outstanding > 0.000001) group.status = 'outstanding'
+            if (group.commissionMode === 'tracked') group.status = 'tracked'
+            else if (group.outstanding > 0.000001) group.status = 'outstanding'
             else if (group.outstanding < -0.000001) group.status = 'recovery_due'
             else if (group.paid > 0.000001) group.status = 'paid'
             else if (group.recovered > 0.000001) group.status = 'recovered'

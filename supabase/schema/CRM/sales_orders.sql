@@ -6,6 +6,8 @@ CREATE TABLE crm.sales_orders (
   customer_id uuid NOT NULL,
   customer_name text NULL,
   sales_account_agent_id uuid NULL REFERENCES crm.agents(id) ON DELETE RESTRICT,
+  commission_mode text NOT NULL DEFAULT 'payable'::text,
+  commission_mode_captured_at timestamp with time zone NOT NULL DEFAULT now(),
   subtotal numeric NULL DEFAULT 0,
   discount numeric NULL DEFAULT 0,
   tax numeric NULL DEFAULT 0,
@@ -71,6 +73,10 @@ ALTER TABLE crm.sales_orders
   ADD CONSTRAINT sales_orders_return_status_check
   CHECK (return_status IN ('none', 'partial', 'full'));
 
+ALTER TABLE crm.sales_orders
+  ADD CONSTRAINT sales_orders_commission_mode_check
+  CHECK (commission_mode IN ('payable', 'tracked'));
+
 CREATE INDEX IF NOT EXISTS idx_crm_sales_orders_workspace
   ON crm.sales_orders (workspace_id);
 
@@ -82,6 +88,10 @@ CREATE INDEX IF NOT EXISTS idx_crm_sales_orders_workspace_deleted
 
 CREATE INDEX IF NOT EXISTS idx_crm_sales_orders_workspace_status
   ON crm.sales_orders (workspace_id, status);
+
+CREATE INDEX IF NOT EXISTS sales_orders_workspace_commission_mode_idx
+  ON crm.sales_orders (workspace_id, commission_mode, created_at DESC)
+  WHERE COALESCE(is_deleted, false) = false;
 
 CREATE INDEX IF NOT EXISTS idx_crm_sales_orders_customer
   ON crm.sales_orders (customer_id);

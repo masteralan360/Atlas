@@ -271,7 +271,7 @@ describe('buildPartnerAccountStatementLedger', () => {
         ])
     })
 
-    it('shows immutable per-unit and line product commission snapshots without changing the account balance', () => {
+    it('shows tracked per-unit and line product commission snapshots on the sale row without changing the account balance', () => {
         const data = statementData()
         data.itemizeSalesOrders = true
         data.isAgentCommissionStatement = true
@@ -286,12 +286,19 @@ describe('buildPartnerAccountStatementLedger', () => {
             id: 'product-commission-accrual', orderId: 'commissioned-sale', assignmentId: 'assignment-1', agentId: 'agent-1',
             orderItemId: 'product-line', productId: 'product-1', kind: 'accrual', status: 'earned', currency: 'iqd',
             commissionType: 'fixed_amount', ratePercent: 0, quantity: 3, basisAmountPerUnit: 10,
-            commissionPerUnit: 5, amount: 15, occurredAt: '2026-01-04T10:00:00.000Z', isDeleted: false
+            commissionMode: 'tracked', commissionPerUnit: 5, amount: 15,
+            occurredAt: '2026-01-04T10:00:00.000Z', isDeleted: false
+        }] as any
+        data.agentCommissionEntries = [{
+            id: 'tracked-aggregate', orderId: 'commissioned-sale', assignmentId: 'assignment-1', agentId: 'agent-1',
+            commissionMode: 'tracked', kind: 'accrual', status: 'earned', currency: 'iqd', amount: 15,
+            occurredAt: '2026-01-04T10:00:00.000Z', isDeleted: false
         }] as any
 
         const ledger = buildPartnerAccountStatementLedger(data)[0]
         const entry = ledger.entries.find((row) => row.id === 'sales-order:commissioned-sale:item:product-line')
         expect(entry).toMatchObject({ commissionPerProduct: 5, totalProductCommission: 15, delta: 30, runningBalance: 30 })
+        expect(ledger.entries.some((row) => row.kind === 'agent_commission')).toBe(false)
         expect(ledger.productCommissionTotal).toBe(15)
 
         const html = renderToStaticMarkup(createElement(PartnerAccountStatementPrintTemplate, {
@@ -301,6 +308,50 @@ describe('buildPartnerAccountStatementLedger', () => {
         const footer = html.match(/<tfoot>(.*?)<\/tfoot>/)?.[1]
         expect(footer).toContain('>Total</td>')
         expect(footer).toContain('>15 iqd</td>')
+    })
+
+    it('shows the tracked order product commission total when sale items are collapsed', () => {
+        const data = statementData()
+        data.itemizeSalesOrders = false
+        data.isAgentCommissionStatement = true
+        data.statementOrders = [{
+            id: 'collapsed-commissioned-sale', orderNumber: 'SO-PRODUCT-2', customerId: 'agent-partner',
+            total: 70, currency: 'iqd', status: 'completed', createdAt: '2026-01-04T10:00:00.000Z',
+            isDeleted: false, linkedLoanId: null,
+            items: [
+                { id: 'product-line-a', productName: 'Service pack', quantity: 2, unit: 'pcs', lineTotal: 30 },
+                { id: 'product-line-b', productName: 'Support pack', quantity: 4, unit: 'pcs', lineTotal: 40 }
+            ]
+        }] as any
+        data.settlementTransactions = []
+        data.agentProductCommissionEntries = [
+            {
+                id: 'tracked-product-a', orderId: 'collapsed-commissioned-sale', assignmentId: 'assignment-1', agentId: 'agent-1',
+                orderItemId: 'product-line-a', productId: 'product-1', kind: 'accrual', status: 'earned', currency: 'iqd',
+                commissionType: 'fixed_amount', ratePercent: 0, quantity: 2, basisAmountPerUnit: 15,
+                commissionMode: 'tracked', commissionPerUnit: 2, amount: 4,
+                occurredAt: '2026-01-04T10:00:00.000Z', isDeleted: false
+            },
+            {
+                id: 'tracked-product-b', orderId: 'collapsed-commissioned-sale', assignmentId: 'assignment-1', agentId: 'agent-1',
+                orderItemId: 'product-line-b', productId: 'product-2', kind: 'accrual', status: 'earned', currency: 'iqd',
+                commissionType: 'fixed_amount', ratePercent: 0, quantity: 4, basisAmountPerUnit: 10,
+                commissionMode: 'tracked', commissionPerUnit: 1.5, amount: 6,
+                occurredAt: '2026-01-04T10:00:00.000Z', isDeleted: false
+            }
+        ] as any
+
+        const [ledger] = buildPartnerAccountStatementLedger(data)
+
+        expect(ledger.entries).toHaveLength(1)
+        expect(ledger.entries[0]).toMatchObject({
+            id: 'sales-order:collapsed-commissioned-sale',
+            totalProductCommission: 10,
+            delta: 70,
+            runningBalance: 70
+        })
+        expect(ledger.entries[0].commissionPerProduct).toBeUndefined()
+        expect(ledger.productCommissionTotal).toBe(10)
     })
 
     it('nets returned product commission in the period total and rounds decimal totals', () => {
@@ -327,13 +378,15 @@ describe('buildPartnerAccountStatementLedger', () => {
                 id: 'product-commission-accrual', orderId: 'commissioned-sale', assignmentId: 'assignment-1', agentId: 'agent-1',
                 orderItemId: 'product-line', productId: 'product-1', kind: 'accrual', status: 'earned', currency: 'iqd',
                 commissionType: 'fixed_amount', ratePercent: 0, quantity: 3, basisAmountPerUnit: 10,
-                commissionPerUnit: 0.1, amount: 0.3, occurredAt: '2026-01-04T10:00:00.000Z', isDeleted: false
+                commissionMode: 'tracked', commissionPerUnit: 0.1, amount: 0.3,
+                occurredAt: '2026-01-04T10:00:00.000Z', isDeleted: false
             },
             {
                 id: 'product-commission-return', orderId: 'commissioned-sale', orderReturnId: 'return-1', assignmentId: 'assignment-1', agentId: 'agent-1',
                 orderItemId: 'product-line', productId: 'product-1', kind: 'reversal', status: 'reversed', currency: 'iqd',
                 commissionType: 'fixed_amount', ratePercent: 0, quantity: -1, basisAmountPerUnit: 10,
-                commissionPerUnit: 0.1, amount: -0.1, occurredAt: '2026-01-05T10:00:00.000Z', isDeleted: false
+                commissionMode: 'tracked', commissionPerUnit: 0.1, amount: -0.1,
+                occurredAt: '2026-01-05T10:00:00.000Z', isDeleted: false
             }
         ] as any
 

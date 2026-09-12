@@ -36,6 +36,7 @@ import {
   activeProductCommissionRule,
   appendAgentProductCommissionEntry,
 } from "./productCommissions";
+import { getSalesOrderCommissionMode, isPayableCommissionEntry } from "./commissionMode";
 import { addToOfflineMutations } from "./offlineMutations";
 
 const PLAN_TABLE = "agent_commission_plans";
@@ -1249,8 +1250,12 @@ async function appendEntry(
   id = generateId(),
 ) {
   const now = new Date().toISOString();
+  const linkedOrder = input.orderId ? await db.sales_orders.get(input.orderId) : null;
   const entry: AgentCommissionEntry = {
     ...input,
+    commissionMode: linkedOrder
+      ? getSalesOrderCommissionMode(linkedOrder)
+      : input.commissionMode ?? "payable",
     id,
     workspaceId,
     createdAt: now,
@@ -2478,6 +2483,9 @@ export async function recordCommissionApproval(
     || !["accrual", "adjustment"].includes(source.kind)) {
     throw new Error("Earned commission entry not found");
   }
+  if (!isPayableCommissionEntry(source)) {
+    throw new Error("Tracked commission is nonpayable and cannot be approved for settlement");
+  }
   const existing = await db.agent_commission_entries
     .where("relatedEntryId")
     .equals(source.id)
@@ -2648,6 +2656,10 @@ async function recordServerCommissionSettlement(
   kind: 'payout' | 'recovery',
   input: RecordAgentCommissionSettlementInput,
 ) {
+  const order = await db.sales_orders.get(input.orderId);
+  if (order && getSalesOrderCommissionMode(order) === 'tracked') {
+    throw new Error('Tracked commission is nonpayable and cannot be settled');
+  }
   const { data, error } = await runSupabaseAction(
     'salesAgentCommissions.pay',
     () => supabase.rpc(
@@ -2742,6 +2754,9 @@ export async function recordAgentCommissionPayout(
   ) {
     throw new Error('Eligible sales order not found');
   }
+  if (getSalesOrderCommissionMode(order) === 'tracked') {
+    throw new Error('Tracked commission is nonpayable and cannot be settled');
+  }
   if (order.currency !== input.currency) {
     throw new Error('Commission payout currency must match the sales order');
   }
@@ -2753,6 +2768,7 @@ export async function recordAgentCommissionPayout(
       !entry.isDeleted
       && entry.assignmentId === assignment.id
       && entry.orderId === order.id
+      && isPayableCommissionEntry(entry)
       && entry.currency === input.currency
       && entry.kind !== 'estimate'
       && entry.kind !== 'approval'
@@ -2879,6 +2895,9 @@ export async function recordAgentCommissionRecovery(
   if (!order || order.isDeleted || order.workspaceId !== workspaceId) {
     throw new Error('Sales order not found');
   }
+  if (getSalesOrderCommissionMode(order) === 'tracked') {
+    throw new Error('Tracked commission is nonpayable and cannot be settled');
+  }
   if (order.currency !== input.currency) {
     throw new Error('Commission recovery currency must match the sales order');
   }
@@ -2889,6 +2908,7 @@ export async function recordAgentCommissionRecovery(
     .and((entry) => !entry.isDeleted
       && entry.assignmentId === assignment.id
       && entry.orderId === order.id
+      && isPayableCommissionEntry(entry)
       && entry.currency === input.currency
       && entry.kind !== 'estimate'
       && entry.kind !== 'approval')
@@ -3108,6 +3128,7 @@ export async function settlePaidSalesOrderCommissionsLocally(
   createdBy?: string | null,
 ) {
   if (shouldUseCloudData(order.workspaceId)
+    || getSalesOrderCommissionMode(order) === 'tracked'
     || order.status !== 'completed'
     || (!order.isPaid && order.paymentStatus !== 'paid')) {
     return [] as AgentCommissionEntry[];
@@ -3131,14 +3152,15 @@ export async function settlePaidSalesOrderCommissionsLocally(
     const source = entries.find((entry) => entry.kind === 'accrual');
     if (!source) continue;
     const assignmentDue = roundCommissionAmount(entries
-      .filter((entry) => entry.currency === source.currency
+        .filter((entry) => isPayableCommissionEntry(entry)
+          && entry.currency === source.currency
         && entry.kind !== 'estimate'
         && entry.kind !== 'approval')
       .reduce((sum, entry) => sum + entry.amount, 0));
     const agentEntries = await db.agent_commission_entries
       .where('[workspaceId+agentId]')
       .equals([order.workspaceId, assignment.agentId])
-      .and((entry) => !entry.isDeleted && entry.currency === source.currency)
+      .and((entry) => !entry.isDeleted && isPayableCommissionEntry(entry) && entry.currency === source.currency)
       .toArray();
     const agentDue = roundCommissionAmount(agentEntries
       .filter((entry) => entry.kind !== 'estimate' && entry.kind !== 'approval')

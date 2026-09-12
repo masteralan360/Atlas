@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { BadgePercent, HandCoins, MapPin, Truck, UserRoundCheck } from 'lucide-react'
+import { BadgeDollarSign, BadgePercent, HandCoins, MapPin, Truck, UserRoundCheck } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { formatCurrency, formatDateTime } from '@/lib/utils'
@@ -8,10 +8,12 @@ import {
     useAgentCommissionEntries,
     useAgentProductCommissionEntries,
     useSalesOrderAgentAssignments,
+    useSalesOrder,
     type CurrencyCode,
     type IQDDisplayPreference,
     type PaymentObligation
 } from '@/local-db'
+import { getCommissionEntryMode, getSalesOrderCommissionMode } from '@/local-db/commissionMode'
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from '@/ui/components'
 import { commissionStatusClass, commissionStatusLabel, formatCommissionPlanTerms } from './agentCommissionPresentation'
 import { useCommissionAgentDirectory } from './useCommissionAgentDirectory'
@@ -41,6 +43,9 @@ export function OrderAgentCommissionCard({
 }) {
     const { t } = useTranslation()
     const assignments = useSalesOrderAgentAssignments(workspaceId)
+    const order = useSalesOrder(orderId)
+    const commissionMode = order ? getSalesOrderCommissionMode(order) : 'payable'
+    const isTrackedCommission = commissionMode === 'tracked'
     const entries = useAgentCommissionEntries(workspaceId)
     const productEntries = useAgentProductCommissionEntries(workspaceId)
     const directory = useCommissionAgentDirectory(workspaceId)
@@ -52,9 +57,9 @@ export function OrderAgentCommissionCard({
     const displayedAssignments = canAssign || canViewAllCommission ? activeAssignments : visibleAssignments
     const canViewAssignment = canAssign || canViewAllCommission || visibleAssignments.length > 0
     const orderEntries = useMemo(() => entries
-        .filter((entry) => !entry.isDeleted && entry.orderId === orderId)
+        .filter((entry) => !entry.isDeleted && entry.orderId === orderId && getCommissionEntryMode(entry) === commissionMode)
         .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime()),
-    [entries, orderId])
+    [commissionMode, entries, orderId])
 
     if (!canViewAssignment) return null
 
@@ -66,6 +71,20 @@ export function OrderAgentCommissionCard({
                     {activeAssignments.length > 1
                         ? t('salesAgentCommissions.salesAgentBeneficiaries')
                         : t('salesAgentCommissions.salesAgent')}
+                    {isTrackedCommission ? (
+                        <>
+                            <Badge variant="outline" className="gap-1 border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300">
+                                <BadgeDollarSign className="h-3.5 w-3.5" />
+                                {t('salesAgentCommissions.trackedCommission')}
+                            </Badge>
+                            <Badge variant="secondary">{t('salesAgentCommissions.nonpayable')}</Badge>
+                            <Badge variant="outline">
+                                {order?.status === 'completed'
+                                    ? t('salesAgentCommissions.final')
+                                    : t('salesAgentCommissions.projected')}
+                            </Badge>
+                        </>
+                    ) : null}
                 </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
@@ -77,19 +96,22 @@ export function OrderAgentCommissionCard({
                                     || (canViewOwnCommission && Boolean(userId) && assignedAgent?.agent.linkedUserId === userId)
                                 const assignmentEntries = orderEntries.filter((entry) => entry.assignmentId === assignment.id)
                                 const assignmentProductEntries = productEntries
-                                    .filter((entry) => !entry.isDeleted && entry.assignmentId === assignment.id && entry.orderId === orderId)
+                                    .filter((entry) => !entry.isDeleted
+                                        && entry.assignmentId === assignment.id
+                                        && entry.orderId === orderId
+                                        && getCommissionEntryMode(entry) === commissionMode)
                                     .sort((left, right) => left.productNameSnapshot.localeCompare(right.productNameSnapshot))
                                 const sourceEntry = assignmentEntries.find((entry) => entry.kind === 'accrual')
                                 const latestEntry = assignmentEntries[0]
                                 const commissionAmount = assignmentEntries
                                     .filter((entry) => ['accrual', 'reversal', 'adjustment'].includes(entry.kind))
                                     .reduce((total, entry) => total + Number(entry.amount || 0), 0)
-                                const outstandingAmount = assignmentEntries
+                                const outstandingAmount = isTrackedCommission ? 0 : assignmentEntries
                                     .filter((entry) => entry.kind !== 'estimate' && entry.kind !== 'approval')
                                     .reduce((total, entry) => total + Number(entry.amount || 0), 0)
                                 const currency = (sourceEntry?.currency || latestEntry?.currency || orderCurrency) as CurrencyCode
                                 const partner = assignedAgent?.partner
-                                const commissionObligation: PaymentObligation | null = partner && Math.abs(outstandingAmount) > 0.000001
+                                const commissionObligation: PaymentObligation | null = !isTrackedCommission && partner && Math.abs(outstandingAmount) > 0.000001
                                     ? {
                                         id: `agent-commission:${assignment.agentId}:${assignment.id}:${currency}`,
                                         workspaceId,
@@ -167,13 +189,13 @@ export function OrderAgentCommissionCard({
                                                     </div>
                                                 </div>
                                                 <div className="mt-3 grid gap-3 text-xs">
-                                                    {Math.abs(outstandingAmount - commissionAmount) > 0.000001 ? (
+                                                    {!isTrackedCommission && Math.abs(outstandingAmount - commissionAmount) > 0.000001 ? (
                                                         <div>
                                                             <div className="text-muted-foreground">{t('salesAgentCommissions.due')}</div>
                                                             <div className="mt-1 font-semibold">{formatCurrency(outstandingAmount, currency, iqdPreference)}</div>
                                                         </div>
                                                     ) : null}
-                                                    {canPayCommission && commissionObligation ? (
+                                                    {!isTrackedCommission && canPayCommission && commissionObligation ? (
                                                         <Button
                                                             type="button"
                                                             size="sm"

@@ -19,6 +19,7 @@ import type {
     ProductCommissionRuleAgent
 } from './models'
 import { addToOfflineMutations } from './offlineMutations'
+import { getSalesOrderCommissionMode } from './commissionMode'
 
 const RULE_TABLE = 'product_commission_rules'
 const RULE_AGENT_TABLE = 'product_commission_rule_agents'
@@ -96,8 +97,12 @@ export async function appendAgentProductCommissionEntry(
         'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'version' | 'isDeleted' | 'syncStatus' | 'lastSyncedAt'>
 ) {
     const now = new Date().toISOString()
+    const linkedOrder = await db.sales_orders.get(input.orderId)
     const entry: AgentProductCommissionEntry = {
         ...input,
+        commissionMode: linkedOrder
+            ? getSalesOrderCommissionMode(linkedOrder)
+            : input.commissionMode ?? 'payable',
         id: generateId(),
         workspaceId,
         createdAt: now,

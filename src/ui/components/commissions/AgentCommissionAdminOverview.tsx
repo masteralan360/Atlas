@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { BadgeCheck, BadgePercent, CircleDollarSign, Eye, ReceiptText, RotateCcw } from 'lucide-react'
+import { BadgeCheck, BadgeDollarSign, BadgePercent, CircleDollarSign, Eye, ReceiptText, RotateCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { useAgentCommissionEntries, usePaymentObligations, useSalesOrderAgentAssignments, useSalesOrders, type IQDDisplayPreference, type PaymentObligation } from '@/local-db'
@@ -43,6 +43,7 @@ export function AgentCommissionAdminOverview({
     const paymentObligations = usePaymentObligations(workspaceId)
     const [settlementAgentId, setSettlementAgentId] = useState<string | null>(null)
     const summary = useMemo(() => summarizeCommissionEntries(entries), [entries])
+    const trackedSummary = useMemo(() => summarizeCommissionEntries(entries, 'tracked'), [entries])
     const currentAssignments = useMemo(
         () => assignments.filter((assignment) => !assignment.isDeleted && !assignment.unassignedAt),
         [assignments]
@@ -68,6 +69,7 @@ export function AgentCommissionAdminOverview({
             return {
                 entry,
                 summary: summarizeCommissionEntries(entries.filter((ledgerEntry) => ledgerEntry.agentId === entry.agent.id)),
+                trackedSummary: summarizeCommissionEntries(entries.filter((ledgerEntry) => ledgerEntry.agentId === entry.agent.id), 'tracked'),
                 assignedOrders: agentOrders.length,
                 openOrders: agentOrders.filter((order) => order.status === 'draft' || order.status === 'pending').length,
                 cancelledOrders: agentOrders.filter((order) => order.status === 'cancelled').length,
@@ -76,7 +78,7 @@ export function AgentCommissionAdminOverview({
                 totalOrderValue
             }
         })
-        .filter((row) => row.entry.membership || row.summary.entryCount > 0 || row.assignedOrders > 0)
+        .filter((row) => row.entry.membership || row.summary.entryCount > 0 || row.trackedSummary.entryCount > 0 || row.assignedOrders > 0)
         .sort((left, right) => right.assignedOrders - left.assignedOrders || left.entry.name.localeCompare(right.entry.name)),
     [assignedAssignments, directory.agents, entries, salesOrderById])
     const settlementByAgentId = useMemo(() => {
@@ -106,14 +108,14 @@ export function AgentCommissionAdminOverview({
                 </p>
             </CardHeader>
             <CardContent className="space-y-5">
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
                     <OverviewMetric
                         label={t('salesAgentCommissions.assignedOrders')}
                         icon={ReceiptText}
                         value={String(currentAssignments.length)}
                     />
                     <OverviewMetric
-                        label={t('salesAgentCommissions.recognizedEarned')}
+                        label={t('salesAgentCommissions.payableCommission')}
                         icon={BadgeCheck}
                         value={<CommissionCurrencyTotalsView totals={summary.earned} iqdPreference={iqdPreference} />}
                     />
@@ -121,6 +123,11 @@ export function AgentCommissionAdminOverview({
                         label={t('salesAgentCommissions.netPaid')}
                         icon={CircleDollarSign}
                         value={<CommissionCurrencyTotalsView totals={summary.netPaid} iqdPreference={iqdPreference} />}
+                    />
+                    <OverviewMetric
+                        label={t('salesAgentCommissions.trackedTotal')}
+                        icon={BadgeDollarSign}
+                        value={<CommissionCurrencyTotalsView totals={trackedSummary.earned} iqdPreference={iqdPreference} />}
                     />
                     <OverviewMetric
                         label={t('salesAgentCommissions.recovered')}
@@ -155,7 +162,8 @@ export function AgentCommissionAdminOverview({
                                     <TableHead className="text-end">{t('salesAgentCommissions.returned')}</TableHead>
                                     <TableHead className="text-end">{t('salesAgentCommissions.cancelledZero')}</TableHead>
                                     <TableHead className="text-end">{t('salesAgentCommissions.totalOrderValue')}</TableHead>
-                                    <TableHead className="text-end">{t('salesAgentCommissions.netEarned')}</TableHead>
+                                    <TableHead className="text-end">{t('salesAgentCommissions.payableCommission')}</TableHead>
+                                    <TableHead className="text-end">{t('salesAgentCommissions.trackedTotal')}</TableHead>
                                     <TableHead className="text-end">{t('salesAgentCommissions.netPaid')}</TableHead>
                                     <TableHead className="text-end">{t('salesAgentCommissions.recovered')}</TableHead>
                                     <TableHead className="text-end">{t('salesAgentCommissions.reversed')}</TableHead>
@@ -164,7 +172,7 @@ export function AgentCommissionAdminOverview({
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {rows.map(({ entry, summary: agentSummary, assignedOrders, openOrders, returnedOrders, cancelledOrders, zeroValueOrders, totalOrderValue }) => {
+                                {rows.map(({ entry, summary: agentSummary, trackedSummary: agentTrackedSummary, assignedOrders, openOrders, returnedOrders, cancelledOrders, zeroValueOrders, totalOrderValue }) => {
                                     const settlement = settlementByAgentId.get(entry.agent.id)
                                     return (
                                     <TableRow key={entry.agent.id}>
@@ -185,6 +193,7 @@ export function AgentCommissionAdminOverview({
                                         <TableCell className="text-end font-semibold text-rose-600">{cancelledOrders} / {zeroValueOrders}</TableCell>
                                         <TableCell className="text-end font-semibold"><CommissionCurrencyTotalsView totals={totalOrderValue} iqdPreference={iqdPreference} /></TableCell>
                                         <TableCell className="text-end font-semibold"><CommissionCurrencyTotalsView totals={agentSummary.earned} iqdPreference={iqdPreference} /></TableCell>
+                                        <TableCell className="text-end font-semibold text-sky-700 dark:text-sky-300"><CommissionCurrencyTotalsView totals={agentTrackedSummary.earned} iqdPreference={iqdPreference} /></TableCell>
                                         <TableCell className="text-end font-semibold text-emerald-600"><CommissionCurrencyTotalsView totals={agentSummary.netPaid} iqdPreference={iqdPreference} /></TableCell>
                                         <TableCell className="text-end font-semibold text-sky-600"><CommissionCurrencyTotalsView totals={agentSummary.recovered} iqdPreference={iqdPreference} /></TableCell>
                                         <TableCell className="text-end font-semibold text-rose-600"><CommissionCurrencyTotalsView totals={agentSummary.reversed} iqdPreference={iqdPreference} /></TableCell>

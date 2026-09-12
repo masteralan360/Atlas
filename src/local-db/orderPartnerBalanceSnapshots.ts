@@ -5,6 +5,7 @@ import {
 import { isDirectTransactionPartnerAccountEffect } from './payments'
 
 import { db } from './database'
+import { isPayableCommissionEntry } from './commissionMode'
 import type {
   OrderPartnerBalanceSnapshot,
   OrderType,
@@ -147,7 +148,7 @@ async function loadOrderPartnerStatementData(
         && transaction.metadata?.businessPartnerId === partnerId
         && isDirectTransactionPartnerAccountEffect(transaction.metadata?.partnerAccountEffect)
     }),
-    agentCommissionEntries: commissionEntries.filter((entry) => commissionAgentIds.has(entry.agentId)),
+    agentCommissionEntries: commissionEntries.filter((entry) => commissionAgentIds.has(entry.agentId) && isPayableCommissionEntry(entry)),
     agentProductCommissionEntries: productCommissionEntries.filter((entry) => commissionAgentIds.has(entry.agentId)),
     deliveryLedgerEntries: deliveryLedgerEntries.filter((entry) => (
       !entry.isDeleted

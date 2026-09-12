@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
-import { BadgeCheck, CalendarDays, ChevronDown, CircleCheck, CircleDashed, CircleDollarSign, Clock3, CreditCard, EllipsisVertical, Eye, HandCoins, LayoutGrid, List, ListFilter, Loader2, Lock, Package, PackageCheck, PackagePlus, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse, XCircle, type LucideIcon } from 'lucide-react'
+import { BadgeCheck, BadgeDollarSign, CalendarDays, ChevronDown, CircleCheck, CircleDashed, CircleDollarSign, Clock3, CreditCard, EllipsisVertical, Eye, HandCoins, LayoutGrid, List, ListFilter, Loader2, Lock, Package, PackageCheck, PackagePlus, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse, XCircle, type LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLocalizedOrderError } from '@/lib/orderErrors'
 import type { PaymentMethodOption } from '@/lib/paymentMethods'
@@ -136,6 +136,7 @@ type OrderTab = 'sales' | 'purchase'
 type StatusFilter = 'all' | 'draft' | 'pending' | 'ordered' | 'received' | 'completed' | 'cancelled'
 type PaymentFilter = 'all' | 'unpaid' | 'partial' | 'paid' | 'returned'
 type EcommerceFilter = 'all' | 'ecommerce' | 'nonEcommerce'
+type CommissionModeFilter = 'all' | 'payable' | 'tracked'
 
 const statusFilterIcons = {
     all: ListFilter,
@@ -160,6 +161,12 @@ const ecommerceFilterIcons = {
     ecommerce: ShoppingCart,
     nonEcommerce: List
 } satisfies Record<EcommerceFilter, LucideIcon>
+
+const commissionModeFilterIcons = {
+    all: ListFilter,
+    payable: CircleDollarSign,
+    tracked: BadgeDollarSign
+} satisfies Record<CommissionModeFilter, LucideIcon>
 
 type FormItem = {
     id: string
@@ -447,6 +454,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
     const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all')
     const [ecommerceFilter, setEcommerceFilter] = useState<EcommerceFilter>('all')
+    const [commissionModeFilter, setCommissionModeFilter] = useState<CommissionModeFilter>('all')
     const [fulfillmentDateRange, setFulfillmentDateRange] = useState<DateRangeType>('allTime')
     const [fulfillmentCustomDates, setFulfillmentCustomDates] = useState({ start: '', end: '' })
     const [isFulfilledDateFilterExpanded, setIsFulfilledDateFilterExpanded] = useState(false)
@@ -612,6 +620,10 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
             items = items.filter((order) => getOrderPaymentStatus(order) === paymentFilter)
         }
 
+        if (commissionModeFilter !== 'all') {
+            items = items.filter((order) => (order.commissionMode ?? 'payable') === commissionModeFilter)
+        }
+
         const query = search.trim().toLowerCase()
         if (!query) return items
 
@@ -622,7 +634,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                 && visibleCommissionAgentsByOrderId.get(order.id)?.some((agent) => agent.name.toLowerCase().includes(query)))
             || order.items.some((item) => item.productName.toLowerCase().includes(query))
         )
-    }, [dateFilteredSalesOrders, ecommerceFilter, paymentFilter, salesAgentCommissionsEnabled, search, statusFilter, visibleCommissionAgentsByOrderId])
+    }, [commissionModeFilter, dateFilteredSalesOrders, ecommerceFilter, paymentFilter, salesAgentCommissionsEnabled, search, statusFilter, visibleCommissionAgentsByOrderId])
 
     const filteredPurchaseOrders = useMemo(() => {
         let items = [...dateFilteredPurchaseOrders]
@@ -736,6 +748,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const hasAdditionalTableFilters = statusFilter !== 'all'
         || paymentFilter !== 'all'
         || ecommerceFilter !== 'all'
+        || commissionModeFilter !== 'all'
         || Boolean(search.trim())
         || fulfillmentDateRange !== 'allTime'
     const totalOrdersTrend = !hasAdditionalTableFilters && previousOrderCount && previousOrderCount > 0
@@ -1552,6 +1565,12 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                                             {t('ecommerce.title', { defaultValue: 'E-Commerce' })}
                                                         </span>
                                                     ) : null}
+                                                    {activeTab === 'sales' && (row as SalesOrder).commissionMode === 'tracked' ? (
+                                                        <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-sky-700 dark:text-sky-300">
+                                                            <BadgeDollarSign className="h-3 w-3" />
+                                                            {t('salesAgentCommissions.trackedCommission')} · {t('salesAgentCommissions.nonpayable')}
+                                                        </span>
+                                                    ) : null}
                                                 </div>
                                                 <div className="text-xs text-muted-foreground">{summary}</div>
                                             </div>
@@ -1689,6 +1708,12 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                             {activeTab === 'sales' && (row as SalesOrder).sourceChannel === 'marketplace' ? (
                                                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/20">
                                                     {t('ecommerce.title', { defaultValue: 'E-Commerce' })}
+                                                </span>
+                                            ) : null}
+                                            {activeTab === 'sales' && (row as SalesOrder).commissionMode === 'tracked' ? (
+                                                <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/20 bg-sky-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-sky-700 dark:text-sky-300">
+                                                    <BadgeDollarSign className="h-3 w-3" />
+                                                    {t('salesAgentCommissions.trackedCommission')} · {t('salesAgentCommissions.nonpayable')}
                                                 </span>
                                             ) : null}
                                         </div>
@@ -2194,6 +2219,26 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                             onValueChange={setEcommerceFilter}
                                         />
                                     )}
+
+                                    {activeTab === 'sales' && salesAgentCommissionsEnabled ? (
+                                        <FilterDropdown
+                                            dir={pageDirection}
+                                            value={commissionModeFilter}
+                                            label={t('salesAgentCommissions.commissionMode')}
+                                            hasActiveFilter={commissionModeFilter !== 'all'}
+                                            contentClassName="min-w-52"
+                                            options={(['all', 'payable', 'tracked'] as const).map((value) => ({
+                                                value,
+                                                icon: commissionModeFilterIcons[value],
+                                                label: value === 'all'
+                                                    ? (t('common.all') || 'All')
+                                                    : value === 'tracked'
+                                                        ? t('salesAgentCommissions.trackedCommission')
+                                                        : t('salesAgentCommissions.payableCommission')
+                                            }))}
+                                            onValueChange={setCommissionModeFilter}
+                                        />
+                                    ) : null}
 
                                     <FilterDropdown
                                         dir={pageDirection}

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { HandCoins } from 'lucide-react'
+import { BadgeDollarSign, HandCoins } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 
@@ -7,6 +7,7 @@ import { useAuth } from '@/auth'
 import { recordObligationSettlement, type PaymentObligation, type WorkspacePaymentMethod } from '@/local-db'
 import { hasEffectiveSalesAgentCommissionPermission, useWorkspacePermissions } from '@/permissions'
 import { AgentCommissionAdminOverview } from '@/ui/components/commissions/AgentCommissionAdminOverview'
+import { SalesAgentCommissionModeDialog } from '@/ui/components/commissions/SalesAgentCommissionModeDialog'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { SettlementDialog } from '@/ui/components/payments/SettlementDialog'
 import { Button, useToast } from '@/ui/components'
@@ -36,6 +37,7 @@ export function AgentCommissions() {
     const [, navigate] = useLocation()
     const [settlementTarget, setSettlementTarget] = useState<PaymentObligation | null>(null)
     const [isSubmitting, setIsSubmitting] = useState(false)
+    const [isCommissionModeDialogOpen, setIsCommissionModeDialogOpen] = useState(false)
 
     const enabled = hasFeature('sales_agent_commissions')
     const canView = enabled && (
@@ -94,9 +96,22 @@ export function AgentCommissions() {
                             <ModulePageFreshness className="ms-2" tableNames={SALES_AGENT_COMMISSIONS_FRESHNESS_TABLES} />
                         </p>
                     </div>
-                    <Button type="button" variant="outline" onClick={() => navigate('/agents')}>
-                        {t('agents.title')}
-                    </Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                        {user.role === 'admin' ? (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="gap-2"
+                                onClick={() => setIsCommissionModeDialogOpen(true)}
+                            >
+                                <BadgeDollarSign className="h-4 w-4" />
+                                {t('salesAgentCommissions.trackWithoutPayment')}
+                            </Button>
+                        ) : null}
+                        <Button type="button" variant="outline" onClick={() => navigate('/agents')}>
+                            {t('agents.title')}
+                        </Button>
+                    </div>
                 </div>
 
                 <AgentCommissionAdminOverview
@@ -114,6 +129,10 @@ export function AgentCommissions() {
                 obligation={settlementTarget}
                 isSubmitting={isSubmitting}
                 onSubmit={recordSettlement}
+            />
+            <SalesAgentCommissionModeDialog
+                open={isCommissionModeDialogOpen}
+                onOpenChange={setIsCommissionModeDialogOpen}
             />
         </CommissionFeatureBoundary>
     )

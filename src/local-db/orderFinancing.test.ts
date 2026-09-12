@@ -38,6 +38,7 @@ type SalesOrderCreateInput = Omit<
 let createBusinessPartner: typeof import('./businessPartners').createBusinessPartner
 let createSalesOrder: typeof import('./orders').createSalesOrder
 let createCompletedSalesOrder: typeof import('./orders').createCompletedSalesOrder
+let updateSalesOrder: typeof import('./orders').updateSalesOrder
 let createPurchaseOrder: typeof import('./orders').createPurchaseOrder
 let updateSalesOrderStatus: typeof import('./orders').updateSalesOrderStatus
 let updatePurchaseOrderStatus: typeof import('./orders').updatePurchaseOrderStatus
@@ -370,6 +371,7 @@ describe('order-linked financing', () => {
         createBusinessPartner = partners.createBusinessPartner
         createSalesOrder = orders.createSalesOrder
         createCompletedSalesOrder = orders.createCompletedSalesOrder
+        updateSalesOrder = orders.updateSalesOrder
         createPurchaseOrder = orders.createPurchaseOrder
         updateSalesOrderStatus = orders.updateSalesOrderStatus
         updatePurchaseOrderStatus = orders.updatePurchaseOrderStatus
@@ -421,6 +423,33 @@ describe('order-linked financing', () => {
 
         expect(salesOrder.items[0].note).toBe('Deliver this line before noon.')
         expect((await db.sales_orders.get(salesOrder.id))?.items[0].note).toBe('Deliver this line before noon.')
+    })
+
+    it('snapshots the current workspace commission mode and preserves it through edits', async () => {
+        await db.workspaces.put({
+            id: WORKSPACE_ID,
+            workspaceId: WORKSPACE_ID,
+            name: 'Tracked workspace',
+            data_mode: 'local',
+            sales_agent_commission_mode: 'tracked',
+        } as any)
+        const customer = await createCustomer()
+        const { storage, product } = await createStockedSalesProduct(100)
+        const originalInput = salesOrderInput(customer.id, product, storage.id, { method: 'cash', total: 100 })
+        originalInput.commissionMode = 'payable'
+
+        const trackedOrder = await createSalesOrder(WORKSPACE_ID, originalInput)
+        expect(trackedOrder).toMatchObject({ commissionMode: 'tracked' })
+        expect(trackedOrder.commissionModeCapturedAt).toBeTruthy()
+
+        await db.workspaces.update(WORKSPACE_ID, { sales_agent_commission_mode: 'payable' })
+        const editedOrder = await updateSalesOrder(trackedOrder.id, { commissionMode: 'payable', notes: 'Edited' })
+        expect(editedOrder.commissionMode).toBe('tracked')
+        expect(editedOrder.commissionModeCapturedAt).toBe(trackedOrder.commissionModeCapturedAt)
+
+        const duplicateInput = { ...originalInput, commissionMode: trackedOrder.commissionMode }
+        const duplicate = await createSalesOrder(WORKSPACE_ID, duplicateInput)
+        expect(duplicate.commissionMode).toBe('payable')
     })
 
     it('completes quick-order style cash sales through the existing paid order lifecycle', async () => {

@@ -1,5 +1,4 @@
 Post Service Archiver
-retry sync
 icon
 usage calculator
 remove R2 Print only
@@ -13,5 +12,9 @@ SQLite Offline queue
 Price books selector order form and quick order
 
 One single Usage Request Payload
+
+fix retry sync
+
+Accoutn Statement DATERANGEFILTER
 
 Restric Phone number in khaleej cosmetic

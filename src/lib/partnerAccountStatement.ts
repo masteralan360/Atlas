@@ -11,6 +11,7 @@ import type {
   PurchaseOrder,
   SalesOrder
 } from '@/local-db'
+import { isPayableCommissionEntry } from '@/local-db/commissionMode'
 
 type StatementOrder = SalesOrder | PurchaseOrder
 
@@ -432,7 +433,11 @@ function createOrderEntries(data: PartnerAccountStatementData): PartnerAccountSt
     returnItemsByReturnId.set(returnItem.returnId, rows)
   }
   const entries: PartnerAccountStatementEntry[] = []
-  const productCommissionEntries = (data.agentProductCommissionEntries || []).filter((entry) => !entry.isDeleted)
+  // Product snapshots explain both payable and tracked commissions on the
+  // originating sale rows; unlike aggregate commission entries, they never
+  // create a statement balance movement.
+  const productCommissionEntries = (data.agentProductCommissionEntries || [])
+    .filter((entry) => !entry.isDeleted)
 
   for (const order of sourceOrders) {
     if (order.isDeleted || order.status === 'draft' || order.status === 'cancelled') continue
@@ -462,6 +467,14 @@ function createOrderEntries(data: PartnerAccountStatementData): PartnerAccountSt
     const salesOrder = order as SalesOrder
     const saleItems = (salesOrder.items || []).filter((item) => Number(item.quantity || 0) > 0)
     const shouldItemizeSalesOrders = data.itemizeSalesOrders === true
+    const orderProductCommissionAccruals = productCommissionEntries.filter(
+      (entry) => entry.orderId === salesOrder.id && entry.kind === 'accrual'
+    )
+    const orderProductCommissionTotal = orderProductCommissionAccruals.length > 0
+      ? roundStatementAmount(
+        orderProductCommissionAccruals.reduce((sum, entry) => sum + Number(entry.amount || 0), 0)
+      )
+      : null
 
     if (shouldItemizeSalesOrders && saleItems.length > 0) {
       const saleTotal = originalSalesOrderAmount(salesOrder)
@@ -510,6 +523,7 @@ function createOrderEntries(data: PartnerAccountStatementData): PartnerAccountSt
         description: 'Sales order',
         descriptionKey: 'salesOrder',
         note: salesOrder.notes,
+        totalProductCommission: orderProductCommissionTotal,
         currency: salesOrder.currency,
         delta: shouldItemizeSalesOrders
           ? originalSalesOrderAmount(salesOrder)
@@ -591,7 +605,8 @@ type AutomaticCommissionSettlement = {
  * rows in storage and in the Payments module.
  */
 function getAutomaticCommissionSettlements(data: PartnerAccountStatementData): AutomaticCommissionSettlement[] {
-  const entries = (data.agentCommissionEntries || []).filter((entry) => !entry.isDeleted)
+  const entries = (data.agentCommissionEntries || [])
+    .filter((entry) => !entry.isDeleted && isPayableCommissionEntry(entry))
   const payoutsById = new Map(
     entries
       .filter((entry) => entry.kind === 'payout' && entry.settlementSource === 'automatic')
@@ -710,6 +725,7 @@ function createAgentCommissionEntries(data: PartnerAccountStatementData): Partne
   const settlements = getAutomaticCommissionSettlements(data)
   const collapsedRecognizedEntryIds = new Set(settlements.map((settlement) => settlement.recognizedEntryId))
   const commissionEntries = (data.agentCommissionEntries || [])
+    .filter(isPayableCommissionEntry)
     .filter((entry) => !entry.isDeleted)
     .filter((entry) => !collapsedRecognizedEntryIds.has(entry.id))
     .flatMap((entry) => {

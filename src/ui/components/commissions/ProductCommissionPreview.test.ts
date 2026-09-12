@@ -470,4 +470,23 @@ describe('buildProductCommissionSettlementActions', () => {
             entries: [commissionEntry(), commissionEntry({ id: 'payout-1', kind: 'payout', amount: -50 })]
         })).toEqual([])
     })
+
+    it('never turns tracked commission entries into payment state or settlement actions', () => {
+        const entries = [commissionEntry({ commissionMode: 'tracked', amount: 50 })]
+
+        expect(buildProductCommissionPaymentSummaries({
+            orderId: 'order-1',
+            agentIds: [agent.id],
+            agents: [agent],
+            entries
+        })).toEqual([])
+        expect(buildProductCommissionSettlementActions({
+            workspaceId: 'workspace-1',
+            orderId: 'order-1',
+            orderReference: 'SO-1001',
+            agentIds: [agent.id],
+            agents: [agent],
+            entries
+        })).toEqual([])
+    })
 })

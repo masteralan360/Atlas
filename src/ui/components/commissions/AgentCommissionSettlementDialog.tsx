@@ -45,6 +45,7 @@ export function AgentCommissionSettlementDialog({
     const { t } = useTranslation()
     const salesOrders = useSalesOrders(workspaceId)
     const summary = useMemo(() => summarizeCommissionEntries(entries), [entries])
+    const trackedSummary = useMemo(() => summarizeCommissionEntries(entries, 'tracked'), [entries])
     const orderNumberById = useMemo(() => new Map(salesOrders.map((order) => [order.id, order.orderNumber])), [salesOrders])
     const historyGroups = useMemo(() => buildCommissionHistoryGroups(entries), [entries])
     const hasReversals = Object.values(summary.reversed).some((amount) => Math.abs(amount) > 0.000001)
@@ -62,8 +63,9 @@ export function AgentCommissionSettlementDialog({
                     </AppDialogDescription>
                 </AppDialogHeader>
                 <AppDialogBody className="space-y-5">
-                    <div className={`grid gap-3 sm:grid-cols-2 ${hasReversals ? 'xl:grid-cols-4' : 'xl:grid-cols-3'}`}>
+                    <div className={`grid gap-3 sm:grid-cols-2 ${hasReversals ? 'xl:grid-cols-5' : 'xl:grid-cols-4'}`}>
                         <SummaryTile label={t('salesAgentCommissions.netEarned', { defaultValue: 'Net earned' })} totals={summary.earned} iqdPreference={iqdPreference} />
+                        <SummaryTile label={t('salesAgentCommissions.trackedTotal')} totals={trackedSummary.earned} iqdPreference={iqdPreference} />
                         <SummaryTile label={t('salesAgentCommissions.paid')} totals={summary.paid} iqdPreference={iqdPreference} />
                         {hasReversals ? <SummaryTile label={t('salesAgentCommissions.reversed')} totals={summary.reversed} iqdPreference={iqdPreference} /> : null}
                         <SummaryTile label={t('salesAgentCommissions.outstanding', { defaultValue: 'Outstanding' })} totals={summary.due} iqdPreference={iqdPreference} />
@@ -121,6 +123,7 @@ function CommissionHistoryGroupCard({
                     <div className="flex flex-wrap items-center gap-2">
                         <span className="font-semibold">{orderReference}</span>
                         <CommissionHistoryStatusBadge status={group.status} />
+                        {group.commissionMode === 'tracked' ? <Badge variant="secondary">{t('salesAgentCommissions.nonpayable')}</Badge> : null}
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(group.occurredAt)}</p>
                 </div>
@@ -129,7 +132,11 @@ function CommissionHistoryGroupCard({
                     {group.paid > 0.000001 ? <HistoryAmount label={t('salesAgentCommissions.paid')} amount={group.paid} currency={group.currency} iqdPreference={iqdPreference} /> : null}
                     {group.recovered > 0.000001 ? <HistoryAmount label={t('salesAgentCommissions.recovered')} amount={group.recovered} currency={group.currency} iqdPreference={iqdPreference} /> : null}
                     {group.reversed > 0.000001 ? <HistoryAmount label={t('salesAgentCommissions.reversed')} amount={group.reversed} currency={group.currency} iqdPreference={iqdPreference} /> : null}
-                    {Math.abs(group.outstanding) > 0.000001 ? <HistoryAmount label={t('salesAgentCommissions.outstanding')} amount={Math.abs(group.outstanding)} currency={group.currency} iqdPreference={iqdPreference} /> : null}
+                    {group.commissionMode === 'tracked' ? (
+                        <HistoryAmount label={t('salesAgentCommissions.trackedTotal')} amount={group.earned} currency={group.currency} iqdPreference={iqdPreference} />
+                    ) : Math.abs(group.outstanding) > 0.000001 ? (
+                        <HistoryAmount label={t('salesAgentCommissions.outstanding')} amount={Math.abs(group.outstanding)} currency={group.currency} iqdPreference={iqdPreference} />
+                    ) : null}
                 </div>
             </div>
         </div>
@@ -139,6 +146,7 @@ function CommissionHistoryGroupCard({
 function CommissionHistoryStatusBadge({ status }: { status: ReturnType<typeof buildCommissionHistoryGroups>[number]['status'] }) {
     const { t } = useTranslation()
     const labels = {
+        tracked: t('salesAgentCommissions.trackedCommission'),
         earned: t('salesAgentCommissions.earned'),
         paid: t('salesAgentCommissions.paid'),
         recovered: t('salesAgentCommissions.recovered'),
@@ -147,6 +155,7 @@ function CommissionHistoryStatusBadge({ status }: { status: ReturnType<typeof bu
         recovery_due: t('salesAgentCommissions.recoveryDue'),
     }
     const classes = {
+        tracked: 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300',
         earned: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
         paid: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
         recovered: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',

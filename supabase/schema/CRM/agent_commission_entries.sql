@@ -8,6 +8,7 @@ CREATE TABLE crm.agent_commission_entries (
   plan_id uuid NULL REFERENCES crm.agent_commission_plans(id) ON DELETE RESTRICT,
   order_return_id uuid NULL REFERENCES public.order_returns(id) ON DELETE RESTRICT,
   related_entry_id uuid NULL REFERENCES crm.agent_commission_entries(id) ON DELETE RESTRICT,
+  commission_mode text NOT NULL DEFAULT 'payable' CHECK (commission_mode IN ('payable', 'tracked')),
   kind text NOT NULL CHECK (kind IN ('estimate', 'accrual', 'approval', 'reversal', 'payout', 'recovery', 'adjustment')),
   status text NOT NULL CHECK (status IN ('estimated', 'earned', 'approved', 'paid', 'reversed')),
   currency text NOT NULL CHECK (currency IN ('usd', 'eur', 'iqd', 'try')),
@@ -46,6 +47,7 @@ CREATE TABLE crm.agent_commission_entries (
     OR (kind = 'adjustment' AND status IN ('earned', 'approved', 'reversed'))
   ),
   CONSTRAINT agent_commission_entries_return_kind_check CHECK (order_return_id IS NULL OR kind = 'reversal'),
+  CONSTRAINT agent_commission_entries_tracked_nonfinancial_check CHECK (commission_mode = 'payable' OR kind NOT IN ('approval', 'payout', 'recovery')),
   CONSTRAINT agent_commission_entries_related_not_self CHECK (related_entry_id IS NULL OR related_entry_id <> id)
 );
 
@@ -62,6 +64,9 @@ CREATE INDEX agent_commission_entries_related_idx ON crm.agent_commission_entrie
 CREATE INDEX agent_commission_entries_created_by_idx ON crm.agent_commission_entries (created_by);
 CREATE INDEX agent_commission_entries_workspace_status_idx
   ON crm.agent_commission_entries (workspace_id, status, occurred_at DESC);
+CREATE INDEX agent_commission_entries_workspace_mode_agent_idx
+  ON crm.agent_commission_entries (workspace_id, commission_mode, agent_id, occurred_at DESC)
+  WHERE is_deleted = false;
 CREATE UNIQUE INDEX agent_commission_entries_one_accrual_per_assignment_idx
   ON crm.agent_commission_entries (assignment_id) WHERE kind = 'accrual';
 CREATE UNIQUE INDEX agent_commission_entries_one_reversal_per_return_idx

@@ -2271,10 +2271,18 @@ async function buildSalesOrderEntity(
         })
         : await normalizeSalesOrderCounterparty(data)
     const paymentState = normalizeOrderPaymentState(data, now)
+    const workspace = await db.workspaces.get(workspaceId)
+    // This is a new order, including duplicates. Always snapshot the current
+    // workspace setting rather than inheriting a source order's historical lane.
+    const commissionMode = workspace?.sales_agent_commission_mode === 'tracked'
+        ? 'tracked' as const
+        : 'payable' as const
     const order = buildBaseEntity(workspaceId, {
         ...data,
         salesAccountAgentId: salesAccount?.agent.id ?? null,
         commissionEnabled: data.commissionEnabled ?? true,
+        commissionMode,
+        commissionModeCapturedAt: now,
         ...paymentState,
         ...counterparty,
         orderNumber,
@@ -2674,6 +2682,10 @@ export async function updateSalesOrder(id: string, data: Partial<SalesOrder>) {
         ...data,
         salesAccountAgentId,
         commissionEnabled: data.commissionEnabled ?? existing.commissionEnabled ?? true,
+        // Commission mode is a creation-time snapshot. Draft edits do not
+        // migrate an order between the payable and tracked lanes.
+        commissionMode: existing.commissionMode ?? 'payable',
+        commissionModeCapturedAt: existing.commissionModeCapturedAt ?? existing.createdAt,
         ...(confirmedAdjustments.length > 0 ? { orderAdjustments: confirmedAdjustments } : {}),
         ...paymentState,
         ...counterparty,

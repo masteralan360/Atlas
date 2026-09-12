@@ -1307,6 +1307,78 @@ describe("sales agent commission lifecycle", () => {
     expect(accountBalance?.balanceAmount).toBe(0);
   });
 
+  it("tracks the full commission calculation without creating any financial obligation", async () => {
+    const agent = fieldAgent(crypto.randomUUID());
+    const order = {
+      ...completedOrder(crypto.randomUUID()),
+      commissionMode: 'tracked' as const,
+      commissionModeCapturedAt: '2026-09-12T08:00:00.000Z',
+    };
+    await db.agents.put(agent);
+    await db.business_partners.put({
+      id: agent.businessPartnerId,
+      workspaceId: WORKSPACE_ID,
+      partnerName: 'Tracked commission agent',
+      isDeleted: false,
+    } as any);
+    await db.sales_orders.put(order);
+    const plan = await commissions.createAgentCommissionPlan(WORKSPACE_ID, {
+      name: 'Tracked level',
+      level: 'tracked-level',
+      ratePercent: 10,
+      calculationBasis: 'net_profit',
+    });
+    await commissions.setAgentCommissionMembership(WORKSPACE_ID, {
+      agentId: agent.id,
+      planId: plan.id,
+    });
+    const assignment = await commissions.assignSalesOrderAgent(WORKSPACE_ID, {
+      orderId: order.id,
+      agentId: agent.id,
+    });
+    if (!assignment) throw new Error('Expected a tracked sales-agent assignment');
+
+    const entries = await db.agent_commission_entries
+      .where('assignmentId')
+      .equals(assignment.id)
+      .toArray();
+    expect(entries).toEqual([
+      expect.objectContaining({
+        kind: 'accrual',
+        status: 'earned',
+        commissionMode: 'tracked',
+        basisAmount: 400,
+        amount: 40,
+      }),
+    ]);
+
+    const { appendPaymentTransaction, buildAgentCommissionObligations } = await import('./payments');
+    expect(await buildAgentCommissionObligations(WORKSPACE_ID)).toEqual([]);
+    await expect(commissions.recordCommissionApproval(WORKSPACE_ID, {
+      entryId: entries[0].id,
+    })).rejects.toThrow('nonpayable');
+    await expect(commissions.recordAgentCommissionPayout(WORKSPACE_ID, {
+      agentId: agent.id,
+      assignmentId: assignment.id,
+      orderId: order.id,
+      amount: 40,
+      currency: 'usd',
+      paymentMethod: 'cash',
+    })).rejects.toThrow('nonpayable');
+    await expect(appendPaymentTransaction(WORKSPACE_ID, {
+      sourceModule: 'orders',
+      sourceType: 'agent_commission_payout',
+      sourceRecordId: agent.id,
+      direction: 'outgoing',
+      amount: 40,
+      currency: 'usd',
+      paymentMethod: 'cash',
+      paidAt: '2026-09-12T09:00:00.000Z',
+      metadata: { orderId: order.id },
+    })).rejects.toThrow('cannot create a payment transaction');
+    expect(await db.payment_transactions.where('workspaceId').equals(WORKSPACE_ID).count()).toBe(0);
+  });
+
   it("records an incoming recovery when a paid commission is later reversed", async () => {
     const agent = fieldAgent(crypto.randomUUID());
     const order = completedOrder(crypto.randomUUID());

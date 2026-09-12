@@ -1,8 +1,10 @@
-import { useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 
 import {
   db,
+  fetchTableFromSupabase,
+  syncSalesFromSupabase,
   useAgents,
   useAgentCommissionEntries,
   useAgentProductCommissionEntries,
@@ -20,8 +22,10 @@ import {
   useSales,
   useSalesOrders
 } from '@/local-db'
+import { isPayableCommissionEntry } from '@/local-db/commissionMode'
 import type { PurchaseOrder, Sale, SalesOrder } from '@/local-db/models'
 import { isDirectTransactionPartnerAccountEffect } from '@/local-db/payments'
+import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { deriveLegacyOrderPartnerBalanceSnapshot } from '@/lib/orderPartnerBalanceSnapshot'
 import {
   getPartnerAccountStatementClosingBalances,
@@ -29,10 +33,26 @@ import {
   type PartnerAccountStatementData,
   type PartnerAccountStatementPosSaleItem
 } from '@/lib/partnerAccountStatement'
+import {
+  PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES,
+  refreshPartnerAccountStatementLiveData
+} from '@/lib/partnerAccountStatementLiveData'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { readWorkspaceDataHydration } from '@/workspace/workspaceDataFreshness'
 
 const EMPTY_LOAN_PAYMENTS: NonNullable<PartnerAccountStatementData['loanPayments']> = []
 const ALL_TIME_PERIOD: PartnerAccountStatementData['period'] = {
   type: 'allTime'
+}
+
+type PartnerAccountStatementLiveRefreshState = {
+  key: string | null
+  status: 'idle' | 'loading' | 'ready' | 'error'
+  error: Error | null
+}
+
+function normalizeLiveRefreshError(error: unknown) {
+  return error instanceof Error ? error : new Error('Partner account statement refresh failed')
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -103,6 +123,13 @@ export function usePartnerAccountStatement(
   partnerId: string | null | undefined,
   period: PartnerAccountStatementData['period']
 ) {
+  const online = useNetworkStatus()
+  const [liveRefreshGeneration, setLiveRefreshGeneration] = useState(0)
+  const [liveRefreshState, setLiveRefreshState] = useState<PartnerAccountStatementLiveRefreshState>({
+    key: null,
+    status: 'idle',
+    error: null
+  })
   const rawPartner = useBusinessPartner(partnerId || undefined)
   const agents = useAgents(workspaceId)
   const commissionEntries = useAgentCommissionEntries(workspaceId)
@@ -119,6 +146,65 @@ export function usePartnerAccountStatement(
   const deliveryLedgerEntries = useDeliveryLedgerEntries(workspaceId)
   const deliveryShipments = useDeliveryShipments(workspaceId)
   const deliverySettlements = useDeliverySettlements(workspaceId)
+
+  const liveRefreshKey = workspaceId && partnerId && online && !isLocalWorkspaceMode(workspaceId)
+    ? `${workspaceId}:${partnerId}:${liveRefreshGeneration}`
+    : null
+
+  useEffect(() => {
+    if (!workspaceId || !liveRefreshKey) {
+      setLiveRefreshState({ key: null, status: 'idle', error: null })
+      return
+    }
+
+    let cancelled = false
+    setLiveRefreshState({ key: liveRefreshKey, status: 'loading', error: null })
+
+    void refreshPartnerAccountStatementLiveData(workspaceId, {
+      refreshTable: (tableName, targetWorkspaceId) =>
+        fetchTableFromSupabase(tableName, db[tableName], targetWorkspaceId),
+      refreshSales: syncSalesFromSupabase
+    })
+      .then(() => {
+        const hydration = readWorkspaceDataHydration(
+          workspaceId,
+          'supabase',
+          PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES
+        )
+        if (hydration?.lastResult?.state === 'error') {
+          throw new Error('One or more partner account statement sources could not be refreshed')
+        }
+        if (!cancelled) {
+          setLiveRefreshState({ key: liveRefreshKey, status: 'ready', error: null })
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setLiveRefreshState({
+            key: liveRefreshKey,
+            status: 'error',
+            error: normalizeLiveRefreshError(error)
+          })
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [liveRefreshKey, workspaceId])
+
+  const isRefreshing = Boolean(
+    liveRefreshKey
+    && (liveRefreshState.key !== liveRefreshKey || liveRefreshState.status === 'loading')
+  )
+  const refreshError = liveRefreshKey
+    && liveRefreshState.key === liveRefreshKey
+    && liveRefreshState.status === 'error'
+    ? liveRefreshState.error
+    : null
+  const retryLiveRefresh = useCallback(() => {
+    setLiveRefreshGeneration((generation) => generation + 1)
+  }, [])
 
   const partner = rawPartner && rawPartner.workspaceId === workspaceId && !rawPartner.isDeleted ? rawPartner : undefined
   const commissionAgents = useMemo(
@@ -180,7 +266,7 @@ export function usePartnerAccountStatement(
   )
   const loanPayments = useMemo(() => queriedLoanPayments ?? EMPTY_LOAN_PAYMENTS, [queriedLoanPayments])
   const salesAccountCommissionEntries = useMemo(
-    () => commissionEntries.filter((entry) => commissionAgentIds.has(entry.agentId)),
+    () => commissionEntries.filter((entry) => commissionAgentIds.has(entry.agentId) && isPayableCommissionEntry(entry)),
     [commissionAgentIds, commissionEntries]
   )
   const partnerInstallmentSales = useMemo(
@@ -334,7 +420,10 @@ export function usePartnerAccountStatement(
 
   return {
     partner,
-    statementData,
+    statementData: isRefreshing || refreshError ? null : statementData,
+    isRefreshing,
+    refreshError,
+    retryLiveRefresh,
     sourceCounts: {
       orders: partnerSalesOrders.length + partnerPurchaseOrders.length + partnerInstallmentSales.length,
       loans: partnerLoans.length,

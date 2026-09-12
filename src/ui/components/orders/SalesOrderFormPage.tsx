@@ -1,6 +1,6 @@
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, ArrowLeft, CalendarDays, Check, CreditCard, NotebookPen, Plus, ShoppingCart, Star, Trash2, Truck, Users, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, BadgeDollarSign, CalendarDays, Check, CreditCard, NotebookPen, Plus, ShoppingCart, Star, Trash2, Truck, Users, X } from 'lucide-react'
 
 import { useAuth } from '@/auth'
 import { useDemoTutorial } from '@/demo'
@@ -246,12 +246,17 @@ export function SalesOrderFormPage({
     const agents = useAgents(workspaceId)
     const salesOrderAgentAssignments = useSalesOrderAgentAssignments(workspaceId)
     const editingOrder = useSalesOrder(editingOrderId)
+    const commissionMode = editingOrder
+        ? (editingOrder.commissionMode === 'tracked' ? 'tracked' : 'payable')
+        : features.sales_agent_commission_mode
+    const isTrackedCommission = commissionMode === 'tracked'
     const salesAgentCommissionsEnabled = hasFeature('sales_agent_commissions')
     const agentSalesAccountsEnabled = hasFeature('agent_sales_accounts')
     const canAssignSalesAgents = OLD_SALES_AGENT_CONFIGURATION.showSalesAgentBeneficiaries
         && salesAgentCommissionsEnabled
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.assignOrders')
     const canPaySalesAgentCommissions = salesAgentCommissionsEnabled
+        && !isTrackedCommission
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.pay')
     const defaultStorageId = getPrimaryStorageFromList(storages)?.id || ''
     const storageOptionsForModal = useMemo(() => {
@@ -379,6 +384,14 @@ export function SalesOrderFormPage({
         const timeout = setTimeout(() => setHighlightedNewSeq(null), 1600)
         return () => clearTimeout(timeout)
     }, [highlightedNewSeq])
+
+    useEffect(() => {
+        if (isTrackedCommission) {
+            setPaidCommissionOnSave(false)
+            setCommissionPaymentAccountId(null)
+            setCommissionPaymentAccountNameSnapshot(null)
+        }
+    }, [isTrackedCommission])
 
     useEffect(() => () => {
         if (customerHighlightTimeoutRef.current) clearTimeout(customerHighlightTimeoutRef.current)
@@ -1178,7 +1191,7 @@ export function SalesOrderFormPage({
                         : editingOrderId ? (t('common.save') || 'Saved') : (t('common.create') || 'Created')
                 })
             }
-            const dueCommissionPayments = paidCommissionOnSave && !commissionAssignmentError
+            const dueCommissionPayments = canPaySalesAgentCommissions && paidCommissionOnSave && !commissionAssignmentError
                 ? (await buildAgentCommissionObligations(workspaceId))
                     .filter((obligation) => (
                         obligation.sourceType === 'agent_commission_payout'
@@ -1385,6 +1398,16 @@ export function SalesOrderFormPage({
                                 unlockLabel={t('orders.form.selectBusinessPartnerToUnlock')}
                                 onLockedInteraction={highlightCustomerInformation}
                             >
+                                {isTrackedCommission ? (
+                                    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-sky-500/20 bg-sky-500/[0.05] px-4 py-3 text-sm text-sky-800 dark:text-sky-200">
+                                        <BadgeDollarSign className="h-4 w-4" />
+                                        <span className="font-semibold">{t('salesAgentCommissions.trackedCommission')}</span>
+                                        <Badge variant="secondary">{t('salesAgentCommissions.nonpayable')}</Badge>
+                                        <span className="basis-full text-xs text-muted-foreground sm:basis-auto">
+                                            {t('salesAgentCommissions.trackedOrderDescription')}
+                                        </span>
+                                    </div>
+                                ) : null}
                                 <SalesOrderCommissionAssignmentSection
                                     ref={commissionAssignmentRef}
                                     workspaceId={workspaceId}
@@ -2000,6 +2023,7 @@ export function SalesOrderFormPage({
                                 currency={currency}
                                 exchangeRates={adjustmentExchangeRates}
                                 iqdPreference={features.iqd_display_preference}
+                                commissionMode={commissionMode}
                                 showTotal
                             />
                         ) : null}

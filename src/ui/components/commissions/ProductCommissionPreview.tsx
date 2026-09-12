@@ -1,4 +1,4 @@
-import { CircleCheck, Clock3, HandCoins, PackageCheck, RotateCcw, UserRound } from 'lucide-react'
+import { BadgeDollarSign, CircleCheck, Clock3, HandCoins, PackageCheck, RotateCcw, UserRound } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -10,12 +10,16 @@ import {
     type PaymentObligation,
     type ProductCommissionRule,
     type ProductCommissionRuleAgent,
+    type SalesAgentCommissionMode,
+    type SalesOrderStatus,
     useAgentCommissionEntries,
     useProductCommissionRuleAgents,
     useProductCommissionRules
 } from '@/local-db'
+import { isPayableCommissionEntry } from '@/local-db/commissionMode'
 import { cn, formatCurrency } from '@/lib/utils'
 import { Button } from '@/ui/components/button'
+import { Badge } from '@/ui/components/ui/badge'
 import {
     buildProductCommissionPreviewRows,
     type ProductCommissionPreviewItem,
@@ -84,6 +88,7 @@ function buildProductCommissionBalances({
     for (const entry of entries) {
         if (
             entry.isDeleted
+            || !isPayableCommissionEntry(entry)
             || entry.orderId !== orderId
             || !entry.assignmentId
             || entry.kind === 'estimate'
@@ -309,6 +314,8 @@ export function ProductCommissionPreview({
     showTotal = false,
     orderId,
     orderReference,
+    commissionMode = 'payable',
+    commissionStatus,
     canPayCommission = false,
     onSettleCommission
 }: {
@@ -323,6 +330,8 @@ export function ProductCommissionPreview({
     /** Enables the order-detail settlement action without affecting form/POS previews. */
     orderId?: string
     orderReference?: string
+    commissionMode?: SalesAgentCommissionMode
+    commissionStatus?: SalesOrderStatus
     canPayCommission?: boolean
     onSettleCommission?: (obligation: PaymentObligation) => void
 }) {
@@ -366,7 +375,7 @@ export function ProductCommissionPreview({
         })
     ), [agentIds, commissionDirectory.agentById])
     const settlementActions = useMemo(() => {
-        if (!orderId || !orderReference || !canPayCommission || !onSettleCommission) return []
+        if (commissionMode === 'tracked' || !orderId || !orderReference || !canPayCommission || !onSettleCommission) return []
         return buildProductCommissionSettlementActions({
             workspaceId,
             orderId,
@@ -378,6 +387,7 @@ export function ProductCommissionPreview({
     }, [
         agentIds,
         canPayCommission,
+        commissionMode,
         commissionEntries,
         onSettleCommission,
         orderId,
@@ -392,9 +402,26 @@ export function ProductCommissionPreview({
     if (rows.length === 0) return null
     return (
         <div className="space-y-3 rounded-2xl border border-violet-500/25 bg-violet-500/[0.035] p-4">
-            <div className="flex items-center gap-2 font-semibold">
-                <PackageCheck className="h-4 w-4 text-violet-600" />
-                {t('salesAgentCommissions.productCommission.previewTitle')}
+            <div className="flex flex-wrap items-center gap-2 font-semibold">
+                {commissionMode === 'tracked' ? (
+                    <BadgeDollarSign className="h-4 w-4 text-sky-600" />
+                ) : (
+                    <PackageCheck className="h-4 w-4 text-violet-600" />
+                )}
+                <span>{t('salesAgentCommissions.productCommission.previewTitle')}</span>
+                {commissionMode === 'tracked' ? (
+                    <>
+                        <Badge variant="outline" className="border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300">
+                            {t('salesAgentCommissions.trackedCommission')}
+                        </Badge>
+                        <Badge variant="secondary">{t('salesAgentCommissions.nonpayable')}</Badge>
+                        <Badge variant="outline">
+                            {commissionStatus === 'completed'
+                                ? t('salesAgentCommissions.final')
+                                : t('salesAgentCommissions.projected')}
+                        </Badge>
+                    </>
+                ) : null}
             </div>
             <p className="text-xs text-muted-foreground">{t('salesAgentCommissions.productCommission.previewHint')}</p>
             <div className="space-y-2">

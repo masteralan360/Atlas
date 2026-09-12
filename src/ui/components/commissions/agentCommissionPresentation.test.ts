@@ -153,6 +153,45 @@ describe('agent commission presentation helpers', () => {
         expect(result.due).toEqual({ iqd: 0 })
     })
 
+    it('keeps tracked commission separate from payable, paid, and outstanding totals', () => {
+        const entries = [
+            entry({ id: 'payable', orderId: 'payable-order', amount: 5_000 }),
+            entry({ id: 'tracked', orderId: 'tracked-order', amount: 7_500, commissionMode: 'tracked' }),
+            entry({ id: 'tracked-return', orderId: 'tracked-order', kind: 'reversal', status: 'reversed', amount: -2_500, commissionMode: 'tracked' })
+        ]
+
+        expect(summarizeCommissionEntries(entries)).toMatchObject({
+            earned: { iqd: 5_000 },
+            due: { iqd: 5_000 },
+            orderCount: 1,
+            entryCount: 1
+        })
+        expect(summarizeCommissionEntries(entries, 'tracked')).toMatchObject({
+            earned: { iqd: 5_000 },
+            paid: {},
+            due: {},
+            orderCount: 1,
+            entryCount: 2
+        })
+
+        const groups = buildCommissionHistoryGroups(entries)
+        expect(groups).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                orderId: 'tracked-order',
+                commissionMode: 'tracked',
+                earned: 5_000,
+                outstanding: 0,
+                status: 'tracked'
+            }),
+            expect.objectContaining({
+                orderId: 'payable-order',
+                commissionMode: 'payable',
+                outstanding: 5_000,
+                status: 'outstanding'
+            })
+        ]))
+    })
+
     it('nets linked return reversals into the approved source amount', () => {
         const result = summarizeCommissionEntries([
             entry({ id: 'accrual', orderId: 'order-1', kind: 'accrual', amount: 40 }),

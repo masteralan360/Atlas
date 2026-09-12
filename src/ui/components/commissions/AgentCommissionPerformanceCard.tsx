@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { BadgeCheck, BadgePercent, CircleDollarSign, Eye, ReceiptText, RotateCcw } from 'lucide-react'
+import { BadgeCheck, BadgeDollarSign, BadgePercent, CircleDollarSign, Eye, ReceiptText, RotateCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'wouter'
 
@@ -12,6 +12,7 @@ import {
     type CurrencyCode,
     type IQDDisplayPreference
 } from '@/local-db'
+import { getCommissionEntryMode } from '@/local-db/commissionMode'
 import {
     Badge,
     Button,
@@ -70,8 +71,10 @@ export function AgentCommissionPerformanceCard({
         .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime()),
     [agentId, allEntries, endDate, startDate])
     const summary = useMemo(() => summarizeCommissionEntries(entries), [entries])
+    const trackedSummary = useMemo(() => summarizeCommissionEntries(entries, 'tracked'), [entries])
     const productCommissionTotals = useMemo(() => allProductEntries
         .filter((entry) => entry.agentId === agentId && !entry.isDeleted
+            && getCommissionEntryMode(entry) === 'payable'
             && (!startDate || entry.occurredAt >= startDate)
             && (!endDate || entry.occurredAt < endDate))
         .reduce<Record<string, number>>((totals, entry) => {
@@ -163,9 +166,10 @@ export function AgentCommissionPerformanceCard({
                         {t('salesAgentCommissions.noPlanPerformanceNotice')}
                     </div>
                 ) : null}
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
                     <PerformanceMetric label={t('salesAgentCommissions.assignedOrders')} icon={ReceiptText} value={String(assignedOrders.length)} />
-                    <PerformanceMetric label={t('salesAgentCommissions.recognizedEarned')} icon={BadgeCheck} value={<CommissionCurrencyTotalsView totals={summary.earned} iqdPreference={iqdPreference} />} />
+                    <PerformanceMetric label={t('salesAgentCommissions.payableCommission')} icon={BadgeCheck} value={<CommissionCurrencyTotalsView totals={summary.earned} iqdPreference={iqdPreference} />} />
+                    <PerformanceMetric label={t('salesAgentCommissions.trackedTotal')} icon={BadgeDollarSign} value={<CommissionCurrencyTotalsView totals={trackedSummary.earned} iqdPreference={iqdPreference} />} />
                     <PerformanceMetric label={t('salesAgentCommissions.approved')} icon={BadgePercent} value={<CommissionCurrencyTotalsView totals={summary.approved} iqdPreference={iqdPreference} />} />
                     <PerformanceMetric
                         label={t('salesAgentCommissions.paidReversed')}
@@ -239,6 +243,14 @@ export function AgentCommissionPerformanceCard({
                                                 <TableCell>
                                                     <div className="flex flex-wrap gap-1">
                                                         <Badge variant="outline">{t(`orders.status.${order.status}`, { defaultValue: order.status })}</Badge>
+                                                        {order.commissionMode === 'tracked' ? (
+                                                            <>
+                                                                <Badge variant="outline" className="border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300">
+                                                                    {t('salesAgentCommissions.trackedCommission')}
+                                                                </Badge>
+                                                                <Badge variant="secondary">{t('salesAgentCommissions.nonpayable')}</Badge>
+                                                            </>
+                                                        ) : null}
                                                         {order.returnStatus && order.returnStatus !== 'none' ? (
                                                             <Badge variant="outline" className="border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-300">
                                                                 {order.returnStatus === 'full' ? t('salesAgentCommissions.returned') : t('salesAgentCommissions.partialReturn')}
@@ -286,9 +298,19 @@ export function AgentCommissionPerformanceCard({
                                         <TableCell>{formatDateTime(entry.occurredAt)}</TableCell>
                                         <TableCell className="font-medium">{commissionEntryOrderReference(entry, orderNumberById)}</TableCell>
                                         <TableCell>
-                                            <Badge variant="outline" className={commissionStatusClass(entry.status)}>
-                                                {commissionStatusLabel(entry.status, t)}
-                                            </Badge>
+                                            <div className="flex flex-wrap gap-1">
+                                                <Badge variant="outline" className={commissionStatusClass(entry.status)}>
+                                                    {commissionStatusLabel(entry.status, t)}
+                                                </Badge>
+                                                {getCommissionEntryMode(entry) === 'tracked' ? (
+                                                    <>
+                                                        <Badge variant="outline" className="border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300">
+                                                            {t('salesAgentCommissions.trackedCommission')}
+                                                        </Badge>
+                                                        <Badge variant="secondary">{t('salesAgentCommissions.nonpayable')}</Badge>
+                                                    </>
+                                                ) : null}
+                                            </div>
                                         </TableCell>
                                         <TableCell className="text-end">{formatCurrency(entry.basisAmount, entry.currency as CurrencyCode, iqdPreference)}</TableCell>
                                         <TableCell className="text-end">{entry.ratePercent}%</TableCell>

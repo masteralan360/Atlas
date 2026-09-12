@@ -29,6 +29,11 @@ export {
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
+import {
+  getSalesOrderCommissionMode,
+  isPayableCommissionEntry,
+  isTrackedCommissionEntry,
+} from './commissionMode'
 import { addToOfflineMutations, fetchTableFromSupabase } from './hooks'
 import { getOrderBalanceAmount } from './orderInstallments'
 import {
@@ -1422,6 +1427,25 @@ export async function appendPaymentTransaction(
   workspaceId: string,
   input: AppendPaymentTransactionInput
 ): Promise<PaymentTransaction> {
+  if (
+    input.sourceType === 'agent_commission_payout'
+    || input.sourceType === 'agent_commission_recovery'
+  ) {
+    const linkedEntry = input.sourceSubrecordId
+      ? await db.agent_commission_entries.get(input.sourceSubrecordId)
+      : undefined
+    const metadataOrderId = getMetadataString(input.metadata, 'orderId')
+    const orderId = linkedEntry?.orderId ?? metadataOrderId
+    const order = orderId ? await db.sales_orders.get(orderId) : undefined
+
+    if (
+      (linkedEntry && isTrackedCommissionEntry(linkedEntry))
+      || (order && getSalesOrderCommissionMode(order) === 'tracked')
+    ) {
+      throw new Error('Tracked commission is nonpayable and cannot create a payment transaction')
+    }
+  }
+
   if (input.id) {
     const existing = await db.payment_transactions.get(input.id)
     if (existing && !existing.isDeleted) return existing
@@ -2171,6 +2195,7 @@ export async function buildAgentCommissionObligations(
   for (const entry of entries) {
     if (
       entry.isDeleted
+      || !isPayableCommissionEntry(entry)
       || entry.kind === 'estimate'
       || entry.kind === 'approval'
       || !entry.assignmentId

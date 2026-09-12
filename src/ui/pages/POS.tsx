@@ -4812,6 +4812,7 @@ export function POS() {
                 agentSalesAccountsEnabled={hasFeature('agent_sales_accounts')}
                 productCommissionsEnabled={hasFeature('sales_agent_commissions')}
                 commissionAssignmentsEnabled={canAssignQuickOrderCommissions}
+                commissionMode={features.sales_agent_commission_mode}
                 commissionExchangeRates={quickOrderCommissionExchangeRates}
                 commissionCurrencies={Array.from(new Set([features.default_currency, ...features.allowed_currencies])) as CurrencyCode[]}
                 commissionAssignedBy={user?.id}

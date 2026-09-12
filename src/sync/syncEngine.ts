@@ -459,6 +459,11 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
   };
 
   switch (entityType) {
+    case "sales_orders":
+      // A queued commission-mode setting change must reach the workspace before
+      // an offline-created order snapshots that setting on the server.
+      addParent("workspaces", "workspaceId", "workspace_id");
+      break;
     case "agents":
       addParent("business_partners", "businessPartnerId", "business_partner_id");
       break;

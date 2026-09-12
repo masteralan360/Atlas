@@ -856,6 +856,8 @@ export type CommissionCalculationBasis = 'net_profit' | 'net_revenue'
 export type CommissionPlanType = 'fixed_amount' | 'percentage'
 /** A workspace-wide presentation structure for the sales-agent commission sheet. */
 export type SalesAgentCommissionSheetType = 'normal' | 'tier_based'
+/** Whether an order creates a payable liability or a nonfinancial tracked commission. */
+export type SalesAgentCommissionMode = 'payable' | 'tracked'
 export type ManualSalesAgentCommissionType = CommissionPlanType
 /** Product rules use the same fixed/percentage terms as commission plans. */
 export type ProductCommissionRecipientScope = 'all_assigned' | 'selected_assigned'
@@ -1031,6 +1033,8 @@ export interface AgentCommissionEntry extends BaseEntity {
   planId?: string | null
   orderReturnId?: string | null
   relatedEntryId?: string | null
+  /** Legacy rows are payable. Tracked rows are reporting-only and never settle. */
+  commissionMode?: SalesAgentCommissionMode
   kind: CommissionEntryKind
   status: CommissionEntryStatus
   currency: CurrencyCode
@@ -1072,6 +1076,8 @@ export interface AgentProductCommissionEntry extends BaseEntity {
   ruleId?: string | null
   orderReturnId?: string | null
   relatedEntryId?: string | null
+  /** Mirrors the parent order's immutable commission-mode snapshot. */
+  commissionMode?: SalesAgentCommissionMode
   kind: 'accrual' | 'reversal' | 'adjustment'
   status: 'earned' | 'reversed'
   currency: CurrencyCode
@@ -1135,6 +1141,10 @@ export interface SalesOrder extends BaseEntity {
    * Older orders intentionally behave as enabled.
    */
   commissionEnabled?: boolean
+  /** Immutable workspace-mode snapshot captured when this order is created. */
+  commissionMode?: SalesAgentCommissionMode
+  /** Creation-time marker used to preserve offline snapshots across later setting changes. */
+  commissionModeCapturedAt?: string | null
   sourceStorageId?: string | null
   items: SalesOrderItem[]
   subtotal: number
@@ -2663,6 +2673,9 @@ export interface Workspace extends BaseEntity {
   store_slug?: string | null
   store_description?: string | null
   sales_agent_commission_sheet_type?: SalesAgentCommissionSheetType
+  sales_agent_commission_mode?: SalesAgentCommissionMode
+  sales_agent_commission_mode_changed_at?: string | null
+  sales_agent_commission_mode_changed_by?: string | null
   /** Shared per-workspace presentation preferences for the Ledger cash summary. */
   ledger_dashboard_config?: {
     version: 1

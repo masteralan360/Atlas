@@ -465,6 +465,41 @@ describe('agent deletion ordering', () => {
     })
 })
 
+describe('tracked commission snapshot ordering', () => {
+    it('syncs an offline workspace mode change before its new sales order', () => {
+        const ordered = orderMutationsForSync([
+            {
+                id: 'order-first-in-time',
+                workspaceId: 'workspace-1',
+                entityType: 'sales_orders',
+                entityId: 'order-1',
+                operation: 'create',
+                payload: {
+                    id: 'order-1',
+                    workspaceId: 'workspace-1',
+                    commissionMode: 'tracked',
+                    commissionModeCapturedAt: '2026-09-12T08:00:00.000Z'
+                },
+                createdAt: '2026-09-12T08:00:00.000Z'
+            },
+            {
+                id: 'workspace-setting',
+                workspaceId: 'workspace-1',
+                entityType: 'workspaces',
+                entityId: 'workspace-1',
+                operation: 'update',
+                payload: { id: 'workspace-1', sales_agent_commission_mode: 'tracked' },
+                createdAt: '2026-09-12T08:00:01.000Z'
+            }
+        ])
+
+        expect(ordered.map((mutation) => mutation.id)).toEqual([
+            'workspace-setting',
+            'order-first-in-time'
+        ])
+    })
+})
+
 describe('delivery mutation ordering', () => {
     it('replays a shipment before its event when parallel writes queued the event first', () => {
         const ordered = orderMutationsForSync([

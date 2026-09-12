@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, FileText, Printer, Settings, TrendingDown, TrendingUp } from 'lucide-react'
+import { ArrowLeft, CircleAlert, FileText, Loader2, Printer, RefreshCw, Settings, TrendingDown, TrendingUp } from 'lucide-react'
 import { Link, useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 import type { i18n as I18n } from 'i18next'
@@ -37,6 +37,7 @@ import {
     type PartnerAccountStatementEntryKind,
     type PartnerAccountStatementPeriod
 } from '@/lib/partnerAccountStatement'
+import { PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES } from '@/lib/partnerAccountStatementLiveData'
 import {
     getPartnerAccountStatementEntryDescription,
     getPartnerAccountStatementEntryDetail
@@ -77,6 +78,7 @@ import {
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import { PartnerAccountStatementTemplateDialog } from '@/ui/components/crm/PartnerAccountStatementTemplateDialog'
 import type { PartnerAccountStatementPrintData } from '@/ui/components/crm/PartnerAccountStatementPrintTemplate'
+import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useWorkspace } from '@/workspace'
 
 const ACCOUNT_STATEMENT_PATH = '/business-partners/account-statement'
@@ -459,7 +461,13 @@ export function AccountStatements() {
         }
     }, [selectedStatementTemplateId, statementTemplates])
 
-    const { partner, statementData } = usePartnerAccountStatement(workspaceId, selectedPartnerId, statementPeriod)
+    const {
+        partner,
+        statementData,
+        isRefreshing,
+        refreshError,
+        retryLiveRefresh
+    } = usePartnerAccountStatement(workspaceId, selectedPartnerId, statementPeriod)
     const isAgentStatement = isAgentBusinessPartnerRole(partner?.role)
     const itemizeSalesOrders = activeStatementTemplate.configuration.showOrderItems
     const itemizePosSaleLoans = activeStatementTemplate.configuration.showPosSaleItems
@@ -766,6 +774,7 @@ export function AccountStatements() {
                     <span>/</span>
                     <span className="truncate font-semibold text-foreground">
                         {t('businessPartners.accountStatement.title', { defaultValue: 'Account Statement' })}
+                        <ModulePageFreshness tableNames={PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES} className="ms-2" />
                     </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -780,7 +789,7 @@ export function AccountStatements() {
                     <Button
                         variant="outline"
                         className="h-10 gap-2 rounded-xl px-4"
-                        disabled={!printPreview || !activePrintLayout}
+                        disabled={isRefreshing || Boolean(refreshError) || !printPreview || !activePrintLayout}
                         onClick={() => {
                             setSelectedPrintTemplate(null)
                             setIsPrintPreviewOpen(true)
@@ -829,6 +838,34 @@ export function AccountStatements() {
                                 defaultValue: 'Choose a partner to view opening balances, account activity, and closing balances.'
                             })}
                         </p>
+                    </CardContent>
+                </Card>
+            ) : isRefreshing ? (
+                <Card>
+                    <CardContent className="flex min-h-72 flex-col items-center justify-center p-8 text-center">
+                        <Loader2 className="mb-4 h-10 w-10 animate-spin text-primary" />
+                        <h2 className="text-lg font-semibold">
+                            {t('businessPartners.accountStatement.refreshingLiveData')}
+                        </h2>
+                        <p className="mt-1 max-w-lg text-sm text-muted-foreground">
+                            {t('businessPartners.accountStatement.refreshingLiveDataDescription')}
+                        </p>
+                    </CardContent>
+                </Card>
+            ) : refreshError ? (
+                <Card>
+                    <CardContent className="flex min-h-72 flex-col items-center justify-center p-8 text-center">
+                        <CircleAlert className="mb-4 h-10 w-10 text-amber-600 dark:text-amber-400" />
+                        <h2 className="text-lg font-semibold">
+                            {t('businessPartners.accountStatement.liveDataUnavailable')}
+                        </h2>
+                        <p className="mt-1 max-w-lg text-sm text-muted-foreground">
+                            {t('businessPartners.accountStatement.liveDataUnavailableDescription')}
+                        </p>
+                        <Button type="button" variant="outline" className="mt-4 gap-2" onClick={retryLiveRefresh}>
+                            <RefreshCw className="h-4 w-4" />
+                            {t('common.retry')}
+                        </Button>
                     </CardContent>
                 </Card>
             ) : !partner ? (

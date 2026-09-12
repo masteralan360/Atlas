@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import { ArrowLeft, BadgeCheck, CalendarDays, CircleCheck, Clock3, CreditCard, Eye, LayoutGrid, List, Loader2, Lock, Package, PackageCheck, Pencil, Plus, Printer, Receipt, RotateCcw, ShoppingCart, Trash2, TrendingUp, Truck, UsersRound, Warehouse, XCircle } from 'lucide-react'
+import { ArrowLeft, BadgeCheck, BadgeDollarSign, CalendarDays, CircleCheck, Clock3, CreditCard, Eye, LayoutGrid, List, Loader2, Lock, Package, PackageCheck, Pencil, Plus, Printer, Receipt, RotateCcw, ShoppingCart, Trash2, TrendingUp, Truck, UsersRound, Warehouse, XCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLocalizedOrderError } from '@/lib/orderErrors'
 import { ORDER_STATUS_ADVANCE_HOLD_DURATION_MS } from '@/lib/pressAndHold'
@@ -367,6 +367,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
 
     const { permissionKeys } = useWorkspacePermissions()
     const salesAgentCommissionsEnabled = hasFeature('sales_agent_commissions')
+    const isTrackedCommission = salesOrder?.commissionMode === 'tracked'
     const canAssignSalesAgents = salesAgentCommissionsEnabled
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.assignOrders')
     const canViewAllAgentCommissions = salesAgentCommissionsEnabled
@@ -374,6 +375,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const canViewOwnAgentCommissions = salesAgentCommissionsEnabled
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.viewOwn')
     const canPaySalesAgentCommissions = salesAgentCommissionsEnabled
+        && !isTrackedCommission
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.pay')
     const productCommissionPreviewAgentIds = useMemo(() => {
         if (!salesOrder) return []
@@ -1173,6 +1175,12 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             {t('ecommerce.title', { defaultValue: 'E-Commerce' })}
                         </span>
                     ) : null}
+                    {isSales && (order as SalesOrder).commissionMode === 'tracked' ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-sky-700 dark:text-sky-300">
+                            <BadgeDollarSign className="h-3 w-3" />
+                            {t('salesAgentCommissions.trackedCommission')} · {t('salesAgentCommissions.nonpayable')}
+                        </span>
+                    ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                     {canEditOrder && (
@@ -1372,6 +1380,8 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             showTotal
                             orderId={order.id}
                             orderReference={(order as SalesOrder).orderNumber}
+                            commissionMode={(order as SalesOrder).commissionMode}
+                            commissionStatus={(order as SalesOrder).status}
                             canPayCommission={canPaySalesAgentCommissions}
                             onSettleCommission={setSettlementTarget}
                         />
@@ -1601,6 +1611,12 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                             <OrderStatusBadge status="returned" label={t('sales.return.returnedStatus') || 'Returned'} />
                                         ) : isSales && (order as SalesOrder).returnStatus === 'partial' ? (
                                             <OrderStatusBadge status="partially_returned" label={t('sales.return.partialReturn') || 'Partially Returned'} />
+                                        ) : null}
+                                        {isSales && (order as SalesOrder).commissionMode === 'tracked' ? (
+                                            <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-sky-700 dark:text-sky-300">
+                                                <BadgeDollarSign className="h-3 w-3" />
+                                                {t('salesAgentCommissions.trackedCommission')} · {t('salesAgentCommissions.nonpayable')}
+                                            </span>
                                         ) : null}
                                         <span className={cn(
                                             'inline-flex items-center rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em]',

@@ -35,10 +35,14 @@ CREATE TABLE public.workspaces (
   payment_renewal_locked boolean NOT NULL DEFAULT false,
   subscription_expiry_locked boolean NOT NULL DEFAULT false,
   sales_agent_commission_sheet_type text NOT NULL DEFAULT 'normal'::text,
+  sales_agent_commission_mode text NOT NULL DEFAULT 'payable'::text,
+  sales_agent_commission_mode_changed_at timestamp with time zone NOT NULL DEFAULT now(),
+  sales_agent_commission_mode_changed_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   ledger_dashboard_config jsonb NOT NULL DEFAULT '{"version":1,"hiddenGroups":[],"groupOrder":["operating","borrowing","lending"]}'::jsonb,
   CONSTRAINT workspaces_data_mode_check CHECK ((data_mode::text) = ANY (ARRAY['cloud'::text, 'local'::text, 'hybrid'::text, 'demo'::text])),
   CONSTRAINT workspaces_plan_check CHECK (plan = ANY (ARRAY['basic'::text, 'business'::text, 'enterprise'::text])),
   CONSTRAINT workspaces_sales_agent_commission_sheet_type_check CHECK (sales_agent_commission_sheet_type IN ('normal', 'tier_based')),
+  CONSTRAINT workspaces_sales_agent_commission_mode_check CHECK (sales_agent_commission_mode IN ('payable', 'tracked')),
   CONSTRAINT workspaces_ledger_dashboard_config_object_check CHECK (jsonb_typeof(ledger_dashboard_config) = 'object'),
   PRIMARY KEY (id)
 );

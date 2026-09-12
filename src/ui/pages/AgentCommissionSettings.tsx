@@ -21,7 +21,7 @@ export function AgentCommissionSettings() {
 
     return (
         <CommissionFeatureBoundary enabled={true} workspaceId={user.workspaceId}>
-            <div className="mx-auto w-full max-w-[96rem] space-y-8 pb-8">
+            <div className="w-full space-y-8 pb-8">
                 <div className="space-y-1">
                     <Button type="button" variant="ghost" className="h-auto gap-2 px-0 text-muted-foreground hover:bg-transparent hover:text-foreground" onClick={() => navigate('/agents')}>
                         <ArrowLeft className="h-4 w-4" />
@@ -34,7 +34,11 @@ export function AgentCommissionSettings() {
                     <p className="text-sm text-muted-foreground">{t('salesAgentCommissions.settingsDescription')}</p>
                 </div>
 
-                <AgentCommissionSettingsForm workspaceId={user.workspaceId} userId={user.id} onCancel={() => navigate('/agents')} />
+                <AgentCommissionSettingsForm
+                    workspaceId={user.workspaceId}
+                    userId={user.id}
+                    onCancel={() => navigate('/agents')}
+                />
             </div>
         </CommissionFeatureBoundary>
     )
