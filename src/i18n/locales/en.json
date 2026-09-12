@@ -5541,6 +5541,15 @@
       "deleteConfirm": "Products in this storage will be moved to Reserve. Continue?"
     }
   },
+  "inventory": {
+    "errors": {
+      "onlineRequired": "Connect to the internet before changing stock in a Cloud or Hybrid workspace.",
+      "negativeQuantity": "Stock quantity cannot be negative.",
+      "invalidQuantity": "Enter a valid finite stock quantity.",
+      "authoritativeResultMissing": "The server did not return the updated stock. Refresh and try again.",
+      "legacyMutationQuarantined": "A legacy stock snapshot was quarantined. Refresh inventory and apply the correction manually."
+    }
+  },
   "inventoryTransfer": {
     "title": "Inventory Transfer",
     "subtitle": "Move products between storage locations and keep key shelves automatically replenished.",

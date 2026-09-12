@@ -13,7 +13,7 @@ import { readInstantPosProductsPerRow, saveInstantPosProductsPerRow } from '@/li
 import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle, Button, Input, useToast, Textarea, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, StorageSelector } from '@/ui/components'
 import { AlertCircle, CheckCircle2, ChefHat, ChevronDown, ChevronRight, ChevronUp, Loader2, Menu, Minus, Package, Plus, Receipt, Search, ShoppingCart, StickyNote, Table2, Trash2 } from 'lucide-react'
 import { UiAccessGate } from '@/context/UiAccessContext'
-import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
+import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { platformService } from '@/services/platformService'
 import { useKdsStream } from '@/hooks/useKdsStream'
 import { createVerificationSale, verifySale } from '@/lib/saleVerification'
@@ -1857,9 +1857,17 @@ export function InstantPOS() {
                 throw new Error('local_workspace_sale')
             }
 
-            const { data, error } = await runSupabaseAction('instantPos.completeSale', () =>
+            let completeSaleResponse = await runSupabaseAction('instantPos.completeSale', () =>
                 supabase.rpc('complete_sale', { payload: checkoutPayload })
             )
+
+            if (completeSaleResponse.error && isRetriableWebRequestError(completeSaleResponse.error)) {
+                completeSaleResponse = await runSupabaseAction('instantPos.completeSale.verify', () =>
+                    supabase.rpc('complete_sale', { payload: checkoutPayload })
+                )
+            }
+
+            const { data, error } = completeSaleResponse
 
             if (error) throw normalizeSupabaseActionError(error)
 
@@ -1938,7 +1946,7 @@ export function InstantPOS() {
             const normalized = normalizeSupabaseActionError(err)
             console.error('[Instant POS] Checkout failed, saving offline:', normalized)
 
-            if (!navigator.onLine || isLocalMode) {
+            if (isLocalMode) {
                 try {
                     const localSequenceId = await generateLocalSaleSequenceId(user.workspaceId)
                     const localSaleItems = itemsWithMetadata.map((item) => ({
@@ -2094,7 +2102,9 @@ export function InstantPOS() {
             } else {
                 toast({
                     title: t('common.error') || 'Error',
-                    description: normalized.message || (t('instantPos.checkoutError') || 'Checkout failed.'),
+                    description: (!navigator.onLine || isRetriableWebRequestError(normalized))
+                        ? t('inventory.errors.onlineRequired')
+                        : normalized.message || (t('instantPos.checkoutError') || 'Failed to complete checkout.'),
                     variant: 'destructive'
                 })
             }

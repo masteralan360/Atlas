@@ -1709,7 +1709,10 @@ export function Sales() {
             const isPartialReturn = (saleToReturn as any)._isPartialReturn
             const isIndividualItemReturn = saleToReturn?.items?.length === 1 && !(saleToReturn as any)._isWholeSaleReturn && !isPartialReturn
             const isCurrentlyOnline = typeof navigator === 'undefined' ? true : navigator.onLine
-            const shouldQueueOfflineReturn = !isLocalMode && !isCurrentlyOnline
+            if (!isLocalMode && !isCurrentlyOnline) {
+                throw new Error(t('inventory.errors.onlineRequired'))
+            }
+            const shouldQueueOfflineReturn = false
 
             const queueOfflineReturnMutation = async (payload: Record<string, unknown>) => {
                 await db.offline_mutations.add({

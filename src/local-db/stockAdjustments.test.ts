@@ -119,32 +119,22 @@ describe('stock adjustments', () => {
             .toMatchObject({ quantityDelta: 7, previousQuantity: 4, newQuantity: 11 })
     })
 
-    it('queues only the stock-adjustment operation while offline in cloud mode', async () => {
+    it('rejects an offline stock adjustment in cloud mode without changing stock', async () => {
         writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
 
-        const adjustment = await createStockAdjustment(WORKSPACE_ID, {
+        await expect(createStockAdjustment(WORKSPACE_ID, {
             productId: PRODUCT_ID,
             storageId: STORAGE_ID,
             adjustmentType: 'increase',
             quantity: 1,
             targetQuantity: 11,
             reason: 'correction',
-        })
+        })).rejects.toThrow('Connect to the internet')
 
         expect(await db.inventory.where('[productId+storageId]').equals([PRODUCT_ID, STORAGE_ID]).first())
-            .toMatchObject({ quantity: 11 })
-        expect(await db.offline_mutations.toArray()).toEqual([
-            expect.objectContaining({
-                entityType: 'inventory_transactions',
-                entityId: adjustment.id,
-                operation: 'create',
-                payload: expect.objectContaining({
-                    quantityDelta: 7,
-                    previousQuantity: 4,
-                    newQuantity: 11,
-                }),
-            }),
-        ])
+            .toMatchObject({ quantity: 4 })
+        expect(await db.inventory_transactions.count()).toBe(0)
+        expect(await db.offline_mutations.count()).toBe(0)
     })
 
     it('rounds fractional target quantities to the inventory precision', async () => {

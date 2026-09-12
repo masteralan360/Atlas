@@ -1,14 +1,12 @@
 import { supabase } from '@/auth/supabase'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { isOnline } from '@/lib/network'
 import { QUANTITY_EPSILON, roundQuantity } from '@/lib/quantity'
-import { isRetriableWebRequestError } from '@/lib/supabaseRequest'
 import { generateId } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
-import { getInventoryQuantityForProductStorage, putInventoryQuantity, syncProductStockSnapshot } from './inventory'
-import { addToOfflineMutations, fetchTableFromSupabase, syncSalesFromSupabase } from './hooks'
+import { assertInventoryMutationConnectivity, getInventoryQuantityForProductStorage, putInventoryQuantity, syncProductStockSnapshot } from './inventory'
+import { fetchTableFromSupabase, syncSalesFromSupabase } from './hooks'
 import { refreshStockBatchesFromSupabase, getStockBatchSalePlan, splitStockBatchAllocationsForReturn } from './stockBatches'
 import { resolveReturnStorageId } from './storageUtils'
 import {
@@ -520,9 +518,9 @@ async function refreshAfterCloudExchange(workspaceId: string) {
 export async function processSaleProductExchange(input: ProcessSaleProductExchangeInput): Promise<ProcessSaleProductExchangeResult> {
     const ids: ExchangeIds = { exchangeId: generateId(), returnId: generateId() }
     const localMode = isLocalWorkspaceMode(input.workspaceId)
-    const online = isOnline()
 
-    if (!localMode && online) {
+    if (!localMode) {
+        assertInventoryMutationConnectivity(input.workspaceId)
         const { data, error } = await supabase.rpc('process_sale_product_exchange_with_account', {
             p_exchange_id: ids.exchangeId,
             p_return_id: ids.returnId,
@@ -548,25 +546,10 @@ export async function processSaleProductExchange(input: ProcessSaleProductExchan
                 loanCreditAmount: Number(data.loan_credit_amount || 0), idempotentReplay: !!data.idempotent_replay,
             }
         }
-        if (error && !isRetriableWebRequestError(error)
-            && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
-            throw error
-        }
+        if (error) throw error
     }
 
     const result = await applyLocalSaleProductExchange(input, ids)
-    if (!localMode) {
-        await addToOfflineMutations('sales', input.saleId, 'update', {
-            __rpc_action: 'process_sale_product_exchange_with_account',
-            p_exchange_id: ids.exchangeId, p_return_id: ids.returnId, p_sale_id: input.saleId,
-            p_return_sale_item_id: input.returnSaleItemId, p_return_quantity: input.returnQuantity,
-            p_replacement_product_id: input.replacementProductId, p_replacement_storage_id: input.replacementStorageId,
-            p_replacement_quantity: input.replacementQuantity, p_replacement_unit_amount: input.replacementUnitAmount,
-            p_settlement_method: input.settlementMethod || null, p_note: input.note?.trim() || null,
-            p_account_id: input.accountId || null, p_account_name_snapshot: input.accountNameSnapshot || null,
-            p_return_reason: input.returnReason?.trim() || 'Product exchange',
-        }, input.workspaceId)
-    }
     return result
 }
 

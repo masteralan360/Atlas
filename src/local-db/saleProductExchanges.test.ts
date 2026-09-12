@@ -28,12 +28,41 @@ function installBrowserStorage() {
     Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: storage })
     Object.defineProperty(globalThis, 'window', {
         configurable: true,
-        value: { localStorage: storage, sessionStorage: storage, location: { hash: '', origin: 'http://localhost', pathname: '/' }, addEventListener: () => undefined },
+        value: {
+            localStorage: storage,
+            sessionStorage: storage,
+            location: { hash: '', origin: 'http://localhost', pathname: '/' },
+            URL: globalThis.URL,
+            addEventListener: () => undefined,
+        },
     })
     Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { onLine: false } })
+    Object.defineProperty(globalThis, 'Element', {
+        configurable: true,
+        value: class Element {
+            matches() { return false }
+        },
+    })
+    Object.defineProperty(globalThis, 'DOMMatrix', { configurable: true, value: class DOMMatrix {} })
+    Object.defineProperty(globalThis, 'ImageData', { configurable: true, value: class ImageData {} })
+    Object.defineProperty(globalThis, 'Path2D', { configurable: true, value: class Path2D {} })
+    Object.defineProperty(globalThis.URL, 'createObjectURL', {
+        configurable: true,
+        value: () => 'blob:atlas-test',
+    })
     Object.defineProperty(globalThis, 'document', {
         configurable: true,
-        value: { visibilityState: 'visible', dir: 'ltr', documentElement: { lang: 'en', dir: 'ltr' }, addEventListener: () => undefined, removeEventListener: () => undefined },
+        value: {
+            visibilityState: 'visible',
+            dir: 'ltr',
+            documentElement: { lang: 'en', dir: 'ltr', style: {} },
+            head: { appendChild: () => undefined },
+            createElement: () => ({ style: {}, appendChild: () => undefined, setAttribute: () => undefined }),
+            createTextNode: () => ({}),
+            getElementsByTagName: () => [{ appendChild: () => undefined }],
+            addEventListener: () => undefined,
+            removeEventListener: () => undefined,
+        },
     })
 }
 
@@ -73,7 +102,7 @@ describe('sale product exchanges', () => {
     beforeAll(async () => {
         installBrowserStorage()
         processSaleProductExchange = (await import('./saleProductExchanges')).processSaleProductExchange
-    })
+    }, 30_000)
 
     beforeEach(async () => {
         installBrowserStorage()

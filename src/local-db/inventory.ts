@@ -2,16 +2,21 @@ import { useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
+import i18n from '@/i18n/config'
 import { isOnline } from '@/lib/network'
 import { QUANTITY_EPSILON, isPositiveQuantity, quantitiesEqual, roundQuantity } from '@/lib/quantity'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
-import { runSupabaseAction } from '@/lib/supabaseRequest'
-import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
+import {
+    isRetriableWebRequestError,
+    normalizeSupabaseActionError,
+    runSupabaseAction
+} from '@/lib/supabaseRequest'
+import { generateId, toCamelCase } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
-import { addToOfflineMutations } from './offlineMutations'
+import { isValidNewInventoryQuantity } from './inventoryDeficit'
 import type {
     Inventory,
     InventoryTransferBatchAllocation,
@@ -45,6 +50,12 @@ export interface UseInventoryOptions extends InventoryWorkspaceFetchOptions {
 
 function shouldUseCloudBusinessData(workspaceId?: string | null) {
     return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
+}
+
+export function assertInventoryMutationConnectivity(workspaceId: string) {
+    if (shouldUseCloudBusinessData(workspaceId) && !isOnline(workspaceId)) {
+        throw new Error(i18n.t('inventory.errors.onlineRequired'))
+    }
 }
 
 function getSyncMetadata(
@@ -192,55 +203,61 @@ export async function hydrateInventoryProductStoragesFromSupabase(
 
 export async function syncInventoryRowsBestEffort(rows: Array<Inventory | null>, workspaceId: string) {
     const dedupedRows = Array.from(
-        new Map(rows.filter((row): row is Inventory => !!row).map((row) => [row.id, row])).values()
+        new Map(rows.filter((row): row is Inventory => !!row).map((row) => [
+            buildInventoryPositionKey(row.workspaceId, row.productId, row.storageId),
+            row
+        ])).values()
     )
 
     if (dedupedRows.length === 0 || !shouldUseCloudBusinessData(workspaceId)) {
         return
     }
 
-    if (isOnline()) {
-        try {
-            const payload = dedupedRows.map((row) => toSnakeCase({
-                ...row,
-                syncStatus: undefined,
-                lastSyncedAt: undefined
-            }))
+    assertInventoryMutationConnectivity(workspaceId)
 
-            const client = getSupabaseClientForTable('inventory')
-            const { data: remoteRows, error } = await runSupabaseAction('inventory.sync', () =>
-                client
-                    .from('inventory')
-                    .upsert(payload, { onConflict: 'workspace_id,product_id,storage_id' })
-                    .select('*')
-            )
+    const operationId = generateId()
+    const changes = dedupedRows.map((row) => ({
+        id: row.id,
+        product_id: row.productId,
+        storage_id: row.storageId,
+        quantity: row.quantity,
+        expected_version: Math.max(0, Number(row.version || 1) - 1)
+    }))
+    const client = getSupabaseClientForTable('inventory')
+    const execute = () => runSupabaseAction('inventory.sync.authoritative', () =>
+        client.rpc('apply_inventory_snapshot_changes', {
+            p_operation_id: operationId,
+            p_workspace_id: workspaceId,
+            p_operation_kind: 'client_snapshot_cas',
+            p_changes: changes
+        })
+    )
 
-            if (!error && remoteRows) {
-                const syncedAt = new Date().toISOString()
-                await reconcileInventoryRowsSynced(dedupedRows, remoteRows as Record<string, unknown>[], syncedAt)
-                const productIds = Array.from(new Set(
-                    (remoteRows as Record<string, unknown>[])
-                        .map((row) => row.product_id)
-                        .filter((productId): productId is string => typeof productId === 'string')
-                ))
-                await Promise.all(productIds.map((productId) =>
-                    syncProductStockSnapshot(productId, syncedAt, 'remote')
-                ))
-                return
-            }
-        } catch (error) {
-            console.error('[Inventory] Remote sync failed, queueing for retry:', error)
-        }
+    let response = await execute()
+    if (response.error && isRetriableWebRequestError(response.error)) {
+        // The first request may have committed before its response was lost.
+        // Reusing the same operation id makes this retry safe.
+        response = await execute()
     }
 
-    await Promise.all(dedupedRows.map((row) =>
-        addToOfflineMutations(
-            'inventory',
-            row.id,
-            row.version > 1 || row.isDeleted ? 'update' : 'create',
-            row as unknown as Record<string, unknown>,
-            workspaceId
-        )
+    if (response.error) {
+        throw normalizeSupabaseActionError(response.error)
+    }
+
+    const remoteRows = (response.data as { inventory?: Record<string, unknown>[] } | null)?.inventory
+    if (!remoteRows) {
+        throw new Error(i18n.t('inventory.errors.authoritativeResultMissing'))
+    }
+
+    const syncedAt = new Date().toISOString()
+    await reconcileInventoryRowsSynced(dedupedRows, remoteRows, syncedAt)
+    const productIds = Array.from(new Set(
+        remoteRows
+            .map((row) => row.product_id)
+            .filter((productId): productId is string => typeof productId === 'string')
+    ))
+    await Promise.all(productIds.map((productId) =>
+        syncProductStockSnapshot(productId, syncedAt, 'remote')
     ))
 }
 
@@ -542,6 +559,13 @@ export async function putInventoryQuantity(
     timestamp: string,
     syncSource: InventorySyncSource = 'local'
 ) {
+    if (syncSource === 'local') {
+        assertInventoryMutationConnectivity(workspaceId)
+    }
+    if (!isValidNewInventoryQuantity(quantity)) {
+        throw new Error(i18n.t('inventory.errors.negativeQuantity'))
+    }
+
     const rows = await getInventoryRowsForProductStorage(productId, storageId)
     const activeRow = rows.find((row) => !row.isDeleted)
     const restorableRow = rows.find((row) => row.isDeleted)
@@ -675,6 +699,12 @@ export async function setProductInventoryFromLegacyInput(input: {
 }) {
     const timestamp = input.timestamp || new Date().toISOString()
     const syncSource = input.syncSource || 'local'
+    if (!isValidNewInventoryQuantity(input.quantity)) {
+        throw new Error(i18n.t('inventory.errors.negativeQuantity'))
+    }
+    if (syncSource === 'local') {
+        assertInventoryMutationConnectivity(input.workspaceId)
+    }
     const changedRows: Array<Inventory | null> = []
 
     const updatedProduct = await db.transaction('rw', [db.inventory, db.products, db.storages], async () => {
@@ -770,6 +800,12 @@ export async function adjustInventoryQuantity(input: {
 }) {
     const timestamp = input.timestamp || new Date().toISOString()
     const syncSource = input.syncSource || 'local'
+    if (!Number.isFinite(input.quantityDelta)) {
+        throw new Error(i18n.t('inventory.errors.invalidQuantity'))
+    }
+    if (syncSource === 'local') {
+        assertInventoryMutationConnectivity(input.workspaceId)
+    }
     let changedRow: Inventory | null = null
 
     if (syncSource === 'local' && !input.skipRemoteHydration) {

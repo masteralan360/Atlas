@@ -18,7 +18,27 @@ const browser = vi.hoisted(() => {
   Object.defineProperty(globalThis, 'location', { configurable: true, value: { hash: '' } })
   Object.defineProperty(globalThis, 'document', {
     configurable: true,
-    value: { dir: '', documentElement: { lang: '', dir: '' } },
+    value: {
+      dir: '',
+      documentElement: { lang: '', dir: '', style: {} },
+      head: { appendChild: () => undefined },
+      createElement: () => ({ style: {}, appendChild: () => undefined, setAttribute: () => undefined }),
+      createTextNode: () => ({}),
+      getElementsByTagName: () => [{ appendChild: () => undefined }],
+    },
+  })
+  Object.defineProperty(globalThis, 'Element', {
+    configurable: true,
+    value: class Element {
+      matches() { return false }
+    },
+  })
+  Object.defineProperty(globalThis, 'DOMMatrix', { configurable: true, value: class DOMMatrix {} })
+  Object.defineProperty(globalThis, 'ImageData', { configurable: true, value: class ImageData {} })
+  Object.defineProperty(globalThis, 'Path2D', { configurable: true, value: class Path2D {} })
+  Object.defineProperty(globalThis.URL, 'createObjectURL', {
+    configurable: true,
+    value: () => 'blob:atlas-test',
   })
   Object.defineProperty(globalThis, 'window', { configurable: true, value: globalThis })
   return { storage }

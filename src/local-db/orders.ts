@@ -39,6 +39,7 @@ import {
 } from './businessPartners'
 import {
     adjustInventoryQuantity,
+    assertInventoryMutationConnectivity,
     getInventoryQuantityForProductStorage,
     hydrateInventoryProductStoragesFromSupabase,
     putInventoryQuantity,
@@ -850,6 +851,7 @@ async function getReservedQuantityMaps(workspaceId: string, excludeOrderId?: str
 }
 
 async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: string) {
+    assertInventoryMutationConnectivity(order.workspaceId)
     const { reservedByStorage, reservedWithoutStorage } = await getReservedQuantityMaps(order.workspaceId, excludeOrderId)
     const productIds = Array.from(new Set(order.items.map((item) => item.productId)))
     const products = await db.products.where('id').anyOf(productIds).toArray()
@@ -2552,6 +2554,9 @@ export async function createQuickSalesOrder(
     if (targetStatus !== 'draft' && targetStatus !== 'pending' && targetStatus !== 'completed') {
         throw new Error('Quick orders must be saved as draft, pending, or completed')
     }
+    if (targetStatus !== 'draft') {
+        assertInventoryMutationConnectivity(workspaceId)
+    }
     if (isOrderFinancingMethod(data.paymentMethod) && (data.isPaid || data.paymentStatus === 'paid')) {
         throw new Error('Financed Quick Orders cannot be paid on save')
     }
@@ -3860,6 +3865,7 @@ export async function returnSalesOrder(input: ReturnSalesOrderInput) {
     if (order.status !== 'completed') {
         throw new Error('Only completed sales orders can be returned')
     }
+    assertInventoryMutationConnectivity(order.workspaceId)
 
     const reason = input.reason.trim()
     if (!reason) {
@@ -4088,6 +4094,9 @@ export async function createPurchaseOrder(
     const now = new Date().toISOString()
     const orderNumber = await getInitialOrderNumber('purchase_orders', workspaceId)
     const status = data.status || 'draft'
+    if (status === 'received' || status === 'completed') {
+        assertInventoryMutationConnectivity(workspaceId)
+    }
     const counterparty = await normalizePurchaseOrderCounterparty(data)
     const paymentState = normalizeOrderPaymentState(data, now)
     const order = buildBaseEntity(workspaceId, {
@@ -4230,6 +4239,9 @@ export async function updatePurchaseOrderStatus(id: string, status: PurchaseOrde
     const existing = await db.purchase_orders.get(id)
     if (!existing || existing.isDeleted) {
         throw new Error('Purchase order not found')
+    }
+    if (status === 'received' || status === 'completed') {
+        assertInventoryMutationConnectivity(existing.workspaceId)
     }
 
     if (isOrderApprovalRequested(existing)) {

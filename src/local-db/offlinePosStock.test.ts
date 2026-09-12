@@ -121,7 +121,7 @@ describe("offline POS stock effects", () => {
     await db.delete();
     await db.open();
     setNetworkStatus(false);
-    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: "cloud" });
+    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: "local" });
     await seedStock();
   });
 
@@ -164,5 +164,19 @@ describe("offline POS stock effects", () => {
     expect(await db.inventory.get(INVENTORY_ID)).toMatchObject({ quantity: 20 });
     expect(await db.stock_batches.get(BATCH_ID)).toMatchObject({ quantity: 20 });
     expect(await db.offline_mutations.count()).toBe(0);
+  });
+
+  it("blocks Cloud and Hybrid workspaces from applying offline stock effects", async () => {
+    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: "hybrid" });
+
+    await expect(applyOfflinePosStockEffects({
+      workspaceId: WORKSPACE_ID,
+      items: [{ productId: PRODUCT_ID, storageId: STORAGE_ID, quantity: 1 }],
+      batchPlans: [],
+      timestamp: TIMESTAMP,
+    })).rejects.toThrow("Connect to the internet");
+
+    expect(await db.inventory.get(INVENTORY_ID)).toMatchObject({ quantity: 20 });
+    expect(await db.stock_batches.get(BATCH_ID)).toMatchObject({ quantity: 20 });
   });
 });

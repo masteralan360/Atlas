@@ -1,8 +1,10 @@
 import type Dexie from "dexie";
 
+import i18n from "@/i18n/config";
 import { isTauri } from "@/lib/platform";
 import { shouldMirrorToSqlite, isStrictLocalWorkspaceMode } from "@/workspace/workspaceMode";
 import { recordWorkspaceDataFetch } from "@/workspace/workspaceDataFreshness";
+import { isAllowedInventoryQuantityTransition } from "./inventoryDeficit";
 import { runUsbBackupIfNeeded } from "./usbBackup";
 import { normalizeProductSku } from "./productSku";
 import { createPwaSqliteConnection, isOpfsSupported, getPwaDbInstance, ensurePwaDatabase, replacePwaDatabaseFile, validateAtlasLocalDatabase, DB_FILENAME as PWA_DB_FILENAME } from "./pwaSqlite";
@@ -269,6 +271,60 @@ async function ensureCurrentWorkspaceColumn(connection: SqliteConnection) {
   await connection.execute(`
     CREATE INDEX IF NOT EXISTS idx_local_entities_current_workspace
     ON local_entities (current_workspace)
+  `);
+}
+
+async function ensureInventoryDeficitTriggers(connection: SqliteConnection) {
+  const localWorkspacePredicate = `EXISTS (
+    SELECT 1
+    FROM local_entities AS workspace
+    WHERE workspace.entity_type = 'workspaces'
+      AND workspace.entity_id = NEW.workspace_id
+      AND COALESCE(
+        json_extract(workspace.payload, '$.dataMode'),
+        json_extract(workspace.payload, '$.data_mode')
+      ) = 'local'
+  )`;
+  const invalidNewQuantityPredicate = `(
+    COALESCE(json_type(NEW.payload, '$.quantity'), 'missing') NOT IN ('integer', 'real')
+    OR CAST(json_extract(NEW.payload, '$.quantity') AS REAL) < 0
+  )`;
+
+  await connection.execute(`
+    CREATE TRIGGER IF NOT EXISTS local_inventory_prevent_deficit_insert
+    BEFORE INSERT ON local_entities
+    WHEN NEW.entity_type IN ('inventory', 'products')
+      AND ${localWorkspacePredicate}
+      AND ${invalidNewQuantityPredicate}
+    BEGIN
+      SELECT RAISE(ABORT, 'inventory_quantity_deficit');
+    END
+  `);
+
+  await connection.execute(`
+    CREATE TRIGGER IF NOT EXISTS local_inventory_prevent_deficit_update
+    BEFORE UPDATE OF payload, workspace_id ON local_entities
+    WHEN NEW.entity_type IN ('inventory', 'products')
+      AND ${localWorkspacePredicate}
+      AND (
+        COALESCE(json_type(NEW.payload, '$.quantity'), 'missing') NOT IN ('integer', 'real')
+        OR (
+          COALESCE(json_type(OLD.payload, '$.quantity'), 'missing') NOT IN ('integer', 'real')
+          AND CAST(json_extract(NEW.payload, '$.quantity') AS REAL) < 0
+        )
+        OR (
+          CAST(json_extract(OLD.payload, '$.quantity') AS REAL) >= 0
+          AND CAST(json_extract(NEW.payload, '$.quantity') AS REAL) < 0
+        )
+        OR (
+          CAST(json_extract(OLD.payload, '$.quantity') AS REAL) < 0
+          AND CAST(json_extract(NEW.payload, '$.quantity') AS REAL)
+            < CAST(json_extract(OLD.payload, '$.quantity') AS REAL)
+        )
+      )
+    BEGIN
+      SELECT RAISE(ABORT, 'inventory_quantity_deficit');
+    END
   `);
 }
 
@@ -575,6 +631,7 @@ async function ensureConnection() {
         connection = createPwaSqliteConnection();
       }
 
+      await ensureInventoryDeficitTriggers(connection);
       await ensureCashierShiftActiveClaimsTable(connection);
       await purgeRetiredModuleEntities(connection);
       await purgeRetiredRecipientPayoutSettlementObligations(connection);
@@ -1091,6 +1148,42 @@ async function persistEntity(
     return;
   }
 
+  if (
+    (tableName === "inventory" || tableName === "products")
+    && workspaceId
+    && isStrictLocalWorkspaceMode(workspaceId)
+    && Object.prototype.hasOwnProperty.call(row, "quantity")
+  ) {
+    const nextQuantity = row.quantity;
+    const storedRows = await connection.select<Array<{ payload: string }>>(
+      `
+        SELECT payload
+        FROM local_entities
+        WHERE entity_type = $1 AND entity_id = $2
+        LIMIT 1
+      `,
+      [tableName, entityId],
+    );
+    let previousQuantity: number | null = null;
+    if (storedRows[0]?.payload) {
+      try {
+        const stored = JSON.parse(storedRows[0].payload) as { quantity?: unknown };
+        previousQuantity = typeof stored.quantity === "number"
+          ? stored.quantity
+          : null;
+      } catch {
+        previousQuantity = null;
+      }
+    }
+
+    if (
+      typeof nextQuantity !== "number"
+      || !isAllowedInventoryQuantityTransition(previousQuantity, nextQuantity)
+    ) {
+      throw new Error(i18n.t("inventory.errors.negativeQuantity"));
+    }
+  }
+
   const payload = JSON.stringify(await serializeValue(row));
   const currentWorkspaceId = tableName === "profiles"
     ? typeof row.currentWorkspaceId === "string"
@@ -1102,8 +1195,9 @@ async function persistEntity(
       ? row.updatedAt
       : new Date().toISOString();
 
-  await connection.execute(
-    `
+  try {
+    await connection.execute(
+      `
             INSERT INTO local_entities (entity_type, entity_id, workspace_id, current_workspace, payload, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT(entity_type, entity_id) DO UPDATE SET
@@ -1112,8 +1206,14 @@ async function persistEntity(
                 payload = excluded.payload,
                 updated_at = excluded.updated_at
         `,
-    [tableName, entityId, workspaceId, currentWorkspaceId, payload, updatedAt],
-  );
+      [tableName, entityId, workspaceId, currentWorkspaceId, payload, updatedAt],
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("inventory_quantity_deficit")) {
+      throw new Error(i18n.t("inventory.errors.negativeQuantity"));
+    }
+    throw error;
+  }
   if (tableName === "cashier_shift_occurrences") {
     await synchronizeCashierShiftActiveClaim(connection, row, workspaceId);
   }

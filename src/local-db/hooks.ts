@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Dexie from 'dexie'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useViewOwnRecordScope, type ViewOwnRecordScope } from '@/permissions/useViewOwnRecordScope'
+import i18n from '@/i18n/config'
 
 import { db } from './database'
 import { canAccessBusinessPartnerInLocalCache } from './businessPartnerPrivacy'
@@ -10,9 +11,11 @@ import { createInventoryTransferTransactions } from './inventoryTransferTransact
 import { addToOfflineMutations } from './offlineMutations'
 import { isSyncIntegrityError } from '@/sync/syncErrors'
 import { refreshStockBatchesFromSupabase } from './stockBatches'
+import { isValidNewInventoryQuantity } from './inventoryDeficit'
 import { roundOrderValue } from '@/lib/orderPrecision'
 import { getPrimaryStorageId as getPrimaryStorageIdForWorkspace, normalizeStorageRecord, sortStoragesByPriority } from './storageUtils'
 import {
+    assertInventoryMutationConnectivity,
     deleteInventoryForProduct,
     getInventoryQuantityForProductStorage,
     setProductInventoryFromLegacyInput,
@@ -829,8 +832,15 @@ export async function createProduct(workspaceId: string, data: Omit<Product, 'id
     const service = isService(data)
     const sku = service ? '' : trimProductSku(data.sku)
     const isSavingOnline = isOnline(workspaceId)
-    const initialQuantity = service ? 0 : Number(data.quantity) || 0
+    const initialQuantity = service ? 0 : Number(data.quantity)
     const initialStorageId = service ? null : data.storageId ?? null
+
+    if (!service && !isValidNewInventoryQuantity(initialQuantity)) {
+        throw new Error(i18n.t('inventory.errors.invalidQuantity'))
+    }
+    if (!service && initialQuantity > 0) {
+        assertInventoryMutationConnectivity(workspaceId)
+    }
 
     if (service && data.parentProductId) {
         throw new ProductVariantRelationshipError('Services cannot be variant parents or variants.')
@@ -1108,6 +1118,7 @@ export async function deleteProduct(id: string): Promise<void> {
     const now = new Date().toISOString()
     const existing = await db.products.get(id)
     if (!existing) return
+    assertInventoryMutationConnectivity(existing.workspaceId)
     const isSavingOnline = isOnline(existing.workspaceId)
 
     if (!existing.parentProductId) {

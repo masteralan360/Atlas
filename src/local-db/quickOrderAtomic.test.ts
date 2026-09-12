@@ -47,6 +47,12 @@ const browser = vi.hoisted(() => {
         configurable: true,
         value: { onLine: true, userAgent: 'vitest' }
     })
+    Object.defineProperty(globalThis, 'Element', {
+        configurable: true,
+        value: class Element {
+            matches() { return false }
+        }
+    })
     Object.defineProperty(globalThis, 'DOMMatrix', {
         configurable: true,
         value: class DOMMatrix {}

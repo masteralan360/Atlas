@@ -1,5 +1,6 @@
 import { useLiveQuery } from "dexie-react-hooks";
 
+import i18n from "@/i18n/config";
 import {
   QUANTITY_EPSILON,
   isNonNegativeQuantity,
@@ -8,12 +9,11 @@ import {
 } from "@/lib/quantity";
 import { isOnline } from "@/lib/network";
 import { getSupabaseClientForTable } from "@/lib/supabaseSchema";
-import { runSupabaseAction } from "@/lib/supabaseRequest";
+import { isRetriableWebRequestError, runSupabaseAction } from "@/lib/supabaseRequest";
 import { generateId, toCamelCase, toSnakeCase } from "@/lib/utils";
 import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 
 import { db } from "./database";
-import { addToOfflineMutations } from "./offlineMutations";
 import type {
   Inventory,
   InventoryTransaction,
@@ -216,49 +216,49 @@ async function reconcileAuthoritativeInventory(remoteInventory: Inventory) {
     );
     await db.inventory.put(remoteInventory);
   });
-}
-
-async function queueInventoryTransactionForSync(transaction: InventoryTransaction) {
-  await addToOfflineMutations(
-    TABLE_NAME,
-    transaction.id,
-    "create",
-    transaction as unknown as Record<string, unknown>,
-    transaction.workspaceId,
+  const { syncProductStockSnapshot } = await import("./inventory");
+  await syncProductStockSnapshot(
+    remoteInventory.productId,
+    remoteInventory.lastSyncedAt || new Date().toISOString(),
+    "remote",
   );
 }
 
 export async function syncInventoryTransactionBestEffort(
   transaction: InventoryTransaction,
-) {
+): Promise<InventoryTransaction> {
   if (!shouldSyncInventoryTransaction(transaction.workspaceId, transaction.transactionType)) {
-    return;
+    return transaction;
   }
 
   if (!isOnline(transaction.workspaceId)) {
-    await queueInventoryTransactionForSync(transaction);
-    return;
+    throw new Error(i18n.t("inventory.errors.onlineRequired"));
   }
 
+  let result;
   try {
-    const result = await applyStockAdjustmentTransactionRemotely(transaction);
-    const syncedAt = new Date().toISOString();
-    await db.inventory_transactions.put({
-      ...result.transaction,
+    result = await applyStockAdjustmentTransactionRemotely(transaction);
+  } catch (error) {
+    if (!isRetriableWebRequestError(error)) throw error;
+    // The operation id is the transaction id, so this verification retry is
+    // safe even when the first response was lost after the server committed.
+    result = await applyStockAdjustmentTransactionRemotely(transaction);
+  }
+  const syncedAt = new Date().toISOString();
+  const syncedTransaction: InventoryTransaction = {
+    ...result.transaction,
+    syncStatus: "synced",
+    lastSyncedAt: syncedAt,
+  };
+  await db.inventory_transactions.put(syncedTransaction);
+  if (result.inventory) {
+    await reconcileAuthoritativeInventory({
+      ...result.inventory,
       syncStatus: "synced",
       lastSyncedAt: syncedAt,
     });
-    if (result.inventory) {
-      await reconcileAuthoritativeInventory({
-        ...result.inventory,
-        syncStatus: "synced",
-        lastSyncedAt: syncedAt,
-      });
-    }
-  } catch (error) {
-    console.error("[InventoryTransactions] Failed to sync inventory transaction:", error);
-    await queueInventoryTransactionForSync(transaction);
   }
+  return syncedTransaction;
 }
 
 export async function syncInventoryTransactionsBestEffort(
@@ -304,10 +304,11 @@ export async function createInventoryTransaction(
     lastSyncedAt: shouldSync ? null : timestamp,
   };
 
-  await db.inventory_transactions.put(transaction);
-  if (!options?.skipRemoteSync) {
-    await syncInventoryTransactionBestEffort(transaction);
+  if (!options?.skipRemoteSync && shouldSync) {
+    return syncInventoryTransactionBestEffort(transaction);
   }
+
+  await db.inventory_transactions.put(transaction);
   return transaction;
 }
 

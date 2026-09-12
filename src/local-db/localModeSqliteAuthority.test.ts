@@ -112,6 +112,10 @@ class RecordingSqliteConnection implements SqliteConnection {
       );
       return (occurrenceId ? [{ occurrence_id: occurrenceId }] : []) as T;
     }
+    if (query?.includes("FROM local_entities") && bindValues.length >= 2) {
+      const payload = this.rows.get(`${String(bindValues[0])}:${String(bindValues[1])}`);
+      return (payload ? [{ payload }] : []) as T;
+    }
     return [] as T;
   }
 
@@ -231,6 +235,28 @@ describe("local-mode SQLite authority", () => {
     expect(sqlite.events).toEqual(["begin", "commit"]);
     expect(settled).toBe(true);
     expect(sqlite.rows.has("categories:category-1")).toBe(true);
+  });
+
+  it("rejects a new negative product snapshot before either Local store commits", async () => {
+    const product = { ...entity("product", "negative-product"), quantity: -0.0000001 };
+
+    await expect(testDb.products.put(product as never)).rejects.toThrow();
+
+    expect(await testDb.products.get(product.id)).toBeUndefined();
+    expect(sqlite.rows.has(`products:${product.id}`)).toBe(false);
+  });
+
+  it("allows a legacy deficit to improve but rejects making it worse", async () => {
+    const productId = "legacy-negative-product";
+    sqlite.rows.set(`products:${productId}`, JSON.stringify({ quantity: -5 }));
+
+    await testDb.products.put({ ...entity("product", productId), quantity: -3 } as never);
+    expect(JSON.parse(sqlite.rows.get(`products:${productId}`) || "{}").quantity).toBe(-3);
+
+    await expect(
+      testDb.products.put({ ...entity("product", productId), quantity: -4 } as never),
+    ).rejects.toThrow();
+    expect(JSON.parse(sqlite.rows.get(`products:${productId}`) || "{}").quantity).toBe(-3);
   });
 
   it("checkpoints Local Mode SQLite before an update safety backup", async () => {

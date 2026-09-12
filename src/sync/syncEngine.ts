@@ -1,7 +1,7 @@
 import { supabase, isSupabaseConfigured } from "@/auth/supabase";
+import i18n from "@/i18n/config";
 import { db } from "@/local-db";
 import { syncProductStockSnapshot } from "@/local-db/inventory";
-import type { Inventory } from "@/local-db/models";
 import { syncProductBarcodeCachesForWorkspace } from "@/local-db/productBarcodes";
 import { rekeyPriceBookItemReferences } from "@/local-db/priceBookReferences";
 import { runSupabaseAction } from "@/lib/supabaseRequest";
@@ -266,163 +266,6 @@ interface MutationSyncOrderItem {
   operation: string;
   payload: Record<string, unknown>;
   createdAt: string;
-}
-
-const QUANTITY_REPLAY_EPSILON = 0.0000005;
-
-function mutationPayloadNumber(
-  payload: Record<string, unknown>,
-  ...fieldNames: string[]
-) {
-  for (const fieldName of fieldNames) {
-    const value = Number(payload[fieldName]);
-    if (Number.isFinite(value)) return value;
-  }
-  return null;
-}
-
-function quantitiesMatchForReplay(left: number, right: number) {
-  return Math.abs(left - right) <= QUANTITY_REPLAY_EPSILON;
-}
-
-function saleItemsFromMutation(mutation: MutationSyncOrderItem) {
-  if (mutation.entityType !== "sales" || mutation.operation !== "create") {
-    return [];
-  }
-  return Array.isArray(mutation.payload.items)
-    ? mutation.payload.items.filter(
-      (item): item is Record<string, unknown> => !!item && typeof item === "object",
-    )
-    : [];
-}
-
-/**
- * Older app versions queued the final local inventory/batch snapshot and also
- * queued the stock-changing sale or adjustment. Replaying that final snapshot
- * before the RPC made the RPC apply the same movement again. Convert only
- * snapshots that can be proven to be derived from the following operation
- * back to that operation's pre-movement quantity.
- */
-export function prepareLegacyStockProjectionsForReplay<
-  T extends MutationSyncOrderItem,
->(mutations: T[]): T[] {
-  return mutations.map((mutation, mutationIndex) => {
-    if (mutation.entityType !== "inventory" && mutation.entityType !== "stock_batches") {
-      return mutation;
-    }
-
-    const finalQuantity = mutationPayloadNumber(mutation.payload, "quantity");
-    const productId = payloadReference(mutation.payload, "productId", "product_id");
-    const storageId = payloadReference(mutation.payload, "storageId", "storage_id");
-    if (finalQuantity === null || !productId || !storageId) return mutation;
-
-    for (let ownerIndex = mutationIndex + 1; ownerIndex < mutations.length; ownerIndex++) {
-      const owner = mutations[ownerIndex];
-      if (owner.workspaceId !== mutation.workspaceId) continue;
-
-      if (mutation.entityType === "inventory") {
-        const matchingSaleItems = saleItemsFromMutation(owner).filter((item) => (
-          payloadReference(item, "productId", "product_id") === productId
-          && payloadReference(item, "storageId", "storage_id") === storageId
-        ));
-        if (matchingSaleItems.length > 0) {
-          const inventorySnapshot = mutationPayloadNumber(
-            matchingSaleItems[0],
-            "inventorySnapshot",
-            "inventory_snapshot",
-          );
-          const soldQuantity = matchingSaleItems.reduce((total, item) => (
-            total + (mutationPayloadNumber(item, "quantity") ?? 0)
-          ), 0);
-          if (
-            inventorySnapshot !== null
-            && matchingSaleItems.every((item) => quantitiesMatchForReplay(
-              mutationPayloadNumber(item, "inventorySnapshot", "inventory_snapshot") ?? Number.NaN,
-              inventorySnapshot,
-            ))
-            && quantitiesMatchForReplay(finalQuantity, inventorySnapshot - soldQuantity)
-          ) {
-            return {
-              ...mutation,
-              payload: {
-                ...mutation.payload,
-                quantity: inventorySnapshot,
-                isDeleted: false,
-                is_deleted: false,
-              },
-            };
-          }
-        }
-
-        const ownerType = owner.payload.transactionType ?? owner.payload.transaction_type;
-        const ownerProductId = payloadReference(owner.payload, "productId", "product_id");
-        const ownerStorageId = payloadReference(owner.payload, "storageId", "storage_id");
-        const ownerNewQuantity = mutationPayloadNumber(
-          owner.payload,
-          "newQuantity",
-          "new_quantity",
-        );
-        const ownerPreviousQuantity = mutationPayloadNumber(
-          owner.payload,
-          "previousQuantity",
-          "previous_quantity",
-        );
-        if (
-          owner.entityType === "inventory_transactions"
-          && owner.operation === "create"
-          && ownerType === "stock_adjustment"
-          && ownerProductId === productId
-          && ownerStorageId === storageId
-          && ownerNewQuantity !== null
-          && ownerPreviousQuantity !== null
-          && quantitiesMatchForReplay(finalQuantity, ownerNewQuantity)
-        ) {
-          return {
-            ...mutation,
-            payload: {
-              ...mutation.payload,
-              quantity: ownerPreviousQuantity,
-              isDeleted: ownerPreviousQuantity <= QUANTITY_REPLAY_EPSILON,
-              is_deleted: ownerPreviousQuantity <= QUANTITY_REPLAY_EPSILON,
-            },
-          };
-        }
-      } else {
-        for (const item of saleItemsFromMutation(owner)) {
-          if (
-            payloadReference(item, "productId", "product_id") !== productId
-            || payloadReference(item, "storageId", "storage_id") !== storageId
-          ) {
-            continue;
-          }
-          const allocations = Array.isArray(item.batchAllocations ?? item.batch_allocations)
-            ? (item.batchAllocations ?? item.batch_allocations) as unknown[]
-            : [];
-          const allocatedQuantity = allocations.reduce((total: number, allocation) => {
-            if (!allocation || typeof allocation !== "object") return total;
-            const allocationPayload = allocation as Record<string, unknown>;
-            const batchId = payloadReference(allocationPayload, "batchId", "batch_id");
-            return batchId === mutation.entityId
-              ? total + (mutationPayloadNumber(allocationPayload, "quantity") ?? 0)
-              : total;
-          }, 0);
-          if (allocatedQuantity > QUANTITY_REPLAY_EPSILON) {
-            return {
-              ...mutation,
-              payload: {
-                ...mutation.payload,
-                quantity: finalQuantity + allocatedQuantity,
-                isDeleted: false,
-                is_deleted: false,
-              },
-            };
-          }
-        }
-      }
-    }
-
-    return mutation;
-  });
 }
 
 function compareMutationCreation(
@@ -1104,9 +947,10 @@ export async function processMutationQueue(
     .sort((left, right) =>
       String(left.createdAt).localeCompare(String(right.createdAt)),
     );
-  const orderedMutations = prepareLegacyStockProjectionsForReplay(
-    orderMutationsForSync(mutations),
-  );
+  // Snapshot-style inventory and batch mutations are never rewritten or
+  // replayed. They are quarantined below because their original pre-movement
+  // state cannot be proven after another device has changed stock.
+  const orderedMutations = orderMutationsForSync(mutations);
 
   let completedCount = 0;
   const reportCompleted = () => {
@@ -1133,6 +977,22 @@ export async function processMutationQueue(
   }>();
 
   for (const mutation of orderedMutations) {
+    if (mutation.entityType === "inventory" || mutation.entityType === "stock_batches") {
+      const quarantineMessage = i18n.t("inventory.errors.legacyMutationQuarantined");
+      await db.offline_mutations.update(mutation.id, {
+        status: "failed",
+        error: quarantineMessage,
+      });
+      const table = (db as any)[mutation.entityType];
+      if (table) {
+        await table.update(mutation.entityId, { syncStatus: "conflict" });
+      }
+      failedCount++;
+      errors.push(quarantineMessage);
+      reportCompleted();
+      continue;
+    }
+
     // The duplicate detector was retired. A prior version may have queued
     // suggestions while offline, so retire those local-only mutations without
     // contacting the removed CRM endpoint.
@@ -1437,31 +1297,6 @@ export async function processMutationQueue(
             .update(dbPayload)
             .eq("id", entityId);
           if (error) throw error;
-        } else if (entityType === "inventory") {
-          const { data: remoteInventoryRow, error } = await client
-            .from(remoteTableName)
-            .upsert(dbPayload, {
-              onConflict: "workspace_id,product_id,storage_id",
-            })
-            .select("*")
-            .single();
-
-          if (error) throw error;
-
-          const syncedAt = new Date().toISOString();
-          const localInventoryRow = toCamelCase(
-            remoteInventoryRow as Record<string, unknown>,
-          ) as unknown as Inventory;
-          localInventoryRow.syncStatus = "synced";
-          localInventoryRow.lastSyncedAt = syncedAt;
-          syncedEntityId = localInventoryRow.id;
-
-          if (syncedEntityId !== entityId) {
-            await db.inventory.delete(entityId);
-          }
-
-          await db.inventory.put(localInventoryRow);
-          entityHandledInline = true;
         } else if (entityType === "agent_commission_entries") {
           if (operation !== "create") {
             throw new Error("Commission ledger entries are immutable and cannot be updated");

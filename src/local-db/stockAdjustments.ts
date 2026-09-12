@@ -2,6 +2,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 
 import { isPositiveQuantity, roundQuantity } from "@/lib/quantity";
 import { generateId } from "@/lib/utils";
+import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 
 import { db } from "./database";
 import {
@@ -185,6 +186,31 @@ export async function createStockAdjustment(
 
   if (newQuantity < 0) {
     throw new Error("Insufficient inventory");
+  }
+
+  if (!isLocalWorkspaceMode(workspaceId)) {
+    const transaction = await createInventoryTransaction(
+      workspaceId,
+      {
+        productId: normalized.productId,
+        storageId: normalized.storageId,
+        transactionType: STOCK_ADJUSTMENT_TRANSACTION_TYPE,
+        quantityDelta,
+        previousQuantity,
+        newQuantity,
+        adjustmentReason: normalized.reason,
+        referenceId: transactionId,
+        referenceType: STOCK_ADJUSTMENT_TRANSACTION_TYPE,
+        notes: normalized.notes,
+        createdBy: normalized.createdBy,
+      },
+      {
+        id: transactionId,
+        timestamp,
+      },
+    );
+
+    return mapTransactionToStockAdjustment(transaction) as StockAdjustment;
   }
 
   let inventoryAdjusted = false;

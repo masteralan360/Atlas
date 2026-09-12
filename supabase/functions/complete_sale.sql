@@ -1,8 +1,10 @@
-﻿CREATE OR REPLACE FUNCTION public.complete_sale(payload jsonb)
+﻿CREATE SCHEMA IF NOT EXISTS private;
+
+CREATE OR REPLACE FUNCTION private.complete_sale_once(payload jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
- SET search_path = public
+ SET search_path = ''
 AS $function$
 DECLARE
     new_sale_id UUID;
@@ -445,6 +447,75 @@ BEGIN
     );
 END;
 $function$;
+
+REVOKE ALL ON FUNCTION private.complete_sale_once(jsonb) FROM PUBLIC, anon;
+GRANT USAGE ON SCHEMA private TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION private.complete_sale_once(jsonb) TO authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.complete_sale(payload jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $wrapper$
+DECLARE
+    v_sale_id uuid;
+    v_existing record;
+BEGIN
+    IF auth.uid() IS NULL THEN
+        RAISE EXCEPTION 'Authentication is required' USING ERRCODE = '42501';
+    END IF;
+
+    BEGIN
+        v_sale_id := NULLIF(pg_catalog.btrim(payload->>'id'), '')::uuid;
+    EXCEPTION
+        WHEN invalid_text_representation THEN
+            RAISE EXCEPTION 'Sale id is invalid' USING ERRCODE = '22023';
+    END;
+    IF v_sale_id IS NOT NULL THEN
+        SELECT id, sequence_id, system_verified, system_review_status, system_review_reason
+        INTO v_existing
+        FROM public.sales
+        WHERE id = v_sale_id;
+
+        IF FOUND THEN
+            RETURN pg_catalog.jsonb_build_object(
+                'success', true,
+                'sale_id', v_existing.id,
+                'sequence_id', v_existing.sequence_id,
+                'system_verified', v_existing.system_verified,
+                'system_review_status', v_existing.system_review_status,
+                'system_review_reason', v_existing.system_review_reason,
+                'already_applied', true
+            );
+        END IF;
+    END IF;
+
+    BEGIN
+        RETURN private.complete_sale_once(payload);
+    EXCEPTION
+        WHEN unique_violation THEN
+            IF v_sale_id IS NULL THEN RAISE; END IF;
+            SELECT id, sequence_id, system_verified, system_review_status, system_review_reason
+            INTO v_existing
+            FROM public.sales
+            WHERE id = v_sale_id;
+            IF NOT FOUND THEN RAISE; END IF;
+            RETURN pg_catalog.jsonb_build_object(
+                'success', true,
+                'sale_id', v_existing.id,
+                'sequence_id', v_existing.sequence_id,
+                'system_verified', v_existing.system_verified,
+                'system_review_status', v_existing.system_review_status,
+                'system_review_reason', v_existing.system_review_reason,
+                'already_applied', true
+            );
+    END;
+END;
+$wrapper$;
+
+REVOKE ALL ON FUNCTION public.complete_sale(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.complete_sale(jsonb) TO authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- process_sale_return: service lines are refunded like any other line but

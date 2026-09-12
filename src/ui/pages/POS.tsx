@@ -139,7 +139,7 @@ import { MobileCatalogQuantityButton } from '@/ui/components/pos/MobileCatalogQu
 import { mapSaleToUniversal } from '@/lib/mappings'
 import { LoanRegistrationModal, type LoanRegistrationData } from '@/ui/components/pos/LoanRegistrationModal'
 import { SaveBorrowerAsPartnerDialog, usePendingSavePartnerPrompt } from '@/ui/components/loans/SaveBorrowerAsPartnerDialog'
-import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
+import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { isOnline } from '@/lib/network'
 import { useWebHaptics } from 'web-haptics/react'
 import { getLanguageDirection } from '@/lib/i18nRouting'
@@ -2797,11 +2797,21 @@ export function POS() {
             }
 
             // Attempt online checkout
-            const { data, error } = await runSupabaseAction('pos.completeSale', () =>
+            let completeSaleResponse = await runSupabaseAction('pos.completeSale', () =>
                 supabase.rpc('complete_sale', {
                     payload: checkoutPayload
                 })
             )
+
+            if (completeSaleResponse.error && isRetriableWebRequestError(completeSaleResponse.error)) {
+                completeSaleResponse = await runSupabaseAction('pos.completeSale.verify', () =>
+                    supabase.rpc('complete_sale', {
+                        payload: checkoutPayload
+                    })
+                )
+            }
+
+            const { data, error } = completeSaleResponse
 
             if (error) {
                 throw normalizeSupabaseActionError(error)
@@ -2945,7 +2955,7 @@ export function POS() {
                 return
             }
 
-            if (isLocalMode || !isOnline(user.workspaceId) || isRetriableWebRequestError(normalizedError)) {
+            if (isLocalMode) {
                 try {
                     // Run local verification FIRST (before save, but using the data we're about to save)
                     const verificationSale = createVerificationSale(
@@ -3163,12 +3173,11 @@ export function POS() {
                 }
             }
 
-            if (!isLocalMode && isRetriableWebRequestError(normalizedError)) {
-                const message = getRetriableActionToast(normalizedError)
+            if (!isLocalMode && (!isOnline(user.workspaceId) || isRetriableWebRequestError(normalizedError))) {
                 toast({
                     variant: 'destructive',
-                    title: message.title,
-                    description: message.description,
+                    title: t('messages.error'),
+                    description: t('inventory.errors.onlineRequired'),
                 })
                 return
             }
