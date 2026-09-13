@@ -41,6 +41,7 @@ import {
     adjustInventoryQuantity,
     assertInventoryMutationConnectivity,
     getInventoryQuantityForProductStorage,
+    getInventoryVersionForProductStorage,
     hydrateInventoryProductStoragesFromSupabase,
     putInventoryQuantity,
     syncInventoryRowsBestEffort,
@@ -159,6 +160,7 @@ async function reverseSalesOrderCommissionForReturnBestEffort(
 }
 
 const PURCHASE_BATCH_UUID_NAMESPACE = '82244d4d-29dd-55b5-a907-50f74e8b49bb'
+const SALES_ORDER_INVENTORY_OPERATION_UUID_NAMESPACE = '29a34eb1-80c0-5cf9-8bc1-0bbb71fd718b'
 
 type BaseEntityPayload = {
     id: string
@@ -856,6 +858,12 @@ async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: str
     const productIds = Array.from(new Set(order.items.map((item) => item.productId)))
     const products = await db.products.where('id').anyOf(productIds).toArray()
     const productMap = new Map(products.map((product) => [product.id, product]))
+    const requiredByPosition = new Map<string, {
+        productId: string
+        storageId: string
+        productName: string
+        quantity: number
+    }>()
 
     for (const item of order.items) {
         const product = productMap.get(item.productId)
@@ -875,13 +883,30 @@ async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: str
             throw new Error(`Select a source storage for ${item.productName}`)
         }
 
-        const storageQuantity = await getInventoryQuantityForProductStorage(item.productId, storageId)
-        const storageReserved = reservedByStorage.get(buildInventoryReservationKey(item.productId, storageId)) || 0
-        const globalReserved = reservedWithoutStorage.get(item.productId) || 0
+        const positionKey = buildInventoryReservationKey(item.productId, storageId)
+        const existingRequirement = requiredByPosition.get(positionKey)
+        requiredByPosition.set(positionKey, {
+            productId: item.productId,
+            storageId,
+            productName: item.productName,
+            quantity: roundQuantity(
+                (existingRequirement?.quantity ?? 0) + getOrderLineInventoryQuantity(item)
+            )
+        })
+    }
+
+    for (const requirement of requiredByPosition.values()) {
+        const storageQuantity = await getInventoryQuantityForProductStorage(
+            requirement.productId,
+            requirement.storageId
+        )
+        const storageReserved = reservedByStorage.get(
+            buildInventoryReservationKey(requirement.productId, requirement.storageId)
+        ) || 0
+        const globalReserved = reservedWithoutStorage.get(requirement.productId) || 0
         const available = storageQuantity - storageReserved - globalReserved
-        const requiredQuantity = getOrderLineInventoryQuantity(item)
-        if (available < requiredQuantity) {
-            throw new Error(`Insufficient stock for ${item.productName}`)
+        if (available < requirement.quantity) {
+            throw new Error(`Insufficient stock for ${requirement.productName}`)
         }
     }
 }
@@ -956,20 +981,45 @@ async function deductInventoryForSalesOrder(order: SalesOrder) {
     const physicalItems = order.items
         .map((item, index) => ({ item, index, product: productMap.get(item.productId) }))
         .filter((entry) => entry.product && !entry.product.isDeleted && !isService(entry.product))
+    const inventoryDeductions = new Map<string, {
+        productId: string
+        storageId: string
+        productName: string
+        quantity: number
+    }>()
 
-    await refreshStockBatchesFromSupabase(order.workspaceId)
-    await Promise.all(physicalItems.map(async ({ item }) => {
+    for (const { item } of physicalItems) {
         const storageId = resolveSalesOrderItemStorageId(order, item)
         if (!storageId) {
             throw new Error(`Select a source storage for ${item.productName}`)
         }
+        const positionKey = buildInventoryReservationKey(item.productId, storageId)
+        const existingDeduction = inventoryDeductions.get(positionKey)
+        inventoryDeductions.set(positionKey, {
+            productId: item.productId,
+            storageId,
+            productName: item.productName,
+            quantity: roundQuantity(
+                (existingDeduction?.quantity ?? 0) + getOrderLineInventoryQuantity(item)
+            )
+        })
+    }
 
+    await refreshStockBatchesFromSupabase(order.workspaceId)
+    await Promise.all(Array.from(inventoryDeductions.values()).map(async ({ productId, storageId }) => {
         await hydrateInventoryProductStoragesFromSupabase(
             order.workspaceId,
-            item.productId,
+            productId,
             [storageId]
         )
     }))
+    const expectedVersions = await Promise.all(
+        Array.from(inventoryDeductions.values()).map(async ({ productId, storageId }) => ({
+            productId,
+            storageId,
+            version: await getInventoryVersionForProductStorage(productId, storageId)
+        }))
+    )
     const salePlans = await getStockBatchSalePlans(physicalItems.map(({ item }) => ({
         productId: item.productId,
         storageId: resolveSalesOrderItemStorageId(order, item) as string,
@@ -1034,28 +1084,7 @@ async function deductInventoryForSalesOrder(order: SalesOrder) {
                     }
                 )
                 changedBatches.push(...committedBatches)
-
-                const currentInventoryQuantity = await getInventoryQuantityForProductStorage(
-                    item.productId,
-                    storageId
-                )
                 const inventoryQuantity = getOrderLineInventoryQuantity(item)
-                const changedInventoryRow = await putInventoryQuantity(
-                    order.workspaceId,
-                    item.productId,
-                    storageId,
-                    currentInventoryQuantity - inventoryQuantity,
-                    now
-                )
-                const updatedProduct = await syncProductStockSnapshot(item.productId, now)
-
-                if (!updatedProduct) {
-                    throw new Error(`Product not found: ${item.productName}`)
-                }
-
-                if (changedInventoryRow) {
-                    changedInventoryRows.push(changedInventoryRow)
-                }
 
                 updatedItems[itemIndex] = {
                     ...item,
@@ -1066,11 +1095,41 @@ async function deductInventoryForSalesOrder(order: SalesOrder) {
                     batchAllocations: salePlan.allocations.length > 0 ? salePlan.allocations : null
                 }
             }
+
+            for (const deduction of inventoryDeductions.values()) {
+                const currentInventoryQuantity = await getInventoryQuantityForProductStorage(
+                    deduction.productId,
+                    deduction.storageId
+                )
+                const changedInventoryRow = await putInventoryQuantity(
+                    order.workspaceId,
+                    deduction.productId,
+                    deduction.storageId,
+                    roundQuantity(currentInventoryQuantity - deduction.quantity),
+                    now
+                )
+                if (changedInventoryRow) {
+                    changedInventoryRows.push(changedInventoryRow)
+                }
+            }
+
+            for (const productId of new Set(
+                Array.from(inventoryDeductions.values()).map(({ productId }) => productId)
+            )) {
+                const updatedProduct = await syncProductStockSnapshot(productId, now)
+                if (!updatedProduct) {
+                    throw new Error(`Product not found: ${productId}`)
+                }
+            }
         }
     )
 
     await Promise.all([
-        syncInventoryRowsBestEffort(changedInventoryRows, order.workspaceId),
+        syncInventoryRowsBestEffort(changedInventoryRows, order.workspaceId, {
+            operationId: uuidv5(order.id, SALES_ORDER_INVENTORY_OPERATION_UUID_NAMESPACE),
+            operationKind: 'sales_order_completion',
+            expectedVersions
+        }),
         syncStockBatchesBestEffort(changedBatches, order.workspaceId)
     ])
 
@@ -2929,7 +2988,30 @@ async function cancelOrderFinancialRecords(orderType: OrderType, order: SalesOrd
     }
 }
 
-export async function updateSalesOrderStatus(
+const salesOrderStatusTransitionsInFlight = new Map<string, Promise<SalesOrder>>()
+
+export function updateSalesOrderStatus(
+    id: string,
+    status: SalesOrderStatus,
+    options?: { allowUnpaidNonFinanced?: boolean }
+) {
+    const transitionKey = `${id}:${status}`
+    const existingTransition = salesOrderStatusTransitionsInFlight.get(transitionKey)
+    if (existingTransition) {
+        return existingTransition
+    }
+
+    const transition = updateSalesOrderStatusOnce(id, status, options)
+    salesOrderStatusTransitionsInFlight.set(transitionKey, transition)
+    void transition.finally(() => {
+        if (salesOrderStatusTransitionsInFlight.get(transitionKey) === transition) {
+            salesOrderStatusTransitionsInFlight.delete(transitionKey)
+        }
+    }).catch(() => undefined)
+    return transition
+}
+
+async function updateSalesOrderStatusOnce(
     id: string,
     status: SalesOrderStatus,
     options?: { allowUnpaidNonFinanced?: boolean }

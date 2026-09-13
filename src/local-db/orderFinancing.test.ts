@@ -1105,6 +1105,98 @@ describe('order-linked financing', () => {
         expect((await db.inventory.where('[productId+storageId]').equals([product.id, storage.id]).first())?.quantity).toBe(4.5)
     })
 
+    it('deducts duplicate sales-order product lines once per inventory position', async () => {
+        const customer = await createCustomer()
+        const { storage, product } = await createStockedSalesProduct(100)
+        const input = salesOrderInput(customer.id, product, storage.id, { method: 'cash', total: 200 })
+        input.items = [
+            {
+                ...input.items[0],
+                quantity: 1.25,
+                lineTotal: 125
+            },
+            {
+                ...input.items[0],
+                id: crypto.randomUUID(),
+                quantity: 0.75,
+                lineTotal: 75
+            }
+        ]
+        const draft = await createSalesOrder(WORKSPACE_ID, input)
+        await recordOrderPayment(WORKSPACE_ID, {
+            orderType: 'sales',
+            orderId: draft.id,
+            amount: 200,
+            paymentMethod: 'cash',
+            paidAt: '2026-09-13T12:00:00.000Z'
+        })
+        const pending = await updateSalesOrderStatus(draft.id, 'pending')
+        const before = await db.inventory
+            .where('[productId+storageId]')
+            .equals([product.id, storage.id])
+            .first()
+
+        const [completed, duplicateCompletion] = await Promise.all([
+            updateSalesOrderStatus(pending.id, 'completed'),
+            updateSalesOrderStatus(pending.id, 'completed')
+        ])
+        const inventory = await db.inventory
+            .where('[productId+storageId]')
+            .equals([product.id, storage.id])
+            .first()
+
+        expect(completed).toMatchObject({
+            status: 'completed',
+            items: [
+                expect.objectContaining({ fulfilledQuantity: 1.25 }),
+                expect.objectContaining({ fulfilledQuantity: 0.75 })
+            ]
+        })
+        expect(duplicateCompletion).toEqual(completed)
+        expect(inventory).toMatchObject({
+            quantity: 3,
+            version: (before?.version ?? 0) + 1
+        })
+        expect((await db.products.get(product.id))?.quantity).toBe(3)
+    })
+
+    it('rejects the aggregate of duplicate lines before inventory can go negative', async () => {
+        const customer = await createCustomer()
+        const { storage, product } = await createStockedSalesProduct(100)
+        const input = salesOrderInput(customer.id, product, storage.id, { method: 'cash', total: 600 })
+        input.items = [
+            {
+                ...input.items[0],
+                quantity: 3,
+                lineTotal: 300
+            },
+            {
+                ...input.items[0],
+                id: crypto.randomUUID(),
+                quantity: 3,
+                lineTotal: 300
+            }
+        ]
+        const draft = await createSalesOrder(WORKSPACE_ID, input)
+        await recordOrderPayment(WORKSPACE_ID, {
+            orderType: 'sales',
+            orderId: draft.id,
+            amount: 600,
+            paymentMethod: 'cash',
+            paidAt: '2026-09-13T12:05:00.000Z'
+        })
+
+        await expect(updateSalesOrderStatus(draft.id, 'pending'))
+            .rejects.toThrow(`Insufficient stock for ${product.name}`)
+
+        expect(await db.sales_orders.get(draft.id)).toMatchObject({ status: 'draft' })
+        expect((await db.inventory
+            .where('[productId+storageId]')
+            .equals([product.id, storage.id])
+            .first())?.quantity).toBe(5)
+        expect((await db.products.get(product.id))?.quantity).toBe(5)
+    })
+
     it('rejects a return before changing any data when the caller is not an admin', async () => {
         const customer = await createCustomer()
         const { storage, product } = await createStockedSalesProduct(100)

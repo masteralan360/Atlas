@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(13);
+SELECT plan(19);
 
 CREATE TEMP TABLE inventory_quantity_guard_test (
   quantity numeric NOT NULL
@@ -100,6 +100,127 @@ SELECT ok(
     'EXECUTE'
   ),
   'authenticated clients can call the authoritative inventory RPC'
+);
+
+SET LOCAL request.jwt.claim.role = 'service_role';
+
+SELECT throws_ok(
+  $$
+    SELECT private.apply_inventory_snapshot_changes(
+      '30000000-0000-4000-8000-000000000001'::uuid,
+      '30000000-0000-4000-8000-000000000002'::uuid,
+      'client_snapshot_cas',
+      '[
+        {"product_id":"30000000-0000-4000-8000-000000000003","storage_id":"30000000-0000-4000-8000-000000000004","quantity":1,"expected_version":0},
+        {"product_id":"30000000-0000-4000-8000-000000000003","storage_id":"30000000-0000-4000-8000-000000000004","quantity":2,"expected_version":0}
+      ]'::jsonb
+    )
+  $$,
+  '22023',
+  'Inventory changes contain duplicate product and storage positions',
+  'the RPC rejects duplicate positions before acquiring inventory row locks'
+);
+
+SELECT throws_ok(
+  $$
+    SELECT private.apply_inventory_snapshot_changes(
+      '30000000-0000-4000-8000-000000000005'::uuid,
+      '30000000-0000-4000-8000-000000000002'::uuid,
+      'client_snapshot_cas',
+      (
+        SELECT pg_catalog.jsonb_agg(
+          pg_catalog.jsonb_build_object(
+            'product_id', '30000000-0000-4000-8000-000000000003',
+            'storage_id', '30000000-0000-4000-8000-000000000004',
+            'quantity', 1,
+            'expected_version', 0
+          )
+        )
+        FROM pg_catalog.generate_series(1, 1001)
+      )
+    )
+  $$,
+  '22023',
+  'Inventory changes exceed the maximum batch size',
+  'the RPC rejects oversized batches before taking row locks'
+);
+
+INSERT INTO private.inventory_snapshot_receipts (
+  operation_id,
+  workspace_id,
+  operation_kind,
+  payload_hash,
+  result,
+  actor_id
+)
+VALUES (
+  '30000000-0000-4000-8000-000000000006'::uuid,
+  '30000000-0000-4000-8000-000000000002'::uuid,
+  'sales_order_completion',
+  'original-payload',
+  '{"inventory":[],"already_applied":false}'::jsonb,
+  NULL
+);
+
+SELECT is(
+  (
+    private.apply_inventory_snapshot_changes(
+      '30000000-0000-4000-8000-000000000006'::uuid,
+      '30000000-0000-4000-8000-000000000002'::uuid,
+      'sales_order_completion',
+      '[{"product_id":"30000000-0000-4000-8000-000000000007","storage_id":"30000000-0000-4000-8000-000000000008","quantity":9,"expected_version":3}]'::jsonb
+    )->>'already_applied'
+  )::boolean,
+  true,
+  'a stable sales-order completion id replays the first committed inventory result'
+);
+
+INSERT INTO private.inventory_snapshot_receipts (
+  operation_id,
+  workspace_id,
+  operation_kind,
+  payload_hash,
+  result,
+  actor_id
+)
+VALUES (
+  '30000000-0000-4000-8000-000000000009'::uuid,
+  '30000000-0000-4000-8000-000000000002'::uuid,
+  'client_snapshot_cas',
+  'different-payload',
+  '{"inventory":[],"already_applied":false}'::jsonb,
+  NULL
+);
+
+SELECT throws_ok(
+  $$
+    SELECT private.apply_inventory_snapshot_changes(
+      '30000000-0000-4000-8000-000000000009'::uuid,
+      '30000000-0000-4000-8000-000000000002'::uuid,
+      'client_snapshot_cas',
+      '[{"product_id":"30000000-0000-4000-8000-000000000007","storage_id":"30000000-0000-4000-8000-000000000008","quantity":9,"expected_version":3}]'::jsonb
+    )
+  $$,
+  '23505',
+  'Inventory operation id is already used by another payload',
+  'generic snapshot operations still reject operation-id reuse with another payload'
+);
+
+SELECT is(
+  (
+    SELECT external_language
+    FROM information_schema.routines
+    WHERE routine_schema = 'public'
+      AND routine_name = 'apply_inventory_snapshot_changes'
+  ),
+  'PLPGSQL',
+  'the public inventory RPC can catch and translate strict CAS conflicts'
+);
+
+SELECT ok(
+  pg_get_functiondef('public.apply_inventory_snapshot_changes(uuid,uuid,text,jsonb)'::regprocedure)
+    LIKE '%WHEN serialization_failure THEN%',
+  'the public inventory RPC catches only serialization failures'
 );
 
 SELECT * FROM finish();

@@ -37,7 +37,9 @@ export type InventoryProduct = Product & {
 
 const INVENTORY_FETCH_PAGE_SIZE = 1000
 const INVENTORY_PRODUCT_FETCH_CHUNK_SIZE = 500
+const INVENTORY_CONFLICT_COOLDOWN_MS = 5000
 const inventoryWorkspaceFetchesInFlight = new Map<string, Promise<void>>()
+const inventorySnapshotConflictCooldowns = new Map<string, number>()
 
 export interface InventoryWorkspaceFetchOptions {
     storageId?: string
@@ -46,6 +48,18 @@ export interface InventoryWorkspaceFetchOptions {
 export interface UseInventoryOptions extends InventoryWorkspaceFetchOptions {
     syncRemote?: boolean
     enabled?: boolean
+}
+
+export interface InventorySnapshotExpectedVersion {
+    productId: string
+    storageId: string
+    version: number
+}
+
+export interface InventorySnapshotSyncOptions {
+    operationId?: string
+    operationKind?: string
+    expectedVersions?: ReadonlyArray<InventorySnapshotExpectedVersion>
 }
 
 function shouldUseCloudBusinessData(workspaceId?: string | null) {
@@ -148,14 +162,12 @@ export async function hydrateInventoryProductStoragesFromSupabase(
             .eq('workspace_id', workspaceId)
             .eq('product_id', productId)
             .eq('storage_id', normalizedStorageIds[0])
-            .eq('is_deleted', false)
         : client
             .from('inventory')
             .select('*')
             .eq('workspace_id', workspaceId)
             .eq('product_id', productId)
             .in('storage_id', normalizedStorageIds)
-            .eq('is_deleted', false)
 
     const { data: remoteRows, error } = await runSupabaseAction('inventory.position.fetch', () => query)
     if (error || !remoteRows) {
@@ -201,7 +213,11 @@ export async function hydrateInventoryProductStoragesFromSupabase(
     })
 }
 
-export async function syncInventoryRowsBestEffort(rows: Array<Inventory | null>, workspaceId: string) {
+export async function syncInventoryRowsBestEffort(
+    rows: Array<Inventory | null>,
+    workspaceId: string,
+    options: InventorySnapshotSyncOptions = {}
+) {
     const dedupedRows = Array.from(
         new Map(rows.filter((row): row is Inventory => !!row).map((row) => [
             buildInventoryPositionKey(row.workspaceId, row.productId, row.storageId),
@@ -215,20 +231,35 @@ export async function syncInventoryRowsBestEffort(rows: Array<Inventory | null>,
 
     assertInventoryMutationConnectivity(workspaceId)
 
-    const operationId = generateId()
+    const expectedVersions = new Map(
+        (options.expectedVersions ?? []).map(({ productId, storageId, version }) => [
+            buildInventoryPositionKey(workspaceId, productId, storageId),
+            Math.max(0, Math.trunc(Number(version) || 0))
+        ])
+    )
+    const operationId = options.operationId ?? generateId()
+    const operationKind = options.operationKind ?? 'client_snapshot_cas'
+    const conflictKey = `${workspaceId}:${operationKind}:${operationId}`
+    const conflictCooldownUntil = inventorySnapshotConflictCooldowns.get(conflictKey) ?? 0
+    if (conflictCooldownUntil > Date.now()) {
+        throw new Error(i18n.t('inventory.errors.authoritativeResultMissing'))
+    }
+    inventorySnapshotConflictCooldowns.delete(conflictKey)
     const changes = dedupedRows.map((row) => ({
         id: row.id,
         product_id: row.productId,
         storage_id: row.storageId,
         quantity: row.quantity,
-        expected_version: Math.max(0, Number(row.version || 1) - 1)
+        expected_version: expectedVersions.get(
+            buildInventoryPositionKey(workspaceId, row.productId, row.storageId)
+        ) ?? Math.max(0, Number(row.version || 1) - 1)
     }))
     const client = getSupabaseClientForTable('inventory')
     const execute = () => runSupabaseAction('inventory.sync.authoritative', () =>
         client.rpc('apply_inventory_snapshot_changes', {
             p_operation_id: operationId,
             p_workspace_id: workspaceId,
-            p_operation_kind: 'client_snapshot_cas',
+            p_operation_kind: operationKind,
             p_changes: changes
         })
     )
@@ -241,13 +272,32 @@ export async function syncInventoryRowsBestEffort(rows: Array<Inventory | null>,
     }
 
     if (response.error) {
+        if ((response.error as { code?: string }).code === '40001') {
+            inventorySnapshotConflictCooldowns.set(
+                conflictKey,
+                Date.now() + INVENTORY_CONFLICT_COOLDOWN_MS
+            )
+        }
         throw normalizeSupabaseActionError(response.error)
     }
 
-    const remoteRows = (response.data as { inventory?: Record<string, unknown>[] } | null)?.inventory
+    const result = response.data as {
+        inventory?: Record<string, unknown>[] | null
+        conflict?: boolean
+    } | null
+    if (result?.conflict) {
+        inventorySnapshotConflictCooldowns.set(
+            conflictKey,
+            Date.now() + INVENTORY_CONFLICT_COOLDOWN_MS
+        )
+        throw new Error(i18n.t('inventory.errors.authoritativeResultMissing'))
+    }
+
+    const remoteRows = result?.inventory
     if (!remoteRows) {
         throw new Error(i18n.t('inventory.errors.authoritativeResultMissing'))
     }
+    inventorySnapshotConflictCooldowns.delete(conflictKey)
 
     const syncedAt = new Date().toISOString()
     await reconcileInventoryRowsSynced(dedupedRows, remoteRows, syncedAt)
@@ -549,6 +599,12 @@ function useInventoryCloudSync(workspaceId: string | undefined, options: UseInve
 
 async function getInventoryRowsForProductStorage(productId: string, storageId: string) {
     return db.inventory.where('[productId+storageId]').equals([productId, storageId]).toArray()
+}
+
+export async function getInventoryVersionForProductStorage(productId: string, storageId: string) {
+    const rows = await getInventoryRowsForProductStorage(productId, storageId)
+    const existingRow = rows.find((row) => !row.isDeleted) ?? rows.find((row) => row.isDeleted)
+    return Math.max(0, Math.trunc(Number(existingRow?.version) || 0))
 }
 
 export async function putInventoryQuantity(
