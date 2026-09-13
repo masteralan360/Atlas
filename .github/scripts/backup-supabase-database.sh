@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Creates a consistent full logical PostgreSQL snapshot, encrypts it locally,
-# and stores only the encrypted archive and checksum in a private R2 bucket.
+# Creates a consistent full logical PostgreSQL snapshot and stores a native
+# custom archive plus a readable SQL rendering in a private R2 bucket.
 # This intentionally uses the native pg_dump binary, not Docker or the
 # Supabase CLI (whose db dump command runs pg_dump in a container).
 
@@ -22,8 +22,7 @@ for required in \
   R2_BACKUP_ACCESS_KEY_ID \
   R2_BACKUP_SECRET_ACCESS_KEY \
   R2_BACKUP_ACCOUNT_ID \
-  R2_BACKUP_BUCKET \
-  BACKUP_AGE_RECIPIENT; do
+  R2_BACKUP_BUCKET; do
   require_env "$required"
 done
 
@@ -41,7 +40,6 @@ fi
 
 command -v pg_dump >/dev/null || fail 'pg_dump is not installed.'
 command -v pg_restore >/dev/null || fail 'pg_restore is not installed.'
-command -v age >/dev/null || fail 'age is not installed.'
 command -v aws >/dev/null || fail 'aws is not installed.'
 pg_dump --version | grep --fixed-strings --quiet 'pg_dump (PostgreSQL) 17.' \
   || fail 'PostgreSQL 17 pg_dump is required for this PostgreSQL 17 Supabase project.'
@@ -56,16 +54,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
-timestamp="$(date --utc +'%Y%m%dT%H%M%SZ')"
+timestamp="$(date --utc +'%Y-%m-%dT%H-%M-%SZ')"
 run_id="${GITHUB_RUN_ID:-manual}"
-archive_base="atlas-supabase-${timestamp}-${run_id}.dump"
+backup_id="${timestamp}-${run_id}"
+archive_base="atlas-supabase-${backup_id}.dump"
 plain_archive="$work_dir/$archive_base"
-encrypted_archive="$plain_archive.age"
-checksum_file="$encrypted_archive.sha256"
-downloaded_archive="$work_dir/verified-$(basename "$encrypted_archive")"
-object_prefix="daily"
-object_key="$object_prefix/$(basename "$encrypted_archive")"
-checksum_key="$object_prefix/$(basename "$checksum_file")"
+sql_export="$work_dir/${archive_base%.dump}.sql"
+downloaded_archive="$work_dir/verified-$(basename "$plain_archive")"
+downloaded_sql="$work_dir/verified-$(basename "$sql_export")"
+backup_prefix="daily/${backup_id}"
+archive_key="$backup_prefix/atlas-supabase.dump"
+sql_key="$backup_prefix/atlas-supabase.sql"
 r2_endpoint="https://${R2_BACKUP_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
 export AWS_ACCESS_KEY_ID="$R2_BACKUP_ACCESS_KEY_ID"
@@ -84,53 +83,65 @@ pg_dump \
 echo 'Validating PostgreSQL archive structure…'
 pg_restore --list "$plain_archive" > /dev/null
 # Render every archive entry without connecting to a database. This forces
-# pg_restore to read and decompress the archive before we encrypt it.
+# pg_restore to read and decompress the archive before it leaves the runner.
 pg_restore --file=/dev/null "$plain_archive"
 
-echo 'Encrypting archive before it leaves the runner…'
-age --recipient "$BACKUP_AGE_RECIPIENT" --output "$encrypted_archive" "$plain_archive"
-rm --force -- "$plain_archive"
-[[ -s "$encrypted_archive" ]] || fail 'Encryption completed without creating an archive.'
+echo 'Rendering readable SQL from the validated PostgreSQL archive…'
+pg_restore --file="$sql_export" "$plain_archive"
+[[ -s "$sql_export" ]] || fail 'pg_restore completed without creating a SQL export.'
 
-checksum="$(sha256sum "$encrypted_archive" | awk '{print $1}')"
-printf '%s  %s\n' "$checksum" "$(basename "$encrypted_archive")" > "$checksum_file"
-local_size="$(wc --bytes < "$encrypted_archive" | tr --delete '[:space:]')"
+archive_size="$(wc --bytes < "$plain_archive" | tr --delete '[:space:]')"
+sql_size="$(wc --bytes < "$sql_export" | tr --delete '[:space:]')"
 
-echo 'Uploading encrypted archive to private R2 storage…'
-aws s3 cp "$encrypted_archive" "s3://${R2_BACKUP_BUCKET}/${object_key}" \
+echo 'Uploading plaintext database backups to private R2 storage…'
+aws s3 cp "$plain_archive" "s3://${R2_BACKUP_BUCKET}/${archive_key}" \
   --endpoint-url "$r2_endpoint" \
   --only-show-errors \
-  --metadata "sha256=${checksum},source=supabase,format=pg_dump-custom-age"
-aws s3 cp "$checksum_file" "s3://${R2_BACKUP_BUCKET}/${checksum_key}" \
+  --content-type 'application/octet-stream' \
+  --metadata 'source=supabase,format=pg_dump-custom'
+aws s3 cp "$sql_export" "s3://${R2_BACKUP_BUCKET}/${sql_key}" \
   --endpoint-url "$r2_endpoint" \
   --only-show-errors \
-  --content-type 'text/plain'
+  --content-type 'application/sql; charset=utf-8' \
+  --metadata 'source=supabase,format=pg_restore-sql'
 
-echo 'Verifying uploaded archive metadata and length…'
-remote_size="$(aws s3api head-object \
+echo 'Verifying uploaded backup lengths…'
+remote_archive_size="$(aws s3api head-object \
   --bucket "$R2_BACKUP_BUCKET" \
-  --key "$object_key" \
+  --key "$archive_key" \
   --endpoint-url "$r2_endpoint" \
   --query 'ContentLength' \
   --output text)"
-[[ "$remote_size" =~ ^[0-9]+$ ]] || fail 'R2 did not return a valid uploaded archive length.'
-[[ "$remote_size" -eq "$local_size" ]] || fail 'R2 archive length does not match the encrypted local archive.'
+remote_sql_size="$(aws s3api head-object \
+  --bucket "$R2_BACKUP_BUCKET" \
+  --key "$sql_key" \
+  --endpoint-url "$r2_endpoint" \
+  --query 'ContentLength' \
+  --output text)"
+[[ "$remote_archive_size" =~ ^[0-9]+$ ]] || fail 'R2 did not return a valid uploaded archive length.'
+[[ "$remote_sql_size" =~ ^[0-9]+$ ]] || fail 'R2 did not return a valid uploaded SQL export length.'
+[[ "$remote_archive_size" -eq "$archive_size" ]] || fail 'R2 archive length does not match the local archive.'
+[[ "$remote_sql_size" -eq "$sql_size" ]] || fail 'R2 SQL export length does not match the local SQL export.'
 
-echo 'Downloading the encrypted archive once to verify its checksum…'
-aws s3 cp "s3://${R2_BACKUP_BUCKET}/${object_key}" "$downloaded_archive" \
+echo 'Downloading both R2 objects once to verify their contents…'
+aws s3 cp "s3://${R2_BACKUP_BUCKET}/${archive_key}" "$downloaded_archive" \
   --endpoint-url "$r2_endpoint" \
   --only-show-errors
-downloaded_checksum="$(sha256sum "$downloaded_archive" | awk '{print $1}')"
-[[ "$downloaded_checksum" == "$checksum" ]] \
-  || fail 'Downloaded R2 archive checksum does not match the uploaded archive.'
+aws s3 cp "s3://${R2_BACKUP_BUCKET}/${sql_key}" "$downloaded_sql" \
+  --endpoint-url "$r2_endpoint" \
+  --only-show-errors
+cmp --silent "$plain_archive" "$downloaded_archive" \
+  || fail 'Downloaded R2 archive does not match the uploaded archive.'
+cmp --silent "$sql_export" "$downloaded_sql" \
+  || fail 'Downloaded R2 SQL export does not match the uploaded SQL export.'
 
 {
   echo '## Supabase database backup complete'
   echo
-  echo "- Object: \`$object_key\`"
-  echo "- Encrypted size: \`$local_size\` bytes"
-  echo "- SHA-256: \`$checksum\`"
-  echo '- Archive format: `pg_dump` custom archive, encrypted with age'
+  echo "- Backup folder: $backup_prefix/"
+  echo "- Custom archive: $archive_key ($archive_size bytes)"
+  echo "- SQL export: $sql_key ($sql_size bytes)"
+  echo '- Formats: plaintext PostgreSQL custom archive and plaintext SQL'
 } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
-echo 'Encrypted database backup uploaded and verified.'
+echo 'Plaintext database backups uploaded and verified.'

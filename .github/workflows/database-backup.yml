@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   backup:
-    name: Encrypted database backup
+    name: Database backup
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     # Create this GitHub environment manually and scope its secrets/variables
@@ -52,14 +52,13 @@ jobs:
           sudo apt-get update
           # GitHub's ubuntu-24.04 hosted runner already includes AWS CLI v2.
           # Ubuntu's `awscli` package is not available on this image.
-          sudo apt-get install --yes --no-install-recommends postgresql-client-17 age
+          sudo apt-get install --yes --no-install-recommends postgresql-client-17
           export PATH="/usr/lib/postgresql/17/bin:$PATH"
           echo '/usr/lib/postgresql/17/bin' >> "$GITHUB_PATH"
           pg_dump --version | grep --fixed-strings --quiet 'pg_dump (PostgreSQL) 17.'
-          age --version
           aws --version
 
-      - name: Dump, encrypt, validate, and upload
+      - name: Dump, render SQL, validate, and upload
         shell: bash
         env:
           SUPABASE_BACKUP_DATABASE_URL: ${{ secrets.SUPABASE_BACKUP_DATABASE_URL }}
@@ -67,5 +66,4 @@ jobs:
           R2_BACKUP_SECRET_ACCESS_KEY: ${{ secrets.R2_BACKUP_SECRET_ACCESS_KEY }}
           R2_BACKUP_ACCOUNT_ID: ${{ vars.R2_BACKUP_ACCOUNT_ID }}
           R2_BACKUP_BUCKET: ${{ vars.R2_BACKUP_BUCKET }}
-          BACKUP_AGE_RECIPIENT: ${{ vars.BACKUP_AGE_RECIPIENT }}
         run: bash .github/scripts/backup-supabase-database.sh
