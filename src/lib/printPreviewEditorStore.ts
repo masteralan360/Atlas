@@ -1,5 +1,6 @@
 import { getPdfShapeBottom, type PdfShape, type UniversalInvoice } from '@/types'
 import type { ReactElement } from 'react'
+import type { PartnerAccountStatementClosingBalance } from '@/lib/partnerAccountStatement'
 
 export type PrintFormat = 'a4' | 'receipt' | 'barcode_35x15'
 export type CustomTemplatePrintLanguage = 'en' | 'ar' | 'ku'
@@ -59,6 +60,20 @@ export type TemplatePreview = {
     supportsBackgroundEdit?: boolean
     /** Keeps legacy lower-page notes below dynamic native content when it expands. */
     reflowLowerPageText?: boolean
+    /** The final document must wait for a freshly calculated partner balance. */
+    requiresFreshPartnerBalance?: boolean
+    /** Starts a fresh partner-balance load when this preview is opened. */
+    resetFreshPartnerBalance?: () => void
+    /** Live source required to verify the Atlas Standard partner balance. */
+    freshPartnerBalanceRequest?: {
+        workspaceId: string
+        partnerId: string
+    }
+    /** Receives fresh balance data for the visible preview and final PDF. */
+    onFreshPartnerBalanceStateChange?: (
+        state: 'loading' | 'ready' | 'error',
+        balances?: PartnerAccountStatementClosingBalance[]
+    ) => void
     page?: {
         widthMm: number
         heightMm: number

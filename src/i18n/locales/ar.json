@@ -791,6 +791,7 @@
     "timeline": "المخطط الزمني للحالة",
     "timelineSubmitted": "تم الإرسال",
     "inventoryDeducted": "تم خصم المخزون",
+    "inventoryReturned": "تمت إعادة المخزون",
     "inventoryWarning": "يحتاج المخزون إلى متابعة يدوية لعنصر واحد أو أكثر.",
     "cancelReason": "سبب الإلغاء",
     "customerNote": "ملاحظة",
@@ -801,6 +802,7 @@
       "processing": "قيد المعالجة",
       "shipped": "تم الشحن",
       "delivered": "تم التسليم",
+      "returned": "مرتجع",
       "cancelled": "ملغي"
     },
     "actions": {
@@ -810,7 +812,8 @@
       "deliver": "تحديده كمسلّم",
       "cancel": "إلغاء الطلب",
       "editItems": "تعديل العناصر",
-      "collect": "تسجيل التحصيل"
+      "collect": "تسجيل التحصيل",
+      "viewSalesOrder": "عرض طلب المبيعات"
     }
   },
   "notebook": {
@@ -1509,7 +1512,9 @@
       "partnerBalanceSnapshot": "أرصدة الشريك",
       "partnerBalanceBefore": "رصيد الشريك قبل الطلب",
       "partnerBalanceAfter": "رصيد الشريك بعد الطلب",
-      "partnerBalanceCurrent": "الرصيد الحالي للشريك"
+      "partnerBalanceCurrent": "الرصيد الحالي للشريك",
+      "partnerBalanceLoading": "جارٍ التحميل",
+      "partnerBalanceUnavailable": "الرصيد الحالي غير متاح"
     },
     "table": {
       "orderNumber": "رقم الطلب",
@@ -4527,7 +4532,7 @@
       "searchPartner": "ابحث عن شريك أعمال",
       "selectPartnerDescription": "اختر شريكاً لعرض الرصيد الافتتاحي وحركة الحساب والرصيد الختامي.",
       "refreshingLiveData": "جاري تحميل حركة الحساب الحالية",
-      "refreshingLiveDataDescription": "يتم التحقق من أحدث الطلبات والقروض ودفعات القروض والمدفوعات من Supabase قبل عرض هذا الكشف.",
+      "refreshingLiveDataDescription": "يتم التحقق من أحدث الطلبات والقروض ودفعات القروض والمدفوعات قبل عرض هذا الكشف.",
       "liveDataUnavailable": "تعذر تحميل حركة الحساب الحالية",
       "liveDataUnavailableDescription": "تم إخفاء الكشف لمنع عرض أو طباعة رصيد غير مكتمل. تحقق من الاتصال ثم حاول مرة أخرى.",
       "accountActivity": "حركة الحساب",

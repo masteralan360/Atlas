@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { TFunction } from 'i18next'
 
 import { isSupabaseConfigured } from '@/auth'
@@ -28,6 +28,7 @@ import type { PrintFormat } from '@/services/pdfGenerator'
 import type { WorkspaceFeatures } from '@/workspace'
 
 import type { ProductPrintImageUrls } from '@/ui/components/print/ProductPrintImage'
+import { createAtlasStandardPartnerBalancePrintState } from '@/lib/atlasStandardPartnerBalancePrintState'
 
 type OrderKind = 'sales' | 'purchase'
 type OrderNativeTemplateKey = typeof ORDER_ATLAS_STANDARD_TEMPLATE_KEY
@@ -78,6 +79,9 @@ export function useOrderCustomPrint({
     const partnerId = order?.businessPartnerId
         || (orderKind === 'sales' ? (order as SalesOrder)?.customerId : (order as PurchaseOrder)?.supplierId)
     const bizPartner = useBusinessPartner(partnerId)
+    const atlasStandardPartnerBalanceStateRef = useRef(
+        createAtlasStandardPartnerBalancePrintState(Boolean(workspaceId && partnerId))
+    )
     const counterpartyPhone = bizPartner?.phone || ''
     const counterpartyAddress = bizPartner?.address || ''
 
@@ -159,6 +163,7 @@ export function useOrderCustomPrint({
             orderInstallments: installments,
             businessPartner: bizPartner,
             partnerAccountStatementBalances,
+            partnerBalancePrintState: atlasStandardPartnerBalanceStateRef.current,
             productUnits,
             productImageUrls,
             counterpartyPhone,
@@ -195,6 +200,7 @@ export function useOrderCustomPrint({
                 orderInstallments: installments,
                 businessPartner: bizPartner,
                 partnerAccountStatementBalances,
+                partnerBalancePrintState: atlasStandardPartnerBalanceStateRef.current,
                 productUnits,
                 productImageUrls,
                 counterpartyPhone,
@@ -231,6 +237,7 @@ export function useOrderCustomPrint({
                 orderInstallments: installments,
                 businessPartner: bizPartner,
                 partnerAccountStatementBalances,
+                partnerBalancePrintState: atlasStandardPartnerBalanceStateRef.current,
                 productUnits,
                 productImageUrls,
                 counterpartyPhone,

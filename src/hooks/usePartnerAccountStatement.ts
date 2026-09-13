@@ -459,7 +459,12 @@ export function usePartnerAccountStatementPrintBalances(
   partnerId: string | null | undefined,
   order: SalesOrder | PurchaseOrder | null | undefined
 ) {
-  const { statementData } = usePartnerAccountStatement(workspaceId, partnerId, ALL_TIME_PERIOD)
+  const {
+    statementData,
+    isRefreshing,
+    refreshError,
+    retryLiveRefresh
+  } = usePartnerAccountStatement(workspaceId, partnerId, ALL_TIME_PERIOD)
 
   return useMemo(() => ({
     currentBalances: statementData
@@ -467,6 +472,9 @@ export function usePartnerAccountStatementPrintBalances(
       : undefined,
     legacyOrderBalanceSnapshot: statementData && order && !order.partnerBalanceSnapshot
       ? deriveLegacyOrderPartnerBalanceSnapshot(statementData, order)
-      : null
-  }), [order, statementData])
+      : null,
+    isRefreshing,
+    refreshError,
+    retryLiveRefresh
+  }), [isRefreshing, order, refreshError, retryLiveRefresh, statementData])
 }

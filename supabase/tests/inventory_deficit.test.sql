@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(11);
+SELECT plan(13);
 
 CREATE TEMP TABLE inventory_quantity_guard_test (
   quantity numeric NOT NULL
@@ -54,6 +54,27 @@ SELECT throws_ok(
   '23514',
   'A legacy inventory deficit cannot be increased',
   'a legacy deficit cannot worsen'
+);
+
+CREATE TEMP TABLE marketplace_delivery_existing_stock_test (
+  quantity numeric NOT NULL
+);
+
+CREATE TRIGGER marketplace_delivery_existing_stock_test_trigger
+BEFORE INSERT OR UPDATE OF quantity ON marketplace_delivery_existing_stock_test
+FOR EACH ROW
+EXECUTE FUNCTION private.guard_nonnegative_quantity_transition();
+
+INSERT INTO marketplace_delivery_existing_stock_test(quantity) VALUES (110);
+
+SELECT lives_ok(
+  $$UPDATE marketplace_delivery_existing_stock_test SET quantity = quantity - 1$$,
+  'an existing inventory position can be deducted without proposing a negative insert'
+);
+SELECT is(
+  (SELECT quantity FROM marketplace_delivery_existing_stock_test),
+  109::numeric,
+  'deducting one marketplace item from 110 leaves 109 units'
 );
 
 SELECT ok(

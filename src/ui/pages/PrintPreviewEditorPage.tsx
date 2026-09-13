@@ -47,6 +47,7 @@ import { cn } from '@/lib/utils'
 import { resolveIsolatedTextDirection } from '@/lib/textDirection'
 import type { UniversalInvoice } from '@/types'
 import { useAuth } from '@/auth/AuthContext'
+import { usePartnerAccountStatementPrintBalances } from '@/hooks/usePartnerAccountStatement'
 import { UiAccessGate, useUiAccess } from '@/context/UiAccessContext'
 import { AttachedShapesOverlay } from '@/ui/components/AttachedShapesOverlay'
 import { PDF_SHAPE_OPTIONS } from '@/ui/components/PdfShapeGraphic'
@@ -586,6 +587,39 @@ export function PrintPreviewEditorPage() {
 
     // Template preview mode (loans, orders, budget)
     const templatePreview = source?.templatePreview
+    const [freshPartnerBalanceState, setFreshPartnerBalanceState] = useState<'loading' | 'ready' | 'error'>(
+        () => templatePreview?.requiresFreshPartnerBalance ? 'loading' : 'ready'
+    )
+    const freshPartnerBalanceRequest = templatePreview?.freshPartnerBalanceRequest
+    const {
+        currentBalances: freshPartnerBalances,
+        isRefreshing: isFreshPartnerBalanceRefreshing,
+        refreshError: freshPartnerBalanceRefreshError
+    } = usePartnerAccountStatementPrintBalances(
+        freshPartnerBalanceRequest?.workspaceId,
+        freshPartnerBalanceRequest?.partnerId,
+        undefined
+    )
+    const nextFreshPartnerBalanceState: 'loading' | 'ready' | 'error' = !templatePreview?.requiresFreshPartnerBalance
+        ? 'ready'
+        : !freshPartnerBalanceRequest || freshPartnerBalanceRefreshError
+            ? 'error'
+            : isFreshPartnerBalanceRefreshing || freshPartnerBalances === undefined
+                ? 'loading'
+                : 'ready'
+
+    useEffect(() => {
+        templatePreview?.onFreshPartnerBalanceStateChange?.(
+            nextFreshPartnerBalanceState,
+            nextFreshPartnerBalanceState === 'ready' ? freshPartnerBalances : undefined
+        )
+        setFreshPartnerBalanceState((current) => (
+            current === nextFreshPartnerBalanceState ? current : nextFreshPartnerBalanceState
+        ))
+    }, [freshPartnerBalances, nextFreshPartnerBalanceState, templatePreview])
+
+    const isTemplatePrintReady = !templatePreview?.requiresFreshPartnerBalance
+        || freshPartnerBalanceState === 'ready'
     const fixedTemplatePrintLang = templatePreview?.fixedPrintLang
     const initialTemplateLayout = source?.initialTemplateLayout
     const templatePage = initialTemplateLayout?.page || templatePreview?.page || {
@@ -1078,7 +1112,7 @@ export function PrintPreviewEditorPage() {
     }, [source, templatePreview, fieldValues, initialTemplateLayout?.label, templateAnnotations, templateComponentPositions, templateHiddenFields, templateFieldOrders, templateFieldLabelOverrides, templateFieldDisplayModes, templateBackground, templateTexts, templateImages, templateShapes, templatePageHeight, templatePageWidth])
 
     const saveTemplatePreview = useCallback(async (layout?: CustomTemplateLayout, label?: string) => {
-        if (!source || !templatePreview || !fieldValues || isSaving) return
+        if (!source || !templatePreview || !fieldValues || isSaving || !isTemplatePrintReady) return
         beginProgressToast(title || t('print.progressTitle', { defaultValue: 'Saving & Printing' }))
         let shouldCloseAfterAction = true
         setIsSaving(true)
@@ -1147,10 +1181,10 @@ export function PrintPreviewEditorPage() {
                 window.history.back()
             }
         }
-    }, [source, templatePreview, fieldValues, isSaving, fixedTemplatePrintLang, tempPrintLang, buildTemplateLayout, sourceWorkspaceFooterContacts, templateHiddenFields, templateFieldOrders, templateFieldLabelOverrides, templateBackground, beginProgressToast, finishProgressToast, title, t])
+    }, [source, templatePreview, fieldValues, isSaving, isTemplatePrintReady, fixedTemplatePrintLang, tempPrintLang, buildTemplateLayout, sourceWorkspaceFooterContacts, templateHiddenFields, templateFieldOrders, templateFieldLabelOverrides, templateBackground, beginProgressToast, finishProgressToast, title, t])
 
     const handleTemplatePreviewSave = useCallback(async () => {
-        if (!source || !templatePreview || !fieldValues || isSaving) return
+        if (!source || !templatePreview || !fieldValues || isSaving || !isTemplatePrintReady) return
 
         if (source.onSaveTemplateLayout) {
             const layout = buildTemplateLayout()
@@ -1169,7 +1203,7 @@ export function PrintPreviewEditorPage() {
         }
 
         await saveTemplatePreview()
-    }, [source, templatePreview, fieldValues, isSaving, buildTemplateLayout, saveTemplatePreview, title])
+    }, [source, templatePreview, fieldValues, isSaving, isTemplatePrintReady, buildTemplateLayout, saveTemplatePreview, title])
 
     const handleConfirmTemplateLayoutSave = useCallback(async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault()
@@ -1710,7 +1744,7 @@ export function PrintPreviewEditorPage() {
                             <button
                                 className="inline-flex items-center justify-center rounded-md h-8 w-8 px-0 text-xs font-medium transition-colors gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:w-auto md:px-3"
                                 onClick={handleTemplatePreviewSave}
-                                disabled={isSaving}
+                                disabled={isSaving || !isTemplatePrintReady}
                                 aria-label={source.onSaveTemplateLayout
                                     ? t('customTemplates.saveLayout', { defaultValue: 'Save Layout' })
                                     : source.templatePrimaryActionLabel || source.printActionLabel || (source.onSave ? (t('print.printAndSave') || 'Print & Save') : (t('common.print') || 'Print'))}

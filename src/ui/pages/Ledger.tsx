@@ -3125,6 +3125,10 @@ export function Ledger() {
                             rows.map((entry, rowIndex) => {
                                 const projection = settlementIndex.byTransactionId.get(entry.transactionId) ?? null
                                 const finalProjection = finalSettlementIndex.byTransactionId.get(entry.transactionId) ?? null
+                                const isReferenceIdTruncated = entry.referenceId.length > 15
+                                const displayedReferenceId = isReferenceIdTruncated
+                                    ? `${entry.referenceId.slice(0, 15)}…`
+                                    : entry.referenceId
                                 const entryHighlightKey = getEntryHighlightKey(entry)
                                 const isRelationHovered = !!hoveredRelationKey && entryHighlightKey === hoveredRelationKey
                                 const relatedVisibleCount = entryHighlightKey ? highlightCounts.get(entryHighlightKey) || 0 : 0
@@ -3478,9 +3482,20 @@ export function Ledger() {
                                             {sourceModuleLabel(entry.sourceModule, t)}
                                         </TableCell>
                                         <TableCell className={cn('font-medium', compactColumns && 'align-top px-2 py-3')}>
-                                            <span className="block truncate" title={entry.referenceId}>
-                                                {entry.referenceId}
-                                            </span>
+                                            {isReferenceIdTruncated ? (
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <span className="inline-block cursor-help font-mono">
+                                                            {displayedReferenceId}
+                                                        </span>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent side="bottom" align="start" className="font-mono text-xs">
+                                                        {entry.referenceId}
+                                                    </TooltipContent>
+                                                </Tooltip>
+                                            ) : (
+                                                <span className="block font-mono">{displayedReferenceId}</span>
+                                            )}
                                         </TableCell>
                                         <TableCell className={cn(compactColumns && 'align-top px-2 py-3')}>
                                             <span className="block truncate" title={entry.partner || undefined}>

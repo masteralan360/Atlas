@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactElement } from 'react'
+import { useCallback, useMemo, useRef, useState, type ReactElement } from 'react'
 import { CreditCard, Eye, Printer, Search, ShoppingCart } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'wouter'
@@ -46,7 +46,13 @@ import {
     OrderDetailsPrintTemplate,
     OrderReceiptPrintTemplate
 } from './OrderPrintTemplates'
-import { AtlasStandardOrderInvoiceTemplate } from './AtlasStandardOrderInvoiceTemplate'
+import {
+    AtlasStandardOrderInvoiceTemplate
+} from './AtlasStandardOrderInvoiceTemplate'
+import {
+    createAtlasStandardPartnerBalancePrintState,
+    resetAtlasStandardPartnerBalancePrintState
+} from '@/lib/atlasStandardPartnerBalancePrintState'
 import { useOrderCustomPrint } from './useOrderCustomPrint'
 
 type OrderInstallmentRow =
@@ -144,6 +150,9 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
             ? (printTarget.order as SalesOrder).customerId
             : (printTarget?.order as PurchaseOrder | undefined)?.supplierId)
     const printPartner = useBusinessPartner(printPartnerId)
+    const atlasStandardPartnerBalanceStateRef = useRef(
+        createAtlasStandardPartnerBalancePrintState(Boolean(workspaceId && printPartnerId))
+    )
     const {
         currentBalances: partnerAccountStatementBalances,
         legacyOrderBalanceSnapshot
@@ -468,6 +477,18 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
         if (!printTarget) return undefined
         return {
             fields: [],
+            requiresFreshPartnerBalance: Boolean(workspaceId && printPartnerId),
+            resetFreshPartnerBalance: () => resetAtlasStandardPartnerBalancePrintState(
+                atlasStandardPartnerBalanceStateRef.current,
+                Boolean(workspaceId && printPartnerId)
+            ),
+            freshPartnerBalanceRequest: workspaceId && printPartnerId
+                ? { workspaceId, partnerId: printPartnerId }
+                : undefined,
+            onFreshPartnerBalanceStateChange: (status, balances) => {
+                atlasStandardPartnerBalanceStateRef.current.status = status
+                atlasStandardPartnerBalanceStateRef.current.balances = balances
+            },
             createElement: (_data, _effectiveId, printLangOverride, renderOptions) => (
                 <AtlasStandardOrderInvoiceTemplate
                     workspaceName={workspaceName}
@@ -479,6 +500,7 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
                     logoUrl={features.logo_url}
                     businessPartner={printPartner}
                     partnerAccountStatementBalances={partnerAccountStatementBalances}
+                    partnerBalancePrintState={atlasStandardPartnerBalanceStateRef.current}
                     partnerBalanceFallbackSnapshot={legacyOrderBalanceSnapshot}
                     printedBy={user?.name}
                     productImageUrls={productImageUrls}
@@ -502,11 +524,13 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
         printInstallments,
         printLang,
         printPartner,
+        printPartnerId,
         partnerAccountStatementBalances,
         legacyOrderBalanceSnapshot,
         printTarget,
         productImageUrls,
         user?.name,
+        workspaceId,
         workspaceName
     ])
     const customOrderPrint = useOrderCustomPrint({

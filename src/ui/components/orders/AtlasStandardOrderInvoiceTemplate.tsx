@@ -1,6 +1,6 @@
 import type { DraggableProvidedDragHandleProps } from '@hello-pangea/dnd'
 import { GripVertical } from 'lucide-react'
-import { useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -14,6 +14,7 @@ import {
     type SalesOrder
 } from '@/local-db'
 import type { PartnerAccountStatementClosingBalance } from '@/lib/partnerAccountStatement'
+import type { AtlasStandardPartnerBalancePrintState } from '@/lib/atlasStandardPartnerBalancePrintState'
 import {
     formatAtlasStandardPartnerBalanceSnapshot,
     formatAtlasStandardPartnerCurrentBalance
@@ -92,6 +93,8 @@ export interface AtlasStandardOrderInvoiceTemplateProps {
     businessPartner?: BusinessPartner | null
     /** All original-currency balances from the Partner Account Statement. */
     partnerAccountStatementBalances?: PartnerAccountStatementClosingBalance[]
+    /** Mutable per-preview balance state shared with the final PDF build. */
+    partnerBalancePrintState?: AtlasStandardPartnerBalancePrintState
     /** Read-only Account Statement reconstruction for legacy orders without a saved snapshot. */
     partnerBalanceFallbackSnapshot?: OrderPartnerBalanceSnapshot | null
     printedBy?: string | null
@@ -1142,6 +1145,7 @@ export function AtlasStandardOrderInvoiceTemplate({
     workspaceFooterContacts,
     businessPartner,
     partnerAccountStatementBalances,
+    partnerBalancePrintState,
     partnerBalanceFallbackSnapshot,
     printedBy,
     componentPositions,
@@ -1172,6 +1176,25 @@ export function AtlasStandardOrderInvoiceTemplate({
     const isOriginalPrint = isSales && effectivePrintVersion === 'original'
     const salesOrder = isSales ? order as SalesOrder : null
     const purchaseOrder = !isSales ? order as PurchaseOrder : null
+    const partnerBalanceStatus = partnerBalancePrintState?.status || 'ready'
+    const resolvedPartnerAccountStatementBalances = partnerBalanceStatus === 'ready'
+        ? partnerBalancePrintState?.balances || partnerAccountStatementBalances
+        : undefined
+    const [partnerBalanceLoadingDots, setPartnerBalanceLoadingDots] = useState(1)
+
+    useEffect(() => {
+        if (partnerBalanceStatus !== 'loading') {
+            setPartnerBalanceLoadingDots(1)
+            return
+        }
+
+        const timer = window.setInterval(() => {
+            setPartnerBalanceLoadingDots((count) => count === 3 ? 1 : count + 1)
+        }, 450)
+
+        return () => window.clearInterval(timer)
+    }, [partnerBalanceStatus])
+
     const counterpartyLabel = isSales
         ? labels.customer
         : labels.supplier
@@ -1201,10 +1224,14 @@ export function AtlasStandardOrderInvoiceTemplate({
     const noteValue = order.notes?.trim() || '-'
     const outstanding = getOrderBalanceAmount(order)
     const paidAmount = getOrderPaidAmount(order)
-    const currentPartnerBalance = formatAtlasStandardPartnerCurrentBalance(
-        partnerAccountStatementBalances,
-        iqdPreference
-    )
+    const currentPartnerBalance = partnerBalanceStatus === 'loading'
+        ? `${t('orders.print.partnerBalanceLoading')}${'.'.repeat(partnerBalanceLoadingDots)}`
+        : partnerBalanceStatus === 'error'
+            ? t('orders.print.partnerBalanceUnavailable')
+            : formatAtlasStandardPartnerCurrentBalance(
+                resolvedPartnerAccountStatementBalances,
+                iqdPreference
+            )
     const historicalPartnerBalanceSnapshot = order.partnerBalanceSnapshot || partnerBalanceFallbackSnapshot
     const partnerBalanceBeforeOrder = formatAtlasStandardPartnerBalanceSnapshot(
         historicalPartnerBalanceSnapshot,
@@ -1713,7 +1740,7 @@ export function AtlasStandardOrderInvoiceTemplate({
             className: 'col-span-4 border-l border-t border-[#1f2937]',
             layoutSpan: 6,
             dialogClassName: 'col-span-6',
-            render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong>{currentPartnerBalance}</div>
+            render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong><span aria-live="polite">{currentPartnerBalance}</span></div>
         },
         {
             key: financialKeys.paymentMethod,

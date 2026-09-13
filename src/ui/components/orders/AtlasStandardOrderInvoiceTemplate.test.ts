@@ -8,6 +8,28 @@ import {
     chunkAtlasStandardTableRows,
     resolveAtlasStandardTableCapacities
 } from '@/lib/atlasStandardOrderTablePagination'
+import {
+    createAtlasStandardPartnerBalancePrintState,
+    resetAtlasStandardPartnerBalancePrintState
+} from '@/lib/atlasStandardPartnerBalancePrintState'
+
+describe('Atlas Standard partner-balance print state', () => {
+    it('starts a live-balance preview in loading state and clears stale values for a new preview', () => {
+        const state = createAtlasStandardPartnerBalancePrintState(true)
+
+        expect(state).toEqual({ status: 'loading' })
+
+        state.status = 'ready'
+        state.balances = [{ currency: 'iqd', closingBalance: 1_056_000 }]
+        resetAtlasStandardPartnerBalancePrintState(state, true)
+
+        expect(state).toEqual({ status: 'loading', balances: undefined })
+    })
+
+    it('does not hold a print that has no linked partner balance to refresh', () => {
+        expect(createAtlasStandardPartnerBalancePrintState(false)).toEqual({ status: 'ready' })
+    })
+})
 
 describe('formatAtlasStandardPartnerCurrentBalance', () => {
     it('keeps each account-statement currency separate with circle separators and preserves signed balances', () => {

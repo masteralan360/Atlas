@@ -514,6 +514,7 @@ export function PrintPreviewModal({
 
     const handleOpenPreview = useCallback(async () => {
         try {
+            templatePreviewProp?.resetFreshPartnerBalance?.()
             const hasPdfDataForPreview = !!pdfData
             const hasPdfBuilder = !!pdfBuilder
 

@@ -804,6 +804,7 @@
     "timeline": "Status Timeline",
     "timelineSubmitted": "Submitted",
     "inventoryDeducted": "Inventory deducted",
+    "inventoryReturned": "Inventory Returned",
     "inventoryWarning": "Inventory needs a manual follow-up for one or more items.",
     "cancelReason": "Cancellation reason",
     "customerNote": "Note",
@@ -814,6 +815,7 @@
       "processing": "Processing",
       "shipped": "Shipped",
       "delivered": "Delivered",
+      "returned": "Returned",
       "cancelled": "Cancelled"
     },
     "actions": {
@@ -823,7 +825,8 @@
       "deliver": "Mark as Delivered",
       "cancel": "Cancel Order",
       "editItems": "Edit Items",
-      "collect": "Record Collection"
+      "collect": "Record Collection",
+      "viewSalesOrder": "View Sales Order"
     }
   },
   "notebook": {
@@ -1491,7 +1494,7 @@
       "searchPartner": "Search for a business partner",
       "selectPartnerDescription": "Choose a partner to view opening balances, account activity, and closing balances.",
       "refreshingLiveData": "Loading current account activity",
-      "refreshingLiveDataDescription": "Checking Supabase for the latest orders, loans, repayments, and payments before showing this statement.",
+      "refreshingLiveDataDescription": "Checking for the latest orders, loans, repayments, and payments before showing this statement.",
       "liveDataUnavailable": "Current account activity could not be loaded",
       "liveDataUnavailableDescription": "The statement is hidden to prevent showing or printing an incomplete balance. Check the connection and try again.",
       "accountActivity": "Account Activity",
@@ -2854,7 +2857,9 @@
       "partnerBalanceSnapshot": "Partner balances",
       "partnerBalanceBefore": "Partner's Balance Before Order",
       "partnerBalanceAfter": "Partner's Balance After Order",
-      "partnerBalanceCurrent": "Partner's Current Balance"
+      "partnerBalanceCurrent": "Partner's Current Balance",
+      "partnerBalanceLoading": "Loading",
+      "partnerBalanceUnavailable": "Current balance is unavailable"
     },
     "table": {
       "orderNumber": "Order #",

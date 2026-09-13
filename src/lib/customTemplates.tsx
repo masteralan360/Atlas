@@ -71,6 +71,11 @@ import {
     ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS
 } from '@/ui/components/orders/AtlasStandardOrderInvoiceTemplate'
 import {
+    createAtlasStandardPartnerBalancePrintState,
+    resetAtlasStandardPartnerBalancePrintState,
+    type AtlasStandardPartnerBalancePrintState
+} from '@/lib/atlasStandardPartnerBalancePrintState'
+import {
     SalesHistoryAtlasStandardInvoiceTemplate,
     SALES_HISTORY_ATLAS_STANDARD_MOVABLE_COMPONENT_KEYS
 } from '@/ui/components/sales/SalesHistoryAtlasStandardInvoiceTemplate'
@@ -602,6 +607,7 @@ export type CustomTemplatePreviewOptions = {
     orderInstallments?: OrderInstallment[]
     businessPartner?: BusinessPartner | null
     partnerAccountStatementBalances?: PartnerAccountStatementClosingBalance[]
+    partnerBalancePrintState?: AtlasStandardPartnerBalancePrintState
     productUnits?: Record<string, string | null | undefined>
     productImageUrls?: ProductPrintImageUrls
     counterpartyPhone?: string
@@ -1861,6 +1867,11 @@ function createAtlasStandardOrderInvoicePreview(
         ? SAMPLE_ORDER_DATA
         : options.order || SAMPLE_ORDER_DATA
     const kind = printMode === 'return' ? 'sales' : options.orderKind || 'sales'
+    const partnerId = order.businessPartnerId
+        || (kind === 'sales' ? (order as SalesOrder).customerId : (order as PurchaseOrder).supplierId)
+    const requiresFreshPartnerBalance = Boolean(options.workspaceId && partnerId)
+    const partnerBalancePrintState = options.partnerBalancePrintState
+        || createAtlasStandardPartnerBalancePrintState(requiresFreshPartnerBalance)
     const effectivePrintVersion: OrderPrintVersion = printMode === 'return'
         ? 'returned'
         : options.orderPrintVersion || 'adjusted'
@@ -1886,6 +1897,18 @@ function createAtlasStandardOrderInvoicePreview(
         ],
         page: { widthMm: 210, heightMm: 297 },
         fixedPrintLang,
+        requiresFreshPartnerBalance,
+        resetFreshPartnerBalance: () => resetAtlasStandardPartnerBalancePrintState(
+            partnerBalancePrintState,
+            requiresFreshPartnerBalance
+        ),
+        freshPartnerBalanceRequest: options.workspaceId && partnerId
+            ? { workspaceId: options.workspaceId, partnerId }
+            : undefined,
+        onFreshPartnerBalanceStateChange: (status, balances) => {
+            partnerBalancePrintState.status = status
+            partnerBalancePrintState.balances = balances
+        },
         createElement: (data, _effectiveId, printLangOverride, renderOptions) => (
             <AtlasStandardOrderInvoiceTemplate
                 workspaceName={options.workspaceName}
@@ -1898,6 +1921,7 @@ function createAtlasStandardOrderInvoicePreview(
                 workspaceFooterContacts={renderOptions?.workspaceFooterContacts || options.workspaceFooterContacts}
                 businessPartner={options.businessPartner}
                 partnerAccountStatementBalances={options.partnerAccountStatementBalances}
+                partnerBalancePrintState={partnerBalancePrintState}
                 printedBy={options.printedBy}
                 productImageUrls={options.productImageUrls}
                 componentPositions={renderOptions?.componentPositions}

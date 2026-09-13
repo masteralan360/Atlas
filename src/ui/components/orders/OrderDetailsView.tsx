@@ -111,6 +111,10 @@ import {
     AtlasStandardOrderInvoiceTemplate,
     ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS
 } from './AtlasStandardOrderInvoiceTemplate'
+import {
+    createAtlasStandardPartnerBalancePrintState,
+    resetAtlasStandardPartnerBalancePrintState
+} from '@/lib/atlasStandardPartnerBalancePrintState'
 import { OrderStatusBadge } from './OrderStatusBadge'
 import { OrderProductAvatar } from './OrderProductAvatars'
 import { useOrderCustomPrint } from './useOrderCustomPrint'
@@ -348,6 +352,9 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const partnerId = resolved?.order.businessPartnerId
         || (resolved?.kind === 'sales' ? (resolved?.order as SalesOrder)?.customerId : (resolved?.order as PurchaseOrder)?.supplierId)
     const bizPartner = useBusinessPartner(partnerId)
+    const atlasStandardPartnerBalanceStateRef = useRef(
+        createAtlasStandardPartnerBalancePrintState(Boolean(workspaceId && partnerId))
+    )
     const {
         currentBalances: partnerAccountStatementBalances,
         legacyOrderBalanceSnapshot
@@ -737,6 +744,16 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showOrderAdjustments, label: t('orders.adjustments.showInPrint', { defaultValue: 'Show order adjustments' }), value: 'true', type: 'boolean' }
             ],
             supportsBackgroundEdit: true,
+            requiresFreshPartnerBalance: Boolean(workspaceId && partnerId),
+            resetFreshPartnerBalance: () => resetAtlasStandardPartnerBalancePrintState(
+                atlasStandardPartnerBalanceStateRef.current,
+                Boolean(workspaceId && partnerId)
+            ),
+            freshPartnerBalanceRequest: workspaceId && partnerId ? { workspaceId, partnerId } : undefined,
+            onFreshPartnerBalanceStateChange: (status, balances) => {
+                atlasStandardPartnerBalanceStateRef.current.status = status
+                atlasStandardPartnerBalanceStateRef.current.balances = balances
+            },
             createElement: (data, _effectiveId, printLangOverride, renderOptions) => {
                 const baseLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
                 return (
@@ -751,6 +768,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                         workspaceFooterContacts={renderOptions?.workspaceFooterContacts || workspaceFooterContacts}
                         businessPartner={bizPartner}
                         partnerAccountStatementBalances={partnerAccountStatementBalances}
+                        partnerBalancePrintState={atlasStandardPartnerBalanceStateRef.current}
                         partnerBalanceFallbackSnapshot={legacyOrderBalanceSnapshot}
                         printedBy={creatorName}
                         productImageUrls={productImageUrls}
@@ -771,7 +789,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 return generateTemplatePdf({ element, format: 'a4', printLang: printLangOverride || baseLang })
             }
         }
-    }, [resolved, features, installments, workspaceName, t, i18n, bizPartner, partnerAccountStatementBalances, legacyOrderBalanceSnapshot, workspaceFooterContacts, creatorName, productImageUrls, customOrderPrint.selectedPrintVersion])
+    }, [resolved, features, installments, workspaceName, t, i18n, bizPartner, partnerId, partnerAccountStatementBalances, legacyOrderBalanceSnapshot, workspaceFooterContacts, creatorName, productImageUrls, customOrderPrint.selectedPrintVersion, workspaceId])
 
     const orderAtlasStandardReturnPreview = useMemo<TemplatePreview | undefined>(() => {
         if (!resolved || resolved.kind !== 'sales' || !returnPrintData) return undefined
@@ -779,6 +797,16 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         return {
             fields: [],
             supportsBackgroundEdit: true,
+            requiresFreshPartnerBalance: Boolean(workspaceId && partnerId),
+            resetFreshPartnerBalance: () => resetAtlasStandardPartnerBalancePrintState(
+                atlasStandardPartnerBalanceStateRef.current,
+                Boolean(workspaceId && partnerId)
+            ),
+            freshPartnerBalanceRequest: workspaceId && partnerId ? { workspaceId, partnerId } : undefined,
+            onFreshPartnerBalanceStateChange: (status, balances) => {
+                atlasStandardPartnerBalanceStateRef.current.status = status
+                atlasStandardPartnerBalanceStateRef.current.balances = balances
+            },
             createElement: (_data, _effectiveId, printLangOverride, renderOptions) => {
                 const baseLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
                 return (
@@ -793,6 +821,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                         workspaceFooterContacts={renderOptions?.workspaceFooterContacts || workspaceFooterContacts}
                         businessPartner={bizPartner}
                         partnerAccountStatementBalances={partnerAccountStatementBalances}
+                        partnerBalancePrintState={atlasStandardPartnerBalanceStateRef.current}
                         partnerBalanceFallbackSnapshot={legacyOrderBalanceSnapshot}
                         printedBy={creatorName}
                         productImageUrls={productImageUrls}
@@ -813,7 +842,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 return generateTemplatePdf({ element, format: 'a4', printLang: printLangOverride || baseLang })
             }
         }
-    }, [resolved, features, installments, workspaceName, i18n, bizPartner, partnerAccountStatementBalances, legacyOrderBalanceSnapshot, workspaceFooterContacts, creatorName, productImageUrls, returnPrintData])
+    }, [resolved, features, installments, workspaceName, i18n, bizPartner, partnerId, partnerAccountStatementBalances, legacyOrderBalanceSnapshot, workspaceFooterContacts, creatorName, productImageUrls, returnPrintData, workspaceId])
 
     if (!resolved) {
         return (
@@ -853,7 +882,9 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const outstanding = getOrderBalanceAmount(order)
     const paymentStatus = getOrderPaymentStatus(order)
     const hasPendingDraftLoanRepayment = isDraftOrderLoanRepaymentPending(order)
-    const isFullyReturnedSalesOrder = isSales && (order as SalesOrder).returnStatus === 'full'
+    const salesOrderReturnStatus = isSales ? (order as SalesOrder).returnStatus ?? 'none' : 'none'
+    const hasSalesOrderReturn = salesOrderReturnStatus !== 'none'
+    const isFullyReturnedSalesOrder = salesOrderReturnStatus === 'full'
     const canCreatePostReturnAdjustment = isSales
         && salesOrderReturns.length > 0
         && user?.role === 'admin'
@@ -896,7 +927,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         isSales ? { id: 'reserved', color: '#f59e0b', reached: Boolean((order as SalesOrder).reservedAt) } : null,
         { id: 'actual', color: 'hsl(var(--primary))', reached: Boolean(order.actualDeliveryDate) },
         { id: 'paid', color: '#10b981', reached: Boolean(order.paidAt) },
-        isSales && salesOrderReturns[0] ? { id: 'returned', color: '#f59e0b', reached: true } : null
+        hasSalesOrderReturn ? { id: 'returned', color: '#f43f5e', reached: true } : null
     ].filter(Boolean) as Array<{ id: string; color: string; reached: boolean }>
 
     const workflowFill = order.status === 'cancelled'
@@ -1554,7 +1585,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                                 row.id === 'paid'
                                                     ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]'
                                                     : row.id === 'returned'
-                                                        ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]'
+                                                        ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]'
                                                     : row.id === 'reserved'
                                                         ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]'
                                                     : isCreated
@@ -1564,7 +1595,10 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                                             : "bg-slate-400"
                                             )} />
                                             <div className="space-y-0.5">
-                                                <div className="font-bold text-sm leading-none transition-colors group-hover:text-primary">
+                                                <div className={cn(
+                                                    'font-bold text-sm leading-none transition-colors group-hover:text-primary',
+                                                    row.id === 'returned' && 'text-rose-700 dark:text-rose-300 group-hover:text-rose-700 dark:group-hover:text-rose-300'
+                                                )}>
                                                     {row.label}
                                                 </div>
                                                 <div className="text-muted-foreground text-xs font-medium flex items-center gap-1.5 pt-1">
@@ -1592,13 +1626,20 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                         'overflow-hidden border-border/60',
                         isApprovalRequested
                             ? 'bg-gradient-to-br from-violet-500/15 via-background to-amber-500/10'
-                            : isSales ? 'bg-gradient-to-br from-primary/10 via-background to-emerald-500/10' : 'bg-gradient-to-br from-sky-500/10 via-background to-cyan-500/10'
+                            : hasSalesOrderReturn
+                                ? 'bg-gradient-to-br from-rose-500/15 via-background to-rose-500/10'
+                                : isSales ? 'bg-gradient-to-br from-primary/10 via-background to-emerald-500/10' : 'bg-gradient-to-br from-sky-500/10 via-background to-cyan-500/10'
                     )}>
                         <CardContent className="p-6">
                             <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
                                 <div className="space-y-4">
                                     <div className="flex flex-wrap items-center gap-2">
-                                        <span className={cn('inline-flex items-center rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em]', isSales ? 'border-primary/20 bg-primary/10 text-primary' : 'border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-300')}>
+                                        <span className={cn(
+                                            'inline-flex items-center rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em]',
+                                            hasSalesOrderReturn
+                                                ? 'border-rose-500/20 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                                                : isSales ? 'border-primary/20 bg-primary/10 text-primary' : 'border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-300'
+                                        )}>
                                             {isSales ? (t('orders.details.salesOrder') || 'Sales Order') : (t('orders.details.purchaseOrder') || 'Purchase Order')}
                                         </span>
                                         <OrderStatusBadge

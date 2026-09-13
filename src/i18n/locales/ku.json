@@ -793,6 +793,7 @@
     "timeline": "هێڵی کاتی دۆخ",
     "timelineSubmitted": "نێردراوە",
     "inventoryDeducted": "کۆگا کەمکرایەوە",
+    "inventoryReturned": "کۆگا گەڕێندرایەوە",
     "inventoryWarning": "کۆگا پێویستی بە دواداچوونی دەستی هەیە بۆ یەک یان چەند بەرهەم.",
     "cancelReason": "هۆکاری هەڵوەشاندنەوە",
     "customerNote": "تێبینی",
@@ -803,6 +804,7 @@
       "processing": "لە پرۆسەدایە",
       "shipped": "نێردراوە",
       "delivered": "گەیشتووە",
+      "returned": "گەڕێندرایەوە",
       "cancelled": "هەڵوەشاوە"
     },
     "actions": {
@@ -812,7 +814,8 @@
       "deliver": "نیشانکردن وەک گەیشتوو",
       "cancel": "هەڵوەشاندنەوەی داواکاری",
       "editItems": "دەستکاریکردنی کاڵاکان",
-      "collect": "تۆمارکردنی وەرگرتن"
+      "collect": "تۆمارکردنی وەرگرتن",
+      "viewSalesOrder": "بینینی داواکاریی فرۆشتن"
     }
   },
   "notebook": {
@@ -1512,7 +1515,9 @@
       "partnerBalanceSnapshot": "باڵانسەکانی هاوبەش",
       "partnerBalanceBefore": "باڵانسی هاوبەش پێش داواکاری",
       "partnerBalanceAfter": "باڵانسی هاوبەش دوای داواکاری",
-      "partnerBalanceCurrent": "باڵانسی ئێستای هاوبەش"
+      "partnerBalanceCurrent": "باڵانسی ئێستای هاوبەش",
+      "partnerBalanceLoading": "باردەکرێت",
+      "partnerBalanceUnavailable": "باڵانسی ئێستا بەردەست نییە"
     },
     "table": {
       "orderNumber": "داواکاری #",
@@ -4524,7 +4529,7 @@
       "searchPartner": "بگەڕێ بەدوای هاوبەشێکی بازرگانی",
       "selectPartnerDescription": "هاوبەشێک هەڵبژێرە بۆ بینینی باڵانسی دەستپێک، چالاکییەکانی هەژمار و باڵانسی کۆتایی.",
       "refreshingLiveData": "چالاکیی نوێی هەژمار بار دەکرێت",
-      "refreshingLiveDataDescription": "پێش پیشاندانی ئەم ڕاپۆرتە، نوێترین داواکارییەکان، قەرزەکان و پارەدانەکان لە Supabase پشکنین دەکرێن.",
+      "refreshingLiveDataDescription": "پێش پیشاندانی ئەم ڕاپۆرتە، نوێترین داواکارییەکان، قەرزەکان و پارەدانەکان پشکنین دەکرێن.",
       "liveDataUnavailable": "نەتوانرا چالاکیی نوێی هەژمار بار بکرێت",
       "liveDataUnavailableDescription": "بۆ ئەوەی باڵانسێکی ناتەواو پیشان یان چاپ نەکرێت، ڕاپۆرتەکە شاردراوەتەوە. پەیوەندییەکە بپشکنە و دووبارە هەوڵ بدە.",
       "accountActivity": "چالاکیی هەژمار",
