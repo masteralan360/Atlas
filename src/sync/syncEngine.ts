@@ -302,6 +302,21 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
   };
 
   switch (entityType) {
+    case "loan_commands": {
+      const commandPayload = payload.payload;
+      if (!commandPayload || typeof commandPayload !== "object" || Array.isArray(commandPayload)) break;
+      const command = commandPayload as Record<string, unknown>;
+      const addCommandParent = (parentType: string, ...fieldNames: string[]) => {
+        const parentId = payloadReference(command, ...fieldNames);
+        if (parentId) parentKeys.push(mutationEntityKey(workspaceId, parentType, parentId));
+      };
+      addCommandParent("business_partners", "linked_party_id");
+      addCommandParent("payment_accounts", "account_id");
+      addCommandParent("loans", "loan_id");
+      addCommandParent("loan_commands", "loan_id");
+      addCommandParent("loan_commands", "loan_payment_id");
+      break;
+    }
     case "sales_orders":
       // A queued commission-mode setting change must reach the workspace before
       // an offline-created order snapshots that setting on the server.
@@ -938,7 +953,8 @@ export async function processMutationQueue(
         isRetriableSaleReturnMutation(mutation) ||
         isRecoverableProductSkuKeyMutation(mutation) ||
         isRecoverablePriceBookMutation(mutation) ||
-        isRecoverableCashierShiftTerminalReplayMutation(mutation),
+        isRecoverableCashierShiftTerminalReplayMutation(mutation) ||
+        mutation.entityType === "loan_commands",
     )
     .sortBy("createdAt");
   const mutations = mutationGroups
@@ -1069,6 +1085,32 @@ export async function processMutationQueue(
     try {
       const { entityType, operation, payload, entityId, workspaceId, id } =
         mutation;
+      if (entityType === "loan_commands") {
+        const action = payload.action;
+        const commandPayload = payload.payload;
+        if (
+          (action !== "create" && action !== "payment" && action !== "reversal")
+          || !commandPayload
+          || typeof commandPayload !== "object"
+          || Array.isArray(commandPayload)
+        ) {
+          throw new Error("Loan replay command is invalid");
+        }
+
+        const rpcName = action === "create"
+          ? "create_loan"
+          : action === "payment" ? "post_loan_payment" : "reverse_loan_payment";
+        const { data, error } = await supabase.rpc(rpcName, {
+          p_payload: commandPayload as Record<string, unknown>,
+        });
+        if (error) throw error;
+        const { persistLoanAggregateRpcResult } = await import("@/local-db/loanTransactions");
+        await persistLoanAggregateRpcResult(data);
+        await db.offline_mutations.update(id, { status: "synced", error: undefined });
+        successCount++;
+        reportCompleted();
+        continue;
+      }
       if (entityType === "delivery_voice_cleanup") {
         const shipmentId = payload.shipmentId ?? payload.shipment_id;
         if (typeof shipmentId !== "string" || !shipmentId || shipmentId !== entityId) {

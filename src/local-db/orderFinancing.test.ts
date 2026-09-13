@@ -391,6 +391,28 @@ describe('order-linked financing', () => {
         await db.delete()
         await db.open()
         writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'local' })
+        const now = '2026-06-01T00:00:00.000Z'
+        await db.products.put({
+            id: PRODUCT_ID,
+            workspaceId: WORKSPACE_ID,
+            sku: 'TEST-001',
+            name: 'Test Product',
+            description: '',
+            categoryId: null,
+            price: 100,
+            costPrice: 50,
+            quantity: 0,
+            minStockLevel: 0,
+            unit: 'pcs',
+            currency: 'usd',
+            canBeReturned: true,
+            createdAt: now,
+            updatedAt: now,
+            syncStatus: 'synced',
+            lastSyncedAt: now,
+            version: 1,
+            isDeleted: false
+        })
     })
 
     afterEach(() => {

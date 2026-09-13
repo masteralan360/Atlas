@@ -201,6 +201,8 @@ export interface AppendPaymentTransactionInput {
     id?: string
     /** Uses an ID upsert for an operation that may be replayed by an offline client. */
     idempotent?: boolean
+    /** Aggregate workflows own remote replay and must not enqueue a second row mutation. */
+    deferRemoteSync?: boolean
     sourceModule: PaymentTransactionSourceModule
     sourceType: PaymentTransactionSourceType
     sourceRecordId: string
@@ -406,6 +408,7 @@ function buildLoanOriginationTransactionInput(
     | 'loanNo'
     | 'notes'
     | 'createdBy'
+    | 'linkedPartyId'
   >
 ): AppendPaymentTransactionInput | null {
   if (loan.source !== 'manual') {
@@ -429,7 +432,8 @@ function buildLoanOriginationTransactionInput(
     metadata: {
       loanCategory: loan.loanCategory || 'standard',
       loanDirection: loan.direction || 'lent',
-      origination: true
+      origination: true,
+      ...(loan.linkedPartyId ? { businessPartnerId: loan.linkedPartyId } : {})
     }
   }
 }
@@ -1503,17 +1507,19 @@ export async function appendPaymentTransaction(
     return transaction
   }
 
-  if (!isOnline()) {
+  if (!isOnline() || input.deferRemoteSync) {
     await assertPaymentAccountTransactionCanBeAppliedLocally(transaction)
     await db.payment_transactions.put(transaction)
     await mirrorPaymentAccountTransactionLocally(transaction)
-    await addToOfflineMutations(
-      'payment_transactions',
-      transaction.id,
-      'create',
-      transaction as unknown as Record<string, unknown>,
-      workspaceId
-    )
+    if (!input.deferRemoteSync) {
+      await addToOfflineMutations(
+        'payment_transactions',
+        transaction.id,
+        'create',
+        transaction as unknown as Record<string, unknown>,
+        workspaceId
+      )
+    }
     return transaction
   }
 
@@ -1545,13 +1551,15 @@ export async function appendPaymentTransaction(
       await assertPaymentAccountTransactionCanBeAppliedLocally(transaction)
       await db.payment_transactions.put(transaction)
       await mirrorPaymentAccountTransactionLocally(transaction)
-      await addToOfflineMutations(
-        'payment_transactions',
-        transaction.id,
-        'create',
-        transaction as unknown as Record<string, unknown>,
-        workspaceId
-      )
+      if (!input.deferRemoteSync) {
+        await addToOfflineMutations(
+          'payment_transactions',
+          transaction.id,
+          'create',
+          transaction as unknown as Record<string, unknown>,
+          workspaceId
+        )
+      }
       return transaction
     }
 
@@ -1846,10 +1854,13 @@ export async function appendLoanOriginationTransactionForLoan(
     | 'loanNo'
     | 'notes'
     | 'createdBy'
+    | 'linkedPartyId'
   >,
   selection: {
     accountId?: string | null
     accountNameSnapshot?: string | null
+    transactionId?: string
+    deferRemoteSync?: boolean
   } = {}
 ) {
   if (loan.workspaceId !== workspaceId) {
@@ -1878,6 +1889,9 @@ export async function appendLoanOriginationTransactionForLoan(
 
   return appendPaymentTransaction(workspaceId, {
     ...input,
+    id: selection.transactionId,
+    idempotent: !!selection.transactionId,
+    deferRemoteSync: selection.deferRemoteSync,
     ...(selection.accountId === undefined
       ? {}
       : {
@@ -3137,34 +3151,22 @@ export async function reversePaymentTransaction(
       const loan = await db.loans.get(transaction.sourceRecordId)
       if (!loan || loan.isDeleted) throw new Error('Loan not found')
       const { reverseLoanPayment } = await import('./hooks')
-      const reversal = await appendPaymentTransaction(workspaceId, {
-        sourceModule: transaction.sourceModule,
-        sourceType: transaction.sourceType,
-        sourceRecordId: transaction.sourceRecordId,
-        sourceSubrecordId: transaction.sourceSubrecordId ?? null,
-        direction: transaction.direction,
-        amount: -reversalAmount,
-        currency: transaction.currency,
-        paymentMethod: reversalPaymentMethod,
-        paidAt: input.paidAt ? new Date(input.paidAt).toISOString() : new Date().toISOString(),
-        counterpartyName: transaction.counterpartyName || null,
-        referenceLabel: loan.loanNo || transaction.referenceLabel || null,
-        note,
-        createdBy: input.createdBy || null,
-        ...reversalAccount,
-        reversalOfTransactionId: transaction.id,
-        metadata: {
-          ...(transaction.metadata && typeof transaction.metadata === 'object' ? transaction.metadata : {}),
-          reversal: true
-        }
-      })
-      try {
-        await reverseLoanPayment(workspaceId, transaction)
-        return reversal
-      } catch (error) {
-        await softDeletePaymentTransaction(reversal)
-        throw error
+      if (Math.abs(reversalAmount - reversalState.remainingAmount) > PAYMENT_AMOUNT_EPSILON) {
+        throw new Error('Loan payments can only be reversed in full')
       }
+      if (input.accountId !== undefined && input.accountId !== transaction.accountId) {
+        throw new Error('A loan reversal must use the original payment account')
+      }
+      if (input.paymentMethod !== undefined && input.paymentMethod !== transaction.paymentMethod) {
+        throw new Error('A loan reversal must use the original payment method')
+      }
+      const result = await reverseLoanPayment(workspaceId, transaction, {
+        reversalTransactionId: generateId(),
+        paidAt: input.paidAt,
+        note,
+        createdBy: input.createdBy
+      })
+      return result.transaction
     }
 
     case 'sales_order': {

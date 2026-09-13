@@ -11,6 +11,12 @@ SQLite Offline queue
 
 Price books selector order form and quick order
 
+English LOG
+
+Fix Instant POS Checkoutsucessmodal
+
+Print-upon-checkout toggle
+
 One single Usage Request Payload
 
 fix retry sync

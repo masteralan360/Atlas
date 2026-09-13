@@ -43,6 +43,7 @@ import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { isPosPaymentTypeAllowed, type PosPaymentType } from '@/lib/posPaymentPolicy'
 import { db } from '@/local-db/database'
 import { applyOfflinePosStockEffects } from '@/local-db/offlinePosStock'
+import { persistLoanAggregateRpcResult } from '@/local-db/loanTransactions'
 import { formatCurrency, generateId, cn } from '@/lib/utils'
 import { roundOrderValue } from '@/lib/orderPrecision'
 import { CartItem } from '@/types'
@@ -2764,6 +2765,37 @@ export function POS() {
                     : digitalProvider) as 'cash' | 'fib' | 'qicard' | 'zaincash' | 'fastpay' | 'loan'
         }
 
+        const atomicLoanPayload = paymentType === 'loan' && validLoanRegistrationData
+            ? {
+                id: generateId(),
+                workspace_id: user.workspaceId,
+                sale_id: saleId,
+                source: 'pos',
+                loan_category: validLoanRegistrationData.installmentCount > 1 ? 'standard' : 'simple',
+                direction: 'lent',
+                linked_party_type: validLoanRegistrationData.linkedPartyType || null,
+                linked_party_id: validLoanRegistrationData.linkedPartyId || null,
+                linked_party_name: validLoanRegistrationData.linkedPartyName || null,
+                borrower_name: validLoanRegistrationData.borrowerName,
+                borrower_phone: validLoanRegistrationData.borrowerPhone,
+                borrower_address: validLoanRegistrationData.borrowerAddress,
+                borrower_national_id: validLoanRegistrationData.borrowerNationalId,
+                principal_amount: totalAmount,
+                settlement_currency: settlementCurrency,
+                exchange_rate_snapshot: exchangeRatesPayload,
+                installment_count: Math.max(1, validLoanRegistrationData.installmentCount),
+                installment_frequency: validLoanRegistrationData.installmentFrequency,
+                first_due_date: validLoanRegistrationData.firstDueDate,
+                notes: validLoanRegistrationData.notes || null,
+                created_by: user.id,
+                created_at: checkoutTimestamp,
+                installments: Array.from(
+                    { length: Math.max(1, validLoanRegistrationData.installmentCount) },
+                    () => ({ id: generateId() })
+                )
+            }
+            : null
+
         const recordPosPayment = async (referenceLabel: string) => {
             // A financed POS sale creates its own loan obligation; it is not a
             // cash receipt at checkout. Every immediately paid sale is posted
@@ -2797,18 +2829,16 @@ export function POS() {
             }
 
             // Attempt online checkout
-            let completeSaleResponse = await runSupabaseAction('pos.completeSale', () =>
-                supabase.rpc('complete_sale', {
-                    payload: checkoutPayload
+            const completeSale = () => atomicLoanPayload
+                ? supabase.rpc('complete_sale_with_loan', {
+                    payload: checkoutPayload,
+                    p_loan: atomicLoanPayload
                 })
-            )
+                : supabase.rpc('complete_sale', { payload: checkoutPayload })
+            let completeSaleResponse = await runSupabaseAction('pos.completeSale', completeSale)
 
             if (completeSaleResponse.error && isRetriableWebRequestError(completeSaleResponse.error)) {
-                completeSaleResponse = await runSupabaseAction('pos.completeSale.verify', () =>
-                    supabase.rpc('complete_sale', {
-                        payload: checkoutPayload
-                    })
-                )
+                completeSaleResponse = await runSupabaseAction('pos.completeSale.verify', completeSale)
             }
 
             const { data, error } = completeSaleResponse
@@ -2823,6 +2853,9 @@ export function POS() {
             const serverResult = data as any
             const sequenceId = serverResult?.sequence_id
             const formattedInvoiceId = sequenceId ? `#${String(sequenceId).padStart(5, '0')}` : `#${saleId.slice(0, 8)}`
+            const atomicLoanAggregate = serverResult?.loan_aggregate
+                ? await persistLoanAggregateRpcResult(serverResult.loan_aggregate)
+                : null
 
             await recordPosPayment(formattedInvoiceId)
 
@@ -2886,44 +2919,19 @@ export function POS() {
                 isDeleted: false
             })
 
-            if (paymentType === 'loan' && validLoanRegistrationData) {
-                try {
-                    const loanResult = await createLoanFromPosSale(user.workspaceId, {
-                        saleId,
-                        linkedPartyType: validLoanRegistrationData.linkedPartyType || null,
-                        linkedPartyId: validLoanRegistrationData.linkedPartyId || null,
-                        linkedPartyName: validLoanRegistrationData.linkedPartyName || null,
-                        borrowerName: validLoanRegistrationData.borrowerName,
-                        borrowerPhone: validLoanRegistrationData.borrowerPhone,
-                        borrowerAddress: validLoanRegistrationData.borrowerAddress,
-                        borrowerNationalId: validLoanRegistrationData.borrowerNationalId,
-                        principalAmount: totalAmount,
-                        settlementCurrency: settlementCurrency as CurrencyCode,
-                        exchangeRateSnapshot: exchangeRatesPayload,
-                        installmentCount: validLoanRegistrationData.installmentCount,
-                        installmentFrequency: validLoanRegistrationData.installmentFrequency,
-                        firstDueDate: validLoanRegistrationData.firstDueDate,
-                        notes: validLoanRegistrationData.notes,
-                        createdBy: user.id
-                    })
-
-                    if (!validLoanRegistrationData.linkedPartyType && validLoanRegistrationData.borrowerName.trim()) {
-                        setPosLoanSavePartnerData({
-                            loanId: loanResult.loan.id,
-                            borrowerName: validLoanRegistrationData.borrowerName.trim(),
-                            borrowerPhone: validLoanRegistrationData.borrowerPhone.trim(),
-                            borrowerAddress: validLoanRegistrationData.borrowerAddress.trim(),
-                            settlementCurrency: settlementCurrency as CurrencyCode
-                        })
-                    }
-                } catch (loanErr) {
-                    console.error('[POS] Loan registration failed after checkout:', loanErr)
-                    toast({
-                        variant: 'destructive',
-                        title: t('messages.error'),
-                        description: t('loans.messages.loanCreateFailed') || 'Loan registration failed. Sale was completed.'
-                    })
-                }
+            if (
+                atomicLoanAggregate
+                && validLoanRegistrationData
+                && !validLoanRegistrationData.linkedPartyType
+                && validLoanRegistrationData.borrowerName.trim()
+            ) {
+                setPosLoanSavePartnerData({
+                    loanId: atomicLoanAggregate.loan.id,
+                    borrowerName: validLoanRegistrationData.borrowerName.trim(),
+                    borrowerPhone: validLoanRegistrationData.borrowerPhone.trim(),
+                    borrowerAddress: validLoanRegistrationData.borrowerAddress.trim(),
+                    settlementCurrency: settlementCurrency as CurrencyCode
+                })
             }
 
             setCart([])

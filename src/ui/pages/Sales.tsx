@@ -16,6 +16,7 @@ import { getLoanDetailsPath } from '@/lib/loanPresentation'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
 import { adjustInventoryQuantity, applySalesOrderReturnQuantities, appendPaymentTransaction, commitStockBatchAllocations, db, getActiveTravelBookingPayments, markPosLoanCancelledForFullSaleReturn, processSaleProductExchange, recordLoanPayment, resolveReturnStorageId, restoreStockBatchAllocations, splitStockBatchAllocationsForReturn, useLoanBySaleId, useLoanInstallments, useLoanPayments, useLoans, usePriceBookCatalogState, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useInventory, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useDeliveryMerchantProfiles, useDeliveryShipments, useRentalContracts, useRentalVehicles, toUISale, toUISaleFromOrder, toUISaleFromExchangeTransaction, toUISaleFromRealEstateCommissionTransaction, toUISaleFromPaidClinicalAppointment, toUISaleFromActivityTransaction, toUISaleFromDeliveryShipment, toUISaleFromRentalContract, toUISaleFromTravelBookingPayment, type CurrencyCode, type Loan, type PaymentAccount, type SaleReturn as LocalSaleReturn, type SaleReturnItem as LocalSaleReturnItem, type StockBatchAllocation, type WorkspacePaymentMethod } from '@/local-db'
+import { persistLoanAggregateRpcResult } from '@/local-db/loanTransactions'
 import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
 import { useWorkspace } from '@/workspace'
 import { isMobile } from '@/lib/platform'
@@ -1683,9 +1684,13 @@ export function Sales() {
 
                     const loan = await db.loans.where('saleId').equals(saleToReturn.id).first()
                     if (loan) {
+                        // Match the atomic Cloud RPC: a return can settle only
+                        // the outstanding obligation, never overpay the loan.
+                        const returnCredit = Math.min(amt, Math.max(0, loan.balanceAmount))
+                        if (returnCredit <= 0) return
                         await recordLoanPayment(saleToReturn.workspace_id, {
                             loanId: loan.id,
-                            amount: amt,
+                            amount: returnCredit,
                             paymentMethod: 'loan_adjustment',
                             note: `Return Credit (Reason: ${reason || 'Return'})`,
                             createdBy: user?.id
@@ -2013,7 +2018,9 @@ export function Sales() {
                 }))
 
                 const { data, error: itemError } = await runSupabaseAction('sales.returnItems', () =>
-                    supabase.rpc('process_sale_return', {
+                    supabase.rpc(saleToReturn.payment_method === 'loan'
+                        ? 'process_sale_return_with_loan'
+                        : 'process_sale_return', {
                         p_return_id: returnId,
                         p_sale_id: saleToReturn.id,
                         p_items: returnLinePayloads,
@@ -2024,6 +2031,9 @@ export function Sales() {
                 error = itemError
 
                 if (!error && data?.success) {
+                    if (data.loan_aggregate) {
+                        await persistLoanAggregateRpcResult(data.loan_aggregate)
+                    }
                     const returnValue = data.return_value || 0
                     const returnTimestamp = new Date().toISOString()
                     const restoredPlans = await restoreInventoryForReturn({
@@ -2113,10 +2123,6 @@ export function Sales() {
                     if (selectedSale?.id === saleToReturn.id) {
                         setSelectedSale(updateSale(selectedSale))
                     }
-                    await recordReturnLoanPayment(returnValue, {
-                        isFullSaleReturn: isSaleFullyReturnedBy(itemsToReturn, quantities),
-                        pendingRemoteSync: false
-                    })
                 }
             } else {
                 // Whole Sale Return
@@ -2131,7 +2137,9 @@ export function Sales() {
                     quantity: quantities[index]
                 }))
                 const { data, error: saleError } = await runSupabaseAction('sales.returnWhole', () =>
-                    supabase.rpc('process_sale_return', {
+                    supabase.rpc(saleToReturn.payment_method === 'loan'
+                        ? 'process_sale_return_with_loan'
+                        : 'process_sale_return', {
                         p_return_id: returnId,
                         p_sale_id: saleToReturn.id,
                         p_items: returnLinePayloads,
@@ -2142,6 +2150,9 @@ export function Sales() {
                 error = saleError
 
                 if (!error && data?.success) {
+                    if (data.loan_aggregate) {
+                        await persistLoanAggregateRpcResult(data.loan_aggregate)
+                    }
                     const returnTimestamp = new Date().toISOString()
                     const restoredPlans = await restoreInventoryForReturn({
                         workspaceId: saleToReturn.workspace_id,
@@ -2242,10 +2253,6 @@ export function Sales() {
                     if (selectedSale?.id === saleToReturn.id) {
                         setSelectedSale(updateSale(selectedSale))
                     }
-                    await recordReturnLoanPayment(returnValue, {
-                        isFullSaleReturn: true,
-                        pendingRemoteSync: false
-                    })
                 }
             }
         

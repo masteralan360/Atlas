@@ -28,12 +28,14 @@ function installBrowserStorage() {
 
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage })
     Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: storage })
+    Object.defineProperty(globalThis.URL, 'createObjectURL', { configurable: true, value: () => 'blob:test' })
     Object.defineProperty(globalThis, 'window', {
         configurable: true,
         value: {
             localStorage: storage,
             sessionStorage: storage,
             location: { origin: 'http://localhost', hash: '', pathname: '/' },
+            URL: globalThis.URL,
             addEventListener: () => undefined,
             removeEventListener: () => undefined
         }
@@ -43,12 +45,21 @@ function installBrowserStorage() {
         value: {
             visibilityState: 'visible',
             dir: 'ltr',
-            documentElement: { lang: 'en', dir: 'ltr' },
+            documentElement: { lang: 'en', dir: 'ltr', style: {} },
+            head: { appendChild: () => undefined },
+            getElementsByTagName: () => [{ appendChild: () => undefined }],
+            createElement: () => ({ appendChild: () => undefined, setAttribute: () => undefined, style: {} }),
+            createTextNode: () => ({}),
             addEventListener: () => undefined,
             removeEventListener: () => undefined
         }
     })
     Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { onLine: false } })
+    Object.defineProperty(globalThis, 'DOMMatrix', { configurable: true, value: class DOMMatrix {} })
+    Object.defineProperty(globalThis, 'ImageData', { configurable: true, value: class ImageData {} })
+    Object.defineProperty(globalThis, 'Path2D', { configurable: true, value: class Path2D {} })
+    Object.defineProperty(globalThis, 'Element', { configurable: true, value: class Element {} })
+    Object.defineProperty(globalThis, 'HTMLElement', { configurable: true, value: class HTMLElement {} })
 }
 
 describe('POS loan full returns', () => {
@@ -158,11 +169,23 @@ describe('POS loan full returns', () => {
                 status: 'cancelled'
             })))
         )
+        const transactions = await db.payment_transactions.where('workspaceId').equals(WORKSPACE_ID).toArray()
+        const reversalTransaction = transactions.find((transaction) => (
+            transaction.reversalOfTransactionId === originalTransaction!.id
+        ))
+        expect(reversalTransaction).toBeTruthy()
         expect(await db.loan_payments.where('loanId').equals(loan.id).toArray()).toEqual([
-            expect.objectContaining({ amount: 40, paymentMethod: 'cash', isDeleted: false })
+            expect.objectContaining({
+                amount: 40,
+                paymentMethod: 'cash',
+                paymentTransactionId: originalTransaction!.id,
+                reversedAmount: 40,
+                reversalTransactionId: reversalTransaction!.id,
+                isDeleted: true,
+                integrityVersion: 1
+            })
         ])
 
-        const transactions = await db.payment_transactions.where('workspaceId').equals(WORKSPACE_ID).toArray()
         expect(transactions).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 id: originalTransaction!.id,

@@ -245,6 +245,15 @@ describe('payment-account availability', () => {
       paidAt: '2026-09-02T12:00:00.000Z',
     })
 
+    const postedLoan = await db.loans.get(loan.id)
+    const postedPayment = (await db.loan_payments.where('loanId').equals(loan.id).toArray())[0]
+    expect(postedLoan).toMatchObject({ loanNo: loan.loanNo, integrityVersion: 1 })
+    expect(postedPayment).toMatchObject({
+      sequenceNo: 1,
+      integrityVersion: 1,
+      reversedAmount: 0,
+    })
+
     const original = (await db.payment_transactions
       .where('[workspaceId+sourceType+sourceRecordId]')
       .equals([WORKSPACE_ID, 'loan_installment', loan.id])
@@ -257,6 +266,7 @@ describe('payment-account availability', () => {
         touchedInstallmentIds: [installments[0].id],
       }),
     })
+    expect(postedPayment?.paymentTransactionId).toBe(original?.id)
     expect(await db.loans.get(loan.id)).toMatchObject({ totalPaidAmount: 50_000, balanceAmount: 50_000 })
     expect(await db.payment_account_movements.get(original!.id)).toMatchObject({ deltaAmount: 50_000 })
 
@@ -278,7 +288,11 @@ describe('payment-account availability', () => {
       { paidAmount: 0, balanceAmount: 50_000 },
       { paidAmount: 0, balanceAmount: 50_000 },
     ])
-    expect((await db.loan_payments.where('loanId').equals(loan.id).toArray())[0]).toMatchObject({ isDeleted: true })
+    expect((await db.loan_payments.where('loanId').equals(loan.id).toArray())[0]).toMatchObject({
+      isDeleted: true,
+      reversedAmount: 50_000,
+      reversalTransactionId: reversal.id,
+    })
     expect(await db.payment_account_movements.get(reversal.id)).toMatchObject({ deltaAmount: -50_000 })
     expect((await db.payment_account_balances.where('[accountId+currency]').equals([account.id, 'iqd']).first())?.balanceAmount).toBe(50_000)
 
@@ -348,6 +362,35 @@ describe('payment-account availability', () => {
     })
     expect((await db.payment_transactions.where('workspaceId').equals(WORKSPACE_ID).toArray())
       .filter((transaction) => transaction.sourceType === 'simple_loan')).toHaveLength(0)
+  })
+
+  it('rejects an overpayment instead of silently capping it and preserves every balance', async () => {
+    const { loan } = await createManualLoan(WORKSPACE_ID, {
+      loanCategory: 'simple',
+      direction: 'lent',
+      borrowerName: 'Test Borrower',
+      borrowerPhone: '',
+      borrowerAddress: '',
+      borrowerNationalId: '',
+      principalAmount: 100,
+      settlementCurrency: 'usd',
+      installmentCount: 1,
+      installmentFrequency: 'monthly',
+      firstDueDate: '2026-09-01',
+    })
+
+    await expect(recordLoanPayment(WORKSPACE_ID, {
+      loanId: loan.id,
+      amount: 100.001,
+      paymentMethod: 'cash',
+    })).rejects.toThrow('exceeds the remaining balance')
+
+    expect(await db.loans.get(loan.id)).toMatchObject({
+      loanNo: loan.loanNo,
+      totalPaidAmount: 0,
+      balanceAmount: 100,
+    })
+    expect(await db.loan_payments.where('loanId').equals(loan.id).count()).toBe(0)
   })
 
   it('keeps an expense unpaid when its selected account cannot fund the settlement', async () => {

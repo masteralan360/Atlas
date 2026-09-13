@@ -464,6 +464,55 @@ describe('agent deletion ordering', () => {
     })
 })
 
+describe('loan command ordering', () => {
+    it('replays create, payment, and reversal in financial order', () => {
+        const ordered = orderMutationsForSync([
+            {
+                id: 'a-reversal-command',
+                workspaceId: 'workspace-1',
+                entityType: 'loan_commands',
+                entityId: 'reversal-transaction-1',
+                operation: 'create',
+                payload: {
+                    action: 'reversal',
+                    payload: { loan_id: 'loan-1', loan_payment_id: 'payment-1' }
+                },
+                createdAt: '2026-09-13T10:00:00.000Z'
+            },
+            {
+                id: 'b-payment-command',
+                workspaceId: 'workspace-1',
+                entityType: 'loan_commands',
+                entityId: 'payment-1',
+                operation: 'create',
+                payload: {
+                    action: 'payment',
+                    payload: { loan_id: 'loan-1' }
+                },
+                createdAt: '2026-09-13T10:00:01.000Z'
+            },
+            {
+                id: 'c-create-command',
+                workspaceId: 'workspace-1',
+                entityType: 'loan_commands',
+                entityId: 'loan-1',
+                operation: 'create',
+                payload: {
+                    action: 'create',
+                    payload: { loan_id: 'loan-1' }
+                },
+                createdAt: '2026-09-13T10:00:02.000Z'
+            }
+        ])
+
+        expect(ordered.map((mutation) => mutation.id)).toEqual([
+            'c-create-command',
+            'b-payment-command',
+            'a-reversal-command'
+        ])
+    })
+})
+
 describe('tracked commission snapshot ordering', () => {
     it('syncs an offline workspace mode change before its new sales order', () => {
         const ordered = orderMutationsForSync([

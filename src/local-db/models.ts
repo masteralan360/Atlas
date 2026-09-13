@@ -2020,6 +2020,12 @@ export interface Loan extends BaseEntity {
   status: LoanStatus
   notes?: string
   createdBy?: string
+  /** The cash-ledger entry that funded a manual loan. New records always populate this. */
+  originationTransactionId?: string | null
+  /** Once set, source links, category, direction, and settlement currency are immutable. */
+  termsLockedAt?: string | null
+  /** Zero denotes a legacy row; version one is protected by the hardened integrity contract. */
+  integrityVersion?: number
 }
 
 export interface LoanInstallment extends BaseEntity {
@@ -2031,6 +2037,7 @@ export interface LoanInstallment extends BaseEntity {
   balanceAmount: number
   status: InstallmentStatus
   paidAt?: string | null
+  integrityVersion?: number
 }
 
 export interface LoanPayment extends BaseEntity {
@@ -2040,6 +2047,13 @@ export interface LoanPayment extends BaseEntity {
   paidAt: string
   note?: string
   createdBy?: string
+  sequenceNo?: number | null
+  paymentTransactionId?: string | null
+  reversedAmount?: number
+  reversalTransactionId?: string | null
+  reversedAt?: string | null
+  reversedBy?: string | null
+  integrityVersion?: number
 }
 
 /** A generic, off-catalog sale with either a fixed schedule or an open customer balance. */
@@ -2766,6 +2780,7 @@ export interface OfflineMutation {
     | 'loans'
     | 'loan_installments'
     | 'loan_payments'
+    | 'loan_commands'
     | 'installment_sales'
     | 'installment_sale_installments'
     | 'installment_sale_payments'

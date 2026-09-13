@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(19);
+SELECT plan(21);
 
 CREATE TEMP TABLE inventory_quantity_guard_test (
   quantity numeric NOT NULL
@@ -35,6 +35,27 @@ SELECT throws_ok(
   '23514',
   'Inventory quantity must be a finite number',
   'NaN stock is rejected'
+);
+
+CREATE TEMP TABLE service_product_quantity_guard_test (
+  quantity numeric NULL,
+  is_service boolean NOT NULL
+);
+
+CREATE TRIGGER service_product_quantity_guard_test_trigger
+BEFORE INSERT OR UPDATE OF quantity ON service_product_quantity_guard_test
+FOR EACH ROW
+EXECUTE FUNCTION private.guard_nonnegative_quantity_transition();
+
+SELECT lives_ok(
+  $$INSERT INTO service_product_quantity_guard_test(quantity, is_service) VALUES (NULL, true)$$,
+  'a service may retain its intentionally empty inventory snapshot'
+);
+SELECT throws_ok(
+  $$INSERT INTO service_product_quantity_guard_test(quantity, is_service) VALUES (NULL, false)$$,
+  '23514',
+  'Inventory quantity must be a finite number',
+  'a non-service product still requires a finite inventory snapshot'
 );
 
 ALTER TABLE inventory_quantity_guard_test DISABLE TRIGGER USER;
