@@ -50,7 +50,9 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/postgresql-apt.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends postgresql-client-17 awscli age
+          # GitHub's ubuntu-24.04 hosted runner already includes AWS CLI v2.
+          # Ubuntu's `awscli` package is not available on this image.
+          sudo apt-get install --yes --no-install-recommends postgresql-client-17 age
           pg_dump --version | grep --extended-regexp '^pg_dump \(PostgreSQL\) 17\.'
           age --version
           aws --version
