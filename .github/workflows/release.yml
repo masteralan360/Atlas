@@ -6,6 +6,9 @@ on:
   workflow_dispatch:
 
 env:
+  # Windows GitHub runners can otherwise start Python with a legacy CP-1252
+  # console encoding, which cannot emit all CI log output safely.
+  PYTHONUTF8: "1"
   VITE_R2_WORKER_URL: ${{ secrets.VITE_R2_WORKER_URL }}
   VITE_R2_AUTH_TOKEN: ${{ secrets.VITE_R2_AUTH_TOKEN }}
   VITE_ENABLE_DEMO: ${{ secrets.VITE_ENABLE_DEMO }}

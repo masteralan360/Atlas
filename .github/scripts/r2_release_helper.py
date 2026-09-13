@@ -42,7 +42,7 @@ def is_sau_enabled():
 
 def clear_updates():
     if is_sau_enabled():
-        print("⚠️  SAU is enabled — skipping atlas-updates/ clear entirely.")
+        print("SAU is enabled; skipping atlas-updates/ clear entirely.")
         return
 
     print("Clearing atlas-updates/ in R2...")
@@ -66,7 +66,7 @@ def clear_updates():
 
 def upload_assets():
     if is_sau_enabled():
-        print("⚠️  SAU is enabled — skipping all atlas-updates/ uploads entirely.")
+        print("SAU is enabled; skipping all atlas-updates/ uploads entirely.")
         print("   Existing R2 update files will remain untouched.")
         return
 
