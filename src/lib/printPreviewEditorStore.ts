@@ -1,6 +1,7 @@
 import { getPdfShapeBottom, type PdfShape, type UniversalInvoice } from '@/types'
 import type { ReactElement } from 'react'
 import type { PartnerAccountStatementClosingBalance } from '@/lib/partnerAccountStatement'
+import type { OrderPartnerBalanceSnapshot, PurchaseOrder, SalesOrder } from '@/local-db'
 
 export type PrintFormat = 'a4' | 'receipt' | 'barcode_35x15'
 export type CustomTemplatePrintLanguage = 'en' | 'ar' | 'ku'
@@ -68,11 +69,13 @@ export type TemplatePreview = {
     freshPartnerBalanceRequest?: {
         workspaceId: string
         partnerId: string
+        order: SalesOrder | PurchaseOrder
     }
     /** Receives fresh balance data for the visible preview and final PDF. */
     onFreshPartnerBalanceStateChange?: (
         state: 'loading' | 'ready' | 'error',
-        balances?: PartnerAccountStatementClosingBalance[]
+        balances?: PartnerAccountStatementClosingBalance[],
+        legacyOrderBalanceSnapshot?: OrderPartnerBalanceSnapshot | null
     ) => void
     page?: {
         widthMm: number

@@ -21,9 +21,18 @@ describe('Atlas Standard partner-balance print state', () => {
 
         state.status = 'ready'
         state.balances = [{ currency: 'iqd', closingBalance: 1_056_000 }]
+        state.legacyOrderBalanceSnapshot = {
+            version: 1,
+            capturedAt: '2026-09-13T00:00:00.000Z',
+            balances: [{ currency: 'iqd', before: 1_056_000, after: 1_051_150 }]
+        }
         resetAtlasStandardPartnerBalancePrintState(state, true)
 
-        expect(state).toEqual({ status: 'loading', balances: undefined })
+        expect(state).toEqual({
+            status: 'loading',
+            balances: undefined,
+            legacyOrderBalanceSnapshot: undefined
+        })
     })
 
     it('does not hold a print that has no linked partner balance to refresh', () => {

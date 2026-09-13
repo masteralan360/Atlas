@@ -2859,7 +2859,8 @@
       "partnerBalanceAfter": "Partner's Balance After Order",
       "partnerBalanceCurrent": "Partner's Current Balance",
       "partnerBalanceLoading": "Loading",
-      "partnerBalanceUnavailable": "Current balance is unavailable"
+      "partnerBalanceUnavailable": "Current balance is unavailable",
+      "partnerBalanceSnapshotUnavailable": "Partner balance is unavailable"
     },
     "table": {
       "orderNumber": "Order #",

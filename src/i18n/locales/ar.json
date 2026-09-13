@@ -1514,7 +1514,8 @@
       "partnerBalanceAfter": "رصيد الشريك بعد الطلب",
       "partnerBalanceCurrent": "الرصيد الحالي للشريك",
       "partnerBalanceLoading": "جارٍ التحميل",
-      "partnerBalanceUnavailable": "الرصيد الحالي غير متاح"
+      "partnerBalanceUnavailable": "الرصيد الحالي غير متاح",
+      "partnerBalanceSnapshotUnavailable": "رصيد الشريك غير متاح"
     },
     "table": {
       "orderNumber": "رقم الطلب",

@@ -1867,9 +1867,13 @@ function createAtlasStandardOrderInvoicePreview(
         ? SAMPLE_ORDER_DATA
         : options.order || SAMPLE_ORDER_DATA
     const kind = printMode === 'return' ? 'sales' : options.orderKind || 'sales'
+    const usesRealOrder = Boolean(options.order) && order === options.order
     const partnerId = order.businessPartnerId
         || (kind === 'sales' ? (order as SalesOrder).customerId : (order as PurchaseOrder).supplierId)
-    const requiresFreshPartnerBalance = Boolean(options.workspaceId && partnerId)
+    // The Custom Templates page renders sample documents with the active
+    // workspace. A sample must never trigger a real partner refresh or block
+    // saving a layout; only an actual order print requires verified balances.
+    const requiresFreshPartnerBalance = Boolean(usesRealOrder && options.workspaceId && partnerId)
     const partnerBalancePrintState = options.partnerBalancePrintState
         || createAtlasStandardPartnerBalancePrintState(requiresFreshPartnerBalance)
     const effectivePrintVersion: OrderPrintVersion = printMode === 'return'
@@ -1902,12 +1906,13 @@ function createAtlasStandardOrderInvoicePreview(
             partnerBalancePrintState,
             requiresFreshPartnerBalance
         ),
-        freshPartnerBalanceRequest: options.workspaceId && partnerId
-            ? { workspaceId: options.workspaceId, partnerId }
+        freshPartnerBalanceRequest: requiresFreshPartnerBalance && options.workspaceId && partnerId
+            ? { workspaceId: options.workspaceId, partnerId, order }
             : undefined,
-        onFreshPartnerBalanceStateChange: (status, balances) => {
+        onFreshPartnerBalanceStateChange: (status, balances, legacyOrderBalanceSnapshot) => {
             partnerBalancePrintState.status = status
             partnerBalancePrintState.balances = balances
+            partnerBalancePrintState.legacyOrderBalanceSnapshot = legacyOrderBalanceSnapshot
         },
         createElement: (data, _effectiveId, printLangOverride, renderOptions) => (
             <AtlasStandardOrderInvoiceTemplate

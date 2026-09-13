@@ -483,11 +483,12 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
                 Boolean(workspaceId && printPartnerId)
             ),
             freshPartnerBalanceRequest: workspaceId && printPartnerId
-                ? { workspaceId, partnerId: printPartnerId }
+                ? { workspaceId, partnerId: printPartnerId, order: printTarget.order }
                 : undefined,
-            onFreshPartnerBalanceStateChange: (status, balances) => {
+            onFreshPartnerBalanceStateChange: (status, balances, legacyOrderBalanceSnapshot) => {
                 atlasStandardPartnerBalanceStateRef.current.status = status
                 atlasStandardPartnerBalanceStateRef.current.balances = balances
+                atlasStandardPartnerBalanceStateRef.current.legacyOrderBalanceSnapshot = legacyOrderBalanceSnapshot
             },
             createElement: (_data, _effectiveId, printLangOverride, renderOptions) => (
                 <AtlasStandardOrderInvoiceTemplate

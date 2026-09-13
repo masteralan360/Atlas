@@ -1232,17 +1232,35 @@ export function AtlasStandardOrderInvoiceTemplate({
                 resolvedPartnerAccountStatementBalances,
                 iqdPreference
             )
-    const historicalPartnerBalanceSnapshot = order.partnerBalanceSnapshot || partnerBalanceFallbackSnapshot
-    const partnerBalanceBeforeOrder = formatAtlasStandardPartnerBalanceSnapshot(
-        historicalPartnerBalanceSnapshot,
-        'before',
-        iqdPreference
-    )
-    const partnerBalanceAfterOrder = formatAtlasStandardPartnerBalanceSnapshot(
-        historicalPartnerBalanceSnapshot,
-        'after',
-        iqdPreference
-    )
+    const requiresLegacyPartnerBalanceReconstruction = !order.partnerBalanceSnapshot
+    const legacyPartnerBalanceStatus = requiresLegacyPartnerBalanceReconstruction
+        ? partnerBalanceStatus
+        : 'ready'
+    const freshLegacyPartnerBalanceSnapshot = partnerBalancePrintState?.legacyOrderBalanceSnapshot !== undefined
+        ? partnerBalancePrintState.legacyOrderBalanceSnapshot
+        : partnerBalanceFallbackSnapshot
+    const historicalPartnerBalanceSnapshot = order.partnerBalanceSnapshot
+        || (legacyPartnerBalanceStatus === 'ready'
+            ? freshLegacyPartnerBalanceSnapshot
+            : undefined)
+    const partnerBalanceBeforeOrder = legacyPartnerBalanceStatus === 'loading'
+        ? `${t('orders.print.partnerBalanceLoading')}${'.'.repeat(partnerBalanceLoadingDots)}`
+        : legacyPartnerBalanceStatus === 'error'
+            ? t('orders.print.partnerBalanceSnapshotUnavailable')
+            : formatAtlasStandardPartnerBalanceSnapshot(
+                historicalPartnerBalanceSnapshot,
+                'before',
+                iqdPreference
+            )
+    const partnerBalanceAfterOrder = legacyPartnerBalanceStatus === 'loading'
+        ? `${t('orders.print.partnerBalanceLoading')}${'.'.repeat(partnerBalanceLoadingDots)}`
+        : legacyPartnerBalanceStatus === 'error'
+            ? t('orders.print.partnerBalanceSnapshotUnavailable')
+            : formatAtlasStandardPartnerBalanceSnapshot(
+                historicalPartnerBalanceSnapshot,
+                'after',
+                iqdPreference
+            )
     const partnerBalanceLabels = {
         before: t('orders.print.partnerBalanceBefore'),
         after: t('orders.print.partnerBalanceAfter'),
@@ -1722,7 +1740,7 @@ export function AtlasStandardOrderInvoiceTemplate({
             className: 'col-span-4 border-l border-t border-[#1f2937]',
             layoutSpan: 6,
             dialogClassName: 'col-span-6',
-            render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong>{partnerBalanceBeforeOrder}</div>
+            render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong><span aria-live="polite">{partnerBalanceBeforeOrder}</span></div>
         },
         {
             key: financialKeys.balanceAfter,
@@ -1731,7 +1749,7 @@ export function AtlasStandardOrderInvoiceTemplate({
             className: 'col-span-4 border-l border-t border-[#1f2937]',
             layoutSpan: 6,
             dialogClassName: 'col-span-6',
-            render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong>{partnerBalanceAfterOrder}</div>
+            render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong><span aria-live="polite">{partnerBalanceAfterOrder}</span></div>
         },
         {
             key: financialKeys.currentBalance,

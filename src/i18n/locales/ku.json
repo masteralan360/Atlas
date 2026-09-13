@@ -1517,7 +1517,8 @@
       "partnerBalanceAfter": "باڵانسی هاوبەش دوای داواکاری",
       "partnerBalanceCurrent": "باڵانسی ئێستای هاوبەش",
       "partnerBalanceLoading": "باردەکرێت",
-      "partnerBalanceUnavailable": "باڵانسی ئێستا بەردەست نییە"
+      "partnerBalanceUnavailable": "باڵانسی ئێستا بەردەست نییە",
+      "partnerBalanceSnapshotUnavailable": "باڵانسی هاوبەش بەردەست نییە"
     },
     "table": {
       "orderNumber": "داواکاری #",

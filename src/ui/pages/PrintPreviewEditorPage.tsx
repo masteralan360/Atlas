@@ -594,11 +594,12 @@ export function PrintPreviewEditorPage() {
     const {
         currentBalances: freshPartnerBalances,
         isRefreshing: isFreshPartnerBalanceRefreshing,
-        refreshError: freshPartnerBalanceRefreshError
+        refreshError: freshPartnerBalanceRefreshError,
+        legacyOrderBalanceSnapshot: freshLegacyOrderBalanceSnapshot
     } = usePartnerAccountStatementPrintBalances(
         freshPartnerBalanceRequest?.workspaceId,
         freshPartnerBalanceRequest?.partnerId,
-        undefined
+        freshPartnerBalanceRequest?.order
     )
     const nextFreshPartnerBalanceState: 'loading' | 'ready' | 'error' = !templatePreview?.requiresFreshPartnerBalance
         ? 'ready'
@@ -611,12 +612,13 @@ export function PrintPreviewEditorPage() {
     useEffect(() => {
         templatePreview?.onFreshPartnerBalanceStateChange?.(
             nextFreshPartnerBalanceState,
-            nextFreshPartnerBalanceState === 'ready' ? freshPartnerBalances : undefined
+            nextFreshPartnerBalanceState === 'ready' ? freshPartnerBalances : undefined,
+            nextFreshPartnerBalanceState === 'ready' ? freshLegacyOrderBalanceSnapshot : undefined
         )
         setFreshPartnerBalanceState((current) => (
             current === nextFreshPartnerBalanceState ? current : nextFreshPartnerBalanceState
         ))
-    }, [freshPartnerBalances, nextFreshPartnerBalanceState, templatePreview])
+    }, [freshLegacyOrderBalanceSnapshot, freshPartnerBalances, nextFreshPartnerBalanceState, templatePreview])
 
     const isTemplatePrintReady = !templatePreview?.requiresFreshPartnerBalance
         || freshPartnerBalanceState === 'ready'

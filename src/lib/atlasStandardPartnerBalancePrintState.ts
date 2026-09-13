@@ -1,8 +1,10 @@
 import type { PartnerAccountStatementClosingBalance } from '@/lib/partnerAccountStatement'
+import type { OrderPartnerBalanceSnapshot } from '@/local-db'
 
 export type AtlasStandardPartnerBalancePrintState = {
     status: 'loading' | 'ready' | 'error'
     balances?: PartnerAccountStatementClosingBalance[]
+    legacyOrderBalanceSnapshot?: OrderPartnerBalanceSnapshot | null
 }
 
 export function createAtlasStandardPartnerBalancePrintState(
@@ -17,4 +19,5 @@ export function resetAtlasStandardPartnerBalancePrintState(
 ) {
     state.status = requiresFreshBalance ? 'loading' : 'ready'
     state.balances = undefined
+    state.legacyOrderBalanceSnapshot = undefined
 }

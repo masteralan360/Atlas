@@ -749,10 +749,11 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 atlasStandardPartnerBalanceStateRef.current,
                 Boolean(workspaceId && partnerId)
             ),
-            freshPartnerBalanceRequest: workspaceId && partnerId ? { workspaceId, partnerId } : undefined,
-            onFreshPartnerBalanceStateChange: (status, balances) => {
+            freshPartnerBalanceRequest: workspaceId && partnerId ? { workspaceId, partnerId, order } : undefined,
+            onFreshPartnerBalanceStateChange: (status, balances, legacyOrderBalanceSnapshot) => {
                 atlasStandardPartnerBalanceStateRef.current.status = status
                 atlasStandardPartnerBalanceStateRef.current.balances = balances
+                atlasStandardPartnerBalanceStateRef.current.legacyOrderBalanceSnapshot = legacyOrderBalanceSnapshot
             },
             createElement: (data, _effectiveId, printLangOverride, renderOptions) => {
                 const baseLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
@@ -802,10 +803,11 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 atlasStandardPartnerBalanceStateRef.current,
                 Boolean(workspaceId && partnerId)
             ),
-            freshPartnerBalanceRequest: workspaceId && partnerId ? { workspaceId, partnerId } : undefined,
-            onFreshPartnerBalanceStateChange: (status, balances) => {
+            freshPartnerBalanceRequest: workspaceId && partnerId ? { workspaceId, partnerId, order } : undefined,
+            onFreshPartnerBalanceStateChange: (status, balances, legacyOrderBalanceSnapshot) => {
                 atlasStandardPartnerBalanceStateRef.current.status = status
                 atlasStandardPartnerBalanceStateRef.current.balances = balances
+                atlasStandardPartnerBalanceStateRef.current.legacyOrderBalanceSnapshot = legacyOrderBalanceSnapshot
             },
             createElement: (_data, _effectiveId, printLangOverride, renderOptions) => {
                 const baseLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
