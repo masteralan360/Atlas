@@ -19,6 +19,20 @@ Print-upon-checkout toggle
 
 One single Usage Request Payload
 
+Fix Sidebar Sub-Tab
+
+Fix Print Preview JS
+
+Fix Photo and Watermark on IOS pwa
+
+Multi-Color Partner
+
+Balance Color Settings
+
+Context-menu partner account statement & invoice redirect
+
+Accumilated account statement rows
+
 fix retry sync
 
 Account Statement DATERANGEFILTER
