@@ -2815,6 +2815,12 @@
     "lockedSuccess": "Order locked successfully",
     "cancelTitle": "Cancel Order?",
     "cancelDescription": "Are you sure you want to cancel this order? This action cannot be undone.",
+    "receiptErrors": {
+      "partialReceipt": "This purchase receipt is only partially recorded. Repair it before trying again.",
+      "invalidResponse": "The purchase receipt returned an invalid response. Please try again.",
+      "incompleteResponse": "The purchase receipt response is incomplete. Refresh and try again.",
+      "prepareFailed": "The purchase order could not be prepared for receipt. Refresh and try again."
+    },
     "actions": {
       "order": "Order ",
       "reserve": "Reserve",

@@ -17,6 +17,7 @@ import { useLocation } from "wouter";
 
 import {
   useInventoryTransferTransactions,
+  useInventoryTransactions,
   usePurchaseOrders,
   useProducts,
   useSales,
@@ -311,6 +312,7 @@ export function InventoryTransactionsPage() {
     activeWorkspace?.id,
   );
   const stockAdjustments = useStockAdjustments(activeWorkspace?.id);
+  const inventoryTransactions = useInventoryTransactions(activeWorkspace?.id);
   const sales = useSales(activeWorkspace?.id);
   const salesOrders = useSalesOrders(activeWorkspace?.id);
   const purchaseOrders = usePurchaseOrders(activeWorkspace?.id);
@@ -464,9 +466,46 @@ export function InventoryTransactionsPage() {
           }),
     );
 
+    const purchaseOrdersById = new Map(
+      purchaseOrders.map((order) => [order.id, order] as const),
+    );
+    const persistedPurchaseRecords: InventoryActivityRecord[] =
+      inventoryTransactions.flatMap((transaction) => {
+        if (
+          transaction.transactionType !== "purchase" ||
+          !transaction.referenceId ||
+          (transaction.referenceType !== "purchase_order" &&
+            transaction.referenceType !== "purchase_order_repair")
+        ) {
+          return [];
+        }
+
+        const order = purchaseOrdersById.get(transaction.referenceId);
+        return [{
+          id: `purchase-ledger:${transaction.id}`,
+          kind: "ledger" as const,
+          createdAt: transaction.createdAt,
+          productId: transaction.productId,
+          storageId: transaction.storageId,
+          sourceRecordId: transaction.referenceId,
+          referenceLabel:
+            order?.orderNumber || `#${transaction.referenceId.slice(0, 8)}`,
+          transactionType: "purchase" as const,
+          movementSource: "purchase-order" as const,
+          quantityDelta: transaction.quantityDelta,
+          previousQuantity: transaction.previousQuantity,
+          newQuantity: transaction.newQuantity,
+        }];
+      });
+    const persistedPurchaseOrderIds = new Set(
+      persistedPurchaseRecords.map((record) =>
+        record.kind === "ledger" ? record.sourceRecordId : "",
+      ),
+    );
     const mirroredPurchaseRecords: InventoryActivityRecord[] = purchaseOrders.flatMap(
       (order) =>
-        order.status !== "received" && order.status !== "completed"
+        (order.status !== "received" && order.status !== "completed") ||
+        persistedPurchaseOrderIds.has(order.id)
           ? []
           : order.items.flatMap((item) => {
             const quantity = Number(
@@ -526,6 +565,7 @@ export function InventoryTransactionsPage() {
       ...adjustmentRecords,
       ...mirroredPosRecords,
       ...mirroredSalesOrderRecords,
+      ...persistedPurchaseRecords,
       ...mirroredPurchaseRecords,
       ...mirroredSalesOrderReturnRecords,
     ].filter((record) => !productsById.get(record.productId)?.isService).sort(
@@ -535,6 +575,7 @@ export function InventoryTransactionsPage() {
     );
   }, [
     purchaseOrders,
+    inventoryTransactions,
     productsById,
     sales,
     salesOrderReturnItems,

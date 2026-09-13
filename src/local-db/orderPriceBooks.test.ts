@@ -33,6 +33,7 @@ function installBrowserStorage() {
         value: {
             localStorage: storage,
             sessionStorage: storage,
+            URL: globalThis.URL,
             location: { origin: 'http://localhost', hash: '', pathname: '/' },
             addEventListener: () => undefined,
             removeEventListener: () => undefined
@@ -43,12 +44,43 @@ function installBrowserStorage() {
         value: {
             visibilityState: 'visible',
             dir: 'ltr',
-            documentElement: { lang: 'en', dir: 'ltr' },
+            documentElement: { lang: 'en', dir: 'ltr', style: {} },
+            head: { appendChild: () => undefined },
+            getElementsByTagName: () => [{ appendChild: () => undefined }],
+            createElement: () => ({
+                type: '',
+                style: {},
+                appendChild: () => undefined,
+                setAttribute: () => undefined
+            }),
+            createTextNode: () => ({}),
             addEventListener: () => undefined,
             removeEventListener: () => undefined
         }
     })
     Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { onLine: false } })
+    Object.defineProperty(globalThis, 'Element', {
+        configurable: true,
+        value: class Element {
+            matches() { return false }
+        }
+    })
+    Object.defineProperty(globalThis, 'DOMMatrix', {
+        configurable: true,
+        value: class DOMMatrix {}
+    })
+    Object.defineProperty(globalThis, 'ImageData', {
+        configurable: true,
+        value: class ImageData {}
+    })
+    Object.defineProperty(globalThis, 'Path2D', {
+        configurable: true,
+        value: class Path2D {}
+    })
+    Object.defineProperty(globalThis.URL, 'createObjectURL', {
+        configurable: true,
+        value: () => 'blob:test'
+    })
 }
 
 async function createPurchaseFixture() {
@@ -170,7 +202,7 @@ describe('Price Book order pricing', () => {
         createStorage = hooks.createStorage
         createPurchaseOrder = orders.createPurchaseOrder
         findPartnerProductPriceBookItem = priceBooks.findPartnerProductPriceBookItem
-    })
+    }, 30_000)
 
     beforeEach(async () => {
         await db.delete()
@@ -224,6 +256,10 @@ describe('Price Book order pricing', () => {
             .where('[sourcePurchaseOrderId+sourcePurchaseOrderItemId]')
             .equals([order.id, order.items[0].id])
             .first()
+        const receiptTransaction = await db.inventory_transactions
+            .where('referenceId')
+            .equals(order.id)
+            .first()
 
         expect(order.items[0]).toMatchObject({
             priceBookId: 'price-book-1',
@@ -235,6 +271,77 @@ describe('Price Book order pricing', () => {
             currency: 'iqd',
             quantity: 2
         })
+        expect(receiptTransaction).toMatchObject({
+            workspaceId: WORKSPACE_ID,
+            productId: fixture.product.id,
+            storageId: fixture.storage.id,
+            transactionType: 'purchase',
+            quantityDelta: 2,
+            previousQuantity: 0,
+            newQuantity: 2,
+            referenceId: order.id,
+            referenceType: 'purchase_order'
+        })
+    })
+
+    it('rounds and aggregates duplicate receipt lines into one inventory position and ledger row', async () => {
+        const fixture = await createPurchaseFixture()
+        const input = receivedPurchaseOrderInput(
+            fixture,
+            {
+                originalCurrency: 'iqd',
+                originalUnitPrice: fixture.product.costPrice ?? 0,
+                convertedUnitPrice: 10,
+                batchSalePrice: fixture.product.price
+            },
+            null
+        )
+        input.items = [
+            { ...input.items[0], receivedQuantity: 1.1111114 },
+            { ...input.items[0], id: crypto.randomUUID(), receivedQuantity: 2.2222224 }
+        ]
+
+        const order = await createPurchaseOrder(WORKSPACE_ID, input)
+        const inventory = await db.inventory
+            .where('[productId+storageId]')
+            .equals([fixture.product.id, fixture.storage.id])
+            .first()
+        const transactions = await db.inventory_transactions
+            .where('referenceId')
+            .equals(order.id)
+            .toArray()
+
+        expect(inventory?.quantity).toBe(3.333333)
+        expect(transactions).toHaveLength(1)
+        expect(transactions[0]).toMatchObject({
+            transactionType: 'purchase',
+            quantityDelta: 3.333333,
+            previousQuantity: 0,
+            newQuantity: 3.333333
+        })
+    })
+
+    it('rolls back the local order, inventory, and receipt ledger when a line is not receivable', async () => {
+        const fixture = await createPurchaseFixture()
+        const input = receivedPurchaseOrderInput(
+            fixture,
+            {
+                originalCurrency: 'iqd',
+                originalUnitPrice: fixture.product.costPrice ?? 0,
+                convertedUnitPrice: 10,
+                batchSalePrice: fixture.product.price
+            },
+            null
+        )
+        input.items[0] = { ...input.items[0], receivedQuantity: 0 }
+
+        await expect(createPurchaseOrder(WORKSPACE_ID, input)).rejects.toThrow(
+            'Received quantity must be greater than zero'
+        )
+
+        expect(await db.purchase_orders.where('workspaceId').equals(WORKSPACE_ID).count()).toBe(0)
+        expect(await db.inventory.where('workspaceId').equals(WORKSPACE_ID).count()).toBe(0)
+        expect(await db.inventory_transactions.where('workspaceId').equals(WORKSPACE_ID).count()).toBe(0)
     })
 
     it('creates a receipt batch when only the Price Book selling price differs', async () => {

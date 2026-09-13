@@ -267,7 +267,7 @@ export interface StockAdjustment extends BaseEntity {
 }
 
 export type InventoryTransactionType =
-  'stock_adjustment' | 'transfer_in' | 'transfer_out' | 'sale' | 'return' | 'initial_stock'
+  'stock_adjustment' | 'transfer_in' | 'transfer_out' | 'sale' | 'return' | 'purchase' | 'initial_stock'
 
 export interface InventoryTransaction extends BaseEntity {
   productId: string

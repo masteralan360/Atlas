@@ -16,7 +16,7 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
-import { isValidNewInventoryQuantity } from './inventoryDeficit'
+import { isAllowedInventoryQuantityTransition, isValidNewInventoryQuantity } from './inventoryDeficit'
 import type {
     Inventory,
     InventoryTransferBatchAllocation,
@@ -618,13 +618,13 @@ export async function putInventoryQuantity(
     if (syncSource === 'local') {
         assertInventoryMutationConnectivity(workspaceId)
     }
-    if (!isValidNewInventoryQuantity(quantity)) {
-        throw new Error(i18n.t('inventory.errors.negativeQuantity'))
-    }
-
     const rows = await getInventoryRowsForProductStorage(productId, storageId)
     const activeRow = rows.find((row) => !row.isDeleted)
     const restorableRow = rows.find((row) => row.isDeleted)
+    const previousQuantity = activeRow?.quantity ?? restorableRow?.quantity ?? null
+    if (!isAllowedInventoryQuantityTransition(previousQuantity, quantity)) {
+        throw new Error(i18n.t('inventory.errors.negativeQuantity'))
+    }
     const syncMetadata = getSyncMetadata(workspaceId, timestamp, syncSource)
 
     if (!isPositiveQuantity(quantity)) {

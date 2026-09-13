@@ -23,6 +23,7 @@ import { readWorkspaceCache } from '@/workspace/workspaceCache'
 import { supabase } from '@/auth/supabase'
 import { useViewOwnRecordScope } from '@/permissions/useViewOwnRecordScope'
 import { useOptionalWorkspacePermissions } from '@/permissions/workspacePermissionsState'
+import i18n from '@/i18n/config'
 
 import { db } from './database'
 import {
@@ -66,6 +67,7 @@ import type {
     CurrencyCode,
     InstallmentFrequency,
     Inventory,
+    InventoryTransaction,
     Loan,
     OrderInstallment,
     OrderAdjustment,
@@ -77,6 +79,7 @@ import type {
     PaymentTransaction,
     PurchaseOrder,
     PurchaseOrderStatus,
+    Product,
     SalesOrder,
     SalesOrderItem,
     SalesOrderStatus,
@@ -84,6 +87,7 @@ import type {
     StockBatchAllocation,
     Supplier
 } from './models'
+import { createInventoryTransaction } from './inventoryTransactions'
 import { appendPaymentTransaction, synchronizeOrderPaymentReferences } from './payments'
 import { mirrorPaymentAccountTransactionLocally } from './paymentAccounts'
 import { calculateInitialOrderPartnerBalanceSnapshot } from './orderPartnerBalanceSnapshots'
@@ -160,6 +164,7 @@ async function reverseSalesOrderCommissionForReturnBestEffort(
 }
 
 const PURCHASE_BATCH_UUID_NAMESPACE = '82244d4d-29dd-55b5-a907-50f74e8b49bb'
+const PURCHASE_RECEIPT_TRANSACTION_UUID_NAMESPACE = '7ca4197b-c139-56f9-9f87-6c476901f09e'
 const SALES_ORDER_INVENTORY_OPERATION_UUID_NAMESPACE = '29a34eb1-80c0-5cf9-8bc1-0bbb71fd718b'
 
 type BaseEntityPayload = {
@@ -275,6 +280,8 @@ type SyncUpsertOptions = {
      * impossible order mutation.
      */
     throwOnNonRetriableError?: boolean
+    /** Atomic workflows cannot continue after any failed prerequisite write. */
+    throwOnError?: boolean
 }
 
 async function syncUpsertEntities(
@@ -363,7 +370,8 @@ async function syncUpsertEntities(
     } catch (error) {
         console.error(`[Orders] Failed to sync ${tableName}:`, error)
 
-        if (options.throwOnNonRetriableError && !isRetriableWebRequestError(error)) {
+        if (options.throwOnError
+            || (options.throwOnNonRetriableError && !isRetriableWebRequestError(error))) {
             throw normalizeSupabaseActionError(error)
         }
 
@@ -1487,14 +1495,23 @@ function getPurchaseOrderReceiptSources(order: PurchaseOrder) {
     })
 }
 
-async function receiveInventoryForPurchaseOrder(order: PurchaseOrder) {
-    const now = new Date().toISOString()
-    const changedInventoryRows: Inventory[] = []
-    const changedBatches: StockBatch[] = []
-    const affectedProductIds = new Set<string>()
+type PurchaseReceiptLinePlan = {
+    itemIndex: number
+    item: PurchaseOrder['items'][number]
+    product: Product
+    storageId: string
+    receivedQuantity: number
+    actualUnitCost: number
+    batchSalePrice: number
+    shouldCreatePurchaseBatch: boolean
+    sourceItemId: string
+    sourceLineKey: string
+}
+
+async function getPurchaseOrderReceiptLinePlans(order: PurchaseOrder): Promise<PurchaseReceiptLinePlan[]> {
     const receiptSources = getPurchaseOrderReceiptSources(order)
 
-    for (const [itemIndex, item] of order.items.entries()) {
+    return Promise.all(order.items.map(async (item, itemIndex) => {
         const product = await db.products.get(item.productId)
         if (!product || product.isDeleted) {
             throw new Error(`Product not found: ${item.productName}`)
@@ -1539,56 +1556,137 @@ async function receiveInventoryForPurchaseOrder(order: PurchaseOrder) {
             throw new Error(`Purchase cost is invalid for ${item.productName}`)
         }
 
-        const { sourceItemId, sourceLineKey } = receiptSources[itemIndex]
+        return {
+            itemIndex,
+            item,
+            product,
+            storageId,
+            receivedQuantity: roundQuantity(receivedQuantity),
+            actualUnitCost,
+            batchSalePrice,
+            shouldCreatePurchaseBatch,
+            ...receiptSources[itemIndex]
+        }
+    }))
+}
+
+async function receiveInventoryForPurchaseOrder(order: PurchaseOrder) {
+    const now = new Date().toISOString()
+    const changedInventoryRows: Inventory[] = []
+    const changedBatches: StockBatch[] = []
+    const changedInventoryTransactions: InventoryTransaction[] = []
+    const affectedProductIds = new Set<string>()
+    const receiptPlans = await getPurchaseOrderReceiptLinePlans(order)
+    const existingLedgerRows = await db.inventory_transactions
+        .where('referenceId')
+        .equals(order.id)
+        .and((row) => row.transactionType === 'purchase' && !row.isDeleted)
+        .toArray()
+    if (existingLedgerRows.length > 0) {
+        return {
+            changedInventoryRows,
+            changedBatches,
+            changedInventoryTransactions: existingLedgerRows,
+            alreadyApplied: true
+        }
+    }
+
+    const inventoryDeltas = new Map<string, {
+        productId: string
+        storageId: string
+        quantity: number
+    }>()
+
+    for (const plan of receiptPlans) {
+        const {
+            item,
+            storageId,
+            receivedQuantity,
+            shouldCreatePurchaseBatch,
+            sourceItemId
+        } = plan
         if (shouldCreatePurchaseBatch) {
             const existingReceiptBatch = await db.stock_batches
                 .where('[sourcePurchaseOrderId+sourcePurchaseOrderItemId]')
                 .equals([order.id, sourceItemId])
                 .first()
             if (existingReceiptBatch) {
-                continue
+                throw new Error(i18n.t('orders.receiptErrors.partialReceipt'))
             }
         }
 
-        const currentInventoryQuantity = await getInventoryQuantityForProductStorage(item.productId, storageId)
+        const positionKey = buildInventoryReservationKey(item.productId, storageId)
+        const existingDelta = inventoryDeltas.get(positionKey)
+        inventoryDeltas.set(positionKey, {
+            productId: item.productId,
+            storageId,
+            quantity: roundQuantity((existingDelta?.quantity ?? 0) + receivedQuantity)
+        })
 
+        affectedProductIds.add(item.productId)
+    }
+
+    for (const delta of Array.from(inventoryDeltas.values()).sort((left, right) =>
+        left.productId.localeCompare(right.productId) || left.storageId.localeCompare(right.storageId)
+    )) {
+        const previousQuantity = await getInventoryQuantityForProductStorage(delta.productId, delta.storageId)
+        const newQuantity = roundQuantity(previousQuantity + delta.quantity)
         const changedInventoryRow = await putInventoryQuantity(
             order.workspaceId,
-            item.productId,
-            storageId,
-            roundQuantity(currentInventoryQuantity + receivedQuantity),
+            delta.productId,
+            delta.storageId,
+            newQuantity,
             now
         )
         if (changedInventoryRow) {
             changedInventoryRows.push(changedInventoryRow)
         }
 
-        if (shouldCreatePurchaseBatch) {
-            const receiptBatchId = uuidv5(
-                sourceLineKey,
-                PURCHASE_BATCH_UUID_NAMESPACE
-            )
-            const receiptBatch = await createStockBatch(order.workspaceId, {
-                productId: item.productId,
-                storageId,
-                batchNumber: item.batchNumber?.trim() || `${order.orderNumber}-${String(itemIndex + 1).padStart(2, '0')}`,
-                quantity: receivedQuantity,
-                price: batchSalePrice,
-                costPrice: actualUnitCost,
-                currency: product.currency,
-                expiryDate: item.batchExpiryDate ?? null,
-                manufacturingDate: item.batchManufacturingDate ?? null,
-                notes: `Received from purchase order ${order.orderNumber}.`,
-                sourcePurchaseOrderId: order.id,
-                sourcePurchaseOrderItemId: sourceItemId
-            }, {
-                id: receiptBatchId,
-                timestamp: now,
-                skipRemoteSync: true
-            })
-            changedBatches.push(receiptBatch)
-        }
-        affectedProductIds.add(item.productId)
+        const transaction = await createInventoryTransaction(order.workspaceId, {
+            productId: delta.productId,
+            storageId: delta.storageId,
+            transactionType: 'purchase',
+            quantityDelta: delta.quantity,
+            previousQuantity,
+            newQuantity,
+            referenceId: order.id,
+            referenceType: 'purchase_order',
+            notes: `Received from purchase order ${order.orderNumber}.`,
+            createdBy: order.createdBy ?? null
+        }, {
+            id: uuidv5(
+                `${order.id}:${delta.productId}:${delta.storageId}`,
+                PURCHASE_RECEIPT_TRANSACTION_UUID_NAMESPACE
+            ),
+            timestamp: now,
+            skipRemoteSync: true
+        })
+        changedInventoryTransactions.push(transaction)
+    }
+
+    // Batch validation compares against inventory, so create receipt batches
+    // only after all inventory positions have been advanced.
+    for (const plan of receiptPlans.filter((candidate) => candidate.shouldCreatePurchaseBatch)) {
+        const receiptBatch = await createStockBatch(order.workspaceId, {
+            productId: plan.item.productId,
+            storageId: plan.storageId,
+            batchNumber: plan.item.batchNumber?.trim()
+                || `${order.orderNumber}-${String(plan.itemIndex + 1).padStart(2, '0')}`,
+            quantity: plan.receivedQuantity,
+            price: plan.batchSalePrice,
+            costPrice: plan.actualUnitCost,
+            currency: plan.product.currency,
+            expiryDate: plan.item.batchExpiryDate ?? null,
+            manufacturingDate: plan.item.batchManufacturingDate ?? null,
+            notes: `Received from purchase order ${order.orderNumber}.`,
+            sourcePurchaseOrderId: order.id,
+            sourcePurchaseOrderItemId: plan.sourceItemId
+        }, {
+            id: uuidv5(plan.sourceLineKey, PURCHASE_BATCH_UUID_NAMESPACE),
+            timestamp: now,
+            skipRemoteSync: true
+        })
+        changedBatches.push(receiptBatch)
     }
 
     for (const productId of affectedProductIds) {
@@ -1597,7 +1695,9 @@ async function receiveInventoryForPurchaseOrder(order: PurchaseOrder) {
 
     return {
         changedInventoryRows,
-        changedBatches
+        changedBatches,
+        changedInventoryTransactions,
+        alreadyApplied: false
     }
 }
 
@@ -1630,6 +1730,123 @@ async function syncPurchaseReceiptResult(workspaceId: string, result: PurchaseRe
         syncInventoryRowsBestEffort(result.changedInventoryRows, workspaceId),
         syncStockBatchesBestEffort(result.changedBatches, workspaceId)
     ])
+}
+
+type PurchaseReceiptRpcResult = {
+    order: Record<string, unknown>
+    inventory: Record<string, unknown>[]
+    inventory_transactions: Record<string, unknown>[]
+    stock_batches: Record<string, unknown>[]
+    already_applied: boolean
+}
+
+function asRemotePurchaseReceiptResult(value: unknown): PurchaseReceiptRpcResult {
+    if (!value || typeof value !== 'object') {
+        throw new Error(i18n.t('orders.receiptErrors.invalidResponse'))
+    }
+    const result = value as Partial<PurchaseReceiptRpcResult>
+    if (!result.order || typeof result.order !== 'object'
+        || !Array.isArray(result.inventory)
+        || !Array.isArray(result.inventory_transactions)
+        || !Array.isArray(result.stock_batches)
+    ) {
+        throw new Error(i18n.t('orders.receiptErrors.incompleteResponse'))
+    }
+    return result as PurchaseReceiptRpcResult
+}
+
+async function receivePurchaseOrderRemotely(
+    order: PurchaseOrder,
+    targetStatus: Extract<PurchaseOrderStatus, 'received' | 'completed'>,
+    postInventory: boolean
+) {
+    const receiptPlans = postInventory
+        ? await getPurchaseOrderReceiptLinePlans(order)
+        : []
+    const batchPayloads = receiptPlans
+        .filter((plan) => plan.shouldCreatePurchaseBatch)
+        .map((plan) => ({
+            id: uuidv5(plan.sourceLineKey, PURCHASE_BATCH_UUID_NAMESPACE),
+            item_index: plan.itemIndex,
+            product_id: plan.item.productId,
+            storage_id: plan.storageId,
+            quantity: plan.receivedQuantity,
+            source_item_id: plan.sourceItemId,
+            batch_number: plan.item.batchNumber?.trim()
+                || `${order.orderNumber}-${String(plan.itemIndex + 1).padStart(2, '0')}`,
+            price: plan.batchSalePrice,
+            cost_price: plan.actualUnitCost,
+            currency: plan.product.currency,
+            expiry_date: plan.item.batchExpiryDate ?? null,
+            manufacturing_date: plan.item.batchManufacturingDate ?? null,
+            notes: `Received from purchase order ${order.orderNumber}.`
+        }))
+    const { data, error } = await runMutation('purchase_orders.receive', () =>
+        supabase.rpc('receive_purchase_order', {
+            p_order_id: order.id,
+            p_target_status: targetStatus,
+            p_batches: batchPayloads
+        })
+    )
+    if (error) {
+        throw normalizeSupabaseActionError(error)
+    }
+
+    const result = asRemotePurchaseReceiptResult(data)
+    const syncedAt = new Date().toISOString()
+    const remoteOrder = {
+        ...(toCamelCase(result.order) as unknown as PurchaseOrder),
+        syncStatus: 'synced' as const,
+        lastSyncedAt: syncedAt
+    }
+    const remoteInventory = result.inventory.map((row) => ({
+        ...(toCamelCase(row) as unknown as Inventory),
+        syncStatus: 'synced' as const,
+        lastSyncedAt: syncedAt
+    }))
+    const remoteTransactions = result.inventory_transactions.map((row) => ({
+        ...(toCamelCase(row) as unknown as InventoryTransaction),
+        syncStatus: 'synced' as const,
+        lastSyncedAt: syncedAt
+    }))
+    const remoteBatches = result.stock_batches.map((row) => ({
+        ...(toCamelCase(row) as unknown as StockBatch),
+        syncStatus: 'synced' as const,
+        lastSyncedAt: syncedAt
+    }))
+
+    await db.transaction(
+        'rw',
+        [
+            db.purchase_orders,
+            db.products,
+            db.inventory,
+            db.inventory_transactions,
+            db.stock_batches,
+            db.storages
+        ],
+        async () => {
+            for (const remoteRow of remoteInventory) {
+                const duplicateRows = await db.inventory
+                    .where('[productId+storageId]')
+                    .equals([remoteRow.productId, remoteRow.storageId])
+                    .toArray()
+                await Promise.all(duplicateRows
+                    .filter((row) => row.id !== remoteRow.id)
+                    .map((row) => db.inventory.delete(row.id)))
+                await db.inventory.put(remoteRow)
+            }
+            await db.inventory_transactions.bulkPut(remoteTransactions)
+            await db.stock_batches.bulkPut(remoteBatches)
+            await db.purchase_orders.put(remoteOrder)
+
+            for (const productId of new Set(remoteInventory.map((row) => row.productId))) {
+                await syncProductStockSnapshot(productId, syncedAt, 'remote')
+            }
+        }
+    )
+
+    return remoteOrder
 }
 
 async function getSalesOrderIdsAssignedToLinkedFieldAgent(
@@ -4208,25 +4425,63 @@ export async function createPurchaseOrder(
     if (!isOrderApprovalRequested(order)) {
         await appendInitialOrderPaymentTransaction('purchase', order)
     }
+    const shouldReceive = status === 'received' || status === 'completed'
+    const usesCloudAuthority = shouldReceive && shouldUseCloudBusinessData(workspaceId)
     let receiptResult: PurchaseReceiptResult | null = null
-    if (status === 'received' || status === 'completed') {
+    let createdOrder: PurchaseOrder
+    if (shouldReceive && !usesCloudAuthority) {
         await preparePurchaseOrderReceipt(order)
     }
-    await db.transaction(
-        'rw',
-        [db.purchase_orders, db.products, db.inventory, db.stock_batches, db.storages],
-        async () => {
-            await db.purchase_orders.put(order)
-            if (status === 'received' || status === 'completed') {
-                receiptResult = await receiveInventoryForPurchaseOrder(order)
-            }
-        }
-    )
 
-    await syncUpsertEntities('purchase_orders', [order as unknown as Record<string, unknown> & { id: string; version: number }], workspaceId)
-    await syncPurchaseReceiptResult(workspaceId, receiptResult)
-    await recalculateSupplierAndPartnerSummaries(workspaceId, order.supplierId, order.businessPartnerId)
-    const createdOrder = (await db.purchase_orders.get(order.id)) as PurchaseOrder
+    if (usesCloudAuthority) {
+        // The RPC requires an existing ordered document and changes its status
+        // only in the same transaction that posts stock and ledger rows.
+        const stagedOrder: PurchaseOrder = {
+            ...order,
+            status: 'ordered',
+            actualDeliveryDate: null
+        }
+        await db.purchase_orders.put(stagedOrder)
+        await syncUpsertEntities(
+            'purchase_orders',
+            [stagedOrder as unknown as Record<string, unknown> & { id: string; version: number }],
+            workspaceId,
+            { throwOnError: true }
+        )
+        const syncedStagedOrder = await db.purchase_orders.get(order.id)
+        if (!syncedStagedOrder) {
+            throw new Error(i18n.t('orders.receiptErrors.prepareFailed'))
+        }
+        createdOrder = await receivePurchaseOrderRemotely(
+            syncedStagedOrder,
+            status as Extract<PurchaseOrderStatus, 'received' | 'completed'>,
+            true
+        )
+    } else {
+        await db.transaction(
+            'rw',
+            [
+                db.purchase_orders,
+                db.products,
+                db.inventory,
+                db.inventory_transactions,
+                db.stock_batches,
+                db.storages
+            ],
+            async () => {
+                await db.purchase_orders.put(order)
+                if (shouldReceive) {
+                    receiptResult = await receiveInventoryForPurchaseOrder(order)
+                }
+            }
+        )
+
+        await syncUpsertEntities('purchase_orders', [order as unknown as Record<string, unknown> & { id: string; version: number }], workspaceId)
+        await syncPurchaseReceiptResult(workspaceId, receiptResult)
+        createdOrder = (await db.purchase_orders.get(order.id)) as PurchaseOrder
+    }
+
+    await recalculateSupplierAndPartnerSummaries(workspaceId, createdOrder.supplierId, createdOrder.businessPartnerId)
 
     if (!isOrderApprovalRequested(createdOrder)) {
         await appendInitialOrderPaymentTransaction('purchase', createdOrder)
@@ -4388,27 +4643,50 @@ export async function updatePurchaseOrderStatus(id: string, status: PurchaseOrde
         ...getSyncMetadata(existing.workspaceId, now)
     }
 
+    const shouldPostReceipt = status === 'received'
+        && existing.status !== 'received'
+        && existing.status !== 'completed'
+    const usesCloudAuthority = (status === 'received' || status === 'completed')
+        && shouldUseCloudBusinessData(existing.workspaceId)
     let receiptResult: PurchaseReceiptResult | null = null
-    if ((status === 'received' || status === 'completed') && existing.status !== 'received' && existing.status !== 'completed') {
+    let persistedOrder: PurchaseOrder
+    if (shouldPostReceipt && !usesCloudAuthority) {
         await preparePurchaseOrderReceipt(updated)
     }
-    await db.transaction(
-        'rw',
-        [db.purchase_orders, db.products, db.inventory, db.stock_batches, db.storages],
-        async () => {
-            if ((status === 'received' || status === 'completed') && existing.status !== 'received' && existing.status !== 'completed') {
-                receiptResult = await receiveInventoryForPurchaseOrder(updated)
-            }
-            await db.purchase_orders.put(updated)
-        }
-    )
 
-    await syncUpsertEntities('purchase_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
-    await syncPurchaseReceiptResult(existing.workspaceId, receiptResult)
+    if (usesCloudAuthority) {
+        persistedOrder = await receivePurchaseOrderRemotely(
+            updated,
+            status as Extract<PurchaseOrderStatus, 'received' | 'completed'>,
+            shouldPostReceipt
+        )
+    } else {
+        await db.transaction(
+            'rw',
+            [
+                db.purchase_orders,
+                db.products,
+                db.inventory,
+                db.inventory_transactions,
+                db.stock_batches,
+                db.storages
+            ],
+            async () => {
+                if (shouldPostReceipt) {
+                    receiptResult = await receiveInventoryForPurchaseOrder(updated)
+                }
+                await db.purchase_orders.put(updated)
+            }
+        )
+
+        await syncUpsertEntities('purchase_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
+        await syncPurchaseReceiptResult(existing.workspaceId, receiptResult)
+        persistedOrder = updated
+    }
     await Promise.all(
         Array.from(new Set([
             `${existing.supplierId}::${existing.businessPartnerId || ''}`,
-            `${updated.supplierId}::${updated.businessPartnerId || ''}`
+            `${persistedOrder.supplierId}::${persistedOrder.businessPartnerId || ''}`
         ])).map((key) => {
             const [supplierId, businessPartnerId] = key.split('::')
             return recalculateSupplierAndPartnerSummaries(
@@ -4418,7 +4696,7 @@ export async function updatePurchaseOrderStatus(id: string, status: PurchaseOrde
             )
         })
     )
-    return persistInitialOrderPartnerBalanceSnapshot('purchase', updated)
+    return persistInitialOrderPartnerBalanceSnapshot('purchase', persistedOrder)
 }
 
 export async function approvePurchaseOrderRequest(id: string, reviewedBy?: string | null) {

@@ -3,7 +3,6 @@ import { useLiveQuery } from "dexie-react-hooks";
 import i18n from "@/i18n/config";
 import {
   QUANTITY_EPSILON,
-  isNonNegativeQuantity,
   quantitiesEqual,
   roundQuantity,
 } from "@/lib/quantity";
@@ -14,6 +13,7 @@ import { generateId, toCamelCase, toSnakeCase } from "@/lib/utils";
 import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 
 import { db } from "./database";
+import { isAllowedInventoryQuantityTransition } from "./inventoryDeficit";
 import type {
   Inventory,
   InventoryTransaction,
@@ -26,8 +26,9 @@ const CLOUD_TRANSACTION_TYPES = new Set<InventoryTransactionType>([
   "stock_adjustment",
 ]);
 
-// Sales, returns, purchases, transfers, and initial stock are mirrored only
-// in the local ledger. Manual stock adjustments are the sole cloud entries.
+// Purchase receipts are written to the cloud ledger by the authoritative
+// receive_purchase_order RPC. Manual stock adjustments use their own RPC.
+// Other transaction types remain local mirrors of their source documents.
 export interface InventoryTransactionInput {
   productId: string;
   storageId: string;
@@ -75,6 +76,7 @@ function normalizeTransactionInput(input: InventoryTransactionInput) {
     "transfer_out",
     "sale",
     "return",
+    "purchase",
     "initial_stock",
   ];
   const allowedAdjustmentReasons: StockAdjustmentReason[] = [
@@ -107,11 +109,11 @@ function normalizeTransactionInput(input: InventoryTransactionInput) {
     throw new Error("Quantity delta must be non-zero");
   }
 
-  if (!isNonNegativeQuantity(previousQuantity)) {
+  if (!Number.isFinite(previousQuantity)) {
     throw new Error("Previous quantity is invalid");
   }
 
-  if (!isNonNegativeQuantity(newQuantity)) {
+  if (!isAllowedInventoryQuantityTransition(previousQuantity, newQuantity)) {
     throw new Error("New quantity is invalid");
   }
 
