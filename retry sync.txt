@@ -5,23 +5,12 @@ remove R2 Print only
 account switch
 Fix SQLITE loading
 Transaction Reconciliation & Integrity Audit, Expandable, Plain English Explanation, AGENTS.md guide
-supabase backup
-Move Tabs in sidebar and add favorite
 SQLite Offline queue
 
 Price books selector order form and quick order
 ##
-English LOG
-
-Fix Instant POS Checkoutsucessmodal
-
-Print-upon-checkout toggle
 
 One single Usage Request Payload
-
-Fix Sidebar Sub-Tab
-
-Fix Print Preview JS
 
 Fix Photo and Watermark on IOS pwa
 

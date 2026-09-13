@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     printNative: vi.fn(),
     testNative: vi.fn(),
     getAppSetting: vi.fn(),
+    getAppSettingSync: vi.fn(),
     setAppSetting: vi.fn(),
     clearAppSetting: vi.fn(),
     qzIsActive: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('@/i18n/config', () => ({
 
 vi.mock('@/local-db/settings', () => ({
     getAppSetting: mocks.getAppSetting,
+    getAppSettingSync: mocks.getAppSettingSync,
     setAppSetting: mocks.setAppSetting,
     clearAppSetting: mocks.clearAppSetting
 }))
@@ -110,6 +112,23 @@ describe('PWA thermal printing through QZ Tray', () => {
         ])
 
         expect(mocks.qzConnect).toHaveBeenCalledWith({ retries: 0, delay: 0 })
+    })
+
+    it('persists auto-print upon checkout separately for this workspace and device', async () => {
+        mocks.getAppSettingSync.mockImplementation((key: string) => (
+            key === 'auto_print_upon_checkout_workspace-1' ? 'true' : null
+        ))
+
+        expect(printService.isAutoPrintUponCheckoutEnabled('workspace-1')).toBe(true)
+        expect(printService.isAutoPrintUponCheckoutEnabled('workspace-2')).toBe(false)
+        expect(printService.isAutoPrintUponCheckoutEnabled('')).toBe(false)
+
+        await printService.setAutoPrintUponCheckoutEnabled('workspace-1', false)
+
+        expect(mocks.setAppSetting).toHaveBeenCalledWith(
+            'auto_print_upon_checkout_workspace-1',
+            'false'
+        )
     })
 
     it('sends the receipt image as a raw ESC/POS QZ print job', async () => {

@@ -1,8 +1,18 @@
+import { toEnglishLogText } from './logTextEnglish'
+import {
+    ErrorLogSpamBlocker,
+    LOG_SPAM_SUMMARY_INTERVAL_MS,
+    type ErrorLogSpamSummary,
+} from './errorLogSpamBlocker'
+
 const ERROR_LOG_DIRECTORY = 'Logs'
 export const ERROR_LOG_RETENTION_DAYS = 30
 
 const ERROR_LOG_FILE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})\.jsonl$/
 const MAX_SERIALIZATION_DEPTH = 8
+const ERROR_LOG_WRITE_BATCH_SIZE = 100
+const ERROR_LOG_WRITE_DELAY_MS = 250
+const MAX_PENDING_ERROR_LOG_RECORDS = 2_000
 const CONSOLE_ERROR_LOGGER_INSTALLED = Symbol.for('atlas.console-error-logger-installed')
 
 export type ErrorLogSource = 'console' | 'toast'
@@ -75,9 +85,16 @@ export interface ErrorToastLogInput {
 type FileSystemApi = typeof import('@tauri-apps/plugin-fs')
 
 let fileSystemPromise: Promise<FileSystemApi> | undefined
-let writeQueue: Promise<void> = Promise.resolve()
 let cleanupScheduled = false
 let consoleErrorLoggerInstalled = false
+const pendingErrorLogRecords: ErrorLogRecord[] = []
+let errorLogFlushTimer: ReturnType<typeof setTimeout> | undefined
+let errorLogFlushInProgress = false
+let errorLogRecordsInFlight = 0
+let queueOverflowSuppressedSinceSummary = 0
+let queueOverflowLastSummaryAt: number | undefined
+
+const errorLogSpamBlocker = new ErrorLogSpamBlocker()
 
 function isTauriRuntime() {
     return typeof window !== 'undefined'
@@ -119,7 +136,8 @@ function getConstructorName(value: object) {
 }
 
 function serializeValue(value: unknown, ancestors: WeakSet<object>, depth: number): SerializedConsoleValue {
-    if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
+    if (value === null || typeof value === 'boolean') return value
+    if (typeof value === 'string') return toEnglishLogText(value)
 
     if (typeof value === 'number') {
         return Number.isFinite(value) ? value : { type: 'number', value: String(value) }
@@ -140,7 +158,7 @@ function serializeValue(value: unknown, ancestors: WeakSet<object>, depth: numbe
             return {
                 type: 'error',
                 name: error.name || 'Error',
-                message: error.message,
+                message: toEnglishLogText(error.message),
                 ...(typeof error.stack === 'string' && error.stack ? { stack: error.stack } : {}),
                 ...('cause' in error ? { cause: serializeValue(error.cause, ancestors, depth + 1) } : {}),
             }
@@ -274,12 +292,14 @@ function extractToastText(value: unknown, depth = 0): string | undefined {
 export function createToastErrorLogRecord(input: ErrorToastLogInput, options: Omit<CreateErrorLogRecordOptions, 'source' | 'toast'> = {}) {
     const title = extractToastText(input.title)
     const description = extractToastText(input.description)
+    const loggedTitle = title ? toEnglishLogText(title) : undefined
+    const loggedDescription = description ? toEnglishLogText(description) : undefined
     const toast = {
-        ...(title ? { title } : {}),
-        ...(description ? { description } : {}),
+        ...(loggedTitle ? { title: loggedTitle } : {}),
+        ...(loggedDescription ? { description: loggedDescription } : {}),
     }
 
-    return createErrorLogRecord([input.title, input.description], {
+    return createErrorLogRecord([loggedTitle ?? input.title, loggedDescription ?? input.description], {
         ...options,
         source: 'toast',
         ...(Object.keys(toast).length > 0 ? { toast } : {}),
@@ -324,7 +344,7 @@ export async function cleanExpiredErrorLogs(now = new Date()) {
     }
 }
 
-async function persistErrorLog(record: ErrorLogRecord) {
+async function persistErrorLogs(records: ErrorLogRecord[]) {
     if (!isTauriRuntime()) return
 
     const { BaseDirectory, mkdir, writeTextFile } = await loadFileSystem()
@@ -335,18 +355,114 @@ async function persistErrorLog(record: ErrorLogRecord) {
         await cleanExpiredErrorLogs()
     }
 
-    await writeTextFile(
-        `${ERROR_LOG_DIRECTORY}/${getLogFileName(new Date(record.timestamp))}`,
-        `${JSON.stringify(record)}\n`,
+    const recordsByFile = new Map<string, string[]>()
+    for (const record of records) {
+        const fileName = getLogFileName(new Date(record.timestamp))
+        const fileRecords = recordsByFile.get(fileName) ?? []
+        fileRecords.push(`${JSON.stringify(record)}\n`)
+        recordsByFile.set(fileName, fileRecords)
+    }
+
+    await Promise.all(Array.from(recordsByFile, ([fileName, fileRecords]) => writeTextFile(
+        `${ERROR_LOG_DIRECTORY}/${fileName}`,
+        fileRecords.join(''),
         { baseDir: BaseDirectory.AppData, append: true },
-    )
+    )))
+}
+
+function createSpamSummaryRecord(summary: ErrorLogSpamSummary) {
+    const recordLabel = summary.suppressedCount === 1 ? 'record' : 'records'
+    const message = summary.kind === 'duplicate'
+        ? `Suppressed ${summary.suppressedCount} repeated log ${recordLabel} with the same source, route, and payload.`
+        : `Suppressed ${summary.suppressedCount} log ${recordLabel} because the global logging limit was reached.`
+
+    return createErrorLogRecord(['Atlas log spam blocker', message], { source: 'console' })
+}
+
+function createQueueOverflowSummaryRecord(suppressedCount: number) {
+    const recordLabel = suppressedCount === 1 ? 'record' : 'records'
+    return createErrorLogRecord([
+        'Atlas log spam blocker',
+        `Discarded ${suppressedCount} log ${recordLabel} while the logging queue caught up.`,
+    ], { source: 'console' })
+}
+
+function scheduleErrorLogFlush() {
+    if (errorLogFlushTimer || errorLogFlushInProgress || pendingErrorLogRecords.length === 0) return
+
+    if (pendingErrorLogRecords.length >= ERROR_LOG_WRITE_BATCH_SIZE) {
+        void flushPendingErrorLogs()
+        return
+    }
+
+    errorLogFlushTimer = setTimeout(() => {
+        errorLogFlushTimer = undefined
+        void flushPendingErrorLogs()
+    }, ERROR_LOG_WRITE_DELAY_MS)
+}
+
+function queueOverflowSummaryIfPossible() {
+    const now = Date.now()
+    if (
+        queueOverflowSuppressedSinceSummary === 0
+        || pendingErrorLogRecords.length + errorLogRecordsInFlight >= MAX_PENDING_ERROR_LOG_RECORDS
+        || (
+            queueOverflowLastSummaryAt !== undefined
+            && now - queueOverflowLastSummaryAt < LOG_SPAM_SUMMARY_INTERVAL_MS
+        )
+    ) {
+        return
+    }
+
+    pendingErrorLogRecords.push(createQueueOverflowSummaryRecord(queueOverflowSuppressedSinceSummary))
+    queueOverflowSuppressedSinceSummary = 0
+    queueOverflowLastSummaryAt = now
+}
+
+async function flushPendingErrorLogs() {
+    if (errorLogFlushInProgress || pendingErrorLogRecords.length === 0) return
+
+    if (errorLogFlushTimer) {
+        clearTimeout(errorLogFlushTimer)
+        errorLogFlushTimer = undefined
+    }
+
+    const records = pendingErrorLogRecords.splice(0, ERROR_LOG_WRITE_BATCH_SIZE)
+    errorLogRecordsInFlight = records.length
+    errorLogFlushInProgress = true
+
+    try {
+        await persistErrorLogs(records)
+    } catch {
+        // Logging must never create another console error or interrupt the app.
+    } finally {
+        errorLogRecordsInFlight = 0
+        errorLogFlushInProgress = false
+        queueOverflowSummaryIfPossible()
+        scheduleErrorLogFlush()
+    }
+}
+
+function enqueueErrorLog(record: ErrorLogRecord) {
+    if (pendingErrorLogRecords.length + errorLogRecordsInFlight >= MAX_PENDING_ERROR_LOG_RECORDS) {
+        queueOverflowSuppressedSinceSummary += 1
+        return false
+    }
+
+    pendingErrorLogRecords.push(record)
+    scheduleErrorLogFlush()
+    return true
 }
 
 function queueErrorLog(record: ErrorLogRecord) {
-    writeQueue = writeQueue
-        .catch(() => undefined)
-        .then(() => persistErrorLog(record))
-        .catch(() => undefined)
+    if (!isTauriRuntime()) return
+
+    const decision = errorLogSpamBlocker.evaluate(record)
+    decision.summaries.forEach((summary) => {
+        enqueueErrorLog(createSpamSummaryRecord(summary))
+    })
+
+    if (decision.persist) enqueueErrorLog(record)
 }
 
 export function recordErrorToast(input: ErrorToastLogInput) {

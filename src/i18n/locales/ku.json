@@ -2006,6 +2006,9 @@
     "printing": {
       "title": "ڕێکخستنەکانی چاپکردن",
       "desc": "ڕێکخستنەکانی چاپکردن بەڕێوەببە",
+      "autoPrintUponCheckoutTitle": "چاپکردنی خۆکار لە کاتی تەواوکردنی پارەدان",
+      "autoPrintUponCheckoutDesc": "دوای هەر پارەدانێکی سەرکەوتوو لە POS، پسوڵەکە بە خۆکار لەسەر ئەم ئامێرە چاپ بکە.",
+      "autoPrintUponCheckoutSaveError": "نەتوانرا هەڵبژاردەی چاپکردنی خۆکار نوێ بکرێتەوە.",
       "language": "زمان",
       "auto": "خۆکار",
       "qrTitle": "کۆدی QR",
@@ -2925,6 +2928,22 @@
     "zoomOut": "بچووککردنەوە",
     "zoomIn": "گەورەکردن",
     "resetZoom": "گەڕاندنەوەی زووم"
+  },
+  "pdfPreview": {
+    "title": "پێشبینینی PDF",
+    "unavailable": "ئەم پێشبینینی PDFە بەردەست نییە.",
+    "back": "گەڕانەوە",
+    "save": "پاشەکەوتکردن",
+    "share": "هاوبەشکردن",
+    "print": "چاپکردن",
+    "saveErrorTitle": "نەتوانرا PDF پاشەکەوت بکرێت",
+    "saveErrorDescription": "دووبارە هەوڵ بدە بۆ پاشەکەوتکردنی ئەم پێشبینینە وەک PDF.",
+    "shareErrorTitle": "نەتوانرا PDF هاوبەش بکرێت",
+    "shareErrorDescription": "دووبارە هەوڵ بدە بۆ هاوبەشکردنی ئەم پێشبینینە.",
+    "shareUnavailableTitle": "هاوبەشکردن بەردەست نییە",
+    "shareUnavailableDescription": "لەبری ئەوە PDFەکە داگیرا.",
+    "printErrorTitle": "نەتوانرا PDF چاپ بکرێت",
+    "printErrorDescription": "دووبارە هەوڵ بدە بۆ چاپکردنی ئەم پێشبینینە."
   },
   "invoice": {
     "date": "بەروار",

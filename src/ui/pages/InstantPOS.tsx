@@ -2197,23 +2197,40 @@ export function InstantPOS() {
         return platformService.convertFileSrc(url)
     }
 
+    const checkoutSuccessModal = (
+        <CheckoutSuccessModal
+            isOpen={isSuccessModalOpen}
+            onClose={() => {
+                setIsSuccessModalOpen(false)
+                setCompletedSaleData(null)
+            }}
+            saleData={completedSaleData}
+            features={features}
+            receiptTemplateKey={INSTANT_HISTORY_RECEIPT_TEMPLATE_KEY}
+            tableNumber={restaurantMode ? completedSaleData?.table_number : null}
+        />
+    )
+
     if (restaurantMode && restaurantTableNumber === null) {
         return (
-            <RestaurantTableGrid
-                tableCount={restaurantTableSettings.tableCount}
-                vipTableNumbers={restaurantTableSettings.vipTableNumbers}
-                tickets={restaurantPosTickets}
-                formatTotal={(ticket) => formatCurrency(
-                    calculateRestaurantTicketTotal(ticket.items),
-                    settlementCurrency,
-                    features.iqd_display_preference
-                )}
-                onOpenTable={openRestaurantTable}
-                onMoveTicket={handleRestaurantTicketMove}
-                canManageActionVisibility={isRestaurantAdmin}
-                actionVisibility={restaurantActionVisibility}
-                onSaveActionVisibility={saveRestaurantActionVisibility}
-            />
+            <>
+                <RestaurantTableGrid
+                    tableCount={restaurantTableSettings.tableCount}
+                    vipTableNumbers={restaurantTableSettings.vipTableNumbers}
+                    tickets={restaurantPosTickets}
+                    formatTotal={(ticket) => formatCurrency(
+                        calculateRestaurantTicketTotal(ticket.items),
+                        settlementCurrency,
+                        features.iqd_display_preference
+                    )}
+                    onOpenTable={openRestaurantTable}
+                    onMoveTicket={handleRestaurantTicketMove}
+                    canManageActionVisibility={isRestaurantAdmin}
+                    actionVisibility={restaurantActionVisibility}
+                    onSaveActionVisibility={saveRestaurantActionVisibility}
+                />
+                {checkoutSuccessModal}
+            </>
         )
     }
 
@@ -2918,16 +2935,7 @@ export function InstantPOS() {
                 onProductsPerRowChange={setProductsPerRow}
             />
 
-            <CheckoutSuccessModal
-                isOpen={isSuccessModalOpen}
-                onClose={() => {
-                    setIsSuccessModalOpen(false)
-                    setCompletedSaleData(null)
-                }}
-                saleData={completedSaleData}
-                features={features}
-                receiptTemplateKey={INSTANT_HISTORY_RECEIPT_TEMPLATE_KEY}
-            />
+            {checkoutSuccessModal}
         </div>
     )
 }

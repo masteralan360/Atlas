@@ -86,6 +86,19 @@ export function removeSidebarFavorite(favorites: SidebarFavorites, href: string)
   }
 }
 
+/** Returns favorited items in saved order without altering their nested navigation. */
+export function getVisibleSidebarFavoriteItems<Item extends { href: string }>(
+  favorites: SidebarFavorites,
+  visibleItems: readonly Item[]
+): Item[] {
+  const itemsByHref = new Map(visibleItems.map((item) => [item.href, item]))
+
+  return favorites.order.flatMap((href) => {
+    const item = itemsByHref.get(href)
+    return item ? [item] : []
+  })
+}
+
 /** Reorders visible favorites while retaining saved unavailable modules. */
 export function reorderVisibleSidebarFavorites(
   favorites: SidebarFavorites,

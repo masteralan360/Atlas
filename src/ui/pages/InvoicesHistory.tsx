@@ -37,7 +37,7 @@ import { useDateRange } from '@/context/DateRangeContext'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { r2Service } from '@/services/r2Service'
 import { UploadFilesTab } from './UploadFile'
-import { setPrintPreviewEditorSource } from '@/lib/printPreviewEditorStore'
+import { setPDFPreviewSource } from '@/lib/pdfPreviewStore'
 import { loadInvoiceVersions } from '@/services/invoiceVersionService'
 import { getReadableFileSize } from '@/components/application/file-upload/file-upload-base'
 import { getWorkspaceUsageLimitMessage, isWorkspaceUsageLimitError } from '@/lib/workspaceUsage'
@@ -208,11 +208,11 @@ export function InvoicesHistory() {
                 return
             }
 
-            setPrintPreviewEditorSource({
+            setPDFPreviewSource({
                 url,
                 title: `${t('invoices.viewInvoice') || 'Invoice'} ${invoice.invoiceid}`
             })
-            setLocation('/print-preview-editor')
+            setLocation('/pdf-preview')
         } catch (error) {
             console.error('[InvoicesHistory] Failed to load PDF:', error)
             setDownloadError(t('invoices.pdfLoadError') || 'Failed to load PDF')
@@ -333,12 +333,12 @@ export function InvoicesHistory() {
                 return
             }
 
-            setPrintPreviewEditorSource({
+            setPDFPreviewSource({
                 url,
                 title: `${versionsTarget?.invoiceid || t('invoices.invoice', { defaultValue: 'Invoice' })} · ${t('invoices.version', { defaultValue: 'Version' })} ${version.versionNumber}`,
             })
             setVersionsTarget(null)
-            setLocation('/print-preview-editor')
+            setLocation('/pdf-preview')
         } catch (error) {
             console.error('[InvoicesHistory] Failed to view invoice version:', error)
             setDownloadError(t('invoices.pdfLoadError') || 'Failed to load PDF')

@@ -70,6 +70,7 @@ import {
   addSidebarFavorite,
   createSidebarFavoritesStorageValue,
   getSidebarFavoritesStorageKey,
+  getVisibleSidebarFavoriteItems,
   readSidebarFavorites,
   removeSidebarFavorite,
   reorderVisibleSidebarFavorites,
@@ -840,16 +841,12 @@ export function Layout({ children }: LayoutProps) {
   )
   const sidebarFavoriteHrefSet = useMemo(() => new Set(sidebarFavorites.order), [sidebarFavorites.order])
   const sidebarFavoritesGroup = useMemo<SidebarFavoritesGroup | null>(() => {
-    const modulesByHref = new Map(allVisibleSidebarModules.map((item) => [item.href, item]))
-    const favoriteItems = sidebarFavorites.order.flatMap((href) => {
-      const item = modulesByHref.get(href)
-      return item ? [{ ...item, children: undefined }] : []
-    })
+    const favoriteItems = getVisibleSidebarFavoriteItems(sidebarFavorites, allVisibleSidebarModules)
 
     return favoriteItems.length > 0
       ? { sectionKey: 'favorites', title: t('nav.sidebarFavorites.title'), icon: Star, items: favoriteItems }
       : null
-  }, [allVisibleSidebarModules, sidebarFavorites.order, t])
+  }, [allVisibleSidebarModules, sidebarFavorites, t])
   const sidebarFavoritePlacementGroup = useMemo<SidebarFavoritesGroup>(
     () => sidebarFavoritesGroup ?? { sectionKey: 'favorites', title: t('nav.sidebarFavorites.title'), icon: Star, items: [] },
     [sidebarFavoritesGroup, t]

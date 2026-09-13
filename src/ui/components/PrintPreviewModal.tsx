@@ -35,6 +35,7 @@ import {
     type CustomTemplatePreviewTarget,
     type TemplatePreview
 } from '@/lib/printPreviewEditorStore'
+import { setPDFPreviewSource } from '@/lib/pdfPreviewStore'
 import { useWorkspacePermissions } from '@/permissions/WorkspacePermissionsContext'
 import {
     PrintSelectionModal,
@@ -514,6 +515,7 @@ export function PrintPreviewModal({
 
     const handleOpenPreview = useCallback(async () => {
         try {
+            let previewPath = '/print-preview-editor'
             templatePreviewProp?.resetFreshPartnerBalance?.()
             const hasPdfDataForPreview = !!pdfData
             const hasPdfBuilder = !!pdfBuilder
@@ -578,17 +580,17 @@ export function PrintPreviewModal({
                     const blob = printFormat === 'receipt' ? blobs.receipt : blobs.a4
                     if (!blob) throw new Error('Failed to generate PDF')
                     const url = await blobToDataUrl(blob)
-                    setPrintPreviewEditorSource({
+                    setPDFPreviewSource({
                         url,
                         title: title || t('print.previewTitle') || 'Print Preview',
-                        onSave: showSaveButton ? handleSave : undefined,
                         onPrint: onPreviewPrint,
                         printActionLabel: previewPrintActionLabel,
                     })
+                    previewPath = '/pdf-preview'
                 }
             }
 
-            setLocation('/print-preview-editor')
+            setLocation(previewPath)
         } catch (err) {
             console.error('Failed to open preview:', err)
         }

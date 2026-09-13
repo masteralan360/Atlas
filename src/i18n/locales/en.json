@@ -3386,6 +3386,9 @@
     "printing": {
       "title": "Printing Settings",
       "desc": "Manage your printing settings",
+      "autoPrintUponCheckoutTitle": "Auto-Print Upon Checkout",
+      "autoPrintUponCheckoutDesc": "Automatically print the receipt after every successful POS checkout on this device.",
+      "autoPrintUponCheckoutSaveError": "Couldn't update the automatic printing preference.",
       "language": "Language",
       "auto": "Auto",
       "qrTitle": "QR Code",
@@ -4569,6 +4572,22 @@
     "zoomOut": "Zoom out",
     "zoomIn": "Zoom in",
     "resetZoom": "Reset zoom"
+  },
+  "pdfPreview": {
+    "title": "PDF Preview",
+    "unavailable": "This PDF preview is unavailable.",
+    "back": "Back",
+    "save": "Save",
+    "share": "Share",
+    "print": "Print",
+    "saveErrorTitle": "Couldn't save the PDF",
+    "saveErrorDescription": "Try again to save this preview as a PDF.",
+    "shareErrorTitle": "Couldn't share the PDF",
+    "shareErrorDescription": "Try again to share this preview.",
+    "shareUnavailableTitle": "Sharing isn't available",
+    "shareUnavailableDescription": "The PDF was downloaded instead.",
+    "printErrorTitle": "Couldn't print the PDF",
+    "printErrorDescription": "Try again to print this preview."
   },
   "invoice": {
     "date": "Date",

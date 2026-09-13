@@ -1,17 +1,13 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
     A4_PAGE_HEIGHT_MM,
-    clearPendingPrintPreviewEditorView,
     clearPrintPreviewEditorSource,
     getCustomTemplateLayoutHeightMm,
     getCustomTemplateLayoutOverflowHeightMm,
     getCustomTemplateLayoutPageCount,
-    getPendingPrintPreviewEditorView,
     getPrintPreviewEditorSource,
-    setPendingPrintPreviewEditorView,
     setPrintPreviewEditorSource,
-    shouldReflowCustomTemplateText,
-    subscribeToPendingPrintPreviewEditorView
+    shouldReflowCustomTemplateText
 } from './printPreviewEditorStore'
 import type { CustomTemplateLayout } from './printPreviewEditorStore'
 
@@ -32,7 +28,6 @@ function createLayout(overrides: Partial<CustomTemplateLayout> = {}): CustomTemp
 
 afterEach(() => {
     clearPrintPreviewEditorSource()
-    clearPendingPrintPreviewEditorView()
 })
 
 describe('print preview editor state', () => {
@@ -44,21 +39,6 @@ describe('print preview editor state', () => {
 
         clearPrintPreviewEditorSource()
         expect(getPrintPreviewEditorSource()).toBeNull()
-    })
-
-    it('publishes pending editor view changes to subscribers', () => {
-        const listener = vi.fn()
-        const unsubscribe = subscribeToPendingPrintPreviewEditorView(listener)
-        const view = { url: 'blob:print-preview-editor', title: 'Saved document' }
-
-        setPendingPrintPreviewEditorView(view)
-        expect(getPendingPrintPreviewEditorView()).toBe(view)
-        expect(listener).toHaveBeenCalledTimes(1)
-
-        unsubscribe()
-        clearPendingPrintPreviewEditorView()
-        expect(getPendingPrintPreviewEditorView()).toBeNull()
-        expect(listener).toHaveBeenCalledTimes(1)
     })
 })
 

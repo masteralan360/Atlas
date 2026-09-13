@@ -176,6 +176,11 @@ const PrintPreviewEditorPage = lazy(() =>
     default: m.PrintPreviewEditorPage,
   })),
 );
+const PDFPreviewPage = lazy(() =>
+  import("@/ui/pages/PDFPreviewPage").then((m) => ({
+    default: m.PDFPreviewPage,
+  })),
+);
 const CustomTemplates = lazy(() =>
   import("@/ui/pages/CustomTemplates").then((m) => ({
     default: m.CustomTemplates,
@@ -2400,6 +2405,13 @@ function App() {
                         <ProtectedRoute>
                           <Suspense fallback={null}>
                             <PrintPreviewEditorPage />
+                          </Suspense>
+                        </ProtectedRoute>
+                      </Route>
+                      <Route path="/pdf-preview">
+                        <ProtectedRoute>
+                          <Suspense fallback={null}>
+                            <PDFPreviewPage />
                           </Suspense>
                         </ProtectedRoute>
                       </Route>

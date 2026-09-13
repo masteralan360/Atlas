@@ -31,7 +31,7 @@ import { ORDER_STATUS_ADVANCE_HOLD_DURATION_MS } from '@/lib/pressAndHold'
 import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { buildWorkflowGradientFill } from '@/lib/workflowProgressGradient'
 import { generateJumlaKhaleejInquiryPdf } from '@/lib/jumlaKhaleejInquiryPdf'
-import { setPrintPreviewEditorSource } from '@/lib/printPreviewEditorStore'
+import { setPDFPreviewSource } from '@/lib/pdfPreviewStore'
 import { printPdfBlob } from '@/services/pdfPrintService'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
 import { PdfJsViewer } from '@/ui/components/PdfJsViewer'
@@ -161,13 +161,13 @@ function MarketplaceInquiryPdfCard({ order }: { order: MarketplaceOrderRecord })
                 orderId: order.id
             })
             setPdfBytes(result.bytes)
-            setPrintPreviewEditorSource({
+            setPDFPreviewSource({
                 title: `${t('ecommerce.inquiryPdf')} ${result.documentNumber}`,
                 pdfBytes: result.bytes,
                 onPrint: (blob) => printPdfBlob(blob, { title: result.documentNumber }),
                 printActionLabel: t('common.print')
             })
-            navigate('/print-preview-editor')
+            navigate('/pdf-preview')
         } catch (error) {
             console.error('[ecommerce] inquiry editor preparation failed', error)
             setPdfBytes(null)

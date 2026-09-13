@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import ar from '@/i18n/locales/ar.json'
+import en from '@/i18n/locales/en.json'
+import ku from '@/i18n/locales/ku.json'
 import {
     ERROR_LOG_RETENTION_DAYS,
     createErrorLogRecord,
@@ -47,6 +50,43 @@ describe('errorLogger', () => {
             description: 'Try again after reconnecting.',
         })
         expect(record.arguments).toEqual(['Unable to save', 'Try again after reconnecting.'])
+    })
+
+    it('records localized Atlas toast text in English while preserving interpolated values', () => {
+        const count = 'عميل خارجي'
+        const localizedDescription = ar.subscriptionExpiryWarning.description.replace('{{count}}', count)
+        const englishDescription = en.subscriptionExpiryWarning.description.replace('{{count}}', count)
+        const record = createToastErrorLogRecord({
+            title: ar.common.error,
+            description: localizedDescription,
+        })
+
+        expect(record.toast).toEqual({
+            title: en.common.error,
+            description: englishDescription,
+        })
+        expect(record.arguments).toEqual([en.common.error, englishDescription])
+
+        const KurdishRecord = createToastErrorLogRecord({ title: ku.common.error })
+        expect(KurdishRecord.toast).toEqual({ title: en.common.error })
+        expect(KurdishRecord.arguments).toEqual([en.common.error, { type: 'undefined' }])
+
+        const consoleRecord = createErrorLogRecord([ku.common.error])
+        expect(consoleRecord.arguments).toEqual([en.common.error])
+    })
+
+    it('keeps external toast values verbatim', () => {
+        const externalDescription = 'قيمة خارجية مخصصة 9f3a701e'
+        const record = createToastErrorLogRecord({
+            title: ar.common.error,
+            description: externalDescription,
+        })
+
+        expect(record.toast).toEqual({
+            title: en.common.error,
+            description: externalDescription,
+        })
+        expect(record.arguments).toEqual([en.common.error, externalDescription])
     })
 
     it('keeps console capture safe for values that cannot be inspected', () => {

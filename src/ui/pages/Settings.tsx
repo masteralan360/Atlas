@@ -230,6 +230,10 @@ export function Settings() {
     const [selectedThermalRollWidth, setSelectedThermalRollWidth] = useState<ThermalRollWidth>(DEFAULT_THERMAL_ROLL_WIDTH)
     const [isScanningThermalPrinters, setIsScanningThermalPrinters] = useState(false)
     const [isThermalActionPending, setIsThermalActionPending] = useState(false)
+    const [autoPrintUponCheckout, setAutoPrintUponCheckout] = useState(() =>
+        printService.isAutoPrintUponCheckoutEnabled(user?.workspaceId || '')
+    )
+    const [isAutoPrintUponCheckoutSaving, setIsAutoPrintUponCheckoutSaving] = useState(false)
     const [bleServiceUuid, setBleServiceUuid] = useState('')
     const [bleCharacteristicUuid, setBleCharacteristicUuid] = useState('')
     const [isInvoicePdfExporting, setIsInvoicePdfExporting] = useState(false)
@@ -315,6 +319,27 @@ export function Settings() {
             description: fallbackDescription || normalized.message,
             variant: 'destructive'
         })
+    }
+
+    useEffect(() => {
+        setAutoPrintUponCheckout(printService.isAutoPrintUponCheckoutEnabled(user?.workspaceId || ''))
+    }, [user?.workspaceId])
+
+    const handleAutoPrintUponCheckoutChange = async (enabled: boolean) => {
+        if (!user?.workspaceId || isAutoPrintUponCheckoutSaving) return
+
+        const previousValue = autoPrintUponCheckout
+        setAutoPrintUponCheckout(enabled)
+        setIsAutoPrintUponCheckoutSaving(true)
+
+        try {
+            await printService.setAutoPrintUponCheckoutEnabled(user.workspaceId, enabled)
+        } catch (error) {
+            setAutoPrintUponCheckout(previousValue)
+            showActionError(error, t('settings.printing.autoPrintUponCheckoutSaveError'))
+        } finally {
+            setIsAutoPrintUponCheckoutSaving(false)
+        }
     }
 
     const handleClinicalRegistryTypeChange = async (useBeautyCenterTerms: boolean) => {
@@ -3599,6 +3624,23 @@ export function Settings() {
                                 </>)}
 
                                 <div className="grid gap-4 md:grid-cols-2 max-w-3xl">
+                                    {canUseReceiptPrinting && (
+                                    <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg border border-border">
+                                        <div className="space-y-0.5 pr-4">
+                                            <Label className="text-sm font-medium">
+                                                {t('settings.printing.autoPrintUponCheckoutTitle')}
+                                            </Label>
+                                            <p className="text-xs text-muted-foreground">
+                                                {t('settings.printing.autoPrintUponCheckoutDesc')}
+                                            </p>
+                                        </div>
+                                        <Switch
+                                            checked={autoPrintUponCheckout}
+                                            onCheckedChange={handleAutoPrintUponCheckoutChange}
+                                            disabled={isAutoPrintUponCheckoutSaving || !user?.workspaceId}
+                                        />
+                                    </div>
+                                    )}
                                     {canUseThermalPrinter && (<>
                                     <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg border border-border">
                                         <div className="space-y-0.5 pr-4">

@@ -25,6 +25,7 @@ import { normalizeUnitCode } from '@/local-db/models'
 import { buildWorkflowGradientFill } from '@/lib/workflowProgressGradient'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import { setPrintPreviewEditorSource, type TemplatePreview, type TemplatePreviewRenderOptions } from '@/lib/printPreviewEditorStore'
+import { setPDFPreviewSource } from '@/lib/pdfPreviewStore'
 import {
     db,
     approvePurchaseOrderRequest,
@@ -585,11 +586,11 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
 
             if (!url) return
 
-            setPrintPreviewEditorSource({
+            setPDFPreviewSource({
                 url,
                 title: `Invoice ${orderInvoice.invoiceid}`
             })
-            navigate('/print-preview-editor')
+            navigate('/pdf-preview')
         } catch (error) {
             console.error('[OrderDetailsView] Failed to load invoice PDF:', error)
             toast({

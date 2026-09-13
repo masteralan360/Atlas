@@ -2,7 +2,7 @@ import i18n from '@/i18n/config'
 import { formatCurrency, formatDocumentDateTime } from '@/lib/utils'
 import { invoke } from '@tauri-apps/api/core'
 import { isAndroidPwa, isDesktop, isTauriAndroid } from '@/lib/platform'
-import { clearAppSetting, getAppSetting, setAppSetting } from '@/local-db/settings'
+import { clearAppSetting, getAppSetting, getAppSettingSync, setAppSetting } from '@/local-db/settings'
 import {
     getDirectMobileThermalCapabilities,
     listAuthorizedUsbThermalPrinters,
@@ -175,6 +175,10 @@ const OFFICE_PRINTER_PATTERNS = [
 
 function getThermalPrinterSettingKey(workspaceId: string) {
     return `thermal_printer_selection_${workspaceId}`
+}
+
+function getAutoPrintUponCheckoutSettingKey(workspaceId: string) {
+    return `auto_print_upon_checkout_${workspaceId}`
 }
 
 interface AndroidBluetoothThermalPrinterInfo {
@@ -386,6 +390,20 @@ export function isLikelyThermalPrinter(printer: Pick<ThermalPrinterInfo, 'name' 
 
 export const printService = {
     getDirectMobileThermalCapabilities,
+
+    /**
+     * This preference lives alongside the selected thermal printer, keeping
+     * checkout auto-printing specific to the current workspace and device.
+     */
+    isAutoPrintUponCheckoutEnabled(workspaceId: string): boolean {
+        if (!workspaceId) return false
+        return getAppSettingSync(getAutoPrintUponCheckoutSettingKey(workspaceId)) === 'true'
+    },
+
+    async setAutoPrintUponCheckoutEnabled(workspaceId: string, enabled: boolean): Promise<void> {
+        if (!workspaceId) return
+        await setAppSetting(getAutoPrintUponCheckoutSettingKey(workspaceId), String(enabled))
+    },
 
     async listThermalPrinters(): Promise<ThermalPrinterInfo[]> {
         if (isDesktop()) {

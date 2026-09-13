@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
     Dialog,
@@ -6,9 +6,10 @@ import {
     DialogTitle,
     Button
 } from '@/ui/components'
-import { CheckCircle2, Printer, Coins } from 'lucide-react'
+import { CheckCircle2, Printer, Coins, Table2 } from 'lucide-react'
 import { formatCurrency, cn } from '@/lib/utils'
 import { triggerInvoiceSync } from '@/services/invoiceSyncService'
+import { printService } from '@/services/printService'
 import { useAuth } from '@/auth'
 import { useWorkspace, type WorkspaceFeatures } from '@/workspace'
 import { Textarea } from '@/ui/components/textarea'
@@ -31,6 +32,8 @@ interface CheckoutSuccessModalProps {
     receiptTemplateKey?: string
     /** Persists the note to the underlying source record instead of the POS sales table. */
     onSaveNote?: (note: string) => Promise<void> | void
+    /** Table context shown for restaurant-table checkouts. */
+    tableNumber?: string | number | null
 }
 
 export function CheckoutSuccessModal({
@@ -41,7 +44,8 @@ export function CheckoutSuccessModal({
     tutorialDisablePrint = false,
     receiptPdfBuilder,
     receiptTemplateKey = SALES_HISTORY_RECEIPT_TEMPLATE_KEY,
-    onSaveNote
+    onSaveNote,
+    tableNumber
 }: CheckoutSuccessModalProps) {
     const { t } = useTranslation()
     const { user } = useAuth()
@@ -52,6 +56,8 @@ export function CheckoutSuccessModal({
     const [isProcessing, setIsProcessing] = useState(false)
     const [note, setNote] = useState(saleData?.notes || '')
     const [noteSourceId, setNoteSourceId] = useState<string | null>(saleData?.id || null)
+    const hasAutoPrintedRef = useRef(false)
+    const hasTableNumber = tableNumber !== null && tableNumber !== undefined && tableNumber !== ''
     const debouncedNote = useDebounce(note, 1000)
     const receiptSaleData = useMemo(
         () => saleData ? { ...saleData, notes: note } : saleData,
@@ -71,6 +77,7 @@ export function CheckoutSuccessModal({
         receiptPdfBuilder,
         receiptTemplateKey,
     })
+    const isPrintDisabled = isProcessing || isLoadingPrimaryReceiptTemplate || tutorialDisablePrint
 
     useEffect(() => {
         if (!isOpen) {
@@ -130,7 +137,7 @@ export function CheckoutSuccessModal({
         })
     }, [debouncedNote, persistNote])
 
-    const handlePrintAndUpload = async () => {
+    const handlePrintAndUpload = useCallback(async () => {
         if (isProcessing || !saleData) {
             // If already processing or missing data, just close or do nothing
             onClose()
@@ -182,7 +189,53 @@ export function CheckoutSuccessModal({
         } finally {
             setIsProcessing(false)
         }
-    }
+    }, [
+        buildReceiptPdf,
+        isProcessing,
+        note,
+        onClose,
+        printFeatures,
+        printReceipt,
+        receiptSaleData,
+        resolvedWorkspaceName,
+        saleData,
+        user,
+        workspaceId,
+        persistNote,
+    ])
+
+    useEffect(() => {
+        if (!isOpen) {
+            hasAutoPrintedRef.current = false
+        }
+    }, [isOpen])
+
+    useEffect(() => {
+        if (
+            !isOpen
+            || hasAutoPrintedRef.current
+            || tutorialDisablePrint
+            || isProcessing
+            || isLoadingPrimaryReceiptTemplate
+            || !saleData
+            || !printService.isAutoPrintUponCheckoutEnabled(workspaceId)
+        ) {
+            return
+        }
+
+        // Mark the checkout before starting the shared flow so a print error
+        // follows the existing close-on-error behavior without an auto-retry.
+        hasAutoPrintedRef.current = true
+        void handlePrintAndUpload()
+    }, [
+        handlePrintAndUpload,
+        isLoadingPrimaryReceiptTemplate,
+        isOpen,
+        isProcessing,
+        saleData,
+        tutorialDisablePrint,
+        workspaceId,
+    ])
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -215,6 +268,12 @@ export function CheckoutSuccessModal({
                         <p className="text-white/60 text-[10px] font-bold uppercase tracking-widest">
                             {saleData?.sequenceId ? `#${String(saleData.sequenceId).padStart(5, '0')}` : saleData?.invoiceid}
                         </p>
+                        {hasTableNumber && (
+                            <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-black/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-white">
+                                <Table2 className="h-3.5 w-3.5" aria-hidden="true" />
+                                <span>{t('instantPos.table', { defaultValue: 'Table' })} {tableNumber}</span>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -267,14 +326,14 @@ export function CheckoutSuccessModal({
                             size="lg"
                             className={cn(
                                 "w-full text-lg h-14 rounded-xl transition-all active:scale-95 group",
-                                tutorialDisablePrint
+                                isPrintDisabled
                                     ? "bg-muted text-muted-foreground border border-border shadow-none cursor-not-allowed hover:bg-muted"
                                     : "bg-[#23c55e] hover:bg-[#1ea34d] text-white shadow-lg shadow-green-500/20"
                             )}
                             onClick={handlePrintAndUpload}
-                            disabled={isProcessing || isLoadingPrimaryReceiptTemplate || tutorialDisablePrint}
+                            disabled={isPrintDisabled}
                         >
-                            <Printer className={cn("w-6 h-6 mr-3 transition-transform", !tutorialDisablePrint && "group-hover:rotate-12")} />
+                            <Printer className={cn("w-6 h-6 mr-3 transition-transform", !isPrintDisabled && "group-hover:rotate-12")} />
                             {isProcessing || isLoadingPrimaryReceiptTemplate ? t('common.loading') : t('pos.printReceipt')}
                         </Button>
 

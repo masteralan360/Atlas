@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addSidebarFavorite,
   createSidebarFavoritesStorageValue,
+  getVisibleSidebarFavoriteItems,
   readSidebarFavorites,
   removeSidebarFavorite,
   reorderVisibleSidebarFavorites,
@@ -33,6 +34,22 @@ describe('sidebar favorites', () => {
       order: ['/stock-adjustments', '/hidden', '/products'],
       firstAddedOrder: ['/products', '/hidden', '/stock-adjustments']
     })
+  })
+
+  it('preserves a favorited parent tab\'s nested tabs', () => {
+    const children = [{ href: '/products/catalog', name: 'Catalog' }]
+    const visibleItems = [
+      { href: '/products', name: 'Products', children },
+      { href: '/sales', name: 'Sales' }
+    ]
+
+    const favoriteItems = getVisibleSidebarFavoriteItems(
+      { order: ['/products', '/unavailable'], firstAddedOrder: ['/products', '/unavailable'] },
+      visibleItems
+    )
+
+    expect(favoriteItems).toEqual([visibleItems[0]])
+    expect(favoriteItems[0].children).toBe(children)
   })
 
   it('resets a customized order to first-added order', () => {

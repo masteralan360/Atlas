@@ -1999,6 +1999,9 @@
     "printing": {
       "title": "إعدادات الطباعة",
       "desc": "إدارة إعدادات الطباعة الخاصة بك",
+      "autoPrintUponCheckoutTitle": "الطباعة التلقائية عند إتمام الدفع",
+      "autoPrintUponCheckoutDesc": "اطبع الإيصال تلقائيًا بعد كل عملية دفع ناجحة في نقطة البيع على هذا الجهاز.",
+      "autoPrintUponCheckoutSaveError": "تعذر تحديث تفضيل الطباعة التلقائية.",
       "language": "اللغة",
       "auto": "تلقائي",
       "qrTitle": "رمز الاستجابة السريعة (QR)",
@@ -2909,6 +2912,22 @@
     "zoomOut": "تصغير",
     "zoomIn": "تكبير",
     "resetZoom": "إعادة ضبط التكبير"
+  },
+  "pdfPreview": {
+    "title": "معاينة PDF",
+    "unavailable": "معاينة ملف PDF هذه غير متاحة.",
+    "back": "رجوع",
+    "save": "حفظ",
+    "share": "مشاركة",
+    "print": "طباعة",
+    "saveErrorTitle": "تعذر حفظ ملف PDF",
+    "saveErrorDescription": "حاول مرة أخرى لحفظ هذه المعاينة كملف PDF.",
+    "shareErrorTitle": "تعذر مشاركة ملف PDF",
+    "shareErrorDescription": "حاول مرة أخرى لمشاركة هذه المعاينة.",
+    "shareUnavailableTitle": "المشاركة غير متاحة",
+    "shareUnavailableDescription": "تم تنزيل ملف PDF بدلاً من ذلك.",
+    "printErrorTitle": "تعذرت طباعة ملف PDF",
+    "printErrorDescription": "حاول مرة أخرى لطباعة هذه المعاينة."
   },
   "invoice": {
     "date": "التاريخ",

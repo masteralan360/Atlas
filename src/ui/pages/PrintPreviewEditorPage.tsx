@@ -5,7 +5,6 @@ import {
     A4_PAGE_HEIGHT_MM,
     getPrintPreviewEditorSource,
     clearPrintPreviewEditorSource,
-    setPendingPrintPreviewEditorView,
     getCustomTemplateLayoutHeightMm,
     getFixedPageCountForHeight,
     shouldReflowCustomTemplateText,
@@ -17,6 +16,7 @@ import {
     type CustomTemplateShape,
     type CustomTemplateText
 } from '@/lib/printPreviewEditorStore'
+import { setPendingPDFPreview } from '@/lib/pdfPreviewStore'
 import { platformService } from '@/services/platformService'
 import { paginateOrderItemsStatementPages, paginateOrderItemsTables } from '@/lib/orderItemsTablePagination'
 import { centerTablesOnPages } from '@/lib/centeredTablePagination'
@@ -51,12 +51,9 @@ import { usePartnerAccountStatementPrintBalances } from '@/hooks/usePartnerAccou
 import { UiAccessGate, useUiAccess } from '@/context/UiAccessContext'
 import { AttachedShapesOverlay } from '@/ui/components/AttachedShapesOverlay'
 import { PDF_SHAPE_OPTIONS } from '@/ui/components/PdfShapeGraphic'
-import { PdfJsViewer } from '@/ui/components/PdfJsViewer'
 import { useToast } from '@/ui/components/use-toast'
 import { ProgressToast } from '@/ui/components/ProgressToast'
 import { subscribePdfProgress } from '@/services/pdfProgress'
-import { printPdfBlob } from '@/services/pdfPrintService'
-import { resolvePdfBytes } from '@/lib/pdfViewerBytes'
 import type { PdfShapeKind } from '@/types'
 
 const PREVIEW_PAGE_BREAK_SELECTOR = [
@@ -1018,7 +1015,6 @@ export function PrintPreviewEditorPage() {
         templateTexts
     ])
 
-    const showNativePdf = Boolean((source?.url || source?.pdfBytes) && !source?.data)
     const hasTemplatePrimaryAction = Boolean(
         source?.onSaveTemplateLayout
         || source?.onSave
@@ -1040,7 +1036,7 @@ export function PrintPreviewEditorPage() {
                 const langOverride = tempPrintLang !== 'auto' ? tempPrintLang : undefined
                 const blob = await source.generatePdfBlob(editableData, langOverride)
                 const invoiceId = await source.onSave?.(blob)
-                setPendingPrintPreviewEditorView({ url: URL.createObjectURL(blob), title: invoiceId ? `Invoice ${invoiceId}` : title })
+                setPendingPDFPreview({ url: URL.createObjectURL(blob), title: invoiceId ? `Invoice ${invoiceId}` : title })
                 return
             } else {
                 await source.onSave?.(new Blob())
@@ -1062,25 +1058,6 @@ export function PrintPreviewEditorPage() {
                 <p className="text-muted-foreground">{t('common.noData') || 'No data'}</p>
             </div>
         )
-    }
-
-    const handleNativePrint = async () => {
-        if ((!source?.url && !source?.pdfBytes) || isSaving) return
-
-        setIsSaving(true)
-        try {
-            const bytes = source.pdfBytes?.slice()
-                || (source.url ? await resolvePdfBytes(source.url) : null)
-            if (!bytes) throw new Error('Failed to load PDF for printing.')
-
-            const blob = new Blob([bytes], { type: 'application/pdf' })
-            if (source.onPrint) await source.onPrint(blob)
-            else await printPdfBlob(blob, { title })
-        } catch (err) {
-            console.error('Failed to print PDF:', err)
-        } finally {
-            setIsSaving(false)
-        }
     }
 
     const buildTemplateLayout = useCallback((): CustomTemplateLayout | null => {
@@ -1162,7 +1139,7 @@ export function PrintPreviewEditorPage() {
                 }
 
                 const invoiceId = await source.onSave(blob)
-                setPendingPrintPreviewEditorView({ url: URL.createObjectURL(blob), title: invoiceId ? `Invoice ${invoiceId}` : title })
+                setPendingPDFPreview({ url: URL.createObjectURL(blob), title: invoiceId ? `Invoice ${invoiceId}` : title })
                 setIsSaving(false)
                 setIsTemplateLabelDialogOpen(false)
                 setPendingTemplateLayout(null)
@@ -2448,45 +2425,6 @@ export function PrintPreviewEditorPage() {
                     </DialogContent>
                 </Dialog>
             </div>
-        )
-    }
-
-    if (showNativePdf) {
-        return (
-            <div className="flex h-screen w-screen flex-col bg-background overflow-hidden"
-                    style={{ marginTop: 'var(--titlebar-height)', height: 'calc(100vh - var(--titlebar-height))' }}>
-                    <header className="flex items-center gap-2 border-b px-2 py-1.5 shrink-0 bg-card z-10 md:justify-between md:px-4 md:py-2">
-                        <div className="flex min-w-0 flex-1 items-center gap-2 md:gap-3">
-                            <button
-                                className="inline-flex items-center justify-center rounded-md h-8 w-8 hover:bg-accent transition-colors shrink-0"
-                                onClick={handleBack}
-                            >
-                                <ArrowLeft className="h-4 w-4" />
-                            </button>
-                            <h1 className="text-sm font-semibold truncate">{title}</h1>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1 md:gap-2">
-                            <button
-                                className="inline-flex items-center justify-center rounded-md h-8 w-8 px-0 text-xs font-medium transition-colors gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:w-auto md:px-3"
-                                onClick={handleNativePrint}
-                                disabled={isSaving}
-                                aria-label={source.printActionLabel || t('common.print') || 'Print'}
-                            >
-                                {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
-                                <span className="hidden md:inline">{source.printActionLabel || t('common.print') || 'Print'}</span>
-                            </button>
-                        </div>
-                    </header>
-                    <div className="min-h-0 flex-1">
-                        <PdfJsViewer
-                            url={source.url}
-                            bytes={source.pdfBytes}
-                            title={title}
-                            allowPrint={false}
-                            showZoom
-                        />
-                    </div>
-                </div>
         )
     }
 

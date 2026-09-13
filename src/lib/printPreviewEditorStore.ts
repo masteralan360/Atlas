@@ -281,10 +281,6 @@ export type PrintPreviewEditorSource = {
     invoiceData?: any
     effectiveId?: string
     generatePdfBlob?: (editedData: UniversalInvoice, printLangOverride?: string) => Promise<Blob>
-    /** Fallback: PDF blob/data URL for read-only viewing when structured data isn't available */
-    url?: string
-    /** In-memory PDF bytes for read-only viewing without creating a long-lived object URL. */
-    pdfBytes?: Uint8Array
     /** Template preview mode for editable inline preview of custom templates (loans, orders, budget) */
     templatePreview?: TemplatePreview
     customTemplate?: CustomTemplatePreviewTarget
@@ -308,35 +304,4 @@ export function getPrintPreviewEditorSource(): PrintPreviewEditorSource | null {
 
 export function clearPrintPreviewEditorSource() {
     _printPreviewEditorSource = null
-}
-
-export type PendingPrintPreviewEditorView = {
-    url: string
-    title: string
-}
-
-let _pendingPrintPreviewEditorView: PendingPrintPreviewEditorView | null = null
-const _pendingPrintPreviewEditorViewListeners = new Set<() => void>()
-
-function notifyPendingPrintPreviewEditorViewListeners() {
-    _pendingPrintPreviewEditorViewListeners.forEach(cb => cb())
-}
-
-export function subscribeToPendingPrintPreviewEditorView(callback: () => void): () => void {
-    _pendingPrintPreviewEditorViewListeners.add(callback)
-    return () => { _pendingPrintPreviewEditorViewListeners.delete(callback) }
-}
-
-export function setPendingPrintPreviewEditorView(view: PendingPrintPreviewEditorView) {
-    _pendingPrintPreviewEditorView = view
-    notifyPendingPrintPreviewEditorViewListeners()
-}
-
-export function getPendingPrintPreviewEditorView(): PendingPrintPreviewEditorView | null {
-    return _pendingPrintPreviewEditorView
-}
-
-export function clearPendingPrintPreviewEditorView() {
-    _pendingPrintPreviewEditorView = null
-    notifyPendingPrintPreviewEditorViewListeners()
 }
