@@ -32,11 +32,18 @@ case "$SUPABASE_BACKUP_DATABASE_URL" in
   *) fail 'SUPABASE_BACKUP_DATABASE_URL must be a PostgreSQL connection URL.' ;;
 esac
 
+# PGDG installs versioned client binaries here. Prefer PostgreSQL 17 explicitly
+# because GitHub's image also has an older PostgreSQL client on its default PATH.
+postgres17_bin='/usr/lib/postgresql/17/bin'
+if [[ -x "$postgres17_bin/pg_dump" ]]; then
+  export PATH="$postgres17_bin:$PATH"
+fi
+
 command -v pg_dump >/dev/null || fail 'pg_dump is not installed.'
 command -v pg_restore >/dev/null || fail 'pg_restore is not installed.'
 command -v age >/dev/null || fail 'age is not installed.'
 command -v aws >/dev/null || fail 'aws is not installed.'
-pg_dump --version | grep --extended-regexp --quiet '^pg_dump \(PostgreSQL\) 17\.' \
+pg_dump --version | grep --fixed-strings --quiet 'pg_dump (PostgreSQL) 17.' \
   || fail 'PostgreSQL 17 pg_dump is required for this PostgreSQL 17 Supabase project.'
 
 runner_temp="${RUNNER_TEMP:-/tmp}"

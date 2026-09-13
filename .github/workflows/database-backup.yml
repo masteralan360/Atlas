@@ -53,7 +53,9 @@ jobs:
           # GitHub's ubuntu-24.04 hosted runner already includes AWS CLI v2.
           # Ubuntu's `awscli` package is not available on this image.
           sudo apt-get install --yes --no-install-recommends postgresql-client-17 age
-          pg_dump --version | grep --extended-regexp '^pg_dump \(PostgreSQL\) 17\.'
+          export PATH="/usr/lib/postgresql/17/bin:$PATH"
+          echo '/usr/lib/postgresql/17/bin' >> "$GITHUB_PATH"
+          pg_dump --version | grep --fixed-strings --quiet 'pg_dump (PostgreSQL) 17.'
           age --version
           aws --version
 
