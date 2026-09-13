@@ -1,0 +1,67 @@
+name: Back up Supabase database
+
+on:
+  schedule:
+    # 04:17 Asia/Baghdad (UTC+03:00). Avoid the top of the hour, when GitHub
+    # may delay scheduled workflows more often.
+    - cron: "17 1 * * *"
+  workflow_dispatch:
+
+# The backup script is checked out read-only. It does not need deployment,
+# package, or repository-write permissions.
+permissions:
+  contents: read
+
+# Do not permit two logical snapshots to run at the same time. Queued runs are
+# retained so an occasional delayed scheduled run is not discarded.
+concurrency:
+  group: atlas-supabase-database-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Encrypted database backup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    # Create this GitHub environment manually and scope its secrets/variables
+    # to the protected main branch. See docs/supabase-backups.md.
+    environment: database-backup
+    steps:
+      - name: Check out the backup script
+        # actions/checkout v7.0.1, pinned to an immutable commit SHA.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          sparse-checkout: |
+            .github/scripts/backup-supabase-database.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Install native PostgreSQL 17 client and backup tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ca-certificates curl gnupg
+          curl --fail --silent --show-error --location \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | gpg --dearmor \
+            | sudo tee /usr/share/keyrings/postgresql-apt.gpg > /dev/null
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/keyrings/postgresql-apt.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql-client-17 awscli age
+          pg_dump --version | grep --extended-regexp '^pg_dump \(PostgreSQL\) 17\.'
+          age --version
+          aws --version
+
+      - name: Dump, encrypt, validate, and upload
+        shell: bash
+        env:
+          SUPABASE_BACKUP_DATABASE_URL: ${{ secrets.SUPABASE_BACKUP_DATABASE_URL }}
+          R2_BACKUP_ACCESS_KEY_ID: ${{ secrets.R2_BACKUP_ACCESS_KEY_ID }}
+          R2_BACKUP_SECRET_ACCESS_KEY: ${{ secrets.R2_BACKUP_SECRET_ACCESS_KEY }}
+          R2_BACKUP_ACCOUNT_ID: ${{ vars.R2_BACKUP_ACCOUNT_ID }}
+          R2_BACKUP_BUCKET: ${{ vars.R2_BACKUP_BUCKET }}
+          BACKUP_AGE_RECIPIENT: ${{ vars.BACKUP_AGE_RECIPIENT }}
+        run: bash .github/scripts/backup-supabase-database.sh

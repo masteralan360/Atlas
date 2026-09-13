@@ -10,7 +10,7 @@ Move Tabs in sidebar and add favorite
 SQLite Offline queue
 
 Price books selector order form and quick order
-
+##
 English LOG
 
 Fix Instant POS Checkoutsucessmodal
@@ -32,6 +32,9 @@ Balance Color Settings
 Context-menu partner account statement & invoice redirect
 
 Accumilated account statement rows
+
+Centralized Photo Compression
+##
 
 fix retry sync
 
