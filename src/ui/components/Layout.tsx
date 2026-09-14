@@ -1481,7 +1481,7 @@ export function Layout({ children }: LayoutProps) {
   return (
     <UnifiedSnoozeProvider>
       <LoanPaymentModalProvider>
-        <div className="h-screen overflow-hidden bg-transparent">
+        <div className="atlas-dynamic-viewport overflow-hidden bg-transparent">
           <ResourceSyncOverlay />
           {features.allowed_currencies.length > 1 && <ManualRateModals />}
           {features.allowed_currencies.length > 1 && <GlobalExchangeRateReminders />}

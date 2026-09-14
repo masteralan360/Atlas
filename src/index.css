@@ -377,6 +377,28 @@ html[lang] pre {
   }
 }
 
+/* Mobile browsers resize the visible viewport as their browser chrome opens and
+   closes. Keep app shells and the POS cart sheet anchored to that viewport
+   while retaining a vh fallback for older WebViews. */
+.atlas-dynamic-viewport {
+  height: 100vh;
+}
+
+.pos-mobile-cart-sheet {
+  --pos-mobile-cart-sheet-height: 75vh;
+  height: var(--pos-mobile-cart-sheet-height);
+}
+
+@supports (height: 100dvh) {
+  .atlas-dynamic-viewport {
+    height: 100dvh;
+  }
+
+  .pos-mobile-cart-sheet {
+    --pos-mobile-cart-sheet-height: 75dvh;
+  }
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 10px;

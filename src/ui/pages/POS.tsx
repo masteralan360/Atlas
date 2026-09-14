@@ -5947,15 +5947,14 @@ function MobileCart({
             <div
                 ref={panelRef}
                 className={cn(
-                    "fixed bottom-0 left-0 right-0 bg-card border-t border-border shadow-[0_-10px_40px_rgba(0,0,0,0.1)] z-40 transition-all duration-500 ease-in-out px-6 pt-2 overscroll-none touch-none flex flex-col",
-                    "h-[75vh]", // Constant height
+                    "pos-mobile-cart-sheet absolute bottom-0 left-0 right-0 bg-card border-t border-border shadow-[0_-10px_40px_rgba(0,0,0,0.1)] z-40 transition-all duration-500 ease-in-out px-6 pt-2 overscroll-none touch-none flex flex-col",
                     isExpanded ? "rounded-t-[2.5rem]" : "rounded-t-[2rem]",
                     isDragging && "duration-0 transition-none will-change-transform"
                 )}
                 style={{
                     transform: isDragging
-                        ? `translateY(calc(${isExpanded ? '0px' : `75vh - ${collapsedHeight}px`} + ${currentY}px))`
-                        : isExpanded ? 'none' : `translateY(calc(75vh - ${collapsedHeight}px))`
+                        ? `translateY(calc(${isExpanded ? '0px' : `var(--pos-mobile-cart-sheet-height) - ${collapsedHeight}px`} + ${currentY}px))`
+                        : isExpanded ? 'none' : `translateY(calc(var(--pos-mobile-cart-sheet-height) - ${collapsedHeight}px))`
                 }}
             >
 
