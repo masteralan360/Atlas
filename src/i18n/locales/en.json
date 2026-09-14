@@ -793,6 +793,8 @@
     "inquiryPdfUnavailable": "This inquiry PDF could not be generated.",
     "erpRegistration": "Registered in ERP",
     "lastUpdated": "Last Updated",
+    "markedDeliveredBy": "Marked Delivered By",
+    "unknown": "Unknown",
     "collectionRecorded": "Collection recorded and the order is now marked as paid.",
     "itemsEdited": "Order items updated.",
     "editItems": "Edit Order Items",
@@ -5573,6 +5575,25 @@
     },
     "messages": {
       "deleteConfirm": "Products in this storage will be moved to Reserve. Continue?"
+    },
+    "permissions": {
+      "title": "Storage permissions",
+      "description": "Exclude workspace members from {{storage}}.",
+      "defaultAccessHint": "Members keep access to every other storage unless you exclude them here. Workspace administrators always retain access.",
+      "excluded": "Excluded",
+      "allowed": "Allowed",
+      "noEligibleMembers": "There are no non-admin workspace members to manage.",
+      "manageAria": "Manage permissions for {{storage}}",
+      "memberToggleAria": "Toggle storage exclusion for {{member}}",
+      "savedTitle": "Storage permissions saved",
+      "savedDescription": "The selected member exclusions are now active.",
+      "saveErrorTitle": "Could not save storage permissions",
+      "saveErrorDescription": "Check your connection and try again.",
+      "errors": {
+        "storageNotFound": "This storage is no longer available in the workspace.",
+        "adminProtected": "Workspace administrators cannot be excluded from a storage.",
+        "accessDenied": "You do not have access to this storage."
+      }
     }
   },
   "inventory": {

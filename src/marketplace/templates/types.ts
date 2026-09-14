@@ -11,7 +11,12 @@ export type StorefrontTemplateOptions = Readonly<Record<string, string | number 
  * Code-owned switches that can be assigned to any storefront slug. Add new
  * rules here first, then implement their UI behavior in the relevant template.
  */
-export const storefrontRuleKeys = ['hidePrice', 'hideAddToCart'] as const
+export const storefrontRuleKeys = [
+    'hidePrice',
+    'hideAddToCart',
+    'hideCheckoutEmail',
+    'hideFilters'
+] as const
 
 export type StorefrontRuleKey = typeof storefrontRuleKeys[number]
 

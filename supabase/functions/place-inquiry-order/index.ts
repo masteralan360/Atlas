@@ -52,6 +52,8 @@ type InventoryRow = {
     quantity: number | null
 }
 
+const WORKSPACE_WITHOUT_MARKETPLACE_EMAIL = '0b342f6c-bcdc-45a9-bcda-9d21360ff3c9'
+
 function countDigits(value: string) {
     return value.replace(/\D/g, '').length
 }
@@ -132,7 +134,7 @@ Deno.serve(async (req) => {
         const storeSlug = sanitizeMarketplaceText(body.store_slug, 80).toLowerCase()
         const customerName = sanitizeMarketplaceText(body.customer?.name, 120)
         const customerPhone = sanitizeMarketplaceText(body.customer?.phone, 40)
-        const customerEmail = sanitizeNullableMarketplaceText(body.customer?.email, 120)
+        const requestedCustomerEmail = sanitizeNullableMarketplaceText(body.customer?.email, 120)
         const customerAddress = sanitizeNullableMarketplaceText(body.customer?.address, 200)
         const customerCity = sanitizeNullableMarketplaceText(body.customer?.city, 80)
         const customerNotes = sanitizeNullableMarketplaceText(body.customer?.notes, 500)
@@ -218,6 +220,12 @@ Deno.serve(async (req) => {
             resolvedWorkspace = storefrontWorkspace as WorkspaceRow
             storefrontId = (storefront as { id: string }).id
         }
+
+        // This storefront accepts phone as its required contact method and
+        // deliberately does not collect or retain customer email addresses.
+        const customerEmail = resolvedWorkspace.id === WORKSPACE_WITHOUT_MARKETPLACE_EMAIL
+            ? null
+            : requestedCustomerEmail
 
         const requestFingerprintSource = getRequesterIp(req) ?? `unknown:${storeSlug}:${req.headers.get('Origin') ?? 'no-origin'}`
         const requestIpHash = await hashMarketplaceValue(requestFingerprintSource)

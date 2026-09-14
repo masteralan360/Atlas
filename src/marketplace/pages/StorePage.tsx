@@ -30,6 +30,7 @@ import { usePageMeta } from '../hooks/usePageMeta'
 import { useStoreCatalog } from '../hooks/useStoreCatalog'
 import { getMarketplaceAssetUrl } from '../lib/assets'
 import { placeInquiryOrder, type MarketplaceProduct } from '../lib/marketplaceApi'
+import { getEffectiveStorefrontRules } from '../templates/rules'
 import type { StorefrontRules } from '../templates/types'
 
 type PriceFilter = 'all' | 'under-threshold'
@@ -95,8 +96,11 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
     const storeCurrency = catalog?.store.currency || 'usd'
     const underPriceThreshold = getUnderPriceThreshold(storeCurrency)
     const underPriceLabel = formatThresholdLabel(underPriceThreshold, storeCurrency)
-    const hidePrice = rules.hidePrice === true
-    const hideAddToCart = rules.hideAddToCart === true
+    const effectiveRules = getEffectiveStorefrontRules(rules, catalog?.store.workspace_id)
+    const hidePrice = effectiveRules.hidePrice === true
+    const hideAddToCart = effectiveRules.hideAddToCart === true
+    const hideCheckoutEmail = effectiveRules.hideCheckoutEmail === true
+    const hideFilters = effectiveRules.hideFilters === true
 
     useEffect(() => {
         if (catalog) {
@@ -265,8 +269,11 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
                     </CardContent>
                 </Card>
             ) : (
-                <div className="mx-auto grid max-w-[1180px] gap-6 max-sm:pb-40 lg:grid-cols-[220px_minmax(0,1fr)]">
-                    <aside className="rounded-[2.5rem] border border-[#e3e8ef] bg-[#fbfbfd] p-6 lg:min-h-[660px]">
+                <div className={cn(
+                    'mx-auto max-w-[1180px] gap-6 max-sm:pb-40',
+                    hideFilters ? 'w-full' : 'grid lg:grid-cols-[220px_minmax(0,1fr)]'
+                )}>
+                    {!hideFilters && <aside className="rounded-[2.5rem] border border-[#e3e8ef] bg-[#fbfbfd] p-6 lg:min-h-[660px]">
                         <div className="flex h-full flex-col">
                             <div>
                                 <h2 className="text-xl font-bold text-[#151b28]">
@@ -312,9 +319,9 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
                                 )}
                             </div>
                         </div>
-                    </aside>
+                    </aside>}
 
-                    <section className="space-y-6">
+                    <section className={cn('space-y-6', hideFilters && 'mx-auto w-full')}>
                         {confirmation && (
                             <OrderConfirmation
                                 orderNumber={confirmation.orderNumber}
@@ -426,6 +433,7 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
                                 submitting={submitting}
                                 setCheckoutMode={setCheckoutMode}
                                 onSubmit={handleSubmitOrder}
+                                collectEmail={!hideCheckoutEmail}
                             />
                         )}
 
@@ -538,6 +546,7 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
                                     submitting={submitting}
                                     onCancel={() => setCheckoutMode(false)}
                                     onSubmit={handleSubmitOrder}
+                                    collectEmail={!hideCheckoutEmail}
                                 />
                             )}
                         </CartDrawer>}

@@ -52,6 +52,7 @@ const SYNC_PULL_TABLES = [
   "inventory",
   "stock_batches",
   "storages",
+  "storage_member_exclusions",
   "product_discounts",
   "category_discounts",
   "reorder_transfer_rules",
@@ -563,6 +564,32 @@ export function orderMutationsForSync<T extends MutationSyncOrderItem>(mutations
       const replacementAgentId = payloadReference(replacementMutation.payload, "agentId", "agent_id");
       if (closingAgentId && closingAgentId === replacementAgentId) {
         addEdge(closingIndex, replacementIndex);
+      }
+    });
+  });
+
+  // An offline admin can allow a member again and later exclude that same
+  // member before reconnecting. The table deliberately enforces one active
+  // exclusion per workspace/storage/member, so the hard-delete must be sent
+  // before the replacement row even if generated ids would otherwise sort in
+  // the opposite order.
+  chronological.forEach((removalMutation, removalIndex) => {
+    if (removalMutation.entityType !== "storage_member_exclusions"
+      || removalMutation.operation !== "delete") return;
+
+    const removedStorageId = payloadReference(removalMutation.payload, "storageId", "storage_id");
+    const removedUserId = payloadReference(removalMutation.payload, "userId", "user_id");
+    if (!removedStorageId || !removedUserId) return;
+
+    chronological.forEach((replacementMutation, replacementIndex) => {
+      if (replacementMutation.workspaceId !== removalMutation.workspaceId
+        || replacementMutation.entityType !== "storage_member_exclusions"
+        || replacementMutation.operation !== "create") return;
+
+      const replacementStorageId = payloadReference(replacementMutation.payload, "storageId", "storage_id");
+      const replacementUserId = payloadReference(replacementMutation.payload, "userId", "user_id");
+      if (replacementStorageId === removedStorageId && replacementUserId === removedUserId) {
+        addEdge(removalIndex, replacementIndex);
       }
     });
   });

@@ -14,6 +14,7 @@ import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 
 import { db } from "./database";
 import { isAllowedInventoryQuantityTransition } from "./inventoryDeficit";
+import { canAccessStorage, useStorageAccess } from "./storagePermissions";
 import type {
   Inventory,
   InventoryTransaction,
@@ -430,6 +431,7 @@ export function getInventoryTransactionsInDateRange(
 }
 
 export function useInventoryTransactions(workspaceId: string | undefined) {
+  const storageAccess = useStorageAccess(workspaceId);
   const transactions = useLiveQuery(async () => {
     if (!workspaceId) {
       return [];
@@ -441,12 +443,12 @@ export function useInventoryTransactions(workspaceId: string | undefined) {
       .and((row) => !row.isDeleted)
       .toArray();
 
-    return rows.sort(
+    return rows.filter((row) => canAccessStorage(row.storageId, storageAccess)).sort(
       (left, right) =>
         new Date(right.createdAt).getTime() -
         new Date(left.createdAt).getTime(),
     );
-  }, [workspaceId]);
+  }, [storageAccess.signature, workspaceId]);
 
   return transactions ?? [];
 }

@@ -18,6 +18,7 @@ type MobileStoreCartProps = {
     submitting: boolean
     setCheckoutMode: (mode: boolean) => void
     onSubmit: (payload: MarketplaceOrderCustomer) => Promise<void>
+    collectEmail?: boolean
 }
 
 export function MobileStoreCart({
@@ -29,7 +30,8 @@ export function MobileStoreCart({
     checkoutMode,
     submitting,
     setCheckoutMode,
-    onSubmit
+    onSubmit,
+    collectEmail = true
 }: MobileStoreCartProps) {
     const { t } = useTranslation()
     const [isExpanded, setIsExpanded] = useState(false)
@@ -216,6 +218,7 @@ export function MobileStoreCart({
                                     onCancel={() => setCheckoutMode(false)}
                                     onSubmit={onSubmit}
                                     isMobile={true}
+                                    collectEmail={collectEmail}
                                 />
                             </div>
                         ) : items.length === 0 ? (

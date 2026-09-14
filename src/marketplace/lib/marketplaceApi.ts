@@ -44,6 +44,7 @@ export interface MarketplaceProduct {
 
 export interface MarketplaceStoreCatalog {
     store: {
+        workspace_id: string
         name: string
         slug: string
         description: string | null

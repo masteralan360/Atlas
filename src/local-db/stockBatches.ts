@@ -19,6 +19,7 @@ import { db } from './database'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
 import { getInventoryQuantityForProductStorage, useInventoryProducts, type InventoryProduct } from './inventory'
 import { addToOfflineMutations } from './offlineMutations'
+import { assertCurrentUserCanAccessStorage, canAccessStorage, useStorageAccess } from './storagePermissions'
 import type {
     CurrencyCode,
     InventoryTransferBatchAllocation,
@@ -823,6 +824,9 @@ export async function commitStockBatchAllocations(
 
     const timestamp = options?.timestamp || new Date().toISOString()
     const syncSource = options?.syncSource || 'local'
+    if (syncSource === 'local') {
+        await assertCurrentUserCanAccessStorage(workspaceId, storageId)
+    }
     const updatedBatches = await db.transaction('rw', db.stock_batches, async () => {
         const rowsToSync: StockBatch[] = []
 
@@ -1213,6 +1217,9 @@ export async function createStockBatch(
     const timestamp = options?.timestamp || new Date().toISOString()
     const syncSource = options?.syncSource || 'local'
     const normalized = await normalizeBatchInput(input)
+    if (syncSource === 'local') {
+        await assertCurrentUserCanAccessStorage(workspaceId, normalized.storageId)
+    }
     await validateBatchTotals(workspaceId, normalized)
 
     const batch: StockBatch = {
@@ -1254,6 +1261,7 @@ export async function updateStockBatch(id: string, data: Partial<StockBatchInput
         sourcePurchaseOrderId: data.sourcePurchaseOrderId ?? existing.sourcePurchaseOrderId,
         sourcePurchaseOrderItemId: data.sourcePurchaseOrderItemId ?? existing.sourcePurchaseOrderItemId
     }, existing)
+    await assertCurrentUserCanAccessStorage(existing.workspaceId, normalized.storageId)
     await validateBatchTotals(existing.workspaceId, normalized, existing.id)
 
     const updated: StockBatch = {
@@ -1276,6 +1284,7 @@ export async function deleteStockBatch(id: string) {
     }
 
     const timestamp = new Date().toISOString()
+    await assertCurrentUserCanAccessStorage(existing.workspaceId, existing.storageId)
     const deleted: StockBatch = {
         ...existing,
         isDeleted: true,
@@ -1451,6 +1460,7 @@ export function useStockBatches(workspaceId: string | undefined, options: UseSto
     const enabled = options.enabled ?? true
     const syncRemote = options.syncRemote ?? true
     const storageId = options.storageId?.trim()
+    const storageAccess = useStorageAccess(workspaceId)
 
     const batches = useLiveQuery(
         async () => {
@@ -1470,7 +1480,7 @@ export function useStockBatches(workspaceId: string | undefined, options: UseSto
                     .and((row) => !row.isDeleted)
                     .toArray()
 
-            return rows.sort((left, right) => {
+            return rows.filter((row) => canAccessStorage(row.storageId, storageAccess)).sort((left, right) => {
                 if (left.productId !== right.productId) {
                     return left.productId.localeCompare(right.productId)
                 }
@@ -1482,7 +1492,7 @@ export function useStockBatches(workspaceId: string | undefined, options: UseSto
                 return left.batchNumber.localeCompare(right.batchNumber)
             })
         },
-        [enabled, storageId, workspaceId]
+        [enabled, storageAccess.signature, storageId, workspaceId]
     )
 
     useEffect(() => {
@@ -1558,6 +1568,7 @@ export function useBatchAwareInventoryProducts(workspaceId: string | undefined, 
 }
 
 export function useStockBatchesForProduct(productId: string | undefined) {
+    const storageAccess = useStorageAccess(undefined)
     const batches = useLiveQuery(
         async () => {
             if (!productId) {
@@ -1570,9 +1581,11 @@ export function useStockBatchesForProduct(productId: string | undefined) {
                 .and((row) => !row.isDeleted)
                 .toArray()
 
-            return rows.sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
+            return rows
+                .filter((row) => canAccessStorage(row.storageId, storageAccess))
+                .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
         },
-        [productId]
+        [productId, storageAccess.signature]
     )
 
     return batches ?? []

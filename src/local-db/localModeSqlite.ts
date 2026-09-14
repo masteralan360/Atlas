@@ -31,6 +31,7 @@ export const LOCAL_MODE_SQLITE_TABLES = [
   "order_return_items",
   "workspaces",
   "storages",
+  "storage_member_exclusions",
   "inventory",
   "inventory_transactions",
   "stock_batches",

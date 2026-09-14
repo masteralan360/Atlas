@@ -51,6 +51,7 @@ type InventoryRow = {
 
 function buildStorePayload(workspace: WorkspaceRow, description: string | null, logoUrl: string | null, contacts: ContactRow[]) {
     return {
+        workspace_id: workspace.id,
         name: workspace.name,
         slug: workspace.store_slug,
         description,

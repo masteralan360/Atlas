@@ -25,6 +25,7 @@ import type {
 import { createInventoryTransaction } from './inventoryTransactions'
 import { syncProductBarcodeCachesForWorkspace } from './productBarcodes'
 import { normalizeProductSku } from './productSku'
+import { assertCurrentUserCanAccessStorage, canAccessStorage, useStorageAccess } from './storagePermissions'
 import type { StockBatchTransferSelection } from './stockBatches'
 
 type InventorySyncSource = 'local' | 'remote'
@@ -617,6 +618,7 @@ export async function putInventoryQuantity(
 ) {
     if (syncSource === 'local') {
         assertInventoryMutationConnectivity(workspaceId)
+        await assertCurrentUserCanAccessStorage(workspaceId, storageId)
     }
     const rows = await getInventoryRowsForProductStorage(productId, storageId)
     const activeRow = rows.find((row) => !row.isDeleted)
@@ -760,6 +762,9 @@ export async function setProductInventoryFromLegacyInput(input: {
     }
     if (syncSource === 'local') {
         assertInventoryMutationConnectivity(input.workspaceId)
+        if (input.storageId) {
+            await assertCurrentUserCanAccessStorage(input.workspaceId, input.storageId)
+        }
     }
     const changedRows: Array<Inventory | null> = []
 
@@ -943,6 +948,10 @@ async function transferInventoryQuantityCore(
     let targetPreviousQuantity = 0
 
     if (syncSource === 'local') {
+        await Promise.all([
+            assertCurrentUserCanAccessStorage(input.workspaceId, input.sourceStorageId),
+            assertCurrentUserCanAccessStorage(input.workspaceId, input.targetStorageId)
+        ])
         await hydrateInventoryProductStoragesFromSupabase(
             input.workspaceId,
             input.productId,
@@ -1171,19 +1180,21 @@ export async function deleteInventoryForProduct(
 export function useInventory(workspaceId: string | undefined, options: UseInventoryOptions = {}) {
     const enabled = options.enabled ?? true
     const storageId = options.storageId?.trim()
+    const storageAccess = useStorageAccess(workspaceId)
     useInventoryCloudSync(workspaceId, { ...options, storageId })
 
     const inventory = useLiveQuery(
-        () => {
+        async () => {
             if (!enabled || !workspaceId) {
                 return []
             }
 
-            return storageId
+            const rows = await (storageId
                 ? db.inventory.where('[workspaceId+storageId]').equals([workspaceId, storageId]).and((item) => !item.isDeleted).toArray()
-                : db.inventory.where('workspaceId').equals(workspaceId).and((item) => !item.isDeleted).toArray()
+                : db.inventory.where('workspaceId').equals(workspaceId).and((item) => !item.isDeleted).toArray())
+            return rows.filter((row) => canAccessStorage(row.storageId, storageAccess))
         },
-        [enabled, storageId, workspaceId]
+        [enabled, storageAccess.signature, storageId, workspaceId]
     )
 
     return inventory ?? []
@@ -1192,6 +1203,7 @@ export function useInventory(workspaceId: string | undefined, options: UseInvent
 export function useInventoryProducts(workspaceId: string | undefined, options: UseInventoryOptions = {}) {
     const enabled = options.enabled ?? true
     const storageId = options.storageId?.trim()
+    const storageAccess = useStorageAccess(workspaceId)
     useInventoryCloudSync(workspaceId, { ...options, storageId })
 
     const products = useLiveQuery(async () => {
@@ -1199,9 +1211,10 @@ export function useInventoryProducts(workspaceId: string | undefined, options: U
             return []
         }
 
-        const inventoryRows = storageId
+        const inventoryRows = (storageId
             ? await db.inventory.where('[workspaceId+storageId]').equals([workspaceId, storageId]).and((item) => !item.isDeleted).toArray()
-            : await db.inventory.where('workspaceId').equals(workspaceId).and((item) => !item.isDeleted).toArray()
+            : await db.inventory.where('workspaceId').equals(workspaceId).and((item) => !item.isDeleted).toArray())
+            .filter((row) => canAccessStorage(row.storageId, storageAccess))
 
         const productIds = Array.from(new Set(inventoryRows.map((row) => row.productId)))
         const productRows = storageId
@@ -1228,7 +1241,7 @@ export function useInventoryProducts(workspaceId: string | undefined, options: U
                 } satisfies InventoryProduct
             })
             .filter((item): item is InventoryProduct => !!item)
-    }, [enabled, storageId, workspaceId])
+    }, [enabled, storageAccess.signature, storageId, workspaceId])
 
     return products ?? []
 }

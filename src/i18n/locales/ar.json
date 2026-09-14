@@ -780,6 +780,8 @@
     "inquiryPdfUnavailable": "تعذر إنشاء PDF الاستفسار هذا.",
     "erpRegistration": "مسجل في نظام ERP",
     "lastUpdated": "آخر تحديث",
+    "markedDeliveredBy": "تم تحديده كمُسلَّم بواسطة",
+    "unknown": "غير معروف",
     "collectionRecorded": "تم تسجيل التحصيل ووُسِم الطلب الآن كمدفوع.",
     "itemsEdited": "تم تحديث عناصر الطلب.",
     "editItems": "تعديل عناصر الطلب",
@@ -3889,6 +3891,25 @@
     },
     "messages": {
       "deleteConfirm": "سيتم نقل المنتجات في هذا المخزن إلى الاحتياطي. هل تريد المتابعة؟"
+    },
+    "permissions": {
+      "title": "صلاحيات المخزن",
+      "description": "استبعد أعضاء مساحة العمل من {{storage}}.",
+      "defaultAccessHint": "يحتفظ الأعضاء بالوصول إلى كل المخازن الأخرى ما لم تستبعدهم هنا. يحتفظ مسؤولو مساحة العمل بالوصول دائماً.",
+      "excluded": "مستبعد",
+      "allowed": "مسموح",
+      "noEligibleMembers": "لا يوجد أعضاء غير مسؤولين لإدارتهم.",
+      "manageAria": "إدارة صلاحيات {{storage}}",
+      "memberToggleAria": "تبديل استبعاد {{member}} من المخزن",
+      "savedTitle": "تم حفظ صلاحيات المخزن",
+      "savedDescription": "أصبحت استبعادات الأعضاء المحددة فعالة الآن.",
+      "saveErrorTitle": "تعذر حفظ صلاحيات المخزن",
+      "saveErrorDescription": "تحقق من اتصالك وحاول مرة أخرى.",
+      "errors": {
+        "storageNotFound": "لم يعد هذا المخزن متاحاً في مساحة العمل.",
+        "adminProtected": "لا يمكن استبعاد مسؤولي مساحة العمل من مخزن.",
+        "accessDenied": "ليس لديك حق الوصول إلى هذا المخزن."
+      }
     }
   },
   "inventory": {

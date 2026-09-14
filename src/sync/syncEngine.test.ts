@@ -548,6 +548,40 @@ describe('tracked commission snapshot ordering', () => {
     })
 })
 
+describe('storage exclusion mutation ordering', () => {
+    it('removes an offline exclusion before replacing the same unique scope', () => {
+        const ordered = orderMutationsForSync([
+            {
+                id: 'a-replacement',
+                workspaceId: 'workspace-1',
+                entityType: 'storage_member_exclusions',
+                entityId: 'new-exclusion',
+                operation: 'create',
+                payload: { storageId: 'storage-1', userId: 'member-1' },
+                // The ids intentionally put the replacement first when both
+                // mutations have the same timestamp.
+                createdAt: '2026-09-14T20:00:00.000Z'
+            },
+            {
+                id: 'z-removal',
+                workspaceId: 'workspace-1',
+                entityType: 'storage_member_exclusions',
+                entityId: 'old-exclusion',
+                operation: 'delete',
+                payload: {
+                    id: 'old-exclusion',
+                    storageId: 'storage-1',
+                    userId: 'member-1',
+                    hardDelete: true
+                },
+                createdAt: '2026-09-14T20:00:00.000Z'
+            }
+        ])
+
+        expect(ordered.map((mutation) => mutation.id)).toEqual(['z-removal', 'a-replacement'])
+    })
+})
+
 describe('delivery mutation ordering', () => {
     it('replays a shipment before its event when parallel writes queued the event first', () => {
         const ordered = orderMutationsForSync([
@@ -962,13 +996,13 @@ describe('fullSync error reporting', () => {
         expect(writtenSales).toHaveLength(500)
         expect(writtenSales).not.toContainEqual(expect.objectContaining({ id: 'sale-0' }))
         expect(progress).toContainEqual(expect.objectContaining({
-            completed: 45,
-            total: 94,
+            completed: 46,
+            total: 95,
             detail: { table: 'sales', completed: 250, total: 501 }
         }))
         expect(progress).toContainEqual(expect.objectContaining({
-            completed: 45,
-            total: 94,
+            completed: 46,
+            total: 95,
             detail: { table: 'sales', completed: 501, total: 501 }
         }))
     })

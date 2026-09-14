@@ -29,6 +29,7 @@ import type {
   Workspace,
   AppSetting,
   Storage,
+  StorageMemberExclusion,
   Inventory,
   InventoryTransaction,
   StockBatch,
@@ -417,6 +418,7 @@ export class AtlasDatabase extends Dexie {
   order_return_items!: EntityTable<OrderReturnItem, 'id'>
   workspaces!: EntityTable<Workspace, 'id'>
   storages!: EntityTable<Storage, 'id'>
+  storage_member_exclusions!: EntityTable<StorageMemberExclusion, 'id'>
   inventory!: EntityTable<Inventory, 'id'>
   inventory_transactions!: EntityTable<InventoryTransaction, 'id'>
   stock_batches!: EntityTable<StockBatch, 'id'>
@@ -3398,6 +3400,11 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, accountId, paymentTransactionId, currency, occurredAt, voidId, updatedAt, isDeleted, syncStatus, [workspaceId+accountId], [accountId+occurredAt], [workspaceId+occurredAt], [workspaceId+voidId]'
     })
 
+    this.version(126).stores({
+      storage_member_exclusions:
+        'id, workspaceId, storageId, userId, updatedAt, isDeleted, syncStatus, [workspaceId+storageId], [workspaceId+userId], [storageId+userId]'
+    })
+
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
   }
@@ -3514,6 +3521,7 @@ export class AtlasDatabase extends Dexie {
       'order_return_items',
       'workspaces',
       'storages',
+      'storage_member_exclusions',
       'inventory',
       'inventory_transactions',
       'stock_batches',
@@ -3768,6 +3776,7 @@ export async function clearDatabase(): Promise<void> {
       db.agent_commission_plans,
       db.product_commission_rule_agents,
       db.product_commission_rules,
+      db.storage_member_exclusions,
       db.syncQueue
     ],
     async () => {
@@ -3841,6 +3850,7 @@ export async function clearDatabase(): Promise<void> {
       await db.agent_commission_plans.clear()
       await db.product_commission_rule_agents.clear()
       await db.product_commission_rules.clear()
+      await db.storage_member_exclusions.clear()
       await db.syncQueue.clear()
     }
   )

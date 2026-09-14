@@ -1,5 +1,6 @@
 import { db } from './database'
 import { getInventoryRowsForProduct } from './inventory'
+import { canAccessStorage, getCurrentStorageAccess } from './storagePermissions'
 import type { Storage } from './models'
 
 function isLegacyMainStorage(storage?: Pick<Storage, 'name' | 'isSystem' | 'isDeleted'> | null) {
@@ -82,23 +83,33 @@ export function sortStoragesByPriority(storages: Storage[]) {
 }
 
 export async function getPrimaryStorage(workspaceId: string) {
-    const storages = await db.storages
+    const [storages, access] = await Promise.all([
+        db.storages
         .where('workspaceId')
         .equals(workspaceId)
         .and((storage) => !storage.isDeleted)
-        .toArray()
+        .toArray(),
+        getCurrentStorageAccess(workspaceId)
+    ])
 
-    return getPrimaryStorageFromList(storages.map(normalizeStorageRecord)) ?? null
+    return getPrimaryStorageFromList(
+        storages.filter((storage) => canAccessStorage(storage.id, access)).map(normalizeStorageRecord)
+    ) ?? null
 }
 
 export async function getPrimaryStorageId(workspaceId: string, excludedStorageId?: string | null) {
-    const storages = await db.storages
+    const [storages, access] = await Promise.all([
+        db.storages
         .where('workspaceId')
         .equals(workspaceId)
         .and((storage) => !storage.isDeleted && storage.id !== excludedStorageId)
-        .toArray()
+        .toArray(),
+        getCurrentStorageAccess(workspaceId)
+    ])
 
-    return getPrimaryStorageFromList(storages.map(normalizeStorageRecord))?.id ?? null
+    return getPrimaryStorageFromList(
+        storages.filter((storage) => canAccessStorage(storage.id, access)).map(normalizeStorageRecord)
+    )?.id ?? null
 }
 
 export async function resolveReturnStorageId(input: {
@@ -106,11 +117,16 @@ export async function resolveReturnStorageId(input: {
     productId: string
     saleStorageId?: string | null
 }) {
-    const storages = (await db.storages
+    const [storageRows, access] = await Promise.all([
+        db.storages
         .where('workspaceId')
         .equals(input.workspaceId)
         .and((storage) => !storage.isDeleted)
-        .toArray())
+        .toArray(),
+        getCurrentStorageAccess(input.workspaceId)
+    ])
+    const storages = storageRows
+        .filter((storage) => canAccessStorage(storage.id, access))
         .map(normalizeStorageRecord)
 
     const activeStorageMap = new Map(storages.map((storage) => [storage.id, storage] as const))

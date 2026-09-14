@@ -144,19 +144,27 @@ export function ProductsViewModal({
     labels
 }: ProductsViewModalProps) {
     const user = useOptionalAuth()?.user
-    const { canSelectProduct, filterProducts: filterSelectableProducts } = useProductSelectionAccess(user?.workspaceId, user?.id)
+    const {
+        canSelectProduct,
+        filterProducts: filterSelectableProducts,
+        storageAccess
+    } = useProductSelectionAccess(user?.workspaceId, user?.id)
     const [search, setSearch] = useState('')
     const [storageId, setStorageId] = useState('')
     const [expandedProductId, setExpandedProductId] = useState<string | null>(null)
-    const selectedStorageId = storageId || initialStorageId || storages[0]?.id || ''
+    const accessibleStorages = useMemo(
+        () => storages.filter((storage) => storageAccess.canAccessStorage(storage.id)),
+        [storageAccess, storages]
+    )
+    const selectedStorageId = storageId || initialStorageId || accessibleStorages[0]?.id || ''
 
     useEffect(() => {
         if (!open) return
 
         setSearch('')
-        setStorageId(initialStorageId || storages[0]?.id || '')
+        setStorageId(initialStorageId || accessibleStorages[0]?.id || '')
         setExpandedProductId(null)
-    }, [initialStorageId, open, storages])
+    }, [accessibleStorages, initialStorageId, open])
 
     useEffect(() => {
         setExpandedProductId(null)
@@ -238,13 +246,13 @@ export function ProductsViewModal({
                         {showStorageSelector ? (
                             <div className="space-y-2">
                                 <Label>{labels?.storageLabel || 'Storage'}</Label>
-                                <Select value={selectedStorageId} onValueChange={setStorageId} disabled={storages.length === 0}>
+                                <Select value={selectedStorageId} onValueChange={setStorageId} disabled={accessibleStorages.length === 0}>
                                     <SelectTrigger className="h-10">
                                         <Warehouse className="me-2 h-4 w-4 shrink-0 text-muted-foreground" />
                                         <SelectValue placeholder={labels?.storagePlaceholder || 'Select a storage'} />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {storages.map((storage) => (
+                                        {accessibleStorages.map((storage) => (
                                             <SelectItem key={storage.id} value={storage.id}>
                                                 {getStorageLabel(storage)}
                                             </SelectItem>

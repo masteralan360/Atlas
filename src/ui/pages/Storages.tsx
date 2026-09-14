@@ -1,4 +1,6 @@
 import { useStorages, createStorage, updateStorage, deleteStorage, setMarketplaceStorage, getPrimaryStorageId, getPrimaryStorageFromList, isPrimaryStorage, useInventory, useProducts, useCategories, type Storage, type CurrencyCode } from '@/local-db'
+import { replaceStorageMemberExclusions, useStorageMemberExclusionsState } from '@/local-db/storagePermissions'
+import { useWorkspaceUsers } from '@/local-db/hooks'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useLocation } from 'wouter'
@@ -6,7 +8,7 @@ import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { useAuth } from '@/auth'
 import { useWorkspace } from '@/workspace'
 import { Button } from '@/ui/components/button'
-import { Plus, Search, Edit, Trash2, Warehouse, ShieldCheck, Package, Filter, LayoutGrid, Info, Store, ArrowRight } from 'lucide-react'
+import { Plus, Search, Edit, Trash2, Warehouse, ShieldCheck, Package, Filter, LayoutGrid, Info, Store, ArrowRight, KeyRound, UsersRound } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/ui/components/card'
 import { Input } from '@/ui/components/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/components/table'
@@ -15,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Label } from '@/ui/components/label'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '@/ui/components/use-toast'
-import { StorageSelector, Tabs, TabsList, TabsTrigger, TabsContent, Select, SelectContent, SelectTrigger, SelectValue, SelectItem, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/components'
+import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle, StorageSelector, Switch, Tabs, TabsList, TabsTrigger, TabsContent, Select, SelectContent, SelectTrigger, SelectValue, SelectItem, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/components'
 import { formatCurrency, cn } from '@/lib/utils'
 import { platformService } from '@/services/platformService'
 import { useDemoTutorial } from '@/demo'
@@ -42,6 +44,9 @@ export default function Storages() {
     const products = useProducts(activeWorkspace?.id, { syncBarcodeCache: false })
     const inventory = useInventory(activeWorkspace?.id)
     const categories = useCategories(activeWorkspace?.id)
+    const workspaceUsers = useWorkspaceUsers(activeWorkspace?.id)
+    const storageExclusionsState = useStorageMemberExclusionsState(activeWorkspace?.id)
+    const storageMemberExclusions = storageExclusionsState.rows
     const { features } = useWorkspace()
     const productById = useMemo(
         () => new Map(products.map((product) => [product.id, product] as const)),
@@ -58,12 +63,64 @@ export default function Storages() {
     const [selectedCategoryId, setSelectedCategoryId] = useState<string>('all')
     const [inventorySearch, setInventorySearch] = useState('')
     const [marketplaceStoragePendingId, setMarketplaceStoragePendingId] = useState<string | null>(null)
+    const [permissionsStorage, setPermissionsStorage] = useState<Storage | null>(null)
+    const [excludedMemberIds, setExcludedMemberIds] = useState<Set<string>>(new Set())
+    const [savingStoragePermissions, setSavingStoragePermissions] = useState(false)
 
     const { exchangeData, eurRates, tryRates } = useExchangeRate()
     const settlementCurrency = (features.default_currency || 'usd') as CurrencyCode
     const isMarketplaceStoreActive = features.visibility === 'public' || features.visibility === 'link_only'
     const canManageMarketplaceStorage = user?.role === 'admin' && isMarketplaceStoreActive
     const showMarketplaceStorageState = isMarketplaceStoreActive
+    const nonAdminWorkspaceMembers = useMemo(
+        () => workspaceUsers.filter((member) => member.role !== 'admin'),
+        [workspaceUsers]
+    )
+
+    const openStoragePermissions = useCallback((storage: Storage) => {
+        setExcludedMemberIds(new Set(
+            storageMemberExclusions
+                .filter((exclusion) => exclusion.storageId === storage.id)
+                .map((exclusion) => exclusion.userId)
+        ))
+        setPermissionsStorage(storage)
+    }, [storageMemberExclusions])
+
+    const toggleMemberStorageExclusion = useCallback((memberId: string, shouldExclude: boolean) => {
+        setExcludedMemberIds((current) => {
+            const next = new Set(current)
+            if (shouldExclude) {
+                next.add(memberId)
+            } else {
+                next.delete(memberId)
+            }
+            return next
+        })
+    }, [])
+
+    const saveStoragePermissions = useCallback(async () => {
+        if (!permissionsStorage || !activeWorkspace?.id || user?.role !== 'admin') return
+
+        setSavingStoragePermissions(true)
+        try {
+            await replaceStorageMemberExclusions(
+                activeWorkspace.id,
+                permissionsStorage.id,
+                Array.from(excludedMemberIds)
+            )
+            toast({ title: t('storages.permissions.savedTitle'), description: t('storages.permissions.savedDescription') })
+            setPermissionsStorage(null)
+        } catch (error) {
+            console.error('[Storage permissions] Failed to save:', error)
+            toast({
+                title: t('storages.permissions.saveErrorTitle'),
+                description: t('storages.permissions.saveErrorDescription'),
+                variant: 'destructive'
+            })
+        } finally {
+            setSavingStoragePermissions(false)
+        }
+    }, [activeWorkspace?.id, excludedMemberIds, permissionsStorage, t, toast, user?.role])
 
     const getStorageDisplayName = useCallback((storage: Storage) => {
         return storage.isSystem
@@ -473,6 +530,19 @@ const totalStorageValue = useMemo(() => {
                                                             </Button>
                                                         )}
                                                         <div className="flex justify-end gap-1">
+                                                            {user?.role === 'admin' && (
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    disabled={!storageExclusionsState.isReady}
+                                                                    className="h-8 w-8 rounded-xl hover:bg-primary/10 hover:text-primary transition-all"
+                                                                    onClick={() => openStoragePermissions(storage)}
+                                                                    aria-label={t('storages.permissions.manageAria', { storage: getStorageDisplayName(storage) })}
+                                                                >
+                                                                    <KeyRound className="h-4 w-4" />
+                                                                </Button>
+                                                            )}
                                                             {!storage.isSystem && (
                                                                 <>
                                                                     {(user?.role === 'admin' || user?.role === 'staff') && (
@@ -811,6 +881,92 @@ const totalStorageValue = useMemo(() => {
                 title={t('storages.confirmDelete', 'Delete Storage')}
                 description={t('storages.messages.deleteConfirmPrimary', 'Products in this storage will be moved to the primary storage or next available storage. Continue?')}
             />
+
+            <AppDialog
+                open={!!permissionsStorage}
+                onOpenChange={(open) => {
+                    if (!open && !savingStoragePermissions) {
+                        setPermissionsStorage(null)
+                    }
+                }}
+            >
+                <AppDialogContent
+                    className="max-w-xl"
+                    showCloseButton={!savingStoragePermissions}
+                    onEscapeKeyDown={(event) => {
+                        if (savingStoragePermissions) event.preventDefault()
+                    }}
+                    onInteractOutside={(event) => {
+                        if (savingStoragePermissions) event.preventDefault()
+                    }}
+                >
+                    <AppDialogHeader>
+                        <AppDialogTitle className="flex items-center gap-2">
+                            <KeyRound className="h-5 w-5 text-primary" />
+                            {t('storages.permissions.title')}
+                        </AppDialogTitle>
+                        <p className="text-sm text-muted-foreground">
+                            {t('storages.permissions.description', { storage: permissionsStorage ? getStorageDisplayName(permissionsStorage) : '' })}
+                        </p>
+                    </AppDialogHeader>
+                    <AppDialogBody className="space-y-4">
+                        <div className="rounded-xl border border-primary/15 bg-primary/5 p-3 text-sm text-muted-foreground">
+                            {t('storages.permissions.defaultAccessHint')}
+                        </div>
+                        {nonAdminWorkspaceMembers.length === 0 ? (
+                            <div className="flex min-h-36 flex-col items-center justify-center gap-3 rounded-xl border border-dashed text-center text-muted-foreground">
+                                <UsersRound className="h-8 w-8 opacity-40" />
+                                <p className="text-sm">{t('storages.permissions.noEligibleMembers')}</p>
+                            </div>
+                        ) : (
+                            <div className="overflow-hidden rounded-xl border divide-y">
+                                {nonAdminWorkspaceMembers.map((member) => {
+                                    const isExcluded = excludedMemberIds.has(member.id)
+                                    return (
+                                        <div key={member.id} className="flex items-center gap-3 px-4 py-3">
+                                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                                                <UsersRound className="h-4 w-4" />
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="truncate text-sm font-medium">{member.name || member.email}</p>
+                                                <p className="text-xs text-muted-foreground">{t(`auth.roles.${member.role}`)}</p>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs text-muted-foreground">
+                                                    {isExcluded ? t('storages.permissions.excluded') : t('storages.permissions.allowed')}
+                                                </span>
+                                                <Switch
+                                                    checked={isExcluded}
+                                                    disabled={savingStoragePermissions}
+                                                    onCheckedChange={(checked) => toggleMemberStorageExclusion(member.id, checked)}
+                                                    aria-label={t('storages.permissions.memberToggleAria', { member: member.name || member.email })}
+                                                />
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        )}
+                    </AppDialogBody>
+                    <AppDialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            disabled={savingStoragePermissions}
+                            onClick={() => setPermissionsStorage(null)}
+                        >
+                            {t('common.cancel')}
+                        </Button>
+                        <Button
+                            type="button"
+                            disabled={savingStoragePermissions || !storageExclusionsState.isReady}
+                            onClick={() => void saveStoragePermissions()}
+                        >
+                            {savingStoragePermissions ? t('common.saving') : t('common.save')}
+                        </Button>
+                    </AppDialogFooter>
+                </AppDialogContent>
+            </AppDialog>
         </div>
     )
 }

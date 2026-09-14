@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next'
 
 import { useAuth } from '@/auth'
 import {
+    getMarketplaceDeliveryActorName,
     getMarketplaceInventoryDisplayStatus,
     getMarketplaceOrderDisplayStatus
 } from '@/lib/marketplaceOrderPresentation'
@@ -245,6 +246,10 @@ export function EcommerceDetailView({
         order.inventory_deducted
     )
     const isReturned = displayStatus === 'returned'
+    const deliveredByName = getMarketplaceDeliveryActorName(
+        order.delivered_by_name,
+        t('ecommerce.unknown', { defaultValue: 'Unknown' })
+    )
     const workflowProgress = marketplaceWorkflowProgress(order.status, isReturned)
     const workflowFill = marketplaceWorkflowFill(order.status, isReturned)
     const activityRows = [
@@ -652,6 +657,17 @@ export function EcommerceDetailView({
                                     <div className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">{t('orders.details.items', { defaultValue: 'Items' })}</div>
                                     <div className="mt-1 font-medium">{displayItems.length}</div>
                                 </div>
+                                {order.status === 'delivered' ? (
+                                    <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-3">
+                                        <div className="text-xs font-bold uppercase tracking-[0.14em] text-emerald-700 dark:text-emerald-300">
+                                            {t('ecommerce.markedDeliveredBy', { defaultValue: 'Marked Delivered By' })}
+                                        </div>
+                                        <div className="mt-1 flex items-center gap-1.5 font-medium text-emerald-800 dark:text-emerald-200">
+                                            <BadgeCheck className="h-4 w-4" aria-hidden="true" />
+                                            {deliveredByName}
+                                        </div>
+                                    </div>
+                                ) : null}
                             </div>
                         </CardContent>
                     </Card>

@@ -17,6 +17,18 @@ export type MarketplaceInventoryDisplayStatus =
   | null
 
 /**
+ * Delivery actor names are stored as snapshots so historical deliveries remain
+ * attributable after the user's profile changes. Older delivered orders do not
+ * have that snapshot and use the supplied localized fallback instead.
+ */
+export function getMarketplaceDeliveryActorName(
+  deliveredByName: string | null | undefined,
+  unknownLabel: string,
+): string {
+  return deliveredByName?.trim() || unknownLabel
+}
+
+/**
  * Marketplace rows retain their delivery lifecycle for audit purposes. A
  * return is posted against the linked sales order, so expose it as the final
  * customer-facing state only after the marketplace order was delivered.

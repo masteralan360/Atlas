@@ -13,6 +13,7 @@ import { useCart } from '../../hooks/useCart'
 import { usePageMeta } from '../../hooks/usePageMeta'
 import { useStoreCatalog } from '../../hooks/useStoreCatalog'
 import { getMarketplaceAssetUrl } from '../../lib/assets'
+import { getEffectiveStorefrontRules } from '../rules'
 import {
     placeInquiryOrder,
     type MarketplaceCategory,
@@ -386,6 +387,7 @@ type PosCartContentProps = {
     checkoutMode: boolean
     setCheckoutMode: (mode: boolean) => void
     submitting: boolean
+    collectEmail: boolean
     onSubmit: (customer: {
         name: string
         phone: string
@@ -396,7 +398,7 @@ type PosCartContentProps = {
     }) => Promise<void>
 }
 
-function PosCartContent({ cart, storeCurrency, iqdPreference, checkoutMode, setCheckoutMode, submitting, onSubmit }: PosCartContentProps) {
+function PosCartContent({ cart, storeCurrency, iqdPreference, checkoutMode, setCheckoutMode, submitting, collectEmail, onSubmit }: PosCartContentProps) {
     const { t } = useTranslation()
     const currency = cart.currency || storeCurrency
     const formatMoney = (amount: number) => formatCurrency(amount, currency, iqdPreference)
@@ -408,6 +410,7 @@ function PosCartContent({ cart, storeCurrency, iqdPreference, checkoutMode, setC
                     submitting={submitting}
                     onCancel={() => setCheckoutMode(false)}
                     onSubmit={onSubmit}
+                    collectEmail={collectEmail}
                 />
                 <button
                     type="button"
@@ -524,8 +527,10 @@ function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
     const [confirmation, setConfirmation] = useState<{ orderNumber: string; phone: string } | null>(null)
     const deferredSearch = useDeferredValue(search.trim().toLocaleLowerCase())
     const iqdPreference: 'IQD' | 'د.ع' = i18n.language === 'en' ? 'IQD' : 'د.ع'
-    const hidePrice = rules.hidePrice === true
-    const hideAddToCart = rules.hideAddToCart === true
+    const effectiveRules = getEffectiveStorefrontRules(rules, catalog?.store.workspace_id)
+    const hidePrice = effectiveRules.hidePrice === true
+    const hideAddToCart = effectiveRules.hideAddToCart === true
+    const hideCheckoutEmail = effectiveRules.hideCheckoutEmail === true
 
     useEffect(() => {
         if (catalog) {
@@ -763,6 +768,7 @@ function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
                         checkoutMode={checkoutMode}
                         setCheckoutMode={setCheckoutMode}
                         submitting={submitting}
+                        collectEmail={!hideCheckoutEmail}
                         onSubmit={handleSubmitOrder}
                     />
                 </CartDrawer>

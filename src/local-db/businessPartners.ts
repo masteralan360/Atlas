@@ -27,6 +27,7 @@ import { addToOfflineMutations } from './offlineMutations'
 import { getOrderBalanceAmount } from './orderInstallments'
 import { isDirectTransactionPartnerAccountEffect } from './payments'
 import { endActiveFleetAssignmentsForAgent, ensureDriverFleetAssignment } from './fleet'
+import { filterProductsByStorageAccess, useStorageAccess } from './storagePermissions'
 import type {
   Agent,
   AgentExcludedCategory,
@@ -37,6 +38,7 @@ import type {
   CurrencyCode,
   Customer,
   Loan,
+  Product,
   PurchaseOrder,
   SalesOrder,
   Supplier
@@ -735,6 +737,7 @@ export function useAgentExcludedCategories(workspaceId: string | undefined, agen
 
 export function useProductSelectionAccess(workspaceId: string | undefined, userId: string | null | undefined) {
   const online = useNetworkStatus()
+  const storageAccess = useStorageAccess(workspaceId, userId)
   const agents = useLiveQuery(
     () =>
       workspaceId
@@ -747,6 +750,16 @@ export function useProductSelectionAccess(workspaceId: string | undefined, userI
     [workspaceId]
   )
   const exclusions = useAgentExcludedCategories(workspaceId)
+  const inventoryRows = useLiveQuery(
+    () => workspaceId
+      ? db.inventory
+          .where('workspaceId')
+          .equals(workspaceId)
+          .and((row) => !row.isDeleted)
+          .toArray()
+      : [],
+    [workspaceId]
+  )
 
   useEffect(() => {
     if (!online || !workspaceId || !shouldUseCloudBusinessData(workspaceId)) {
@@ -763,17 +776,25 @@ export function useProductSelectionAccess(workspaceId: string | undefined, userI
     [agents, exclusions, userId]
   )
   const canSelectProduct = useCallback(
-    (product: { categoryId?: string | null }) => canSelectProductForExcludedCategories(product, excludedCategoryIds),
-    [excludedCategoryIds]
+    (product: Product) => (
+      canSelectProductForExcludedCategories(product, excludedCategoryIds)
+      && filterProductsByStorageAccess([product], inventoryRows ?? [], storageAccess).length > 0
+    ),
+    [excludedCategoryIds, inventoryRows, storageAccess]
   )
   const filterProducts = useCallback(
-    <T extends { categoryId?: string | null }>(products: readonly T[]) =>
-      filterSelectableProducts(products, excludedCategoryIds),
-    [excludedCategoryIds]
+    <T extends Product>(products: readonly T[]) =>
+      filterProductsByStorageAccess(
+        filterSelectableProducts(products, excludedCategoryIds),
+        inventoryRows ?? [],
+        storageAccess
+      ),
+    [excludedCategoryIds, inventoryRows, storageAccess]
   )
 
   return {
     excludedCategoryIds,
+    storageAccess,
     canSelectProduct,
     filterProducts
   }

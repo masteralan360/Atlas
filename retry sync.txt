@@ -5,10 +5,20 @@ remove R2 Print only
 account switch
 Fix SQLITE loading
 Transaction Reconciliation & Integrity Audit, Expandable, Plain English Explanation, AGENTS.md guide
-SQLite Offline queue
 
 Price books selector order form and quick order
 ##
+
+storefront lazy loading image
+
+Hasan Mamad storefront fix
+Ecommerce Modify Prices
+Product Commission
+Right-Click Sell As
+
+Fix POS web slider
+
+Storage Permission
 
 Multi-Color Partner
 
@@ -22,7 +32,5 @@ Centralized Photo Compression
 ##
 
 fix retry sync
-
-Account Statement DATERANGEFILTER
 
 Restrict Phone number in khaleej cosmetic

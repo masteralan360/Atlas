@@ -4,6 +4,7 @@ import { QUANTITY_EPSILON, isPositiveQuantity, roundQuantity } from '@/lib/quant
 import { generateId } from '@/lib/utils'
 
 import { db } from './database'
+import { assertCurrentUserCanAccessStorage, canAccessStorage, useStorageAccess } from './storagePermissions'
 import type {
     InventoryTransferBatchAllocation,
     InventoryTransferTransaction,
@@ -118,6 +119,11 @@ export async function createInventoryTransferTransactions(
         return [] as InventoryTransferTransaction[]
     }
 
+    await Promise.all(inputs.flatMap((input) => [
+        assertCurrentUserCanAccessStorage(workspaceId, input.sourceStorageId),
+        assertCurrentUserCanAccessStorage(workspaceId, input.destinationStorageId)
+    ]))
+
     const timestamp = options?.timestamp || new Date().toISOString()
     const transactions = inputs.map((input) => {
         const normalized = normalizeTransactionInput(input)
@@ -140,6 +146,7 @@ export async function createInventoryTransferTransactions(
 }
 
 export function useInventoryTransferTransactions(workspaceId: string | undefined) {
+    const storageAccess = useStorageAccess(workspaceId)
     const transactions = useLiveQuery(
         async () => {
             if (!workspaceId) {
@@ -152,9 +159,14 @@ export function useInventoryTransferTransactions(workspaceId: string | undefined
                 .and((row) => !row.isDeleted)
                 .toArray()
 
-            return rows.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+            return rows
+                .filter((row) => (
+                    canAccessStorage(row.sourceStorageId, storageAccess)
+                    && canAccessStorage(row.destinationStorageId, storageAccess)
+                ))
+                .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
         },
-        [workspaceId]
+        [storageAccess.signature, workspaceId]
     )
 
     return transactions ?? []

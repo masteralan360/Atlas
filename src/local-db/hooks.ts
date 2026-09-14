@@ -15,6 +15,13 @@ import { isValidNewInventoryQuantity } from './inventoryDeficit'
 import { roundOrderValue } from '@/lib/orderPrecision'
 import { getPrimaryStorageId as getPrimaryStorageIdForWorkspace, normalizeStorageRecord, sortStoragesByPriority } from './storageUtils'
 import {
+    assertCurrentUserCanAccessStorage,
+    filterProductsByStorageAccess,
+    getCurrentStorageAccess,
+    redactSaleForStorageAccess,
+    useStorageAccess
+} from './storagePermissions'
+import {
     assertInventoryMutationConnectivity,
     deleteInventoryForProduct,
     getInventoryQuantityForProductStorage,
@@ -679,13 +686,27 @@ export interface UseProductsOptions {
 
 export function useProducts(workspaceId: string | undefined, options: UseProductsOptions = {}) {
     const isOnline = useNetworkStatus()
+    const storageAccess = useStorageAccess(workspaceId)
     const enabled = options.enabled ?? true
     const syncRemote = options.syncRemote ?? true
     const syncBarcodeCache = options.syncBarcodeCache ?? true
 
     const products = useLiveQuery(
-        () => enabled && workspaceId ? db.products.where('workspaceId').equals(workspaceId).and(p => !p.isDeleted).toArray() : [],
-        [enabled, workspaceId]
+        async () => {
+            if (!enabled || !workspaceId) return []
+
+            const rows = await db.products.where('workspaceId').equals(workspaceId).and(p => !p.isDeleted).toArray()
+            if (storageAccess.isReady !== false
+                && (storageAccess.isAdmin || storageAccess.excludedStorageIds.size === 0)) return rows
+
+            const inventoryRows = await db.inventory
+                .where('workspaceId')
+                .equals(workspaceId)
+                .and((row) => !row.isDeleted)
+                .toArray()
+            return filterProductsByStorageAccess(rows, inventoryRows, storageAccess)
+        },
+        [enabled, storageAccess.signature, workspaceId]
     )
 
     useEffect(() => {
@@ -705,6 +726,7 @@ export function useProducts(workspaceId: string | undefined, options: UseProduct
 
 export function useProductsByIds(workspaceId: string | undefined, productIds: string[]) {
     const productIdKey = productIds.join('|')
+    const storageAccess = useStorageAccess(workspaceId)
 
     const products = useLiveQuery(
         async () => {
@@ -712,35 +734,62 @@ export function useProductsByIds(workspaceId: string | undefined, productIds: st
                 return []
             }
 
-            const rows = await db.products.bulkGet(productIds)
-            return rows.filter((product): product is Product =>
+            const rows = (await db.products.bulkGet(productIds)).filter((product): product is Product =>
                 !!product && product.workspaceId === workspaceId && !product.isDeleted
             )
+            if (storageAccess.isReady !== false
+                && (storageAccess.isAdmin || storageAccess.excludedStorageIds.size === 0)) return rows
+
+            const inventoryRows = await db.inventory
+                .where('workspaceId')
+                .equals(workspaceId)
+                .and((row) => !row.isDeleted)
+                .toArray()
+            return filterProductsByStorageAccess(rows, inventoryRows, storageAccess)
         },
-        [workspaceId, productIdKey]
+        [workspaceId, productIdKey, storageAccess.signature]
     )
 
     return products ?? []
 }
 
 export function useProduct(id: string | undefined) {
+    const storageAccess = useStorageAccess(undefined)
     const product = useLiveQuery(
-        () => id ? db.products.get(id) : undefined,
-        [id]
+        async () => {
+            if (!id) return undefined
+
+            const row = await db.products.get(id)
+            if (!row || row.isDeleted) return undefined
+            const inventoryRows = await db.inventory
+                .where('productId')
+                .equals(id)
+                .and((inventory) => !inventory.isDeleted)
+                .toArray()
+            return filterProductsByStorageAccess([row], inventoryRows, storageAccess)[0]
+        },
+        [id, storageAccess.signature]
     )
     return product
 }
 
 export function useProductVariants(parentProductId: string | undefined) {
+    const storageAccess = useStorageAccess(undefined)
     const variants = useLiveQuery(
-        () => parentProductId
-            ? db.products
+        async () => {
+            if (!parentProductId) return []
+            const rows = await db.products
                 .where('parentProductId')
                 .equals(parentProductId)
                 .and((product) => !product.isDeleted)
-                .sortBy('name')
-            : [],
-        [parentProductId]
+                .toArray()
+            const inventoryRows = rows.length > 0
+                ? await db.inventory.where('productId').anyOf(rows.map((row) => row.id)).and((inventory) => !inventory.isDeleted).toArray()
+                : []
+            return filterProductsByStorageAccess(rows, inventoryRows, storageAccess)
+                .sort((left, right) => left.name.localeCompare(right.name))
+        },
+        [parentProductId, storageAccess.signature]
     )
 
     return variants ?? []
@@ -836,6 +885,10 @@ export async function createProduct(workspaceId: string, data: Omit<Product, 'id
     const initialQuantity = service ? 0 : Number(data.quantity)
     const initialStorageId = service ? null : data.storageId ?? null
 
+    if (initialStorageId) {
+        await assertCurrentUserCanAccessStorage(workspaceId, initialStorageId)
+    }
+
     if (!service && !isValidNewInventoryQuantity(initialQuantity)) {
         throw new Error(i18n.t('inventory.errors.invalidQuantity'))
     }
@@ -920,6 +973,13 @@ export async function updateProduct(id: string, data: Partial<Product>): Promise
     const now = new Date().toISOString()
     const existing = await db.products.get(id)
     if (!existing) throw new Error('Product not found')
+    const [storageAccess, inventoryRows] = await Promise.all([
+        getCurrentStorageAccess(existing.workspaceId),
+        db.inventory.where('productId').equals(id).and((row) => !row.isDeleted).toArray()
+    ])
+    if (filterProductsByStorageAccess([existing], inventoryRows, storageAccess).length === 0) {
+        throw new Error(i18n.t('storages.permissions.errors.accessDenied'))
+    }
     const isSavingOnline = isOnline(existing.workspaceId)
     const {
         quantity: _ignoredQuantity,
@@ -1119,6 +1179,13 @@ export async function deleteProduct(id: string): Promise<void> {
     const now = new Date().toISOString()
     const existing = await db.products.get(id)
     if (!existing) return
+    const [storageAccess, inventoryRows] = await Promise.all([
+        getCurrentStorageAccess(existing.workspaceId),
+        db.inventory.where('productId').equals(id).and((row) => !row.isDeleted).toArray()
+    ])
+    if (filterProductsByStorageAccess([existing], inventoryRows, storageAccess).length === 0) {
+        throw new Error(i18n.t('storages.permissions.errors.accessDenied'))
+    }
     assertInventoryMutationConnectivity(existing.workspaceId)
     const isSavingOnline = isOnline(existing.workspaceId)
 
@@ -2837,6 +2904,7 @@ export function useSales(
     const isOnline = useNetworkStatus()
     const syncRemote = options.syncRemote ?? true
     const viewOwnScope = useViewOwnRecordScope('sales.view_own')
+    const storageAccess = useStorageAccess(workspaceId)
 
     const sales = useLiveQuery(
         async () => {
@@ -2859,9 +2927,12 @@ export function useSales(
             const visibleRows = viewOwnScope.isRestricted
                 ? rows.filter((sale) => sale.cashierId === viewOwnScope.userId)
                 : rows
-            return enrichSalesForUiRows(workspaceId, visibleRows)
+            const enrichedRows = await enrichSalesForUiRows(workspaceId, visibleRows)
+            return enrichedRows
+                .map((sale) => redactSaleForStorageAccess(sale as any, storageAccess))
+                .filter((sale): sale is NonNullable<typeof sale> => !!sale)
         },
-        [workspaceId, startDate, endDate, viewOwnScope.isRestricted, viewOwnScope.userId]
+        [workspaceId, startDate, endDate, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId]
     )
 
     useEffect(() => {
@@ -3127,6 +3198,7 @@ import type { Storage } from './models'
 
 export function useStorages(workspaceId: string | undefined) {
     const online = useNetworkStatus()
+    const storageAccess = useStorageAccess(workspaceId)
 
     const storages = useLiveQuery(
         async () => {
@@ -3140,9 +3212,13 @@ export function useStorages(workspaceId: string | undefined) {
                 .and((storage) => !storage.isDeleted)
                 .toArray()
 
-            return sortStoragesByPriority(rows.map(normalizeStorageRecord))
+            return sortStoragesByPriority(
+                rows
+                    .filter((storage) => storageAccess.canAccessStorage(storage.id))
+                    .map(normalizeStorageRecord)
+            )
         },
-        [workspaceId]
+        [storageAccess.signature, workspaceId]
     )
 
     useEffect(() => {

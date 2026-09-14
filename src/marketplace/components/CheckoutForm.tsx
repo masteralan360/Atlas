@@ -12,9 +12,10 @@ type CheckoutFormProps = {
     onCancel: () => void
     onSubmit: (payload: MarketplaceOrderCustomer) => Promise<void>
     isMobile?: boolean
+    collectEmail?: boolean
 }
 
-export function CheckoutForm({ submitting, onCancel, onSubmit, isMobile = false }: CheckoutFormProps) {
+export function CheckoutForm({ submitting, onCancel, onSubmit, isMobile = false, collectEmail = true }: CheckoutFormProps) {
     const { t } = useTranslation()
     const [name, setName] = useState('')
     const [phone, setPhone] = useState('')
@@ -22,17 +23,23 @@ export function CheckoutForm({ submitting, onCancel, onSubmit, isMobile = false 
     const [city, setCity] = useState('')
     const [address, setAddress] = useState('')
     const [notes, setNotes] = useState('')
+    const hasRequiredFields = name.trim().length > 0 && phone.trim().length > 0
 
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault()
-        await onSubmit({
+        const customer: MarketplaceOrderCustomer = {
             name,
             phone,
-            email,
             city,
             address,
             notes
-        })
+        }
+
+        if (collectEmail) {
+            customer.email = email
+        }
+
+        await onSubmit(customer)
     }
 
     return (
@@ -63,18 +70,20 @@ export function CheckoutForm({ submitting, onCancel, onSubmit, isMobile = false 
                 />
             </div>
 
-            <div className="space-y-1.5">
-                <Label htmlFor="marketplace-customer-email">
-                    {t('marketplace.checkout.email', { defaultValue: 'Email' })}
-                </Label>
-                <Input
-                    id="marketplace-customer-email"
-                    type="email"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    placeholder={t('marketplace.checkout.email', { defaultValue: 'Email' })}
-                />
-            </div>
+            {collectEmail && (
+                <div className="space-y-1.5">
+                    <Label htmlFor="marketplace-customer-email">
+                        {t('marketplace.checkout.email', { defaultValue: 'Email' })}
+                    </Label>
+                    <Input
+                        id="marketplace-customer-email"
+                        type="email"
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                        placeholder={t('marketplace.checkout.email', { defaultValue: 'Email' })}
+                    />
+                </div>
+            )}
 
             <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
@@ -125,6 +134,7 @@ export function CheckoutForm({ submitting, onCancel, onSubmit, isMobile = false 
                     <>
                         <SwipeToConfirm
                             loading={submitting}
+                            disabled={!hasRequiredFields}
                             label={t('marketplace.checkout.swipsubmit', { defaultValue: 'Swipe to Submit Order' })}
                             onConfirm={() => {
                                 // Create a synthetic form event since handleSubmit expects one
@@ -144,7 +154,7 @@ export function CheckoutForm({ submitting, onCancel, onSubmit, isMobile = false 
                         <Button type="button" variant="outline" className="flex-1 rounded-2xl" onClick={onCancel}>
                             {t('common.back', { defaultValue: 'Back' })}
                         </Button>
-                        <Button type="submit" className="flex-1 rounded-2xl" disabled={submitting}>
+                        <Button type="submit" className="flex-1 rounded-2xl" disabled={submitting || !hasRequiredFields}>
                             {submitting
                                 ? t('common.loading', { defaultValue: 'Loading...' })
                                 : t('marketplace.checkout.submit', { defaultValue: 'Submit Order' })}

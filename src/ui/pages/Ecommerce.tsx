@@ -129,6 +129,8 @@ const MARKETPLACE_ORDER_SELECT = `
     processing_at,
     shipped_at,
     delivered_at,
+    delivered_by,
+    delivered_by_name,
     cancelled_at,
     cancel_reason,
     inventory_deducted,

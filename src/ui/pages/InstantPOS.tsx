@@ -1486,7 +1486,7 @@ export function InstantPOS() {
                 status: 'pending',
                 items: [{
                     productId: product.id,
-                    storageId: product.storageId,
+                    storageId: product.storageId ?? undefined,
                     name: product.name,
                     sku: product.sku,
                     baseUnitPrice: product.price,
@@ -1529,7 +1529,7 @@ export function InstantPOS() {
 
             const newItem: InstantPosItem = {
                 productId: product.id,
-                storageId: product.storageId,
+                storageId: product.storageId ?? undefined,
                 name: product.name,
                 sku: product.sku,
                 baseUnitPrice: product.price,

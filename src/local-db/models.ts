@@ -244,6 +244,12 @@ export interface Storage extends BaseEntity {
   isMarketplace: boolean
 }
 
+/** A non-admin workspace member who must not access one storage location. */
+export interface StorageMemberExclusion extends BaseEntity {
+  storageId: string
+  userId: string
+}
+
 export interface Inventory extends BaseEntity {
   productId: string
   storageId: string
@@ -2543,6 +2549,7 @@ export interface SyncQueueItem {
     | 'product_discounts'
     | 'category_discounts'
     | 'storages'
+    | 'storage_member_exclusions'
     | 'employees'
     | 'workspace_contacts'
     | 'loans'
@@ -2775,6 +2782,7 @@ export interface OfflineMutation {
     | 'workspaces'
     | 'workspace_branches'
     | 'storages'
+    | 'storage_member_exclusions'
     | 'employees'
     | 'workspace_contacts'
     | 'loans'

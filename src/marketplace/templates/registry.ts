@@ -3,6 +3,12 @@ import { genericStorefrontTemplate } from './generic/GenericStorefrontTemplate'
 import { posStorefrontTemplate } from './pos/PosStorefrontTemplate'
 import type { StorefrontRules, StorefrontTemplate, StorefrontTemplateOptions } from './types'
 
+export {
+    getEffectiveStorefrontRules,
+    getWorkspaceStorefrontRules,
+    workspaceStorefrontRules
+} from './rules'
+
 export const DEFAULT_STOREFRONT_TEMPLATE_ID = 'generic' as const
 
 /**

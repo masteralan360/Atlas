@@ -51,6 +51,12 @@ import {
 import { addToOfflineMutations, fetchTableFromSupabase } from './hooks'
 import { resolveReturnStorageId } from './storageUtils'
 import {
+    assertCurrentUserCanAccessStorage,
+    redactPurchaseOrderForStorageAccess,
+    redactSalesOrderForStorageAccess,
+    useStorageAccess
+} from './storagePermissions'
+import {
     calculateStockBatchUnitCost,
     commitStockBatchAllocations,
     createStockBatch,
@@ -827,6 +833,23 @@ function resolveSalesOrderItemStorageId(order: SalesOrder, item: SalesOrder['ite
 
 function resolvePurchaseOrderItemStorageId(order: PurchaseOrder, item: PurchaseOrder['items'][number]) {
     return item.storageId || order.destinationStorageId || null
+}
+
+/** Applies the same location boundary before a draft can enter local storage. */
+async function assertOrderStorageAccess(order: SalesOrder | PurchaseOrder) {
+    const isSalesOrder = 'customerId' in order
+    const storageIds = new Set(
+        order.items
+            .map((item) => isSalesOrder
+                ? item.storageId || (order as SalesOrder).sourceStorageId
+                : item.storageId || (order as PurchaseOrder).destinationStorageId
+            )
+            .filter((storageId): storageId is string => typeof storageId === 'string' && storageId.length > 0)
+    )
+
+    await Promise.all(Array.from(storageIds, (storageId) =>
+        assertCurrentUserCanAccessStorage(order.workspaceId, storageId)
+    ))
 }
 
 async function getReservedQuantityMaps(workspaceId: string, excludeOrderId?: string) {
@@ -1991,6 +2014,7 @@ export function useSalesOrders(workspaceId: string | undefined, startDate?: stri
         workspaceId,
         permissions?.permissionKeys
     )
+    const storageAccess = useStorageAccess(workspaceId)
 
     const orders = useLiveQuery(
         async () => {
@@ -2025,9 +2049,11 @@ export function useSalesOrders(workspaceId: string | undefined, startDate?: stri
             ))
             return rows
                 .filter((_, index) => visibility[index])
+                .map((order) => redactSalesOrderForStorageAccess(order, storageAccess))
+                .filter((order): order is SalesOrder => !!order)
                 .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
         },
-        [workspaceId, startDate, endDate, viewOwnScope.isRestricted, viewOwnScope.userId, assignedOrderAccess]
+        [workspaceId, startDate, endDate, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, assignedOrderAccess]
     )
 
     useEffect(() => {
@@ -2045,6 +2071,7 @@ export function useSalesOrders(workspaceId: string | undefined, startDate?: stri
 export function usePurchaseOrders(workspaceId: string | undefined) {
     const online = useNetworkStatus()
     const viewOwnScope = useViewOwnRecordScope('orders.view_own')
+    const storageAccess = useStorageAccess(workspaceId)
 
     const orders = useLiveQuery(
         async () => {
@@ -2062,9 +2089,11 @@ export function usePurchaseOrders(workspaceId: string | undefined) {
             ))
             return rows
                 .filter((_, index) => visibility[index])
+                .map((order) => redactPurchaseOrderForStorageAccess(order, storageAccess))
+                .filter((order): order is PurchaseOrder => !!order)
                 .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
         },
-        [workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId]
+        [workspaceId, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId]
     )
 
     useEffect(() => {
@@ -2080,6 +2109,7 @@ export function useSalesOrder(orderId: string | undefined) {
     const viewOwnScope = useViewOwnRecordScope('orders.view_own')
     const permissions = useOptionalWorkspacePermissions()
     const permissionKeys = permissions?.permissionKeys
+    const storageAccess = useStorageAccess(undefined)
     return useLiveQuery(async () => {
         if (!orderId) return undefined
         const order = await db.sales_orders.get(orderId)
@@ -2093,15 +2123,17 @@ export function useSalesOrder(orderId: string | undefined) {
             return undefined
         }
         if (!viewOwnScope.isRestricted || order.createdBy === viewOwnScope.userId) {
-            return order
+            return redactSalesOrderForStorageAccess(order, storageAccess) ?? undefined
         }
         const assignedOrderIds = await getSalesOrderIdsAssignedToLinkedFieldAgent(
             order.workspaceId,
             viewOwnScope.userId,
             getCommissionAssignedOrderAccess(order.workspaceId, permissionKeys)
         )
-        return assignedOrderIds.has(order.id) ? order : undefined
-    }, [orderId, viewOwnScope.isRestricted, viewOwnScope.userId, permissionKeys])
+        return assignedOrderIds.has(order.id)
+            ? redactSalesOrderForStorageAccess(order, storageAccess) ?? undefined
+            : undefined
+    }, [orderId, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, permissionKeys])
 }
 
 export function useSalesOrderReturns(orderId: string | undefined, workspaceId?: string) {
@@ -2232,6 +2264,7 @@ export function applySalesOrderReturnQuantities(
 
 export function usePurchaseOrder(orderId: string | undefined) {
     const viewOwnScope = useViewOwnRecordScope('orders.view_own')
+    const storageAccess = useStorageAccess(undefined)
     return useLiveQuery(async () => {
         if (!orderId) return undefined
         const order = await db.purchase_orders.get(orderId)
@@ -2242,9 +2275,9 @@ export function usePurchaseOrder(orderId: string | undefined) {
             ? await canAccessBusinessPartnerInLocalCache(order.workspaceId, order.businessPartnerId, 'supplier')
             : await canAccessBusinessPartnerFacetInLocalCache(order.workspaceId, order.supplierId, 'supplier')
         return visible && (!viewOwnScope.isRestricted || order.createdBy === viewOwnScope.userId)
-            ? order
+            ? redactPurchaseOrderForStorageAccess(order, storageAccess) ?? undefined
             : undefined
-    }, [orderId, viewOwnScope.isRestricted, viewOwnScope.userId])
+    }, [orderId, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId])
 }
 
 export function useOrderInstallments(orderId: string | undefined, workspaceId?: string) {
@@ -2573,6 +2606,8 @@ async function buildSalesOrderEntity(
     if (confirmedAdjustments.length > 0) order.orderAdjustments = confirmedAdjustments
     else delete order.orderAdjustments
     order.nextDueDate = isOrderFinancingMethod(order.paymentMethod) ? order.firstDueDate || null : null
+
+    await assertOrderStorageAccess(order)
 
     return order
 }
@@ -2978,6 +3013,7 @@ export async function updateSalesOrder(id: string, data: Partial<SalesOrder>) {
     if (confirmedAdjustments.length === 0) delete updated.orderAdjustments
 
     updated.nextDueDate = isOrderFinancingMethod(updated.paymentMethod) ? updated.firstDueDate || null : null
+    await assertOrderStorageAccess(updated)
     await assertSalesProductsHaveCosts(updated)
     await appendInitialOrderPaymentTransaction('sales', updated)
     await db.sales_orders.put(updated)
@@ -4411,6 +4447,8 @@ export async function createPurchaseOrder(
     else delete order.orderAdjustments
     order.nextDueDate = isOrderFinancingMethod(order.paymentMethod) ? order.firstDueDate || null : null
 
+    await assertOrderStorageAccess(order)
+
     await assertPurchaseOrderItemsAreInventoryProducts(order)
 
     if (status !== 'draft' && isOrderFinancingMethod(order.paymentMethod)) {
@@ -4548,6 +4586,7 @@ export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrde
     if (confirmedAdjustments.length === 0) delete updated.orderAdjustments
 
     updated.nextDueDate = isOrderFinancingMethod(updated.paymentMethod) ? updated.firstDueDate || null : null
+    await assertOrderStorageAccess(updated)
     await assertPurchaseOrderItemsAreInventoryProducts(updated)
     await appendInitialOrderPaymentTransaction('purchase', updated)
     await db.purchase_orders.put(updated)

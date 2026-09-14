@@ -29,7 +29,9 @@ vi.mock('./pos/PosStorefrontTemplate', () => ({
 
 import {
     DEFAULT_STOREFRONT_TEMPLATE_ID,
+    getEffectiveStorefrontRules,
     getStorefrontTemplateForSlug,
+    getWorkspaceStorefrontRules,
     storefrontTemplates
 } from './registry'
 
@@ -77,5 +79,24 @@ describe('getStorefrontTemplateForSlug', () => {
 
         expect(resolved.template.id).toBe('generic')
         expect(resolved.rules).toEqual({ hidePrice: true, hideAddToCart: true })
+    })
+
+    it('applies the custom checkout and layout rules only to the configured workspace', () => {
+        expect(getWorkspaceStorefrontRules('0B342F6C-BCDC-45A9-BCDA-9D21360FF3C9')).toEqual({
+            hideCheckoutEmail: true,
+            hideFilters: true
+        })
+        expect(getWorkspaceStorefrontRules('another-workspace')).toEqual({})
+    })
+
+    it('keeps assigned storefront rules while adding the workspace-specific rules', () => {
+        expect(getEffectiveStorefrontRules(
+            { hidePrice: true },
+            '0b342f6c-bcdc-45a9-bcda-9d21360ff3c9'
+        )).toEqual({
+            hidePrice: true,
+            hideCheckoutEmail: true,
+            hideFilters: true
+        })
     })
 })
