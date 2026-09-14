@@ -609,7 +609,7 @@ async function handleJoinWorkspace(
         workspace_code: joinedWorkspace.code,
         workspace_name: joinedWorkspace.name,
         workspace_plan: joinedPlan.plan,
-        data_mode: joinedWorkspace.data_mode ?? 'cloud'
+        data_mode: joinedWorkspace.data_mode ?? 'hybrid'
     })
 }
 
@@ -929,7 +929,7 @@ async function handleCreateBranch(
         return errorResponse('Source workspace not found', 404)
     }
 
-    if ((sourceWorkspace.data_mode ?? 'cloud') === 'local') {
+    if ((sourceWorkspace.data_mode ?? 'hybrid') === 'local') {
         return errorResponse('Branches are unavailable for local workspaces.', 400)
     }
 
@@ -946,7 +946,7 @@ async function handleCreateBranch(
     const branchInsert = {
         name: branchName,
         plan: sourcePlan.plan,
-        data_mode: sourceWorkspace.data_mode ?? 'cloud',
+        data_mode: sourceWorkspace.data_mode ?? 'hybrid',
         is_configured: true,
         default_currency: sourceWorkspace.default_currency ?? 'iqd',
         iqd_display_preference: sourceWorkspace.iqd_display_preference ?? 'IQD',
@@ -996,7 +996,7 @@ async function handleCreateBranch(
         workspace_code: branchWorkspace.code,
         workspace_name: branchWorkspace.name,
         workspace_plan: normalizeWorkspacePlan(branchWorkspace.plan),
-        data_mode: branchWorkspace.data_mode ?? 'cloud'
+        data_mode: branchWorkspace.data_mode ?? 'hybrid'
     })
 }
 
@@ -1071,7 +1071,7 @@ async function handleSwitchBranch(
         workspace_code: targetWorkspace.code,
         workspace_name: targetWorkspace.name,
         workspace_plan: normalizeWorkspacePlan(targetWorkspace.plan),
-        data_mode: targetWorkspace.data_mode ?? 'cloud'
+        data_mode: targetWorkspace.data_mode ?? 'hybrid'
     })
 }
 

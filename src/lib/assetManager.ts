@@ -113,6 +113,14 @@ export class AssetManager extends SimpleEventEmitter {
         this.emit('progress', progress);
     }
 
+    private localPathForR2Path(r2Path: string): string {
+        const parts = r2Path.replace(/\\/g, '/').replace(/^\/+/, '').split('/');
+        if (this.workspaceId && parts[0] === this.workspaceId && parts.length >= 3) {
+            return `${parts[1]}/${this.workspaceId}/${parts.slice(2).join('/')}`;
+        }
+        return r2Path.replace(/\\/g, '/').replace(/^\/+/, '');
+    }
+
     public getProgress(): AssetProgress & { isInitialSync: boolean } {
         return {
             status: this.isScanning ? 'scanning' : 'idle',
@@ -138,6 +146,12 @@ export class AssetManager extends SimpleEventEmitter {
 
             const fileName = file.name.replace(/\s+/g, '_');
             const storagePath = `${this.workspaceId}/${folder}/${fileName}`;
+
+            await platformService.persistWorkspaceAssetForBackup(
+                this.workspaceId,
+                this.localPathForR2Path(storagePath),
+                file,
+            );
 
             const success = await r2Service.upload(storagePath, file);
 
@@ -170,6 +184,12 @@ export class AssetManager extends SimpleEventEmitter {
             const folder = format === 'a4' ? 'A4' : 'receipts';
             // Use custom path if provided, otherwise fallback to standard ID-based path
             const r2Path = customPath || `${this.workspaceId}/printed-invoices/${folder}/${invoiceId}.pdf`;
+
+            await platformService.persistWorkspaceAssetForBackup(
+                this.workspaceId,
+                this.localPathForR2Path(r2Path),
+                pdfBlob,
+            );
 
             this.emitStatus({ status: 'uploading', currentFile: `${invoiceId}.pdf` });
 

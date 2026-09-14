@@ -5,16 +5,19 @@
 ; SQLite had not checkpointed before the previous process exited.
 !macro NSIS_HOOK_POSTINSTALL
   ${If} $WixMode = 1
-    ${If} ${FileExists} "$APPDATA\${BUNDLEID}\atlas-local-mode.db"
+    ; Preserve every legacy or scoped workspace/user database. New databases
+    ; use atlas-{workspaceId}-{userId}.db; atlas-local-mode.db remains a
+    ; compatibility read during the migration window.
+    ${If} ${FileExists} "$APPDATA\${BUNDLEID}\atlas-*.db"
       CreateDirectory "$APPDATA\${BUNDLEID}\db-backup\msi-nsis-migration-${VERSION}"
-      CopyFiles /SILENT "$APPDATA\${BUNDLEID}\atlas-local-mode.db" "$APPDATA\${BUNDLEID}\db-backup\msi-nsis-migration-${VERSION}"
+      CopyFiles /SILENT "$APPDATA\${BUNDLEID}\atlas-*.db" "$APPDATA\${BUNDLEID}\db-backup\msi-nsis-migration-${VERSION}"
 
-      ${If} ${FileExists} "$APPDATA\${BUNDLEID}\atlas-local-mode.db-wal"
-        CopyFiles /SILENT "$APPDATA\${BUNDLEID}\atlas-local-mode.db-wal" "$APPDATA\${BUNDLEID}\db-backup\msi-nsis-migration-${VERSION}"
+      ${If} ${FileExists} "$APPDATA\${BUNDLEID}\atlas-*.db-wal"
+        CopyFiles /SILENT "$APPDATA\${BUNDLEID}\atlas-*.db-wal" "$APPDATA\${BUNDLEID}\db-backup\msi-nsis-migration-${VERSION}"
       ${EndIf}
 
-      ${If} ${FileExists} "$APPDATA\${BUNDLEID}\atlas-local-mode.db-shm"
-        CopyFiles /SILENT "$APPDATA\${BUNDLEID}\atlas-local-mode.db-shm" "$APPDATA\${BUNDLEID}\db-backup\msi-nsis-migration-${VERSION}"
+      ${If} ${FileExists} "$APPDATA\${BUNDLEID}\atlas-*.db-shm"
+        CopyFiles /SILENT "$APPDATA\${BUNDLEID}\atlas-*.db-shm" "$APPDATA\${BUNDLEID}\db-backup\msi-nsis-migration-${VERSION}"
       ${EndIf}
     ${EndIf}
   ${EndIf}

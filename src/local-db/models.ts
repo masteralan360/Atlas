@@ -6,7 +6,16 @@ export type SyncStatus = 'pending' | 'synced' | 'conflict'
 export type UserRole = 'admin' | 'staff' | 'viewer'
 
 export type CurrencyCode = 'usd' | 'eur' | 'iqd' | 'try'
-export type WorkspaceDataMode = 'cloud' | 'local' | 'hybrid' | 'demo'
+/**
+ * Canonical workspace modes used inside Atlas.
+ *
+ * `hybrid` is presented to users as Cloud Sync. The retired `cloud` value is
+ * accepted only at persisted-data boundaries during the compatibility window
+ * and must be normalized before it enters application state.
+ */
+export type WorkspaceDataMode = 'hybrid' | 'local' | 'demo'
+export type LegacyWorkspaceDataMode = 'cloud'
+export type WorkspaceDataModeInput = WorkspaceDataMode | LegacyWorkspaceDataMode
 export type WorkspacePlan = 'basic' | 'business' | 'enterprise'
 
 export type PaymentMethod = 'cash' | 'fib' | 'qicard' | 'zaincash' | 'fastpay' | 'loan'
@@ -2627,14 +2636,28 @@ export interface SyncQueueItem {
   retryCount: number
 }
 
-// Offline Mutation for manual sync queue
-export type MutationStatus = 'pending' | 'syncing' | 'failed' | 'synced'
+// Durable Cloud Sync outbox lifecycle. The four legacy values remain accepted
+// while an upgraded workspace imports its former Dexie queue.
+export type MutationStatus =
+  | 'pending'
+  | 'leased'
+  | 'retry_wait'
+  | 'blocked'
+  | 'conflict'
+  | 'rejected'
+  | 'acknowledged'
+  | 'abandoned'
+  | 'syncing'
+  | 'failed'
+  | 'synced'
 
 export interface Workspace extends BaseEntity {
   name: string
   code: string
   plan?: WorkspacePlan
   data_mode: WorkspaceDataMode
+  /** Server-gated whole-workspace sync protocol cutover (0 = compatibility). */
+  syncProtocolVersion?: number
   is_configured?: boolean
   // Module toggles
   pos?: boolean
@@ -2746,10 +2769,7 @@ export interface RestaurantPosTicket extends BaseEntity {
   createdBy?: string | null
 }
 
-export interface OfflineMutation {
-  id: string
-  workspaceId: string
-  entityType:
+export type OfflineMutationEntityType =
     | 'products'
     | 'product_barcodes'
     | 'price_books'
@@ -2857,12 +2877,35 @@ export interface OfflineMutation {
     | 'manual_entries'
     | 'restaurant_table_settings'
     | 'restaurant_pos_tickets'
+
+export interface OfflineMutation {
+  id: string
+  workspaceId: string
+  entityType: OfflineMutationEntityType
   entityId: string
   operation: 'create' | 'update' | 'delete'
   payload: Record<string, unknown>
   createdAt: string
   status: MutationStatus
   error?: string
+  /** Monotonic sequence allocated by the workspace SQLite database. */
+  localSequence?: number
+  /** Entity mutations may compact; command mutations are immutable. */
+  mutationKind?: 'entity' | 'command'
+  aggregateKey?: string
+  groupId?: string | null
+  dependencies?: string[]
+  payloadSchemaVersion?: number
+  payloadHash?: string
+  baseVersion?: number | null
+  actorId?: string | null
+  leaseOwner?: string | null
+  leaseExpiresAt?: string | null
+  nextAttemptAt?: string | null
+  attemptCount?: number
+  errorCode?: string | null
+  updatedAt?: string
+  acknowledgedAt?: string | null
 }
 
 export interface AppSetting {

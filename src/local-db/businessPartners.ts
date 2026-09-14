@@ -23,7 +23,7 @@ import {
   type BusinessPartnerPrivacyContext
 } from './businessPartnerPrivacy'
 import { fetchTableFromSupabase } from './hooks'
-import { addToOfflineMutations } from './offlineMutations'
+import { abandonOfflineMutations, addToOfflineMutations } from './offlineMutations'
 import { getOrderBalanceAmount } from './orderInstallments'
 import { isDirectTransactionPartnerAccountEffect } from './payments'
 import { endActiveFleetAssignmentsForAgent, ensureDriverFleetAssignment } from './fleet'
@@ -287,11 +287,16 @@ async function removeOfflineMutationsForEntityIds(tableName: PartnerTableName, e
   const rows = await db.offline_mutations
     .where('entityId')
     .anyOf(entityIds)
-    .and((item) => item.entityType === tableName)
+    .and((item) => (
+      item.entityType === tableName
+      && item.status !== 'synced'
+      && item.status !== 'acknowledged'
+      && item.status !== 'abandoned'
+    ))
     .toArray()
 
   if (rows.length > 0) {
-    await db.offline_mutations.bulkDelete(rows.map((row) => row.id))
+    await abandonOfflineMutations(rows, 'Superseded by a successful remote hard delete.')
   }
 }
 

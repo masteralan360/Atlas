@@ -119,8 +119,8 @@ describe('stock adjustments', () => {
             .toMatchObject({ quantityDelta: 7, previousQuantity: 4, newQuantity: 11 })
     })
 
-    it('rejects an offline stock adjustment in cloud mode without changing stock', async () => {
-        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
+    it('rejects an offline stock adjustment in Cloud Sync mode without changing stock', async () => {
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'hybrid' })
 
         await expect(createStockAdjustment(WORKSPACE_ID, {
             productId: PRODUCT_ID,

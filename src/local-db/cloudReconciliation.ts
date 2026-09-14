@@ -1,14 +1,14 @@
 import { readWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 
 import { db } from './database'
-import type { WorkspaceDataMode } from './models'
+import type { WorkspaceDataModeInput } from './models'
 
-type ReconciliationMode = WorkspaceDataMode | null | undefined
+type ReconciliationMode = WorkspaceDataModeInput | null | undefined
 
 /**
  * Remote reconciliation may remove local rows. It must therefore be enabled
- * only by a positive, durable indication that this workspace uses cloud data.
- * An absent browser snapshot is intentionally *not* treated as cloud: that is
+ * only by a positive, durable indication that this workspace uses Cloud Sync.
+ * An absent browser snapshot is intentionally *not* treated as Cloud Sync: that is
  * the startup state that previously let an empty remote response erase Local
  * Mode records.
  */

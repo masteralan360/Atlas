@@ -1,4 +1,4 @@
-import type { WorkspaceDataMode } from '@/local-db/models'
+import type { WorkspaceDataModeInput } from '@/local-db/models'
 
 const WORKSPACE_DATA_FETCH_PREFIX = 'atlas_workspace_data_fetch:v2:'
 
@@ -106,7 +106,7 @@ function parseSnapshot(
     }
 }
 
-export function getWorkspaceDataFetchSource(dataMode?: WorkspaceDataMode | null): WorkspaceDataFetchSource {
+export function getWorkspaceDataFetchSource(dataMode?: WorkspaceDataModeInput | null): WorkspaceDataFetchSource {
     return dataMode === 'local' || dataMode === 'demo' ? 'local' : 'supabase'
 }
 

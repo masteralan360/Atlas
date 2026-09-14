@@ -1,15 +1,84 @@
 import type Dexie from "dexie";
 
 import i18n from "@/i18n/config";
+import { getActiveBusinessUserId, getActiveBusinessWorkspaceId, isOnline } from "@/lib/network";
 import { isTauri } from "@/lib/platform";
 import { shouldMirrorToSqlite, isStrictLocalWorkspaceMode } from "@/workspace/workspaceMode";
 import { recordWorkspaceDataFetch } from "@/workspace/workspaceDataFreshness";
 import { isAllowedInventoryQuantityTransition } from "./inventoryDeficit";
-import { runUsbBackupIfNeeded } from "./usbBackup";
 import { normalizeProductSku } from "./productSku";
-import { createPwaSqliteConnection, isOpfsSupported, getPwaDbInstance, ensurePwaDatabase, replacePwaDatabaseFile, validateAtlasLocalDatabase, DB_FILENAME as PWA_DB_FILENAME } from "./pwaSqlite";
+import { closePwaDatabase, createPwaSqliteConnection, DEFAULT_PWA_SQLITE_SCOPE, exportPwaDatabase, isOpfsSupported, quarantinePwaDatabase, runExclusivePwaDatabaseReplacement, validateAtlasLocalDatabase, type PwaSqliteScope } from "./pwaSqlite";
+import type { OfflineMutationEntityType } from "./models";
 
-const LOCAL_MODE_SQLITE_PATH = "sqlite:atlas-local-mode.db";
+const LEGACY_LOCAL_MODE_SQLITE_FILENAME = "atlas-local-mode.db";
+const SQLITE_SCOPE_CATALOG_KEY = "atlas_sqlite_scopes:v1";
+const DEXIE_COMPATIBILITY_MIGRATION_KEY = "dexie_compatibility_migrated:v1";
+
+export interface LocalModeSqliteScope {
+  workspaceId: string;
+  userId: string;
+}
+
+function normalizeScopePart(value: string) {
+  return value.trim().replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+export function getLocalModeSqliteFilename(scope?: LocalModeSqliteScope | null) {
+  if (!scope) return LEGACY_LOCAL_MODE_SQLITE_FILENAME;
+  return `atlas-${normalizeScopePart(scope.workspaceId)}-${normalizeScopePart(scope.userId)}.db`;
+}
+
+function getLocalModeSqlitePath(scope?: LocalModeSqliteScope | null) {
+  return `sqlite:${getLocalModeSqliteFilename(scope)}`;
+}
+
+function scopeKey(scope?: LocalModeSqliteScope | null) {
+  return scope ? `${scope.workspaceId}:${scope.userId}` : "legacy";
+}
+
+function resolveSqliteScope(scope?: LocalModeSqliteScope | null) {
+  // `null` is reserved for the one-time legacy database. Omitting the argument
+  // resolves the currently authenticated workspace/user pair.
+  if (scope === null) return null;
+  if (scope?.workspaceId && scope.userId) return scope;
+  const workspaceId = getActiveBusinessWorkspaceId();
+  const userId = getActiveBusinessUserId();
+  return workspaceId && userId ? { workspaceId, userId } : null;
+}
+
+function readRememberedSqliteScopes(userId?: string | null) {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SQLITE_SCOPE_CATALOG_KEY) ?? "[]") as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is LocalModeSqliteScope => (
+      !!item && typeof item === "object" &&
+      typeof (item as LocalModeSqliteScope).workspaceId === "string" &&
+      typeof (item as LocalModeSqliteScope).userId === "string" &&
+      (!userId || (item as LocalModeSqliteScope).userId === userId)
+    ));
+  } catch {
+    return [];
+  }
+}
+
+function rememberSqliteScope(scope: LocalModeSqliteScope | null) {
+  if (!scope || typeof localStorage === "undefined") return;
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SQLITE_SCOPE_CATALOG_KEY) ?? "[]") as unknown;
+    const scopes = Array.isArray(parsed)
+      ? parsed.filter((item): item is LocalModeSqliteScope => (
+        !!item && typeof item === "object" &&
+        typeof (item as LocalModeSqliteScope).workspaceId === "string" &&
+        typeof (item as LocalModeSqliteScope).userId === "string"
+      ))
+      : [];
+    const next = [scope, ...scopes.filter((item) => scopeKey(item) !== scopeKey(scope))].slice(0, 100);
+    localStorage.setItem(SQLITE_SCOPE_CATALOG_KEY, JSON.stringify(next));
+  } catch {
+    // Scope discovery is a recovery convenience; opening the database remains authoritative.
+  }
+}
 
 export const LOCAL_MODE_SQLITE_TABLES = [
   "products",
@@ -140,6 +209,15 @@ export interface SqliteConnection {
   close?(database?: string): Promise<boolean>;
 }
 
+export type NativeSqliteReadiness =
+  | { ready: true; scope: LocalModeSqliteScope }
+  | {
+      ready: false;
+      scope: LocalModeSqliteScope;
+      reason: "sqlite-unavailable" | "integrity-check-failed" | "write-test-failed";
+      message: string;
+    };
+
 export type LocalModeSqliteMutation =
   | {
       type: "upsert";
@@ -243,13 +321,18 @@ function normalizeLegacyPartnerPayload(
 const hydratedWorkspaces = new Set<string>();
 const hydrationTasks = new Map<string, Promise<void>>();
 
-function markLocalWorkspaceFetched(workspaceId: string) {
-  hydratedWorkspaces.add(workspaceId);
+function hydrationKey(workspaceId: string, userId?: string | null) {
+  return `${workspaceId}:${userId ?? getActiveBusinessUserId() ?? "legacy"}`;
+}
+
+function markLocalWorkspaceFetched(workspaceId: string, userId?: string | null) {
+  hydratedWorkspaces.add(hydrationKey(workspaceId, userId));
   recordWorkspaceDataFetch(workspaceId, "local");
 }
 
 let sqlitePromise: Promise<SqliteConnection | null> | null = null;
 let sqliteWriteQueue: Promise<void> = Promise.resolve();
+let activeSqliteScope: LocalModeSqliteScope | null = null;
 let mirroringPauseDepth = 0;
 let testConnectionOverride: SqliteConnection | undefined;
 
@@ -272,6 +355,80 @@ async function ensureCurrentWorkspaceColumn(connection: SqliteConnection) {
     CREATE INDEX IF NOT EXISTS idx_local_entities_current_workspace
     ON local_entities (current_workspace)
   `);
+}
+
+async function ensureDatabaseIdentity(
+  connection: SqliteConnection,
+  scope: LocalModeSqliteScope | null,
+) {
+  if (!scope) return;
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS atlas_database_identity (
+      singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+      workspace_id TEXT NOT NULL,
+      user_id TEXT NOT NULL
+    )
+  `);
+  const identities = await connection.select<Array<{
+    workspace_id: string;
+    user_id: string;
+  }>>(
+    "SELECT workspace_id, user_id FROM atlas_database_identity WHERE singleton = 1",
+  );
+  const identity = identities[0];
+  if (identity) {
+    if (
+      identity.workspace_id !== scope.workspaceId ||
+      identity.user_id !== scope.userId
+    ) {
+      throw new Error("This SQLite database belongs to a different workspace or user.");
+    }
+    return;
+  }
+  await connection.execute(
+    `
+      INSERT INTO atlas_database_identity (singleton, workspace_id, user_id)
+      VALUES (1, $1, $2)
+    `,
+    [scope.workspaceId, scope.userId],
+  );
+}
+
+async function ensureLocalMetadata(connection: SqliteConnection) {
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS atlas_local_metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+}
+
+async function hasCompletedDexieCompatibilityMigration(
+  connection: SqliteConnection,
+) {
+  await ensureLocalMetadata(connection);
+  const rows = await connection.select<Array<{ value: string }>>(
+    "SELECT value FROM atlas_local_metadata WHERE key = $1 LIMIT 1",
+    [DEXIE_COMPATIBILITY_MIGRATION_KEY],
+  );
+  return rows[0]?.value === "complete";
+}
+
+async function markDexieCompatibilityMigrationComplete(
+  connection: SqliteConnection,
+) {
+  await ensureLocalMetadata(connection);
+  await connection.execute(
+    `
+      INSERT INTO atlas_local_metadata (key, value, updated_at)
+      VALUES ($1, 'complete', $2)
+      ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = excluded.updated_at
+    `,
+    [DEXIE_COMPATIBILITY_MIGRATION_KEY, new Date().toISOString()],
+  );
 }
 
 async function ensureInventoryDeficitTriggers(connection: SqliteConnection) {
@@ -489,13 +646,11 @@ export function setLocalModeSqliteConnectionForTests(
   testConnectionOverride = connection;
   sqlitePromise = connection ? Promise.resolve(connection) : null;
   sqliteWriteQueue = Promise.resolve();
+  activeSqliteScope = null;
 }
 
 function isSqliteMirrorEnabled(workspaceId?: string | null) {
-  if (isTauri()) {
-    return shouldMirrorToSqlite(workspaceId);
-  }
-  return isStrictLocalWorkspaceMode(workspaceId);
+  return shouldMirrorToSqlite(workspaceId);
 }
 
 function isMirroredTableName(
@@ -589,7 +744,7 @@ function deserializeValue(value: unknown): unknown {
   return value;
 }
 
-async function ensureConnection() {
+async function ensureConnection(requestedScope?: LocalModeSqliteScope | null) {
   if (testConnectionOverride) {
     return testConnectionOverride;
   }
@@ -597,13 +752,25 @@ async function ensureConnection() {
     return null;
   }
 
+  const desiredScope = resolveSqliteScope(requestedScope);
+  if (requestedScope !== null && !desiredScope) {
+    throw new Error(
+      "SQLite access requires an explicit workspace and authenticated user scope.",
+    );
+  }
+  if (sqlitePromise && scopeKey(desiredScope) !== scopeKey(activeSqliteScope)) {
+    await resetSqliteConnection();
+  }
+  activeSqliteScope = desiredScope;
+  rememberSqliteScope(desiredScope);
+
   if (!sqlitePromise) {
     sqlitePromise = (async () => {
       let connection: SqliteConnection;
       if (isTauri()) {
         const { default: Database } = await import("@tauri-apps/plugin-sql");
         connection = (await Database.load(
-          LOCAL_MODE_SQLITE_PATH,
+          getLocalModeSqlitePath(desiredScope),
         )) as SqliteConnection;
 
         await connection.execute("PRAGMA busy_timeout = 5000");
@@ -627,10 +794,12 @@ async function ensureConnection() {
                 ON local_entities (entity_type, workspace_id)
             `);
         await ensureCurrentWorkspaceColumn(connection);
+        await ensureDatabaseIdentity(connection, desiredScope);
       } else {
-        connection = createPwaSqliteConnection();
+        connection = createPwaSqliteConnection(desiredScope as PwaSqliteScope | undefined);
       }
 
+      await ensureLocalMetadata(connection);
       await ensureInventoryDeficitTriggers(connection);
       await ensureCashierShiftActiveClaimsTable(connection);
       await purgeRetiredModuleEntities(connection);
@@ -652,8 +821,8 @@ async function ensureConnection() {
   return sqlitePromise;
 }
 
-export async function getLocalModeSqliteConnection() {
-  return ensureConnection();
+export async function getLocalModeSqliteConnection(scope?: LocalModeSqliteScope | null) {
+  return ensureConnection(scope);
 }
 
 function isSqliteLockedError(error: unknown) {
@@ -663,26 +832,44 @@ function isSqliteLockedError(error: unknown) {
 
 async function resetSqliteConnection() {
   const currentConnection = sqlitePromise;
+  const closingScope = activeSqliteScope;
   sqlitePromise = null;
+  activeSqliteScope = null;
+  let closed = false;
 
   try {
     const connection = currentConnection ? await currentConnection : null;
     if (connection?.close) {
       await connection.close();
-      return;
+      closed = true;
     }
   } catch {
     // Fall through.
   }
 
-  if (isTauri()) {
+  if (!closed && isTauri()) {
     try {
       const { default: Database } = await import("@tauri-apps/plugin-sql");
-      await Database.get(LOCAL_MODE_SQLITE_PATH).close();
+      await Database.get(getLocalModeSqlitePath(closingScope)).close();
     } catch {
       // Reopening on the next attempt is enough.
     }
+  } else if (!closed && closingScope) {
+    await closePwaDatabase(closingScope).catch(() => undefined);
   }
+}
+
+export async function releaseLocalModeSqliteConnection(
+  expectedScope?: LocalModeSqliteScope | null,
+) {
+  await sqliteWriteQueue.catch(() => undefined);
+  if (
+    expectedScope !== undefined &&
+    scopeKey(resolveSqliteScope(expectedScope)) !== scopeKey(activeSqliteScope)
+  ) {
+    return;
+  }
+  await resetSqliteConnection();
 }
 
 async function retrySqliteWrite<T>(task: () => Promise<T>) {
@@ -702,19 +889,34 @@ async function retrySqliteWrite<T>(task: () => Promise<T>) {
   }
 }
 
-export function runLocalModeSqliteWrite<T>(task: () => Promise<T>): Promise<T> {
-  const queued = sqliteWriteQueue
-    .catch(() => undefined)
-    .then(() => retrySqliteWrite(task));
-
+function enqueueSqliteWriteLane<T>(task: () => Promise<T>): Promise<T> {
+  const queued = sqliteWriteQueue.catch(() => undefined).then(task);
   sqliteWriteQueue = queued.then(
     () => undefined,
     () => undefined,
   );
+  return queued;
+}
+
+export function runLocalModeSqliteWrite<T>(
+  task: () => Promise<T>,
+  scope?: LocalModeSqliteScope | null,
+): Promise<T> {
+  const writeScope = resolveSqliteScope(scope);
+  const queued = enqueueSqliteWriteLane(() => retrySqliteWrite(async () => {
+      // Resolve/switch the physical database while this global write lane is
+      // held, so two workspace scopes can never share a transaction.
+      await ensureConnection(writeScope);
+      return task();
+    }));
 
   void queued.then(
     () => {
-      runUsbBackupIfNeeded();
+      if (writeScope) {
+        void import("./usbBackup").then(({ runUsbBackupIfNeeded }) => {
+          runUsbBackupIfNeeded(writeScope.workspaceId, writeScope.userId);
+        });
+      }
     },
     () => undefined,
   );
@@ -745,11 +947,93 @@ async function runConnectionTransaction<T>(
   }
 }
 
+/**
+ * Proves that the native database can be opened, passes SQLite's integrity
+ * check, and provides real commit/rollback semantics before the workspace UI
+ * is allowed to mount. Browser/PWA readiness is handled by pwaSqlite because
+ * it also owns the workspace-wide Web Lock.
+ */
+export async function checkNativeSqliteReadiness(
+  scope: LocalModeSqliteScope,
+): Promise<NativeSqliteReadiness> {
+  try {
+    const connection = await ensureConnection(scope);
+    if (!connection) {
+      return {
+        ready: false,
+        scope,
+        reason: "sqlite-unavailable",
+        message: "The native SQLite database could not be opened.",
+      };
+    }
+
+    const integrityRows = await connection.select<Array<Record<string, unknown>>>(
+      "PRAGMA quick_check(1)",
+    );
+    const integrityResult = integrityRows[0]
+      ? String(Object.values(integrityRows[0])[0] ?? "").toLowerCase()
+      : "";
+    if (integrityResult !== "ok") {
+      return {
+        ready: false,
+        scope,
+        reason: "integrity-check-failed",
+        message: "The native SQLite database failed its integrity check.",
+      };
+    }
+
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS atlas_sqlite_readiness_probe (
+        probe_id TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL
+      )
+    `);
+    const probeId = globalThis.crypto.randomUUID();
+    const rollbackProbe = new Error("atlas-sqlite-readiness-rollback");
+    try {
+      await runConnectionTransaction(connection, async (transaction) => {
+        await transaction.execute(
+          "INSERT INTO atlas_sqlite_readiness_probe (probe_id, created_at) VALUES ($1, $2)",
+          [probeId, new Date().toISOString()],
+        );
+        const inserted = await transaction.select<Array<{ count: number }>>(
+          "SELECT COUNT(*) AS count FROM atlas_sqlite_readiness_probe WHERE probe_id = $1",
+          [probeId],
+        );
+        if (Number(inserted[0]?.count ?? 0) !== 1) {
+          throw new Error("The native SQLite write probe could not be read back.");
+        }
+        throw rollbackProbe;
+      });
+    } catch (error) {
+      if (error !== rollbackProbe) throw error;
+    }
+
+    const rolledBack = await connection.select<Array<{ count: number }>>(
+      "SELECT COUNT(*) AS count FROM atlas_sqlite_readiness_probe WHERE probe_id = $1",
+      [probeId],
+    );
+    if (Number(rolledBack[0]?.count ?? 0) !== 0) {
+      throw new Error("The native SQLite rollback probe remained committed.");
+    }
+
+    return { ready: true, scope };
+  } catch (error) {
+    return {
+      ready: false,
+      scope,
+      reason: "write-test-failed",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export function runLocalModeSqliteTransaction<T>(
   task: (connection: SqliteConnection) => Promise<T>,
+  scope?: LocalModeSqliteScope | null,
 ): Promise<T> {
   return runLocalModeSqliteWrite(async () => {
-    const connection = await ensureConnection();
+    const connection = await ensureConnection(scope);
     if (!connection) {
       throw new Error(
         "Local-mode SQLite is unavailable; the mutation was not committed.",
@@ -757,7 +1041,7 @@ export function runLocalModeSqliteTransaction<T>(
     }
 
     return runConnectionTransaction(connection, task);
-  });
+  }, scope);
 }
 
 /**
@@ -767,9 +1051,11 @@ export function runLocalModeSqliteTransaction<T>(
  * afterwards so an updater can copy a stable database file without retaining
  * a stale WAL lock.
  */
-export function checkpointLocalModeSqliteForBackup(): Promise<void> {
+export function checkpointLocalModeSqliteForBackup(
+  scope?: LocalModeSqliteScope | null,
+): Promise<void> {
   return runLocalModeSqliteWrite(async () => {
-    const connection = await ensureConnection();
+    const connection = await ensureConnection(scope);
     if (!connection) {
       throw new Error("Local-mode SQLite is unavailable; the backup was not created.");
     }
@@ -782,11 +1068,61 @@ export function checkpointLocalModeSqliteForBackup(): Promise<void> {
     }
 
     await resetSqliteConnection();
-  });
+  }, scope);
 }
 
-function enqueueWrite(task: () => Promise<void>) {
-  return runLocalModeSqliteWrite(task).catch((error) => {
+/**
+ * Capture a verified SQLite file while the global write lane remains held.
+ * Native capture deliberately keeps the lane through checkpoint, close, file
+ * read, and validation so a new WAL writer cannot race the copied bytes.
+ */
+export function captureLocalModeSqliteDatabaseForBackup(
+  requestedScope: LocalModeSqliteScope,
+): Promise<Uint8Array> {
+  const scope = resolveSqliteScope(requestedScope);
+  if (!scope) {
+    return Promise.reject(new Error("A workspace and user are required to create a backup."));
+  }
+
+  return runLocalModeSqliteWrite(async () => {
+    const connection = await ensureConnection(scope);
+    if (!connection) {
+      throw new Error("Local-mode SQLite is unavailable; the backup was not created.");
+    }
+
+    if (!isTauri()) {
+      const data = await exportPwaDatabase(scope as PwaSqliteScope);
+      if (!data) throw new Error("No browser SQLite database is open for this workspace and user.");
+      await validateAtlasLocalDatabase(data, scope as PwaSqliteScope, {
+        requireScopedIdentity: true,
+      });
+      return data;
+    }
+
+    const checkpoint = await connection.select<Array<{ busy?: number }>>(
+      "PRAGMA wal_checkpoint(TRUNCATE)",
+    );
+    if (checkpoint.some((row) => Number(row.busy ?? 0) !== 0)) {
+      throw new Error("Local-mode SQLite is busy; the backup was not created.");
+    }
+    await resetSqliteConnection();
+
+    const { exists, readFile, BaseDirectory } = await import("@tauri-apps/plugin-fs");
+    const databaseFilename = getLocalModeSqliteFilename(scope);
+    if (!(await exists(databaseFilename, { baseDir: BaseDirectory.AppData }))) {
+      throw new Error("No SQLite database exists for this workspace and user.");
+    }
+    const data = await readFile(databaseFilename, { baseDir: BaseDirectory.AppData });
+    await validateTauriDatabaseFile(data, scope, true);
+    return data;
+  }, scope);
+}
+
+function enqueueWrite(
+  task: () => Promise<void>,
+  scope?: LocalModeSqliteScope | null,
+) {
+  return runLocalModeSqliteWrite(task, scope).catch((error) => {
       console.error("[LocalModeSQLite] Write failed:", error);
     });
 }
@@ -799,6 +1135,11 @@ async function withMirroringPaused<T>(work: () => Promise<T>) {
   } finally {
     mirroringPauseDepth = Math.max(0, mirroringPauseDepth - 1);
   }
+}
+
+/** Run a disposable-cache projection without feeding it back into SQLite. */
+export function projectDexieFromSqlite<T>(work: () => Promise<T>) {
+  return withMirroringPaused(work);
 }
 
 function getEntityId(
@@ -910,18 +1251,32 @@ async function readCacheRowsForWorkspace(
     .toArray();
 }
 
-export async function seedWorkspaceFromDexie(cacheDb: Dexie, workspaceId: string) {
-  for (const tableName of LOCAL_MODE_SQLITE_TABLES) {
-    const rows = await readCacheRowsForWorkspace(
-      cacheDb,
-      tableName,
-      workspaceId,
-    );
-
-    for (const row of rows) {
-      await persistEntity(cacheDb, tableName, row as Record<string, unknown>);
-    }
+export async function seedWorkspaceFromDexie(
+  cacheDb: Dexie,
+  workspaceId: string,
+  userId?: string | null,
+) {
+  const resolvedUserId = userId ?? getActiveBusinessUserId();
+  if (!resolvedUserId) {
+    throw new Error("Dexie compatibility migration requires an explicit user scope.");
   }
+  const scope = { workspaceId, userId: resolvedUserId };
+  await runLocalModeSqliteTransaction(async (connection) => {
+    for (const tableName of LOCAL_MODE_SQLITE_TABLES) {
+      const rows = await readCacheRowsForWorkspace(
+        cacheDb,
+        tableName,
+        workspaceId,
+      );
+
+      for (const row of rows) {
+        await persistEntity(cacheDb, tableName, row as Record<string, unknown>, {
+          connection,
+          workspaceId,
+        });
+      }
+    }
+  }, scope);
 }
 
 async function hasCachedRowsForWorkspace(cacheDb: Dexie, workspaceId: string) {
@@ -957,6 +1312,89 @@ async function getStoredWorkspaceRowCount(
   return typeof count === "string"
     ? Number.parseInt(count, 10)
     : Number(count ?? 0);
+}
+
+async function openLegacySqliteConnectionForMigration() {
+  if (testConnectionOverride) return null;
+  if (isTauri()) {
+    const { exists, BaseDirectory } = await import("@tauri-apps/plugin-fs");
+    if (!(await exists(LEGACY_LOCAL_MODE_SQLITE_FILENAME, { baseDir: BaseDirectory.AppData }))) {
+      return null;
+    }
+    const { default: Database } = await import("@tauri-apps/plugin-sql");
+    return await Database.load(getLocalModeSqlitePath(null)) as SqliteConnection;
+  }
+  return createPwaSqliteConnection(DEFAULT_PWA_SQLITE_SCOPE);
+}
+
+/**
+ * One-time compatibility bridge from the old shared SQLite file. Only rows
+ * belonging to the selected workspace are copied, so the new physical file
+ * never inherits another workspace's data. The legacy file remains untouched
+ * as a recovery source until the compatibility window ends.
+ */
+async function migrateLegacyWorkspaceIntoScope(
+  target: SqliteConnection,
+  scope: LocalModeSqliteScope,
+) {
+  const legacy = await openLegacySqliteConnectionForMigration();
+  if (!legacy) return 0;
+  try {
+    const legacyTables = await legacy.select<Array<{ name: string }>>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'local_entities' LIMIT 1",
+    );
+    if (legacyTables.length === 0) return 0;
+    const legacyColumns = await legacy.select<Array<{ name: string }>>(
+      "PRAGMA table_info(local_entities)",
+    );
+    const hasCurrentWorkspace = legacyColumns.some((column) => column.name === "current_workspace");
+    const currentWorkspaceSelect = hasCurrentWorkspace
+      ? "current_workspace"
+      : "NULL AS current_workspace";
+    const currentWorkspacePredicate = hasCurrentWorkspace
+      ? "OR (entity_type = 'profiles' AND current_workspace = $1)"
+      : "";
+    const rows = await legacy.select<StoredEntityRow[]>(
+      `
+        SELECT entity_type, entity_id, workspace_id, ${currentWorkspaceSelect}, payload, updated_at
+        FROM local_entities
+        WHERE workspace_id = $1
+           ${currentWorkspacePredicate}
+           OR (entity_type = 'workspaces' AND entity_id = $1)
+           OR (entity_type = 'profiles' AND entity_id = $2)
+        ORDER BY entity_type, updated_at
+      `,
+      [scope.workspaceId, scope.userId],
+    );
+    if (rows.length === 0) return 0;
+
+    await runConnectionTransaction(target, async (connection) => {
+      for (const row of rows) {
+        await connection.execute(
+          `
+            INSERT INTO local_entities (
+              entity_type, entity_id, workspace_id, current_workspace, payload, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT(entity_type, entity_id) DO NOTHING
+          `,
+          [
+            row.entity_type,
+            row.entity_id,
+            row.workspace_id,
+            row.current_workspace,
+            row.payload,
+            row.updated_at,
+          ],
+        );
+      }
+    });
+    console.info(
+      `[LocalModeSQLite] Migrated ${rows.length} legacy row(s) into scoped workspace storage.`,
+    );
+    return rows.length;
+  } finally {
+    await legacy.close?.().catch(() => false);
+  }
 }
 
 /**
@@ -1291,15 +1729,32 @@ function isAuthoritativeLocalMutation(
   const { tableName, row } = mutation;
   if (tableName === "workspaces") {
     const workspaceId = getEntityId(tableName, row);
-    return row.data_mode === "local" ||
-      (workspaceId ? isStrictLocalWorkspaceMode(workspaceId) : false);
+    return row.data_mode === "local" || row.data_mode === "hybrid" ||
+      (workspaceId ? isSqliteMirrorEnabled(workspaceId) : false);
   }
 
   const workspaceId = tableName === "profiles" &&
       typeof row.currentWorkspaceId === "string"
     ? row.currentWorkspaceId
     : mutation.workspaceId;
-  return !!workspaceId && isStrictLocalWorkspaceMode(workspaceId);
+  return !!workspaceId && isSqliteMirrorEnabled(workspaceId);
+}
+
+async function hydrateDurableOutboxProjection(
+  cacheDb: Dexie,
+  workspaceId: string,
+  userId?: string | null,
+  importLegacyProjection = false,
+) {
+  if (isStrictLocalWorkspaceMode(workspaceId)) return;
+  const {
+    importLegacyDexieOutbox,
+    rebuildDexieOutboxProjection,
+  } = await import("./cloudSyncOutbox");
+  if (importLegacyProjection) {
+    await importLegacyDexieOutbox(cacheDb, workspaceId, userId);
+  }
+  await rebuildDexieOutboxProjection(cacheDb, workspaceId, userId);
 }
 
 export async function commitLocalModeSqliteMutations(
@@ -1330,6 +1785,23 @@ export async function commitLocalModeSqliteMutations(
     );
   }
 
+  const workspaceIds = new Set(
+    authoritativeMutations
+      .map((mutation) => mutation.workspaceId)
+      .filter((workspaceId): workspaceId is string => !!workspaceId),
+  );
+  if (workspaceIds.size > 1) {
+    throw new Error("Cross-workspace local mutations must use an online server transaction.");
+  }
+  const workspaceId = workspaceIds.values().next().value as string | undefined;
+  const userId = getActiveBusinessUserId();
+  if (!workspaceId || !userId) {
+    throw new Error(
+      "SQLite business writes require an explicit workspace and authenticated user scope.",
+    );
+  }
+  const scope = { workspaceId, userId };
+
   await runLocalModeSqliteTransaction(async (connection) => {
     for (const mutation of authoritativeMutations) {
       if (mutation.type === "upsert") {
@@ -1346,43 +1818,110 @@ export async function commitLocalModeSqliteMutations(
         });
       }
     }
-  });
+
+    // For Cloud Sync, the durable entity post-state/tombstone and its outbox
+    // intent share this exact SQLite transaction. Dexie and its queue are only
+    // projections, so a process crash cannot leave durable business state with
+    // no replayable intent.
+    if (!isStrictLocalWorkspaceMode(workspaceId) && !isOnline(workspaceId)) {
+      const [{ enqueueCloudSyncMutation }, { SYNC_REGISTRY }] = await Promise.all([
+        import("./cloudSyncOutbox"),
+        import("@/sync/syncRegistry"),
+      ]);
+      for (const mutation of authoritativeMutations) {
+        const entityType = mutation.tableName as OfflineMutationEntityType;
+        const registration = (SYNC_REGISTRY as Partial<
+          Record<OfflineMutationEntityType, { kind: string }>
+        >)[entityType];
+        if (registration?.kind !== "entity") continue;
+
+        const hardDelete = mutation.type === "delete";
+        const softDelete = mutation.row.isDeleted === true;
+        if (!hardDelete && mutation.row.syncStatus !== "pending") continue;
+
+        const rowVersion = typeof mutation.row.version === "number" &&
+            Number.isFinite(mutation.row.version)
+          ? Math.max(0, Math.trunc(mutation.row.version))
+          : null;
+        const operation = hardDelete || softDelete
+          ? "delete"
+          : rowVersion !== null && rowVersion <= 1
+          ? "create"
+          : "update";
+        const payload = hardDelete
+          ? { ...mutation.row, hardDelete: true }
+          : mutation.row;
+        const entityId = getEntityId(mutation.tableName, mutation.row);
+        if (!entityId) continue;
+
+        await enqueueCloudSyncMutation({
+          mutationId: globalThis.crypto.randomUUID(),
+          workspaceId,
+          entityType,
+          entityId,
+          operation,
+          payload,
+          actorId: userId,
+          baseVersion: hardDelete ? rowVersion : undefined,
+        }, connection);
+      }
+    }
+  }, scope);
 }
 
 export async function hydrateLocalModeCacheFromSqlite(
   cacheDb: Dexie,
   workspaceId?: string | null,
+  userId?: string | null,
 ) {
   if (!workspaceId || !isSqliteMirrorEnabled(workspaceId) || !isSupported()) {
     return;
   }
 
-  const existingTask = hydrationTasks.get(workspaceId);
+  const resolvedUserId = userId ?? getActiveBusinessUserId();
+  const key = hydrationKey(workspaceId, resolvedUserId);
+  if (!resolvedUserId) {
+    throw new Error(
+      "SQLite hydration requires an explicit authenticated user scope.",
+    );
+  }
+  const scope = { workspaceId, userId: resolvedUserId };
+  const existingTask = hydrationTasks.get(key);
   if (existingTask) {
     return existingTask;
   }
 
-  if (hydratedWorkspaces.has(workspaceId)) {
+  if (hydratedWorkspaces.has(key)) {
     return;
   }
 
   const task = (async () => {
-    const connection = await ensureConnection();
+    const connection = await ensureConnection(scope);
     if (!connection) {
       return;
     }
+    const allowCompatibilityImport = !await hasCompletedDexieCompatibilityMigration(connection);
 
-    const storedRowCount = await getStoredWorkspaceRowCount(
+    let storedRowCount = await getStoredWorkspaceRowCount(
       connection,
       workspaceId,
     );
+    if (storedRowCount === 0 && resolvedUserId) {
+      await migrateLegacyWorkspaceIntoScope(connection, {
+        workspaceId,
+        userId: resolvedUserId,
+      });
+      storedRowCount = await getStoredWorkspaceRowCount(connection, workspaceId);
+    }
     if (storedRowCount === 0) {
-      if (await hasCachedRowsForWorkspace(cacheDb, workspaceId)) {
+      if (allowCompatibilityImport && await hasCachedRowsForWorkspace(cacheDb, workspaceId)) {
         console.warn(
           `[LocalModeSQLite] SQLite is empty for workspace ${workspaceId}; seeding it from the existing cache instead of clearing data.`,
         );
-        await seedWorkspaceFromDexie(cacheDb, workspaceId);
-        markLocalWorkspaceFetched(workspaceId);
+        await seedWorkspaceFromDexie(cacheDb, workspaceId, resolvedUserId);
+        await hydrateDurableOutboxProjection(cacheDb, workspaceId, resolvedUserId, true);
+        await markDexieCompatibilityMigrationComplete(connection);
+        markLocalWorkspaceFetched(workspaceId, resolvedUserId);
         return;
       }
 
@@ -1390,7 +1929,14 @@ export async function hydrateLocalModeCacheFromSqlite(
       await withMirroringPaused(() =>
         clearCacheRowsForWorkspace(cacheDb, workspaceId)
       );
-      markLocalWorkspaceFetched(workspaceId);
+      await hydrateDurableOutboxProjection(
+        cacheDb,
+        workspaceId,
+        resolvedUserId,
+        allowCompatibilityImport,
+      );
+      await markDexieCompatibilityMigrationComplete(connection);
+      markLocalWorkspaceFetched(workspaceId, resolvedUserId);
       return;
     }
 
@@ -1406,18 +1952,22 @@ export async function hydrateLocalModeCacheFromSqlite(
       [workspaceId],
     );
 
-    const seededMissingTables = await seedMissingMirrorTablesFromDexie(
-      connection,
-      cacheDb,
-      workspaceId,
-      rows,
-    );
-    const seededCacheOnlySaleItems = await seedCacheOnlySaleItemsFromDexie(
-      connection,
-      cacheDb,
-      workspaceId,
-      rows,
-    );
+    const seededMissingTables = allowCompatibilityImport
+      ? await seedMissingMirrorTablesFromDexie(
+        connection,
+        cacheDb,
+        workspaceId,
+        rows,
+      )
+      : false;
+    const seededCacheOnlySaleItems = allowCompatibilityImport
+      ? await seedCacheOnlySaleItemsFromDexie(
+        connection,
+        cacheDb,
+        workspaceId,
+        rows,
+      )
+      : false;
     if (seededMissingTables || seededCacheOnlySaleItems) {
       rows = await connection.select<StoredEntityRow[]>(
         `
@@ -1525,51 +2075,74 @@ export async function hydrateLocalModeCacheFromSqlite(
       }
     });
 
-    markLocalWorkspaceFetched(workspaceId);
+    await hydrateDurableOutboxProjection(
+      cacheDb,
+      workspaceId,
+      resolvedUserId,
+      allowCompatibilityImport,
+    );
+    await markDexieCompatibilityMigrationComplete(connection);
+    markLocalWorkspaceFetched(workspaceId, resolvedUserId);
   })().finally(() => {
-    hydrationTasks.delete(workspaceId);
+    hydrationTasks.delete(key);
   });
 
-  hydrationTasks.set(workspaceId, task);
+  hydrationTasks.set(key, task);
   return task;
 }
 
-export async function readLocalProfileWorkspaceState(userId: string) {
+export async function readLocalProfileWorkspaceState(
+  userId: string,
+  workspaceId?: string | null,
+) {
   if (!userId || !isSupported()) {
     return null;
   }
 
-  const connection = await ensureConnection();
-  if (!connection) {
-    return null;
+  const activeWorkspaceId = getActiveBusinessWorkspaceId();
+  const candidates: Array<LocalModeSqliteScope | null> = [];
+  const seen = new Set<string>();
+  const addCandidate = (scope: LocalModeSqliteScope | null) => {
+    const key = scopeKey(scope);
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(scope);
+  };
+  if (workspaceId) addCandidate({ workspaceId, userId });
+  if (activeWorkspaceId) addCandidate({ workspaceId: activeWorkspaceId, userId });
+  readRememberedSqliteScopes(userId).forEach(addCandidate);
+  // The unscoped database is read only as a compatibility source for devices
+  // that predate per-workspace/per-user physical files.
+  addCandidate(null);
+
+  for (const candidate of candidates) {
+    const connection = await ensureConnection(candidate);
+    if (!connection) continue;
+    const rows = await connection.select<StoredEntityRow[]>(
+      `
+        SELECT entity_type, entity_id, workspace_id, current_workspace, payload, updated_at
+        FROM local_entities
+        WHERE entity_type = 'profiles' AND entity_id = $1
+        LIMIT 1
+      `,
+      [userId],
+    );
+    const row = rows[0];
+    if (!row) continue;
+
+    const payload = deserializeValue(JSON.parse(row.payload)) as Record<string, unknown>;
+    const sourceWorkspaceId = row.workspace_id
+      || (typeof payload.workspaceId === "string" ? payload.workspaceId : null);
+    const currentWorkspaceId = row.current_workspace
+      || (typeof payload.currentWorkspaceId === "string" ? payload.currentWorkspaceId : null)
+      || sourceWorkspaceId;
+
+    if (sourceWorkspaceId && currentWorkspaceId) {
+      return { sourceWorkspaceId, currentWorkspaceId };
+    }
   }
 
-  const rows = await connection.select<StoredEntityRow[]>(
-    `
-      SELECT entity_type, entity_id, workspace_id, current_workspace, payload, updated_at
-      FROM local_entities
-      WHERE entity_type = 'profiles' AND entity_id = $1
-      LIMIT 1
-    `,
-    [userId],
-  );
-  const row = rows[0];
-  if (!row) {
-    return null;
-  }
-
-  const payload = deserializeValue(JSON.parse(row.payload)) as Record<string, unknown>;
-  const sourceWorkspaceId = row.workspace_id
-    || (typeof payload.workspaceId === "string" ? payload.workspaceId : null);
-  const currentWorkspaceId = row.current_workspace
-    || (typeof payload.currentWorkspaceId === "string" ? payload.currentWorkspaceId : null)
-    || sourceWorkspaceId;
-
-  if (!sourceWorkspaceId || !currentWorkspaceId) {
-    return null;
-  }
-
-  return { sourceWorkspaceId, currentWorkspaceId };
+  return null;
 }
 
 export function queueLocalModeSqliteUpsert(
@@ -1585,7 +2158,8 @@ export function queueLocalModeSqliteUpsert(
     return;
   }
 
-  void enqueueWrite(async () => {
+  const userId = getActiveBusinessUserId();
+  void (async () => {
     const workspaceId = tableName === "profiles" &&
         typeof row.currentWorkspaceId === "string"
       ? row.currentWorkspaceId
@@ -1599,8 +2173,13 @@ export function queueLocalModeSqliteUpsert(
     if (isAuthoritativeLocalMutation(mutation)) {
       return;
     }
-    await persistEntity(cacheDb, tableName, row);
-  });
+    const scope = workspaceId && userId ? { workspaceId, userId } : undefined;
+    await enqueueWrite(async () => {
+      const connection = await ensureConnection(scope);
+      if (!connection) return;
+      await persistEntity(cacheDb, tableName, row, { connection, workspaceId });
+    }, scope);
+  })();
 }
 
 export function queueLocalModeSqliteDelete(
@@ -1616,7 +2195,8 @@ export function queueLocalModeSqliteDelete(
     return;
   }
 
-  void enqueueWrite(async () => {
+  const userId = getActiveBusinessUserId();
+  void (async () => {
     const workspaceId = tableName === "profiles" &&
         typeof row.currentWorkspaceId === "string"
       ? row.currentWorkspaceId
@@ -1630,16 +2210,26 @@ export function queueLocalModeSqliteDelete(
     if (isAuthoritativeLocalMutation(mutation)) {
       return;
     }
-    await deleteEntity(cacheDb, tableName, row);
-  });
+    const scope = workspaceId && userId ? { workspaceId, userId } : undefined;
+    await enqueueWrite(async () => {
+      const connection = await ensureConnection(scope);
+      if (!connection) return;
+      await deleteEntity(cacheDb, tableName, row, { connection, workspaceId });
+    }, scope);
+  })();
 }
 
-export async function clearWorkspaceSqliteData(workspaceId: string) {
+export async function clearWorkspaceSqliteData(
+  workspaceId: string,
+  userId?: string | null,
+) {
   if (!isSupported()) {
     return;
   }
 
-  const connection = await ensureConnection();
+  const resolvedUserId = userId ?? getActiveBusinessUserId();
+  const scope = resolvedUserId ? { workspaceId, userId: resolvedUserId } : undefined;
+  const connection = await ensureConnection(scope);
   if (!connection) {
     return;
   }
@@ -1657,26 +2247,28 @@ export async function clearWorkspaceSqliteData(workspaceId: string) {
     [workspaceId],
   );
 
-  hydratedWorkspaces.delete(workspaceId);
+  hydratedWorkspaces.delete(hydrationKey(workspaceId, resolvedUserId));
   console.log(
     `[LocalModeSQLite] Cleared all SQLite data for workspace ${workspaceId}`,
   );
 }
 
 export async function downloadDatabaseFile(): Promise<void> {
+  const scope = resolveSqliteScope();
+  const databaseFilename = getLocalModeSqliteFilename(scope);
   if (isTauri()) {
     try {
       const { readFile, writeFile, BaseDirectory } = await import("@tauri-apps/plugin-fs");
       const { save } = await import("@tauri-apps/plugin-dialog");
 
       const filePath = await save({
-        defaultPath: "atlas-local-mode.db",
+        defaultPath: databaseFilename,
         filters: [{ name: "SQLite Database", extensions: ["db"] }],
       });
 
       if (!filePath) return;
 
-      const fileData = await readFile("atlas-local-mode.db", { baseDir: BaseDirectory.AppData });
+      const fileData = await readFile(databaseFilename, { baseDir: BaseDirectory.AppData });
       await writeFile(filePath, fileData);
     } catch (error) {
       console.error("[LocalModeSQLite] Failed to download database in Tauri:", error);
@@ -1684,20 +2276,13 @@ export async function downloadDatabaseFile(): Promise<void> {
     return;
   }
 
-  let db = getPwaDbInstance();
-  if (!db) {
-    const loaded = await ensurePwaDatabase();
-    if (!loaded) return;
-    db = getPwaDbInstance();
-  }
-  if (!db) return;
-
-  const data = db.export();
+  const data = await exportPwaDatabase(scope as PwaSqliteScope | undefined);
+  if (!data) return;
   const blob = new Blob([data], { type: "application/x-sqlite3" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = PWA_DB_FILENAME;
+  a.download = databaseFilename;
   a.style.display = "none";
   document.body.appendChild(a);
   a.click();
@@ -1705,36 +2290,464 @@ export async function downloadDatabaseFile(): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
+function assertSqliteFileHeader(data: Uint8Array): void {
+  if (data.byteLength < 100) {
+    throw new Error("The selected file is not a valid SQLite database.");
+  }
+  const header = new TextDecoder().decode(data.subarray(0, 16));
+  if (header !== "SQLite format 3\0") {
+    throw new Error("The selected file is not a valid SQLite database.");
+  }
+}
+
+function firstSqliteCell(row: Record<string, unknown> | undefined) {
+  return row ? Object.values(row)[0] : undefined;
+}
+
+async function assertAtlasDatabaseConnection(
+  connection: SqliteConnection,
+  scope: LocalModeSqliteScope,
+  requireScopedIdentity: boolean,
+) {
+  const quickCheck = await connection.select<Array<Record<string, unknown>>>(
+    "PRAGMA quick_check",
+  );
+  if (String(firstSqliteCell(quickCheck[0]) ?? "").toLowerCase() !== "ok") {
+    throw new Error("The selected database failed its integrity check.");
+  }
+
+  const tables = await connection.select<Array<{ name: string }>>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'local_entities' LIMIT 1",
+  );
+  if (tables.length !== 1) {
+    throw new Error("The selected SQLite file is not an Atlas Local Mode database.");
+  }
+  const columns = await connection.select<Array<{ name: string }>>(
+    "PRAGMA table_info(local_entities)",
+  );
+  const columnNames = new Set(columns.map((column) => column.name));
+  for (const required of ["entity_type", "entity_id", "workspace_id", "payload"]) {
+    if (!columnNames.has(required)) {
+      throw new Error("The selected SQLite file is not an Atlas Local Mode database.");
+    }
+  }
+
+  const identityTables = await connection.select<Array<{ name: string }>>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'atlas_database_identity' LIMIT 1",
+  );
+  if (identityTables.length) {
+    const identities = await connection.select<Array<{
+      workspace_id: string;
+      user_id: string;
+    }>>(
+      "SELECT workspace_id, user_id FROM atlas_database_identity WHERE singleton = 1",
+    );
+    const identity = identities[0];
+    if (
+      !identity ||
+      identity.workspace_id !== scope.workspaceId ||
+      identity.user_id !== scope.userId
+    ) {
+      throw new Error("This SQLite database belongs to a different workspace or user.");
+    }
+    return;
+  }
+
+  if (requireScopedIdentity) {
+    throw new Error("The selected backup is missing its workspace database identity.");
+  }
+
+  const [foreignWorkspaces, foreignProfiles] = await Promise.all([
+    connection.select<Array<Record<string, unknown>>>(
+      `
+        SELECT 1
+        FROM local_entities
+        WHERE (workspace_id IS NOT NULL AND workspace_id <> $1)
+           OR (entity_type = 'workspaces' AND entity_id <> $1)
+        LIMIT 1
+      `,
+      [scope.workspaceId],
+    ),
+    connection.select<Array<Record<string, unknown>>>(
+      `
+        SELECT 1
+        FROM local_entities
+        WHERE entity_type = 'profiles' AND entity_id <> $1
+        LIMIT 1
+      `,
+      [scope.userId],
+    ),
+  ]);
+  if (foreignWorkspaces.length || foreignProfiles.length) {
+    throw new Error("This SQLite database belongs to a different workspace or user.");
+  }
+}
+
+async function validateTauriDatabaseAtFilename(
+  filename: string,
+  scope: LocalModeSqliteScope,
+  requireScopedIdentity: boolean,
+) {
+  const { default: Database } = await import("@tauri-apps/plugin-sql");
+  let validationConnection: SqliteConnection | null = null;
+  try {
+    validationConnection = await Database.load(`sqlite:${filename}`) as SqliteConnection;
+    await assertAtlasDatabaseConnection(
+      validationConnection,
+      scope,
+      requireScopedIdentity,
+    );
+  } finally {
+    await validationConnection?.close?.().catch(() => false);
+  }
+}
+
+async function removeTauriDatabaseJournals(filename: string) {
+  const { remove, BaseDirectory } = await import("@tauri-apps/plugin-fs");
+  await Promise.all([
+    remove(`${filename}-wal`, { baseDir: BaseDirectory.AppData }).catch(() => undefined),
+    remove(`${filename}-shm`, { baseDir: BaseDirectory.AppData }).catch(() => undefined),
+  ]);
+}
+
+async function validateTauriDatabaseFile(
+  data: Uint8Array,
+  scope: LocalModeSqliteScope,
+  requireScopedIdentity = false,
+): Promise<void> {
+  assertSqliteFileHeader(data);
+
+  const validationFilename = `atlas-restore-validation-${crypto.randomUUID()}.db`;
+  const { writeFile, remove, BaseDirectory } = await import("@tauri-apps/plugin-fs");
+  try {
+    await writeFile(validationFilename, data, { baseDir: BaseDirectory.AppData });
+    await validateTauriDatabaseAtFilename(
+      validationFilename,
+      scope,
+      requireScopedIdentity,
+    );
+  } finally {
+    await Promise.all([
+      remove(validationFilename, { baseDir: BaseDirectory.AppData }).catch(() => undefined),
+      remove(`${validationFilename}-wal`, { baseDir: BaseDirectory.AppData }).catch(() => undefined),
+      remove(`${validationFilename}-shm`, { baseDir: BaseDirectory.AppData }).catch(() => undefined),
+    ]);
+  }
+}
+
+async function assertRestoredConnectionWritable(
+  connection: SqliteConnection,
+  scope: LocalModeSqliteScope,
+) {
+  await assertAtlasDatabaseConnection(connection, scope, true);
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS atlas_sqlite_restore_probe (
+      probe_id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL
+    )
+  `);
+  const probeId = globalThis.crypto.randomUUID();
+  const rollbackProbe = new Error("atlas-sqlite-restore-rollback");
+  try {
+    await runConnectionTransaction(connection, async (transaction) => {
+      await transaction.execute(
+        "INSERT INTO atlas_sqlite_restore_probe (probe_id, created_at) VALUES ($1, $2)",
+        [probeId, new Date().toISOString()],
+      );
+      const inserted = await transaction.select<Array<{ count: number }>>(
+        "SELECT COUNT(*) AS count FROM atlas_sqlite_restore_probe WHERE probe_id = $1",
+        [probeId],
+      );
+      if (Number(inserted[0]?.count ?? 0) !== 1) {
+        throw new Error("The restored SQLite write probe could not be read back.");
+      }
+      throw rollbackProbe;
+    });
+  } catch (error) {
+    if (error !== rollbackProbe) throw error;
+  }
+  const rolledBack = await connection.select<Array<{ count: number }>>(
+    "SELECT COUNT(*) AS count FROM atlas_sqlite_restore_probe WHERE probe_id = $1",
+    [probeId],
+  );
+  if (Number(rolledBack[0]?.count ?? 0) !== 0) {
+    throw new Error("The restored SQLite rollback probe remained committed.");
+  }
+}
+
+export interface LocalModeDatabaseRestoreOptions {
+  /** Bundle v1+ databases must carry the same physical workspace/user identity. */
+  requireScopedIdentity?: boolean;
+  /** Commit a previously staged asset generation after the new DB is healthy. */
+  commitExternalState?: () => Promise<void>;
+  /** Restore active assets if their commit started but the restore fails. */
+  rollbackExternalState?: () => Promise<void>;
+}
+
+function combinedRestoreError(
+  message: string,
+  primaryError: unknown,
+  rollbackErrors: unknown[],
+) {
+  const error = new Error(message);
+  (error as Error & { cause?: unknown }).cause = {
+    primaryError,
+    rollbackErrors,
+  };
+  return error;
+}
+
+async function replaceTauriDatabaseWithRollback(
+  data: Uint8Array,
+  scope: LocalModeSqliteScope,
+  options: LocalModeDatabaseRestoreOptions,
+) {
+  assertSqliteFileHeader(data);
+  const databaseFilename = getLocalModeSqliteFilename(scope);
+  const candidateFilename = `${databaseFilename}.restore-${crypto.randomUUID()}.candidate.db`;
+  const rollbackFilename = `${databaseFilename}.restore-${crypto.randomUUID()}.rollback.db`;
+  const {
+    copyFile,
+    exists,
+    readFile,
+    remove,
+    rename,
+    writeFile,
+    BaseDirectory,
+  } = await import("@tauri-apps/plugin-fs");
+  let targetExisted = false;
+  let rollbackBytes: Uint8Array | null = null;
+  let databaseWasReplaced = false;
+  let rollbackRecovered = false;
+
+  try {
+    await writeFile(candidateFilename, data, { baseDir: BaseDirectory.AppData });
+    // Validate the exact temporary file which will be renamed into place.
+    await validateTauriDatabaseAtFilename(
+      candidateFilename,
+      scope,
+      options.requireScopedIdentity === true,
+    );
+    await removeTauriDatabaseJournals(candidateFilename);
+
+    const current = await ensureConnection(scope);
+    if (!current) throw new Error("The current SQLite database could not be opened for restore.");
+    const checkpoint = await current.select<Array<{ busy?: number }>>(
+      "PRAGMA wal_checkpoint(TRUNCATE)",
+    );
+    if (checkpoint.some((row) => Number(row.busy ?? 0) !== 0)) {
+      throw new Error("Local-mode SQLite is busy; the backup was not restored.");
+    }
+    await resetSqliteConnection();
+
+    targetExisted = await exists(databaseFilename, { baseDir: BaseDirectory.AppData });
+    if (targetExisted) {
+      rollbackBytes = await readFile(databaseFilename, { baseDir: BaseDirectory.AppData });
+      await copyFile(databaseFilename, rollbackFilename, {
+        fromPathBaseDir: BaseDirectory.AppData,
+        toPathBaseDir: BaseDirectory.AppData,
+      });
+      await validateTauriDatabaseAtFilename(rollbackFilename, scope, true);
+      await removeTauriDatabaseJournals(rollbackFilename);
+    }
+    await removeTauriDatabaseJournals(databaseFilename);
+
+    // plugin-fs maps this to a same-directory rename which replaces the target
+    // atomically on platforms where the operating system supports it.
+    // Treat the swap as potentially mutating before awaiting it: an IPC/OS
+    // error may be reported after the filesystem operation has started.
+    databaseWasReplaced = true;
+    try {
+      await rename(candidateFilename, databaseFilename, {
+        oldPathBaseDir: BaseDirectory.AppData,
+        newPathBaseDir: BaseDirectory.AppData,
+      });
+    } catch (replaceError) {
+      if (!targetExisted) throw replaceError;
+      // Windows does not replace an existing destination with rename. The
+      // verified rollback copy and in-memory bytes are already durable, so use
+      // a remove-then-rename fallback and let the outer recovery path restore
+      // the previous file if either operation fails.
+      await remove(databaseFilename, { baseDir: BaseDirectory.AppData });
+      await rename(candidateFilename, databaseFilename, {
+        oldPathBaseDir: BaseDirectory.AppData,
+        newPathBaseDir: BaseDirectory.AppData,
+      });
+    }
+
+    const restored = await ensureConnection(scope);
+    if (!restored) throw new Error("The restored SQLite database could not be reopened.");
+    await assertRestoredConnectionWritable(restored, scope);
+    await markDexieCompatibilityMigrationComplete(restored);
+    await options.commitExternalState?.();
+
+    await remove(rollbackFilename, { baseDir: BaseDirectory.AppData }).catch(() => undefined);
+    await removeTauriDatabaseJournals(rollbackFilename);
+  } catch (primaryError) {
+    const rollbackErrors: unknown[] = [];
+    try {
+      await options.rollbackExternalState?.();
+    } catch (error) {
+      rollbackErrors.push(error);
+    }
+
+    if (databaseWasReplaced) {
+      try {
+        await resetSqliteConnection();
+        await removeTauriDatabaseJournals(databaseFilename);
+        if (targetExisted && rollbackBytes) {
+          try {
+            await rename(rollbackFilename, databaseFilename, {
+              oldPathBaseDir: BaseDirectory.AppData,
+              newPathBaseDir: BaseDirectory.AppData,
+            });
+          } catch {
+            // Keep the disk rollback copy and use the in-memory copy as a
+            // second recovery path if replace-rename is unavailable.
+            await writeFile(databaseFilename, rollbackBytes, {
+              baseDir: BaseDirectory.AppData,
+            });
+          }
+          const recovered = await ensureConnection(scope);
+          if (!recovered) throw new Error("The previous SQLite database could not be reopened.");
+          await assertRestoredConnectionWritable(recovered, scope);
+        } else {
+          await remove(databaseFilename, { baseDir: BaseDirectory.AppData }).catch(() => undefined);
+        }
+        rollbackRecovered = true;
+      } catch (error) {
+        rollbackErrors.push(error);
+      }
+    } else {
+      rollbackRecovered = true;
+    }
+
+    if (rollbackErrors.length) {
+      throw combinedRestoreError(
+        "The database restore failed and automatic rollback was incomplete.",
+        primaryError,
+        rollbackErrors,
+      );
+    }
+    throw primaryError;
+  } finally {
+    await remove(candidateFilename, { baseDir: BaseDirectory.AppData }).catch(() => undefined);
+    await removeTauriDatabaseJournals(candidateFilename);
+    if (rollbackRecovered || !databaseWasReplaced) {
+      await remove(rollbackFilename, { baseDir: BaseDirectory.AppData }).catch(() => undefined);
+      await removeTauriDatabaseJournals(rollbackFilename);
+    }
+  }
+}
+
+async function replacePwaDatabaseWithRollback(
+  data: Uint8Array,
+  scope: LocalModeSqliteScope,
+  options: LocalModeDatabaseRestoreOptions,
+) {
+  const pwaScope = scope as PwaSqliteScope;
+  let quarantineReason: unknown = null;
+  try {
+    await runExclusivePwaDatabaseReplacement(
+      data,
+      pwaScope,
+      { requireScopedIdentity: options.requireScopedIdentity === true },
+      async (session) => {
+        let finalizationAttempted = false;
+        try {
+          await markDexieCompatibilityMigrationComplete(session.connection);
+          await options.commitExternalState?.();
+          finalizationAttempted = true;
+          await session.finalize();
+          return;
+        } catch (primaryError) {
+          // Once finalize has been sent, a rejected/lost reply cannot tell us
+          // whether the worker deleted the durable DB rollback first. Keep the
+          // asset rollback journal untouched and close the client. On reopen,
+          // the worker's rollback-file recovery result decides whether assets
+          // follow the old or replacement database.
+          if (finalizationAttempted) {
+            quarantineReason = primaryError;
+            throw primaryError;
+          }
+
+          const rollbackErrors: unknown[] = [];
+          try {
+            await options.rollbackExternalState?.();
+          } catch (error) {
+            rollbackErrors.push(error);
+          }
+          let requiresQuarantine = rollbackErrors.length > 0;
+          try {
+            await session.rollback({ retainRecoveryEvidence: requiresQuarantine });
+          } catch (error) {
+            rollbackErrors.push(error);
+            requiresQuarantine = true;
+          }
+          if (rollbackErrors.length) {
+            quarantineReason = primaryError;
+            throw combinedRestoreError(
+              "The browser database restore failed and automatic rollback was incomplete.",
+              primaryError,
+              rollbackErrors,
+            );
+          }
+          throw primaryError;
+        }
+      },
+    );
+  } catch (primaryError) {
+    if (quarantineReason) {
+      let quarantineError: unknown;
+      try {
+        await quarantinePwaDatabase(pwaScope, quarantineReason);
+      } catch (error) {
+        quarantineError = error;
+      } finally {
+        await resetSqliteConnection();
+      }
+      if (quarantineError) {
+        throw combinedRestoreError(
+          "The browser database restore failed and its uncertain connection could not be quarantined.",
+          primaryError,
+          [quarantineError],
+        );
+      }
+    }
+    throw primaryError;
+  }
+}
+
 /**
  * Replace the device's Local Mode SQLite file with a validated Atlas backup.
  * Callers must clear the IndexedDB cache and reload after this resolves.
  */
-export async function injectLocalModeDatabaseFile(data: Uint8Array): Promise<void> {
+export async function injectLocalModeDatabaseFile(
+  data: Uint8Array,
+  requestedScope?: LocalModeSqliteScope | null,
+  options: LocalModeDatabaseRestoreOptions = {},
+): Promise<void> {
   if (!isSupported()) {
     throw new Error("Local database storage is unavailable on this device.");
   }
 
-  await validateAtlasLocalDatabase(data);
+  const scope = resolveSqliteScope(requestedScope);
+  if (!scope) throw new Error("A workspace and user are required to restore a database.");
   mirroringPauseDepth += 1;
   try {
-    // Finish any save already in progress before closing its connection and
-    // replacing the underlying file.
-    await sqliteWriteQueue.catch(() => undefined);
-    await resetSqliteConnection();
-
-    if (isTauri()) {
-      const { remove, writeFile, BaseDirectory } = await import("@tauri-apps/plugin-fs");
-      // A stale WAL journal could otherwise be replayed over the injected DB.
-      await Promise.all([
-        remove(`${PWA_DB_FILENAME}-wal`, { baseDir: BaseDirectory.AppData }).catch(() => undefined),
-        remove(`${PWA_DB_FILENAME}-shm`, { baseDir: BaseDirectory.AppData }).catch(() => undefined),
-      ]);
-      await writeFile(PWA_DB_FILENAME, data, { baseDir: BaseDirectory.AppData });
-    } else {
-      await replacePwaDatabaseFile(data);
-    }
-
-    hydratedWorkspaces.clear();
+    await enqueueSqliteWriteLane(async () => {
+      const connection = await ensureConnection(scope);
+      if (!connection) throw new Error("The current SQLite database could not be opened for restore.");
+      if (isTauri()) {
+        await replaceTauriDatabaseWithRollback(data, scope, options);
+      } else {
+        await validateAtlasLocalDatabase(data, scope as PwaSqliteScope, {
+          requireScopedIdentity: options.requireScopedIdentity === true,
+        });
+        await replacePwaDatabaseWithRollback(data, scope, options);
+      }
+      hydratedWorkspaces.clear();
+    });
   } finally {
     mirroringPauseDepth -= 1;
   }

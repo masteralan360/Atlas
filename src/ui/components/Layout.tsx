@@ -526,8 +526,8 @@ export function Layout({ children }: LayoutProps) {
 
     fetchMembers()
 
-    // Do not initialize cloud resource sync until this workspace's mode has
-    // resolved. `features` starts as cloud, which must never override a
+    // Do not initialize remote resource sync until this workspace's mode has
+    // resolved. `features` starts as Cloud Sync, which must never override a
     // Local Mode workspace during startup.
     if (user?.id && user.workspaceId && !isWorkspaceLoading && loadedWorkspaceId === user.workspaceId) {
       assetManager.initialize(user.workspaceId, features.data_mode)
@@ -535,7 +535,7 @@ export function Layout({ children }: LayoutProps) {
 
     // Start R2 database backup interval for local mode
     if (user?.workspaceId) {
-      startR2BackupInterval(user.workspaceId)
+      startR2BackupInterval(user.workspaceId, user.id)
     }
 
     // Fetch App Version

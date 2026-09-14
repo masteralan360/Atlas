@@ -1,7 +1,6 @@
 import { assetManager } from '@/lib/assetManager'
 import { isTauri } from '@/lib/platform'
 import { platformService } from '@/services/platformService'
-import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 /**
  * Stores one product image using the exact location and fallback strategy used
@@ -19,25 +18,7 @@ export async function storeProductImageFile(file: File, workspaceId: string): Pr
         return targetPath
     }
 
-    const ext = file.name.split('.').pop() || 'jpg'
-    const fileName = `${Date.now()}.${ext}`
-    const targetPath = `product-images/${workspaceId}/${fileName}`
-    const r2Path = `${workspaceId}/product-images/${fileName}`
-
-    const { r2Service } = await import('@/services/r2Service')
-    if (!isLocalWorkspaceMode(workspaceId) && r2Service.isConfigured()) {
-        const success = await r2Service.upload(r2Path, file)
-        if (success) {
-            return targetPath
-        }
-    }
-
-    return await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onloadend = () => resolve(reader.result as string)
-        reader.onerror = () => reject(new Error('Unable to read the selected image.'))
-        reader.readAsDataURL(file)
-    })
+    return platformService.saveImageFile(file, workspaceId, 'product-images')
 }
 
 export function getProductImageDisplayUrl(url?: string | null): string {

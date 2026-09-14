@@ -67,12 +67,13 @@ function installBrowserStorage() {
     value: {
       visibilityState: 'visible',
       dir: 'ltr',
-      documentElement: { lang: 'en', dir: 'ltr' },
+      documentElement: { lang: 'en', dir: 'ltr', style: {} },
       head: documentHead,
       getElementsByTagName: () => [documentHead],
       createElement: () => ({
         setAttribute: () => undefined,
-        appendChild: () => undefined
+        appendChild: () => undefined,
+        style: {}
       }),
       createTextNode: () => ({}),
       addEventListener: () => undefined,
@@ -82,6 +83,14 @@ function installBrowserStorage() {
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
     value: { onLine: true }
+  })
+  Object.defineProperty(globalThis, 'Element', {
+    configurable: true,
+    value: class Element {}
+  })
+  Object.defineProperty(globalThis, 'HTMLElement', {
+    configurable: true,
+    value: class HTMLElement {}
   })
 }
 
@@ -111,7 +120,7 @@ function manualAssignment(): CashierShiftAssignment {
   }
 }
 
-describe('Cloud cashier-shift claims', () => {
+describe('Cloud Sync cashier-shift claims', () => {
   beforeAll(async () => {
     installBrowserStorage()
     ;({ startCashierShiftOccurrence } = await import('./paymentAccounts'))
@@ -125,7 +134,7 @@ describe('Cloud cashier-shift claims', () => {
     await db.open()
     writeWorkspaceModeSnapshot({
       workspaceId: WORKSPACE_ID,
-      dataMode: 'cloud'
+      dataMode: 'hybrid'
     })
     setNetworkStatus(true)
     rpcMock.mockReset()
@@ -137,7 +146,7 @@ describe('Cloud cashier-shift claims', () => {
     clearWorkspaceModeSnapshot(WORKSPACE_ID)
   })
 
-  it('uses the server claim before mirroring a Cloud start locally', async () => {
+  it('uses the server claim before mirroring a Cloud Sync start locally', async () => {
     const assignment = manualAssignment()
     await db.cashier_shift_assignments.put(assignment)
     rpcMock.mockResolvedValue({ data: null, error: null })

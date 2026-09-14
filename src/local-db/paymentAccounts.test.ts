@@ -2,6 +2,8 @@ import 'fake-indexeddb/auto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
+import { setActiveBusinessUser, setActiveBusinessWorkspace } from '@/lib/network'
+import { installMemorySqliteForTest } from '@/test/sqliteTestConnection'
 
 import { db } from './database'
 import type { PaymentTransaction } from './models'
@@ -18,6 +20,7 @@ let savePaymentAccount: typeof import('./paymentAccounts').savePaymentAccount
 let recordPaymentAccountManualOperation: typeof import('./paymentAccounts').recordPaymentAccountManualOperation
 let assertPaymentAccountTransactionCanBeAppliedLocally: typeof import('./paymentAccounts').assertPaymentAccountTransactionCanBeAppliedLocally
 let mirrorPaymentAccountTransactionLocally: typeof import('./paymentAccounts').mirrorPaymentAccountTransactionLocally
+let releaseSqlite: (() => void) | undefined
 
 function installBrowserStorage() {
     const rows = new Map<string, string>()
@@ -109,10 +112,18 @@ describe('payment-account availability', () => {
     installBrowserStorage()
     await db.delete()
     await db.open()
+    setActiveBusinessWorkspace(WORKSPACE_ID)
+    setActiveBusinessUser('00000000-0000-4000-8000-000000000502')
     writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'local' })
   })
 
-  afterEach(() => clearWorkspaceModeSnapshot(WORKSPACE_ID))
+  afterEach(() => {
+    releaseSqlite?.()
+    releaseSqlite = undefined
+    clearWorkspaceModeSnapshot(WORKSPACE_ID)
+    setActiveBusinessWorkspace(null)
+    setActiveBusinessUser(null)
+  })
   afterAll(async () => { await db.delete() })
 
   it('rejects an outgoing payment that exceeds the selected account balance while preserving ledger-only payments', async () => {
@@ -139,9 +150,10 @@ describe('payment-account availability', () => {
     expect(balance?.balanceAmount).toBe(0)
   })
 
-  it('immediately mirrors a cloud-mode manual deposit into the local account cache', async () => {
+  it('immediately mirrors a Cloud Sync manual deposit into the local account cache', async () => {
+    releaseSqlite = await installMemorySqliteForTest()
     const account = await createFundedAccount()
-    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
+    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'hybrid' })
 
     await recordPaymentAccountManualOperation(WORKSPACE_ID, {
       accountId: account.id,

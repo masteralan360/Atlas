@@ -75,8 +75,15 @@ const browser = vi.hoisted(() => {
 
 const supabaseMock = vi.hoisted(() => {
     const rpc = vi.fn()
-    const upsert = vi.fn(async () => ({ data: [], error: null }))
-    const insert = vi.fn(async () => ({ data: [], error: null }))
+    const mutationResult = () => {
+        const result = Promise.resolve({ data: [], error: null })
+        return {
+            select: vi.fn(() => result),
+            then: result.then.bind(result),
+        }
+    }
+    const upsert = vi.fn(mutationResult)
+    const insert = vi.fn(mutationResult)
     const from = vi.fn(() => ({ upsert, insert }))
     return { rpc, upsert, insert, from }
 })
@@ -340,7 +347,7 @@ describe('atomic POS Quick Order completion', () => {
         await db.open()
         browser.storage.clear()
         clearWorkspaceModeSnapshot(WORKSPACE_ID)
-        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'hybrid' })
         setNetworkStatus(true)
         vi.clearAllMocks()
 

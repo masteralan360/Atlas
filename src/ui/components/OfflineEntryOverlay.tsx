@@ -7,11 +7,11 @@ import { connectionManager } from '@/lib/connectionManager'
 import { Button } from '@/ui/components/button'
 
 function canEnterOfflineMode(workspaceMode: string | undefined) {
-    return workspaceMode === 'cloud' || workspaceMode === 'hybrid'
+    return workspaceMode === 'hybrid'
 }
 
 /**
- * Blocks cloud and hybrid workspaces after an OS-level network-loss event until
+ * Blocks Cloud Sync workspaces after an OS-level network-loss event until
  * the user confirms that the app should switch into its existing offline mode.
  */
 export function OfflineEntryOverlay() {

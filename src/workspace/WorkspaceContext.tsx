@@ -12,10 +12,10 @@ import type {
 import { db } from '@/local-db/database'
 import { hasCurrencyExchangeAccountingData } from '@/local-db/currencyExchange'
 import { addToOfflineMutations } from '@/local-db/hooks'
-import { hydrateLocalModeCacheFromSqlite, clearWorkspaceSqliteData, seedWorkspaceFromDexie } from '@/local-db/localModeSqlite'
-import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
+import { hydrateLocalModeCacheFromSqlite } from '@/local-db/localModeSqlite'
 import { isMobile } from '@/lib/platform'
 import { connectionManager } from '@/lib/connectionManager'
+import { setWorkspaceSyncProtocolVersion } from '@/lib/network'
 import {
     clearWorkspaceCache,
     readWorkspaceCache,
@@ -27,6 +27,14 @@ import {
     writeWorkspaceModeSnapshot
 } from './workspaceMode'
 import { isWorkspaceResolutionPending } from './workspaceLoading'
+import {
+    evaluateOfflineEntitlement,
+    OFFLINE_ENTITLEMENT_MAX_AGE_MS,
+    recordOfflineEntitlementObservation,
+    readOfflineEntitlementSnapshot,
+    writeOfflineEntitlementSnapshot,
+    type OfflineEntitlementSnapshot
+} from './offlineEntitlement'
 import { resolveFetchedWorkspaceLogo, resolvePersistedWorkspaceLogo } from './workspaceLogo'
 import {
     resolveFetchedWorkspaceName,
@@ -65,6 +73,7 @@ export type ModuleFeatureKey = WorkspaceFeatureKey
 export interface WorkspaceFeatures {
     plan: WorkspacePlan
     data_mode: WorkspaceDataMode
+    sync_protocol_version: number
     // Module toggles
     pos: boolean
     instant_pos: boolean
@@ -159,9 +168,9 @@ interface WorkspaceContextType {
     setPendingUpdate: (update: UpdateInfo | null) => void
     isFullscreen: boolean
     isLocked: boolean
+    requiresOnlineEntitlementRevalidation: boolean
     isLocalMode: boolean
     isDemoMode: boolean
-    isCloudMode: boolean
     isHybridMode: boolean
     hasFeature: (feature: ModuleFeatureKey) => boolean
     hasCapability: (capability: PlanCapabilityKey) => boolean
@@ -171,7 +180,6 @@ interface WorkspaceContextType {
         settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'pos_convert_to_workspace_currency' | 'iqd_display_preference' | 'allow_whatsapp' | 'logo_url' | 'coordination' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'thermal_printing' | 'visibility' | 'store_slug' | 'store_description' | 'sales_agent_commission_sheet_type' | 'sales_agent_commission_mode' | 'ledger_dashboard_config' | 'private_staff_customers' | 'private_staff_suppliers' | 'suppliers_admin_only' | 'upload_limit_mb' | 'data_mode' | 'plan' | 'is_configured'>> & { name?: string },
         options?: { requireRemoteSync?: boolean }
     ) => Promise<void>
-    switchDataMode: (newMode: 'cloud' | 'hybrid') => Promise<{ error: string | null }>
     activeWorkspace: { id: string } | undefined
 }
 
@@ -252,7 +260,8 @@ const PLAN_CONTROLLED_SETTINGS = new Set<string>([
 
 const defaultFeatures: WorkspaceFeatures = {
     plan: defaultPlan,
-    data_mode: 'cloud',
+    data_mode: 'hybrid',
+    sync_protocol_version: 0,
     ...getPlanFeatureFlags(defaultPlan),
     is_configured: true,
     default_currency: 'usd',
@@ -297,6 +306,7 @@ const WORKSPACE_FEATURE_COLUMNS = [
     'name',
     'plan',
     'data_mode',
+    'sync_protocol_version',
     'real_estate',
     'is_configured',
     'default_currency',
@@ -396,7 +406,8 @@ function getFeaturesFromLocalWorkspace(localWorkspace: Workspace): WorkspaceFeat
 
     return mergeWorkspaceFeatures({
         plan: normalizeWorkspacePlan(localWorkspace.plan),
-        data_mode: localWorkspace.data_mode ?? 'cloud',
+        data_mode: localWorkspace.data_mode ?? 'hybrid',
+        sync_protocol_version: localWorkspace.syncProtocolVersion ?? 0,
         real_estate: localWorkspace.real_estate ?? true,
         activities: localWorkspace.activities ?? false,
         currency_exchange: localWorkspace.currency_exchange ?? false,
@@ -452,6 +463,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const [loadedWorkspaceId, setLoadedWorkspaceId] = useState<string | null>(null)
     const [paymentSummary, setPaymentSummary] = useState<WorkspacePaymentSummary | null>(null)
     const [isPaymentSummaryLoading, setIsPaymentSummaryLoading] = useState(false)
+    const [offlineEntitlementSnapshot, setOfflineEntitlementSnapshot] = useState<OfflineEntitlementSnapshot | null>(null)
+    const [isOfflineEntitlementLoaded, setIsOfflineEntitlementLoaded] = useState(false)
     const [billingNowMs, setBillingNowMs] = useState(() => Date.now())
     const [pendingUpdate, setPendingUpdate] = useState<UpdateInfo | null>(null)
     const [isFullscreen, setIsFullscreen] = useState(false)
@@ -462,6 +475,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const branchFetchRequestRef = useRef(0)
     const featuresRef = useRef(defaultFeatures)
     const paymentSummaryRef = useRef<WorkspacePaymentSummary | null>(null)
+    const offlineEntitlementSnapshotRef = useRef<OfflineEntitlementSnapshot | null>(null)
     const overridesRef = useRef<WorkspaceAccessOverride[]>([])
     const workspaceNameRef = useRef<string | null>(null)
 
@@ -472,6 +486,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         paymentSummaryRef.current = paymentSummary
     }, [paymentSummary])
+
+    useEffect(() => {
+        offlineEntitlementSnapshotRef.current = offlineEntitlementSnapshot
+    }, [offlineEntitlementSnapshot])
 
     useEffect(() => {
         overridesRef.current = overrides
@@ -494,6 +512,50 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             document.removeEventListener('visibilitychange', updateBillingClock)
         }
     }, [])
+
+    useEffect(() => {
+        if (!offlineEntitlementSnapshot) return
+
+        const verifiedAtMs = Date.parse(offlineEntitlementSnapshot.verifiedAt)
+        if (!Number.isFinite(verifiedAtMs)) return
+
+        const expiresAfterMs = verifiedAtMs + OFFLINE_ENTITLEMENT_MAX_AGE_MS
+        const timeoutId = window.setTimeout(
+            () => setBillingNowMs(Date.now()),
+            Math.max(0, expiresAfterMs - Date.now() + 1)
+        )
+
+        return () => window.clearTimeout(timeoutId)
+    }, [offlineEntitlementSnapshot])
+
+    useEffect(() => {
+        if (!offlineEntitlementSnapshot) return
+        const decision = evaluateOfflineEntitlement({
+            dataMode: features.data_mode,
+            snapshot: offlineEntitlementSnapshot,
+            nowMs: billingNowMs
+        })
+        const lastObservedAtMs = Date.parse(offlineEntitlementSnapshot.lastObservedAt)
+        if (
+            decision.status !== 'valid'
+            || !Number.isFinite(lastObservedAtMs)
+            || billingNowMs <= lastObservedAtMs + 60_000
+        ) {
+            return
+        }
+
+        const observedAt = new Date(billingNowMs).toISOString()
+        const nextSnapshot = { ...offlineEntitlementSnapshot, lastObservedAt: observedAt }
+        offlineEntitlementSnapshotRef.current = nextSnapshot
+        setOfflineEntitlementSnapshot(nextSnapshot)
+        void recordOfflineEntitlementObservation(
+            nextSnapshot.workspaceId,
+            nextSnapshot.userId,
+            observedAt
+        ).catch((error) => {
+            console.warn('[WorkspaceEntitlement] Failed to persist the local clock observation:', error)
+        })
+    }, [billingNowMs, features.data_mode, offlineEntitlementSnapshot])
 
     useEffect(() => {
         // @ts-ignore
@@ -565,6 +627,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             code: existing?.code || user?.workspaceCode || 'LOADED',
             plan: nextFeatures.plan,
             data_mode: nextFeatures.data_mode,
+            syncProtocolVersion: nextFeatures.sync_protocol_version,
             is_configured: nextFeatures.is_configured,
             pos: nextFeatures.pos,
             sales_history: nextFeatures.sales_history,
@@ -626,10 +689,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             updatedAt: timestamp
         })
 
-        // Important: If we are in local/hybrid mode, we MUST keep our local logo_url
+        // Important: In Local/Cloud Sync mode, keep the durable local logo_url
         // as the source of truth, even if fetchFeatures later tries to sync from Supabase.
         if (nextFeatures.data_mode === 'local' || nextFeatures.data_mode === 'hybrid') {
-            await hydrateLocalModeCacheFromSqlite(db, workspaceId)
+            await hydrateLocalModeCacheFromSqlite(db, workspaceId, user?.id)
         }
     }
 
@@ -674,13 +737,41 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             setWorkspaceName(null)
             setPaymentSummary(null)
             setIsPaymentSummaryLoading(false)
+            setOfflineEntitlementSnapshot(null)
+            setIsOfflineEntitlementLoaded(true)
             if (!silent) setIsLoading(false)
             return
         }
 
         const requestId = ++fetchRequestRef.current
         const cachedSnapshot = options?.cachedSnapshot ?? readWorkspaceCache<WorkspaceFeatures>(workspaceId)
+        const expectedDataMode = normalizeWorkspaceDataMode(
+            cachedSnapshot?.features?.data_mode ?? user?.workspaceMode
+        )
+        const userId = user?.id
         setIsPaymentSummaryLoading(true)
+
+        if (expectedDataMode === 'hybrid' && userId) {
+            try {
+                const storedEntitlement = await readOfflineEntitlementSnapshot(workspaceId, userId)
+                if (isCurrentWorkspaceRequest(workspaceId, requestId)) {
+                    offlineEntitlementSnapshotRef.current = storedEntitlement
+                    setOfflineEntitlementSnapshot(storedEntitlement)
+                    setIsOfflineEntitlementLoaded(true)
+                }
+            } catch (error) {
+                console.warn('[WorkspaceEntitlement] Failed to read the durable verification:', error)
+                if (isCurrentWorkspaceRequest(workspaceId, requestId)) {
+                    offlineEntitlementSnapshotRef.current = null
+                    setOfflineEntitlementSnapshot(null)
+                    setIsOfflineEntitlementLoaded(true)
+                }
+            }
+        } else if (isCurrentWorkspaceRequest(workspaceId, requestId)) {
+            offlineEntitlementSnapshotRef.current = null
+            setOfflineEntitlementSnapshot(null)
+            setIsOfflineEntitlementLoaded(true)
+        }
 
         const applyFallback = async () => {
             const fallback = await resolveTrustedFallback(workspaceId, cachedSnapshot)
@@ -722,7 +813,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
 
         try {
-            const [workspaceResult, overridesResult, usageStatusResult, paymentSummaryResult] = await Promise.all([
+            const [
+                workspaceResult,
+                overridesResult,
+                usageStatusResult,
+                paymentSummaryResult,
+                entitlementResult,
+            ] = await Promise.all([
                 runSupabaseAction(
                     'workspace.getFeatures',
                     () => supabase.from('workspaces').select(WORKSPACE_FEATURE_COLUMNS).eq('id', workspaceId).maybeSingle(),
@@ -739,7 +836,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 ),
                 getWorkspacePaymentSummary()
                     .then((summary) => ({ summary, error: null as unknown }))
-                    .catch((error: unknown) => ({ summary: null, error }))
+                    .catch((error: unknown) => ({ summary: null, error })),
+                expectedDataMode === 'hybrid' && userId
+                    ? runSupabaseAction(
+                        'workspace.getOfflineEntitlement',
+                        () => supabase.rpc('atlas_get_workspace_offline_entitlement', {
+                            p_workspace_id: workspaceId,
+                        }),
+                        { timeoutMs: 12000, platform: 'all' }
+                    )
+                    : Promise.resolve({ data: null, error: null }),
             ]) as any
 
             const { data, error } = workspaceResult
@@ -759,13 +865,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                         workspaceCode: '',
                         workspaceName: undefined,
                         isConfigured: undefined,
-                        workspaceMode: 'cloud'
+                        workspaceMode: 'hybrid'
                     })
                 }
                 return
             }
 
             const workspaceRow = data as any
+            setWorkspaceSyncProtocolVersion(workspaceId, workspaceRow.sync_protocol_version)
             const fetchedOverrides = (overridesResult?.data ?? []) as WorkspaceAccessOverride[]
             const usageStatus = Array.isArray(usageStatusResult?.data)
                 ? usageStatusResult.data[0]
@@ -790,6 +897,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             const fetchedFeatures = mergeWorkspaceFeatures({
                 plan: normalizeWorkspacePlan(workspaceRow.plan),
                 data_mode: workspaceRow.data_mode ?? currentFeatures.data_mode,
+                sync_protocol_version: workspaceRow.sync_protocol_version ?? currentFeatures.sync_protocol_version,
                 real_estate: workspaceRow.real_estate ?? currentFeatures.real_estate,
                 activities: currentFeatures.activities,
                 currency_exchange: currentFeatures.currency_exchange,
@@ -842,6 +950,64 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 currentName: workspaceNameRef.current ?? user?.workspaceName
             })
             const resolvedNextWorkspaceName = nextWorkspaceName || user?.workspaceName || 'My Workspace'
+            const entitlementEnvelope = Array.isArray(entitlementResult?.data)
+                ? entitlementResult.data[0]
+                : entitlementResult?.data
+            const hasCompleteServerEntitlement = Boolean(
+                fetchedFeatures.data_mode === 'hybrid'
+                && userId
+                && !entitlementResult?.error
+                && entitlementEnvelope
+                && entitlementEnvelope.workspace_id === workspaceId
+                && typeof entitlementEnvelope.server_verified_at === 'string'
+                && typeof entitlementEnvelope.locked_workspace === 'boolean'
+                && typeof entitlementEnvelope.has_usage_limits === 'boolean'
+                && typeof entitlementEnvelope.payment_access_locked === 'boolean'
+                && (entitlementEnvelope.subscription_expires_at === null
+                    || typeof entitlementEnvelope.subscription_expires_at === 'string')
+                && (entitlementEnvelope.renewal_due_at === null
+                    || typeof entitlementEnvelope.renewal_due_at === 'string')
+            )
+            const verifiedEntitlement: OfflineEntitlementSnapshot | null = hasCompleteServerEntitlement
+                ? {
+                    workspaceId,
+                    userId: userId!,
+                    verifiedAt: entitlementEnvelope.server_verified_at,
+                    lastObservedAt: entitlementEnvelope.server_verified_at,
+                    lock: {
+                        lockedWorkspace: entitlementEnvelope.locked_workspace,
+                        subscriptionExpiresAt: entitlementEnvelope.subscription_expires_at,
+                        renewalDueAt: entitlementEnvelope.renewal_due_at,
+                        hasUsageLimits: entitlementEnvelope.has_usage_limits,
+                        paymentAccessLocked: entitlementEnvelope.payment_access_locked
+                    }
+                }
+                : null
+
+            if (!isCurrentWorkspaceRequest(workspaceId, requestId)) {
+                return
+            }
+
+            if (fetchedFeatures.data_mode !== 'hybrid') {
+                offlineEntitlementSnapshotRef.current = null
+                setOfflineEntitlementSnapshot(null)
+                setIsOfflineEntitlementLoaded(true)
+            } else if (verifiedEntitlement) {
+                try {
+                    await writeOfflineEntitlementSnapshot(verifiedEntitlement)
+                    if (isCurrentWorkspaceRequest(workspaceId, requestId)) {
+                        offlineEntitlementSnapshotRef.current = verifiedEntitlement
+                        setOfflineEntitlementSnapshot(verifiedEntitlement)
+                        setIsOfflineEntitlementLoaded(true)
+                        setBillingNowMs(Date.now())
+                    }
+                } catch (entitlementPersistenceError) {
+                    console.warn(
+                        '[WorkspaceEntitlement] Server verification succeeded but could not be persisted:',
+                        entitlementPersistenceError
+                    )
+                }
+            }
 
             if (!isCurrentWorkspaceRequest(workspaceId, requestId)) {
                 return
@@ -963,6 +1129,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         branchFetchRequestRef.current += 1
         setLoadedWorkspaceId(null)
         setResolvedBranchInfoWorkspaceId(null)
+        offlineEntitlementSnapshotRef.current = null
+        setOfflineEntitlementSnapshot(null)
+        setIsOfflineEntitlementLoaded(false)
 
         if (!workspaceId) {
             setFeatures(defaultFeatures)
@@ -971,6 +1140,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             paymentSummaryRef.current = null
             setPaymentSummary(null)
             setIsPaymentSummaryLoading(false)
+            setIsOfflineEntitlementLoaded(true)
             setIsLoading(false)
             return
         }
@@ -1184,12 +1354,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (!isSupabaseConfigured || !isAuthenticated || !user?.workspaceId) return
 
         const unsubscribe = connectionManager.subscribe((event) => {
+            const entitlementNeedsRevalidation = evaluateOfflineEntitlement({
+                dataMode: featuresRef.current.data_mode,
+                snapshot: offlineEntitlementSnapshotRef.current,
+                nowMs: Date.now()
+            }).status === 'revalidation-required'
             const shouldRefresh =
                 event === 'wake'
                 || event === 'online'
                 || (event === 'heartbeat' && (
                     isWorkspaceCurrentlyLocked(featuresRef.current, paymentSummaryRef.current)
                     || shouldWorkspacePaymentLockAccess(paymentSummaryRef.current)
+                    || entitlementNeedsRevalidation
                 ))
 
             if (shouldRefresh) {
@@ -1333,8 +1509,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         })
 
         const existing = await db.workspaces.get(workspaceId)
-        const usesCloudBusinessData = newFeatures.data_mode === 'cloud'
-            || newFeatures.data_mode === 'hybrid'
+        const usesCloudBusinessData = newFeatures.data_mode === 'hybrid'
         const supabaseUpdate: Record<string, unknown> = { ...featureSettings }
         delete supabaseUpdate.thermal_printing
         if (newFeatures.data_mode === 'local' || newFeatures.data_mode === 'demo') {
@@ -1530,90 +1705,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
     }
 
-    const switchDataMode = async (newMode: 'cloud' | 'hybrid'): Promise<{ error: string | null }> => {
-        const workspaceId = user?.workspaceId
-        if (!workspaceId) return { error: 'No workspace' }
-
-        const currentMode = featuresRef.current.data_mode
-        if (currentMode === 'local') return { error: 'Cannot switch from local mode' }
-        if (currentMode === newMode) return { error: null }
-
-        try {
-            const { error: updateError } = await runSupabaseAction(
-                'workspace.switchDataMode',
-                () => supabase
-                    .from('workspaces')
-                    .update({ data_mode: newMode })
-                    .eq('id', workspaceId),
-                { timeoutMs: 12000, platform: 'all' }
-            ) as any
-
-            if (updateError) {
-                const normalized = normalizeSupabaseActionError(updateError)
-                return { error: normalized.message }
-            }
-
-            const { error: authError } = await runSupabaseAction(
-                'auth.updateWorkspaceMode',
-                () => supabase.auth.updateUser({
-                    data: {
-                        data_mode: newMode
-                    }
-                }),
-                { timeoutMs: 8000, platform: 'all' }
-            ) as any
-
-            if (authError) {
-                console.warn('[Workspace] Failed to persist workspace mode in auth metadata:', authError)
-            }
-
-            // Update local state
-            const updatedFeatures = mergeWorkspaceFeatures({ ...featuresRef.current, data_mode: newMode }, overridesRef.current)
-            setFeatures(updatedFeatures)
-            writeWorkspaceCache({
-                workspaceId,
-                features: updatedFeatures,
-                workspaceName: workspaceNameRef.current ?? user?.workspaceName ?? 'My Workspace',
-                overrides: overridesRef.current
-            })
-
-            // Update workspace mode snapshot
-            writeWorkspaceModeSnapshot({
-                workspaceId,
-                dataMode: newMode
-            })
-
-            // Update Dexie workspace record
-            await db.workspaces.update(workspaceId, { data_mode: newMode })
-
-            // Update auth user mode
-            updateUser({ workspaceMode: newMode })
-
-            if (newMode === 'hybrid') {
-                // Cloud → Hybrid: seed SQLite from Dexie cache, then hydrate
-                await seedWorkspaceFromDexie(db, workspaceId)
-                await hydrateLocalModeCacheFromSqlite(db, workspaceId)
-
-                try {
-                    await fetchCachedCustomTemplates(workspaceId)
-                } catch (customTemplateSeedError) {
-                    console.warn(
-                        '[Workspace] Custom templates will be mirrored on the next successful refresh:',
-                        customTemplateSeedError
-                    )
-                }
-            } else {
-                // Hybrid → Cloud: abandon SQLite data
-                await clearWorkspaceSqliteData(workspaceId)
-            }
-
-            return { error: null }
-        } catch (err) {
-            const normalized = normalizeSupabaseActionError(err)
-            return { error: normalized.message }
-        }
-    }
-
     useEffect(() => {
         if (!user?.workspaceId || loadedWorkspaceId !== user.workspaceId) {
             return
@@ -1631,16 +1722,37 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
     const isLocalMode = features.data_mode === 'local' || features.data_mode === 'demo'
     const isDemoMode = features.data_mode === 'demo'
-    const isCloudMode = features.data_mode === 'cloud'
     const isHybridMode = features.data_mode === 'hybrid'
+    const offlineEntitlementDecision = evaluateOfflineEntitlement({
+        dataMode: features.data_mode,
+        snapshot: offlineEntitlementSnapshot,
+        nowMs: billingNowMs
+    })
+    const requiresOnlineEntitlementRevalidation = offlineEntitlementDecision.status === 'revalidation-required'
     const isWorkspaceLoading = isWorkspaceResolutionPending({
         isLoading,
         isAuthenticated,
         workspaceId: user?.workspaceId,
         resolvingWorkspaceId: currentWorkspaceIdRef.current
-    })
+    }) || Boolean(user?.workspaceId && isHybridMode && !isOfflineEntitlementLoaded)
+    const verifiedEntitlementIsLocked = Boolean(
+        isHybridMode
+        && offlineEntitlementDecision.status === 'valid'
+        && offlineEntitlementSnapshot
+        && (
+            offlineEntitlementSnapshot.lock.paymentAccessLocked
+            || isWorkspaceCurrentlyLocked({
+                locked_workspace: offlineEntitlementSnapshot.lock.lockedWorkspace,
+                subscription_expires_at: offlineEntitlementSnapshot.lock.subscriptionExpiresAt,
+                renewal_due_at: offlineEntitlementSnapshot.lock.renewalDueAt,
+                has_usage_limits: offlineEntitlementSnapshot.lock.hasUsageLimits
+            }, null, new Date(billingNowMs))
+        )
+    )
     const isLocked = isWorkspaceCurrentlyLocked(features, paymentSummary, new Date(billingNowMs))
         || shouldWorkspacePaymentLockAccess(paymentSummary)
+        || requiresOnlineEntitlementRevalidation
+        || verifiedEntitlementIsLocked
     const planCapabilities = overrides.length
         ? applyWorkspaceOverrides(getPlanCapabilities(features.plan), overrides)
         : getPlanCapabilities(features.plan)
@@ -1660,9 +1772,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             pendingUpdate,
             setPendingUpdate,
             isLocked,
+            requiresOnlineEntitlementRevalidation,
             isLocalMode,
             isDemoMode,
-            isCloudMode,
             isHybridMode,
             hasFeature,
             hasCapability,
@@ -1670,7 +1782,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             refreshFeatures,
             refreshPaymentSummary,
             updateSettings,
-            switchDataMode,
             activeWorkspace: user?.workspaceId ? { id: user.workspaceId } : undefined
         }}>
             {children}

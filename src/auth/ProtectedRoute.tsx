@@ -34,7 +34,14 @@ export function ProtectedRoute({
     requiredAnyPermission
 }: ProtectedRouteProps) {
     const { isAuthenticated, isLoading, hasRole, isKicked, user } = useAuth()
-    const { hasFeature, hasCapability, features, isLoading: featuresLoading, isLocked } = useWorkspace()
+    const {
+        hasFeature,
+        hasCapability,
+        features,
+        isLoading: featuresLoading,
+        isLocked,
+        requiresOnlineEntitlementRevalidation
+    } = useWorkspace()
     const { hasPermission, isLoading: permissionsLoading } = useWorkspacePermissions()
     const [location] = useLocation()
     if (isLoading) {
@@ -52,7 +59,24 @@ export function ProtectedRoute({
         return <Redirect to={`${redirectTo}?redirect=${encodeURIComponent(location)}`} />
     }
 
-    if (featuresLoading || ((requiredPermission || requiredAnyPermission?.length) && permissionsLoading)) {
+    if (featuresLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-background">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                    <p className="text-muted-foreground">Loading...</p>
+                </div>
+            </div>
+        )
+    }
+
+    // A stale Cloud Sync entitlement blocks every workspace route, including
+    // setup and admin pages. Only the page explaining how to revalidate may render.
+    if (requiresOnlineEntitlementRevalidation && location !== '/locked-workspace') {
+        return <Redirect to="/locked-workspace" />
+    }
+
+    if ((requiredPermission || requiredAnyPermission?.length) && permissionsLoading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-background">
                 <div className="flex flex-col items-center gap-4">
@@ -64,17 +88,17 @@ export function ProtectedRoute({
     }
 
     // Redirect kicked users to workspace registration (unless this route allows kicked users)
-    if (isKicked && !allowKicked) {
+    if (!requiresOnlineEntitlementRevalidation && isKicked && !allowKicked) {
         return <Redirect to="/workspace-registration" />
     }
 
     // Redirect admins to workspace configuration only after workspace state resolves.
-    if (user?.role === 'admin' && !features.is_configured && location !== '/workspace-configuration') {
+    if (!requiresOnlineEntitlementRevalidation && user?.role === 'admin' && !features.is_configured && location !== '/workspace-configuration') {
         return <Redirect to="/workspace-configuration" />
     }
 
     // Redirect admins away from workspace configuration once the workspace is configured.
-    if (user?.role === 'admin' && features.is_configured && location === '/workspace-configuration') {
+    if (!requiresOnlineEntitlementRevalidation && user?.role === 'admin' && features.is_configured && location === '/workspace-configuration') {
         return <Redirect to="/" />
     }
 
@@ -84,7 +108,7 @@ export function ProtectedRoute({
 
         // If not an admin route, redirect everyone (including admins)
         // This ensures admins "feel" the lock on general pages like POS/Dashboard
-        if (!isAdminRoute) {
+        if (requiresOnlineEntitlementRevalidation || !isAdminRoute) {
             console.log('[ProtectedRoute] Redirecting to /locked-workspace (Locked Workspace)');
             return <Redirect to="/locked-workspace" />
         }

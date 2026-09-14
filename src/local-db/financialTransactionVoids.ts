@@ -504,7 +504,7 @@ async function voidFinancialTransactionInCloud(
   input: VoidFinancialTransactionInput,
 ): Promise<VoidFinancialTransactionResult> {
   if (!isOnline()) {
-    throw new Error('Connect to the internet to void a cloud or hybrid financial transaction.')
+    throw new Error('Connect to the internet to void a Cloud Sync financial transaction.')
   }
 
   const client = getSupabaseClientForTable('payment_transactions')

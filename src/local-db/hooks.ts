@@ -8,8 +8,11 @@ import { db } from './database'
 import { canAccessBusinessPartnerInLocalCache } from './businessPartnerPrivacy'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
 import { createInventoryTransferTransactions } from './inventoryTransferTransactions'
-import { addToOfflineMutations } from './offlineMutations'
-import { isSyncIntegrityError } from '@/sync/syncErrors'
+import { abandonOfflineMutations, addToOfflineMutations } from './offlineMutations'
+import {
+    assertLoanDeletionConnectivity,
+    loanDeletionOnlineRequiredError
+} from './loanDeletionSupport'
 import { refreshStockBatchesFromSupabase } from './stockBatches'
 import { isValidNewInventoryQuantity } from './inventoryDeficit'
 import { roundOrderValue } from '@/lib/orderPrecision'
@@ -2000,20 +2003,14 @@ export function useInvoices(workspaceId: string | undefined) {
                 if (!await canReconcileCloudWorkspaceData(workspaceId)) {
                     return
                 }
-                await db.transaction('rw', [db.invoices, db.offline_mutations], async () => {
+                await db.transaction('rw', db.invoices, async () => {
                     const remoteIds = new Set(data.map(d => d.id))
                     const localItems = await db.invoices.where('workspaceId').equals(workspaceId).toArray()
 
-                    // Delete local items that are missing from server (remotely deleted).
-                    // Handles 'synced', 'pending', and orphan items with no syncStatus.
-                    // Pending items also get their offline mutations cleaned up to prevent re-creation.
+                    // A missing remote row cannot invalidate a pending local write. Pulls
+                    // preserve pending state until its durable SQLite mutation resolves.
                     for (const local of localItems) {
-                        if (!remoteIds.has(local.id)) {
-                            if (local.syncStatus === 'pending') {
-                                await db.offline_mutations
-                                    .where({ entityType: 'invoices', entityId: local.id, status: 'pending' })
-                                    .delete()
-                            }
+                        if (!remoteIds.has(local.id) && local.syncStatus !== 'pending') {
                             await db.invoices.delete(local.id)
                         }
                     }
@@ -2948,27 +2945,25 @@ export function useSyncQueue() {
 
 export function usePendingSyncMutations(): OfflineMutation[] {
     const mutations = useLiveQuery(async () => {
-        const [pending, syncing, failedSaleCreates, failedIntegrityIssues] = await Promise.all([
-            db.offline_mutations.where('status').equals('pending').toArray(),
-            db.offline_mutations.where('status').equals('syncing').toArray(),
-            db.offline_mutations
-                .where('status')
-                .equals('failed')
-                .filter((mutation) => (
-                    mutation.entityType === 'sales'
-                    && mutation.operation === 'create'
-                    && !isSyncIntegrityError(mutation.error)
-                ))
-                .toArray(),
-            db.offline_mutations
-                .where('status')
-                .equals('failed')
-                .filter((mutation) => isSyncIntegrityError(mutation.error))
-                .toArray()
-        ])
+        const activeStatuses = [
+            'pending',
+            'leased',
+            'retry_wait',
+            'blocked',
+            'conflict',
+            'rejected',
+            // Compatibility values retained while old Dexie queues migrate.
+            'syncing',
+            'failed',
+        ] as const
+        const groups = await Promise.all(activeStatuses.map((status) =>
+            db.offline_mutations.where('status').equals(status).toArray()
+        ))
 
-        return [...pending, ...syncing, ...failedSaleCreates, ...failedIntegrityIssues]
-            .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+        return groups.flat().sort((left, right) =>
+            (left.localSequence ?? Number.MAX_SAFE_INTEGER) - (right.localSequence ?? Number.MAX_SAFE_INTEGER)
+            || left.createdAt.localeCompare(right.createdAt)
+        )
     }, [])
 
     return mutations ?? []
@@ -2984,18 +2979,6 @@ export async function removeFromSyncQueue(id: string): Promise<void> {
 
 export async function clearSyncQueue(): Promise<void> {
     await db.syncQueue.clear()
-}
-
-export async function clearOfflineMutations(): Promise<void> {
-    await db.offline_mutations.clear()
-
-    // Also reset syncStatus for items if possible? 
-    // Actually, discarding mutations means we won't sync them.
-    // The simplest way to "discard" is just to clear the mutation queue.
-    // But local items will still have syncStatus: 'pending'.
-    // We should probably reset them to 'synced' (as if they were never intended to be synced) 
-    // or just leave them as 'pending' (they will stay local only).
-    // The user said "pending info will get deleted or discarded".
 }
 
 // ===================
@@ -4053,15 +4036,19 @@ async function clearPendingOfflineMutations(
 ): Promise<void> {
     const targetKeys = new Set(targets.map(target => `${target.entityType}:${target.entityId}`))
     const pendingMutations = await db.offline_mutations.where('workspaceId').equals(workspaceId).toArray()
-    const mutationIds = pendingMutations
+    const mutationsToAbandon = pendingMutations
         .filter(mutation =>
             mutation.status !== 'synced' &&
+            mutation.status !== 'acknowledged' &&
+            mutation.status !== 'abandoned' &&
             targetKeys.has(`${mutation.entityType}:${mutation.entityId}`)
         )
-        .map(mutation => mutation.id)
 
-    if (mutationIds.length > 0) {
-        await db.offline_mutations.bulkDelete(mutationIds)
+    if (mutationsToAbandon.length > 0) {
+        await abandonOfflineMutations(
+            mutationsToAbandon,
+            'Superseded by a successful remote hard delete.'
+        )
     }
 }
 
@@ -5759,8 +5746,10 @@ export async function cancelOrderLinkedLoan(loanId: string): Promise<void> {
     if (await hasLoanTransactionHistory(loan.workspaceId, loan.id)) {
         throw new Error('financed_order_has_payment_history')
     }
+    assertLoanDeletionConnectivity(loan.workspaceId)
 
     const now = new Date().toISOString()
+    const localOnly = isLocalWorkspaceMode(loan.workspaceId)
     const installments = await db.loan_installments.where('loanId').equals(loan.id).and((item) => !item.isDeleted).toArray()
     const deletedLoan: Loan = {
         ...loan,
@@ -5778,21 +5767,7 @@ export async function cancelOrderLinkedLoan(loanId: string): Promise<void> {
         syncStatus: 'pending' as const,
         lastSyncedAt: null
     }))
-    await db.transaction('rw', [db.loans, db.loan_installments], async () => {
-        await db.loans.put(deletedLoan)
-        if (deletedInstallments.length > 0) await db.loan_installments.bulkPut(deletedInstallments)
-    })
-
-    const enqueue = async () => {
-        await addToOfflineMutations('loans', loan.id, 'delete', { id: loan.id }, loan.workspaceId)
-        await Promise.all(deletedInstallments.map((item) =>
-            addToOfflineMutations('loan_installments', item.id, 'delete', { id: item.id }, loan.workspaceId)
-        ))
-    }
-
-    if (!isOnline(loan.workspaceId)) {
-        await enqueue()
-    } else {
+    if (!localOnly) {
         try {
             const { error: loanError } = await runMutation('loans.cancelOrderLinked.loan', () =>
                 supabase.from('loans').update({ is_deleted: true, updated_at: now, version: deletedLoan.version }).eq('id', loan.id)
@@ -5804,13 +5779,29 @@ export async function cancelOrderLinkedLoan(loanId: string): Promise<void> {
                 )
                 if (installmentError) throw installmentError
             }
-            const syncedAt = new Date().toISOString()
-            await db.loans.update(loan.id, { syncStatus: 'synced', lastSyncedAt: syncedAt })
         } catch (error) {
-            if (!shouldUseOfflineMutationFallback(error)) throw normalizeSupabaseActionError(error)
-            await enqueue()
+            if (shouldUseOfflineMutationFallback(error)) {
+                throw loanDeletionOnlineRequiredError()
+            }
+            throw normalizeSupabaseActionError(error)
         }
     }
+
+    const syncedAt = new Date().toISOString()
+    await db.transaction('rw', [db.loans, db.loan_installments], async () => {
+        await db.loans.put({
+            ...deletedLoan,
+            syncStatus: 'synced',
+            lastSyncedAt: syncedAt
+        })
+        if (deletedInstallments.length > 0) {
+            await db.loan_installments.bulkPut(deletedInstallments.map((item) => ({
+                ...item,
+                syncStatus: 'synced' as const,
+                lastSyncedAt: syncedAt
+            })))
+        }
+    })
 
     await recalculateLoanLinkedBusinessPartnerSummary(loan.workspaceId, loan.linkedPartyType, loan.linkedPartyId)
 }
@@ -5986,6 +5977,8 @@ export async function deleteLoan(loanId: string): Promise<void> {
     if (!isLoanDeletionAllowed(loan, hasLinkedActiveSource, hasTransactionHistory)) {
         throw new Error('loan_delete_not_allowed')
     }
+    const localOnly = isLocalWorkspaceMode(loan.workspaceId)
+    assertLoanDeletionConnectivity(loan.workspaceId)
 
     const hideLoanTransactions = async () => {
         const { hideLoanTransactionsForDeletedLoan } = await import('./payments')
@@ -6000,30 +5993,38 @@ export async function deleteLoan(loanId: string): Promise<void> {
 
     const installmentIds = new Set(installments.map(item => item.id))
     const paymentIds = new Set(payments.map(item => item.id))
-    const relatedMutationIds = offlineMutations
-        .filter(mutation => {
-            if (mutation.status === 'synced') {
-                return false
-            }
-
-            if (mutation.entityType === 'loans') {
-                return mutation.entityId === loanId
-            }
-
-            if (mutation.entityType === 'loan_installments') {
-                return installmentIds.has(mutation.entityId)
-            }
-
-            if (mutation.entityType === 'loan_payments') {
-                return paymentIds.has(mutation.entityId)
-            }
-
+    const relatedMutations = offlineMutations.filter(mutation => {
+        if (
+            mutation.status === 'synced'
+            || mutation.status === 'acknowledged'
+            || mutation.status === 'abandoned'
+        ) {
             return false
-        })
-        .map(mutation => mutation.id)
+        }
 
-    const removeLoanAggregateLocally = async (enqueueDeleteMutation: boolean) => {
-        await db.transaction('rw', [db.loans, db.loan_installments, db.loan_payments, db.offline_mutations], async () => {
+        if (mutation.entityType === 'loans') {
+            return mutation.entityId === loanId
+        }
+
+        if (mutation.entityType === 'loan_installments') {
+            return installmentIds.has(mutation.entityId)
+        }
+
+        if (mutation.entityType === 'loan_payments') {
+            return paymentIds.has(mutation.entityId)
+        }
+
+        return false
+    })
+
+    const removeLoanAggregateLocally = async () => {
+        if (!localOnly && relatedMutations.length > 0) {
+            await abandonOfflineMutations(
+                relatedMutations,
+                'Superseded by deletion of the loan aggregate.'
+            )
+        }
+        await db.transaction('rw', [db.loans, db.loan_installments, db.loan_payments], async () => {
             await db.loans.delete(loanId)
             if (installments.length > 0) {
                 await db.loan_installments.bulkDelete(installments.map(item => item.id))
@@ -6031,27 +6032,12 @@ export async function deleteLoan(loanId: string): Promise<void> {
             if (payments.length > 0) {
                 await db.loan_payments.bulkDelete(payments.map(item => item.id))
             }
-            if (relatedMutationIds.length > 0) {
-                await db.offline_mutations.bulkDelete(relatedMutationIds)
-            }
-            if (enqueueDeleteMutation) {
-                await db.offline_mutations.add({
-                    id: generateId(),
-                    workspaceId: loan.workspaceId,
-                    entityType: 'loans',
-                    entityId: loanId,
-                    operation: 'delete',
-                    payload: { id: loanId },
-                    createdAt: new Date().toISOString(),
-                    status: 'pending'
-                })
-            }
         })
     }
 
-    if (!isOnline()) {
+    if (localOnly) {
         await hideLoanTransactions()
-        await removeLoanAggregateLocally(true)
+        await removeLoanAggregateLocally()
         await recalculateLoanLinkedBusinessPartnerSummary(loan.workspaceId, loan.linkedPartyType, loan.linkedPartyId)
         return
     }
@@ -6063,15 +6049,11 @@ export async function deleteLoan(loanId: string): Promise<void> {
         if (error) throw error
 
         await hideLoanTransactions()
-        await removeLoanAggregateLocally(false)
+        await removeLoanAggregateLocally()
         await recalculateLoanLinkedBusinessPartnerSummary(loan.workspaceId, loan.linkedPartyType, loan.linkedPartyId)
     } catch (error) {
         if (shouldUseOfflineMutationFallback(error)) {
-            console.error('[Loans] Delete sync failed, queued offline mutation:', error)
-            await hideLoanTransactions()
-            await removeLoanAggregateLocally(true)
-            await recalculateLoanLinkedBusinessPartnerSummary(loan.workspaceId, loan.linkedPartyType, loan.linkedPartyId)
-            return
+            throw loanDeletionOnlineRequiredError()
         }
 
         throw normalizeSupabaseActionError(error)

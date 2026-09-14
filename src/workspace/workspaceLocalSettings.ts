@@ -1,11 +1,11 @@
-import type { CurrencyCode, IQDDisplayPreference, WorkspaceDataMode } from '@/local-db/models'
+import type { CurrencyCode, IQDDisplayPreference, WorkspaceDataModeInput } from '@/local-db/models'
 
 /**
  * Workspace settings that are edited by the user in Settings and stored
  * locally in Local mode (where Supabase sync is skipped). For these keys the
  * durable local workspace record is the source of truth in Local/Demo mode;
- * the remote `workspaces` row must not override it. Hybrid mode is
- * cloud-backed (settings sync to Supabase), so the remote row is
+ * the remote `workspaces` row must not override it. Cloud Sync (`hybrid`) is
+ * Supabase-backed, so the remote row is
  * authoritative there and the resolver leaves it untouched.
  */
 export const LOCALLY_OWNED_SETTING_KEYS = [
@@ -43,7 +43,7 @@ export interface LocallyOwnedSettings {
 type SettingsSource = Partial<Record<LocallyOwnedSettingKey, unknown>> | null
 
 function isLocallyAuthoritativeMode(
-  ...modes: Array<WorkspaceDataMode | null | undefined>
+  ...modes: Array<WorkspaceDataModeInput | null | undefined>
 ) {
   return modes.some((mode) => mode === 'local' || mode === 'demo')
 }
@@ -52,13 +52,13 @@ function isLocallyAuthoritativeMode(
  * Resolves the locally-owned settings from a remote `workspaces` response.
  * In Local/Demo mode the durable local record wins, so an incomplete or
  * stale remote response cannot overwrite the user's local choices (e.g.
- * A4 template / print language). In Cloud and Hybrid mode the remote row is
+ * A4 template / print language). In Cloud Sync mode the remote row is
  * authoritative and this returns an empty object so existing merge behavior
  * is untouched.
  */
 export function resolveFetchedWorkspaceSettings(input: {
-  workspaceMode?: WorkspaceDataMode | null
-  persistedMode?: WorkspaceDataMode | null
+  workspaceMode?: WorkspaceDataModeInput | null
+  persistedMode?: WorkspaceDataModeInput | null
   remote?: SettingsSource
   persisted?: SettingsSource
   cached?: SettingsSource
@@ -86,8 +86,8 @@ export function resolveFetchedWorkspaceSettings(input: {
  * blank or overwrite a locally-owned setting before the app re-fetches it.
  */
 export function resolvePersistedLocallyOwnedSettings(input: {
-  nextMode?: WorkspaceDataMode | null
-  existingMode?: WorkspaceDataMode | null
+  nextMode?: WorkspaceDataModeInput | null
+  existingMode?: WorkspaceDataModeInput | null
   next: SettingsSource
   existing: SettingsSource
 }): LocallyOwnedSettings {
@@ -119,8 +119,8 @@ export function resolvePersistedLocallyOwnedSettings(input: {
  * even when the remote `workspaces` row still carries an older value.
  */
 export function resolveFetchedWorkspaceName(input: {
-  workspaceMode?: WorkspaceDataMode | null
-  persistedMode?: WorkspaceDataMode | null
+  workspaceMode?: WorkspaceDataModeInput | null
+  persistedMode?: WorkspaceDataModeInput | null
   remoteName?: string | null
   persistedName?: string | null
   cachedName?: string | null

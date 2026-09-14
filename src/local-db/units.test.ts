@@ -14,7 +14,7 @@ function installBrowserStorage() {
   };
   Object.defineProperty(globalThis, "window", {
     configurable: true,
-    value: { localStorage: storage },
+    value: { localStorage: storage, URL: globalThis.URL },
   });
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,
@@ -23,6 +23,11 @@ function installBrowserStorage() {
 }
 
 installBrowserStorage();
+
+Object.defineProperty(globalThis.URL, "createObjectURL", {
+  configurable: true,
+  value: () => "blob:vitest",
+});
 
 Object.defineProperty(globalThis, "navigator", {
   configurable: true,
@@ -33,9 +38,37 @@ Object.defineProperty(globalThis, "document", {
   value: {
     visibilityState: "visible",
     dir: "ltr",
-    documentElement: { lang: "en", dir: "ltr" },
-    createElement: () => ({ getContext: () => null }),
+    documentElement: { lang: "en", dir: "ltr", style: {} },
+    head: { appendChild: () => undefined },
+    getElementsByTagName: () => [{ appendChild: () => undefined }],
+    createElement: () => ({
+      appendChild: () => undefined,
+      getContext: () => null,
+      setAttribute: () => undefined,
+      style: {},
+    }),
+    createTextNode: () => ({}),
   },
+});
+Object.defineProperty(globalThis, "Element", {
+  configurable: true,
+  value: class Element {},
+});
+Object.defineProperty(globalThis, "HTMLElement", {
+  configurable: true,
+  value: class HTMLElement {},
+});
+Object.defineProperty(globalThis, "DOMMatrix", {
+  configurable: true,
+  value: class DOMMatrix {},
+});
+Object.defineProperty(globalThis, "ImageData", {
+  configurable: true,
+  value: class ImageData {},
+});
+Object.defineProperty(globalThis, "Path2D", {
+  configurable: true,
+  value: class Path2D {},
 });
 if (!("window" in globalThis)) {
   Object.defineProperty(globalThis, "window", {
@@ -125,11 +158,11 @@ describe("units normalization + rename migration", () => {
       "@/workspace/workspaceMode"
     );
 
-    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: "cloud" });
+    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: "hybrid" });
     await db.workspaces.put({
       id: WORKSPACE_ID,
       name: "Repro",
-      data_mode: "cloud",
+      data_mode: "hybrid",
       syncStatus: "synced",
       isDeleted: false,
     } as never);

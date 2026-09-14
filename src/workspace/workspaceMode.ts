@@ -1,6 +1,12 @@
-import type { WorkspaceDataMode } from '@/local-db/models'
+import type { WorkspaceDataMode, WorkspaceDataModeInput } from '@/local-db/models'
 
 const WORKSPACE_MODE_PREFIX = 'atlas_workspace_mode:'
+
+export type UserSelectableWorkspaceDataMode = Exclude<WorkspaceDataMode, 'demo'>
+export const USER_SELECTABLE_WORKSPACE_DATA_MODES = [
+    'hybrid',
+    'local'
+] as const satisfies readonly UserSelectableWorkspaceDataMode[]
 
 export interface WorkspaceModeSnapshot {
     workspaceId: string
@@ -8,7 +14,7 @@ export interface WorkspaceModeSnapshot {
 }
 
 const defaultSnapshot: Omit<WorkspaceModeSnapshot, 'workspaceId'> = {
-    dataMode: 'cloud'
+    dataMode: 'hybrid'
 }
 
 const inMemorySnapshots = new Map<string, WorkspaceModeSnapshot>()
@@ -23,7 +29,7 @@ function getWorkspaceModeKey(workspaceId: string) {
 
 function normalizeWorkspaceModeSnapshot(
     workspaceId: string,
-    input?: Partial<Omit<WorkspaceModeSnapshot, 'workspaceId'>> | null
+    input?: { dataMode?: WorkspaceDataModeInput | null } | null
 ): WorkspaceModeSnapshot {
     return {
         workspaceId,
@@ -31,12 +37,18 @@ function normalizeWorkspaceModeSnapshot(
     }
 }
 
+/**
+ * Normalize persisted and remote mode values into Atlas' canonical modes.
+ *
+ * Keep the `cloud` compatibility read for at least 30 days and two production
+ * releases after Cloud Sync ships. New writes must always use `hybrid`.
+ */
 export function normalizeWorkspaceDataMode(value?: string | null): WorkspaceDataMode {
     if (value === 'local' || value === 'hybrid' || value === 'demo') {
         return value
     }
 
-    return 'cloud'
+    return 'hybrid'
 }
 
 function parseWorkspaceModeSnapshot(value: string, workspaceId: string): WorkspaceModeSnapshot | null {
@@ -78,13 +90,17 @@ export function readWorkspaceModeSnapshot(workspaceId?: string | null): Workspac
     }
 
     inMemorySnapshots.set(workspaceId, snapshot)
+    const normalizedRaw = JSON.stringify(snapshot)
+    if (raw !== normalizedRaw) {
+        localStorage.setItem(getWorkspaceModeKey(workspaceId), normalizedRaw)
+    }
     return snapshot
 }
 
 export function writeWorkspaceModeSnapshot(
     snapshot: {
         workspaceId: string
-        dataMode?: WorkspaceDataMode | null
+        dataMode?: WorkspaceDataModeInput | null
     }
 ) {
     const normalized = normalizeWorkspaceModeSnapshot(snapshot.workspaceId, {
@@ -135,8 +151,8 @@ export function isLocalWorkspaceMode(workspaceId?: string | null) {
     return mode === 'local' || mode === 'demo'
 }
 
-export function isCloudWorkspaceMode(workspaceId?: string | null) {
-    return getWorkspaceDataMode(workspaceId) === 'cloud'
+export function isCloudSyncWorkspaceMode(workspaceId?: string | null) {
+    return getWorkspaceDataMode(workspaceId) === 'hybrid'
 }
 
 export function isHybridWorkspaceMode(workspaceId?: string | null) {

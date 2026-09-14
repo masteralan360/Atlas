@@ -116,7 +116,7 @@ export function WorkspaceLocationPrompt() {
                 coordination: formatCoordinates(position.coords.latitude, position.coords.longitude)
             }, {
                 // Local-only workspaces intentionally keep their settings on-device.
-                // Cloud and hybrid workspaces must confirm the Supabase write before
+                // Cloud Sync workspaces must confirm the Supabase write before
                 // the dialog tells the user that the location was saved.
                 requireRemoteSync: features.data_mode !== 'local'
             })

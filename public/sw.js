@@ -12,9 +12,12 @@ const CACHE_STATE_URL = '/__atlas_pwa_cache_state__'
 const STAGED_METADATA_URL = '/__atlas_pwa_staged_metadata__'
 const ASSET_MANIFEST_URL = '/atlas-assets.json'
 const DEPLOYMENT_CHECK_QUERY_PARAM = '__atlas_deployment_check'
+const WORKSPACE_ASSET_ROUTE = '/__atlas_workspace_asset__'
+const WORKSPACE_ASSET_ROOT = 'atlas-backup-assets'
+const WORKSPACE_ASSET_SCOPE_CACHE = 'atlas-workspace-asset-scopes-v1'
+const WORKSPACE_ASSET_SCOPE_ROUTE = '/__atlas_workspace_asset_scope__'
 const RUNTIME_APP_ASSETS = [
     '/manifest.webmanifest',
-    '/sql-wasm.wasm',
     '/pwa-icon.png',
     '/logo.png'
 ]
@@ -26,6 +29,11 @@ const absoluteUrl = (path) => new URL(path, self.location.origin).href
 const appShellRequest = () => new Request(absoluteUrl('/'))
 const cacheStateRequest = () => new Request(absoluteUrl(CACHE_STATE_URL))
 const stagedMetadataRequest = () => new Request(absoluteUrl(STAGED_METADATA_URL))
+const workspaceAssetScopeRequest = (clientId) => {
+    const url = new URL(WORKSPACE_ASSET_SCOPE_ROUTE, self.location.origin)
+    url.searchParams.set('client', clientId)
+    return new Request(url.href)
+}
 
 function jsonResponse(value) {
     return new Response(JSON.stringify(value), {
@@ -48,6 +56,145 @@ function isMissingBuildAsset(request) {
     const url = new URL(request.url)
     return request.destination === 'script'
         && /^\/assets\/[^/]+\.js$/i.test(url.pathname)
+}
+
+function isSafeWorkspaceAssetPath(path, workspaceId) {
+    if (!path || !workspaceId || path.startsWith('/') || /^[a-zA-Z]:/.test(path)) return false
+    const segments = path.replace(/\\/g, '/').split('/')
+    return segments.length >= 3
+        && segments[1] === workspaceId
+        && !segments.some((segment) => !segment || segment === '.' || segment === '..' || segment.includes('\0'))
+}
+
+function workspaceAssetContentType(path) {
+    const extension = path.split('.').pop()?.toLowerCase()
+    return ({
+        png: 'image/png',
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        webp: 'image/webp',
+        gif: 'image/gif',
+        svg: 'image/svg+xml',
+        pdf: 'application/pdf',
+        mp3: 'audio/mpeg',
+        wav: 'audio/wav',
+        ogg: 'audio/ogg',
+    })[extension] || null
+}
+
+function workspaceAssetResponse(body, contentType, status = 200) {
+    return new Response(body, {
+        status,
+        headers: {
+            'Content-Type': contentType,
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': "default-src 'none'; sandbox",
+        },
+    })
+}
+
+function expectedRemoteAssetPath(path, workspaceId) {
+    const segments = path.replace(/\\/g, '/').split('/')
+    const keySegments = [workspaceId, segments[0], ...segments.slice(2)]
+    return `/${keySegments.map((segment) => encodeURIComponent(decodeURIComponent(segment))).join('/')}`
+}
+
+async function writeWorkspaceAssetScope(clientId, scope) {
+    if (!clientId) return
+    const cache = await caches.open(WORKSPACE_ASSET_SCOPE_CACHE)
+    const request = workspaceAssetScopeRequest(clientId)
+    if (!scope) {
+        await cache.delete(request)
+        return
+    }
+    await cache.put(request, jsonResponse(scope))
+}
+
+async function readWorkspaceAssetScope(clientId) {
+    if (!clientId) return null
+    try {
+        const cache = await caches.open(WORKSPACE_ASSET_SCOPE_CACHE)
+        const response = await cache.match(workspaceAssetScopeRequest(clientId))
+        const scope = response ? await response.json() : null
+        return scope
+            && typeof scope.workspaceId === 'string'
+            && typeof scope.userId === 'string'
+            && scope.workspaceId
+            && scope.userId
+            ? scope
+            : null
+    } catch {
+        return null
+    }
+}
+
+async function readWorkspaceAssetFromOpfs(path, workspaceId, userId, contentType) {
+    if (!isSafeWorkspaceAssetPath(path, workspaceId) || !userId) return null
+    if (!self.navigator?.storage || typeof self.navigator.storage.getDirectory !== 'function') return null
+
+    try {
+        let directory = await self.navigator.storage.getDirectory()
+        for (const segment of [WORKSPACE_ASSET_ROOT, encodeURIComponent(workspaceId), encodeURIComponent(userId)]) {
+            directory = await directory.getDirectoryHandle(segment)
+        }
+        const manifestHandle = await directory.getFileHandle('manifest.json')
+        const manifest = JSON.parse(await (await manifestHandle.getFile()).text())
+        const metadata = manifest?.[path]
+        if (!metadata || typeof metadata.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(metadata.sha256)) {
+            return null
+        }
+        const content = await (await directory.getFileHandle(metadata.sha256)).getFile()
+        return workspaceAssetResponse(content, contentType)
+    } catch {
+        return null
+    }
+}
+
+async function serveWorkspaceAsset(request, clientId) {
+    const url = new URL(request.url)
+    const path = url.searchParams.get('path') || ''
+    const workspaceId = url.searchParams.get('workspace') || ''
+    const userId = url.searchParams.get('user') || ''
+    const boundScope = await readWorkspaceAssetScope(clientId)
+    const contentType = workspaceAssetContentType(path)
+    if (
+        !boundScope
+        || boundScope.workspaceId !== workspaceId
+        || boundScope.userId !== userId
+        || !isSafeWorkspaceAssetPath(path, workspaceId)
+        || !contentType
+    ) {
+        return new Response('', { status: 404 })
+    }
+    if (request.mode === 'navigate') {
+        return new Response('', { status: 404 })
+    }
+
+    const local = await readWorkspaceAssetFromOpfs(path, workspaceId, userId, contentType)
+    if (local) return local
+
+    const remote = url.searchParams.get('remote')
+    if (remote) {
+        try {
+            const remoteUrl = new URL(remote)
+            const expectedPath = expectedRemoteAssetPath(path, workspaceId)
+            if (
+                remoteUrl.protocol === 'https:'
+                && !remoteUrl.username
+                && !remoteUrl.password
+                && remoteUrl.pathname.endsWith(expectedPath)
+            ) {
+                // Keep the fallback cross-origin. Relaying arbitrary remote
+                // bytes through this same-origin route would turn the worker
+                // into an origin-confused response proxy.
+                return Response.redirect(remoteUrl.href, 302)
+            }
+        } catch {
+            // Return a deterministic missing response below.
+        }
+    }
+    return new Response('', { status: 404 })
 }
 
 async function putResponse(cacheName, request, response) {
@@ -516,7 +663,12 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
     const request = event.request
-    if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin || !isCacheableRequest(request)) {
+    const requestUrl = new URL(request.url)
+    if (request.method === 'GET' && requestUrl.origin === self.location.origin && requestUrl.pathname === WORKSPACE_ASSET_ROUTE) {
+        event.respondWith(serveWorkspaceAsset(request, event.clientId))
+        return
+    }
+    if (request.method !== 'GET' || requestUrl.origin !== self.location.origin || !isCacheableRequest(request)) {
         return
     }
 
@@ -548,6 +700,21 @@ self.addEventListener('fetch', (event) => {
 
 self.addEventListener('message', (event) => {
     const message = event.data || {}
+
+    if (message.type === 'SET_WORKSPACE_ASSET_SCOPE' || message.type === 'CLEAR_WORKSPACE_ASSET_SCOPE') {
+        const clientId = event.source?.id || ''
+        const scope = message.type === 'SET_WORKSPACE_ASSET_SCOPE'
+            && typeof message.workspaceId === 'string'
+            && typeof message.userId === 'string'
+            && message.workspaceId
+            && message.userId
+            ? { workspaceId: message.workspaceId, userId: message.userId }
+            : null
+        event.waitUntil(writeWorkspaceAssetScope(clientId, scope).then(() => {
+            event.ports?.[0]?.postMessage({ type: 'WORKSPACE_ASSET_SCOPE_UPDATED' })
+        }))
+        return
+    }
 
     if (message.type === 'SET_UPDATE_POLICY') {
         updatesEnabled = !message.disabled

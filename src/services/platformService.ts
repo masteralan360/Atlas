@@ -1,6 +1,9 @@
 import { isDesktop, isMobile, isTauri, PlatformAPI } from '../lib/platform';
 import { r2Service } from './r2Service';
 import { isDemoWorkspaceMode, isLocalWorkspaceMode } from '@/workspace/workspaceMode';
+import { getActiveBusinessUserId, getActiveBusinessWorkspaceId } from '@/lib/network';
+import { normalizeWorkspaceBackupAssetPath } from '@/local-db/hybridBackupBundle';
+import { isPwaWorkspaceAssetScopeBound } from '@/local-db/pwaSqlite';
 
 /**
  * Service to handle platform-specific operations
@@ -97,6 +100,47 @@ class PlatformService implements PlatformAPI {
             reader.onerror = () => reject(new Error('Failed to read image as data URL'));
             reader.readAsDataURL(blob);
         });
+    }
+
+    /**
+     * Retain a local recovery copy before the owning business record is saved.
+     * Desktop files use their normal AppData path; PWA files use the scoped,
+     * content-addressed OPFS sidecar included in Atlas backup bundles.
+     */
+    async persistWorkspaceAssetForBackup(
+        workspaceId: string,
+        relativePath: string,
+        file: File | Blob,
+    ): Promise<void> {
+        if (!workspaceId || isDemoWorkspaceMode(workspaceId)) return;
+        const normalizedPath = normalizeWorkspaceBackupAssetPath(relativePath, workspaceId);
+
+        if (isTauri()) {
+            const { mkdir, writeFile, BaseDirectory } = await import('@tauri-apps/plugin-fs');
+            const lastSlash = normalizedPath.lastIndexOf('/');
+            if (lastSlash > 0) {
+                await mkdir(normalizedPath.slice(0, lastSlash), {
+                    baseDir: BaseDirectory.AppData,
+                    recursive: true,
+                });
+            }
+            await writeFile(normalizedPath, new Uint8Array(await file.arrayBuffer()), {
+                baseDir: BaseDirectory.AppData,
+            });
+            return;
+        }
+
+        const userId = getActiveBusinessUserId();
+        if (!userId) throw new Error('A signed-in user is required to retain this asset offline.');
+        const { storePwaWorkspaceBackupAsset } = await import('@/local-db/hybridBackupBundle');
+        await storePwaWorkspaceBackupAsset(
+            { workspaceId, userId },
+            {
+                relativePath: normalizedPath,
+                data: new Uint8Array(await file.arrayBuffer()),
+                mimeType: file.type || 'application/octet-stream',
+            },
+        );
     }
 
     private async resizeBrowserImage(file: File | Blob, maxWidth: number): Promise<Blob> {
@@ -269,22 +313,49 @@ class PlatformService implements PlatformAPI {
             }
         }
 
-        // PWA/Web: resolve relative asset paths to live R2 URLs
+        // PWA/Web: prefer the scoped OPFS recovery sidecar. The service worker
+        // serves this stable virtual URL locally and falls back to the live R2
+        // URL when an older asset has not been retained on this device yet.
         if (path && !path.startsWith('http') && !path.startsWith('data:') && !path.startsWith('blob:') && path.includes('/')) {
+            const normalizedPath = path.replace(/\\/g, '/').replace(/^\/+/, '');
+            const parts = normalizedPath.split('/');
+            const workspaceId = parts.length >= 3 ? parts[1] : '';
+            const userId = getActiveBusinessUserId();
+            const activeWorkspaceId = getActiveBusinessWorkspaceId();
+            let remoteUrl = '';
             if (r2Service.isConfigured()) {
                 // DB paths are like: product-images/workspaceId/file.png
                 // R2 keys are: workspaceId/product-images/file.png
-                const parts = path.split('/');
-                let r2Key = path;
+                let r2Key = normalizedPath;
                 if (parts.length >= 3) {
                     const folderPart = parts[0];
                     const wsIdPart = parts[1];
-                    const filePart = parts[parts.length - 1];
-                    r2Key = `${wsIdPart}/${folderPart}/${filePart}`;
+                    const assetPath = parts.slice(2).join('/');
+                    r2Key = `${wsIdPart}/${folderPart}/${assetPath}`;
                 }
                 const url = r2Service.getUrl(r2Key);
-                if (url) return url;
+                if (url) remoteUrl = url;
             }
+
+            if (
+                workspaceId
+                && userId
+                && workspaceId === activeWorkspaceId
+                && isPwaWorkspaceAssetScopeBound({ workspaceId, userId })
+            ) {
+                try {
+                    normalizeWorkspaceBackupAssetPath(normalizedPath, workspaceId);
+                    const localUrl = new URL('/__atlas_workspace_asset__', window.location.origin);
+                    localUrl.searchParams.set('path', normalizedPath);
+                    localUrl.searchParams.set('workspace', workspaceId);
+                    localUrl.searchParams.set('user', userId);
+                    if (remoteUrl) localUrl.searchParams.set('remote', remoteUrl);
+                    return localUrl.href;
+                } catch {
+                    // Non-sidecar relative paths retain their prior behavior.
+                }
+            }
+            if (remoteUrl) return remoteUrl;
         }
 
         return path;
@@ -414,10 +485,12 @@ class PlatformService implements PlatformAPI {
             const relativeDest = `${subDir}/${workspaceId}/${fileName}`.replace(/\\/g, '/');
             const r2Path = `${workspaceId}/${subDir}/${fileName}`.replace(/\\/g, '/');
 
+            await this.persistWorkspaceAssetForBackup(workspaceId, relativeDest, fileToPersist);
+
             if (!isLocalWorkspaceMode(workspaceId) && r2Service.isConfigured()) {
                 try {
-                    await r2Service.upload(r2Path, fileToPersist, fileToPersist.type || this.getImageContentType(ext));
-                    return relativeDest;
+                    const uploadedUrl = await r2Service.upload(r2Path, fileToPersist, fileToPersist.type || this.getImageContentType(ext));
+                    if (uploadedUrl) return relativeDest;
                 } catch (error) {
                     console.error('[PlatformService] Web image upload failed, falling back to data URL:', error);
                 }
@@ -476,9 +549,11 @@ class PlatformService implements PlatformAPI {
             const relativeDest = `${subDir}/${workspaceId}/${fileName}`.replace(/\\/g, '/');
             const r2Path = `${workspaceId}/${subDir}/${fileName}`.replace(/\\/g, '/');
 
+            await this.persistWorkspaceAssetForBackup(workspaceId, relativeDest, file);
+
             if (!isLocalWorkspaceMode(workspaceId) && r2Service.isConfigured()) {
-                await r2Service.upload(r2Path, file, file.type || this.getImageContentType(ext));
-                return relativeDest;
+                const uploadedUrl = await r2Service.upload(r2Path, file, file.type || this.getImageContentType(ext));
+                if (uploadedUrl) return relativeDest;
             }
 
             return await this.blobToDataUrl(file);

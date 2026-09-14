@@ -12,7 +12,7 @@ vi.mock('@/lib/network', () => ({
 
 vi.mock('@/workspace/workspaceMode', () => ({
     getWorkspaceDataMode: (workspaceId?: string | null) => (
-        workspaceId && testState.localWorkspaceIds.has(workspaceId) ? 'local' : 'cloud'
+        workspaceId && testState.localWorkspaceIds.has(workspaceId) ? 'local' : 'hybrid'
     ),
     isLocalWorkspaceMode: (workspaceId?: string | null) => Boolean(workspaceId && testState.localWorkspaceIds.has(workspaceId))
 }))

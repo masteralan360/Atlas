@@ -57,6 +57,7 @@ export interface PlatformAPI {
     // Media
     pickAndSaveImage: (workspaceId: string, subDir?: string) => Promise<string | null>;
     saveImageFile: (file: File | Blob, workspaceId: string, subDir?: string) => Promise<string | null>;
+    persistWorkspaceAssetForBackup: (workspaceId: string, relativePath: string, file: File | Blob) => Promise<void>;
     resizeImage: (filePath: string, maxWidth?: number) => Promise<string>;
     saveAs: (content: Uint8Array, fileName: string, extensions: { name: string, extensions: string[] }[]) => Promise<string | null>;
 }

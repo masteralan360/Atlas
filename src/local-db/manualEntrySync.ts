@@ -10,7 +10,7 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { db } from './database'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
 import type { ManualEntry, ManualEntryTemplate, ManualEntryTemplateRow } from './models'
-import { addToOfflineMutations } from './offlineMutations'
+import { abandonOfflineMutations, addToOfflineMutations } from './offlineMutations'
 
 const PAGE_SIZE = 1000
 
@@ -52,17 +52,18 @@ async function retireQueuedManualEntryMutations(
     entityId: string,
     throughTimestamp: string
 ) {
-    await db.offline_mutations.toCollection().modify((mutation) => {
-        if (
+    const mutations = await db.offline_mutations
+        .filter((mutation) => (
             mutation.entityType === entityType
             && mutation.entityId === entityId
             && (mutation.status === 'pending' || mutation.status === 'failed')
             && mutation.createdAt <= throughTimestamp
-        ) {
-            mutation.status = 'synced'
-            mutation.error = undefined
-        }
-    })
+        ))
+        .toArray()
+    await abandonOfflineMutations(
+        mutations,
+        'Superseded by a successful direct remote write.',
+    )
 }
 
 async function fetchRemoteRows(

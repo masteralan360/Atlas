@@ -257,6 +257,26 @@ vi.mock('@/workspace/workspaceMode', () => ({
     isLocalWorkspaceMode: workspaceModeMock.isLocalWorkspaceMode
 }))
 
+vi.mock('@/local-db/cloudSyncOutbox', () => ({
+    acknowledgeCloudSyncMutation: vi.fn(async () => null),
+    durableMutationToOfflineMutation: vi.fn((mutation) => mutation),
+    rebuildDexieOutboxProjection: vi.fn(async () => 0),
+    setCloudSyncCursor: vi.fn(async () => undefined),
+    transitionCloudSyncMutation: vi.fn(async () => null),
+    validateCloudSyncOutboxAgainstSnapshots: vi.fn(async () => []),
+}))
+
+vi.mock('@/sync/cloudSyncProtocol', () => ({
+    getWorkspaceSyncProtocolVersion: vi.fn(async () => 0),
+    pullCloudSyncChanges: vi.fn(async () => ({
+        pulled: 0,
+        errors: [],
+        snapshotRequired: false,
+        snapshotWatermark: null,
+    })),
+    pushCloudSyncOutbox: vi.fn(async () => ({ success: 0, failed: 0, errors: [] })),
+}))
+
 import {
     fullSync,
     isExistingCommissionEntryRetry,

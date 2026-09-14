@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertCircle, CalendarPlus, Clock, CreditCard, Copy, HardDrive, Lock, LogOut, Mail, Phone } from 'lucide-react'
+import { AlertCircle, CalendarPlus, Clock, CreditCard, Copy, HardDrive, Lock, LogOut, Mail, Phone, RefreshCw, WifiOff } from 'lucide-react'
 import { Button } from '@/ui/components/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/ui/components/dialog'
 import { useAuth } from '@/auth'
@@ -19,10 +19,19 @@ const ADMIN_PHONE_HREF = 'tel:07701990012'
 export function LockedWorkspace() {
     const { t } = useTranslation()
     const { signOut, user } = useAuth()
-    const { features, isLocked, isLoading, paymentSummary, isPaymentSummaryLoading } = useWorkspace()
+    const {
+        features,
+        isLocked,
+        isLoading,
+        paymentSummary,
+        isPaymentSummaryLoading,
+        requiresOnlineEntitlementRevalidation,
+        refreshFeatures
+    } = useWorkspace()
     const [, setLocation] = useLocation()
     const [contactAdminOpen, setContactAdminOpen] = useState(false)
     const [copied, setCopied] = useState(false)
+    const [isRetryingVerification, setIsRetryingVerification] = useState(false)
 
     const isExpired = isWorkspacePaymentAccessExpired({
         subscriptionExpiresAt: features.subscription_expires_at,
@@ -32,7 +41,8 @@ export function LockedWorkspace() {
     })
     const paymentAlertKind = getWorkspacePaymentAlertKind(paymentSummary)
     const pendingTransaction = paymentSummary?.pendingTransaction ?? null
-    const showPaymentAction = Boolean(paymentAlertKind || isExpired || pendingTransaction)
+    const showPaymentAction = !requiresOnlineEntitlementRevalidation
+        && Boolean(paymentAlertKind || isExpired || pendingTransaction)
     const canRenewSubscription = user?.role === 'admin' && showPaymentAction
     const canAddExtraDays = Boolean(
         canRenewSubscription
@@ -43,6 +53,14 @@ export function LockedWorkspace() {
     const pendingExtraDays = paymentSummary?.pendingExtraDays ?? null
 
     const paymentCopy = (() => {
+        if (requiresOnlineEntitlementRevalidation) {
+            return {
+                title: t('lockedWorkspace.offlineEntitlementTitle'),
+                description: t('lockedWorkspace.offlineEntitlementMessage'),
+                icon: WifiOff
+            }
+        }
+
         switch (paymentAlertKind) {
             case 'payg_renewal_due':
                 return {
@@ -104,6 +122,16 @@ export function LockedWorkspace() {
         setLocation('/login')
     }
 
+    const handleRetryVerification = async () => {
+        if (isRetryingVerification) return
+        setIsRetryingVerification(true)
+        try {
+            await refreshFeatures()
+        } finally {
+            setIsRetryingVerification(false)
+        }
+    }
+
     if (isLoading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-background dark:bg-slate-950">
@@ -145,6 +173,21 @@ export function LockedWorkspace() {
 
                 {/* Buttons Container */}
                 <div className="flex flex-col gap-3 items-center">
+                    {requiresOnlineEntitlementRevalidation && (
+                        <Button
+                            allowViewer={true}
+                            size="lg"
+                            disabled={isRetryingVerification}
+                            onClick={handleRetryVerification}
+                            className="gap-2 w-full max-w-[240px]"
+                        >
+                            <RefreshCw className={`w-5 h-5 ${isRetryingVerification ? 'animate-spin' : ''}`} />
+                            {isRetryingVerification
+                                ? t('lockedWorkspace.offlineEntitlementRetrying')
+                                : t('lockedWorkspace.offlineEntitlementRetry')}
+                        </Button>
+                    )}
+
                     {canRenewSubscription && (
                         <>
                             <Button
@@ -180,8 +223,8 @@ export function LockedWorkspace() {
                         allowViewer={true}
                         size="lg"
                         onClick={handleContactAdmin}
-                        variant={canRenewSubscription ? 'outline' : 'default'}
-                        className={`gap-2 w-full max-w-[240px] ${canRenewSubscription
+                        variant={canRenewSubscription || requiresOnlineEntitlementRevalidation ? 'outline' : 'default'}
+                        className={`gap-2 w-full max-w-[240px] ${canRenewSubscription || requiresOnlineEntitlementRevalidation
                             ? 'dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-100 dark:hover:bg-slate-900'
                             : ''}`}
                     >
@@ -203,7 +246,9 @@ export function LockedWorkspace() {
 
                 {/* Additional Info */}
                 <p className="text-xs text-muted-foreground opacity-70 dark:text-slate-400 dark:opacity-100">
-                    {t('lockedWorkspace.additionalInfo') || 'If you believe this is an error, please reach out to your workspace administrator.'}
+                    {requiresOnlineEntitlementRevalidation
+                        ? t('lockedWorkspace.offlineEntitlementAdditionalInfo')
+                        : (t('lockedWorkspace.additionalInfo') || 'If you believe this is an error, please reach out to your workspace administrator.')}
                 </p>
             </div>
 

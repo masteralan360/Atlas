@@ -61,7 +61,7 @@ describe('AssetManager Local Mode startup', () => {
         const manager = new AssetManager()
         vi.spyOn(manager, 'startWatcher').mockImplementation(() => undefined)
 
-        manager.initialize('workspace-id', 'cloud')
+        manager.initialize('workspace-id', 'hybrid')
         expect(manager.getProgress().isInitialSync).toBe(true)
 
         manager.requestForceEnter()

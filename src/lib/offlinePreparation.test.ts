@@ -3,8 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
     dbOpen: vi.fn(),
     appSettingsCount: vi.fn(),
-    ensurePwaDatabase: vi.fn(),
-    isOpfsSupported: vi.fn(),
+    checkPwaSqliteReadiness: vi.fn(),
     getPersistentStorageStatus: vi.fn(),
     getStorageEstimate: vi.fn(),
     requestPersistentStorage: vi.fn(),
@@ -24,8 +23,7 @@ vi.mock('@/local-db/database', () => ({
 }))
 
 vi.mock('@/local-db/pwaSqlite', () => ({
-    ensurePwaDatabase: mocks.ensurePwaDatabase,
-    isOpfsSupported: mocks.isOpfsSupported
+    checkPwaSqliteReadiness: mocks.checkPwaSqliteReadiness
 }))
 
 vi.mock('@/local-db/storagePersist', () => ({
@@ -67,7 +65,7 @@ const user: AuthUser = {
     workspaceId: 'workspace-1',
     sourceWorkspaceId: 'workspace-1',
     workspaceCode: 'WS-1',
-    workspaceMode: 'cloud'
+    workspaceMode: 'hybrid'
 }
 
 describe('offline preparation', () => {
@@ -88,12 +86,14 @@ describe('offline preparation', () => {
         mocks.getPwaOfflineShellStatus.mockResolvedValue({ ready: true, buildId: 'build-1', cachedAssets: 30 })
         mocks.areApplicationUpdatesDisabled.mockReturnValue(false)
         mocks.getAppSetting.mockResolvedValue(undefined)
-        mocks.isOpfsSupported.mockReturnValue(true)
-        mocks.ensurePwaDatabase.mockResolvedValue({ exec: vi.fn(() => [{ values: [['ok']] }]) })
+        mocks.checkPwaSqliteReadiness.mockResolvedValue({
+            ready: true,
+            scope: { workspaceId: 'workspace-1', userId: 'user-1' }
+        })
     })
 
-    it('fully synchronizes cloud data and records verified readiness', async () => {
-        const result = await prepareForOfflineUse({ user, dataMode: 'cloud' })
+    it('fully synchronizes Cloud Sync data and records verified readiness', async () => {
+        const result = await prepareForOfflineUse({ user, dataMode: 'hybrid' })
 
         expect(result.outcome).toBe('ready')
         expect(mocks.runManagedFullSync).toHaveBeenCalledWith('user-1', 'workspace-1', null)
@@ -111,7 +111,7 @@ describe('offline preparation', () => {
             errors: ['products unavailable']
         })
 
-        await expect(prepareForOfflineUse({ user, dataMode: 'cloud' })).rejects.toMatchObject({
+        await expect(prepareForOfflineUse({ user, dataMode: 'hybrid' })).rejects.toMatchObject({
             code: 'data-sync-failed'
         })
         expect(mocks.preparePwaOfflineShell).not.toHaveBeenCalled()
@@ -125,13 +125,16 @@ describe('offline preparation', () => {
         })
 
         expect(mocks.runManagedFullSync).not.toHaveBeenCalled()
-        expect(mocks.ensurePwaDatabase).toHaveBeenCalledOnce()
+        expect(mocks.checkPwaSqliteReadiness).toHaveBeenCalledWith({
+            workspaceId: 'workspace-1',
+            userId: 'user-1'
+        })
     })
 
     it('keeps readiness unrecorded when the complete shell cannot be verified', async () => {
         mocks.preparePwaOfflineShell.mockResolvedValue({ ready: false, status: 'failed' })
 
-        await expect(prepareForOfflineUse({ user, dataMode: 'cloud' })).rejects.toBeInstanceOf(OfflinePreparationError)
+        await expect(prepareForOfflineUse({ user, dataMode: 'hybrid' })).rejects.toBeInstanceOf(OfflinePreparationError)
         expect(mocks.setAppSetting).not.toHaveBeenCalled()
     })
 
@@ -140,7 +143,7 @@ describe('offline preparation', () => {
             version: 1,
             userId: 'user-1',
             workspaceId: 'workspace-1',
-            dataMode: 'cloud',
+            dataMode: 'hybrid',
             preparedAt: '2026-09-08T00:00:00.000Z',
             dataSyncedAt: '2026-09-08T00:00:00.000Z',
             shellBuildId: 'older-build',
@@ -150,7 +153,7 @@ describe('offline preparation', () => {
             storageQuota: 2
         }))
 
-        await expect(getOfflineReadinessSnapshot(user, 'cloud')).resolves.toMatchObject({ ready: false })
+        await expect(getOfflineReadinessSnapshot(user, 'hybrid')).resolves.toMatchObject({ ready: false })
     })
 
     it('accepts a matching legacy readiness record without requiring an offline lease', async () => {
@@ -158,7 +161,7 @@ describe('offline preparation', () => {
             version: 1,
             userId: 'user-1',
             workspaceId: 'workspace-1',
-            dataMode: 'cloud',
+            dataMode: 'hybrid',
             preparedAt: '2026-09-08T00:00:00.000Z',
             dataSyncedAt: '2026-09-08T00:00:00.000Z',
             shellBuildId: 'build-1',
@@ -169,6 +172,6 @@ describe('offline preparation', () => {
             offlineLeaseExpiresAt: 1
         }))
 
-        await expect(getOfflineReadinessSnapshot(user, 'cloud')).resolves.toMatchObject({ ready: true })
+        await expect(getOfflineReadinessSnapshot(user, 'hybrid')).resolves.toMatchObject({ ready: true })
     })
 })

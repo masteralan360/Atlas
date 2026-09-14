@@ -49,6 +49,7 @@ import {
     syncProductStockSnapshot
 } from './inventory'
 import { addToOfflineMutations, fetchTableFromSupabase } from './hooks'
+import { assertLoanDeletionConnectivity } from './loanDeletionSupport'
 import { resolveReturnStorageId } from './storageUtils'
 import {
     calculateStockBatchUnitCost,
@@ -3196,6 +3197,11 @@ async function reverseLinkedLoanPaymentsForCancellation(order: SalesOrder | Purc
 }
 
 async function cancelOrderFinancialRecords(orderType: OrderType, order: SalesOrder | PurchaseOrder) {
+    if (order.linkedLoanId) {
+        // Fail before reversing any payment when the loan cancellation cannot
+        // be represented by the current Cloud Sync protocol.
+        assertLoanDeletionConnectivity(order.workspaceId)
+    }
     await reverseOrderPaymentsForCancellation(orderType, order)
 
     if (order.linkedLoanId) {

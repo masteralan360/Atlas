@@ -21,6 +21,19 @@ import {
 import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 import { recordWorkspaceDataFetch } from "@/workspace/workspaceDataFreshness";
 import { getPostponedVoiceReasonCleanupPaths } from "@/lib/deliveryVoiceReasonPaths";
+import {
+  acknowledgeCloudSyncMutation,
+  durableMutationToOfflineMutation,
+  rebuildDexieOutboxProjection,
+  transitionCloudSyncMutation,
+  validateCloudSyncOutboxAgainstSnapshots,
+} from "@/local-db/cloudSyncOutbox";
+import {
+  getWorkspaceSyncProtocolVersion,
+  pullCloudSyncChanges,
+  pullCloudSyncSnapshot,
+  pushCloudSyncOutbox,
+} from "@/sync/cloudSyncProtocol";
 // import { getPendingItems, removeFromQueue, incrementRetry } from './syncQueue'
 
 export type SyncState = "idle" | "syncing" | "error" | "offline";
@@ -153,9 +166,50 @@ const ROW_WISE_PULL_TABLES = new Set<string>([
   "inventory",
   "workspaces",
 ]);
-const PROCESSABLE_MUTATION_STATUSES = ["pending", "syncing"] as const;
+const PROCESSABLE_MUTATION_STATUSES = ["pending", "syncing", "leased", "retry_wait"] as const;
 const SALE_CREATE_RESULT_SELECT =
   "id, sequence_id, system_verified, system_review_status, system_review_reason";
+
+async function persistLegacyQueueStateForUser(
+  mutationId: string,
+  status: "pending" | "syncing" | "failed" | "synced",
+  error?: string,
+  durableFailureState: "retry_wait" | "blocked" | "conflict" | "rejected" = "retry_wait",
+  userId?: string,
+  workspaceId?: string,
+) {
+  const durableScope = workspaceId && userId
+    ? { workspaceId, userId }
+    : undefined;
+  if (status === "synced" && durableScope) {
+    const durable = await acknowledgeCloudSyncMutation(mutationId, durableScope);
+    if (durable) {
+      await db.offline_mutations.put(durableMutationToOfflineMutation(durable));
+      return;
+    }
+  } else if (status === "failed" && durableScope) {
+    const durable = await transitionCloudSyncMutation(mutationId, durableFailureState, {
+      errorCode: durableFailureState === "retry_wait" ? "legacy_sync_error" : durableFailureState,
+      errorMessage: error ?? "Cloud Sync failed.",
+      ...durableScope,
+    });
+    if (durable) {
+      await db.offline_mutations.put(durableMutationToOfflineMutation(durable));
+      return;
+    }
+  } else if (status === "pending" && durableScope) {
+    const durable = await transitionCloudSyncMutation(mutationId, "pending", {
+      errorMessage: error ?? null,
+      ...durableScope,
+    });
+    if (durable) {
+      await db.offline_mutations.put(durableMutationToOfflineMutation(durable));
+      return;
+    }
+  }
+
+  await db.offline_mutations.update(mutationId, { status, error });
+}
 
 function isSaleCreateMutation(mutation: {
   entityType: string;
@@ -931,16 +985,38 @@ async function persistRemoteRowsInBatches(
 
 // Process offline mutation queue
 export async function processMutationQueue(
-  _userId: string,
+  userId: string,
   onProgress?: (completed: number, total: number) => void,
 ): Promise<{ success: number; failed: number; errors: string[] }> {
+  const mutationWorkspaceIds = new Map<string, string>();
+  const persistLegacyQueueState = (
+    mutationId: string,
+    status: "pending" | "syncing" | "failed" | "synced",
+    error?: string,
+    durableFailureState: "retry_wait" | "blocked" | "conflict" | "rejected" = "retry_wait",
+  ) => persistLegacyQueueStateForUser(
+    mutationId,
+    status,
+    error,
+    durableFailureState,
+    userId,
+    mutationWorkspaceIds.get(mutationId),
+  );
   if (!isSupabaseConfigured) {
     return { success: 0, failed: 1, errors: ["Supabase not configured"] };
   }
 
   const mutationGroups = await Promise.all(
     PROCESSABLE_MUTATION_STATUSES.map((status) =>
-      db.offline_mutations.where("status").equals(status).sortBy("createdAt"),
+      db.offline_mutations
+        .where("status")
+        .equals(status)
+        .filter((mutation) => (
+          status !== "retry_wait" ||
+          !mutation.nextAttemptAt ||
+          mutation.nextAttemptAt <= new Date().toISOString()
+        ))
+        .sortBy("createdAt"),
     ),
   );
   const failedRetriableMutations = await db.offline_mutations
@@ -963,6 +1039,9 @@ export async function processMutationQueue(
     .sort((left, right) =>
       String(left.createdAt).localeCompare(String(right.createdAt)),
     );
+  for (const mutation of mutations) {
+    mutationWorkspaceIds.set(mutation.id, mutation.workspaceId);
+  }
   // Snapshot-style inventory and batch mutations are never rewritten or
   // replayed. They are quarantined below because their original pre-movement
   // state cannot be proven after another device has changed stock.
@@ -995,10 +1074,7 @@ export async function processMutationQueue(
   for (const mutation of orderedMutations) {
     if (mutation.entityType === "inventory" || mutation.entityType === "stock_batches") {
       const quarantineMessage = i18n.t("inventory.errors.legacyMutationQuarantined");
-      await db.offline_mutations.update(mutation.id, {
-        status: "failed",
-        error: quarantineMessage,
-      });
+      await persistLegacyQueueState(mutation.id, "failed", quarantineMessage, "rejected");
       const table = (db as any)[mutation.entityType];
       if (table) {
         await table.update(mutation.entityId, { syncStatus: "conflict" });
@@ -1013,10 +1089,7 @@ export async function processMutationQueue(
     // suggestions while offline, so retire those local-only mutations without
     // contacting the removed CRM endpoint.
     if (mutation.entityType === "business_partner_merge_candidates") {
-      await db.offline_mutations.update(mutation.id, {
-        status: "synced",
-        error: undefined,
-      });
+      await persistLegacyQueueState(mutation.id, "synced");
       successCount++;
       reportCompleted();
       continue;
@@ -1049,7 +1122,7 @@ export async function processMutationQueue(
             : null,
         });
       }
-      await db.offline_mutations.update(mutation.id, { status: "synced", error: undefined });
+      await persistLegacyQueueState(mutation.id, "synced");
       const legacyEntryTable = (db as any).agent_commission_entries;
       if (legacyEntryTable) await legacyEntryTable.delete(mutation.entityId);
       successCount++;
@@ -1059,10 +1132,12 @@ export async function processMutationQueue(
     const mutationKey = `${mutation.entityType}:${mutation.entityId}`;
     const priorIntegrityIssue = integrityBlockedEntities.get(mutationKey);
     if (priorIntegrityIssue) {
-      await db.offline_mutations.update(mutation.id, {
-        status: "failed",
-        error: `${priorIntegrityIssue} This later change was blocked to preserve record order.`,
-      });
+      await persistLegacyQueueState(
+        mutation.id,
+        "failed",
+        `${priorIntegrityIssue} This later change was blocked to preserve record order.`,
+        "blocked",
+      );
       failedCount++;
       reportCompleted();
       continue;
@@ -1106,7 +1181,7 @@ export async function processMutationQueue(
         if (error) throw error;
         const { persistLoanAggregateRpcResult } = await import("@/local-db/loanTransactions");
         await persistLoanAggregateRpcResult(data);
-        await db.offline_mutations.update(id, { status: "synced", error: undefined });
+        await persistLegacyQueueState(id, "synced");
         successCount++;
         reportCompleted();
         continue;
@@ -1132,7 +1207,7 @@ export async function processMutationQueue(
           paths: payload.paths,
         });
         await deleteQueuedDeliveryVoiceReasons(voiceReasonPaths);
-        await db.offline_mutations.update(id, { status: "synced", error: undefined });
+        await persistLegacyQueueState(id, "synced");
         successCount++;
         reportCompleted();
         continue;
@@ -1581,7 +1656,7 @@ export async function processMutationQueue(
       }
 
       // Success: Mark as synced
-      await db.offline_mutations.update(id, { status: "synced" }); // Or delete if preferred, but synced is good for history
+      await persistLegacyQueueState(id, "synced");
       if (isPriceBookMutation(mutation)) {
         failedPriceBookIds.delete(entityId);
         const supersededFailures = await db.offline_mutations
@@ -1598,6 +1673,9 @@ export async function processMutationQueue(
           )
           .primaryKeys();
         if (supersededFailures.length > 0) {
+          await Promise.all(supersededFailures.map((failureId) =>
+            persistLegacyQueueState(String(failureId), "synced")
+          ));
           await db.offline_mutations.bulkUpdate(
             supersededFailures.map((failureId) => ({
               key: failureId,
@@ -1672,10 +1750,12 @@ export async function processMutationQueue(
         err,
       );
       const storedError = syncIntegrityError ?? errorMessage;
-      await db.offline_mutations.update(mutation.id, {
-        status: "failed",
-        error: storedError,
-      });
+      await persistLegacyQueueState(
+        mutation.id,
+        "failed",
+        storedError,
+        schemaMismatchError ? "rejected" : syncIntegrityError ? "conflict" : "retry_wait",
+      );
       if (syncIntegrityError) {
         const table = (db as any)[mutation.entityType];
         if (table) {
@@ -1723,19 +1803,13 @@ export async function processMutationQueue(
         p_order_return_id: typeof orderReturnId === "string" ? orderReturnId : null,
       });
       if (error) throw error;
-      await db.offline_mutations.update(mutation.id, {
-        status: "synced",
-        error: undefined,
-      });
+      await persistLegacyQueueState(mutation.id, "synced");
       successCount++;
       reportCompleted();
     } catch (err: any) {
       const errorMessage = err?.message || "Commission reconciliation failed";
       console.error(`[Sync] Failed commission reconciliation ${mutation.id}:`, err);
-      await db.offline_mutations.update(mutation.id, {
-        status: "pending",
-        error: errorMessage,
-      });
+      await persistLegacyQueueState(mutation.id, "pending", errorMessage);
       failedCount++;
       errors.push(errorMessage);
       reportCompleted();
@@ -1987,6 +2061,91 @@ export async function fullSync(
   startSyncProgress();
 
   try {
+    const protocolVersion = await getWorkspaceSyncProtocolVersion(workspaceId);
+    if (protocolVersion >= 1) {
+      // Reconnect protocol: pull -> validate/rebase -> push -> pull. Realtime
+      // only wakes this sequence; it is never treated as durable delivery.
+      updateSyncProgress("pulling", 0, 1);
+      let initialPull = await pullCloudSyncChanges(
+        workspaceId,
+        (completed, total) => updateSyncProgress("pulling", completed, total),
+        userId,
+      );
+
+      if (initialPull.snapshotRequired) {
+        // A 180-day-expired cursor is rebuilt only through the v1 RPC. Pages
+        // remain staged until SQLite atomically swaps the complete snapshot;
+        // pending local intents are retained throughout.
+        const snapshot = await pullCloudSyncSnapshot(
+          workspaceId,
+          initialPull.snapshotWatermark,
+          (completed, total) => updateSyncProgress("pulling", completed, total),
+          userId,
+        );
+        initialPull = {
+          pulled: snapshot.pulled,
+          errors: snapshot.errors,
+          snapshotRequired: false,
+          snapshotWatermark: snapshot.snapshotWatermark,
+        };
+
+        // The snapshot is a fuzzy, key-stable read captured at one watermark.
+        // Replaying the feed from that watermark makes concurrent inserts,
+        // updates, and deletes deterministic before local intents are rebased.
+        if (snapshot.errors.length === 0) {
+          const replay = await pullCloudSyncChanges(
+            workspaceId,
+            (completed, total) => updateSyncProgress("pulling", completed, total),
+            userId,
+          );
+          initialPull = {
+            pulled: initialPull.pulled + replay.pulled,
+            errors: replay.snapshotRequired
+              ? [...replay.errors, "Cloud Sync history expired while rebuilding the snapshot; retry synchronization."]
+              : replay.errors,
+            snapshotRequired: replay.snapshotRequired,
+            snapshotWatermark: replay.snapshotWatermark,
+          };
+        }
+      }
+
+      if (initialPull.errors.length > 0) {
+        return {
+          success: false,
+          pushed: 0,
+          pulled: initialPull.pulled,
+          errors: initialPull.errors,
+        };
+      }
+
+      await validateCloudSyncOutboxAgainstSnapshots(workspaceId, userId);
+      await rebuildDexieOutboxProjection(db, workspaceId, userId);
+
+      updateSyncProgress("pushing", 0, 1);
+      const pushed = await pushCloudSyncOutbox(
+        userId,
+        workspaceId,
+        (completed, total) => updateSyncProgress("pushing", completed, total),
+      );
+
+      updateSyncProgress("pulling", 0, 1);
+      const finalPull = await pullCloudSyncChanges(
+        workspaceId,
+        (completed, total) => updateSyncProgress("pulling", completed, total),
+        userId,
+      );
+      const errors = [...pushed.errors, ...finalPull.errors];
+      if (finalPull.errors.length === 0) {
+        recordWorkspaceDataFetch(workspaceId, "supabase");
+      }
+      return {
+        success: pushed.failed === 0 && errors.length === 0,
+        pushed: pushed.success,
+        pulled: initialPull.pulled + finalPull.pulled,
+        errors,
+      };
+    }
+
     // 1. Process Offline Mutations
     const { success, failed, errors: pushErrors } = await processMutationQueue(
       userId,

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { isAuthenticatedState, resolveCachedWorkspaceAssignment } from './authenticationState'
+import {
+  canRestoreWorkspaceRecoveryWithoutSession,
+  isAuthenticatedState,
+  resolveCachedWorkspaceAssignment
+} from './authenticationState'
 
 describe('authentication state', () => {
   it('does not authenticate a session before its user identity is ready', () => {
@@ -36,6 +40,30 @@ describe('authentication state', () => {
   })
 })
 
+describe('offline authentication recovery', () => {
+  it('restores Local and Demo independently of the Cloud Sync entitlement window', () => {
+    expect(canRestoreWorkspaceRecoveryWithoutSession({
+      workspaceId: 'local-workspace',
+      workspaceMode: 'local'
+    }, false)).toBe(true)
+    expect(canRestoreWorkspaceRecoveryWithoutSession({
+      workspaceId: 'demo-workspace',
+      workspaceMode: 'demo'
+    }, false)).toBe(true)
+  })
+
+  it('restores Cloud Sync recovery only while offline so SQLite can enforce entitlement age', () => {
+    expect(canRestoreWorkspaceRecoveryWithoutSession({
+      workspaceId: 'cloud-sync-workspace',
+      workspaceMode: 'cloud'
+    }, true)).toBe(true)
+    expect(canRestoreWorkspaceRecoveryWithoutSession({
+      workspaceId: 'cloud-sync-workspace',
+      workspaceMode: 'hybrid'
+    }, false)).toBe(false)
+  })
+})
+
 describe('cached workspace assignment recovery', () => {
   it('restores the active workspace from the same user recovery record', () => {
     expect(resolveCachedWorkspaceAssignment({
@@ -55,7 +83,7 @@ describe('cached workspace assignment recovery', () => {
       workspaceCode: 'WS-1',
       workspaceName: 'Workspace 1',
       isConfigured: true,
-      workspaceMode: 'cloud'
+      workspaceMode: 'hybrid'
     })
   })
 

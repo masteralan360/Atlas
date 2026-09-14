@@ -37,7 +37,7 @@ import {
   appendAgentProductCommissionEntry,
 } from "./productCommissions";
 import { getSalesOrderCommissionMode, isPayableCommissionEntry } from "./commissionMode";
-import { addToOfflineMutations } from "./offlineMutations";
+import { acknowledgeOfflineMutations, addToOfflineMutations } from "./offlineMutations";
 
 const PLAN_TABLE = "agent_commission_plans";
 const MEMBERSHIP_TABLE = "agent_commission_memberships";
@@ -600,15 +600,12 @@ async function requestServerCommissionReconciliation(
       }),
     )) as { error?: unknown };
     if (error) throw error;
-    const pendingIds = await db.offline_mutations
+    const pendingMutations = await db.offline_mutations
       .where("[entityType+entityId+status]")
       .equals([RECONCILIATION_ENTITY, orderId, "pending"])
-      .primaryKeys();
-    if (pendingIds.length > 0) {
-      await db.offline_mutations.bulkUpdate(pendingIds.map((id) => ({
-        key: id,
-        changes: { status: "synced" as const, error: undefined },
-      })));
+      .toArray();
+    if (pendingMutations.length > 0) {
+      await acknowledgeOfflineMutations(pendingMutations);
     }
     return true;
   } catch (error) {

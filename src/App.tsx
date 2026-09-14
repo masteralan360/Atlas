@@ -22,6 +22,7 @@ import { WorkspacePermissionsProvider } from "@/permissions";
 import { FleetLocationSharingProvider } from "@/fleet/FleetLocationSharingContext";
 import { AutoSyncOverlay } from "@/ui/components/AutoSyncOverlay";
 import { OfflineEntryOverlay } from "@/ui/components/OfflineEntryOverlay";
+import { SqliteWorkspaceGate } from "@/ui/components/SqliteWorkspaceGate";
 import { SyncIntegrityOverlay } from "@/ui/components/SyncIntegrityOverlay";
 import {
   isBackendConfigurationRequired,
@@ -641,7 +642,7 @@ function UpdateHandler() {
           }
         });
 
-        await createUpdateSafetyBackupIfNeeded(user?.workspaceId);
+        await createUpdateSafetyBackupIfNeeded(user?.workspaceId, user?.id);
         await update.install();
 
         localStorage.removeItem(PENDING_UPDATE_VERSION_KEY);
@@ -1382,7 +1383,8 @@ function App() {
   return (
     <AuthProvider>
       <DeviceTokenBootstrap />
-      <WorkspaceProvider>
+      <SqliteWorkspaceGate>
+        <WorkspaceProvider>
         <ClinicalRegistryLocaleSync />
         <WorkspacePermissionsProvider>
           <FleetLocationSharingProvider>
@@ -2518,7 +2520,8 @@ function App() {
             </UiAccessProvider>
           </FleetLocationSharingProvider>
         </WorkspacePermissionsProvider>
-      </WorkspaceProvider>
+        </WorkspaceProvider>
+      </SqliteWorkspaceGate>
     </AuthProvider>
   );
 }

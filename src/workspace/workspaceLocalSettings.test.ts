@@ -33,7 +33,7 @@ describe('Local Mode workspace settings', () => {
     })
   })
 
-  it('keeps the remote row authoritative in hybrid mode', () => {
+  it('keeps the remote row authoritative in Cloud Sync mode', () => {
     expect(resolveFetchedWorkspaceSettings({
       workspaceMode: 'hybrid',
       persistedMode: 'hybrid',
@@ -43,7 +43,7 @@ describe('Local Mode workspace settings', () => {
     })).toEqual({})
   })
 
-  it('returns an empty set for cloud workspaces so remote stays authoritative', () => {
+  it('keeps legacy cloud values remote-authoritative during compatibility', () => {
     expect(resolveFetchedWorkspaceSettings({
       workspaceMode: 'cloud',
       persistedMode: 'cloud',
@@ -66,26 +66,26 @@ describe('Local Mode workspace settings', () => {
     expect(resolveFetchedWorkspaceName({
       workspaceMode: 'local',
       persistedMode: 'local',
-      remoteName: 'Old Cloud Name',
+      remoteName: 'Old Remote Name',
       persistedName: 'My Local Shop',
     })).toBe('My Local Shop')
   })
 
-  it('prefers the remote workspace name in cloud mode', () => {
+  it('prefers the remote workspace name for a legacy cloud value', () => {
     expect(resolveFetchedWorkspaceName({
       workspaceMode: 'cloud',
       persistedMode: 'cloud',
-      remoteName: 'Cloud Name',
+      remoteName: 'Remote Name',
       persistedName: 'My Local Shop',
-    })).toBe('Cloud Name')
+    })).toBe('Remote Name')
   })
 
-  it('prefers the remote workspace name in hybrid mode', () => {
+  it('prefers the remote workspace name in Cloud Sync mode', () => {
     expect(resolveFetchedWorkspaceName({
       workspaceMode: 'hybrid',
       persistedMode: 'hybrid',
-      remoteName: 'Cloud Name',
+      remoteName: 'Remote Name',
       persistedName: 'My Local Shop',
-    })).toBe('Cloud Name')
+    })).toBe('Remote Name')
   })
 })

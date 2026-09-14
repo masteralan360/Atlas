@@ -3398,6 +3398,11 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, accountId, paymentTransactionId, currency, occurredAt, voidId, updatedAt, isDeleted, syncStatus, [workspaceId+accountId], [accountId+occurredAt], [workspaceId+occurredAt], [workspaceId+voidId]'
     })
 
+    this.version(126).stores({
+      offline_mutations:
+        'id, workspaceId, entityType, entityId, status, createdAt, localSequence, aggregateKey, groupId, nextAttemptAt, [workspaceId+status], [entityType+entityId+status]'
+    })
+
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
   }

@@ -1,6 +1,8 @@
 import 'fake-indexeddb/auto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
+import { setActiveBusinessUser, setActiveBusinessWorkspace } from '@/lib/network'
+import { installMemorySqliteForTest } from '@/test/sqliteTestConnection'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 
 import { db } from './database'
@@ -8,6 +10,7 @@ import type { PurchaseOrder, SalesOrder } from './models'
 
 const WORKSPACE_ID = '00000000-0000-4000-8000-000000000201'
 const PRODUCT_ID = '00000000-0000-4000-8000-000000000202'
+const USER_ID = '00000000-0000-4000-8000-000000000203'
 
 type PurchaseOrderCreateInput = Omit<
     PurchaseOrder,
@@ -52,6 +55,7 @@ let buildPaymentObligations: typeof import('./payments').buildPaymentObligations
 let getRemainingPaymentTransactions: typeof import('./payments').getRemainingPaymentTransactions
 let reversePaymentTransaction: typeof import('./payments').reversePaymentTransaction
 let synchronizeOrderPaymentReferences: typeof import('./payments').synchronizeOrderPaymentReferences
+let releaseSqlite: (() => void) | undefined
 
 function installBrowserStorage() {
     const rows = new Map<string, string>()
@@ -416,6 +420,10 @@ describe('order-linked financing', () => {
     })
 
     afterEach(() => {
+        releaseSqlite?.()
+        releaseSqlite = undefined
+        setActiveBusinessWorkspace(null)
+        setActiveBusinessUser(null)
         clearWorkspaceModeSnapshot(WORKSPACE_ID)
     })
 
@@ -541,9 +549,13 @@ describe('order-linked financing', () => {
     })
 
     it('rewrites a queued quick-order payment payload before offline sync can replay it', async () => {
+        releaseSqlite = await installMemorySqliteForTest()
+        setActiveBusinessWorkspace(WORKSPACE_ID)
+        setActiveBusinessUser(USER_ID)
         writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'hybrid' })
         const orderId = crypto.randomUUID()
         const paymentId = crypto.randomUUID()
+        const legacyMutationId = crypto.randomUUID()
         const provisionalReference = 'SO-PENDING-CAADDE41-8CB5-44AF-AC40-7F5A0B7E8670'
         await db.payment_transactions.put({
             id: paymentId,
@@ -571,7 +583,7 @@ describe('order-linked financing', () => {
             isDeleted: false
         })
         await db.offline_mutations.add({
-            id: crypto.randomUUID(),
+            id: legacyMutationId,
             workspaceId: WORKSPACE_ID,
             entityType: 'payment_transactions',
             entityId: paymentId,
@@ -595,11 +607,13 @@ describe('order-linked financing', () => {
             { deferRemoteSync: true }
         )
 
-        const [mutation] = await db.offline_mutations.where('entityId').equals(paymentId).toArray()
-        expect(mutation?.payload).toMatchObject({
-            referenceLabel: 'SO-2026-00101',
+        const mutations = await db.offline_mutations.where('entityId').equals(paymentId).toArray()
+        const replacement = mutations.find((mutation) => mutation.status === 'pending')
+        expect(replacement?.payload).toMatchObject({
+            reference_label: 'SO-2026-00101',
             version: 2
         })
+        expect(mutations.find((mutation) => mutation.id === legacyMutationId)?.status).toBe('abandoned')
     })
 
     it('completes quick-order style financed sales without falsely settling them', async () => {

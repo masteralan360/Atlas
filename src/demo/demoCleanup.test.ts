@@ -82,7 +82,7 @@ describe('demo workspace cleanup', () => {
         name: 'Normal',
         code: 'NORMAL',
         plan: 'basic',
-        data_mode: 'cloud',
+        data_mode: 'hybrid',
         is_configured: true,
         syncStatus: 'synced',
         lastSyncedAt: now,

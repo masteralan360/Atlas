@@ -471,7 +471,9 @@ function LoanListView({
         } catch (error: any) {
             const message = error?.message === 'loan_delete_not_allowed'
                 ? t('loans.messages.loanDeleteBlocked')
-                : error?.message || t('loans.messages.loanDeleteFailed')
+                : error?.message === 'loan_delete_online_required'
+                    ? t('loans.messages.loanDeleteOnlineRequired')
+                    : error?.message || t('loans.messages.loanDeleteFailed')
             toast({
                 title: t('common.error') || 'Error',
                 description: message,
@@ -1248,7 +1250,9 @@ function LoanDetailsView({
         } catch (error: any) {
             const message = error?.message === 'loan_delete_not_allowed'
                 ? t('loans.messages.loanDeleteBlocked')
-                : error?.message || t('loans.messages.loanDeleteFailed')
+                : error?.message === 'loan_delete_online_required'
+                    ? t('loans.messages.loanDeleteOnlineRequired')
+                    : error?.message || t('loans.messages.loanDeleteFailed')
             toast({
                 title: t('common.error') || 'Error',
                 description: message,

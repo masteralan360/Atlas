@@ -41,6 +41,12 @@ const mutationStore = vi.hoisted(() => {
             rows.push({ ...row })
             return row.id
         }),
+        put: vi.fn(async (row: Record<string, any>) => {
+            const index = rows.findIndex((item) => item.id === row.id)
+            if (index >= 0) rows[index] = { ...row }
+            else rows.push({ ...row })
+            return row.id
+        }),
         update: vi.fn(async (id: string, patch: Record<string, any>) => {
             const row = rows.find((item) => item.id === id)
             if (!row) return 0
@@ -61,6 +67,12 @@ const mutationStore = vi.hoisted(() => {
                 if (row) Object.assign(row, changes)
             }
             return updates.length
+        }),
+        bulkDelete: vi.fn(async (ids: string[]) => {
+            for (const id of ids) {
+                const index = rows.findIndex((row) => row.id === id)
+                if (index >= 0) rows.splice(index, 1)
+            }
         })
     }
 
@@ -133,9 +145,11 @@ const mutationStore = vi.hoisted(() => {
             salesOrderAgentAssignments.splice(0)
             table.where.mockClear()
             table.add.mockClear()
+            table.put.mockClear()
             table.update.mockClear()
             table.delete.mockClear()
             table.bulkUpdate.mockClear()
+            table.bulkDelete.mockClear()
             merchantProfilesTable.get.mockClear()
             businessPartnersTable.get.mockClear()
             salesOrdersTable.get.mockClear()
@@ -163,6 +177,97 @@ const workspaceModeMock = vi.hoisted(() => ({
     isLocalWorkspaceMode: vi.fn(() => false)
 }))
 
+const cloudOutboxMock = vi.hoisted(() => {
+    const rows: Array<Record<string, any>> = []
+
+    return {
+        rows,
+        enqueue: vi.fn(async (input: Record<string, any>) => {
+            const existing = rows.find((row) => (
+                row.entityType === input.entityType
+                && row.entityId === input.entityId
+                && row.state === 'pending'
+            ))
+            if (existing) {
+                if (input.operation === 'delete' && existing.operation === 'create') {
+                    rows.splice(rows.indexOf(existing), 1)
+                    return { mutation: null, removedMutationIds: [existing.mutationId], ignoredDerived: false }
+                }
+                existing.operation = input.operation === 'delete'
+                    ? 'delete'
+                    : existing.operation === 'delete' ? 'update' : existing.operation
+                existing.payload = input.operation === 'delete'
+                    ? { ...existing.payload, ...input.payload, id: input.entityId }
+                    : { ...existing.payload, ...input.payload }
+                return { mutation: existing, removedMutationIds: [], ignoredDerived: false }
+            }
+            const mutation = {
+                mutationId: input.mutationId,
+                localSequence: rows.length + 1,
+                workspaceId: input.workspaceId,
+                actorId: null,
+                entityType: input.entityType,
+                entityId: input.entityId,
+                operation: input.operation,
+                mutationKind: 'entity',
+                mutationType: input.operation === 'delete' ? 'entity.delete' : 'entity.upsert',
+                aggregateKey: `${input.entityType}:${input.entityId}`,
+                groupId: null,
+                dependencies: [],
+                payloadSchemaVersion: 1,
+                payloadHash: 'hash',
+                payload: input.payload,
+                baseVersion: null,
+                state: 'pending',
+                attemptCount: 0,
+                leaseOwner: null,
+                leaseExpiresAt: null,
+                nextAttemptAt: null,
+                errorCode: null,
+                errorMessage: null,
+                createdAt: '2026-01-01T00:00:00.000Z',
+                updatedAt: '2026-01-01T00:00:00.000Z',
+                acknowledgedAt: null,
+            }
+            rows.push(mutation)
+            return { mutation, removedMutationIds: [], ignoredDerived: false }
+        }),
+        transition: vi.fn(async (mutationId: string, state: string, options: Record<string, any> = {}) => {
+            const row = rows.find((mutation) => mutation.mutationId === mutationId)
+            if (!row) return null
+            row.state = state
+            row.errorCode = options.errorCode ?? null
+            row.errorMessage = options.errorMessage ?? null
+            return row
+        }),
+        updatePayload: vi.fn(async (
+            mutationId: string,
+            payload: Record<string, unknown>,
+            options: { workspaceId?: string } = {},
+        ) => {
+            const row = rows.find((mutation) => mutation.mutationId === mutationId)
+            if (!row) return null
+            row.payload = payload
+            row.workspaceId = options.workspaceId ?? row.workspaceId
+            row.state = 'pending'
+            row.errorCode = null
+            row.errorMessage = null
+            return row
+        }),
+        readAtomic: vi.fn(async () => ({
+            mutation: null,
+            localEntityPresent: true,
+        })),
+        reset() {
+            rows.splice(0)
+            this.enqueue.mockClear()
+            this.transition.mockClear()
+            this.updatePayload.mockClear()
+            this.readAtomic.mockClear()
+        }
+    }
+})
+
 vi.mock('./database', () => ({
     db: {
         offline_mutations: mutationStore.table,
@@ -184,7 +289,31 @@ vi.mock('@/workspace/workspaceMode', () => ({
     isLocalWorkspaceMode: workspaceModeMock.isLocalWorkspaceMode
 }))
 
-import { addToOfflineMutations, retrySchemaMismatchMutations, retrySyncIntegrityMutations } from './offlineMutations'
+vi.mock('./cloudSyncOutbox', () => ({
+    enqueueCloudSyncMutation: cloudOutboxMock.enqueue,
+    transitionCloudSyncMutation: cloudOutboxMock.transition,
+    updateCloudSyncMutationPayload: cloudOutboxMock.updatePayload,
+    readAtomicCloudSyncEntityMutation: cloudOutboxMock.readAtomic,
+    durableMutationToOfflineMutation: (mutation: Record<string, any>) => ({
+        id: mutation.mutationId,
+        workspaceId: mutation.workspaceId,
+        entityType: mutation.entityType,
+        entityId: mutation.entityId,
+        operation: mutation.operation,
+        payload: mutation.payload,
+        createdAt: mutation.createdAt,
+        status: mutation.state,
+        error: mutation.errorMessage ?? undefined,
+    })
+}))
+
+import {
+    abandonOfflineMutations,
+    addToOfflineMutations,
+    retrySchemaMismatchMutations,
+    retrySyncIntegrityMutations,
+    updateOfflineMutationPayload,
+} from './offlineMutations'
 
 describe('addToOfflineMutations', () => {
     beforeEach(() => {
@@ -192,6 +321,7 @@ describe('addToOfflineMutations', () => {
         idMock.reset()
         workspaceModeMock.isLocalWorkspaceMode.mockReset()
         workspaceModeMock.isLocalWorkspaceMode.mockReturnValue(false)
+        cloudOutboxMock.reset()
     })
 
     it('merges repeated pending updates for the same entity', async () => {
@@ -221,8 +351,7 @@ describe('addToOfflineMutations', () => {
             },
             status: 'pending'
         })
-        expect(mutationStore.table.add).toHaveBeenCalledTimes(1)
-        expect(mutationStore.table.update).toHaveBeenCalledTimes(1)
+        expect(mutationStore.table.put).toHaveBeenCalledTimes(2)
     })
 
     it('keeps an offline create as create when later fields are updated', async () => {
@@ -252,6 +381,24 @@ describe('addToOfflineMutations', () => {
         })
     })
 
+    it('durably queues editable loan metadata instead of treating it as derived state', async () => {
+        await addToOfflineMutations(
+            'loans',
+            'loan-1',
+            'update',
+            { notes: 'Customer requested Friday', version: 2 },
+            'workspace-1'
+        )
+
+        expect(mutationStore.rows).toHaveLength(1)
+        expect(mutationStore.rows[0]).toMatchObject({
+            entityType: 'loans',
+            entityId: 'loan-1',
+            operation: 'update',
+            status: 'pending'
+        })
+    })
+
     it('drops an offline create when the entity is deleted before sync', async () => {
         await addToOfflineMutations(
             'categories',
@@ -270,7 +417,7 @@ describe('addToOfflineMutations', () => {
         )
 
         expect(mutationStore.rows).toHaveLength(0)
-        expect(mutationStore.table.delete).toHaveBeenCalledWith('offline-mutation-1')
+        expect(mutationStore.table.bulkDelete).toHaveBeenCalledWith(['offline-mutation-1'])
     })
 
     it('coalesces a pending update into a delete mutation with entity id in the payload', async () => {
@@ -298,7 +445,82 @@ describe('addToOfflineMutations', () => {
                 id: 'supplier-1'
             }
         })
-        expect(mutationStore.table.update).toHaveBeenCalledTimes(1)
+        expect(mutationStore.table.put).toHaveBeenCalledTimes(2)
+    })
+
+    it('updates SQLite before refreshing an entity mutation projection', async () => {
+        await addToOfflineMutations(
+            'products',
+            'product-durable',
+            'update',
+            { name: 'Before' },
+            'workspace-1',
+        )
+        const mutation = mutationStore.rows[0] as any
+
+        await updateOfflineMutationPayload(mutation, { name: 'After' })
+
+        expect(cloudOutboxMock.updatePayload).toHaveBeenCalledWith(
+            mutation.id,
+            { name: 'After' },
+            {
+                workspaceId: 'workspace-1',
+                userId: null,
+            },
+        )
+        expect(mutationStore.rows[0]).toMatchObject({
+            payload: { name: 'After' },
+            status: 'pending',
+        })
+    })
+
+    it('retires SQLite state before marking a projection abandoned', async () => {
+        await addToOfflineMutations(
+            'products',
+            'product-retired',
+            'update',
+            { name: 'Obsolete' },
+            'workspace-1',
+        )
+        const mutation = mutationStore.rows[0] as any
+
+        await abandonOfflineMutations([mutation], 'Superseded in test.')
+
+        expect(cloudOutboxMock.transition).toHaveBeenCalledWith(
+            mutation.id,
+            'abandoned',
+            expect.objectContaining({
+                errorCode: 'superseded_by_authoritative_write',
+                errorMessage: 'Superseded in test.',
+            }),
+        )
+        expect(mutationStore.rows[0]).toMatchObject({ status: 'abandoned' })
+    })
+
+    it('replaces an immutable command instead of editing its payload', async () => {
+        await addToOfflineMutations(
+            'loan_commands',
+            'loan-command-1',
+            'create',
+            { action: 'create', payload: { amount: 10 } },
+            'workspace-1',
+        )
+        const original = mutationStore.rows[0] as any
+
+        await updateOfflineMutationPayload(original, {
+            action: 'create',
+            payload: { amount: 20 },
+        })
+
+        expect(cloudOutboxMock.updatePayload).not.toHaveBeenCalled()
+        expect(mutationStore.rows).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: original.id, status: 'abandoned' }),
+            expect.objectContaining({
+                id: 'offline-mutation-2',
+                status: 'pending',
+                payload: { action: 'create', payload: { amount: 20 } },
+            }),
+        ]))
     })
 
     it('does not queue mutations for local-only workspaces', async () => {
@@ -313,7 +535,7 @@ describe('addToOfflineMutations', () => {
         )
 
         expect(mutationStore.rows).toHaveLength(0)
-        expect(mutationStore.table.add).not.toHaveBeenCalled()
+        expect(mutationStore.table.put).not.toHaveBeenCalled()
     })
 
     it('queues only stock-adjustment inventory transactions', async () => {

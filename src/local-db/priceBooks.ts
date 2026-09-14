@@ -12,7 +12,11 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { db } from './database'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
 import type { CurrencyCode, PriceBook, PriceBookItem } from './models'
-import { addToOfflineMutations } from './offlineMutations'
+import {
+    abandonOfflineMutations,
+    addToOfflineMutations,
+    updateOfflineMutationPayload
+} from './offlineMutations'
 import { rekeyPriceBookItemReferences } from './priceBookReferences'
 
 export interface PriceBookQueryOptions {
@@ -123,17 +127,22 @@ async function retireQueuedPriceBookMutations(
     throughTimestamp: string,
     matches: (mutation: { entityId: string; payload: Record<string, unknown> }) => boolean
 ) {
-    await db.offline_mutations.toCollection().modify((mutation) => {
-        if (
+    const mutations = await db.offline_mutations
+        .filter((mutation) => (
             mutation.entityType === entityType
-            && (mutation.status === 'pending' || mutation.status === 'failed')
+            && mutation.status !== 'synced'
+            && mutation.status !== 'acknowledged'
+            && mutation.status !== 'abandoned'
+            && mutation.status !== 'leased'
+            && mutation.status !== 'syncing'
             && mutation.createdAt <= throughTimestamp
             && matches(mutation)
-        ) {
-            mutation.status = 'synced'
-            mutation.error = undefined
-        }
-    })
+        ))
+        .toArray()
+    await abandonOfflineMutations(
+        mutations,
+        'Superseded by a successful direct remote write.',
+    )
 }
 
 async function hydratePriceBookTable(
@@ -592,8 +601,13 @@ export async function hardDeletePriceBook(id: string): Promise<void> {
         }
     }
 
-    const staleMutationIds = workspaceMutations
+    const staleMutations = workspaceMutations
         .filter((mutation) => {
+            if (
+                mutation.status === 'synced'
+                || mutation.status === 'acknowledged'
+                || mutation.status === 'abandoned'
+            ) return false
             if (mutation.entityType === 'price_books') {
                 return mutation.entityId === id
             }
@@ -603,28 +617,38 @@ export async function hardDeletePriceBook(id: string): Promise<void> {
             const mutationPriceBookId = mutation.payload.priceBookId ?? mutation.payload.price_book_id
             return itemIds.has(mutation.entityId) || mutationPriceBookId === id
         })
-        .map((mutation) => mutation.id)
     const partnerMutationUpdates = workspaceMutations
-        .filter((mutation) => mutation.entityType === 'business_partners')
+        .filter((mutation) => (
+            mutation.entityType === 'business_partners'
+            && mutation.status !== 'synced'
+            && mutation.status !== 'acknowledged'
+            && mutation.status !== 'abandoned'
+        ))
         .flatMap((mutation) => {
             const priceBookId = mutation.payload.priceBookId ?? mutation.payload.price_book_id
             if (priceBookId !== id) return []
 
             return [{
-                key: mutation.id,
-                changes: {
-                    payload: {
-                        ...mutation.payload,
-                        ...(mutation.payload.priceBookId === id ? { priceBookId: null } : {}),
-                        ...(mutation.payload.price_book_id === id ? { price_book_id: null } : {})
-                    }
+                mutation,
+                payload: {
+                    ...mutation.payload,
+                    ...(mutation.payload.priceBookId === id ? { priceBookId: null } : {}),
+                    ...(mutation.payload.price_book_id === id ? { price_book_id: null } : {})
                 }
             }]
         })
 
+    await abandonOfflineMutations(
+        staleMutations,
+        'Superseded by deletion of the Price Book.',
+    )
+    await Promise.all(partnerMutationUpdates.map(({ mutation, payload }) => (
+        updateOfflineMutationPayload(mutation, payload, { resetToPending: false })
+    )))
+
     await db.transaction(
         'rw',
-        [db.price_books, db.price_book_items, db.business_partners, db.offline_mutations],
+        [db.price_books, db.price_book_items, db.business_partners],
         async () => {
             await db.price_books.delete(id)
             if (itemIds.size > 0) {
@@ -634,12 +658,6 @@ export async function hardDeletePriceBook(id: string): Promise<void> {
                 await Promise.all(assignedPartners.map((partner) => (
                     db.business_partners.update(partner.id, { priceBookId: null })
                 )))
-            }
-            if (staleMutationIds.length > 0) {
-                await db.offline_mutations.bulkDelete(staleMutationIds)
-            }
-            if (partnerMutationUpdates.length > 0) {
-                await db.offline_mutations.bulkUpdate(partnerMutationUpdates)
             }
         }
     )

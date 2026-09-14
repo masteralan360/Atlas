@@ -18,7 +18,7 @@ import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { getAppSettingSync, setAppSetting } from '@/local-db/settings'
 import { decrypt } from '@/lib/encryption'
 import { checkForTauriUpdate } from '@/lib/tauriUpdater'
-import { createUpdateSafetyBackupIfNeeded } from '@/local-db/sqliteBackup'
+import { createUpdateSafetyBackupIfNeeded, downloadWorkspaceBackup, restoreWorkspaceBackup } from '@/local-db/sqliteBackup'
 import { platformService } from '@/services/platformService'
 import { r2Service } from '@/services/r2Service'
 import { Image as ImageIcon } from 'lucide-react'
@@ -36,7 +36,6 @@ import { DEFAULT_THERMAL_ROLL_WIDTH, THERMAL_ROLL_WIDTHS, isLikelyThermalPrinter
 import { registerDeviceTokenIfNeeded } from '@/services/notificationDevice'
 import { useKdsStream } from '@/hooks/useKdsStream'
 import { useUsbBackup } from '@/hooks/useUsbBackup'
-import { downloadDatabaseFile, injectLocalModeDatabaseFile } from '@/local-db/localModeSqlite'
 import { downloadInvoicePdfArchive } from '@/services/invoicePdfExport'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
 import { StorefrontCatalogRulesEditor } from '@/ui/components/marketplace/StorefrontCatalogRulesEditor'
@@ -931,7 +930,7 @@ export function Settings() {
                     }
                 });
 
-                await createUpdateSafetyBackupIfNeeded(user?.workspaceId)
+                await createUpdateSafetyBackupIfNeeded(user?.workspaceId, user?.id)
                 await update.install()
                 setUpdateStatus({ status: 'downloaded' });
             } else {
@@ -1599,15 +1598,28 @@ export function Settings() {
         }
     }
 
+    const handleDownloadWorkspaceBackup = async () => {
+        try {
+            await downloadWorkspaceBackup(user?.workspaceId, user?.id)
+        } catch (error) {
+            console.error('[Settings] Failed to export workspace backup:', error)
+            toast({
+                title: t('common.error'),
+                description: t('settings.workspaceBackup.exportFailed'),
+                variant: 'destructive',
+            })
+        }
+    }
+
     const handleDatabaseInjectionFileChange = (event: ChangeEvent<HTMLInputElement>) => {
         const selectedFile = event.target.files?.[0] ?? null
         event.target.value = ''
         setDatabaseInjectionError(null)
 
         if (!selectedFile) return
-        if (selectedFile.name.toLowerCase() !== 'atlas-local-mode.db') {
+        if (!/\.(atlasbackup|db)$/i.test(selectedFile.name)) {
             setDatabaseFileToInject(null)
-            setDatabaseInjectionError('Select the atlas-local-mode.db file created by Atlas.')
+            setDatabaseInjectionError(t('settings.workspaceBackup.invalidFile'))
             return
         }
 
@@ -1648,14 +1660,14 @@ export function Settings() {
                 try {
                     url = new URL(databaseUrl)
                 } catch {
-                    throw new Error('Enter a valid direct HTTPS link to atlas-local-mode.db.')
+                    throw new Error(t('settings.workspaceBackup.invalidUrl'))
                 }
 
                 if (url.protocol !== 'https:') {
-                    throw new Error('The database link must use HTTPS.')
+                    throw new Error(t('settings.workspaceBackup.httpsRequired'))
                 }
-                if (!url.pathname.toLowerCase().endsWith('/atlas-local-mode.db')) {
-                    throw new Error('The link must point directly to an atlas-local-mode.db file.')
+                if (!/\.(atlasbackup|db)$/i.test(url.pathname)) {
+                    throw new Error(t('settings.workspaceBackup.directFileRequired'))
                 }
 
                 let response: Response
@@ -1665,19 +1677,19 @@ export function Settings() {
                         credentials: 'omit',
                     })
                 } catch {
-                    throw new Error('Could not download the database. Check that the direct link is accessible from Atlas.')
+                    throw new Error(t('settings.workspaceBackup.downloadFailed'))
                 }
                 if (!response.ok) {
-                    throw new Error(`Could not download the database (${response.status}). Check that the link is accessible.`)
+                    throw new Error(t('settings.workspaceBackup.downloadStatusFailed', { status: response.status }))
                 }
 
                 data = new Uint8Array(await response.arrayBuffer())
                 if (data.byteLength === 0) {
-                    throw new Error('The database link returned an empty file.')
+                    throw new Error(t('settings.workspaceBackup.emptyFile'))
                 }
             }
 
-            await injectLocalModeDatabaseFile(data)
+            await restoreWorkspaceBackup(data, user?.workspaceId, user?.id)
 
             // SQLite is authoritative in Local Mode. Remove the old Dexie
             // cache before reloading so it is hydrated only from this backup.
@@ -1688,14 +1700,14 @@ export function Settings() {
             }
 
             toast({
-                title: 'Database injected',
-                description: 'Atlas is reloading from the injected database.',
+                title: t('settings.workspaceBackup.restoredTitle'),
+                description: t('settings.workspaceBackup.restoredDescription'),
             })
             window.setTimeout(() => window.location.reload(), 250)
         } catch (error) {
             console.error('[Settings] Failed to inject local database:', error)
             setDatabaseInjectionError(
-                error instanceof Error ? error.message : 'The database could not be injected. Please try again.',
+                error instanceof Error ? error.message : t('settings.workspaceBackup.restoreFailed'),
             )
             setIsInjectingDatabase(false)
         }
@@ -1853,7 +1865,7 @@ export function Settings() {
             toast({
                 title: t('common.error') || 'Error',
                 description: t('settings.marketplace.localUnsupported', {
-                    defaultValue: 'Marketplace publishing is available only for cloud and hybrid workspaces.'
+                    defaultValue: 'Marketplace publishing is available only for Cloud Sync workspaces.'
                 }),
                 variant: 'destructive'
             })
@@ -1981,7 +1993,7 @@ export function Settings() {
             toast({
                 title: t('common.error') || 'Error',
                 description: t('settings.marketplace.localUnsupported', {
-                    defaultValue: 'Marketplace publishing is available only for cloud and hybrid workspaces.'
+                    defaultValue: 'Marketplace publishing is available only for Cloud Sync workspaces.'
                 }),
                 variant: 'destructive'
             })
@@ -2458,11 +2470,11 @@ export function Settings() {
                             <CardHeader>
                                 <CardTitle className="flex items-center gap-2">
                                     <Cloud className="w-5 h-5" />
-                                    {isLocalMode ? (t('settings.localMode') || 'Local Mode') : t('settings.syncStatus')}
+                                    {isLocalMode ? t('settings.localMode') : t('settings.syncStatus')}
                                 </CardTitle>
                                 <CardDescription>
                                     {isLocalMode
-                                        ? (t('settings.localModeDesc') || 'This workspace stores business data locally on this device and does not use cloud sync.')
+                                        ? t('settings.localModeDesc')
                                         : t('settings.syncDesc')}
                                 </CardDescription>
                             </CardHeader>
@@ -2475,17 +2487,17 @@ export function Settings() {
                                         </p>
                                     </div>
                                     <div>
-                                        <Label className="text-muted-foreground">{isLocalMode ? (t('settings.storageMode') || 'Storage Mode') : t('settings.syncState')}</Label>
-                                        <p className="font-medium capitalize">{isLocalMode ? 'local-only' : syncState}</p>
+                                        <Label className="text-muted-foreground">{isLocalMode ? t('settings.storageMode') : t('settings.syncState')}</Label>
+                                        <p className="font-medium capitalize">{isLocalMode ? t('settings.localOnly') : syncState}</p>
                                     </div>
                                     <div>
-                                        <Label className="text-muted-foreground">{isLocalMode ? (t('settings.workspaceMode') || 'Workspace Mode') : t('settings.pendingChanges')}</Label>
-                                        <p className="font-medium">{isLocalMode ? 'local' : `${pendingCount} items`}</p>
+                                        <Label className="text-muted-foreground">{isLocalMode ? t('settings.workspaceMode') : t('settings.pendingChanges')}</Label>
+                                        <p className="font-medium">{isLocalMode ? t('settings.localMode') : `${pendingCount} items`}</p>
                                     </div>
                                     <div>
-                                        <Label className="text-muted-foreground">{isLocalMode ? (t('settings.cloudSync') || 'Cloud Sync') : t('settings.lastSynced')}</Label>
+                                        <Label className="text-muted-foreground">{isLocalMode ? t('settings.cloudSync') : t('settings.lastSynced')}</Label>
                                         <p className="font-medium">
-                                            {isLocalMode ? (t('settings.disabled') || 'Disabled') : (lastSyncTime ? formatDateTime(lastSyncTime) : t('settings.never'))}
+                                            {isLocalMode ? t('settings.disabled') : (lastSyncTime ? formatDateTime(lastSyncTime) : t('settings.never'))}
                                         </p>
                                     </div>
                                 </div>
@@ -2493,7 +2505,7 @@ export function Settings() {
                                 {!isSupabaseConfigured && (
                                     <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
                                         <p className="text-sm text-amber-500">
-                                            Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to enable cloud sync.
+                                            {t('settings.supabaseNotConfigured')}
                                         </p>
                                     </div>
                                 )}
@@ -2999,7 +3011,7 @@ export function Settings() {
                                         {isLocalMode && (
                                             <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-700 dark:text-amber-300">
                                                 {t('settings.marketplace.localUnsupported', {
-                                                    defaultValue: 'Marketplace publishing is available only for cloud and hybrid workspaces.'
+                                                    defaultValue: 'Marketplace publishing is available only for Cloud Sync workspaces.'
                                                 })}
                                             </div>
                                         )}
@@ -4160,18 +4172,17 @@ export function Settings() {
                                 <CardHeader>
                                   <CardTitle className="flex items-center gap-2">
                                     <Database className="w-5 h-5" />
-                                    Local Database
+                                    {t('settings.workspaceBackup.title')}
                                   </CardTitle>
                                   <CardDescription>
-                                    Download the atlas-local-mode.db SQLite file saved on this device.
-                                    This file contains all your local data and can be opened with any SQLite tool.
+                                    {t('settings.workspaceBackup.description')}
                                   </CardDescription>
                                 </CardHeader>
                                 <CardContent>
                                   <div className="flex flex-col items-start gap-2">
-                                    <Button onClick={downloadDatabaseFile} variant="default" size="sm">
+                                    <Button onClick={() => void handleDownloadWorkspaceBackup()} variant="default" size="sm">
                                       <Download className="mr-2 h-4 w-4" />
-                                      Download Database
+                                      {t('settings.workspaceBackup.download')}
                                     </Button>
                                     <Button
                                       onClick={handleDownloadInvoicePdfs}
@@ -4180,7 +4191,9 @@ export function Settings() {
                                       size="sm"
                                     >
                                       <Download className="mr-2 h-4 w-4" />
-                                      {isInvoicePdfExporting ? 'Preparing PDF Invoices...' : 'Download PDF Invoices'}
+                                      {isInvoicePdfExporting
+                                        ? t('settings.workspaceBackup.preparingPdfs')
+                                        : t('settings.workspaceBackup.downloadPdfs')}
                                     </Button>
                                     <Button
                                       onClick={() => setIsDatabaseInjectionDialogOpen(true)}
@@ -4188,7 +4201,7 @@ export function Settings() {
                                       size="sm"
                                     >
                                       <Upload className="mr-2 h-4 w-4" />
-                                      Inject Database
+                                      {t('settings.workspaceBackup.restore')}
                                     </Button>
                                   </div>
                                 </CardContent>
@@ -4200,20 +4213,19 @@ export function Settings() {
                             >
                               <DialogContent className="sm:max-w-md">
                                 <DialogHeader>
-                                  <DialogTitle>Inject local database</DialogTitle>
+                                  <DialogTitle>{t('settings.workspaceBackup.restoreTitle')}</DialogTitle>
                                   <DialogDescription>
-                                    This permanently replaces this device&apos;s atlas-local-mode.db with the selected backup.
-                                    Atlas will reload immediately after the replacement.
+                                    {t('settings.workspaceBackup.restoreDescription')}
                                   </DialogDescription>
                                 </DialogHeader>
                                 <div className="space-y-4 py-2">
                                   <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-                                    All current Local Mode data on this device will be replaced. Only inject a database you trust.
+                                    {t('settings.workspaceBackup.warning')}
                                   </div>
                                   <input
                                     ref={databaseInjectionInputRef}
                                     type="file"
-                                    accept=".db,application/x-sqlite3,application/vnd.sqlite3"
+                                    accept=".atlasbackup,.db,application/vnd.atlas.workspace-backup+zip,application/x-sqlite3,application/vnd.sqlite3"
                                     className="hidden"
                                     onChange={handleDatabaseInjectionFileChange}
                                   />
@@ -4225,7 +4237,7 @@ export function Settings() {
                                       disabled={isInjectingDatabase}
                                     >
                                       <Upload className="mr-2 h-4 w-4" />
-                                      Select atlas-local-mode.db
+                                      {t('settings.workspaceBackup.select')}
                                     </Button>
                                     {databaseFileToInject && (
                                       <span className="break-all text-sm text-muted-foreground">
@@ -4234,7 +4246,7 @@ export function Settings() {
                                     )}
                                   </div>
                                   <div className="space-y-2 border-t pt-4">
-                                    <Label htmlFor="database-injection-url">Or inject from a direct link</Label>
+                                    <Label htmlFor="database-injection-url">{t('settings.workspaceBackup.urlLabel')}</Label>
                                     <Input
                                       id="database-injection-url"
                                       type="url"
@@ -4244,11 +4256,11 @@ export function Settings() {
                                       spellCheck={false}
                                       value={databaseUrlToInject}
                                       onChange={(event) => handleDatabaseInjectionUrlChange(event.target.value)}
-                                      placeholder="https://…/atlas-local-mode.db"
+                                      placeholder={t('settings.workspaceBackup.urlPlaceholder')}
                                       disabled={isInjectingDatabase}
                                     />
                                     <p className="text-xs text-muted-foreground">
-                                      Paste a direct HTTPS link to an atlas-local-mode.db backup, such as a local-backup link from R2.
+                                      {t('settings.workspaceBackup.urlHelp')}
                                     </p>
                                   </div>
                                   {databaseInjectionError && (
@@ -4264,14 +4276,14 @@ export function Settings() {
                                     onClick={() => handleDatabaseInjectionDialogChange(false)}
                                     disabled={isInjectingDatabase}
                                   >
-                                    Cancel
+                                    {t('settings.workspaceBackup.cancel')}
                                   </Button>
                                   <PressAndHoldButton
                                     variant="destructive"
                                     onComplete={() => void handleInjectDatabase()}
-                                    idleLabel="Press and hold to inject database"
-                                    holdingLabel="Keep holding to replace database..."
-                                    loadingLabel="Injecting database..."
+                                    idleLabel={t('settings.workspaceBackup.holdIdle')}
+                                    holdingLabel={t('settings.workspaceBackup.holdActive')}
+                                    loadingLabel={t('settings.workspaceBackup.holdLoading')}
                                     isLoading={isInjectingDatabase}
                                     disabled={!databaseFileToInject && !databaseUrlToInject.trim()}
                                     durationMs={3000}
@@ -4280,7 +4292,7 @@ export function Settings() {
                               </DialogContent>
                             </Dialog>
 
-                            {/* USB Backup (Desktop + Local/Hybrid mode only) */}
+                            {/* USB Backup (Desktop + Local/Cloud Sync only) */}
                             {usbBackup.isDesktopApp && (isLocalMode || isHybridMode) && (
                               <Card>
                                 <CardHeader>
@@ -4289,8 +4301,7 @@ export function Settings() {
                                     USB Backup
                                   </CardTitle>
                                   <CardDescription>
-                                    Backup atlas-local-mode.db to a USB drive automatically whenever data changes.
-                                    This is a one-way export — the USB copy is never read by the app.
+                                    {t('settings.workspaceBackup.usbDescription')}
                                   </CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-4">

@@ -10,7 +10,8 @@ import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 
 import { db } from "./database";
 import { canAccessBusinessPartnerInLocalCache } from "./businessPartnerPrivacy";
-import { addToOfflineMutations, fetchTableFromSupabase } from "./hooks";
+import { fetchTableFromSupabase } from "./hooks";
+import { addToOfflineMutations, updateOfflineMutationPayload } from "./offlineMutations";
 import { appendPaymentTransaction } from "./payments";
 import type {
   CurrencyCode,
@@ -448,45 +449,41 @@ export async function repairQueuedRentalVehicleYear(
 ) {
   const correctedYear = normalizeRentalVehicleYear(year);
 
-  return db.transaction("rw", db.rental_vehicles, db.offline_mutations, async () => {
-    const [existing, mutation] = await Promise.all([
-      db.rental_vehicles.get(vehicleId),
-      db.offline_mutations.get(mutationId),
-    ]);
+  const [existing, mutation] = await Promise.all([
+    db.rental_vehicles.get(vehicleId),
+    db.offline_mutations.get(mutationId),
+  ]);
 
-    if (!existing || existing.isDeleted || existing.workspaceId !== workspaceId) {
-      throw new Error("Rental vehicle not found");
-    }
-    if (
-      !mutation
-      || mutation.workspaceId !== workspaceId
-      || mutation.entityType !== VEHICLES_TABLE
-      || mutation.entityId !== vehicleId
-      || mutation.status !== "failed"
-      || !isRentalVehicleYearConstraintError(mutation.error)
-    ) {
-      throw new Error("Rental vehicle sync issue was not found");
-    }
+  if (!existing || existing.isDeleted || existing.workspaceId !== workspaceId) {
+    throw new Error("Rental vehicle not found");
+  }
+  if (
+    !mutation
+    || mutation.workspaceId !== workspaceId
+    || mutation.entityType !== VEHICLES_TABLE
+    || mutation.entityId !== vehicleId
+    || (mutation.status !== "failed" && mutation.status !== "rejected")
+    || !isRentalVehicleYearConstraintError(mutation.error)
+  ) {
+    throw new Error("Rental vehicle sync issue was not found");
+  }
 
-    const now = new Date().toISOString();
-    const vehicle: RentalVehicle = {
-      ...existing,
-      year: correctedYear,
-      updatedAt: now,
-      version: existing.version + 1,
-      ...getSyncMetadata(workspaceId, now),
-    };
+  const now = new Date().toISOString();
+  const vehicle: RentalVehicle = {
+    ...existing,
+    year: correctedYear,
+    updatedAt: now,
+    version: existing.version + 1,
+    ...getSyncMetadata(workspaceId, now),
+  };
 
-    await db.rental_vehicles.put(vehicle);
-    await db.offline_mutations.update(mutation.id, {
-      payload: { ...mutation.payload, ...(vehicle as unknown as Record<string, unknown>) },
-      createdAt: now,
-      status: "pending",
-      error: undefined,
-    });
+  await updateOfflineMutationPayload(
+    mutation,
+    { ...mutation.payload, ...(vehicle as unknown as Record<string, unknown>) },
+  );
+  await db.rental_vehicles.put(vehicle);
 
-    return vehicle;
-  });
+  return vehicle;
 }
 
 export async function createRentalRequest(workspaceId: string, input: CreateRentalRequestInput) {

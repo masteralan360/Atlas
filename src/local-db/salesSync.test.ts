@@ -78,7 +78,7 @@ const WORKSPACE_ID = 'local-sales-reconciliation-guard'
 const SALE_ID = 'local-sale-that-must-not-be-deleted'
 const CATEGORY_ID = 'local-category-that-must-not-be-deleted'
 
-describe('sales cloud reconciliation', () => {
+describe('sales Cloud Sync reconciliation', () => {
   beforeAll(async () => {
     await db.open()
   })
@@ -103,7 +103,7 @@ describe('sales cloud reconciliation', () => {
 
   it('does not reconcile local sales when the browser mode snapshot is missing', async () => {
     // With no workspace-mode snapshot, the former code treated this workspace
-    // as cloud. The persisted record must still protect local sales.
+    // as Cloud Sync. The persisted record must still protect local sales.
     await db.workspaces.put({
       id: WORKSPACE_ID,
       workspaceId: WORKSPACE_ID,
@@ -148,8 +148,8 @@ describe('sales cloud reconciliation', () => {
     expect(supabaseMocks.from).not.toHaveBeenCalled()
   })
 
-  it('cancels reconciliation when Local Mode is restored during the cloud request', async () => {
-    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
+  it('cancels reconciliation when Local Mode is restored during the Cloud Sync request', async () => {
+    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'hybrid' })
     await db.sales.put({
       id: SALE_ID,
       workspaceId: WORKSPACE_ID,
@@ -174,7 +174,7 @@ describe('sales cloud reconciliation', () => {
     expect(supabaseMocks.from).toHaveBeenCalledOnce()
   })
 
-  it('requires an explicit cloud or hybrid mode before reconciliation', async () => {
+  it('requires explicit Cloud Sync or legacy cloud authority before reconciliation', async () => {
     expect(hasConfirmedCloudReconciliationAuthority(undefined, undefined)).toBe(false)
     expect(hasConfirmedCloudReconciliationAuthority('cloud', undefined)).toBe(true)
     expect(hasConfirmedCloudReconciliationAuthority('cloud', 'local')).toBe(false)

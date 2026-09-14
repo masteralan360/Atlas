@@ -41,7 +41,7 @@ export default defineConfig(({ mode }) => {
                 // A web deployment never replaces that update gate.
                 filename: 'workbox-sw.js',
                 registerType: 'prompt',
-                includeAssets: ['logo.png', 'pwa-icon.png', 'sql-wasm.wasm'],
+                includeAssets: ['logo.png', 'pwa-icon.png'],
                 manifest: {
                     name: 'Atlas',
                     short_name: 'Atlas',
@@ -177,6 +177,9 @@ export default defineConfig(({ mode }) => {
                 }
             }
         },
+        optimizeDeps: {
+            exclude: ['@sqlite.org/sqlite-wasm']
+        },
         resolve: {
             alias: {
                 '@': path.resolve(__dirname, './src'),
@@ -221,7 +224,11 @@ export default defineConfig(({ mode }) => {
                             return 'vendor-supabase'
                         }
 
-                        if (isPackage('dexie') || isPackage('dexie-react-hooks') || isPackage('sql.js')) {
+                        if (
+                            isPackage('dexie')
+                            || isPackage('dexie-react-hooks')
+                            || isPackage('@sqlite.org/sqlite-wasm')
+                        ) {
                             return 'vendor-db'
                         }
 

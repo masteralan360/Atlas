@@ -8,7 +8,7 @@ interface ConnectionState {
     isOnline: boolean
     /** The last connectivity status reported by the operating system/browser. */
     isOsOnline: boolean
-    /** True while a cloud or hybrid workspace should ask the user to enter offline mode. */
+    /** True while a Cloud Sync workspace should ask the user to enter offline mode. */
     offlineConfirmationRequired: boolean
     isVisible: boolean
     lastActiveAt: number
@@ -140,7 +140,7 @@ export class ConnectionManager {
         this.state.offlineConfirmationRequired = true
         this.stopHeartbeat()
 
-        // Do not change the app's online state here. Cloud and hybrid workspaces
+        // Do not change the app's online state here. Cloud Sync workspaces
         // must first ask the user whether to continue offline.
         this.emit('network-lost')
     }

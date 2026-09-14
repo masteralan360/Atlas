@@ -166,7 +166,7 @@ describe("offline POS stock effects", () => {
     expect(await db.offline_mutations.count()).toBe(0);
   });
 
-  it("blocks Cloud and Hybrid workspaces from applying offline stock effects", async () => {
+  it("blocks Cloud Sync workspaces from applying offline stock effects", async () => {
     writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: "hybrid" });
 
     await expect(applyOfflinePosStockEffects({

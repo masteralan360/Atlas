@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
+import { setNetworkStatus } from '@/lib/network'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 
 import { db } from './database'
@@ -10,6 +11,9 @@ const SALE_ID = '00000000-0000-4000-8000-000000000302'
 const RETURN_ID = '00000000-0000-4000-8000-000000000303'
 
 let createLoanFromPosSale: typeof import('./hooks').createLoanFromPosSale
+let createLoanFromOrder: typeof import('./hooks').createLoanFromOrder
+let cancelOrderLinkedLoan: typeof import('./hooks').cancelOrderLinkedLoan
+let deleteLoan: typeof import('./hooks').deleteLoan
 let markPosLoanCancelledForFullSaleReturn: typeof import('./hooks').markPosLoanCancelledForFullSaleReturn
 let recordLoanPayment: typeof import('./hooks').recordLoanPayment
 
@@ -67,6 +71,9 @@ describe('POS loan full returns', () => {
         installBrowserStorage()
         const loans = await import('./hooks')
         createLoanFromPosSale = loans.createLoanFromPosSale
+        createLoanFromOrder = loans.createLoanFromOrder
+        cancelOrderLinkedLoan = loans.cancelOrderLinkedLoan
+        deleteLoan = loans.deleteLoan
         markPosLoanCancelledForFullSaleReturn = loans.markPosLoanCancelledForFullSaleReturn
         recordLoanPayment = loans.recordLoanPayment
     })
@@ -78,6 +85,7 @@ describe('POS loan full returns', () => {
     })
 
     afterEach(() => {
+        setNetworkStatus(true)
         clearWorkspaceModeSnapshot(WORKSPACE_ID)
     })
 
@@ -204,5 +212,52 @@ describe('POS loan full returns', () => {
             })
         ]))
         expect(transactions.some((transaction) => transaction.paymentMethod === 'loan_adjustment')).toBe(false)
+    })
+
+    it('keeps a loan intact when an offline Cloud Sync delete cannot be represented', async () => {
+        const { loan } = await createLoanFromPosSale(WORKSPACE_ID, {
+            saleId: '00000000-0000-4000-8000-000000000306',
+            borrowerName: 'Offline Delete Customer',
+            borrowerPhone: '07500000306',
+            borrowerAddress: 'Erbil',
+            borrowerNationalId: 'ID-306',
+            principalAmount: 100,
+            settlementCurrency: 'usd',
+            installmentCount: 1,
+            installmentFrequency: 'monthly',
+            firstDueDate: '2026-08-01'
+        })
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'hybrid' })
+        setNetworkStatus(false)
+
+        await expect(deleteLoan(loan.id)).rejects.toThrow('loan_delete_online_required')
+        expect(await db.loans.get(loan.id)).toMatchObject({
+            id: loan.id,
+            isDeleted: false
+        })
+    })
+
+    it('keeps an order loan intact when offline Cloud Sync cancellation cannot be represented', async () => {
+        const { loan } = await createLoanFromOrder(WORKSPACE_ID, {
+            orderId: '00000000-0000-4000-8000-000000000307',
+            orderType: 'sales',
+            borrowerName: 'Offline Cancel Customer',
+            borrowerPhone: '07500000307',
+            borrowerAddress: 'Erbil',
+            borrowerNationalId: 'ID-307',
+            principalAmount: 100,
+            settlementCurrency: 'usd',
+            installmentCount: 1,
+            installmentFrequency: 'monthly',
+            firstDueDate: '2026-08-01'
+        })
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'hybrid' })
+        setNetworkStatus(false)
+
+        await expect(cancelOrderLinkedLoan(loan.id)).rejects.toThrow('loan_delete_online_required')
+        expect(await db.loans.get(loan.id)).toMatchObject({
+            id: loan.id,
+            isDeleted: false
+        })
     })
 })

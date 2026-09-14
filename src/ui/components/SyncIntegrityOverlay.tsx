@@ -43,13 +43,24 @@ export function SyncIntegrityOverlay() {
     const integrityIssues = useLiveQuery(async () => {
         if (!workspaceId) return []
 
-        return db.offline_mutations
-            .where('status')
-            .equals('failed')
-            .filter((mutation) => (
-                mutation.workspaceId === workspaceId && isSyncIntegrityError(mutation.error)
-            ))
-            .sortBy('createdAt')
+        const groups = await Promise.all((['failed', 'blocked', 'conflict', 'rejected'] as const).map((status) =>
+            db.offline_mutations
+                .where('status')
+                .equals(status)
+                .filter((mutation) => (
+                    mutation.workspaceId === workspaceId && (
+                        status === 'blocked'
+                        || status === 'conflict'
+                        || status === 'rejected'
+                        || isSyncIntegrityError(mutation.error)
+                    )
+                ))
+                .toArray()
+        ))
+        return groups.flat().sort((left, right) =>
+            (left.localSequence ?? Number.MAX_SAFE_INTEGER) - (right.localSequence ?? Number.MAX_SAFE_INTEGER)
+            || left.createdAt.localeCompare(right.createdAt)
+        )
     }, [workspaceId]) ?? []
 
     const firstIssue = integrityIssues[0]

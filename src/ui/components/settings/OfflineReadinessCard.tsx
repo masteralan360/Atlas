@@ -61,7 +61,7 @@ export function OfflineReadinessCard() {
     const { toast } = useToast()
     const isOnline = useNetworkStatus()
     const syncProgress = useSyncProgress()
-    const dataMode = features.data_mode ?? user?.workspaceMode ?? 'cloud'
+    const dataMode = features.data_mode ?? user?.workspaceMode ?? 'hybrid'
     const [snapshot, setSnapshot] = useState<OfflineReadinessSnapshot | null>(null)
     const [isChecking, setIsChecking] = useState(true)
     const [dialogOpen, setDialogOpen] = useState(false)
@@ -105,7 +105,7 @@ export function OfflineReadinessCard() {
         const rows: Array<{ phase: OfflinePreparationPhase; icon: typeof ShieldCheck }> = [
             { phase: 'storage', icon: HardDrive }
         ]
-        if (dataMode === 'cloud' || dataMode === 'hybrid') {
+        if (dataMode === 'hybrid') {
             rows.push({ phase: 'data', icon: CloudDownload })
         }
         rows.push({ phase: 'database', icon: Database }, { phase: 'shell', icon: CloudDownload })

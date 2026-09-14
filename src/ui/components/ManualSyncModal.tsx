@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Loader2, CheckCircle2, AlertTriangle, ListTodo } from 'lucide-react'
 import { useAuth } from '@/auth/AuthContext'
 import { useToast } from '@/ui/components/use-toast'
-import { usePendingSyncMutations, clearOfflineMutations } from '@/local-db/hooks'
+import { usePendingSyncMutations } from '@/local-db/hooks'
 import { retrySyncIntegrityMutations } from '@/local-db/offlineMutations'
 import type { OfflineMutation } from '@/local-db/models'
 import { getCapitalPoolConflictFromSyncError, isSyncIntegrityError } from '@/sync/syncErrors'
@@ -108,7 +108,6 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
     const [isSyncing, setIsSyncing] = useState(false)
     const [status, setStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle')
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
-    const [showDiscardConfirm, setShowDiscardConfirm] = useState(false)
     const [selectedMutation, setSelectedMutation] = useState<OfflineMutation | null>(null)
 
     const selectedMutationFields = selectedMutation
@@ -125,7 +124,6 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
     function handleOpenChange(nextOpen: boolean) {
         if (!nextOpen) {
             setSelectedMutation(null)
-            setShowDiscardConfirm(false)
         }
         onOpenChange(nextOpen)
     }
@@ -194,25 +192,6 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
         }
     }
 
-    async function handleDiscard() {
-        try {
-            await clearOfflineMutations()
-            toast({
-                title: t('sync.toastDiscardTitle'),
-                description: t('sync.toastDiscardDesc'),
-                variant: 'default'
-            })
-            setShowDiscardConfirm(false)
-            onOpenChange(false)
-        } catch (_error: any) {
-            toast({
-                title: t('common.error', 'Error'),
-                description: t('sync.discardError'),
-                variant: 'destructive'
-            })
-        }
-    }
-
     return (
         <>
             <Dialog open={open} onOpenChange={isSyncing ? undefined : handleOpenChange}>
@@ -247,11 +226,14 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                                     {pendingMutations.map((mutation) => {
                                         const summary = getMutationSummary(mutation.payload)
                                         const hasSyncIntegrityIssue = isSyncIntegrityError(mutation.error)
+                                            || mutation.status === 'blocked'
+                                            || mutation.status === 'conflict'
+                                            || mutation.status === 'rejected'
                                         const statusLabel = hasSyncIntegrityIssue
                                             ? t('sync.needsAttention', { defaultValue: 'Needs attention' })
-                                            : mutation.status === 'failed'
+                                            : mutation.status === 'failed' || mutation.status === 'retry_wait'
                                                 ? t('sync.retrying')
-                                            : mutation.status === 'syncing'
+                                            : mutation.status === 'syncing' || mutation.status === 'leased'
                                                 ? t('sync.syncing')
                                                 : t('sync.queued')
 
@@ -322,15 +304,6 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                             >
                                 {status === 'success' ? t('common.close', 'Close') : t('common.cancel', 'Cancel')}
                             </Button>
-                            {status === 'idle' && pendingCount > 0 && (
-                                <Button
-                                    variant="destructive"
-                                    onClick={() => setShowDiscardConfirm(true)}
-                                    disabled={isSyncing}
-                                >
-                                    {t('sync.discardBtn')}
-                                </Button>
-                            )}
                         </div>
                         {status !== 'success' && (
                             <Button
@@ -340,28 +313,6 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                                 {isSyncing ? t('sync.syncingBtn') : t('sync.syncNow')}
                             </Button>
                         )}
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
-            <Dialog open={showDiscardConfirm} onOpenChange={setShowDiscardConfirm}>
-                <DialogContent className={cn('sm:max-w-[400px]', contentClassName)}>
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2 text-destructive">
-                            <AlertTriangle className="h-5 w-5" />
-                            {t('sync.confirmDiscard')}
-                        </DialogTitle>
-                        <DialogDescription>
-                            {t('sync.discardDescription', { count: pendingCount })}
-                        </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter className="sm:justify-end gap-2">
-                        <Button variant="ghost" onClick={() => setShowDiscardConfirm(false)}>
-                            {t('common.cancel', 'Cancel')}
-                        </Button>
-                        <Button variant="destructive" onClick={handleDiscard}>
-                            {t('sync.yesDiscard')}
-                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

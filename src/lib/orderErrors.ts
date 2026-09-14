@@ -8,6 +8,10 @@ const ORDER_ERROR_TRANSLATIONS: Record<string, { key: string; fallback: string }
     order_request_requires_approval: {
         key: 'orders.form.errors.orderRequestRequiresApproval',
         fallback: 'This order request must be approved by an admin before the normal order workflow can continue.'
+    },
+    loan_delete_online_required: {
+        key: 'loans.messages.loanDeleteOnlineRequired',
+        fallback: 'Connect to the internet before deleting or cancelling a loan in a Cloud Sync workspace.'
     }
 }
 

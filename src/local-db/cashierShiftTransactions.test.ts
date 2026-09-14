@@ -2,7 +2,8 @@ import 'fake-indexeddb/auto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
-import { setNetworkStatus } from '@/lib/network'
+import { setActiveBusinessUser, setActiveBusinessWorkspace, setNetworkStatus } from '@/lib/network'
+import { installMemorySqliteForTest } from '@/test/sqliteTestConnection'
 
 import { db } from './database'
 import type { CashierShiftAssignment, CashierShiftOccurrence, PaymentTransaction } from './models'
@@ -26,6 +27,7 @@ let terminateCashierShiftOccurrence: typeof import('./paymentAccounts').terminat
 let summarizeCashierShiftTransactions: typeof import('./paymentAccounts').summarizeCashierShiftTransactions
 let startCashierShiftOccurrence: typeof import('./paymentAccounts').startCashierShiftOccurrence
 let updateCashierShiftAssignment: typeof import('./paymentAccounts').updateCashierShiftAssignment
+let releaseSqlite: (() => void) | undefined
 
 function installBrowserStorage() {
   Object.defineProperty(globalThis.URL, 'createObjectURL', {
@@ -71,12 +73,13 @@ function installBrowserStorage() {
     value: {
       visibilityState: 'visible',
       dir: 'ltr',
-      documentElement: { lang: 'en', dir: 'ltr' },
+      documentElement: { lang: 'en', dir: 'ltr', style: {} },
       head: documentHead,
       getElementsByTagName: () => [documentHead],
       createElement: () => ({
         setAttribute: () => undefined,
-        appendChild: () => undefined
+        appendChild: () => undefined,
+        style: {}
       }),
       createTextNode: () => ({}),
       addEventListener: () => undefined,
@@ -86,6 +89,14 @@ function installBrowserStorage() {
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
     value: { onLine: false }
+  })
+  Object.defineProperty(globalThis, 'Element', {
+    configurable: true,
+    value: class Element {}
+  })
+  Object.defineProperty(globalThis, 'HTMLElement', {
+    configurable: true,
+    value: class HTMLElement {}
   })
 }
 
@@ -232,6 +243,8 @@ describe('cashier shift payment attribution', () => {
     installBrowserStorage()
     await db.delete()
     await db.open()
+    setActiveBusinessWorkspace(WORKSPACE_ID)
+    setActiveBusinessUser(CASHIER_ID)
     writeWorkspaceModeSnapshot({
       workspaceId: WORKSPACE_ID,
       dataMode: 'local'
@@ -239,6 +252,10 @@ describe('cashier shift payment attribution', () => {
   })
 
   afterEach(() => {
+    releaseSqlite?.()
+    releaseSqlite = undefined
+    setActiveBusinessWorkspace(null)
+    setActiveBusinessUser(null)
     vi.useRealTimers()
     setNetworkStatus(true)
     clearWorkspaceModeSnapshot(WORKSPACE_ID)
@@ -850,7 +867,7 @@ describe('cashier shift payment attribution', () => {
     })
   })
 
-  it('keeps Cloud and Hybrid starts offline until the server can make the atomic claim', async () => {
+  it('keeps Cloud Sync starts offline until the server can make the atomic claim', async () => {
     const account = await savePaymentAccount(WORKSPACE_ID, {
       name: 'Main Drawer',
       accountType: 'cash_drawer'
@@ -865,7 +882,7 @@ describe('cashier shift payment attribution', () => {
     })
     writeWorkspaceModeSnapshot({
       workspaceId: WORKSPACE_ID,
-      dataMode: 'cloud'
+      dataMode: 'hybrid'
     })
     setNetworkStatus(false)
 
@@ -880,6 +897,7 @@ describe('cashier shift payment attribution', () => {
   })
 
   it('queues an offline login/logout completion locally before sign-out can clear the session', async () => {
+    releaseSqlite = await installMemorySqliteForTest()
     const account = await savePaymentAccount(WORKSPACE_ID, {
       name: 'Main Drawer',
       accountType: 'cash_drawer'
@@ -896,7 +914,7 @@ describe('cashier shift payment attribution', () => {
     })
     writeWorkspaceModeSnapshot({
       workspaceId: WORKSPACE_ID,
-      dataMode: 'cloud'
+      dataMode: 'hybrid'
     })
     setNetworkStatus(false)
 

@@ -2,10 +2,12 @@
 
 ## Workspace data modes
 
-- **Cloud:** Supabase is the source of truth; Dexie is a local cache and offline changes sync when connectivity returns.
-- **Hybrid:** Supabase remains the source of truth; desktop apps also maintain a local SQLite mirror for resilience and recovery.
+- The only user-facing modes are **Cloud Sync** and **Local**. Demo is an internal local-only mode.
+- **Cloud Sync** is stored internally as `hybrid`: Supabase is the source of truth, while each workspace/user has a durable SQLite replica for offline work, the mutation outbox, sync cursors, and recovery metadata.
+- A server-confirmed Cloud Sync entitlement/lock snapshot may authorize offline use for at most 7 days. Its verification timestamp MUST be stored in the scoped SQLite database; after it expires, block all workspace access until online revalidation succeeds. Local and Demo workspaces are exempt.
+- Legacy or missing `cloud` mode values MUST normalize to `hybrid`. Keep compatibility reads for at least 30 days and two production releases, whichever is longer; never write new `cloud` values.
 - **Local:** The device’s SQLite database is the source of truth; business data does not synchronize with Supabase.
-- All modes use Dexie/IndexedDB for responsive local UI reads and writes.
+- Dexie/IndexedDB is a disposable UI projection only. It MUST NOT own unique business data, outbox state, sync cursors, or recovery state, and deleting it must be recoverable from SQLite.
 
 ## Live Exchange Rate Fetch
 

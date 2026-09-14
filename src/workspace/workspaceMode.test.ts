@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
   getWorkspaceDataMode,
+  isCloudSyncWorkspaceMode,
   isDemoWorkspaceMode,
   isLocalWorkspaceMode,
   normalizeWorkspaceDataMode,
   shouldMirrorToSqlite,
+  USER_SELECTABLE_WORKSPACE_DATA_MODES,
   writeWorkspaceModeSnapshot,
 } from './workspaceMode'
 
@@ -37,9 +39,36 @@ describe('workspace data modes', () => {
     installBrowserStorage()
   })
 
-  it('preserves demo as an explicit data mode', () => {
+  it('offers only Cloud Sync and Local to users', () => {
+    expect(USER_SELECTABLE_WORKSPACE_DATA_MODES).toEqual(['hybrid', 'local'])
+    expect(USER_SELECTABLE_WORKSPACE_DATA_MODES).not.toContain('demo')
+    expect(USER_SELECTABLE_WORKSPACE_DATA_MODES).not.toContain('cloud')
+  })
+
+  it('normalizes missing, unknown, and legacy cloud modes to Cloud Sync', () => {
+    expect(normalizeWorkspaceDataMode()).toBe('hybrid')
+    expect(normalizeWorkspaceDataMode('cloud')).toBe('hybrid')
+    expect(normalizeWorkspaceDataMode('unexpected')).toBe('hybrid')
+  })
+
+  it('preserves canonical local, Cloud Sync, and demo modes', () => {
+    expect(normalizeWorkspaceDataMode('local')).toBe('local')
+    expect(normalizeWorkspaceDataMode('hybrid')).toBe('hybrid')
     expect(normalizeWorkspaceDataMode('demo')).toBe('demo')
-    expect(normalizeWorkspaceDataMode('unexpected')).toBe('cloud')
+  })
+
+  it('rewrites a legacy cloud browser snapshot as canonical hybrid', () => {
+    localStorage.setItem('atlas_workspace_mode:legacy-workspace', JSON.stringify({
+      workspaceId: 'legacy-workspace',
+      dataMode: 'cloud',
+    }))
+
+    expect(getWorkspaceDataMode('legacy-workspace')).toBe('hybrid')
+    expect(isCloudSyncWorkspaceMode('legacy-workspace')).toBe(true)
+    expect(JSON.parse(localStorage.getItem('atlas_workspace_mode:legacy-workspace') ?? '{}')).toEqual({
+      workspaceId: 'legacy-workspace',
+      dataMode: 'hybrid',
+    })
   })
 
   it('uses demo as local business storage without enabling SQLite mirroring', () => {

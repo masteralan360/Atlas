@@ -14,6 +14,11 @@ import {
   clearWorkspaceModeSnapshot,
   writeWorkspaceModeSnapshot,
 } from "@/workspace/workspaceMode";
+import {
+  setNetworkStatus,
+  setActiveBusinessUser,
+  setActiveBusinessWorkspace,
+} from "@/lib/network";
 
 import { AtlasDatabase } from "./database";
 import {
@@ -69,8 +74,10 @@ class RecordingSqliteConnection implements SqliteConnection {
   rows = new Map<string, string>();
   activeCashierShiftClaims = new Map<string, string>();
   events: string[] = [];
+  outboxMutationIds = new Set<string>();
   selectQueries: string[] = [];
   failEntityType: string | null = null;
+  failOutbox = false;
   checkpointBusy = false;
   commitGate: Promise<void> | null = null;
 
@@ -82,6 +89,9 @@ class RecordingSqliteConnection implements SqliteConnection {
         throw new Error(`SQLite rejected ${entityType}`);
       }
       this.rows.set(`${entityType}:${String(bindValues[1])}`, String(bindValues[4]));
+    } else if (normalized.startsWith("INSERT INTO SYNC_OUTBOX")) {
+      if (this.failOutbox) throw new Error("SQLite rejected outbox intent");
+      this.outboxMutationIds.add(String(bindValues[0]));
     } else if (normalized.startsWith("DELETE FROM LOCAL_ENTITIES")) {
       this.rows.delete(`${String(bindValues[0])}:${String(bindValues[1])}`);
     } else if (normalized.startsWith("INSERT INTO CASHIER_SHIFT_ACTIVE_CLAIMS")) {
@@ -121,6 +131,7 @@ class RecordingSqliteConnection implements SqliteConnection {
 
   async transaction<T>(task: (connection: SqliteConnection) => Promise<T>) {
     const snapshot = new Map(this.rows);
+    const outboxSnapshot = new Set(this.outboxMutationIds);
     this.events.push("begin");
     try {
       const result = await task(this);
@@ -131,6 +142,7 @@ class RecordingSqliteConnection implements SqliteConnection {
       return result;
     } catch (error) {
       this.rows = snapshot;
+      this.outboxMutationIds = outboxSnapshot;
       this.events.push("rollback");
       throw error;
     }
@@ -200,6 +212,9 @@ describe("local-mode SQLite authority", () => {
     await testDb.open();
     sqlite = new RecordingSqliteConnection();
     setLocalModeSqliteConnectionForTests(sqlite);
+    setActiveBusinessWorkspace(WORKSPACE_ID);
+    setActiveBusinessUser("local-authority-user");
+    setNetworkStatus(true);
     writeWorkspaceModeSnapshot({
       workspaceId: WORKSPACE_ID,
       dataMode: "local",
@@ -207,6 +222,9 @@ describe("local-mode SQLite authority", () => {
   });
 
   afterEach(() => {
+    setActiveBusinessWorkspace(null);
+    setActiveBusinessUser(null);
+    setNetworkStatus(true);
     clearWorkspaceModeSnapshot(WORKSPACE_ID);
     setLocalModeSqliteConnectionForTests();
   });
@@ -358,6 +376,42 @@ describe("local-mode SQLite authority", () => {
     } finally {
       delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
     }
+  });
+
+  it("commits a pending Hybrid entity and its outbox intent in one SQLite transaction", async () => {
+    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: "hybrid" });
+    setNetworkStatus(false);
+    const category = {
+      ...entity("category", "atomic-category"),
+      syncStatus: "pending",
+      lastSyncedAt: null,
+    };
+
+    await testDb.categories.put(category as never);
+
+    expect(sqlite.events).toEqual(["begin", "commit"]);
+    expect(sqlite.rows.has("categories:atomic-category")).toBe(true);
+    expect(sqlite.outboxMutationIds.size).toBe(1);
+  });
+
+  it("rolls back the Hybrid entity when its atomic outbox insert fails", async () => {
+    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: "hybrid" });
+    setNetworkStatus(false);
+    sqlite.failOutbox = true;
+    const category = {
+      ...entity("category", "atomic-category-failure"),
+      syncStatus: "pending",
+      lastSyncedAt: null,
+    };
+
+    await expect(testDb.categories.put(category as never)).rejects.toThrow(
+      "SQLite rejected outbox intent",
+    );
+
+    expect(await testDb.categories.get(category.id)).toBeUndefined();
+    expect(sqlite.rows.has("categories:atomic-category-failure")).toBe(false);
+    expect(sqlite.outboxMutationIds.size).toBe(0);
+    expect(sqlite.events).toEqual(["begin", "rollback"]);
   });
 
   it("backfills timestamp-less sale items while hydrating a legacy local cache", async () => {

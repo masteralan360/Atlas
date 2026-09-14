@@ -1,4 +1,5 @@
-import type { WorkspaceDataMode } from '@/local-db/models'
+import type { WorkspaceDataMode, WorkspaceDataModeInput } from '@/local-db/models'
+import { normalizeWorkspaceDataMode } from '@/workspace/workspaceMode'
 
 interface AuthenticationState {
   hasSession: boolean
@@ -19,7 +20,7 @@ interface RecoveredWorkspaceAssignment {
   workspaceCode?: string
   workspaceName?: string
   isConfigured?: boolean
-  workspaceMode?: WorkspaceDataMode
+  workspaceMode?: WorkspaceDataModeInput
 }
 
 export interface CachedWorkspaceAssignment {
@@ -29,6 +30,16 @@ export interface CachedWorkspaceAssignment {
   workspaceName?: string
   isConfigured?: boolean
   workspaceMode?: WorkspaceDataMode
+}
+
+export function canRestoreWorkspaceRecoveryWithoutSession(
+  recovered: Pick<RecoveredWorkspaceAssignment, 'workspaceId' | 'workspaceMode'> | null | undefined,
+  browserOffline: boolean
+) {
+  if (!recovered?.workspaceId) return false
+
+  const mode = normalizeWorkspaceDataMode(recovered.workspaceMode)
+  return mode === 'local' || mode === 'demo' || browserOffline
 }
 
 export function isAuthenticatedState({
@@ -67,7 +78,9 @@ export function resolveCachedWorkspaceAssignment(options: {
       workspaceCode: recoveredUser.workspaceCode,
       workspaceName: recoveredUser.workspaceName,
       isConfigured: recoveredUser.isConfigured,
-      workspaceMode: recoveredUser.workspaceMode
+      workspaceMode: recoveredUser.workspaceMode === undefined
+        ? undefined
+        : normalizeWorkspaceDataMode(recoveredUser.workspaceMode)
     }
   }
 

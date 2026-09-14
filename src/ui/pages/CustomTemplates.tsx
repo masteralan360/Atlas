@@ -703,7 +703,7 @@ export function CustomTemplates() {
                 <Card>
                     <CardContent className="py-6 text-sm text-muted-foreground">
                         {t('customTemplates.supabaseRequired', {
-                            defaultValue: 'Supabase must be configured before custom templates can be saved in cloud or hybrid mode.'
+                            defaultValue: 'Supabase must be configured before custom templates can be saved in Cloud Sync mode.'
                         })}
                     </CardContent>
                 </Card>

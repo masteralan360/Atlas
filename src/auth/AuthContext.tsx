@@ -6,11 +6,21 @@ import {
   signOutCurrentSupabaseSession
 } from './supabase'
 import { isSupabaseRateLimitedError } from './sessionManager'
-import { isAuthenticatedState, resolveCachedWorkspaceAssignment } from './authenticationState'
+import {
+  canRestoreWorkspaceRecoveryWithoutSession,
+  isAuthenticatedState,
+  resolveCachedWorkspaceAssignment
+} from './authenticationState'
 import type { User, Session } from '@supabase/supabase-js'
-import type { CashierShiftAssignment, CashierShiftOccurrence, UserRole, WorkspaceDataMode } from '@/local-db/models'
+import type {
+  CashierShiftAssignment,
+  CashierShiftOccurrence,
+  UserRole,
+  WorkspaceDataMode,
+  WorkspaceDataModeInput
+} from '@/local-db/models'
 import { connectionManager } from '@/lib/connectionManager'
-import { setActiveBusinessUser, setActiveBusinessWorkspace } from '@/lib/network'
+import { setActiveBusinessUser, setActiveBusinessWorkspace, setWorkspaceSyncProtocolVersion } from '@/lib/network'
 import { clearWorkspaceCache } from '@/workspace/workspaceCache'
 import {
   clearWorkspaceModeSnapshot,
@@ -21,7 +31,7 @@ import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseR
 import { WORKSPACE_USAGE_SKIP_HEADER } from '@/lib/workspaceUsageFetch'
 import { resolveFetchedWorkspaceName } from '@/workspace/workspaceLocalSettings'
 import { db } from '@/local-db/database'
-import { hydrateLocalModeCacheFromSqlite, readLocalProfileWorkspaceState } from '@/local-db/localModeSqlite'
+import { hydrateLocalModeCacheFromSqlite, readLocalProfileWorkspaceState, releaseLocalModeSqliteConnection } from '@/local-db/localModeSqlite'
 import { runDailyBackupIfNeeded, runR2BackupIfNeeded } from '@/local-db/sqliteBackup'
 import { clearLocalDemoWorkspaceData, clearStoredDemoWorkspaces } from '@/demo/demoCleanup'
 import { isDemoWorkspace } from '@/demo/demoConfig'
@@ -127,7 +137,7 @@ const DEMO_USER: AuthUser = {
   workspaceMode: 'local'
 }
 
-const AUTH_WORKSPACE_BOOTSTRAP_COLUMNS = 'name, code, is_configured, data_mode'
+const AUTH_WORKSPACE_BOOTSTRAP_COLUMNS = 'name, code, is_configured, data_mode, sync_protocol_version'
 const ACTIVE_LOCAL_ACCOUNT_PREFIX = 'atlas_active_local_account:'
 
 function parseUserFromSupabase(user: User): AuthUser {
@@ -142,7 +152,7 @@ function parseUserFromSupabase(user: User): AuthUser {
     workspaceName: undefined,
     profileUrl: user.user_metadata?.profile_url,
     isConfigured: user.user_metadata?.is_configured,
-    workspaceMode: 'cloud'
+    workspaceMode: 'hybrid'
   }
 }
 
@@ -378,7 +388,7 @@ function resetWorkspaceAssignment(user: AuthUser, previousWorkspaceId?: string |
     workspaceCode: '',
     workspaceName: undefined,
     isConfigured: undefined,
-    workspaceMode: 'cloud'
+    workspaceMode: 'hybrid'
   }
 }
 
@@ -388,7 +398,8 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
     name?: string | null
     code?: string | null
     is_configured?: boolean | null
-    data_mode?: WorkspaceDataMode | null
+    data_mode?: WorkspaceDataModeInput | null
+    sync_protocol_version?: number | null
   }
 
   type ProfileBootstrapRow = {
@@ -481,7 +492,7 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
     parsedUser.workspaceCode = ''
     parsedUser.workspaceName = undefined
     parsedUser.isConfigured = undefined
-    parsedUser.workspaceMode = 'cloud'
+    parsedUser.workspaceMode = 'hybrid'
   }
 
   if (cachedWorkspaceAssignment) {
@@ -531,14 +542,15 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
       parsedUser.workspaceCode = workspaceRow.code || parsedUser.workspaceCode
       parsedUser.isConfigured = workspaceRow.is_configured ?? parsedUser.isConfigured
       parsedUser.workspaceMode = bootstrapMode
+      setWorkspaceSyncProtocolVersion(parsedUser.workspaceId, workspaceRow.sync_protocol_version)
       writeWorkspaceModeSnapshot({
         workspaceId: parsedUser.workspaceId,
         dataMode: parsedUser.workspaceMode
       })
       if (parsedUser.workspaceMode === 'local' || parsedUser.workspaceMode === 'hybrid') {
-        await hydrateLocalModeCacheFromSqlite(db, parsedUser.workspaceId)
-        void runDailyBackupIfNeeded(parsedUser.workspaceId)
-        void runR2BackupIfNeeded(parsedUser.workspaceId)
+        await hydrateLocalModeCacheFromSqlite(db, parsedUser.workspaceId, parsedUser.id)
+        void runDailyBackupIfNeeded(parsedUser.workspaceId, parsedUser.id)
+        void runR2BackupIfNeeded(parsedUser.workspaceId, parsedUser.id)
       }
       await hydrateAssetProfile(parsedUser)
       return parsedUser
@@ -553,14 +565,15 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
     parsedUser.workspaceName = localWorkspace.name || parsedUser.workspaceName
     parsedUser.isConfigured = localWorkspace.is_configured
     parsedUser.workspaceMode = normalizeWorkspaceDataMode(localWorkspace.data_mode ?? parsedUser.workspaceMode)
+    setWorkspaceSyncProtocolVersion(parsedUser.workspaceId, localWorkspace.syncProtocolVersion)
     writeWorkspaceModeSnapshot({
       workspaceId: parsedUser.workspaceId,
       dataMode: parsedUser.workspaceMode
     })
     if (parsedUser.workspaceMode === 'local' || parsedUser.workspaceMode === 'hybrid') {
-      await hydrateLocalModeCacheFromSqlite(db, parsedUser.workspaceId)
-      void runDailyBackupIfNeeded(parsedUser.workspaceId)
-      void runR2BackupIfNeeded(parsedUser.workspaceId)
+      await hydrateLocalModeCacheFromSqlite(db, parsedUser.workspaceId, parsedUser.id)
+      void runDailyBackupIfNeeded(parsedUser.workspaceId, parsedUser.id)
+      void runR2BackupIfNeeded(parsedUser.workspaceId, parsedUser.id)
     }
     await hydrateAssetProfile(parsedUser)
   }
@@ -587,6 +600,7 @@ function getRecoveredUser(): (AuthUser & { recoveredAt?: number }) | null {
     if (!parsed.sourceWorkspaceId) {
       parsed.sourceWorkspaceId = parsed.workspaceId
     }
+    parsed.workspaceMode = normalizeWorkspaceDataMode(parsed.workspaceMode)
     return parsed
   } catch {
     return null
@@ -617,17 +631,17 @@ function isBrowserOffline() {
 }
 
 /**
- * A cached cloud profile is not proof of authentication while the device is
+ * A cached Cloud Sync profile is not proof of authentication while the device is
  * online. Restoring it after a timeout or a 429 lets background requests run
  * without a bearer token, which then makes the app show a fallback workspace.
  *
  * Local/demo workspaces can always run from their local source of truth. Any
- * cached workspace may be used while the browser is definitely offline.
+ * cached workspace may be restored while the browser is definitely offline;
+ * WorkspaceContext then enforces the durable SQLite entitlement window for
+ * Cloud Sync workspaces.
  */
 function canRestoreWithoutSupabaseSession(recovered: AuthUser | null | undefined) {
-  if (!recovered?.workspaceId) return false
-
-  return recovered.workspaceMode === 'local' || recovered.workspaceMode === 'demo' || isBrowserOffline()
+  return canRestoreWorkspaceRecoveryWithoutSession(recovered, isBrowserOffline())
 }
 
 function shouldKeepRecoveryForTemporaryAuthFailure(error: unknown) {
@@ -693,7 +707,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Supabase can emit INITIAL_SESSION with a null session while its
         // automatic refresh is still being throttled. Keep recovery metadata
         // for a later offline session or fresh sign-in, but do not treat it as
-        // an authenticated cloud session.
+        // an authenticated Cloud Sync session.
         if (event === 'INITIAL_SESSION') {
           setUser(null)
           setIsLoading(false)
@@ -768,19 +782,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const recovered = getRecoveredUser()
 
           if (canRestoreWithoutSupabaseSession(recovered)) {
-            const maxAge = 7 * 24 * 60 * 60 * 1000
-            const isStale = recovered?.recoveredAt && Date.now() - recovered.recoveredAt > maxAge
-
-            if (recovered && !isStale) {
+            if (recovered) {
               console.log('[Auth] Restoring offline/local session from recovery bridge...')
               setUser(recovered)
               writeWorkspaceModeSnapshot({
                 workspaceId: recovered.workspaceId,
                 dataMode: recovered.workspaceMode
               })
-            } else if (isStale) {
-              console.log('[Auth] Recovery bridge is stale (>7 days), clearing.')
-              clearRecovery()
             }
           } else {
             await clearStoredDemoWorkspacesBestEffort()
@@ -1296,6 +1304,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch (cleanupError) {
           console.error('[Auth] Failed to clear local demo data:', cleanupError)
         }
+      }
+
+      if (signingOutUser?.workspaceId && signingOutUser.id) {
+        await releaseLocalModeSqliteConnection({
+          workspaceId: signingOutUser.workspaceId,
+          userId: signingOutUser.id,
+        })
       }
 
       setUser(null)

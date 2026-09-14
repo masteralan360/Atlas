@@ -1,7 +1,7 @@
-import type { WorkspaceDataMode } from '@/local-db/models'
+import type { WorkspaceDataModeInput } from '@/local-db/models'
 
 function usesLocallyAuthoritativeLogo(
-  ...modes: Array<WorkspaceDataMode | null | undefined>
+  ...modes: Array<WorkspaceDataModeInput | null | undefined>
 ) {
   return modes.some((mode) => mode === 'local' || mode === 'hybrid')
 }
@@ -12,8 +12,8 @@ function usesLocallyAuthoritativeLogo(
  * blank the logo in memory or overwrite the SQLite source of truth.
  */
 export function resolveFetchedWorkspaceLogo(input: {
-  workspaceMode?: WorkspaceDataMode | null
-  persistedWorkspaceMode?: WorkspaceDataMode | null
+  workspaceMode?: WorkspaceDataModeInput | null
+  persistedWorkspaceMode?: WorkspaceDataModeInput | null
   persistedLogoUrl?: string | null
   cachedLogoUrl?: string | null
   currentLogoUrl?: string | null
@@ -36,8 +36,8 @@ export function resolveFetchedWorkspaceLogo(input: {
  * clear the logo and must be persisted as-is.
  */
 export function resolvePersistedWorkspaceLogo(input: {
-  nextWorkspaceMode?: WorkspaceDataMode | null
-  existingWorkspaceMode?: WorkspaceDataMode | null
+  nextWorkspaceMode?: WorkspaceDataModeInput | null
+  existingWorkspaceMode?: WorkspaceDataModeInput | null
   nextLogoUrl?: string | null
   existingLogoUrl?: string | null
 }) {

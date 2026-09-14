@@ -146,6 +146,8 @@ export async function refreshRestaurantPosTicketsFromSupabase(workspaceId?: stri
             && mutation.operation === 'delete'
             && mutation.payload.hardDelete === true
             && mutation.status !== 'synced'
+            && mutation.status !== 'acknowledged'
+            && mutation.status !== 'abandoned'
         ))
         .map((mutation) => mutation.entityId))
     const tickets = (data ?? [])

@@ -15,7 +15,7 @@ import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { getLoanDetailsPath } from '@/lib/loanPresentation'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
-import { adjustInventoryQuantity, applySalesOrderReturnQuantities, appendPaymentTransaction, commitStockBatchAllocations, db, getActiveTravelBookingPayments, markPosLoanCancelledForFullSaleReturn, processSaleProductExchange, recordLoanPayment, resolveReturnStorageId, restoreStockBatchAllocations, splitStockBatchAllocationsForReturn, useLoanBySaleId, useLoanInstallments, useLoanPayments, useLoans, usePriceBookCatalogState, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useInventory, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useDeliveryMerchantProfiles, useDeliveryShipments, useRentalContracts, useRentalVehicles, toUISale, toUISaleFromOrder, toUISaleFromExchangeTransaction, toUISaleFromRealEstateCommissionTransaction, toUISaleFromPaidClinicalAppointment, toUISaleFromActivityTransaction, toUISaleFromDeliveryShipment, toUISaleFromRentalContract, toUISaleFromTravelBookingPayment, type CurrencyCode, type Loan, type PaymentAccount, type SaleReturn as LocalSaleReturn, type SaleReturnItem as LocalSaleReturnItem, type StockBatchAllocation, type WorkspacePaymentMethod } from '@/local-db'
+import { addToOfflineMutations, adjustInventoryQuantity, applySalesOrderReturnQuantities, appendPaymentTransaction, commitStockBatchAllocations, db, getActiveTravelBookingPayments, markPosLoanCancelledForFullSaleReturn, processSaleProductExchange, recordLoanPayment, resolveReturnStorageId, restoreStockBatchAllocations, splitStockBatchAllocationsForReturn, useLoanBySaleId, useLoanInstallments, useLoanPayments, useLoans, usePriceBookCatalogState, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useInventory, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useDeliveryMerchantProfiles, useDeliveryShipments, useRentalContracts, useRentalVehicles, toUISale, toUISaleFromOrder, toUISaleFromExchangeTransaction, toUISaleFromRealEstateCommissionTransaction, toUISaleFromPaidClinicalAppointment, toUISaleFromActivityTransaction, toUISaleFromDeliveryShipment, toUISaleFromRentalContract, toUISaleFromTravelBookingPayment, type CurrencyCode, type Loan, type PaymentAccount, type SaleReturn as LocalSaleReturn, type SaleReturnItem as LocalSaleReturnItem, type StockBatchAllocation, type WorkspacePaymentMethod } from '@/local-db'
 import { persistLoanAggregateRpcResult } from '@/local-db/loanTransactions'
 import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
 import { useWorkspace } from '@/workspace'
@@ -1720,16 +1720,13 @@ export function Sales() {
             const shouldQueueOfflineReturn = false
 
             const queueOfflineReturnMutation = async (payload: Record<string, unknown>) => {
-                await db.offline_mutations.add({
-                    id: crypto.randomUUID(),
-                    workspaceId: activeWorkspace?.id || saleToReturn.workspace_id,
-                    entityType: 'sales',
-                    entityId: saleToReturn.id,
-                    operation: 'update',
+                await addToOfflineMutations(
+                    'sales',
+                    saleToReturn.id,
+                    'update',
                     payload,
-                    status: 'pending',
-                    createdAt: new Date().toISOString()
-                })
+                    activeWorkspace?.id || saleToReturn.workspace_id,
+                )
             }
 
             if (isLocalMode || shouldQueueOfflineReturn) {
@@ -2335,16 +2332,13 @@ export function Sales() {
 
                     if (!navigator.onLine) {
                         console.error('Supabase update failed, falling back to offline sync:', normalized)
-                        await db.offline_mutations.add({
-                            id: crypto.randomUUID(),
-                            workspaceId: activeWorkspace?.id || selectedSaleForNote.workspace_id,
-                            entityType: 'sales',
-                            entityId: selectedSaleForNote.id,
-                            operation: 'update',
-                            payload: { notes: note, updated_at: now },
-                            status: 'pending',
-                            createdAt: now
-                        })
+                        await addToOfflineMutations(
+                            'sales',
+                            selectedSaleForNote.id,
+                            'update',
+                            { notes: note, updated_at: now },
+                            activeWorkspace?.id || selectedSaleForNote.workspace_id,
+                        )
 
                         await db.sales.update(selectedSaleForNote.id, {
                             notes: note,
@@ -2384,16 +2378,13 @@ export function Sales() {
                     syncStatus: 'pending'
                 })
 
-                await db.offline_mutations.add({
-                    id: crypto.randomUUID(),
-                    workspaceId: activeWorkspace?.id || selectedSaleForNote.workspace_id,
-                    entityType: 'sales',
-                    entityId: selectedSaleForNote.id,
-                    operation: 'update',
-                    payload: { notes: note, updated_at: now },
-                    status: 'pending',
-                    createdAt: now
-                })
+                await addToOfflineMutations(
+                    'sales',
+                    selectedSaleForNote.id,
+                    'update',
+                    { notes: note, updated_at: now },
+                    activeWorkspace?.id || selectedSaleForNote.workspace_id,
+                )
 
                 toast({
                     title: t('sales.notes.saved') || 'Note Saved',

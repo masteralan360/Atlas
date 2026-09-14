@@ -4,7 +4,8 @@ CREATE TABLE public.workspaces (
   code text NOT NULL DEFAULT generate_workspace_code(),
   plan text NOT NULL DEFAULT 'basic'::text,
   created_at timestamp with time zone NULL DEFAULT now(),
-  data_mode text NOT NULL DEFAULT 'cloud'::text,
+  data_mode text NOT NULL DEFAULT 'hybrid'::text,
+  sync_protocol_version integer NOT NULL DEFAULT 0,
   allow_pos boolean NOT NULL DEFAULT false,
   allow_invoices boolean NOT NULL DEFAULT false,
   is_configured boolean NOT NULL DEFAULT false,
@@ -39,7 +40,8 @@ CREATE TABLE public.workspaces (
   sales_agent_commission_mode_changed_at timestamp with time zone NOT NULL DEFAULT now(),
   sales_agent_commission_mode_changed_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   ledger_dashboard_config jsonb NOT NULL DEFAULT '{"version":1,"hiddenGroups":[],"groupOrder":["operating","borrowing","lending"]}'::jsonb,
-  CONSTRAINT workspaces_data_mode_check CHECK ((data_mode::text) = ANY (ARRAY['cloud'::text, 'local'::text, 'hybrid'::text, 'demo'::text])),
+  CONSTRAINT workspaces_data_mode_check CHECK ((data_mode::text) = ANY (ARRAY['local'::text, 'hybrid'::text, 'demo'::text])),
+  CONSTRAINT workspaces_sync_protocol_version_check CHECK (sync_protocol_version BETWEEN 0 AND 1),
   CONSTRAINT workspaces_plan_check CHECK (plan = ANY (ARRAY['basic'::text, 'business'::text, 'enterprise'::text])),
   CONSTRAINT workspaces_sales_agent_commission_sheet_type_check CHECK (sales_agent_commission_sheet_type IN ('normal', 'tier_based')),
   CONSTRAINT workspaces_sales_agent_commission_mode_check CHECK (sales_agent_commission_mode IN ('payable', 'tracked')),
@@ -53,7 +55,7 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
   IF NEW.data_mode IS DISTINCT FROM OLD.data_mode AND COALESCE(OLD.is_configured, false) THEN
-    IF COALESCE(OLD.data_mode::text, 'cloud') = 'local' OR COALESCE(NEW.data_mode::text, 'cloud') = 'local' THEN
+    IF COALESCE(OLD.data_mode::text, 'hybrid') = 'local' OR COALESCE(NEW.data_mode::text, 'hybrid') = 'local' THEN
       RAISE EXCEPTION 'Workspace mode cannot enter or leave local mode after initial configuration';
     END IF;
   END IF;

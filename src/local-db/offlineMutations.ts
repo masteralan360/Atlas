@@ -1,13 +1,168 @@
 import { generateId } from '@/lib/utils'
 import { isSchemaMismatchError, isSyncIntegrityError } from '@/sync/syncErrors'
+import { getSyncRegistration } from '@/sync/syncRegistry'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { getActiveBusinessUserId } from '@/lib/network'
 
+import {
+    durableMutationToOfflineMutation,
+    enqueueCloudSyncMutation,
+    readAtomicCloudSyncEntityMutation,
+    transitionCloudSyncMutation,
+    updateCloudSyncMutationPayload,
+} from './cloudSyncOutbox'
 import { db } from './database'
+import { LOCAL_MODE_SQLITE_TABLES } from './localModeSqlite'
 import type { BusinessPartner, DeliveryMerchantProfile, OfflineMutation } from './models'
 
-const LOCAL_ONLY_ENTITY_TYPES = new Set<OfflineMutation['entityType']>([
-    'inventory_transfer_transactions'
-])
+type ProjectedMutationTransition = 'pending' | 'acknowledged' | 'abandoned'
+
+async function promoteLegacyProjectionMutation(mutation: OfflineMutation) {
+    const result = await enqueueCloudSyncMutation({
+        mutationId: mutation.id,
+        workspaceId: mutation.workspaceId,
+        entityType: mutation.entityType,
+        entityId: mutation.entityId,
+        operation: mutation.operation,
+        payload: mutation.payload,
+        actorId: mutation.actorId,
+        aggregateKey: mutation.aggregateKey,
+        groupId: mutation.groupId,
+        dependencies: mutation.dependencies,
+        baseVersion: mutation.baseVersion,
+        createdAt: mutation.createdAt,
+    })
+
+    if (result.removedMutationIds.length > 0) {
+        await db.offline_mutations.bulkDelete(result.removedMutationIds)
+    }
+    if (result.mutation) {
+        await db.offline_mutations.put(durableMutationToOfflineMutation(result.mutation))
+    }
+
+    return result.mutation
+}
+
+/**
+ * Update the durable mutation first, then refresh its disposable Dexie
+ * projection. During the compatibility window, a legacy projection-only row
+ * is promoted into SQLite before it is edited.
+ */
+export async function updateOfflineMutationPayload(
+    mutation: OfflineMutation,
+    payload: Record<string, unknown>,
+    options: { workspaceId?: string; resetToPending?: boolean } = {},
+): Promise<OfflineMutation | null> {
+    const registration = getSyncRegistration(mutation.entityType)
+    // `syncing` is a legacy Dexie-only state recovered as pending. Only a
+    // durable lease represents an immutable attempt currently in flight.
+    const isInFlight = mutation.status === 'leased'
+    if (registration.kind === 'command' || isInFlight) {
+        if (!isInFlight) {
+            await abandonOfflineMutations(
+                [mutation],
+                'Replaced by a newer immutable command payload.',
+            )
+        }
+        const result = await enqueueCloudSyncMutation({
+            mutationId: generateId(),
+            workspaceId: options.workspaceId ?? mutation.workspaceId,
+            entityType: mutation.entityType,
+            entityId: mutation.entityId,
+            operation: mutation.operation,
+            payload,
+            actorId: mutation.actorId,
+            aggregateKey: mutation.aggregateKey,
+            groupId: mutation.groupId,
+            dependencies: isInFlight
+                ? [...new Set([...(mutation.dependencies ?? []), mutation.id])]
+                : mutation.dependencies,
+            baseVersion: mutation.baseVersion,
+        })
+        if (!result.mutation) {
+            throw new Error(`Replacement mutation for ${mutation.id} was not persisted.`)
+        }
+        const projection = durableMutationToOfflineMutation(result.mutation)
+        await db.offline_mutations.put(projection)
+        return projection
+    }
+
+    const scopedOptions = {
+        ...options,
+        workspaceId: options.workspaceId ?? mutation.workspaceId,
+        userId: mutation.actorId ?? getActiveBusinessUserId(),
+    }
+    let durable = await updateCloudSyncMutationPayload(mutation.id, payload, scopedOptions)
+    if (!durable) {
+        const promoted = await promoteLegacyProjectionMutation(mutation)
+        if (!promoted) {
+            // Derived rows are intentionally not outbox records. Removing this
+            // obsolete projection cannot discard a valid durable mutation.
+            await db.offline_mutations.delete(mutation.id)
+            return null
+        }
+        durable = await updateCloudSyncMutationPayload(promoted.mutationId, payload, scopedOptions)
+        if (promoted.mutationId !== mutation.id) {
+            await db.offline_mutations.delete(mutation.id)
+        }
+    }
+    if (!durable) {
+        throw new Error(`Durable mutation ${mutation.id} could not be updated.`)
+    }
+    const projection = durableMutationToOfflineMutation(durable)
+    await db.offline_mutations.put(projection)
+    return projection
+}
+
+async function transitionOfflineMutations(
+    mutations: readonly OfflineMutation[],
+    disposition: ProjectedMutationTransition,
+    reason?: string,
+): Promise<void> {
+    for (const mutation of mutations) {
+        let durable = await transitionCloudSyncMutation(mutation.id, disposition, {
+            errorCode: disposition === 'abandoned' ? 'superseded_by_authoritative_write' : null,
+            errorMessage: disposition === 'abandoned' ? reason ?? 'Superseded by an authoritative write.' : null,
+            workspaceId: mutation.workspaceId,
+            userId: mutation.actorId ?? getActiveBusinessUserId(),
+        })
+        if (!durable) {
+            const promoted = await promoteLegacyProjectionMutation(mutation)
+            if (!promoted) {
+                await db.offline_mutations.delete(mutation.id)
+                continue
+            }
+            durable = await transitionCloudSyncMutation(promoted.mutationId, disposition, {
+                errorCode: disposition === 'abandoned' ? 'superseded_by_authoritative_write' : null,
+                errorMessage: disposition === 'abandoned' ? reason ?? 'Superseded by an authoritative write.' : null,
+                workspaceId: promoted.workspaceId,
+                userId: promoted.actorId ?? getActiveBusinessUserId(),
+            })
+            if (promoted.mutationId !== mutation.id) {
+                await db.offline_mutations.delete(mutation.id)
+            }
+        }
+        if (!durable) {
+            throw new Error(`Durable mutation ${mutation.id} could not be retired.`)
+        }
+        await db.offline_mutations.put(durableMutationToOfflineMutation(durable))
+    }
+}
+
+/** Stop queued mutations from replaying after a newer authoritative write. */
+export async function abandonOfflineMutations(
+    mutations: readonly OfflineMutation[],
+    reason?: string,
+): Promise<void> {
+    await transitionOfflineMutations(mutations, 'abandoned', reason)
+}
+
+/** Record compatibility-path mutations whose command already succeeded remotely. */
+export async function acknowledgeOfflineMutations(
+    mutations: readonly OfflineMutation[],
+): Promise<void> {
+    await transitionOfflineMutations(mutations, 'acknowledged')
+}
 
 function isCloudInventoryTransactionMutation(
     entityType: OfflineMutation['entityType'],
@@ -92,7 +247,7 @@ async function repairSalesOrderAgentAssignmentWorkspaceMutations(
                 lastSyncedAt: null,
             })
         }
-        await db.offline_mutations.update(mutation.id, { workspaceId, payload })
+        await updateOfflineMutationPayload(mutation, payload, { workspaceId })
     }
 
     return unrepairedMutationIds
@@ -209,52 +364,59 @@ export async function addToOfflineMutations(
 ): Promise<void> {
     if (
         isLocalWorkspaceMode(workspaceId)
-        || LOCAL_ONLY_ENTITY_TYPES.has(entityType)
         || !isCloudInventoryTransactionMutation(entityType, payload)
     ) {
         return
     }
 
-    const existing = await db.offline_mutations
-        .where('[entityType+entityId+status]')
-        .equals([entityType, entityId, 'pending'])
-        .first()
-
-    if (existing) {
-        if (operation === 'delete') {
-            if (existing.operation === 'create') {
-                await db.offline_mutations.delete(existing.id)
-                return
-            }
-
-            await db.offline_mutations.update(existing.id, {
-                operation: 'delete',
-                payload: { ...payload, id: entityId },
-                createdAt: new Date().toISOString()
-            })
+    const registration = getSyncRegistration(entityType)
+    const isAtomicallyMirroredEntity = registration.kind === 'entity'
+        && (LOCAL_MODE_SQLITE_TABLES as readonly string[]).includes(entityType)
+    if (isAtomicallyMirroredEntity) {
+        const atomic = await readAtomicCloudSyncEntityMutation(
+            workspaceId,
+            entityType,
+            entityId,
+        )
+        if (atomic.mutation) {
+            await db.offline_mutations.put(durableMutationToOfflineMutation(atomic.mutation))
             return
         }
-
-        if (operation === 'update' || operation === 'create') {
-            await db.offline_mutations.update(existing.id, {
-                operation: existing.operation === 'delete' ? 'update' : existing.operation,
-                payload: { ...existing.payload, ...payload },
-                createdAt: new Date().toISOString()
-            })
+        if (operation === 'delete' && !atomic.localEntityPresent) {
+            const staleProjectionIds = await db.offline_mutations
+                .where('entityType')
+                .equals(entityType)
+                .filter((mutation) => (
+                    mutation.workspaceId === workspaceId
+                    && mutation.entityId === entityId
+                    && mutation.status !== 'acknowledged'
+                    && mutation.status !== 'abandoned'
+                ))
+                .primaryKeys()
+            if (staleProjectionIds.length > 0) {
+                await db.offline_mutations.bulkDelete(staleProjectionIds as string[])
+            }
             return
         }
     }
 
-    await db.offline_mutations.add({
-        id: generateId(),
+    // SQLite is the local save boundary. Dexie receives only a projection after
+    // the durable entity/outbox transaction has committed.
+    const result = await enqueueCloudSyncMutation({
+        mutationId: generateId(),
         workspaceId,
         entityType,
         entityId,
         operation,
         payload,
-        createdAt: new Date().toISOString(),
-        status: 'pending'
     })
+
+    if (result.removedMutationIds.length > 0) {
+        await db.offline_mutations.bulkDelete(result.removedMutationIds)
+    }
+    if (result.mutation) {
+        await db.offline_mutations.put(durableMutationToOfflineMutation(result.mutation))
+    }
 }
 
 /**
@@ -262,21 +424,17 @@ export async function addToOfflineMutations(
  * can explicitly retry them after the database migration has been deployed.
  */
 export async function retrySchemaMismatchMutations(workspaceId: string): Promise<number> {
-    const rows = await db.offline_mutations
-        .where('status')
-        .equals('failed')
-        .filter((mutation) => mutation.workspaceId === workspaceId && isSchemaMismatchError(mutation.error))
-        .toArray()
+    const rows = (await Promise.all(
+        (['failed', 'rejected'] as const).map((status) => db.offline_mutations
+            .where('status')
+            .equals(status)
+            .filter((mutation) => mutation.workspaceId === workspaceId && isSchemaMismatchError(mutation.error))
+            .toArray())
+    )).flat()
 
     if (rows.length === 0) return 0
 
-    await db.offline_mutations.bulkUpdate(rows.map((mutation) => ({
-        key: mutation.id,
-        changes: {
-            status: 'pending' as const,
-            error: undefined
-        }
-    })))
+    await transitionOfflineMutations(rows, 'pending')
 
     return rows.length
 }
@@ -286,11 +444,13 @@ export async function retrySchemaMismatchMutations(workspaceId: string): Promise
  * to retry. They must never be picked up by background retry loops.
  */
 export async function retrySyncIntegrityMutations(workspaceId: string): Promise<number> {
-    const rows = await db.offline_mutations
-        .where('status')
-        .equals('failed')
-        .filter((mutation) => mutation.workspaceId === workspaceId && isSyncIntegrityError(mutation.error))
-        .toArray()
+    const rows = (await Promise.all(
+        (['failed', 'conflict', 'rejected'] as const).map((status) => db.offline_mutations
+            .where('status')
+            .equals(status)
+            .filter((mutation) => mutation.workspaceId === workspaceId && isSyncIntegrityError(mutation.error))
+            .toArray())
+    )).flat()
 
     if (rows.length === 0) return 0
 
@@ -299,13 +459,7 @@ export async function retrySyncIntegrityMutations(workspaceId: string): Promise<
     const unrepairedAssignmentMutationIds = await repairSalesOrderAgentAssignmentWorkspaceMutations(rows)
     const rowsToRetry = rows.filter((mutation) => !unrepairedAssignmentMutationIds.has(mutation.id))
 
-    await db.offline_mutations.bulkUpdate(rowsToRetry.map((mutation) => ({
-        key: mutation.id,
-        changes: {
-            status: 'pending' as const,
-            error: undefined
-        }
-    })))
+    await transitionOfflineMutations(rowsToRetry, 'pending')
 
     return rowsToRetry.length
 }

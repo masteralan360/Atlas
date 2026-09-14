@@ -30,11 +30,16 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
 import {
+  abandonOfflineMutations,
+  addToOfflineMutations,
+  updateOfflineMutationPayload,
+} from './offlineMutations'
+import {
   getSalesOrderCommissionMode,
   isPayableCommissionEntry,
   isTrackedCommissionEntry,
 } from './commissionMode'
-import { addToOfflineMutations, fetchTableFromSupabase } from './hooks'
+import { fetchTableFromSupabase } from './hooks'
 import { getOrderBalanceAmount } from './orderInstallments'
 import {
     assertPaymentAccountTransactionCanBeAppliedLocally,
@@ -53,6 +58,7 @@ import type {
     LoanPaymentMethod,
     InstallmentSale,
   InstallmentSaleInstallment,
+    OfflineMutation,
     OrderInstallment,
     OrderType,
     PaymentObligation,
@@ -1611,45 +1617,48 @@ export async function synchronizeOrderPaymentReferences(
       (mutation) =>
         mutation.entityType === 'payment_transactions' &&
         mutation.status !== 'synced' &&
+        mutation.status !== 'acknowledged' &&
+        mutation.status !== 'abandoned' &&
         updatedRowsById.has(mutation.entityId)
     )
     .toArray()
 
-  await db.transaction('rw', [db.payment_transactions, db.offline_mutations], async () => {
-    await db.payment_transactions.bulkPut(updatedRows)
-    await Promise.all(
-      pendingPaymentMutations.map((mutation) => {
-        const transaction = updatedRowsById.get(mutation.entityId)
-        if (!transaction) return Promise.resolve()
+  const refreshedPendingPaymentMutations = (await Promise.all(
+    pendingPaymentMutations.map((mutation) => {
+      const transaction = updatedRowsById.get(mutation.entityId)
+      if (!transaction) return null
 
-        return db.offline_mutations.update(mutation.id, {
-          payload: {
-            ...mutation.payload,
-            referenceLabel,
-            updatedAt: transaction.updatedAt,
-            version: transaction.version,
-            syncStatus: transaction.syncStatus,
-            lastSyncedAt: transaction.lastSyncedAt
-          }
-        })
-      })
-    )
-  })
+      return updateOfflineMutationPayload(mutation, {
+        ...mutation.payload,
+        referenceLabel,
+        updatedAt: transaction.updatedAt,
+        version: transaction.version,
+        syncStatus: transaction.syncStatus,
+        lastSyncedAt: transaction.lastSyncedAt
+      }, { resetToPending: false })
+    })
+  )).filter((mutation): mutation is OfflineMutation => mutation != null)
+  await db.payment_transactions.bulkPut(updatedRows)
 
   if (!shouldUseCloudBusinessData(workspaceId)) return updatedRows
   if (options?.deferRemoteSync && pendingPaymentMutations.length > 0) return updatedRows
 
+  const alreadyQueuedEntityIds = new Set(
+    refreshedPendingPaymentMutations.map((mutation) => mutation.entityId),
+  )
   const queueUpdates = async () => {
     await Promise.all(
-      updatedRows.map((row) =>
-        addToOfflineMutations(
-          'payment_transactions',
-          row.id,
-          'update',
-          row as unknown as Record<string, unknown>,
-          workspaceId
+      updatedRows
+        .filter((row) => !alreadyQueuedEntityIds.has(row.id))
+        .map((row) =>
+          addToOfflineMutations(
+            'payment_transactions',
+            row.id,
+            'update',
+            row as unknown as Record<string, unknown>,
+            workspaceId
+          )
         )
-      )
     )
   }
 
@@ -1665,6 +1674,11 @@ export async function synchronizeOrderPaymentReferences(
       client.from('payment_transactions').upsert(payload, { onConflict: 'id' })
     )
     if (error) throw error
+
+    await abandonOfflineMutations(
+      refreshedPendingPaymentMutations,
+      'Superseded by a successful direct remote payment reference update.',
+    )
 
     const syncedAt = new Date().toISOString()
     await db.payment_transactions.bulkPut(

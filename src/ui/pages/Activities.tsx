@@ -30,7 +30,6 @@ import { assetManager } from '@/lib/assetManager'
 import { isTauri } from '@/lib/platform'
 import { formatCurrency } from '@/lib/utils'
 import { platformService } from '@/services/platformService'
-import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
@@ -496,20 +495,10 @@ export function Activities() {
                 return
             }
 
-            const extension = file.name.split('.').pop() || 'jpg'
-            const fileName = `${Date.now()}.${extension}`
-            const targetPath = `activity-images/${workspaceId}/${fileName}`
-            const r2Path = `${workspaceId}/activity-images/${fileName}`
-            const { r2Service } = await import('@/services/r2Service')
-
-            if (!isLocalWorkspaceMode(workspaceId) && r2Service.isConfigured() && await r2Service.upload(r2Path, file)) {
+            const targetPath = await platformService.saveImageFile(file, workspaceId, 'activity-images')
+            if (targetPath) {
                 setCatalogImage(targetPath)
-                return
             }
-
-            const reader = new FileReader()
-            reader.onloadend = () => setCatalogImage(String(reader.result || ''))
-            reader.readAsDataURL(file)
         } catch (error) {
             console.error('[Activities] Failed to attach activity image:', error)
             toast({

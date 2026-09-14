@@ -149,7 +149,7 @@ async function seedLocalProjection() {
   });
 }
 
-describe("cloud stock adjustment authority", () => {
+describe("Cloud Sync stock adjustment authority", () => {
   beforeAll(async () => {
     installBrowserGlobals();
     await db.open();
@@ -161,7 +161,7 @@ describe("cloud stock adjustment authority", () => {
     await db.open();
     rpc.mockReset();
     setNetworkStatus(true);
-    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: "cloud" });
+    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: "hybrid" });
     await seedLocalProjection();
   });
 

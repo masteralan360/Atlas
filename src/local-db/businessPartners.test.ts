@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import { setActiveBusinessUser, setNetworkStatus } from '@/lib/network'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
+import { installMemorySqliteForTest } from '@/test/sqliteTestConnection'
 
 import { db } from './database'
 
@@ -13,6 +14,7 @@ let mergeBusinessPartners: typeof import('./businessPartners').mergeBusinessPart
 let replaceAgentExcludedCategories: typeof import('./businessPartners').replaceAgentExcludedCategories
 let updateBusinessPartner: typeof import('./businessPartners').updateBusinessPartner
 let canAccessBusinessPartnerInLocalCache: typeof import('./businessPartnerPrivacy').canAccessBusinessPartnerInLocalCache
+let releaseSqlite: (() => void) | undefined
 
 async function createAgentForExcludedCategoryTest() {
     const partner = await createBusinessPartner(WORKSPACE_ID, {
@@ -92,13 +94,14 @@ function installBrowserStorage() {
         value: {
             visibilityState: 'visible',
             dir: 'ltr',
-            documentElement: { lang: 'en', dir: 'ltr' },
+            documentElement: { lang: 'en', dir: 'ltr', style: {} },
             head: documentHead,
             getElementsByTagName: () => [documentHead],
             createElement: () => ({
                 appendChild: () => undefined,
                 setAttribute: () => undefined,
-                styleSheet: null
+                styleSheet: null,
+                style: {}
             }),
             createTextNode: () => ({}),
             addEventListener: () => undefined,
@@ -108,6 +111,14 @@ function installBrowserStorage() {
     Object.defineProperty(globalThis, 'navigator', {
         configurable: true,
         value: { onLine: false }
+    })
+    Object.defineProperty(globalThis, 'Element', {
+        configurable: true,
+        value: class Element {}
+    })
+    Object.defineProperty(globalThis, 'HTMLElement', {
+        configurable: true,
+        value: class HTMLElement {}
     })
     // Imported print utilities load pdfjs during this suite. These lightweight
     // browser constructors are sufficient because the partner tests do not
@@ -156,6 +167,8 @@ describe('business partner agent facets', () => {
     })
 
     afterEach(async () => {
+        releaseSqlite?.()
+        releaseSqlite = undefined
         setActiveBusinessUser(null)
         clearWorkspaceModeSnapshot(WORKSPACE_ID)
         setNetworkStatus(true)
@@ -869,7 +882,9 @@ describe('business partner agent facets', () => {
         expect(await db.agent_excluded_categories.where('agentId').equals(agentId).count()).toBe(0)
     })
 
-    it('queues a hard delete for a removed cloud exclusion while offline', async () => {
+    it('queues a tombstone delete for a removed Cloud Sync exclusion while offline', async () => {
+        releaseSqlite = await installMemorySqliteForTest()
+        setActiveBusinessUser('00000000-0000-4000-8000-000000000012')
         const [agentId, categoryId] = await Promise.all([
             createAgentForExcludedCategoryTest(),
             createCategoryForExcludedCategoryTest()
@@ -889,7 +904,7 @@ describe('business partner agent facets', () => {
             isDeleted: false
         })
 
-        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'hybrid' })
         setNetworkStatus(false)
         await replaceAgentExcludedCategories(WORKSPACE_ID, agentId, [])
 
@@ -900,11 +915,13 @@ describe('business partner agent facets', () => {
             .first())
             .toMatchObject({
                 operation: 'delete',
-                payload: { id: exclusionId, hardDelete: true }
+                payload: { id: exclusionId }
             })
     })
 
-    it('queues an agent retirement with its business-partner reference', async () => {
+    it('queues agent and business-partner tombstones for retirement', async () => {
+        releaseSqlite = await installMemorySqliteForTest()
+        setActiveBusinessUser('00000000-0000-4000-8000-000000000013')
         const partner = await createBusinessPartner(WORKSPACE_ID, {
             partnerName: 'Agent to retire',
             phone: '07500000009',
@@ -918,7 +935,7 @@ describe('business partner agent facets', () => {
             }
         }, { allowAgentRole: true })
 
-        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'hybrid' })
         setNetworkStatus(false)
         await deleteBusinessPartner(partner.id)
 
@@ -931,7 +948,7 @@ describe('business partner agent facets', () => {
 
         expect(agentMutation).toMatchObject({
             operation: 'delete',
-            payload: { id: partner.agentFacetId, businessPartnerId: partner.id }
+            payload: { id: partner.agentFacetId }
         })
         expect(partnerMutation).toMatchObject({
             operation: 'delete',

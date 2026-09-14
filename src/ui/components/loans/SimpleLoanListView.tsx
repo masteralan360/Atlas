@@ -409,7 +409,9 @@ export function SimpleLoanListView({
                 title: t('common.error') || 'Error',
                 description: error?.message === 'loan_delete_not_allowed'
                     ? (t('loans.messages.loanDeleteBlocked') || 'Loans with recorded repayments cannot be deleted.')
-                    : error?.message || (t('loans.messages.loanDeleteFailed') || 'Failed to delete loan.'),
+                    : error?.message === 'loan_delete_online_required'
+                        ? (t('loans.messages.loanDeleteOnlineRequired') || 'Connect to the internet before deleting a loan in a Cloud Sync workspace.')
+                        : error?.message || (t('loans.messages.loanDeleteFailed') || 'Failed to delete loan.'),
                 variant: 'destructive'
             })
         } finally {

@@ -697,7 +697,7 @@ function EcommerceListView({
                 <Card className="border-amber-500/20 bg-amber-500/5">
                     <CardContent className="p-5 text-sm text-amber-700 dark:text-amber-300">
                         {t('settings.marketplace.localUnsupported', {
-                            defaultValue: 'Marketplace publishing and order management are available only for cloud and hybrid workspaces.'
+                            defaultValue: 'Marketplace publishing and order management are available only for Cloud Sync workspaces.'
                         })}
                     </CardContent>
                 </Card>

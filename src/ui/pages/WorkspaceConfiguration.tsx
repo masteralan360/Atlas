@@ -41,7 +41,10 @@ import {
     requestCurrentLocation
 } from '@/lib/geolocation'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
-import type { WorkspaceDataMode } from '@/local-db/models'
+import {
+    USER_SELECTABLE_WORKSPACE_DATA_MODES,
+    type UserSelectableWorkspaceDataMode
+} from '@/workspace/workspaceMode'
 import { WORKSPACE_PLANS, getPlanCapabilities } from '@/plans/workspacePlans'
 import type { WorkspacePlan } from '@/plans/workspacePlans'
 
@@ -59,7 +62,7 @@ export function WorkspaceConfiguration() {
     const [logoUrl, setLogoUrl] = useState(currentFeatures.logo_url || '')
     const [coordination, setCoordination] = useState(currentFeatures.coordination || '')
     const [a2cPhone, setA2cPhone] = useState('')
-    const [dataMode, setDataMode] = useState<WorkspaceDataMode>('hybrid')
+    const [dataMode, setDataMode] = useState<UserSelectableWorkspaceDataMode>('hybrid')
     const [plan, setPlan] = useState<WorkspacePlan>('enterprise')
     const isTauri = isTauriCheck()
     const workspaceId = user?.workspaceId || ''
@@ -396,22 +399,24 @@ export function WorkspaceConfiguration() {
                                     {t('workspaceConfig.mode.description')}
                                 </p>
                             </div>
-                            <Select value={dataMode} onValueChange={(value) => setDataMode(value as WorkspaceDataMode)}>
+                            <Select value={dataMode} onValueChange={(value) => setDataMode(value as UserSelectableWorkspaceDataMode)}>
                                 <SelectTrigger>
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="hybrid">{t('workspaceConfig.mode.hybrid')}</SelectItem>
-                                    <SelectItem value="cloud">{t('workspaceConfig.mode.cloud')}</SelectItem>
-                                    <SelectItem value="local">{t('workspaceConfig.mode.local')}</SelectItem>
+                                    {USER_SELECTABLE_WORKSPACE_DATA_MODES.map((mode) => (
+                                        <SelectItem key={mode} value={mode}>
+                                            {t(mode === 'hybrid'
+                                                ? 'workspaceConfig.mode.cloudSync'
+                                                : 'workspaceConfig.mode.local')}
+                                        </SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                             <p className="text-xs text-muted-foreground">
                                 {dataMode === 'local'
                                     ? t('workspaceConfig.mode.localHint')
-                                    : dataMode === 'hybrid'
-                                        ? t('workspaceConfig.mode.hybridHint')
-                                        : t('workspaceConfig.mode.cloudHint')}
+                                    : t('workspaceConfig.mode.cloudSyncHint')}
                             </p>
                         </div>
 

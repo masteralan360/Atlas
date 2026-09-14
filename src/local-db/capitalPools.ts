@@ -292,8 +292,8 @@ async function persistCapitalPool(pool: CapitalPool, operation: 'create' | 'upda
   }
 
   if (!isOnline()) {
-    await db.capital_pools.put(pool)
     await addToOfflineMutations('capital_pools', pool.id, operation, pool as unknown as Record<string, unknown>, pool.workspaceId)
+    await db.capital_pools.put(pool)
     return pool
   }
 
@@ -305,8 +305,8 @@ async function persistCapitalPool(pool: CapitalPool, operation: 'create' | 'upda
     const friendlyMessage = getCapitalPoolRemoteErrorMessage(error)
     if (friendlyMessage) throw new Error(friendlyMessage)
 
-    await db.capital_pools.put(pool)
     await addToOfflineMutations('capital_pools', pool.id, operation, pool as unknown as Record<string, unknown>, pool.workspaceId)
+    await db.capital_pools.put(pool)
     return pool
   }
 
@@ -344,16 +344,8 @@ export async function saveCapitalPool(workspaceId: string, input: SaveCapitalPoo
       return persistCapitalPool(pool, existing ? 'update' : 'create')
     }
 
-    // A read/validate/write transaction serializes decisions across browser
-    // tabs as well as inside this JavaScript context. The later offline save
-    // therefore observes the first pool and receives the conflict message.
-    if (isLocalWorkspaceMode(workspaceId) || !isOnline()) {
-      return db.transaction(
-        'rw',
-        [db.capital_pools, db.payment_accounts, db.offline_mutations],
-        performSave
-      )
-    }
+    // Cloud Sync grants one browser/PWA owner for this workspace SQLite file,
+    // while the in-process lock serializes validation and writes in that owner.
     return performSave()
   })
 }
@@ -377,13 +369,6 @@ export async function deleteCapitalPool(workspaceId: string, poolId: string, can
       }, 'update')
     }
 
-    if (isLocalWorkspaceMode(workspaceId) || !isOnline()) {
-      return db.transaction(
-        'rw',
-        [db.capital_pools, db.payment_accounts, db.offline_mutations],
-        performDelete
-      )
-    }
     return performDelete()
   })
 }

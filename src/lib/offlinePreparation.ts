@@ -1,7 +1,7 @@
 import type { AuthUser } from '@/auth/AuthContext'
 import { db } from '@/local-db/database'
 import type { WorkspaceDataMode } from '@/local-db/models'
-import { ensurePwaDatabase, isOpfsSupported } from '@/local-db/pwaSqlite'
+import { checkPwaSqliteReadiness } from '@/local-db/pwaSqlite'
 import {
     getPersistentStorageStatus,
     getStorageEstimate,
@@ -141,18 +141,17 @@ function report(
     onPhase?.(phase, progress)
 }
 
-async function verifyLocalDatabase(dataMode: WorkspaceDataMode) {
+async function verifyLocalDatabase(user: AuthUser, dataMode: WorkspaceDataMode) {
     await db.open()
     await db.app_settings.count()
 
-    if (dataMode !== 'local') return
-    if (!isOpfsSupported()) {
-        throw new OfflinePreparationError('database-unavailable')
-    }
-    const sqlite = await ensurePwaDatabase()
-    if (!sqlite) throw new OfflinePreparationError('database-unavailable')
-    const quickCheck = sqlite.exec('PRAGMA quick_check')
-    if (quickCheck[0]?.values[0]?.[0] !== 'ok') {
+    if (dataMode !== 'local' && dataMode !== 'hybrid') return
+    const readiness = await checkPwaSqliteReadiness({
+        workspaceId: user.workspaceId,
+        userId: user.id
+    })
+    if (!readiness.ready) {
+        console.warn('[OfflinePreparation] PWA SQLite is unavailable:', readiness.reason)
         throw new OfflinePreparationError('database-unavailable')
     }
 }
@@ -172,7 +171,7 @@ export async function prepareForOfflineUse(options: {
         const storagePersisted = await requestPersistentStorage()
 
         let dataSyncedAt = new Date().toISOString()
-        if (dataMode === 'cloud' || dataMode === 'hybrid') {
+        if (dataMode === 'hybrid') {
             report(onPhase, 'data')
             const syncResult = await runManagedFullSync(user.id, user.workspaceId, null)
             if (!syncResult.success) {
@@ -186,7 +185,7 @@ export async function prepareForOfflineUse(options: {
         }
 
         report(onPhase, 'database')
-        await verifyLocalDatabase(dataMode)
+        await verifyLocalDatabase(user, dataMode)
 
         report(onPhase, 'shell')
         const shell = await preparePwaOfflineShell({

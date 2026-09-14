@@ -17,8 +17,14 @@ import { useSyncProgress } from '@/sync/syncProgress'
 const MIN_OVERLAY_MS = 800
 
 async function countRecoverableMutations() {
-    const [pending, syncing, failedSaleCreates, failedPriceBooks] = await Promise.all([
+    const [pending, leased, retryWait, syncing, failedSaleCreates, failedPriceBooks] = await Promise.all([
         db.offline_mutations.where('status').equals('pending').count(),
+        db.offline_mutations.where('status').equals('leased').count(),
+        db.offline_mutations
+            .where('status')
+            .equals('retry_wait')
+            .filter((mutation) => !mutation.nextAttemptAt || mutation.nextAttemptAt <= new Date().toISOString())
+            .count(),
         db.offline_mutations.where('status').equals('syncing').count(),
         db.offline_mutations
             .where('status')
@@ -31,7 +37,7 @@ async function countRecoverableMutations() {
             .filter(isRecoverablePriceBookMutation)
             .count()
     ])
-    return pending + syncing + failedSaleCreates + failedPriceBooks
+    return pending + leased + retryWait + syncing + failedSaleCreates + failedPriceBooks
 }
 
 export function AutoSyncOverlay() {

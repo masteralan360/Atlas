@@ -6,6 +6,7 @@ import { useAuth } from '@/auth'
 import { createInvoice, deleteInvoice, db, type Invoice } from '@/local-db'
 import { generateId, formatDateTime } from '@/lib/utils'
 import { r2Service } from '@/services/r2Service'
+import { platformService } from '@/services/platformService'
 import { useWorkspace } from '@/workspace'
 import { useViewOwnRecordScope } from '@/permissions'
 import {
@@ -308,6 +309,11 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
         setUploadProgress(15)
 
         try {
+            await platformService.persistWorkspaceAssetForBackup(
+                activeWorkspace.id,
+                `uploads/${activeWorkspace.id}/${invoiceId}-${sanitizeStorageSegment(trimmedName)}.${uploadExtension}`,
+                selectedFile,
+            )
             await r2Service.upload(storagePath, selectedFile, uploadMimeType)
             uploaded = true
             setUploadProgress(78)

@@ -101,7 +101,7 @@ describe('authoritative inventory snapshot sync', () => {
         await db.open()
         supabaseMock.reset()
         clearWorkspaceModeSnapshot(WORKSPACE_ID)
-        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'hybrid' })
         setNetworkStatus(true)
     })
 
