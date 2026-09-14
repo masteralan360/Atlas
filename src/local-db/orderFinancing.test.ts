@@ -474,6 +474,44 @@ describe('order-linked financing', () => {
         expect(duplicate.commissionMode).toBe('payable')
     })
 
+    it('keeps uncommissioned sale orders out of a mode and snapshots the workspace when re-enabled', async () => {
+        await db.workspaces.put({
+            id: WORKSPACE_ID,
+            workspaceId: WORKSPACE_ID,
+            name: 'Commission mode workspace',
+            data_mode: 'local',
+            sales_agent_commission_mode: 'payable'
+        } as any)
+        const customer = await createCustomer()
+        const { storage, product } = await createStockedSalesProduct(100)
+        const input = salesOrderInput(customer.id, product, storage.id, { method: 'cash', total: 100 })
+
+        const uncommissioned = await createSalesOrder(WORKSPACE_ID, {
+            ...input,
+            commissionEnabled: false
+        })
+        expect(uncommissioned).toMatchObject({
+            commissionEnabled: false,
+            commissionMode: null,
+            commissionModeCapturedAt: null
+        })
+
+        await db.workspaces.update(WORKSPACE_ID, { sales_agent_commission_mode: 'tracked' })
+        const reenabled = await updateSalesOrder(uncommissioned.id, { commissionEnabled: true })
+        expect(reenabled).toMatchObject({
+            commissionEnabled: true,
+            commissionMode: 'tracked'
+        })
+        expect(reenabled.commissionModeCapturedAt).toBeTruthy()
+
+        const cleared = await updateSalesOrder(reenabled.id, { commissionEnabled: false })
+        expect(cleared).toMatchObject({
+            commissionEnabled: false,
+            commissionMode: null,
+            commissionModeCapturedAt: null
+        })
+    })
+
     it('completes quick-order style cash sales through the existing paid order lifecycle', async () => {
         const customer = await createCustomer()
         const { storage, product } = await createStockedSalesProduct(100)

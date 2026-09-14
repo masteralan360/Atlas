@@ -52,6 +52,7 @@ import {
     useLoan,
     useLoanInstallments,
     useOrderInstallments,
+    useOrderStorageWriteAccess,
     useProductsByIds,
     useSalesOrderAgentAssignments,
     useSalesOrder,
@@ -333,6 +334,11 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
             ? { kind: 'purchase' as const, order: purchaseOrder }
             : null,
         [purchaseOrder, salesOrder])
+    const hasOrderStorageWriteAccess = useOrderStorageWriteAccess(
+        orderId,
+        resolved?.kind,
+        workspaceId
+    )
 
     const orderProductIds = useMemo(
         () => resolved?.order.items.map((item) => item.productId) || [],
@@ -421,6 +427,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         convertedUnitPrice: item.convertedUnitPrice
     })) || [], [salesOrder])
     const canManage = user?.role === 'admin' || user?.role === 'staff'
+    const canManageOrder = canManage && hasOrderStorageWriteAccess
     const canDelete = user?.role === 'admin'
     const canApproveOrderRequests = user?.role === 'admin'
     const canViewProfit = !hideCosts
@@ -867,7 +874,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const isSales = resolved.kind === 'sales'
     const order = resolved.order
     const isApprovalRequested = isOrderApprovalRequested(order)
-    const canEditOrder = canManage && order.status === 'draft' && (!isApprovalRequested || canApproveOrderRequests)
+    const canEditOrder = canManageOrder && order.status === 'draft' && (!isApprovalRequested || canApproveOrderRequests)
     const currency = order.currency
     const iqd = features.iqd_display_preference
     const orderAdjustments = normalizeOrderAdjustments(order.orderAdjustments, currency)
@@ -943,16 +950,16 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const actions = isSales
         ? [
             isApprovalRequested && canApproveOrderRequests ? { key: 'approve', icon: BadgeCheck, label: t('orders.actions.approve', { defaultValue: 'Approve' }), onClick: () => runWorkflowAction('approve', () => approveSalesOrderRequest(order.id, user?.id ?? null), t('orders.actions.approveRequestSuccess', { defaultValue: 'Order request approved' })), variant: 'default' as const } : null,
-            !isApprovalRequested && canManage && order.status === 'draft' ? { key: 'reserve', icon: PackageCheck, label: t('orders.actions.reserve') || 'Reserve', onClick: () => runWorkflowAction('reserve', () => updateSalesOrderStatus(order.id, 'pending'), t('orders.details.messages.reserveSuccess') || 'Sales order reserved'), variant: 'default' as const } : null,
-            !isApprovalRequested && canManage && order.status === 'pending' ? { key: 'complete', icon: CircleCheck, label: t('orders.actions.complete') || 'Complete', onClick: () => runWorkflowAction('complete', () => updateSalesOrderStatus(order.id, 'completed'), t('orders.details.messages.completeSuccess') || 'Sales order completed'), variant: 'default' as const } : null,
-            !isApprovalRequested && canManage && order.status === 'pending' ? { key: 'cancel', icon: XCircle, label: t('orders.actions.cancel') || 'Cancel', onClick: () => setCancelConfirm({ isOpen: true }), variant: 'outline' as const } : null
+            !isApprovalRequested && canManageOrder && order.status === 'draft' ? { key: 'reserve', icon: PackageCheck, label: t('orders.actions.reserve') || 'Reserve', onClick: () => runWorkflowAction('reserve', () => updateSalesOrderStatus(order.id, 'pending'), t('orders.details.messages.reserveSuccess') || 'Sales order reserved'), variant: 'default' as const } : null,
+            !isApprovalRequested && canManageOrder && order.status === 'pending' ? { key: 'complete', icon: CircleCheck, label: t('orders.actions.complete') || 'Complete', onClick: () => runWorkflowAction('complete', () => updateSalesOrderStatus(order.id, 'completed'), t('orders.details.messages.completeSuccess') || 'Sales order completed'), variant: 'default' as const } : null,
+            !isApprovalRequested && canManageOrder && order.status === 'pending' ? { key: 'cancel', icon: XCircle, label: t('orders.actions.cancel') || 'Cancel', onClick: () => setCancelConfirm({ isOpen: true }), variant: 'outline' as const } : null
         ].filter(Boolean)
         : [
             isApprovalRequested && canApproveOrderRequests ? { key: 'approve', icon: BadgeCheck, label: t('orders.actions.approve', { defaultValue: 'Approve' }), onClick: () => runWorkflowAction('approve', () => approvePurchaseOrderRequest(order.id, user?.id ?? null), t('orders.actions.approveRequestSuccess', { defaultValue: 'Order request approved' })), variant: 'default' as const } : null,
-            !isApprovalRequested && canManage && order.status === 'draft' ? { key: 'order', icon: ShoppingCart, label: t('orders.actions.order') || 'Order', onClick: () => runWorkflowAction('order', () => updatePurchaseOrderStatus(order.id, 'ordered'), t('orders.details.messages.orderSuccess') || 'Purchase order sent'), variant: 'default' as const } : null,
-            !isApprovalRequested && canManage && order.status === 'ordered' ? { key: 'receive', icon: PackageCheck, label: t('orders.actions.receive') || 'Receive', onClick: () => runWorkflowAction('receive', () => updatePurchaseOrderStatus(order.id, 'received'), t('orders.details.messages.receiveSuccess') || 'Purchase order received'), variant: 'default' as const } : null,
-            !isApprovalRequested && canManage && order.status === 'received' ? { key: 'complete', icon: CircleCheck, label: t('orders.actions.complete') || 'Complete', onClick: () => runWorkflowAction('complete', () => updatePurchaseOrderStatus(order.id, 'completed'), t('orders.details.messages.completeSuccess') || 'Purchase order completed'), variant: 'default' as const } : null,
-            !isApprovalRequested && canManage && (order.status === 'draft' || order.status === 'ordered') ? { key: 'cancel', icon: XCircle, label: t('orders.actions.cancel') || 'Cancel', onClick: () => setCancelConfirm({ isOpen: true }), variant: 'outline' as const } : null
+            !isApprovalRequested && canManageOrder && order.status === 'draft' ? { key: 'order', icon: ShoppingCart, label: t('orders.actions.order') || 'Order', onClick: () => runWorkflowAction('order', () => updatePurchaseOrderStatus(order.id, 'ordered'), t('orders.details.messages.orderSuccess') || 'Purchase order sent'), variant: 'default' as const } : null,
+            !isApprovalRequested && canManageOrder && order.status === 'ordered' ? { key: 'receive', icon: PackageCheck, label: t('orders.actions.receive') || 'Receive', onClick: () => runWorkflowAction('receive', () => updatePurchaseOrderStatus(order.id, 'received'), t('orders.details.messages.receiveSuccess') || 'Purchase order received'), variant: 'default' as const } : null,
+            !isApprovalRequested && canManageOrder && order.status === 'received' ? { key: 'complete', icon: CircleCheck, label: t('orders.actions.complete') || 'Complete', onClick: () => runWorkflowAction('complete', () => updatePurchaseOrderStatus(order.id, 'completed'), t('orders.details.messages.completeSuccess') || 'Purchase order completed'), variant: 'default' as const } : null,
+            !isApprovalRequested && canManageOrder && (order.status === 'draft' || order.status === 'ordered') ? { key: 'cancel', icon: XCircle, label: t('orders.actions.cancel') || 'Cancel', onClick: () => setCancelConfirm({ isOpen: true }), variant: 'outline' as const } : null
         ].filter(Boolean)
 
     const confirmDelete = async () => {
@@ -1279,7 +1286,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             </Button>
                         )
                     })}
-                    {!isApprovalRequested && canManage && isFinanced && linkedLoanRoute ? (
+                    {!isApprovalRequested && canManageOrder && isFinanced && linkedLoanRoute ? (
                         <Button variant="outline" onClick={() => navigate(linkedLoanRoute)}>
                             <CreditCard className="mr-2 h-4 w-4" />
                             {order.paymentMethod === 'installments'
@@ -1287,7 +1294,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                 : t('orders.actions.openLoan', { defaultValue: 'Open Loan' })}
                         </Button>
                     ) : null}
-                    {!isFullyReturnedSalesOrder && !isApprovalRequested && canManage && !isFinanced && outstanding > 0 && !order.isLocked && (
+                    {!isFullyReturnedSalesOrder && !isApprovalRequested && canManageOrder && !isFinanced && outstanding > 0 && !order.isLocked && (
                         <Button
                             variant="outline"
                             onClick={() => setSettlementTarget(
@@ -1300,13 +1307,13 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             {t('orders.actions.recordPayment', { defaultValue: 'Record Payment' })}
                         </Button>
                     )}
-                    {!isFullyReturnedSalesOrder && !isApprovalRequested && canManage && !isFinanced && paidAmount > 0 && !order.isLocked && (
+                    {!isFullyReturnedSalesOrder && !isApprovalRequested && canManageOrder && !isFinanced && paidAmount > 0 && !order.isLocked && (
                         <Button variant="outline" onClick={handleOrderUnpay}>
                             <RotateCcw className="mr-2 h-4 w-4" />
                             {t('orders.actions.reverseLastPayment', { defaultValue: 'Reverse Last Payment' })}
                         </Button>
                     )}
-                    {!isFullyReturnedSalesOrder && !isApprovalRequested && canManage && paidAmount > 0 && !order.isLocked && (
+                    {!isFullyReturnedSalesOrder && !isApprovalRequested && canManageOrder && paidAmount > 0 && !order.isLocked && (
                         <Button
                             variant="outline"
                             className="bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 hover:text-amber-700 border-amber-500/20"
@@ -1414,7 +1421,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             showTotal
                             orderId={order.id}
                             orderReference={(order as SalesOrder).orderNumber}
-                            commissionMode={(order as SalesOrder).commissionMode}
+                            commissionMode={(order as SalesOrder).commissionMode ?? undefined}
                             commissionStatus={(order as SalesOrder).status}
                             canPayCommission={canPaySalesAgentCommissions}
                             onSettleCommission={setSettlementTarget}
@@ -1429,7 +1436,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             <CardContent className="px-3 sm:px-6">
                                 <div className="divide-y overflow-hidden rounded-2xl border">
                                     {installments.map((installment) => {
-                                        const canPayInstallment = !isApprovalRequested && canManage && installment.balanceAmount > 0 && !order.isLocked
+                                        const canPayInstallment = !isApprovalRequested && canManageOrder && installment.balanceAmount > 0 && !order.isLocked
                                         return (
                                             <div key={installment.id} className="space-y-3 p-3">
                                                 <div className="flex flex-wrap items-center justify-between gap-2">

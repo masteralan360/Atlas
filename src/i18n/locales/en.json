@@ -2949,7 +2949,7 @@
       "discount": "Discount",
       "tax": "Tax",
       "total": "Total",
-      "shippingAddress": "Shipping Address",
+      "shippingAddress": "Shipping Address (Optional)",
       "shippingPlaceholder": "Enter shipping address...",
       "notes": "Notes (Optional)",
       "notesPlaceholder": "Order notes, special instructions...",
@@ -3292,7 +3292,7 @@
     "exportFailed": "Unable to export the error record",
     "stopRecording": "Stop recording",
     "resumeRecording": "Resume recording",
-    "recordingStopped": "Log recording is paused for this development session."
+    "recordingStopped": "Log recording is stopped in development mode."
   },
   "settings": {
     "title": "Settings",

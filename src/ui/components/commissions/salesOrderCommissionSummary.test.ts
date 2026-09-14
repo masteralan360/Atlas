@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import type { CommissionSummaryAgent } from './salesOrderCommissionSummary'
-import { summarizeSalesOrderAgentCommissions } from './salesOrderCommissionSummary'
+import {
+    hasConfiguredSalesOrderCommission,
+    summarizeSalesOrderAgentCommissions
+} from './salesOrderCommissionSummary'
 
 const fixedPlanAgent: CommissionSummaryAgent = {
     id: 'agent-fixed',
@@ -102,5 +105,17 @@ describe('summarizeSalesOrderAgentCommissions', () => {
             expect.objectContaining({ agentId: fixedPlanAgent.id, amount: null, status: 'needs_amount' }),
             expect.objectContaining({ agentId: manualAgent.id, amount: null, status: 'needs_amount' })
         ])
+    })
+
+    it('marks only configured manual or plan commissions as commissionable', () => {
+        expect(hasConfiguredSalesOrderCommission([
+            { agentId: 'empty', agentName: 'Empty', planName: null, amount: null, ratePercent: null, status: 'not_configured' },
+            { agentId: 'incomplete', agentName: 'Incomplete', planName: 'Fixed', amount: null, ratePercent: null, status: 'needs_amount' }
+        ])).toBe(false)
+
+        expect(hasConfiguredSalesOrderCommission([
+            { agentId: 'plan', agentName: 'Plan', planName: 'Percentage', amount: null, ratePercent: 5, status: 'calculated_on_completion' },
+            { agentId: 'manual', agentName: 'Manual', planName: null, amount: 20, ratePercent: null, status: 'ready' }
+        ])).toBe(true)
     })
 })

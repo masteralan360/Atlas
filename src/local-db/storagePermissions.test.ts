@@ -21,9 +21,14 @@ vi.hoisted(() => {
 })
 
 import type { Inventory, Product, PurchaseOrder, SalesOrder } from './models'
+import { supabase } from '@/auth/supabase'
+import { setActiveBusinessUser, setActiveBusinessWorkspace, setNetworkStatus } from '@/lib/network'
+import { clearWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 import {
   canAccessStorage,
+  canAccessOrderForStorageAccess,
   filterProductsByStorageAccess,
+  getCurrentStorageAccess,
   redactPurchaseOrderForStorageAccess,
   redactSaleForStorageAccess,
   redactSalesOrderForStorageAccess,
@@ -57,6 +62,29 @@ function inventory(productId: string, storageId: string, quantity = 1) {
 }
 
 describe('storage permissions', () => {
+  it('never restricts the active authenticated admin while membership cache is stale', async () => {
+    const workspaceId = 'storage-access-admin-workspace'
+    const fromSpy = vi.spyOn(supabase, 'from').mockImplementation((() => {
+      throw new Error('An admin must not fetch member exclusions')
+    }) as typeof supabase.from)
+    try {
+      setNetworkStatus(true)
+      setActiveBusinessWorkspace(workspaceId)
+      setActiveBusinessUser('storage-access-admin', 'admin', workspaceId)
+
+      await expect(getCurrentStorageAccess(workspaceId)).resolves.toMatchObject({
+        isAdmin: true,
+        isReady: true
+      })
+      expect(fromSpy).not.toHaveBeenCalled()
+    } finally {
+      fromSpy.mockRestore()
+      clearWorkspaceModeSnapshot(workspaceId)
+      setActiveBusinessUser(null)
+      setActiveBusinessWorkspace(null)
+    }
+  })
+
   it('keeps default access and removes only explicitly excluded storage rows', () => {
     expect(canAccessStorage('storage-a', memberAccess)).toBe(false)
     expect(canAccessStorage('storage-b', memberAccess)).toBe(true)
@@ -99,6 +127,7 @@ describe('storage permissions', () => {
     const visible = redactSalesOrderForStorageAccess(order, memberAccess)
 
     expect(visible).toMatchObject({
+      sourceStorageId: null,
       items: [{ id: 'visible' }],
       subtotal: 50,
       discount: 5,
@@ -108,6 +137,29 @@ describe('storage permissions', () => {
       balanceAmount: 35,
       initialPaymentAmount: 10
     })
+  })
+
+  it('allows an order whose explicit lines are permitted even if its legacy default storage is excluded', () => {
+    const order = {
+      id: 'sales-order-allowed',
+      sourceStorageId: 'storage-a',
+      items: [{ id: 'visible', storageId: 'storage-b', lineTotal: 50 }]
+    } as SalesOrder
+
+    expect(canAccessOrderForStorageAccess(order, memberAccess)).toBe(true)
+  })
+
+  it('does not treat a partially redacted order as actionable', () => {
+    const order = {
+      id: 'sales-order-mixed',
+      sourceStorageId: 'storage-b',
+      items: [
+        { id: 'hidden', storageId: 'storage-a', lineTotal: 100 },
+        { id: 'visible', storageId: 'storage-b', lineTotal: 50 }
+      ]
+    } as SalesOrder
+
+    expect(canAccessOrderForStorageAccess(order, memberAccess)).toBe(false)
   })
 
   it('hides an order that contains no permitted location lines', () => {

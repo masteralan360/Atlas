@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, Check, GitBranch, Package } from 'lucide-react'
 
@@ -7,6 +7,7 @@ import { useOptionalAuth } from '@/auth'
 import { Input, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/components'
 import { cn } from '@/lib/utils'
 import { platformService } from '@/services/platformService'
+import { AutocompletePopover } from '@/ui/components/AutocompletePopover'
 
 interface ProductAutocompleteInputProps {
     value: string
@@ -84,7 +85,6 @@ export function ProductAutocompleteInput({
     const { canSelectProduct, filterProducts } = useProductSelectionAccess(user?.workspaceId, user?.id)
     const [isFocused, setIsFocused] = useState(false)
     const [justSelected, setJustSelected] = useState(false)
-    const containerRef = useRef<HTMLDivElement>(null)
 
     const query = value.trim().toLowerCase()
     const selectableProducts = useMemo(
@@ -134,6 +134,7 @@ export function ProductAutocompleteInput({
             return
         }
         setJustSelected(true)
+        setIsFocused(false)
         onChange(product.name)
         onSelectProduct(product)
     }, [canSelectProduct, onChange, onSelectProduct])
@@ -144,16 +145,6 @@ export function ProductAutocompleteInput({
             return () => clearTimeout(timeout)
         }
     }, [justSelected])
-
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-                setIsFocused(false)
-            }
-        }
-        document.addEventListener('mousedown', handleClickOutside)
-        return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [])
 
     const handleFocus = () => {
         if (storageMissing) {
@@ -190,52 +181,57 @@ export function ProductAutocompleteInput({
     )
 
     return (
-        <div ref={containerRef} className={cn('relative w-full group', className)}>
-            <div className="relative">
-                <Input
-                    value={value}
-                    onChange={handleInputChange}
-                    onFocus={handleFocus}
-                    data-order-product-input={scannerTargetIndex === undefined ? undefined : 'true'}
-                    data-order-product-index={scannerTargetIndex}
-                    placeholder={placeholder}
-                    disabled={disabled}
-                    className={cn(
-                        'flex-1',
-                        inputClassName,
-                        shouldShowLinkedIndicator && 'pr-28',
-                        hasSelection && !storageMissing && 'border-green-500/50 bg-green-50/30 dark:bg-green-950/10',
-                        storageMissing && 'border-red-500/50 bg-red-50/30 dark:bg-red-950/10'
+        <AutocompletePopover
+            open={showDropdown}
+            onOpenChange={setIsFocused}
+            className="w-[max(var(--radix-popover-trigger-width),18rem)]"
+            anchor={(
+                <div data-autocomplete-popover-anchor className={cn('relative w-full group', className)}>
+                    <Input
+                        value={value}
+                        onChange={handleInputChange}
+                        onFocus={handleFocus}
+                        data-order-product-input={scannerTargetIndex === undefined ? undefined : 'true'}
+                        data-order-product-index={scannerTargetIndex}
+                        placeholder={placeholder}
+                        disabled={disabled}
+                        className={cn(
+                            'flex-1',
+                            inputClassName,
+                            shouldShowLinkedIndicator && 'pr-28',
+                            hasSelection && !storageMissing && 'border-green-500/50 bg-green-50/30 dark:bg-green-950/10',
+                            storageMissing && 'border-red-500/50 bg-red-50/30 dark:bg-red-950/10'
+                        )}
+                    />
+                    {shouldShowLinkedIndicator && (
+                        linkedTooltip ? (
+                            <TooltipProvider delayDuration={150}>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>{linkedIndicator}</TooltipTrigger>
+                                    <TooltipContent side="top" align="end" className="max-w-xs break-words text-xs">
+                                        {linkedTooltip}
+                                    </TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                        ) : linkedIndicator
                     )}
-                />
-                {shouldShowLinkedIndicator && (
-                    linkedTooltip ? (
-                        <TooltipProvider delayDuration={150}>
-                            <Tooltip>
-                                <TooltipTrigger asChild>{linkedIndicator}</TooltipTrigger>
-                                <TooltipContent side="top" align="end" className="max-w-xs break-words text-xs">
-                                    {linkedTooltip}
-                                </TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-                    ) : linkedIndicator
-                )}
-                {storageMissing && (
-                    <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-600 dark:text-red-400">
-                            <AlertTriangle className="h-3 w-3" />
-                            {i18n.language?.startsWith('ar') || i18n.language?.startsWith('ku') ? null : storageMissingLabel}
-                        </span>
-                    </div>
-                )}
-            </div>
-            {showDropdown ? (
-                <div className="absolute start-0 top-full z-[100] mt-1 max-h-56 w-max min-w-full overflow-y-auto rounded-xl border bg-popover shadow-lg">
+                    {storageMissing && (
+                        <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-600 dark:text-red-400">
+                                <AlertTriangle className="h-3 w-3" />
+                                {i18n.language?.startsWith('ar') || i18n.language?.startsWith('ku') ? null : storageMissingLabel}
+                            </span>
+                        </div>
+                    )}
+                </div>
+            )}
+        >
+            <div className="rounded-xl border bg-popover shadow-lg">
                     {filtered.map((product) => (
                         <button
                             key={product.id}
                             type="button"
-                            className="flex w-full min-w-[18rem] items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors hover:bg-accent focus:bg-accent focus:outline-none"
+                            className="flex w-full min-w-0 items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors hover:bg-accent focus:bg-accent focus:outline-none"
                             onMouseDown={(e) => {
                                 e.preventDefault()
                                 handleSelect(product)
@@ -254,7 +250,6 @@ export function ProductAutocompleteInput({
                         </button>
                     ))}
                 </div>
-            ) : null}
-        </div>
+        </AutocompletePopover>
     )
 }

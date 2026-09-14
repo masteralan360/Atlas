@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { UserRound } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { Input } from '@/ui/components/input'
+import { AutocompletePopover } from '@/ui/components/AutocompletePopover'
 
 interface PaymentAccountHolderNameAutocompleteProps {
     id: string
@@ -37,7 +38,6 @@ export function PaymentAccountHolderNameAutocomplete({
 }: PaymentAccountHolderNameAutocompleteProps) {
     const [isFocused, setIsFocused] = useState(false)
     const [justSelected, setJustSelected] = useState(false)
-    const containerRef = useRef<HTMLDivElement>(null)
 
     const query = value.trim().toLocaleLowerCase()
     const filteredSuggestions = useMemo(() => (
@@ -49,6 +49,7 @@ export function PaymentAccountHolderNameAutocomplete({
 
     const handleSelect = useCallback((name: string) => {
         setJustSelected(true)
+        setIsFocused(false)
         onSelect(name)
     }, [onSelect])
 
@@ -58,40 +59,35 @@ export function PaymentAccountHolderNameAutocomplete({
         return () => window.clearTimeout(timeout)
     }, [justSelected])
 
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-                setIsFocused(false)
-            }
-        }
-
-        document.addEventListener('mousedown', handleClickOutside)
-        return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [])
-
     return (
-        <div ref={containerRef} className={cn('relative w-full', className)}>
-            <Input
-                id={id}
-                value={value}
-                required={required}
-                aria-invalid={isInvalid}
-                autoComplete="name"
-                placeholder={placeholder}
-                disabled={disabled}
-                className={inputClassName}
-                onChange={(event) => {
-                    setJustSelected(false)
-                    onChange(event.target.value)
-                }}
-                onFocus={() => {
-                    setIsFocused(true)
-                    onFocus?.()
-                }}
-                onBlur={onBlur}
-            />
-            {showDropdown ? (
-                <div className="absolute start-0 top-full z-[100] mt-1 max-h-56 w-full overflow-y-auto rounded-xl border bg-popover shadow-lg">
+        <AutocompletePopover
+            open={showDropdown}
+            onOpenChange={setIsFocused}
+            anchor={(
+                <div data-autocomplete-popover-anchor className={cn('w-full', className)}>
+                    <Input
+                        id={id}
+                        value={value}
+                        required={required}
+                        aria-invalid={isInvalid}
+                        autoComplete="name"
+                        placeholder={placeholder}
+                        disabled={disabled}
+                        className={inputClassName}
+                        onChange={(event) => {
+                            setJustSelected(false)
+                            onChange(event.target.value)
+                        }}
+                        onFocus={() => {
+                            setIsFocused(true)
+                            onFocus?.()
+                        }}
+                        onBlur={onBlur}
+                    />
+                </div>
+            )}
+        >
+            <div className="rounded-xl border bg-popover shadow-lg">
                     {filteredSuggestions.map((name) => (
                         <button
                             key={name}
@@ -107,7 +103,6 @@ export function PaymentAccountHolderNameAutocomplete({
                         </button>
                     ))}
                 </div>
-            ) : null}
-        </div>
+        </AutocompletePopover>
     )
 }

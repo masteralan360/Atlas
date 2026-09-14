@@ -18,6 +18,19 @@ export interface SalesOrderCommissionAssignmentSummary {
     status: SalesOrderCommissionAssignmentSummaryStatus
 }
 
+/**
+ * Returns whether the current beneficiary drafts would actually create a
+ * manual or plan-based commission. Empty, incomplete, and unconfigured
+ * beneficiaries must not put an order into a commission mode.
+ */
+export function hasConfiguredSalesOrderCommission(
+    summaries: readonly SalesOrderCommissionAssignmentSummary[]
+) {
+    return summaries.some((summary) => (
+        summary.status === 'ready' || summary.status === 'calculated_on_completion'
+    ))
+}
+
 export type CommissionSummaryAgent = {
     id: string
     name: string

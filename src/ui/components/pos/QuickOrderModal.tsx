@@ -60,6 +60,7 @@ import {
     ProductCommissionPreview
 } from '@/ui/components/commissions/ProductCommissionPreview'
 import { findLinkedProductCommissionAgent } from '@/ui/components/commissions/productCommissionAgent'
+import { hasConfiguredSalesOrderCommission } from '@/ui/components/commissions/salesOrderCommissionSummary'
 
 export type QuickOrderCheckoutData = {
     customer: BusinessPartner
@@ -454,14 +455,15 @@ export function QuickOrderModal({
             }
         }
 
-        const shouldCreditCommission = includeCommission || hasAutomaticProductCommission
+        const shouldCreditCommission = includeCommission
+            || hasConfiguredSalesOrderCommission(commissionSummaries)
+            || hasAutomaticProductCommission
         try {
             await onSubmit({
                 customer: orderCounterparty!,
                 salesAccountAgentId: selectedSalesAccount?.agent.id ?? null,
-                // A qualifying product commission is automatic. The optional
-                // credit-commission step remains only for per-order manual
-                // commission terms.
+                // Only a configured manual/plan commission or a qualifying
+                // product commission creates an order commission snapshot.
                 commissionEnabled: shouldCreditCommission,
                 orderStatus,
                 paymentStatus,

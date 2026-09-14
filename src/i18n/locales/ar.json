@@ -1603,7 +1603,7 @@
       "discount": "الخصم",
       "tax": "الضريبة",
       "total": "الإجمالي",
-      "shippingAddress": "عنوان الشحن",
+      "shippingAddress": "عنوان الشحن (اختياري)",
       "shippingPlaceholder": "أدخل عنوان الشحن...",
       "notes": "الملاحظات (اختياري)",
       "notesPlaceholder": "ملاحظات الطلب أو التعليمات الخاصة...",
@@ -1907,7 +1907,7 @@
   "errorLogs": {
     "stopRecording": "إيقاف التسجيل",
     "resumeRecording": "استئناف التسجيل",
-    "recordingStopped": "تم إيقاف تسجيل السجلات لجلسة التطوير هذه."
+    "recordingStopped": "تم إيقاف تسجيل السجلات في وضع التطوير."
   },
   "settings": {
     "title": "الإعدادات",

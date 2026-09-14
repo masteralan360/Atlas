@@ -1147,8 +1147,12 @@ export interface SalesOrder extends BaseEntity {
    * Older orders intentionally behave as enabled.
    */
   commissionEnabled?: boolean
-  /** Immutable workspace-mode snapshot captured when this order is created. */
-  commissionMode?: SalesAgentCommissionMode
+  /**
+   * Immutable workspace-mode snapshot captured while this order has commission
+   * attribution. Orders without any manual or product commission keep this
+   * empty rather than being placed in a financial reporting lane.
+   */
+  commissionMode?: SalesAgentCommissionMode | null
   /** Creation-time marker used to preserve offline snapshots across later setting changes. */
   commissionModeCapturedAt?: string | null
   sourceStorageId?: string | null

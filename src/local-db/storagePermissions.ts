@@ -4,7 +4,12 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { supabase } from '@/auth/supabase'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import i18n from '@/i18n/config'
-import { getActiveBusinessUserId, getActiveBusinessWorkspaceId, isOnline } from '@/lib/network'
+import {
+  getActiveBusinessUserId,
+  getActiveBusinessUserRole,
+  getActiveBusinessWorkspaceId,
+  isOnline
+} from '@/lib/network'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
@@ -63,6 +68,25 @@ export function filterStorageScopedRows<T extends { storageId?: string | null }>
 }
 
 /**
+ * A document can only be changed as a whole when every one of its lines is
+ * in a location the current member can access. The UI may safely redact
+ * restricted lines for viewing, but it must never let an update write those
+ * hidden lines back or change their inventory.
+ */
+export function canAccessOrderForStorageAccess(
+  order: SalesOrder | PurchaseOrder,
+  access: StorageAccess
+) {
+  const fallbackStorageId = 'customerId' in order
+    ? order.sourceStorageId
+    : order.destinationStorageId
+
+  return access.isReady !== false && order.items.every((item) => (
+    canAccessStorage(item.storageId || fallbackStorageId, access)
+  ))
+}
+
+/**
  * Products remain global catalog entries, but non-admins only see a stock
  * product when it is assigned to at least one storage they can access.
  */
@@ -110,7 +134,7 @@ export function redactSalesOrderForStorageAccess(order: SalesOrder, access: Stor
   if (access.isAdmin || access.excludedStorageIds.size === 0) return order
 
   const visibleItems = order.items.filter((item) => (
-    canAccessStorage(item.storageId ?? order.sourceStorageId, access)
+    canAccessStorage(item.storageId || order.sourceStorageId, access)
   ))
   if (order.items.length > 0 && visibleItems.length === 0) return null
 
@@ -123,6 +147,9 @@ export function redactSalesOrderForStorageAccess(order: SalesOrder, access: Stor
 
   return {
     ...order,
+    sourceStorageId: canAccessStorage(order.sourceStorageId, access)
+      ? order.sourceStorageId
+      : null,
     items: visibleItems,
     subtotal,
     discount,
@@ -141,7 +168,7 @@ export function redactPurchaseOrderForStorageAccess(order: PurchaseOrder, access
   if (access.isAdmin || access.excludedStorageIds.size === 0) return order
 
   const visibleItems = order.items.filter((item) => (
-    canAccessStorage(item.storageId ?? order.destinationStorageId, access)
+    canAccessStorage(item.storageId || order.destinationStorageId, access)
   ))
   if (order.items.length > 0 && visibleItems.length === 0) return null
 
@@ -153,6 +180,9 @@ export function redactPurchaseOrderForStorageAccess(order: PurchaseOrder, access
 
   return {
     ...order,
+    destinationStorageId: canAccessStorage(order.destinationStorageId, access)
+      ? order.destinationStorageId
+      : null,
     items: visibleItems,
     subtotal,
     discount,
@@ -205,6 +235,13 @@ async function getStorageAccessSnapshot(
     return unrestrictedStorageAccess
   }
 
+  // Do not turn an authenticated admin into a restricted member merely
+  // because the local membership mirror has not finished hydrating. Remote
+  // RLS remains the authority for every cloud mutation.
+  if (userId === getActiveBusinessUserId() && getActiveBusinessUserRole(workspaceId) === 'admin') {
+    return unrestrictedStorageAccess
+  }
+
   const [user, profile] = await Promise.all([db.users.get(userId), db.profiles.get(userId)])
   const role = user?.workspaceId === workspaceId
     ? user.role
@@ -236,6 +273,14 @@ async function getStorageAccessSnapshot(
 /** Non-reactive counterpart for background workflows that must choose a location. */
 export async function getCurrentStorageAccess(workspaceId: string): Promise<StorageAccess> {
   const userId = getActiveBusinessUserId()
+  // Administrators are never subject to a storage exclusion. Resolve that
+  // before refreshing the member deny-list, otherwise a transient refresh
+  // failure incorrectly turns an admin-only inventory mutation into a deny.
+  const cachedAccess = await getStorageAccessSnapshot(workspaceId, userId)
+  if (cachedAccess?.isAdmin) {
+    return unrestrictedStorageAccess
+  }
+
   if (userId && shouldUseCloudStorageData(workspaceId) && isOnline(workspaceId)) {
     try {
       // A mutation must use the latest deny-list rather than trusting a

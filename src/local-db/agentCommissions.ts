@@ -1339,6 +1339,9 @@ function emptyCommissionCalculation(currency: CurrencyCode): CommissionCalculati
  */
 async function ensureLocalOrderCreatorProductCommissionAssignmentInternal(order: SalesOrder) {
   if (
+    order.commissionEnabled === false
+    || order.commissionMode == null
+    ||
     !order.createdBy
     || order.status !== "completed"
     || (!order.isPaid && order.paymentStatus !== "paid")
@@ -1688,7 +1691,11 @@ export async function accrueSalesOrderCommission(
  * not part of this eligibility rule.
  */
 function isCommissionEligibleOrder(order: SalesOrder) {
-  return !order.isDeleted && order.status !== 'cancelled' && order.returnStatus !== 'full';
+  return order.commissionEnabled !== false
+    && order.commissionMode != null
+    && !order.isDeleted
+    && order.status !== 'cancelled'
+    && order.returnStatus !== 'full';
 }
 
 async function accrueSalesOrderAssignmentCommission(
@@ -3138,12 +3145,7 @@ export async function settlePaidSalesOrderCommissionsLocally(
   const payouts: AgentCommissionEntry[] = [];
   for (const assignment of assignments) {
     if (assignment.isDeleted || assignment.unassignedAt) continue;
-    if (
-      order.commissionEnabled === false
-      && assignment.assignmentSource !== ORDER_CREATOR_PRODUCT_ASSIGNMENT_SOURCE
-    ) {
-      continue;
-    }
+    if (order.commissionEnabled === false || order.commissionMode == null) continue;
     const entries = await db.agent_commission_entries
       .where('assignmentId')
       .equals(assignment.id)

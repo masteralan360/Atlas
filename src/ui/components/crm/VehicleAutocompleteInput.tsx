@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Car, Check } from "lucide-react";
 
@@ -10,6 +10,7 @@ import {
 import { getRentalVehicleDisplayLabel } from "@/lib/carRentalPresentation";
 import { cn } from "@/lib/utils";
 import { Input } from "@/ui/components";
+import { AutocompletePopover } from "@/ui/components/AutocompletePopover";
 
 interface VehicleAutocompleteInputProps {
   value: string;
@@ -48,7 +49,6 @@ export function VehicleAutocompleteInput({
   const vehicles = useRentalVehicles(workspaceId);
   const [isFocused, setIsFocused] = useState(false);
   const [justSelected, setJustSelected] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   const query = value.trim().toLowerCase();
   const excludedVehicleIds = useMemo(
@@ -79,6 +79,7 @@ export function VehicleAutocompleteInput({
   const handleSelect = useCallback(
     (vehicle: RentalVehicle) => {
       setJustSelected(true);
+      setIsFocused(false);
       onChange(getRentalVehicleDisplayLabel(vehicle));
       onSelectVehicle(vehicle);
     },
@@ -91,20 +92,6 @@ export function VehicleAutocompleteInput({
     const timeout = setTimeout(() => setJustSelected(false), 200);
     return () => clearTimeout(timeout);
   }, [justSelected]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(event.target as Node)
-      ) {
-        setIsFocused(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   const linkedIndicator = (
     <div
@@ -119,29 +106,33 @@ export function VehicleAutocompleteInput({
   );
 
   return (
-    <div ref={containerRef} className={cn("relative w-full", className)}>
-      <div className="relative">
-        <Input
-          value={value}
-          onChange={(event) => {
-            setJustSelected(false);
-            onChange(event.target.value);
-          }}
-          onFocus={() => setIsFocused(true)}
-          placeholder={placeholder}
-          disabled={disabled}
-          required={required}
-          className={cn(
-            "flex-1",
-            inputClassName,
-            shouldShowLinkedIndicator && "pr-28",
-            hasSelection && "border-green-500/50 bg-green-50/30 dark:bg-green-950/10",
-          )}
-        />
-        {shouldShowLinkedIndicator ? linkedIndicator : null}
-      </div>
-      {showDropdown ? (
-        <div className="absolute left-0 right-0 top-full z-[100] mt-1 max-h-56 overflow-y-auto rounded-xl border bg-popover shadow-lg">
+    <AutocompletePopover
+      open={showDropdown}
+      onOpenChange={setIsFocused}
+      anchor={(
+        <div data-autocomplete-popover-anchor className={cn("relative w-full", className)}>
+          <Input
+            value={value}
+            onChange={(event) => {
+              setJustSelected(false);
+              onChange(event.target.value);
+            }}
+            onFocus={() => setIsFocused(true)}
+            placeholder={placeholder}
+            disabled={disabled}
+            required={required}
+            className={cn(
+              "flex-1",
+              inputClassName,
+              shouldShowLinkedIndicator && "pr-28",
+              hasSelection && "border-green-500/50 bg-green-50/30 dark:bg-green-950/10",
+            )}
+          />
+          {shouldShowLinkedIndicator ? linkedIndicator : null}
+        </div>
+      )}
+    >
+      <div className="rounded-xl border bg-popover shadow-lg">
           {filtered.map((vehicle) => (
             <button
               key={vehicle.id}
@@ -169,7 +160,6 @@ export function VehicleAutocompleteInput({
             </button>
           ))}
         </div>
-      ) : null}
-    </div>
+    </AutocompletePopover>
   );
 }

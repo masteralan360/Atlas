@@ -621,7 +621,9 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         }
 
         if (commissionModeFilter !== 'all') {
-            items = items.filter((order) => (order.commissionMode ?? 'payable') === commissionModeFilter)
+            items = items.filter((order) => (
+                order.commissionMode ?? (order.commissionEnabled === false ? null : 'payable')
+            ) === commissionModeFilter)
         }
 
         const query = search.trim().toLowerCase()

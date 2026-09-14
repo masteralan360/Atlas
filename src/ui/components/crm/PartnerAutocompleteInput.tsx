@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Users } from 'lucide-react'
 
 import { useBusinessPartners, type BusinessPartner, type BusinessPartnerRole } from '@/local-db'
 import { Input } from '@/ui/components'
 import { cn } from '@/lib/utils'
+import { AutocompletePopover } from '@/ui/components/AutocompletePopover'
 
 interface PartnerAutocompleteInputProps {
     value: string
@@ -42,7 +43,6 @@ export function PartnerAutocompleteInput({
     const partners = useBusinessPartners(workspaceId, { includeRealEstateRoles, includeAgentRoles, roles })
     const [isFocused, setIsFocused] = useState(false)
     const [justSelected, setJustSelected] = useState(false)
-    const containerRef = useRef<HTMLDivElement>(null)
 
     const query = value.trim().toLowerCase()
     const excludedPartnerIds = useMemo(() => new Set(excludePartnerIds.filter(Boolean)), [excludePartnerIds])
@@ -64,6 +64,7 @@ export function PartnerAutocompleteInput({
 
     const handleSelect = useCallback((partner: BusinessPartner) => {
         setJustSelected(true)
+        setIsFocused(false)
         onChange(partner.partnerName)
         onSelectPartner(partner)
     }, [onChange, onSelectPartner])
@@ -75,32 +76,28 @@ export function PartnerAutocompleteInput({
         }
     }, [justSelected])
 
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-                setIsFocused(false)
-            }
-        }
-        document.addEventListener('mousedown', handleClickOutside)
-        return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [])
-
     return (
-        <div ref={containerRef} className={cn('relative w-full', className)}>
-            <Input
-                value={value}
-                onChange={(e) => {
-                    setJustSelected(false)
-                    onChange(e.target.value)
-                }}
-                onFocus={() => setIsFocused(true)}
-                placeholder={placeholder}
-                disabled={disabled}
-                required={required}
-                className="flex-1"
-            />
-            {showDropdown ? (
-                <div className="absolute left-0 right-0 top-full z-[100] mt-1 max-h-56 overflow-y-auto rounded-xl border bg-popover shadow-lg">
+        <AutocompletePopover
+            open={showDropdown}
+            onOpenChange={setIsFocused}
+            anchor={(
+                <div data-autocomplete-popover-anchor className={cn('w-full', className)}>
+                    <Input
+                        value={value}
+                        onChange={(e) => {
+                            setJustSelected(false)
+                            onChange(e.target.value)
+                        }}
+                        onFocus={() => setIsFocused(true)}
+                        placeholder={placeholder}
+                        disabled={disabled}
+                        required={required}
+                        className="flex-1"
+                    />
+                </div>
+            )}
+        >
+            <div className="rounded-xl border bg-popover shadow-lg">
                     {filtered.map((partner) => (
                         <button
                             key={partner.id}
@@ -136,7 +133,6 @@ export function PartnerAutocompleteInput({
                         </button>
                     ))}
                 </div>
-            ) : null}
-        </div>
+        </AutocompletePopover>
     )
 }

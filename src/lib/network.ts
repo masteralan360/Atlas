@@ -5,6 +5,8 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 let isActuallyOnline = true;
 let activeBusinessWorkspaceId: string | null = null;
 let activeBusinessUserId: string | null = null;
+let activeBusinessUserRole: 'admin' | 'staff' | 'viewer' | null = null;
+let activeBusinessUserWorkspaceId: string | null = null;
 
 // Update the global state
 export function setNetworkStatus(online: boolean) {
@@ -15,12 +17,32 @@ export function setActiveBusinessWorkspace(workspaceId: string | null | undefine
     activeBusinessWorkspaceId = workspaceId ?? null;
 }
 
-export function setActiveBusinessUser(userId: string | null | undefined) {
+export function setActiveBusinessUser(
+    userId: string | null | undefined,
+    role?: 'admin' | 'staff' | 'viewer' | null,
+    workspaceId?: string | null
+) {
     activeBusinessUserId = userId ?? null;
+    activeBusinessUserRole = userId ? role ?? null : null;
+    activeBusinessUserWorkspaceId = userId ? workspaceId ?? null : null;
 }
 
 export function getActiveBusinessUserId() {
     return activeBusinessUserId;
+}
+
+/**
+ * The authenticated identity is authoritative for immediate local permission
+ * checks. Dexie membership rows can briefly lag after sign-in or a role edit.
+ */
+export function getActiveBusinessUserRole(workspaceId?: string | null) {
+    if (
+        !activeBusinessUserId
+        || (workspaceId && activeBusinessUserWorkspaceId && workspaceId !== activeBusinessUserWorkspaceId)
+    ) {
+        return null;
+    }
+    return activeBusinessUserRole;
 }
 
 export function getActiveBusinessWorkspaceId() {

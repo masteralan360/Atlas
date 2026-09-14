@@ -656,8 +656,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user])
   useEffect(() => {
     setActiveBusinessWorkspace(user?.workspaceId ?? null)
-    setActiveBusinessUser(user?.id ?? null)
-  }, [user?.id, user?.workspaceId])
+    setActiveBusinessUser(user?.id ?? null, user?.role ?? null, user?.workspaceId ?? null)
+  }, [user?.id, user?.role, user?.workspaceId])
 
   useEffect(() => {
     if (!isSupabaseConfigured) {

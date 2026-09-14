@@ -51,7 +51,8 @@ import {
 import { addToOfflineMutations, fetchTableFromSupabase } from './hooks'
 import { resolveReturnStorageId } from './storageUtils'
 import {
-    assertCurrentUserCanAccessStorage,
+    canAccessOrderForStorageAccess,
+    getCurrentStorageAccess,
     redactPurchaseOrderForStorageAccess,
     redactSalesOrderForStorageAccess,
     useStorageAccess
@@ -837,19 +838,10 @@ function resolvePurchaseOrderItemStorageId(order: PurchaseOrder, item: PurchaseO
 
 /** Applies the same location boundary before a draft can enter local storage. */
 async function assertOrderStorageAccess(order: SalesOrder | PurchaseOrder) {
-    const isSalesOrder = 'customerId' in order
-    const storageIds = new Set(
-        order.items
-            .map((item) => isSalesOrder
-                ? item.storageId || (order as SalesOrder).sourceStorageId
-                : item.storageId || (order as PurchaseOrder).destinationStorageId
-            )
-            .filter((storageId): storageId is string => typeof storageId === 'string' && storageId.length > 0)
-    )
-
-    await Promise.all(Array.from(storageIds, (storageId) =>
-        assertCurrentUserCanAccessStorage(order.workspaceId, storageId)
-    ))
+    const access = await getCurrentStorageAccess(order.workspaceId)
+    if (!canAccessOrderForStorageAccess(order, access)) {
+        throw new Error(i18n.t('storages.permissions.errors.accessDenied'))
+    }
 }
 
 async function getReservedQuantityMaps(workspaceId: string, excludeOrderId?: string) {
@@ -2105,6 +2097,33 @@ export function usePurchaseOrders(workspaceId: string | undefined) {
     return orders ?? []
 }
 
+/**
+ * Read hooks can redact inaccessible lines, whereas an update would write the
+ * full document back to the workspace. This reports whether that full order
+ * is safe for the active member to mutate without exposing its hidden lines.
+ */
+export function useOrderStorageWriteAccess(
+    orderId: string | undefined,
+    orderType: 'sales' | 'purchase' | undefined,
+    workspaceId?: string
+) {
+    const storageAccess = useStorageAccess(workspaceId)
+    const allowed = useLiveQuery(async () => {
+        if (!orderId || !orderType || storageAccess.isReady === false) {
+            return false
+        }
+
+        const order = orderType === 'sales'
+            ? await db.sales_orders.get(orderId)
+            : await db.purchase_orders.get(orderId)
+        return !!order
+            && !order.isDeleted
+            && canAccessOrderForStorageAccess(order, storageAccess)
+    }, [orderId, orderType, storageAccess.signature])
+
+    return allowed === true
+}
+
 export function useSalesOrder(orderId: string | undefined) {
     const viewOwnScope = useViewOwnRecordScope('orders.view_own')
     const permissions = useOptionalWorkspacePermissions()
@@ -2585,15 +2604,18 @@ async function buildSalesOrderEntity(
     const workspace = await db.workspaces.get(workspaceId)
     // This is a new order, including duplicates. Always snapshot the current
     // workspace setting rather than inheriting a source order's historical lane.
-    const commissionMode = workspace?.sales_agent_commission_mode === 'tracked'
-        ? 'tracked' as const
-        : 'payable' as const
+    const commissionEnabled = data.commissionEnabled ?? true
+    const commissionMode = commissionEnabled
+        ? (workspace?.sales_agent_commission_mode === 'tracked'
+            ? 'tracked' as const
+            : 'payable' as const)
+        : null
     const order = buildBaseEntity(workspaceId, {
         ...data,
         salesAccountAgentId: salesAccount?.agent.id ?? null,
-        commissionEnabled: data.commissionEnabled ?? true,
+        commissionEnabled,
         commissionMode,
-        commissionModeCapturedAt: now,
+        commissionModeCapturedAt: commissionEnabled ? now : null,
         ...paymentState,
         ...counterparty,
         orderNumber,
@@ -2993,15 +3015,27 @@ export async function updateSalesOrder(id: string, data: Partial<SalesOrder>) {
         hasOrderAdjustmentsUpdate ? data.orderAdjustments : existing.orderAdjustments,
         orderCurrency
     )
+    const workspace = await db.workspaces.get(existing.workspaceId)
+    const commissionEnabled = data.commissionEnabled ?? existing.commissionEnabled ?? true
     const updated: SalesOrder = {
         ...existing,
         ...data,
         salesAccountAgentId,
-        commissionEnabled: data.commissionEnabled ?? existing.commissionEnabled ?? true,
-        // Commission mode is a creation-time snapshot. Draft edits do not
-        // migrate an order between the payable and tracked lanes.
-        commissionMode: existing.commissionMode ?? 'payable',
-        commissionModeCapturedAt: existing.commissionModeCapturedAt ?? existing.createdAt,
+        commissionEnabled,
+        // A mode exists only while an order has commission attribution. When
+        // commission is re-enabled, snapshot the current workspace lane; an
+        // existing enabled order otherwise retains its historical lane.
+        commissionMode: !commissionEnabled
+            ? null
+            : existing.commissionEnabled === false || existing.commissionMode == null
+                ? (workspace?.sales_agent_commission_mode === 'tracked' ? 'tracked' : 'payable')
+                : existing.commissionMode,
+        commissionModeCapturedAt: commissionEnabled
+            && (existing.commissionEnabled === false || existing.commissionMode == null)
+            ? now
+            : commissionEnabled
+                ? existing.commissionModeCapturedAt ?? existing.createdAt
+                : null,
         ...(confirmedAdjustments.length > 0 ? { orderAdjustments: confirmedAdjustments } : {}),
         ...paymentState,
         ...counterparty,
@@ -3287,6 +3321,11 @@ async function updateSalesOrderStatusOnce(
     if (status === 'completed' && existing.status !== 'pending') {
         throw new Error('invalid_order_transition')
     }
+
+    // Status changes synchronize the entire order document. Check the raw
+    // record before making any financial or inventory side effect, because a
+    // details view may contain only its permitted lines.
+    await assertOrderStorageAccess(existing)
 
     let workingOrder = existing
     let linkedLoanId = existing.linkedLoanId || null
@@ -4640,6 +4679,10 @@ export async function updatePurchaseOrderStatus(id: string, status: PurchaseOrde
     if (status === 'completed' && existing.status !== 'received') {
         throw new Error('invalid_order_transition')
     }
+
+    // A status update persists the complete raw document. Do not let a
+    // partially redacted details view change hidden order lines or inventory.
+    await assertOrderStorageAccess(existing)
 
     let workingOrder = existing
     let linkedLoanId = existing.linkedLoanId || null

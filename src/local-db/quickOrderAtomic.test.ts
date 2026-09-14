@@ -416,6 +416,9 @@ describe('atomic POS Quick Order completion', () => {
                 payload: expect.objectContaining({
                     order: expect.objectContaining({
                         status: 'completed',
+                        commission_enabled: false,
+                        commission_mode: null,
+                        commission_mode_captured_at: null,
                         exchange_rates: []
                     }),
                     payment: expect.objectContaining({ amount: 100 })
@@ -426,6 +429,9 @@ describe('atomic POS Quick Order completion', () => {
         expect(completed).toMatchObject({
             orderNumber: 'SO-2026-00999',
             status: 'completed',
+            commissionEnabled: false,
+            commissionMode: null,
+            commissionModeCapturedAt: null,
             paymentStatus: 'paid',
             paidAmount: 100,
             balanceAmount: 0

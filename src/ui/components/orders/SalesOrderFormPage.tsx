@@ -24,6 +24,7 @@ import {
 import { getOrderLineFreeBonusQuantity, hasOrderLineInventoryQuantity } from '@/lib/orderLineItems'
 import { ORDER_DECIMAL_STEP, roundOrderValue } from '@/lib/orderPrecision'
 import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
+import { clearSalesItemProductForServicesStorage } from '@/lib/salesOrderLineStorage'
 import {
     createSalesOrder,
     buildAgentCommissionObligations,
@@ -36,6 +37,8 @@ import {
     useBusinessPartners,
     useInventory,
     useDiscountPriceResolver,
+    useProductCommissionRuleAgents,
+    useProductCommissionRules,
     usePriceBookCatalogState,
     useProducts,
     useWorkspaceProductBarcodes,
@@ -107,10 +110,13 @@ import {
     type SalesOrderCommissionAssignmentSummary
 } from '@/ui/components/commissions/SalesOrderCommissionAssignmentSection'
 import {
+    hasEligibleProductCommission,
     ProductCommissionPreview,
     type ProductCommissionPreviewAgent
 } from '@/ui/components/commissions/ProductCommissionPreview'
 import { findLinkedProductCommissionAgent } from '@/ui/components/commissions/productCommissionAgent'
+import { hasConfiguredSalesOrderCommission } from '@/ui/components/commissions/salesOrderCommissionSummary'
+import { useCommissionAgentDirectory } from '@/ui/components/commissions/useCommissionAgentDirectory'
 import { OLD_SALES_AGENT_CONFIGURATION } from '@/ui/components/commissions/oldSalesAgentConfiguration'
 
 interface SalesOrderFormPageProps {
@@ -233,6 +239,8 @@ export function SalesOrderFormPage({
     const { permissionKeys } = useWorkspacePermissions()
     const { exchangeData, eurRates, tryRates } = useExchangeRate()
     const demoTutorial = useDemoTutorial()
+    const salesAgentCommissionsEnabled = hasFeature('sales_agent_commissions')
+    const agentSalesAccountsEnabled = hasFeature('agent_sales_accounts')
 
     const products = useProducts(workspaceId)
     const productBarcodes = useWorkspaceProductBarcodes(workspaceId, { syncProductCache: false })
@@ -245,13 +253,12 @@ export function SalesOrderFormPage({
     const agentPartners = useBusinessPartners(workspaceId, { roles: ['agent'], includeAgentRoles: true })
     const agents = useAgents(workspaceId)
     const salesOrderAgentAssignments = useSalesOrderAgentAssignments(workspaceId)
+    const productCommissionRules = useProductCommissionRules(salesAgentCommissionsEnabled ? workspaceId : undefined)
+    const productCommissionRuleAgents = useProductCommissionRuleAgents(salesAgentCommissionsEnabled ? workspaceId : undefined)
+    const commissionAgentDirectory = useCommissionAgentDirectory(salesAgentCommissionsEnabled ? workspaceId : undefined)
     const editingOrder = useSalesOrder(editingOrderId)
-    const commissionMode = editingOrder
-        ? (editingOrder.commissionMode === 'tracked' ? 'tracked' : 'payable')
-        : features.sales_agent_commission_mode
+    const commissionMode = editingOrder?.commissionMode ?? features.sales_agent_commission_mode
     const isTrackedCommission = commissionMode === 'tracked'
-    const salesAgentCommissionsEnabled = hasFeature('sales_agent_commissions')
-    const agentSalesAccountsEnabled = hasFeature('agent_sales_accounts')
     const canAssignSalesAgents = OLD_SALES_AGENT_CONFIGURATION.showSalesAgentBeneficiaries
         && salesAgentCommissionsEnabled
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.assignOrders')
@@ -780,6 +787,14 @@ export function SalesOrderFormPage({
                         next.batchId = preferredBatchId
                         Object.assign(next, resolveItemPricing(changes.productId, next.batchId, currency, selectedCustomer))
                     }
+                } else if (
+                    changes.storageId === SERVICES_VIRTUAL_STORAGE_ID
+                    && (item.productId || item.productSearch)
+                ) {
+                    // A regular product cannot be sold from the virtual Services
+                    // source. Reset the line so the user can deliberately choose
+                    // an eligible service and its selling price.
+                    Object.assign(next, clearSalesItemProductForServicesStorage(next))
                 } else if (changes.storageId !== undefined && next.productId) {
                     const preferredBatch = getBatchesForPosition(next.productId, changes.storageId)[0]
                     next.batchId = preferredBatch?.id || ''
@@ -1112,6 +1127,29 @@ export function SalesOrderFormPage({
             const paidAmount = isFinanced ? initialPayment : isPaid ? total : 0
             const balanceAmount = roundFormAmount(Math.max(total - paidAmount, 0))
             const savedAt = new Date().toISOString()
+            const hasSalesAccountPlanCommission = Boolean(
+                selectedSalesAccount
+                && commissionAgentDirectory.agentById.get(selectedSalesAccount.agent.id)?.plan
+            )
+            const hasManualCommission = hasConfiguredSalesOrderCommission(commissionAssignmentSummaries)
+                || hasSalesAccountPlanCommission
+            const hasAutomaticProductCommission = salesAgentCommissionsEnabled
+                && hasEligibleProductCommission({
+                    items: productCommissionPreviewItems,
+                    agentIds: productCommissionAgentIds,
+                    rules: productCommissionRules,
+                    recipients: productCommissionRuleAgents,
+                    at: savedAt
+                })
+            const commissionEnabled = hasManualCommission || hasAutomaticProductCommission
+            // Users who cannot manage beneficiaries must not accidentally
+            // clear existing manual commission while editing unrelated order
+            // fields. New orders and automatic product commission remain
+            // determinable from the form's current state.
+            const shouldPersistCommissionState = !editingOrderId
+                || canAssignSalesAgents
+                || hasAutomaticProductCommission
+                || hasSalesAccountPlanCommission
 
             const payload = {
                 businessPartnerId: customer.id,
@@ -1120,6 +1158,7 @@ export function SalesOrderFormPage({
                 ...(agentSalesAccountsEnabled
                     ? { salesAccountAgentId: selectedSalesAccount?.agent.id ?? null }
                     : {}),
+                ...(shouldPersistCommissionState ? { commissionEnabled } : {}),
                 sourceStorageId: commonStorageId === SERVICES_VIRTUAL_STORAGE_ID ? null : commonStorageId,
                 items: orderItems,
                 subtotal,

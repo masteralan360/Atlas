@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import ar from '@/i18n/locales/ar.json'
 import en from '@/i18n/locales/en.json'
 import ku from '@/i18n/locales/ku.json'
@@ -120,5 +120,35 @@ describe('errorLogger', () => {
         expect(isErrorLogRecordingControlAvailable()).toBe(false)
         expect(setErrorLogRecordingEnabled(false)).toBe(false)
         expect(isErrorLogRecordingEnabled()).toBe(true)
+    })
+
+    it('persists the Tauri development recording preference across module reloads', async () => {
+        const storedValues = new Map<string, string>()
+        vi.stubEnv('DEV', true)
+        vi.stubGlobal('window', {
+            __TAURI_INTERNALS__: {},
+            localStorage: {
+                getItem: (key: string) => storedValues.get(key) ?? null,
+                setItem: (key: string, value: string) => storedValues.set(key, value),
+            },
+        })
+        vi.resetModules()
+
+        try {
+            const firstLoad = await import('./errorLogger')
+            expect(firstLoad.isErrorLogRecordingControlAvailable()).toBe(true)
+            expect(firstLoad.setErrorLogRecordingEnabled(false)).toBe(true)
+            expect(storedValues.get(firstLoad.ERROR_LOG_RECORDING_PREFERENCE_KEY)).toBe('false')
+
+            vi.resetModules()
+            const reloaded = await import('./errorLogger')
+            expect(reloaded.isErrorLogRecordingEnabled()).toBe(false)
+            expect(reloaded.setErrorLogRecordingEnabled(true)).toBe(true)
+            expect(storedValues.get(reloaded.ERROR_LOG_RECORDING_PREFERENCE_KEY)).toBe('true')
+        } finally {
+            vi.unstubAllGlobals()
+            vi.unstubAllEnvs()
+            vi.resetModules()
+        }
     })
 })

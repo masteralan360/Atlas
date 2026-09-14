@@ -13,6 +13,7 @@ const MAX_SERIALIZATION_DEPTH = 8
 const ERROR_LOG_WRITE_BATCH_SIZE = 100
 const ERROR_LOG_WRITE_DELAY_MS = 250
 const MAX_PENDING_ERROR_LOG_RECORDS = 2_000
+export const ERROR_LOG_RECORDING_PREFERENCE_KEY = 'atlas.error-log-recording-enabled'
 const CONSOLE_ERROR_LOGGER_INSTALLED = Symbol.for('atlas.console-error-logger-installed')
 
 export type ErrorLogSource = 'console' | 'toast'
@@ -93,7 +94,7 @@ let errorLogFlushInProgress = false
 let errorLogRecordsInFlight = 0
 let queueOverflowSuppressedSinceSummary = 0
 let queueOverflowLastSummaryAt: number | undefined
-let errorLogRecordingEnabled = true
+let errorLogRecordingEnabled = readStoredErrorLogRecordingEnabled()
 
 let errorLogSpamBlocker = new ErrorLogSpamBlocker()
 
@@ -106,6 +107,16 @@ function isTauriDevelopmentRuntime() {
     return isTauriRuntime() && import.meta.env.DEV
 }
 
+function readStoredErrorLogRecordingEnabled() {
+    if (!isTauriDevelopmentRuntime()) return true
+
+    try {
+        return window.localStorage.getItem(ERROR_LOG_RECORDING_PREFERENCE_KEY) !== 'false'
+    } catch {
+        return true
+    }
+}
+
 export function isErrorLogRecordingControlAvailable() {
     return isTauriDevelopmentRuntime()
 }
@@ -116,6 +127,12 @@ export function isErrorLogRecordingEnabled() {
 
 export function setErrorLogRecordingEnabled(enabled: boolean) {
     if (!isTauriDevelopmentRuntime()) return false
+
+    try {
+        window.localStorage.setItem(ERROR_LOG_RECORDING_PREFERENCE_KEY, String(enabled))
+    } catch {
+        return false
+    }
 
     errorLogRecordingEnabled = enabled
     if (!enabled) {
