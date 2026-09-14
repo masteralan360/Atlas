@@ -24,7 +24,7 @@ import { cn, formatCurrency, formatDate, formatDateTime, formatSnapshotTime } fr
 import { normalizeUnitCode } from '@/local-db/models'
 import { buildWorkflowGradientFill } from '@/lib/workflowProgressGradient'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
-import { setPrintPreviewEditorSource, type TemplatePreview, type TemplatePreviewRenderOptions } from '@/lib/printPreviewEditorStore'
+import { type TemplatePreview, type TemplatePreviewRenderOptions } from '@/lib/printPreviewEditorStore'
 import { setPDFPreviewSource } from '@/lib/pdfPreviewStore'
 import {
     db,

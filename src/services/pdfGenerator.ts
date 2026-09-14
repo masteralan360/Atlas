@@ -13,8 +13,7 @@ import {
 import { paginateOrderItemsStatementPages, paginateOrderItemsTables } from '@/lib/orderItemsTablePagination'
 import { centerTablesOnPages } from '@/lib/centeredTablePagination'
 import { reportPdfProgress } from '@/services/pdfProgress'
-import { isTauri } from '@/lib/platform'
-import { platformService } from '@/services/platformService'
+import { inlineCaptureableImages, waitForPdfImages } from '@/services/pdfImageCapture'
 
 /** Formats that can be stored as invoice versions. */
 export type InvoicePrintFormat = 'a4' | 'receipt'
@@ -107,112 +106,6 @@ const TRANSPARENT_IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAA
 
 function resolvePrintLanguage(printLang: string | null | undefined) {
     return printLang && printLang !== 'auto' ? printLang : i18n.language
-}
-
-async function waitForImageReady(image: HTMLImageElement, timeoutMs = 10_000) {
-    await new Promise<void>((resolve) => {
-        if (image.complete) {
-            resolve()
-            return
-        }
-
-        const cleanup = () => {
-            image.removeEventListener('load', cleanup)
-            image.removeEventListener('error', cleanup)
-            resolve()
-        }
-
-        image.addEventListener('load', cleanup)
-        image.addEventListener('error', cleanup)
-        setTimeout(cleanup, timeoutMs)
-    })
-
-    // iOS WebKit can fire `load` before the image is fully decoded. Waiting for
-    // decode prevents html-to-image from capturing an empty custom-template image.
-    if (image.naturalWidth > 0 && typeof image.decode === 'function') {
-        await Promise.race([
-            image.decode().catch(() => undefined),
-            new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))
-        ])
-    }
-}
-
-async function waitForImages(container: HTMLElement) {
-    await Promise.all(Array.from(container.querySelectorAll('img')).map((image) => waitForImageReady(image)))
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(String(reader.result))
-        reader.onerror = () => reject(reader.error || new Error('Failed to read image data.'))
-        reader.readAsDataURL(blob)
-    })
-}
-
-const TAURI_ASSET_PREFIXES = [
-    'asset://localhost/',
-    'https://asset.localhost/',
-    'http://localhost/'
-]
-
-/**
- * Extracts the filesystem path from a Tauri asset-protocol URL produced by
- * `convertFileSrc` (for example `asset://localhost/attached-images/...` on
- * iOS and `https://asset.localhost/C:/Users/...` on desktop).
- */
-function extractTauriAssetFsPath(source: string): string | null {
-    for (const prefix of TAURI_ASSET_PREFIXES) {
-        if (!source.startsWith(prefix)) continue
-
-        let filePath = decodeURIComponent(source.slice(prefix.length))
-        if (/^\/[A-Za-z]:[\\/]/.test(filePath)) {
-            filePath = filePath.slice(1)
-        }
-        return filePath || null
-    }
-    return null
-}
-
-function imageMimeFromPath(filePath: string): string {
-    const ext = filePath.split('.').pop()?.toLowerCase() || ''
-    if (ext === 'png') return 'image/png'
-    if (ext === 'webp') return 'image/webp'
-    if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
-    return 'application/octet-stream'
-}
-
-async function inlineCaptureableImages(container: HTMLElement) {
-    const images = Array.from(container.querySelectorAll('img'))
-
-    await Promise.all(images.map(async (image) => {
-        const source = image.currentSrc || image.src
-        if (!source || source.startsWith('data:')) {
-            return
-        }
-
-        // Tauri asset-protocol URLs (asset://localhost/... on iOS,
-        // https://asset.localhost/... on desktop) cannot be fetched from the
-        // webview, so html-to-image cannot embed them in its SVG foreignObject
-        // clone and they silently vanish from the captured canvas on iOS
-        // WebKit. Read the file through the fs plugin and inline it as a data
-        // URL before capture.
-        const tauriFilePath = isTauri() ? extractTauriAssetFsPath(source) : null
-        if (tauriFilePath) {
-            try {
-                const bytes = await platformService.readFile(tauriFilePath)
-                image.src = await blobToDataUrl(new Blob([bytes], { type: imageMimeFromPath(tauriFilePath) }))
-                await waitForImageReady(image)
-            } catch (error) {
-                console.warn('[pdfGenerator] Failed to inline Tauri asset image:', tauriFilePath, error)
-            }
-            return
-        }
-
-        // Remote images are embedded by html-to-image during capture. Its
-        // placeholder option below makes a CORS-blocked image empty instead of
-        // allowing the image error event to abort the complete PDF generation.
-    }))
 }
 
 async function expandContainerToRenderedBounds(container: HTMLElement) {
@@ -451,7 +344,7 @@ async function renderToCanvas(element: ReturnType<typeof createElement>, widthMm
     if (document.fonts?.ready) {
         await document.fonts.ready
     }
-    await waitForImages(container)
+    await waitForPdfImages(container)
     await inlineCaptureableImages(container)
     await reflowTemplateTextAfterContent(container, widthMm)
     await expandContainerToRenderedBounds(container)

@@ -7,7 +7,10 @@ import {
     createErrorLogRecord,
     createToastErrorLogRecord,
     formatErrorLogRecord,
+    isErrorLogRecordingControlAvailable,
+    isErrorLogRecordingEnabled,
     isExpiredErrorLogFile,
+    setErrorLogRecordingEnabled,
 } from './errorLogger'
 
 describe('errorLogger', () => {
@@ -111,5 +114,11 @@ describe('errorLogger', () => {
         expect(isExpiredErrorLogFile(cutoffFile, now)).toBe(false)
         expect(isExpiredErrorLogFile(expiredFile, now)).toBe(true)
         expect(isExpiredErrorLogFile('notes.jsonl', now)).toBe(false)
+    })
+
+    it('does not allow log recording to be disabled outside a Tauri development runtime', () => {
+        expect(isErrorLogRecordingControlAvailable()).toBe(false)
+        expect(setErrorLogRecordingEnabled(false)).toBe(false)
+        expect(isErrorLogRecordingEnabled()).toBe(true)
     })
 })

@@ -4,11 +4,13 @@ import {
     AlertTriangle,
     BellRing,
     Clipboard,
+    CircleStop,
     Copy,
     FileSearch,
     FileWarning,
     FolderClock,
     LoaderCircle,
+    Play,
     RefreshCw,
     Search,
     ShieldCheck,
@@ -21,8 +23,11 @@ import {
     copyErrorLogRecord,
     exportErrorLogRecord,
     formatErrorLogRecord,
+    isErrorLogRecordingControlAvailable,
+    isErrorLogRecordingEnabled,
     isErrorLogStorageAvailable,
     readErrorLogs,
+    setErrorLogRecordingEnabled,
     type ErrorLogRecord,
     type SerializedConsoleValue,
 } from '@/lib/errorLogger'
@@ -82,6 +87,8 @@ export function Logs() {
     const [selectedRecord, setSelectedRecord] = useState<ErrorLogRecord | null>(null)
     const [isCopying, setIsCopying] = useState(false)
     const [isExporting, setIsExporting] = useState(false)
+    const [isLogRecordingEnabled, setIsLogRecordingEnabled] = useState(() => isErrorLogRecordingEnabled())
+    const canControlLogRecording = isErrorLogRecordingControlAvailable()
 
     const refresh = useCallback(async () => {
         setIsLoading(true)
@@ -139,6 +146,13 @@ export function Logs() {
         }
     }
 
+    const toggleLogRecording = () => {
+        const nextRecordingState = !isLogRecordingEnabled
+        if (setErrorLogRecordingEnabled(nextRecordingState)) {
+            setIsLogRecordingEnabled(nextRecordingState)
+        }
+    }
+
     if (!isErrorLogStorageAvailable()) {
         return (
             <div className="space-y-6">
@@ -176,12 +190,27 @@ export function Logs() {
                     </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                    {canControlLogRecording ? (
+                        <Button
+                            type="button"
+                            variant={isLogRecordingEnabled ? 'destructive' : 'outline'}
+                            onClick={toggleLogRecording}
+                            className="gap-2"
+                        >
+                            {isLogRecordingEnabled ? <CircleStop className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                            {isLogRecordingEnabled ? t('errorLogs.stopRecording') : t('errorLogs.resumeRecording')}
+                        </Button>
+                    ) : null}
                     <Button type="button" variant="outline" onClick={() => void refresh()} disabled={isLoading} className="gap-2">
                         {isLoading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                         {t('errorLogs.refresh')}
                     </Button>
                 </div>
             </header>
+
+            {canControlLogRecording && !isLogRecordingEnabled ? (
+                <p className="text-sm text-muted-foreground">{t('errorLogs.recordingStopped')}</p>
+            ) : null}
 
             <div className="grid gap-4 xl:grid-cols-3">
                 <Card className="border-destructive/20 bg-destructive/[0.03]">

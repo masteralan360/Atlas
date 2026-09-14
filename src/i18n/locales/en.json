@@ -3287,7 +3287,10 @@
     "copyFailed": "Unable to copy the error record",
     "export": "Export",
     "exported": "Error record exported",
-    "exportFailed": "Unable to export the error record"
+    "exportFailed": "Unable to export the error record",
+    "stopRecording": "Stop recording",
+    "resumeRecording": "Resume recording",
+    "recordingStopped": "Log recording is paused for this development session."
   },
   "settings": {
     "title": "Settings",

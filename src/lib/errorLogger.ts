@@ -93,12 +93,43 @@ let errorLogFlushInProgress = false
 let errorLogRecordsInFlight = 0
 let queueOverflowSuppressedSinceSummary = 0
 let queueOverflowLastSummaryAt: number | undefined
+let errorLogRecordingEnabled = true
 
-const errorLogSpamBlocker = new ErrorLogSpamBlocker()
+let errorLogSpamBlocker = new ErrorLogSpamBlocker()
 
 function isTauriRuntime() {
     return typeof window !== 'undefined'
         && ('__TAURI__' in window || '__TAURI_METADATA__' in window || '__TAURI_INTERNALS__' in window)
+}
+
+function isTauriDevelopmentRuntime() {
+    return isTauriRuntime() && import.meta.env.DEV
+}
+
+export function isErrorLogRecordingControlAvailable() {
+    return isTauriDevelopmentRuntime()
+}
+
+export function isErrorLogRecordingEnabled() {
+    return !isTauriDevelopmentRuntime() || errorLogRecordingEnabled
+}
+
+export function setErrorLogRecordingEnabled(enabled: boolean) {
+    if (!isTauriDevelopmentRuntime()) return false
+
+    errorLogRecordingEnabled = enabled
+    if (!enabled) {
+        if (errorLogFlushTimer) {
+            clearTimeout(errorLogFlushTimer)
+            errorLogFlushTimer = undefined
+        }
+        pendingErrorLogRecords.length = 0
+        queueOverflowSuppressedSinceSummary = 0
+        queueOverflowLastSummaryAt = undefined
+        errorLogSpamBlocker = new ErrorLogSpamBlocker()
+    }
+
+    return true
 }
 
 function loadFileSystem() {
@@ -455,7 +486,7 @@ function enqueueErrorLog(record: ErrorLogRecord) {
 }
 
 function queueErrorLog(record: ErrorLogRecord) {
-    if (!isTauriRuntime()) return
+    if (!isTauriRuntime() || !isErrorLogRecordingEnabled()) return
 
     const decision = errorLogSpamBlocker.evaluate(record)
     decision.summaries.forEach((summary) => {

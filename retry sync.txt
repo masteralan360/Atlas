@@ -10,17 +10,13 @@ SQLite Offline queue
 Price books selector order form and quick order
 ##
 
-One single Usage Request Payload
-
-Fix Photo and Watermark on IOS pwa
-
 Multi-Color Partner
 
 Balance Color Settings
 
 Context-menu partner account statement & invoice redirect
 
-Accumilated account statement rows
+Accumilated account statement rows by types and for one day
 
 Centralized Photo Compression
 ##

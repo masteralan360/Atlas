@@ -1902,6 +1902,11 @@
       }
     }
   },
+  "errorLogs": {
+    "stopRecording": "إيقاف التسجيل",
+    "resumeRecording": "استئناف التسجيل",
+    "recordingStopped": "تم إيقاف تسجيل السجلات لجلسة التطوير هذه."
+  },
   "settings": {
     "title": "الإعدادات",
     "subtitle": "إدارة حسابك وإعدادات التطبيق",
