@@ -11,6 +11,10 @@ Price books selector order form and quick order
 
 storefront lazy loading image
 
+localize insufficient stock error message
+
+General Hardening
+
 Multi-Color Partner
 
 Balance Color Settings

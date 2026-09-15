@@ -3433,6 +3433,18 @@ export class AtlasDatabase extends Dexie {
       ])
     })
 
+    // Some Local Mode caches were left at a later IndexedDB version without
+    // the return-ledger stores from version 67. Bump the schema explicitly so
+    // Dexie creates those stores without touching any existing business data.
+    // This lets POS returns recover in place instead of requiring the user to
+    // clear their Local Mode cache.
+    this.version(128).stores({
+      sale_returns:
+        'id, workspaceId, saleId, status, returnedAt, updatedAt, [workspaceId+saleId], [workspaceId+returnedAt]',
+      sale_return_items:
+        'id, workspaceId, returnId, saleId, saleItemId, updatedAt, [returnId+saleItemId], [workspaceId+saleId]'
+    })
+
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
   }
