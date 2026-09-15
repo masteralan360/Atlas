@@ -10,6 +10,7 @@ import {
 } from '@/lib/atlasStandardOrderTablePagination'
 import {
     createAtlasStandardPartnerBalancePrintState,
+    getAtlasStandardPartnerBalanceLoadingPercentage,
     resetAtlasStandardPartnerBalancePrintState
 } from '@/lib/atlasStandardPartnerBalancePrintState'
 
@@ -29,12 +30,29 @@ describe('Atlas Standard partner-balance print state', () => {
         expect(state).toEqual({
             status: 'loading',
             balances: undefined,
-            orderBalanceAtPosting: undefined
+            orderBalanceAtPosting: undefined,
+            progress: undefined
         })
     })
 
     it('does not hold a print that has no linked partner balance to refresh', () => {
         expect(createAtlasStandardPartnerBalancePrintState(false)).toEqual({ status: 'ready' })
+    })
+})
+
+describe('Atlas Standard partner-balance loading progress', () => {
+    it('converts initial, partial, and complete source counts into a bounded percentage', () => {
+        expect(getAtlasStandardPartnerBalanceLoadingPercentage({ completedSources: 0, totalSources: 18 })).toBe(0)
+        expect(getAtlasStandardPartnerBalanceLoadingPercentage({ completedSources: 1, totalSources: 18 })).toBe(6)
+        expect(getAtlasStandardPartnerBalanceLoadingPercentage({ completedSources: 9, totalSources: 18 })).toBe(50)
+        expect(getAtlasStandardPartnerBalanceLoadingPercentage({ completedSources: 18, totalSources: 18 })).toBe(100)
+        expect(getAtlasStandardPartnerBalanceLoadingPercentage({ completedSources: 19, totalSources: 18 })).toBe(100)
+    })
+
+    it('uses zero when progress is unavailable or invalid', () => {
+        expect(getAtlasStandardPartnerBalanceLoadingPercentage()).toBe(0)
+        expect(getAtlasStandardPartnerBalanceLoadingPercentage({ completedSources: -1, totalSources: 18 })).toBe(0)
+        expect(getAtlasStandardPartnerBalanceLoadingPercentage({ completedSources: 1, totalSources: 0 })).toBe(0)
     })
 })
 

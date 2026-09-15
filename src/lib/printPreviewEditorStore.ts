@@ -1,6 +1,7 @@
 import { getPdfShapeBottom, type PdfShape, type UniversalInvoice } from '@/types'
 import type { ReactElement } from 'react'
 import type { PartnerAccountStatementClosingBalance } from '@/lib/partnerAccountStatement'
+import type { PartnerAccountStatementLiveDataProgress } from '@/lib/partnerAccountStatementLiveData'
 import type { OrderPartnerBalanceAtPosting } from '@/lib/orderPartnerBalance'
 import type { OrderPartnerBalancePrintFieldKeys } from '@/lib/orderPartnerBalancePrintDemand'
 import type { PurchaseOrder, SalesOrder } from '@/local-db'
@@ -47,6 +48,8 @@ export type TemplatePreviewRenderOptions = {
     onFieldLabelChange?: (fieldKey: string, label: string) => void
     onFieldDisplayModeChange?: (fieldKey: string, mode: string) => void
     workspaceFooterContacts?: Record<string, { primary?: string; nonPrimary?: string }>
+    /** Current source completion for a live partner-balance refresh. */
+    partnerBalanceProgress?: PartnerAccountStatementLiveDataProgress | null
 }
 
 export type TemplatePreviewMovableComponent = {
@@ -79,7 +82,8 @@ export type TemplatePreview = {
     onFreshPartnerBalanceStateChange?: (
         state: 'loading' | 'ready' | 'error',
         balances?: PartnerAccountStatementClosingBalance[],
-        orderBalanceAtPosting?: OrderPartnerBalanceAtPosting | null
+        orderBalanceAtPosting?: OrderPartnerBalanceAtPosting | null,
+        progress?: PartnerAccountStatementLiveDataProgress | null
     ) => void
     page?: {
         widthMm: number

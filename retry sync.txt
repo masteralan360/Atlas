@@ -15,9 +15,11 @@ Auto-Row Atlas Standard
 Optional Footer
 Add Row to summary
 
+Revenue Analytics and accounting
+
 Prevent Order form Back-Button
 
-General Hardening
+
 
 Multi-Color Partner
 
@@ -36,6 +38,9 @@ Accumilated account statement rows by types and for one day
 Centralized Photo Compression
 ##
 
+General Hardening
+
 fix retry sync
 
+Simplify E-commerce
 Restrict Phone number in khaleej cosmetic

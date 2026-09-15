@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import { ArrowLeft, BadgeCheck, BadgeDollarSign, CalendarDays, CircleCheck, Clock3, CreditCard, Eye, LayoutGrid, List, Loader2, Lock, Package, PackageCheck, Pencil, Plus, Printer, Receipt, RotateCcw, ShoppingCart, Trash2, TrendingUp, Truck, UsersRound, Warehouse, XCircle } from 'lucide-react'
+import { ArrowLeft, BadgeCheck, BadgeDollarSign, CalendarDays, CircleAlert, CircleCheck, Clock3, CreditCard, Eye, LayoutGrid, List, Loader2, Lock, Package, PackageCheck, Pencil, Plus, Printer, Receipt, RotateCcw, ShoppingCart, Trash2, TrendingUp, Truck, UsersRound, Warehouse, XCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLocalizedOrderError } from '@/lib/orderErrors'
 import { ORDER_STATUS_ADVANCE_HOLD_DURATION_MS } from '@/lib/pressAndHold'
@@ -9,6 +9,8 @@ import { Link, useLocation } from 'wouter'
 import { useAuth } from '@/auth'
 import { useDemoTutorial } from '@/demo'
 import { useProfileData } from '@/hooks/useProfileData'
+import { useNetworkStatus } from '@/hooks/useNetworkStatus'
+import { resolveOrderDetailsLookupStatus, type OrderDetailsRemoteLookupStatus } from '@/lib/orderDetailsLookup'
 import { getOrderLineFreeBonusQuantity, getOrderLineFulfilledQuantity, getOrderLineInventoryQuantity, getOrderLinePaidQuantity, hasOrderLineFreeBonus, isFulfilledUnitsAvailableForOrder } from '@/lib/orderLineItems'
 import {
     getOrderAdjustmentTotals,
@@ -32,6 +34,7 @@ import {
     createPostReturnSalesOrderAdjustment,
     deletePurchaseOrder,
     deleteSalesOrder,
+    fetchTableFromSupabase,
     findLatestUnreversedPaymentTransaction,
     getActiveSalesOrderAgentAssignments,
     getOrderBalanceAmount,
@@ -47,14 +50,14 @@ import {
     updatePurchaseOrderStatus,
     updateSalesOrderStatus,
     useBusinessPartner,
-    usePurchaseOrder,
+    usePurchaseOrderLookup,
     useLoan,
     useLoanInstallments,
     useOrderInstallments,
     useOrderStorageWriteAccess,
     useProductsByIds,
     useSalesOrderAgentAssignments,
-    useSalesOrder,
+    useSalesOrderLookup,
     useSalesOrderReturnItems,
     useSalesOrderReturns,
     useStorages,
@@ -254,9 +257,21 @@ export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string
     const [, navigate] = useLocation()
     const { toast } = useToast()
     const demoTutorial = useDemoTutorial()
+    const isOnline = useNetworkStatus()
+    const [lookupRetryVersion, setLookupRetryVersion] = useState(0)
+    const lookupKey = `${workspaceId}:${orderId}:${lookupRetryVersion}:${isLocalMode ? 'local' : 'cloud'}`
+    const [remoteLookupState, setRemoteLookupState] = useState<{
+        key: string
+        status: OrderDetailsRemoteLookupStatus
+    }>(() => ({
+        key: lookupKey,
+        status: isLocalMode ? 'complete' : 'loading'
+    }))
     const storages = useStorages(workspaceId)
-    const salesOrder = useSalesOrder(orderId)
-    const purchaseOrder = usePurchaseOrder(orderId)
+    const salesOrderLookup = useSalesOrderLookup(orderId, lookupRetryVersion)
+    const purchaseOrderLookup = usePurchaseOrderLookup(orderId, lookupRetryVersion)
+    const salesOrder = salesOrderLookup.status === 'found' ? salesOrderLookup.order : undefined
+    const purchaseOrder = purchaseOrderLookup.status === 'found' ? purchaseOrderLookup.order : undefined
     const salesOrderAgentAssignments = useSalesOrderAgentAssignments(workspaceId)
     const commissionAgentDirectory = useCommissionAgentDirectory(workspaceId)
     const salesOrderReturns = useSalesOrderReturns(orderId, workspaceId)
@@ -334,6 +349,56 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
             ? { kind: 'purchase' as const, order: purchaseOrder }
             : null,
         [purchaseOrder, salesOrder])
+    const remoteLookupStatus = remoteLookupState.key === lookupKey
+        ? remoteLookupState.status
+        : 'loading'
+    const orderLookupStatus = resolveOrderDetailsLookupStatus({
+        salesOrderStatus: salesOrderLookup.status,
+        purchaseOrderStatus: purchaseOrderLookup.status,
+        remoteStatus: remoteLookupStatus
+    })
+    const retryOrderLookup = useCallback(() => {
+        setLookupRetryVersion((version) => version + 1)
+    }, [])
+
+    useEffect(() => {
+        let cancelled = false
+
+        const setRemoteLookupStatus = (status: OrderDetailsRemoteLookupStatus) => {
+            if (!cancelled) {
+                setRemoteLookupState({ key: lookupKey, status })
+            }
+        }
+
+        const hydrateOrder = async () => {
+            if (resolved || isLocalMode) {
+                setRemoteLookupStatus('complete')
+                return
+            }
+
+            if (!isOnline) {
+                setRemoteLookupStatus('error')
+                return
+            }
+
+            setRemoteLookupStatus('loading')
+            try {
+                const results = await Promise.all([
+                    fetchTableFromSupabase('sales_orders', db.sales_orders, workspaceId),
+                    fetchTableFromSupabase('purchase_orders', db.purchase_orders, workspaceId)
+                ])
+                setRemoteLookupStatus(results.every(Boolean) ? 'complete' : 'error')
+            } catch (error) {
+                console.error('[Orders] Failed to hydrate order detail:', error)
+                setRemoteLookupStatus('error')
+            }
+        }
+
+        void hydrateOrder()
+        return () => {
+            cancelled = true
+        }
+    }, [isLocalMode, isOnline, lookupKey, resolved, workspaceId])
     const hasOrderStorageWriteAccess = useOrderStorageWriteAccess(
         orderId,
         resolved?.kind,
@@ -750,10 +815,11 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 Boolean(workspaceId && partnerId)
             ),
             freshPartnerBalanceRequest: workspaceId && partnerId ? { workspaceId, partnerId, order } : undefined,
-            onFreshPartnerBalanceStateChange: (status, balances, orderBalanceAtPosting) => {
+            onFreshPartnerBalanceStateChange: (status, balances, orderBalanceAtPosting, progress) => {
                 atlasStandardPartnerBalanceStateRef.current.status = status
                 atlasStandardPartnerBalanceStateRef.current.balances = balances
                 atlasStandardPartnerBalanceStateRef.current.orderBalanceAtPosting = orderBalanceAtPosting
+                atlasStandardPartnerBalanceStateRef.current.progress = progress
             },
             createElement: (data, _effectiveId, printLangOverride, renderOptions) => {
                 const baseLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
@@ -769,6 +835,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                         workspaceFooterContacts={renderOptions?.workspaceFooterContacts || workspaceFooterContacts}
                         businessPartner={bizPartner}
                         partnerBalancePrintState={atlasStandardPartnerBalanceStateRef.current}
+                        partnerBalanceProgress={renderOptions?.partnerBalanceProgress}
                         printedBy={creatorName}
                         productImageUrls={productImageUrls}
                         hiddenFields={renderOptions?.hiddenFields}
@@ -803,10 +870,11 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 Boolean(workspaceId && partnerId)
             ),
             freshPartnerBalanceRequest: workspaceId && partnerId ? { workspaceId, partnerId, order } : undefined,
-            onFreshPartnerBalanceStateChange: (status, balances, orderBalanceAtPosting) => {
+            onFreshPartnerBalanceStateChange: (status, balances, orderBalanceAtPosting, progress) => {
                 atlasStandardPartnerBalanceStateRef.current.status = status
                 atlasStandardPartnerBalanceStateRef.current.balances = balances
                 atlasStandardPartnerBalanceStateRef.current.orderBalanceAtPosting = orderBalanceAtPosting
+                atlasStandardPartnerBalanceStateRef.current.progress = progress
             },
             createElement: (_data, _effectiveId, printLangOverride, renderOptions) => {
                 const baseLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
@@ -822,6 +890,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                         workspaceFooterContacts={renderOptions?.workspaceFooterContacts || workspaceFooterContacts}
                         businessPartner={bizPartner}
                         partnerBalancePrintState={atlasStandardPartnerBalanceStateRef.current}
+                        partnerBalanceProgress={renderOptions?.partnerBalanceProgress}
                         printedBy={creatorName}
                         productImageUrls={productImageUrls}
                         hiddenFields={renderOptions?.hiddenFields}
@@ -843,7 +912,43 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         }
     }, [resolved, features, installments, workspaceName, i18n, bizPartner, partnerId, workspaceFooterContacts, creatorName, productImageUrls, returnPrintData, workspaceId])
 
-    if (!resolved) {
+    if (orderLookupStatus === 'loading') {
+        return (
+            <Card className="min-h-[280px]">
+                <CardContent className="flex min-h-[280px] flex-col items-center justify-center gap-3 py-10 text-center">
+                    <Loader2 className="h-7 w-7 animate-spin text-primary" aria-hidden="true" />
+                    <div className="text-lg font-semibold">{t('orders.details.loading')}</div>
+                    <div className="max-w-md text-sm text-muted-foreground">{t('orders.details.loadingDescription')}</div>
+                </CardContent>
+            </Card>
+        )
+    }
+
+    if (orderLookupStatus === 'error') {
+        return (
+            <Card className="min-h-[280px]">
+                <CardContent className="flex min-h-[280px] flex-col items-center justify-center gap-4 py-10 text-center">
+                    <CircleAlert className="h-8 w-8 text-destructive" aria-hidden="true" />
+                    <div className="space-y-1">
+                        <div className="text-lg font-semibold">{t('orders.details.loadError')}</div>
+                        <div className="max-w-md text-sm text-muted-foreground">{t('orders.details.loadErrorDescription')}</div>
+                    </div>
+                    <div className="flex flex-wrap justify-center gap-2">
+                        <Button onClick={retryOrderLookup}>
+                            <RotateCcw className="mr-2 h-4 w-4" />
+                            {t('orders.details.retry')}
+                        </Button>
+                        <Button variant="outline" onClick={() => navigate('/orders')}>
+                            <ArrowLeft className="mr-2 h-4 w-4" />
+                            {t('nav.orders') || 'Orders'}
+                        </Button>
+                    </div>
+                </CardContent>
+            </Card>
+        )
+    }
+
+    if (orderLookupStatus === 'not-found' || !resolved) {
         return (
             <Card>
                 <CardContent className="space-y-4 py-10 text-center">

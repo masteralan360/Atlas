@@ -1911,10 +1911,11 @@ function createAtlasStandardOrderInvoicePreview(
         freshPartnerBalanceRequest: requiresFreshPartnerBalance && options.workspaceId && partnerId
             ? { workspaceId: options.workspaceId, partnerId, order }
             : undefined,
-        onFreshPartnerBalanceStateChange: (status, balances, orderBalanceAtPosting) => {
+        onFreshPartnerBalanceStateChange: (status, balances, orderBalanceAtPosting, progress) => {
             partnerBalancePrintState.status = status
             partnerBalancePrintState.balances = balances
             partnerBalancePrintState.orderBalanceAtPosting = orderBalanceAtPosting
+            partnerBalancePrintState.progress = progress
         },
         createElement: (data, _effectiveId, printLangOverride, renderOptions) => (
             <AtlasStandardOrderInvoiceTemplate
@@ -1929,6 +1930,7 @@ function createAtlasStandardOrderInvoicePreview(
                 businessPartner={options.businessPartner}
                 partnerAccountStatementBalances={options.partnerAccountStatementBalances}
                 partnerBalancePrintState={partnerBalancePrintState}
+                partnerBalanceProgress={renderOptions?.partnerBalanceProgress}
                 printedBy={options.printedBy}
                 productImageUrls={options.productImageUrls}
                 componentPositions={renderOptions?.componentPositions}

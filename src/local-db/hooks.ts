@@ -1831,7 +1831,7 @@ export async function deleteCategoryDiscount(id: string) {
 
 // Helpers for repetitive logic
 const TABLE_FETCH_PAGE_SIZE = 1000
-const tableFetchesInFlight = new Map<string, Promise<void>>()
+const tableFetchesInFlight = new Map<string, Promise<boolean>>()
 
 async function fetchTableFromSupabaseInternal<T extends { id: string, syncStatus: any, lastSyncedAt: any }>(
     tableName: string,
@@ -1939,9 +1939,9 @@ export function fetchTableFromSupabase<T extends { id: string, syncStatus: any, 
     table: any,
     workspaceId: string,
     options?: { includeDeleted?: boolean }
-): Promise<void> {
+): Promise<boolean> {
     if (!workspaceId) {
-        return Promise.resolve()
+        return Promise.resolve(true)
     }
 
     const includeDeleted = options?.includeDeleted ?? false
@@ -1953,7 +1953,7 @@ export function fetchTableFromSupabase<T extends { id: string, syncStatus: any, 
 
     const request = (async () => {
         if (!await canReconcileCloudWorkspaceData(workspaceId)) {
-            return
+            return true
         }
 
         startWorkspaceDataHydration(workspaceId, 'supabase', tableName, key)
@@ -1964,9 +1964,11 @@ export function fetchTableFromSupabase<T extends { id: string, syncStatus: any, 
             } else {
                 cancelWorkspaceDataHydration(workspaceId, 'supabase', tableName, key)
             }
+            return completed
         } catch (error) {
             failWorkspaceDataHydration(workspaceId, 'supabase', tableName, undefined, key)
             console.error(`[${tableName}] Failed to hydrate from Supabase:`, error)
+            return false
         }
     })()
         .finally(() => {

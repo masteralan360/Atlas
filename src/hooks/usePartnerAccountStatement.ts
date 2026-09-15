@@ -537,6 +537,7 @@ export function usePartnerAccountStatementPrintBalances(
     statementData,
     isRefreshing,
     refreshError,
+    liveRefreshProgress,
     retryLiveRefresh
   } = usePartnerAccountStatement(
     shouldLoadBalances ? workspaceId : undefined,
@@ -555,6 +556,7 @@ export function usePartnerAccountStatementPrintBalances(
     hasStatementData: Boolean(statementData),
     isRefreshing: shouldLoadBalances && isRefreshing,
     refreshError: shouldLoadBalances ? refreshError : null,
+    liveRefreshProgress: shouldLoadBalances ? liveRefreshProgress : null,
     retryLiveRefresh
-  }), [demand, isRefreshing, order, refreshError, retryLiveRefresh, shouldLoadBalances, statementData])
+  }), [demand, isRefreshing, liveRefreshProgress, order, refreshError, retryLiveRefresh, shouldLoadBalances, statementData])
 }

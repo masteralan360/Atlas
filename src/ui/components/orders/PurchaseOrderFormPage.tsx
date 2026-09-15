@@ -46,6 +46,9 @@ import {
     type PurchaseOrderStatus
 } from '@/local-db'
 import { useWorkspace } from '@/workspace'
+import { useOrderEditorLiveData } from '@/hooks/useOrderEditorLiveData'
+import { isOrderReadOnly } from '@/lib/orderEditability'
+import { isRemoteOrderSaveConfirmationError, type OrderSaveProgress } from '@/lib/orderSaveProgress'
 import { useWorkspacePermissions } from '@/permissions'
 import {
     Button,
@@ -79,6 +82,9 @@ import { OrderAdjustmentsDialog } from './OrderAdjustmentsDialog'
 import { OrderLineItemNoteDialog } from './OrderLineItemNoteDialog'
 import { FreeBonusUnitSelect } from './FreeBonusUnitSelect'
 import { useUnitRegistry } from '@/ui/components/unitRegistry'
+import { OrderEditorLoadingSection, OrderEditorReadOnlyScope } from './OrderEditorLoadingOverlay'
+import { ProgressToast } from '@/ui/components/ProgressToast'
+import { ToastAction } from '@/ui/components/toast'
 
 interface PurchaseOrderFormPageProps {
     workspaceId: string
@@ -209,8 +215,33 @@ export function PurchaseOrderFormPage({
         priceBooks,
         priceBookItems,
         isReady: isPriceBookCatalogReady,
-        error: priceBookCatalogError
+        error: priceBookCatalogError,
+        retry: retryPriceBookCatalog
     } = usePriceBookCatalogState(priceBooksEnabled ? workspaceId : undefined, { enabled: priceBooksEnabled })
+    const orderEditorLiveData = useOrderEditorLiveData({
+        workspaceId,
+        editingOrderId,
+        kind: 'purchase',
+        priceBooksEnabled,
+        priceBookCatalog: {
+            isReady: isPriceBookCatalogReady,
+            error: priceBookCatalogError,
+            retry: retryPriceBookCatalog
+        }
+    })
+    const isOrderEditorBlocked = Boolean(editingOrderId)
+        && (orderEditorLiveData.isLoading || Boolean(orderEditorLiveData.error))
+    const isExistingOrderReadOnly = isOrderReadOnly(editingOrder?.status)
+    const readOnlyOrderStatusLabel = editingOrder && isExistingOrderReadOnly
+        ? t(`orders.status.${editingOrder.status}`, { defaultValue: editingOrder.status })
+        : ''
+    const supplierInformationLoad = orderEditorLiveData.getSectionState([
+        'order', 'businessPartners', 'priceBooks'
+    ])
+    const lineItemsLoad = orderEditorLiveData.getSectionState([
+        'order', 'products', 'productBarcodes', 'storages', 'units', 'priceBooks'
+    ])
+    const orderDataLoad = orderEditorLiveData.getSectionState(['order'])
     const { isAccessKeyHeld } = useUiAccess()
     const formOpenedAtRef = useRef(new Date().toISOString())
     const [isOrderCreationPickerOpen, setIsOrderCreationPickerOpen] = useState(false)
@@ -218,6 +249,32 @@ export function PurchaseOrderFormPage({
     const [prioritizedMethod, setPrioritizedMethod] = useState<string | null>(getPrioritizedPaymentMethod)
 
     const [isSaving, setIsSaving] = useState(false)
+    const progressToastRef = useRef<ReturnType<typeof toast> | null>(null)
+    const saveOperationRef = useRef<{ orderId: string; initialPaymentTransactionId: string } | null>(null)
+    const dismissSaveProgressToast = useCallback(() => {
+        if (progressToastRef.current) {
+            progressToastRef.current.dismiss()
+            progressToastRef.current = null
+        }
+    }, [])
+    const beginSaveProgressToast = useCallback(() => {
+        dismissSaveProgressToast()
+        progressToastRef.current = toast({
+            title: t('orders.form.saveProgressTitle'),
+            description: <ProgressToast fraction={0} stageKey="orders.form.saveProgressPreparing" />,
+            duration: 600000,
+            placement: 'floating'
+        })
+    }, [dismissSaveProgressToast, t, toast])
+    const updateSaveProgressToast = useCallback((progress: OrderSaveProgress) => {
+        const progressToast = progressToastRef.current
+        if (!progressToast) return
+        progressToast.update({
+            id: progressToast.id,
+            description: <ProgressToast fraction={progress.fraction} stageKey={progress.stageKey} />
+        })
+    }, [])
+    useEffect(() => () => dismissSaveProgressToast(), [dismissSaveProgressToast])
     const [productsViewItemIndex, setProductsViewItemIndex] = useState<number | null>(null)
     const [supplierId, setSupplierId] = useState(editingOrder?.businessPartnerId || editingOrder?.supplierId || '')
     const [supplierSearch, setSupplierSearch] = useState(editingOrder?.supplierName || '')
@@ -536,8 +593,8 @@ export function PurchaseOrderFormPage({
             && Boolean(firstDueDate)
         ))
 
-    const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-        event.preventDefault()
+    const submitOrder = async () => {
+        if (isOrderEditorBlocked || isExistingOrderReadOnly) return
         if (priceBooksEnabled && !isPriceBookCatalogReady) return
         if (!user?.workspaceId || isSaving) return
 
@@ -560,6 +617,7 @@ export function PurchaseOrderFormPage({
         }
 
         setIsSaving(true)
+        beginSaveProgressToast()
         try {
             let usesPriceBookPricing = false
             const orderItems: PurchaseOrderItem[] = items
@@ -696,9 +754,22 @@ export function PurchaseOrderFormPage({
                 } : {})
             }
 
+            const saveOperation = saveOperationRef.current ?? {
+                orderId: editingOrderId ?? generateId(),
+                initialPaymentTransactionId: generateId()
+            }
+            saveOperationRef.current = saveOperation
+            const saveOptions = {
+                requireRemoteConfirmation: true,
+                orderId: saveOperation.orderId,
+                initialPaymentTransactionId: saveOperation.initialPaymentTransactionId,
+                onProgress: updateSaveProgressToast
+            }
             const savedOrder = editingOrderId
-                ? await updatePurchaseOrder(editingOrderId, payload)
-                : await createPurchaseOrder(workspaceId, payload, user?.id ?? null)
+                ? await updatePurchaseOrder(editingOrderId, payload, saveOptions)
+                : await createPurchaseOrder(workspaceId, payload, user?.id ?? null, saveOptions)
+            saveOperationRef.current = null
+            dismissSaveProgressToast()
 
             toast({
                 title: requiresApprovalRequest
@@ -710,14 +781,28 @@ export function PurchaseOrderFormPage({
             }
             onCreated?.(savedOrder.id)
         } catch (error: any) {
+            dismissSaveProgressToast()
             toast({
                 title: t('common.error') || 'Error',
-                description: error?.message || t('orders.form.errors.savePurchaseFailed', { defaultValue: 'Failed to save purchase order.' }),
-                variant: 'destructive'
+                description: isRemoteOrderSaveConfirmationError(error)
+                    ? t('orders.form.errors.remoteSaveFailed')
+                    : error?.message || t('orders.form.errors.savePurchaseFailed', { defaultValue: 'Failed to save purchase order.' }),
+                variant: 'destructive',
+                action: (
+                    <ToastAction altText={t('orders.form.saveProgressRetry')} onClick={() => void submitOrder()}>
+                        {t('orders.form.saveProgressRetry')}
+                    </ToastAction>
+                )
             })
         } finally {
+            dismissSaveProgressToast()
             setIsSaving(false)
         }
+    }
+
+    const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault()
+        void submitOrder()
     }
 
     return (
@@ -746,8 +831,17 @@ export function PurchaseOrderFormPage({
                     </div>
                 </div>
 
+                <OrderEditorReadOnlyScope
+                    isReadOnly={isExistingOrderReadOnly}
+                    statusLabel={readOnlyOrderStatusLabel}
+                >
                 <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,2.5fr)_minmax(380px,0.8fr)]">
                             <div className="space-y-5">
+                                <OrderEditorLoadingSection
+                                    state={supplierInformationLoad}
+                                    onRetry={orderEditorLiveData.retry}
+                                    onBack={onCancel}
+                                >
                                 <Card
                                     ref={supplierInformationRef}
                                     tabIndex={-1}
@@ -843,6 +937,7 @@ export function PurchaseOrderFormPage({
                                         </div>
                                     </CardContent>
                                 </Card>
+                                </OrderEditorLoadingSection>
                                 <LoanPartyPickerDialog
                                     isOpen={isSupplierPickerOpen}
                                     onOpenChange={setIsSupplierPickerOpen}
@@ -877,6 +972,11 @@ export function PurchaseOrderFormPage({
                                     locked={isSupplierSelectionRequired}
                                     unlockLabel={t('orders.form.selectBusinessPartnerToUnlock', { defaultValue: 'Select a business partner to unlock this section.' })}
                                     onLockedInteraction={highlightSupplierInformation}
+                                >
+                                <OrderEditorLoadingSection
+                                    state={lineItemsLoad}
+                                    onRetry={orderEditorLiveData.retry}
+                                    onBack={onCancel}
                                 >
                                 <Card className={cn(
                                     'transition-[border-color,background-color] duration-200',
@@ -1100,12 +1200,18 @@ export function PurchaseOrderFormPage({
                                         })}
                                     </CardContent>
                                 </Card>
+                                </OrderEditorLoadingSection>
                                 </PartnerRequiredSection>
 
                                 <PartnerRequiredSection
                                     locked={isSupplierSelectionRequired}
                                     unlockLabel={t('orders.form.selectBusinessPartnerToUnlock', { defaultValue: 'Select a business partner to unlock this section.' })}
                                     onLockedInteraction={highlightSupplierInformation}
+                                >
+                                <OrderEditorLoadingSection
+                                    state={orderDataLoad}
+                                    onRetry={orderEditorLiveData.retry}
+                                    onBack={onCancel}
                                 >
                                 <Card
                                     data-tour-id="tutorial-order-notes"
@@ -1126,6 +1232,7 @@ export function PurchaseOrderFormPage({
                                         />
                                     </CardContent>
                                 </Card>
+                                </OrderEditorLoadingSection>
                                 </PartnerRequiredSection>
                             </div>
 
@@ -1134,6 +1241,11 @@ export function PurchaseOrderFormPage({
                                     locked={isSupplierSelectionRequired}
                                     unlockLabel={t('orders.form.selectBusinessPartnerToUnlock', { defaultValue: 'Select a business partner to unlock this section.' })}
                                     onLockedInteraction={highlightSupplierInformation}
+                                >
+                                <OrderEditorLoadingSection
+                                    state={orderDataLoad}
+                                    onRetry={orderEditorLiveData.retry}
+                                    onBack={onCancel}
                                 >
                                 <Card className={cn(
                                     'transition-[border-color,background-color] duration-200',
@@ -1307,12 +1419,18 @@ export function PurchaseOrderFormPage({
                                         ) : null}
                                     </CardContent>
                                 </Card>
+                                </OrderEditorLoadingSection>
                                 </PartnerRequiredSection>
 
                                 <PartnerRequiredSection
                                     locked={isSupplierSelectionRequired}
                                     unlockLabel={t('orders.form.selectBusinessPartnerToUnlock', { defaultValue: 'Select a business partner to unlock this section.' })}
                                     onLockedInteraction={highlightSupplierInformation}
+                                >
+                                <OrderEditorLoadingSection
+                                    state={orderDataLoad}
+                                    onRetry={orderEditorLiveData.retry}
+                                    onBack={onCancel}
                                 >
                                 <Card
                                     data-tour-id="tutorial-order-commercials"
@@ -1369,8 +1487,9 @@ export function PurchaseOrderFormPage({
                                         </div>
                                     </CardContent>
                                 </Card>
+                                </OrderEditorLoadingSection>
                                 </PartnerRequiredSection>
-                                <Card className="border-border/60 shadow-sm">
+                                {isExistingOrderReadOnly ? null : <Card className="border-border/60 shadow-sm">
                                     <CardHeader className="space-y-1">
                                         <CardTitle className="text-xl">{t('common.actions') || 'Actions'}</CardTitle>
                                         <p className="text-sm text-muted-foreground">
@@ -1378,7 +1497,7 @@ export function PurchaseOrderFormPage({
                                         </p>
                                     </CardHeader>
                                     <CardContent className="space-y-3">
-                                        <Button type="submit" className="h-12 w-full rounded-xl font-black" disabled={!canSubmit || isSaving} data-tour-id="tutorial-order-save">
+                                        <Button type="submit" className="h-12 w-full rounded-xl font-black" disabled={!canSubmit || isSaving || isOrderEditorBlocked} data-tour-id="tutorial-order-save">
                                             {isSaving
                                                 ? (t('common.loading') || 'Loading...')
                                                 : requiresApprovalRequest
@@ -1391,10 +1510,11 @@ export function PurchaseOrderFormPage({
                                             {t('common.cancel') || 'Cancel'}
                                         </Button>
                                     </CardContent>
-                                </Card>
+                                </Card>}
                             </div>
                         </div>
-                    </form>
+                </OrderEditorReadOnlyScope>
+            </form>
             <OrderAdjustmentsDialog
                 open={isOrderAdjustmentsOpen}
                 onOpenChange={setIsOrderAdjustmentsOpen}

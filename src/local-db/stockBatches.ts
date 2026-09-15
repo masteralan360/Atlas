@@ -29,7 +29,7 @@ import type {
 
 const TABLE_NAME = 'stock_batches'
 const STOCK_BATCH_FETCH_PAGE_SIZE = 1000
-const stockBatchFetchesInFlight = new Map<string, Promise<void>>()
+const stockBatchFetchesInFlight = new Map<string, Promise<boolean>>()
 
 export interface StockBatchFetchOptions {
     storageId?: string
@@ -1300,9 +1300,9 @@ export async function deleteStockBatch(id: string) {
 async function refreshStockBatchesFromSupabaseInternal(
     workspaceId: string,
     options: StockBatchFetchOptions
-) {
+): Promise<boolean> {
     if (!await canReconcileCloudWorkspaceData(workspaceId)) {
-        return
+        return true
     }
 
     const storageId = options.storageId?.trim()
@@ -1325,9 +1325,8 @@ async function refreshStockBatchesFromSupabaseInternal(
             .range(from, from + STOCK_BATCH_FETCH_PAGE_SIZE - 1)
 
         const { data, error } = await runSupabaseAction(`${TABLE_NAME}.fetch.page`, () => query)
-        if (!data || error || !await canReconcileCloudWorkspaceData(workspaceId)) {
-            return
-        }
+        if (!data || error) return false
+        if (!await canReconcileCloudWorkspaceData(workspaceId)) return true
 
         remoteRows.push(...(data as Record<string, unknown>[]))
         if (data.length < STOCK_BATCH_FETCH_PAGE_SIZE) {
@@ -1372,7 +1371,7 @@ async function refreshStockBatchesFromSupabaseInternal(
     })
 
     if (!await canReconcileCloudWorkspaceData(workspaceId)) {
-        return
+        return true
     }
 
     await db.transaction('rw', db.stock_batches, async () => {
@@ -1391,14 +1390,16 @@ async function refreshStockBatchesFromSupabaseInternal(
             await db.stock_batches.bulkPut(localItems)
         }
     })
+
+    return true
 }
 
 export async function refreshStockBatchesFromSupabase(
     workspaceId: string,
     options: StockBatchFetchOptions = {}
-) {
+): Promise<boolean> {
     if (!workspaceId || !isOnline()) {
-        return
+        return true
     }
 
     const storageId = options.storageId?.trim()
@@ -1410,9 +1411,9 @@ export async function refreshStockBatchesFromSupabase(
 
     const request = (async () => {
         if (!await canReconcileCloudWorkspaceData(workspaceId)) {
-            return
+            return true
         }
-        await refreshStockBatchesFromSupabaseInternal(workspaceId, { storageId })
+        return refreshStockBatchesFromSupabaseInternal(workspaceId, { storageId })
     })()
         .finally(() => {
             if (stockBatchFetchesInFlight.get(key) === request) {

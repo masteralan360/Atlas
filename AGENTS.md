@@ -32,6 +32,8 @@ Do not create a module-specific account selector or update a payment-account bal
 Any new or changed calculation logic MUST include Vitest coverage for expected results, rounding, and relevant boundary cases.
 Any new or changed transaction flow MUST include Vitest coverage that verifies the resulting records, balances, and ledger effects.
 Tests must cover both the successful path and important validation or failure paths.
+Any new or changed Cloud or Hybrid feature that reads or writes Supabase data MUST include Vitest coverage for its client-side request contract, successful result handling, and user-friendly failure handling.
+For Cloud or Hybrid transaction flows, Vitest coverage MUST additionally verify the expected returned or updated records and all relevant inventory, payment-transaction, balance, and ledger effects.
 
 # Atlas UI conventions
 

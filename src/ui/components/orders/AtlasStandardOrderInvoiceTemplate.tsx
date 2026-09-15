@@ -1,6 +1,6 @@
 import type { DraggableProvidedDragHandleProps } from '@hello-pangea/dnd'
 import { GripVertical } from 'lucide-react'
-import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -13,8 +13,12 @@ import {
     type SalesOrder
 } from '@/local-db'
 import type { PartnerAccountStatementClosingBalance } from '@/lib/partnerAccountStatement'
+import type { PartnerAccountStatementLiveDataProgress } from '@/lib/partnerAccountStatementLiveData'
 import type { OrderPartnerBalanceAtPosting } from '@/lib/orderPartnerBalance'
-import type { AtlasStandardPartnerBalancePrintState } from '@/lib/atlasStandardPartnerBalancePrintState'
+import {
+    getAtlasStandardPartnerBalanceLoadingPercentage,
+    type AtlasStandardPartnerBalancePrintState
+} from '@/lib/atlasStandardPartnerBalancePrintState'
 import {
     formatAtlasStandardPartnerBalanceAtPosting,
     formatAtlasStandardPartnerCurrentBalance
@@ -95,6 +99,8 @@ export interface AtlasStandardOrderInvoiceTemplateProps {
     partnerAccountStatementBalances?: PartnerAccountStatementClosingBalance[]
     /** Mutable per-preview balance state shared with the final PDF build. */
     partnerBalancePrintState?: AtlasStandardPartnerBalancePrintState
+    /** Current source completion while the preview refreshes partner balances. */
+    partnerBalanceProgress?: PartnerAccountStatementLiveDataProgress | null
     /** Read-only Account Statement reconstruction for the order's original posting. */
     partnerBalanceAtPosting?: OrderPartnerBalanceAtPosting | null
     printedBy?: string | null
@@ -1152,6 +1158,7 @@ export function AtlasStandardOrderInvoiceTemplate({
     businessPartner,
     partnerAccountStatementBalances,
     partnerBalancePrintState,
+    partnerBalanceProgress,
     partnerBalanceAtPosting,
     printedBy,
     componentPositions,
@@ -1186,20 +1193,12 @@ export function AtlasStandardOrderInvoiceTemplate({
     const resolvedPartnerAccountStatementBalances = partnerBalanceStatus === 'ready'
         ? partnerBalancePrintState?.balances || partnerAccountStatementBalances
         : undefined
-    const [partnerBalanceLoadingDots, setPartnerBalanceLoadingDots] = useState(1)
-
-    useEffect(() => {
-        if (partnerBalanceStatus !== 'loading') {
-            setPartnerBalanceLoadingDots(1)
-            return
-        }
-
-        const timer = window.setInterval(() => {
-            setPartnerBalanceLoadingDots((count) => count === 3 ? 1 : count + 1)
-        }, 450)
-
-        return () => window.clearInterval(timer)
-    }, [partnerBalanceStatus])
+    const partnerBalanceLoadingPercentage = getAtlasStandardPartnerBalanceLoadingPercentage(
+        partnerBalanceProgress ?? partnerBalancePrintState?.progress
+    )
+    const partnerBalanceLoadingLabel = t('orders.print.partnerBalanceLoadingProgress', {
+        percentage: new Intl.NumberFormat(locale, { useGrouping: false }).format(partnerBalanceLoadingPercentage)
+    })
 
     const counterpartyLabel = isSales
         ? labels.customer
@@ -1236,7 +1235,7 @@ export function AtlasStandardOrderInvoiceTemplate({
     const currentPartnerBalance = !shouldShowPartnerCurrentBalance
         ? '-'
         : partnerBalanceStatus === 'loading'
-        ? `${t('orders.print.partnerBalanceLoading')}${'.'.repeat(partnerBalanceLoadingDots)}`
+        ? partnerBalanceLoadingLabel
         : partnerBalanceStatus === 'error'
             ? t('orders.print.partnerBalanceUnavailable')
             : formatAtlasStandardPartnerCurrentBalance(
@@ -1249,7 +1248,7 @@ export function AtlasStandardOrderInvoiceTemplate({
     const partnerBalanceBeforeOrder = !shouldShowPartnerBalanceBefore
         ? '-'
         : partnerBalanceStatus === 'loading'
-        ? `${t('orders.print.partnerBalanceLoading')}${'.'.repeat(partnerBalanceLoadingDots)}`
+        ? partnerBalanceLoadingLabel
         : partnerBalanceStatus === 'error'
             ? t('orders.print.partnerBalanceAtOrderUnavailable')
             : formatAtlasStandardPartnerBalanceAtPosting(
@@ -1260,7 +1259,7 @@ export function AtlasStandardOrderInvoiceTemplate({
     const partnerBalanceAfterOrder = !shouldShowPartnerBalanceAfter
         ? '-'
         : partnerBalanceStatus === 'loading'
-        ? `${t('orders.print.partnerBalanceLoading')}${'.'.repeat(partnerBalanceLoadingDots)}`
+        ? partnerBalanceLoadingLabel
         : partnerBalanceStatus === 'error'
             ? t('orders.print.partnerBalanceAtOrderUnavailable')
             : formatAtlasStandardPartnerBalanceAtPosting(

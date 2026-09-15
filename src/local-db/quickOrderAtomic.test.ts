@@ -75,7 +75,23 @@ const browser = vi.hoisted(() => {
 
 const supabaseMock = vi.hoisted(() => {
     const rpc = vi.fn()
-    const upsert = vi.fn(async () => ({ data: [], error: null }))
+    const upsert = vi.fn((payload: unknown) => {
+        const rows = Array.isArray(payload) ? payload : [payload]
+        const response = { data: [], error: null }
+        return {
+            select: async () => ({
+                data: rows.map((row) => ({
+                    id: (row as { id?: string }).id,
+                    order_number: 'SO-2026-00999'
+                })),
+                error: null
+            }),
+            then: <TResult1 = typeof response, TResult2 = never>(
+                onfulfilled?: ((value: typeof response) => TResult1 | PromiseLike<TResult1>) | null,
+                onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+            ) => Promise.resolve(response).then(onfulfilled, onrejected)
+        }
+    })
     const insert = vi.fn(async () => ({ data: [], error: null }))
     const from = vi.fn(() => ({ upsert, insert }))
     return { rpc, upsert, insert, from }
@@ -100,7 +116,7 @@ import { SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 
 import { db } from './database'
-import { createCompletedSalesOrder, createQuickSalesOrder } from './orders'
+import { createCompletedSalesOrder, createQuickSalesOrder, createSalesOrder } from './orders'
 
 const WORKSPACE_ID = '10000000-0000-4000-8000-000000000001'
 const USER_ID = '10000000-0000-4000-8000-000000000002'
@@ -439,6 +455,104 @@ describe('atomic POS Quick Order completion', () => {
         expect(await db.sales_orders.get(completed.id)).toMatchObject({ status: 'completed' })
         expect(await db.payment_transactions.where('sourceRecordId').equals(completed.id).count()).toBe(1)
         expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(4)
+    })
+
+    it('requires Supabase acknowledgement for an order-form save and reuses its order identity on retry', async () => {
+        const orderId = crypto.randomUUID()
+        const initialPaymentTransactionId = crypto.randomUUID()
+        const progress: string[] = []
+        const remoteFailure = new Error('Supabase write failed')
+        const successfulUpsert = supabaseMock.upsert.getMockImplementation()
+        supabaseMock.upsert
+            .mockImplementationOnce(() => ({
+                select: async () => ({ data: null, error: remoteFailure }),
+                then: (resolve: (value: { data: null; error: Error }) => unknown) => resolve({ data: null, error: remoteFailure })
+            }))
+
+        await expect(createSalesOrder(
+            WORKSPACE_ID,
+            unpaidQuickOrderInput('draft'),
+            USER_ID,
+            {
+                orderId,
+                initialPaymentTransactionId,
+                requireRemoteConfirmation: true,
+                onProgress: (report) => progress.push(report.stageKey)
+            }
+        )).rejects.toThrow('remote_order_save_confirmation_failed')
+
+        expect(await db.offline_mutations.count()).toBe(0)
+        expect(await db.sales_orders.get(orderId)).toMatchObject({ syncStatus: 'pending' })
+
+        if (successfulUpsert) {
+            supabaseMock.upsert.mockImplementation(successfulUpsert)
+        }
+        const saved = await createSalesOrder(
+            WORKSPACE_ID,
+            unpaidQuickOrderInput('draft'),
+            USER_ID,
+            {
+                orderId,
+                initialPaymentTransactionId,
+                requireRemoteConfirmation: true,
+                onProgress: (report) => progress.push(report.stageKey)
+            }
+        )
+
+        expect(saved).toMatchObject({ id: orderId, orderNumber: 'SO-2026-00999', syncStatus: 'synced' })
+        expect(await db.sales_orders.count()).toBe(1)
+        expect(progress).toContain('orders.form.saveProgressComplete')
+    })
+
+    it('does not duplicate a remotely confirmed first payment when the linked order retry succeeds', async () => {
+        const orderId = crypto.randomUUID()
+        const initialPaymentTransactionId = crypto.randomUUID()
+        let failFirstOrderWrite = true
+        const successfulUpsert = supabaseMock.upsert.getMockImplementation()
+        supabaseMock.upsert.mockImplementation((payload: unknown) => {
+            const rows = Array.isArray(payload) ? payload : [payload]
+            const row = rows[0] as Record<string, unknown>
+            const isOrder = 'customer_id' in row
+            const response = isOrder && failFirstOrderWrite
+                ? { data: null, error: new Error('Supabase order write failed') }
+                : { data: [], error: null }
+            if (isOrder) failFirstOrderWrite = false
+
+            return {
+                select: async () => response.error
+                    ? response
+                    : {
+                        data: rows.map((item) => ({
+                            id: (item as { id?: string }).id,
+                            order_number: 'SO-2026-01000'
+                        })),
+                        error: null
+                    },
+                then: <TResult1 = typeof response, TResult2 = never>(
+                    onfulfilled?: ((value: typeof response) => TResult1 | PromiseLike<TResult1>) | null,
+                    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+                ) => Promise.resolve(response).then(onfulfilled, onrejected)
+            }
+        })
+
+        const options = {
+            orderId,
+            initialPaymentTransactionId,
+            requireRemoteConfirmation: true
+        }
+        await expect(createSalesOrder(WORKSPACE_ID, quickOrderInput(), USER_ID, options))
+            .rejects.toThrow('remote_order_save_confirmation_failed')
+        expect(await db.payment_transactions.where('sourceRecordId').equals(orderId).count()).toBe(1)
+
+        await createSalesOrder(WORKSPACE_ID, quickOrderInput(), USER_ID, options)
+
+        expect(await db.sales_orders.count()).toBe(1)
+        expect(await db.payment_transactions.where('sourceRecordId').equals(orderId).count()).toBe(1)
+        expect(await db.payment_transactions.get(initialPaymentTransactionId)).toMatchObject({ syncStatus: 'synced' })
+
+        if (successfulUpsert) {
+            supabaseMock.upsert.mockImplementation(successfulUpsert)
+        }
     })
 
     it('uses the same atomic order flow for services without inventory movement', async () => {

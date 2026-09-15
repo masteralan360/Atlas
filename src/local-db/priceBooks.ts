@@ -365,7 +365,8 @@ export function usePriceBookCatalogState(
         isReady: priceBooks !== undefined
             && priceBookItems !== undefined
             && (!needsRemoteHydration || remoteHydrationKey === expectedHydrationKey),
-        error: hydrationError
+        error: hydrationError,
+        retry: () => setRetryNonce((value) => value + 1)
     }
 }
 

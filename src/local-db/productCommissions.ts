@@ -274,6 +274,7 @@ export function useProductCommissionCatalogState(workspaceId?: string, enabled =
     const online = useNetworkStatus()
     const [isReady, setIsReady] = useState(() => !enabled || !workspaceId || isLocalWorkspaceMode(workspaceId))
     const [error, setError] = useState<unknown>(null)
+    const [retryNonce, setRetryNonce] = useState(0)
 
     useEffect(() => {
         let cancelled = false
@@ -291,7 +292,10 @@ export function useProductCommissionCatalogState(workspaceId?: string, enabled =
         void Promise.all([
             fetchTableFromSupabase(RULE_TABLE, db.product_commission_rules, workspaceId),
             fetchTableFromSupabase(RULE_AGENT_TABLE, db.product_commission_rule_agents, workspaceId)
-        ]).then(() => {
+        ]).then((results) => {
+            if (!results.every(Boolean)) {
+                throw new Error('product_commission_catalog_load_failed')
+            }
             if (!cancelled) setIsReady(true)
         }).catch((nextError) => {
             if (!cancelled) {
@@ -300,9 +304,15 @@ export function useProductCommissionCatalogState(workspaceId?: string, enabled =
             }
         })
         return () => { cancelled = true }
-    }, [enabled, online, workspaceId])
+    }, [enabled, online, retryNonce, workspaceId])
 
-    return { rules, recipients, isReady, error }
+    return {
+        rules,
+        recipients,
+        isReady,
+        error,
+        retry: () => setRetryNonce((value) => value + 1)
+    }
 }
 
 export function activeProductCommissionRule(

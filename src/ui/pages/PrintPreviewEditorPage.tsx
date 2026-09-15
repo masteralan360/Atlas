@@ -48,6 +48,7 @@ import { resolveIsolatedTextDirection } from '@/lib/textDirection'
 import type { UniversalInvoice } from '@/types'
 import { useAuth } from '@/auth/AuthContext'
 import { usePartnerAccountStatementPrintBalances } from '@/hooks/usePartnerAccountStatement'
+import { getAtlasStandardPartnerBalanceLoadingPercentage } from '@/lib/atlasStandardPartnerBalancePrintState'
 import {
     hasOrderPartnerBalancePrintDemand,
     resolveOrderPartnerBalancePrintDemand
@@ -616,6 +617,7 @@ export function PrintPreviewEditorPage() {
         hasStatementData: hasFreshPartnerBalanceStatementData,
         isRefreshing: isFreshPartnerBalanceRefreshing,
         refreshError: freshPartnerBalanceRefreshError,
+        liveRefreshProgress: freshPartnerBalanceProgress,
         orderBalanceAtPosting: freshOrderBalanceAtPosting
     } = usePartnerAccountStatementPrintBalances(
         freshPartnerBalanceRequest?.workspaceId,
@@ -640,6 +642,9 @@ export function PrintPreviewEditorPage() {
                 : undefined,
             requiresFreshPartnerBalance && nextFreshPartnerBalanceState === 'ready'
                 ? freshOrderBalanceAtPosting
+                : undefined,
+            requiresFreshPartnerBalance && nextFreshPartnerBalanceState === 'loading'
+                ? freshPartnerBalanceProgress
                 : undefined
         )
         setFreshPartnerBalanceState((current) => (
@@ -648,6 +653,7 @@ export function PrintPreviewEditorPage() {
     }, [
         freshOrderBalanceAtPosting,
         freshPartnerBalances,
+        freshPartnerBalanceProgress,
         nextFreshPartnerBalanceState,
         requiresFreshPartnerBalance,
         templatePreview
@@ -1055,6 +1061,22 @@ export function PrintPreviewEditorPage() {
         || source?.onPrint
         || source?.generateTemplateLayoutBlob
     )
+    const isFreshPartnerBalanceLoading = requiresFreshPartnerBalance
+        && nextFreshPartnerBalanceState === 'loading'
+    const freshPartnerBalanceLoadingPercentage = getAtlasStandardPartnerBalanceLoadingPercentage(
+        isFreshPartnerBalanceLoading ? freshPartnerBalanceProgress : null
+    )
+    const templatePrimaryActionLabel = source?.onSaveTemplateLayout
+        ? t('customTemplates.saveLayout', { defaultValue: 'Save Layout' })
+        : source?.templatePrimaryActionLabel || source?.printActionLabel || (source?.onSave
+            ? (t('print.printAndSave') || 'Print & Save')
+            : (t('common.print') || 'Print'))
+    const templatePrimaryActionDisplayLabel = isFreshPartnerBalanceLoading
+        ? t('print.actionWithProgress', {
+            action: templatePrimaryActionLabel,
+            percentage: freshPartnerBalanceLoadingPercentage
+        })
+        : templatePrimaryActionLabel
 
     const handleBack = useCallback(() => {
         clearPrintPreviewEditorSource()
@@ -1152,6 +1174,9 @@ export function PrintPreviewEditorPage() {
                             fieldLabelOverrides: templateFieldLabelOverrides,
                             fieldDisplayModes: templateFieldDisplayModes,
                             background: templateBackground ?? undefined,
+                            partnerBalanceProgress: requiresFreshPartnerBalance && nextFreshPartnerBalanceState === 'loading'
+                                ? freshPartnerBalanceProgress
+                                : undefined,
                             workspaceFooterContacts: sourceWorkspaceFooterContacts
                         }),
                         overrideLang,
@@ -1194,7 +1219,7 @@ export function PrintPreviewEditorPage() {
                 window.history.back()
             }
         }
-    }, [source, templatePreview, fieldValues, isSaving, isTemplatePrintReady, fixedTemplatePrintLang, tempPrintLang, buildTemplateLayout, sourceWorkspaceFooterContacts, templateHiddenFields, templateFieldOrders, templateFieldLabelOverrides, templateBackground, beginProgressToast, finishProgressToast, title, t])
+    }, [source, templatePreview, fieldValues, isSaving, isTemplatePrintReady, fixedTemplatePrintLang, tempPrintLang, buildTemplateLayout, sourceWorkspaceFooterContacts, templateHiddenFields, templateFieldOrders, templateFieldLabelOverrides, templateFieldDisplayModes, templateBackground, requiresFreshPartnerBalance, nextFreshPartnerBalanceState, freshPartnerBalanceProgress, beginProgressToast, finishProgressToast, title, t])
 
     const handleTemplatePreviewSave = useCallback(async () => {
         if (!source || !templatePreview || !fieldValues || isSaving || !isTemplatePrintReady) return
@@ -1265,7 +1290,7 @@ export function PrintPreviewEditorPage() {
 
         const nextDemand = resolveOrderPartnerBalancePrintDemand(balanceFieldKeys, nextHiddenFields)
         if (!hasOrderPartnerBalancePrintDemand(nextDemand)) {
-            templatePreview.onFreshPartnerBalanceStateChange?.('ready', undefined, undefined)
+            templatePreview.onFreshPartnerBalanceStateChange?.('ready', undefined, undefined, undefined)
             setFreshPartnerBalanceState('ready')
             return
         }
@@ -1769,18 +1794,17 @@ export function PrintPreviewEditorPage() {
                         )}
                         {hasTemplatePrimaryAction && (
                             <button
-                                className="inline-flex items-center justify-center rounded-md h-8 w-8 px-0 text-xs font-medium transition-colors gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:w-auto md:px-3"
+                                className={cn(
+                                    'inline-flex items-center justify-center rounded-md h-8 text-xs font-medium transition-colors gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:w-auto md:px-3',
+                                    isFreshPartnerBalanceLoading ? 'w-auto px-2' : 'w-8 px-0'
+                                )}
                                 onClick={handleTemplatePreviewSave}
                                 disabled={isSaving || !isTemplatePrintReady}
-                                aria-label={source.onSaveTemplateLayout
-                                    ? t('customTemplates.saveLayout', { defaultValue: 'Save Layout' })
-                                    : source.templatePrimaryActionLabel || source.printActionLabel || (source.onSave ? (t('print.printAndSave') || 'Print & Save') : (t('common.print') || 'Print'))}
+                                aria-label={templatePrimaryActionDisplayLabel}
                             >
                                 {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : source.onSaveTemplateLayout ? <Check className="h-3.5 w-3.5" /> : <Printer className="h-3.5 w-3.5" />}
-                                <span className="hidden md:inline">
-                                    {source.onSaveTemplateLayout
-                                        ? t('customTemplates.saveLayout', { defaultValue: 'Save Layout' })
-                                        : source.templatePrimaryActionLabel || source.printActionLabel || (source.onSave ? (t('print.printAndSave') || 'Print & Save') : (t('common.print') || 'Print'))}
+                                <span className={isFreshPartnerBalanceLoading ? 'inline' : 'hidden md:inline'}>
+                                    {templatePrimaryActionDisplayLabel}
                                 </span>
                             </button>
                         )}
@@ -2206,6 +2230,9 @@ export function PrintPreviewEditorPage() {
                                             fieldLabelOverrides: templateFieldLabelOverrides,
                                             fieldDisplayModes: templateFieldDisplayModes,
                                             background: templateBackground ?? undefined,
+                                            partnerBalanceProgress: requiresFreshPartnerBalance && nextFreshPartnerBalanceState === 'loading'
+                                                ? freshPartnerBalanceProgress
+                                                : undefined,
                                             onFieldChange: handleFieldChange,
                                             onComponentPositionChange: handleTemplateComponentPositionChange,
                                             onHiddenFieldChange: drawingMode === 'none' ? handleTemplateHiddenFieldChange : undefined,

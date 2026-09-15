@@ -13,6 +13,9 @@ import {
     type MonthKey
 } from '@/lib/budget'
 import { isOnline } from '@/lib/network'
+import {
+  createRemoteOrderSaveConfirmationError,
+} from '@/lib/orderSaveProgress'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { generateId, toSnakeCase } from '@/lib/utils'
@@ -203,6 +206,8 @@ export interface AppendPaymentTransactionInput {
     idempotent?: boolean
     /** Aggregate workflows own remote replay and must not enqueue a second row mutation. */
     deferRemoteSync?: boolean
+    /** The caller cannot report success until Supabase confirms this payment write. */
+    requireRemoteConfirmation?: boolean
     sourceModule: PaymentTransactionSourceModule
     sourceType: PaymentTransactionSourceType
     sourceRecordId: string
@@ -1452,7 +1457,40 @@ export async function appendPaymentTransaction(
 
   if (input.id) {
     const existing = await db.payment_transactions.get(input.id)
-    if (existing && !existing.isDeleted) return existing
+    if (existing && !existing.isDeleted) {
+      if (
+        !input.requireRemoteConfirmation
+        || !shouldUseCloudBusinessData(workspaceId)
+        || existing.syncStatus === 'synced'
+      ) {
+        return existing
+      }
+
+      if (!isOnline()) {
+        throw createRemoteOrderSaveConfirmationError()
+      }
+
+      try {
+        const client = getSupabaseClientForTable('payment_transactions')
+        const payload = sanitizeSyncPayload(existing as unknown as Record<string, unknown>)
+        const { error } = await runMutation('payment_transactions.confirm', () =>
+          client.from('payment_transactions').upsert(payload, { onConflict: 'id' })
+        )
+        if (error) throw error
+
+        const syncedAt = new Date().toISOString()
+        const syncedExisting: PaymentTransaction = {
+          ...existing,
+          syncStatus: 'synced',
+          lastSyncedAt: syncedAt
+        }
+        await db.payment_transactions.put(syncedExisting)
+        await mirrorPaymentAccountTransactionLocally(syncedExisting)
+        return syncedExisting
+      } catch (error) {
+        throw createRemoteOrderSaveConfirmationError(error)
+      }
+    }
   }
   const now = new Date().toISOString()
   const paidAt = input.paidAt ? new Date(input.paidAt).toISOString() : now
@@ -1508,6 +1546,9 @@ export async function appendPaymentTransaction(
   }
 
   if (!isOnline() || input.deferRemoteSync) {
+    if (input.requireRemoteConfirmation) {
+      throw createRemoteOrderSaveConfirmationError()
+    }
     await assertPaymentAccountTransactionCanBeAppliedLocally(transaction)
     await db.payment_transactions.put(transaction)
     await mirrorPaymentAccountTransactionLocally(transaction)
@@ -1527,7 +1568,7 @@ export async function appendPaymentTransaction(
     const client = getSupabaseClientForTable('payment_transactions')
     const payload = sanitizeSyncPayload(transaction as unknown as Record<string, unknown>)
     const { error } = await runMutation('payment_transactions.create', () =>
-      input.idempotent
+      input.idempotent || input.requireRemoteConfirmation
         ? client.from('payment_transactions').upsert(payload, { onConflict: 'id' })
         : client.from('payment_transactions').insert(payload)
     )
@@ -1546,6 +1587,9 @@ export async function appendPaymentTransaction(
     await mirrorPaymentAccountTransactionLocally(syncedTransaction)
     return syncedTransaction
   } catch (error) {
+    if (input.requireRemoteConfirmation) {
+      throw createRemoteOrderSaveConfirmationError(error)
+    }
     if (shouldUseOfflineMutationFallback(error)) {
       console.error('[Payments] Payment transaction sync failed, queued offline mutation:', error)
       await assertPaymentAccountTransactionCanBeAppliedLocally(transaction)
@@ -1581,7 +1625,10 @@ export async function synchronizeOrderPaymentReferences(
   orderType: Extract<OrderType, 'sales' | 'purchase'>,
   orderId: string,
   orderNumber: string | null | undefined,
-  options?: { deferRemoteSync?: boolean }
+  options?: {
+    deferRemoteSync?: boolean
+    requireRemoteConfirmation?: boolean
+  }
 ) {
   const referenceLabel = orderNumber?.trim()
   if (!referenceLabel || isProvisionalOrderReference(referenceLabel)) return []
@@ -1654,6 +1701,9 @@ export async function synchronizeOrderPaymentReferences(
   }
 
   if (!isOnline()) {
+    if (options?.requireRemoteConfirmation) {
+      throw createRemoteOrderSaveConfirmationError()
+    }
     await queueUpdates()
     return
   }
@@ -1675,6 +1725,9 @@ export async function synchronizeOrderPaymentReferences(
       }))
     )
   } catch (error) {
+    if (options?.requireRemoteConfirmation) {
+      throw createRemoteOrderSaveConfirmationError(error)
+    }
     // A document-label correction must never undo a successfully posted
     // payment or order. Keep it queued until a later sync can repair it.
     console.error('[Payments] Failed to synchronize order payment references:', error)

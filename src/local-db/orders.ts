@@ -11,6 +11,12 @@ import { roundOrderValue } from '@/lib/orderPrecision'
 import { convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
 import { createOrderAdjustment, normalizeOrderAdjustments, type OrderAdjustmentDraft } from '@/lib/orderAdjustments'
 import { isOnline } from '@/lib/network'
+import {
+    createRemoteOrderSaveConfirmationError,
+    ORDER_SAVE_PROGRESS,
+    type OrderSaveProgress,
+    type OrderSaveProgressStage
+} from '@/lib/orderSaveProgress'
 import { getOrderLineInventoryQuantity } from '@/lib/orderLineItems'
 import { isPositiveQuantity, roundQuantity } from '@/lib/quantity'
 import { getMissingPriceBookCostMessage, hasValidProductCost } from '@/lib/productCost'
@@ -195,6 +201,21 @@ type CreateOrderInput<TOrder extends SalesOrder | PurchaseOrder> = Omit<
     createdAt?: string
 }
 
+export type OrderFormSaveOptions = {
+    /** Receives every real persistence stage for the order form progress toast. */
+    onProgress?: (progress: OrderSaveProgress) => void
+    /** Prevents Cloud and Hybrid forms from treating an offline queue as a successful save. */
+    requireRemoteConfirmation?: boolean
+    /** Stable client identity makes a retried create an upsert of the same order. */
+    orderId?: string
+    /** Stable client identity prevents a retry from duplicating the first payment. */
+    initialPaymentTransactionId?: string
+}
+
+function reportOrderSaveProgress(options: OrderFormSaveOptions | undefined, stage: OrderSaveProgressStage) {
+    options?.onProgress?.(ORDER_SAVE_PROGRESS[stage])
+}
+
 type OrderWithApproval = Pick<
     SalesOrder | PurchaseOrder,
     'approvalStatus' | 'approvalRequestedAt' | 'approvalRequestedBy' | 'approvalReviewedAt' | 'approvalReviewedBy'
@@ -295,6 +316,8 @@ type SyncUpsertOptions = {
     throwOnNonRetriableError?: boolean
     /** Atomic workflows cannot continue after any failed prerequisite write. */
     throwOnError?: boolean
+    /** The caller must wait for remote order and payment-reference acknowledgement. */
+    requireRemoteConfirmation?: boolean
 }
 
 async function syncUpsertEntities(
@@ -308,6 +331,9 @@ async function syncUpsertEntities(
     }
 
     if (!isOnline(workspaceId)) {
+        if (options.requireRemoteConfirmation) {
+            throw createRemoteOrderSaveConfirmationError()
+        }
         await queueOfflineUpserts(tableName, entities, workspaceId)
         return
     }
@@ -366,6 +392,9 @@ async function syncUpsertEntities(
         }>)[tableName as OrderTableName]
         await Promise.all(entities.map(async (entity) => {
             const orderNumber = orderNumbers.get(entity.id)
+            if (options.requireRemoteConfirmation && !orderNumber) {
+                throw createRemoteOrderSaveConfirmationError()
+            }
             await table.update(entity.id, {
                 ...(orderNumber ? { orderNumber } : {}),
                 syncStatus: 'synced',
@@ -376,12 +405,17 @@ async function syncUpsertEntities(
                     workspaceId,
                     tableName === 'sales_orders' ? 'sales' : 'purchase',
                     entity.id,
-                    orderNumber
+                    orderNumber,
+                    { requireRemoteConfirmation: options.requireRemoteConfirmation }
                 )
             }
         }))
     } catch (error) {
         console.error(`[Orders] Failed to sync ${tableName}:`, error)
+
+        if (options.requireRemoteConfirmation) {
+            throw createRemoteOrderSaveConfirmationError(error)
+        }
 
         if (options.throwOnError
             || (options.throwOnNonRetriableError && !isRetriableWebRequestError(error))) {
@@ -701,7 +735,11 @@ async function recalculateSupplierAndPartnerSummaries(workspaceId: string, suppl
     await Promise.all(tasks)
 }
 
-function buildBaseEntity<T extends Record<string, unknown>>(workspaceId: string, data: T): T & BaseEntityPayload {
+function buildBaseEntity<T extends Record<string, unknown>>(
+    workspaceId: string,
+    data: T,
+    options?: Pick<OrderFormSaveOptions, 'orderId'>
+): T & BaseEntityPayload {
     const now = new Date().toISOString()
     const requestedCreatedAt = typeof data.createdAt === 'string' ? new Date(data.createdAt) : null
     const createdAt = requestedCreatedAt && !Number.isNaN(requestedCreatedAt.valueOf())
@@ -710,7 +748,7 @@ function buildBaseEntity<T extends Record<string, unknown>>(workspaceId: string,
 
     return {
         ...data,
-        id: generateId(),
+        id: options?.orderId ?? generateId(),
         workspaceId,
         createdAt,
         updatedAt: now,
@@ -1294,7 +1332,11 @@ async function hasOrderLoanInitialRepayment(loanId: string, workspaceId: string)
     return payments.some(isOrderLoanInitialRepaymentTransaction)
 }
 
-async function appendInitialOrderPaymentTransaction(orderType: OrderType, order: SalesOrder | PurchaseOrder) {
+async function appendInitialOrderPaymentTransaction(
+    orderType: OrderType,
+    order: SalesOrder | PurchaseOrder,
+    options?: Pick<OrderFormSaveOptions, 'initialPaymentTransactionId' | 'requireRemoteConfirmation'>
+) {
     if (isSimpleOrderLoan(order)) {
         return
     }
@@ -1315,6 +1357,9 @@ async function appendInitialOrderPaymentTransaction(orderType: OrderType, order:
 
     const { appendPaymentTransaction } = await import('./payments')
     await appendPaymentTransaction(order.workspaceId, {
+        id: options?.initialPaymentTransactionId,
+        idempotent: Boolean(options?.initialPaymentTransactionId),
+        requireRemoteConfirmation: options?.requireRemoteConfirmation,
         sourceModule: 'orders',
         sourceType,
         sourceRecordId: order.id,
@@ -2137,35 +2182,54 @@ export function useOrderStorageWriteAccess(
     return allowed === true
 }
 
-export function useSalesOrder(orderId: string | undefined) {
+export type OrderRecordLookup<T> =
+    | { status: 'loading' }
+    | { status: 'found'; order: T }
+    | { status: 'not-found' }
+    | { status: 'error' }
+
+export function useSalesOrderLookup(orderId: string | undefined, refreshKey = 0): OrderRecordLookup<SalesOrder> {
     const viewOwnScope = useViewOwnRecordScope('orders.view_own')
     const permissions = useOptionalWorkspacePermissions()
     const permissionKeys = permissions?.permissionKeys
     const storageAccess = useStorageAccess(undefined)
-    return useLiveQuery(async () => {
-        if (!orderId) return undefined
-        const order = await db.sales_orders.get(orderId)
-        if (!order) {
-            return undefined
+    const lookup = useLiveQuery<OrderRecordLookup<SalesOrder>>(async () => {
+        try {
+            if (!orderId) return { status: 'not-found' }
+            const order = await db.sales_orders.get(orderId)
+            if (!order) return { status: 'not-found' }
+
+            const visible = order.businessPartnerId
+                ? await canAccessBusinessPartnerInLocalCache(order.workspaceId, order.businessPartnerId, 'customer')
+                : await canAccessBusinessPartnerFacetInLocalCache(order.workspaceId, order.customerId, 'customer')
+            if (!visible) return { status: 'not-found' }
+
+            if (!viewOwnScope.isRestricted || order.createdBy === viewOwnScope.userId) {
+                const redactedOrder = redactSalesOrderForStorageAccess(order, storageAccess)
+                return redactedOrder ? { status: 'found', order: redactedOrder } : { status: 'not-found' }
+            }
+
+            const assignedOrderIds = await getSalesOrderIdsAssignedToLinkedFieldAgent(
+                order.workspaceId,
+                viewOwnScope.userId,
+                getCommissionAssignedOrderAccess(order.workspaceId, permissionKeys)
+            )
+            const redactedOrder = assignedOrderIds.has(order.id)
+                ? redactSalesOrderForStorageAccess(order, storageAccess)
+                : undefined
+            return redactedOrder ? { status: 'found', order: redactedOrder } : { status: 'not-found' }
+        } catch (error) {
+            console.error('[Orders] Failed to resolve sales order from the local cache:', error)
+            return { status: 'error' }
         }
-        const visible = order.businessPartnerId
-            ? await canAccessBusinessPartnerInLocalCache(order.workspaceId, order.businessPartnerId, 'customer')
-            : await canAccessBusinessPartnerFacetInLocalCache(order.workspaceId, order.customerId, 'customer')
-        if (!visible) {
-            return undefined
-        }
-        if (!viewOwnScope.isRestricted || order.createdBy === viewOwnScope.userId) {
-            return redactSalesOrderForStorageAccess(order, storageAccess) ?? undefined
-        }
-        const assignedOrderIds = await getSalesOrderIdsAssignedToLinkedFieldAgent(
-            order.workspaceId,
-            viewOwnScope.userId,
-            getCommissionAssignedOrderAccess(order.workspaceId, permissionKeys)
-        )
-        return assignedOrderIds.has(order.id)
-            ? redactSalesOrderForStorageAccess(order, storageAccess) ?? undefined
-            : undefined
-    }, [orderId, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, permissionKeys])
+    }, [orderId, refreshKey, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, permissionKeys])
+
+    return lookup ?? { status: 'loading' }
+}
+
+export function useSalesOrder(orderId: string | undefined) {
+    const lookup = useSalesOrderLookup(orderId)
+    return lookup.status === 'found' ? lookup.order : undefined
 }
 
 export function useSalesOrderReturns(orderId: string | undefined, workspaceId?: string) {
@@ -2294,22 +2358,34 @@ export function applySalesOrderReturnQuantities(
     })
 }
 
-export function usePurchaseOrder(orderId: string | undefined) {
+export function usePurchaseOrderLookup(orderId: string | undefined, refreshKey = 0): OrderRecordLookup<PurchaseOrder> {
     const viewOwnScope = useViewOwnRecordScope('orders.view_own')
     const storageAccess = useStorageAccess(undefined)
-    return useLiveQuery(async () => {
-        if (!orderId) return undefined
-        const order = await db.purchase_orders.get(orderId)
-        if (!order) {
-            return undefined
+    const lookup = useLiveQuery<OrderRecordLookup<PurchaseOrder>>(async () => {
+        try {
+            if (!orderId) return { status: 'not-found' }
+            const order = await db.purchase_orders.get(orderId)
+            if (!order) return { status: 'not-found' }
+
+            const visible = order.businessPartnerId
+                ? await canAccessBusinessPartnerInLocalCache(order.workspaceId, order.businessPartnerId, 'supplier')
+                : await canAccessBusinessPartnerFacetInLocalCache(order.workspaceId, order.supplierId, 'supplier')
+            const redactedOrder = visible && (!viewOwnScope.isRestricted || order.createdBy === viewOwnScope.userId)
+                ? redactPurchaseOrderForStorageAccess(order, storageAccess)
+                : undefined
+            return redactedOrder ? { status: 'found', order: redactedOrder } : { status: 'not-found' }
+        } catch (error) {
+            console.error('[Orders] Failed to resolve purchase order from the local cache:', error)
+            return { status: 'error' }
         }
-        const visible = order.businessPartnerId
-            ? await canAccessBusinessPartnerInLocalCache(order.workspaceId, order.businessPartnerId, 'supplier')
-            : await canAccessBusinessPartnerFacetInLocalCache(order.workspaceId, order.supplierId, 'supplier')
-        return visible && (!viewOwnScope.isRestricted || order.createdBy === viewOwnScope.userId)
-            ? redactPurchaseOrderForStorageAccess(order, storageAccess) ?? undefined
-            : undefined
-    }, [orderId, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId])
+    }, [orderId, refreshKey, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId])
+
+    return lookup ?? { status: 'loading' }
+}
+
+export function usePurchaseOrder(orderId: string | undefined) {
+    const lookup = usePurchaseOrderLookup(orderId)
+    return lookup.status === 'found' ? lookup.order : undefined
 }
 
 export function useOrderInstallments(orderId: string | undefined, workspaceId?: string) {
@@ -2600,7 +2676,8 @@ export async function recordOrderPayment(
 async function buildSalesOrderEntity(
     workspaceId: string,
     data: CreateOrderInput<SalesOrder>,
-    createdBy?: string | null
+    createdBy?: string | null,
+    options?: Pick<OrderFormSaveOptions, 'orderId'>
 ) {
     const now = new Date().toISOString()
     const orderNumber = await getInitialOrderNumber('sales_orders', workspaceId)
@@ -2636,7 +2713,7 @@ async function buildSalesOrderEntity(
         marketplaceOrderId: data.marketplaceOrderId ?? null,
         status,
         createdBy: createdBy ?? null
-    }) as SalesOrder
+    }, options) as SalesOrder
     const confirmedAdjustments = normalizeOrderAdjustments(order.orderAdjustments, order.currency)
     if (confirmedAdjustments.length > 0) order.orderAdjustments = confirmedAdjustments
     else delete order.orderAdjustments
@@ -2650,9 +2727,11 @@ async function buildSalesOrderEntity(
 export async function createSalesOrder(
     workspaceId: string,
     data: CreateOrderInput<SalesOrder>,
-    createdBy?: string | null
+    createdBy?: string | null,
+    options?: OrderFormSaveOptions
 ) {
-    const order = await buildSalesOrderEntity(workspaceId, data, createdBy)
+    reportOrderSaveProgress(options, 'preparing')
+    const order = await buildSalesOrderEntity(workspaceId, data, createdBy, options)
     const status = order.status
 
     await assertSalesProductsHaveCosts(order)
@@ -2670,7 +2749,8 @@ export async function createSalesOrder(
     // Initial purchase/sale payments are posted first so an insufficient
     // selected account cannot create an order that claims to be paid.
     if (!isOrderApprovalRequested(order)) {
-        await appendInitialOrderPaymentTransaction('sales', order)
+        reportOrderSaveProgress(options, 'payment')
+        await appendInitialOrderPaymentTransaction('sales', order, options)
     }
     await db.sales_orders.put(order)
 
@@ -2689,19 +2769,27 @@ export async function createSalesOrder(
         })
     }
 
-    await syncUpsertEntities('sales_orders', [order as unknown as Record<string, unknown> & { id: string; version: number }], workspaceId)
+    reportOrderSaveProgress(options, 'saving')
+    await syncUpsertEntities(
+        'sales_orders',
+        [order as unknown as Record<string, unknown> & { id: string; version: number }],
+        workspaceId,
+        { requireRemoteConfirmation: options?.requireRemoteConfirmation }
+    )
+    reportOrderSaveProgress(options, 'confirming')
     await synchronizeSalesAccountCommissionBeneficiaryBestEffort(workspaceId, order.id, createdBy)
     await recalculateCustomerAndPartnerSummaries(workspaceId, order.customerId, order.businessPartnerId)
     const createdOrder = (await db.sales_orders.get(order.id)) as SalesOrder
 
     if (!isOrderApprovalRequested(createdOrder)) {
-        await appendInitialOrderPaymentTransaction('sales', createdOrder)
+        await appendInitialOrderPaymentTransaction('sales', createdOrder, options)
     }
 
     if (createdOrder.status === 'completed') {
         await reconcileSalesOrderCommissionBestEffort(workspaceId, createdOrder.id, createdBy)
     }
 
+    reportOrderSaveProgress(options, 'complete')
     return createdOrder
 }
 
@@ -2968,7 +3056,8 @@ export async function createCompletedSalesOrder(
     }, createdBy, options)
 }
 
-export async function updateSalesOrder(id: string, data: Partial<SalesOrder>) {
+export async function updateSalesOrder(id: string, data: Partial<SalesOrder>, options?: OrderFormSaveOptions) {
+    reportOrderSaveProgress(options, 'preparing')
     const existing = await db.sales_orders.get(id)
     if (!existing || existing.isDeleted) {
         throw new Error('Sales order not found')
@@ -3060,12 +3149,20 @@ export async function updateSalesOrder(id: string, data: Partial<SalesOrder>) {
     updated.nextDueDate = isOrderFinancingMethod(updated.paymentMethod) ? updated.firstDueDate || null : null
     await assertOrderStorageAccess(updated)
     await assertSalesProductsHaveCosts(updated)
-    await appendInitialOrderPaymentTransaction('sales', updated)
+    reportOrderSaveProgress(options, 'payment')
+    await appendInitialOrderPaymentTransaction('sales', updated, options)
     await db.sales_orders.put(updated)
     const orderForSync = hasOrderAdjustmentsUpdate && confirmedAdjustments.length === 0
         ? { ...updated, orderAdjustments: null }
         : updated
-    await syncUpsertEntities('sales_orders', [orderForSync as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
+    reportOrderSaveProgress(options, 'saving')
+    await syncUpsertEntities(
+        'sales_orders',
+        [orderForSync as unknown as Record<string, unknown> & { id: string; version: number }],
+        existing.workspaceId,
+        { requireRemoteConfirmation: options?.requireRemoteConfirmation }
+    )
+    reportOrderSaveProgress(options, 'confirming')
     await synchronizeSalesAccountCommissionBeneficiaryBestEffort(existing.workspaceId, updated.id, updated.createdBy)
 
     await Promise.all(
@@ -3086,6 +3183,7 @@ export async function updateSalesOrder(id: string, data: Partial<SalesOrder>) {
         updated.id,
         updated.createdBy
     )
+    reportOrderSaveProgress(options, 'complete')
     return updated
 }
 
@@ -4474,8 +4572,10 @@ export async function deleteSalesOrder(id: string) {
 export async function createPurchaseOrder(
     workspaceId: string,
     data: CreateOrderInput<PurchaseOrder>,
-    createdBy?: string | null
+    createdBy?: string | null,
+    options?: OrderFormSaveOptions
 ) {
+    reportOrderSaveProgress(options, 'preparing')
     const now = new Date().toISOString()
     const orderNumber = await getInitialOrderNumber('purchase_orders', workspaceId)
     const status = data.status || 'draft'
@@ -4491,7 +4591,7 @@ export async function createPurchaseOrder(
         orderNumber,
         status,
         createdBy: createdBy ?? null
-    }) as PurchaseOrder
+    }, options) as PurchaseOrder
     const confirmedAdjustments = normalizeOrderAdjustments(order.orderAdjustments, order.currency)
     if (confirmedAdjustments.length > 0) order.orderAdjustments = confirmedAdjustments
     else delete order.orderAdjustments
@@ -4511,7 +4611,8 @@ export async function createPurchaseOrder(
     // Payment is the source of truth for a paid purchase order. Validate the
     // account before receiving inventory or persisting the paid order.
     if (!isOrderApprovalRequested(order)) {
-        await appendInitialOrderPaymentTransaction('purchase', order)
+        reportOrderSaveProgress(options, 'payment')
+        await appendInitialOrderPaymentTransaction('purchase', order, options)
     }
     const shouldReceive = status === 'received' || status === 'completed'
     const usesCloudAuthority = shouldReceive && shouldUseCloudBusinessData(workspaceId)
@@ -4521,6 +4622,7 @@ export async function createPurchaseOrder(
         await preparePurchaseOrderReceipt(order)
     }
 
+    reportOrderSaveProgress(options, 'saving')
     if (usesCloudAuthority) {
         // The RPC requires an existing ordered document and changes its status
         // only in the same transaction that posts stock and ledger rows.
@@ -4534,7 +4636,10 @@ export async function createPurchaseOrder(
             'purchase_orders',
             [stagedOrder as unknown as Record<string, unknown> & { id: string; version: number }],
             workspaceId,
-            { throwOnError: true }
+            {
+                throwOnError: true,
+                requireRemoteConfirmation: options?.requireRemoteConfirmation
+            }
         )
         const syncedStagedOrder = await db.purchase_orders.get(order.id)
         if (!syncedStagedOrder) {
@@ -4564,21 +4669,29 @@ export async function createPurchaseOrder(
             }
         )
 
-        await syncUpsertEntities('purchase_orders', [order as unknown as Record<string, unknown> & { id: string; version: number }], workspaceId)
+        await syncUpsertEntities(
+            'purchase_orders',
+            [order as unknown as Record<string, unknown> & { id: string; version: number }],
+            workspaceId,
+            { requireRemoteConfirmation: options?.requireRemoteConfirmation }
+        )
         await syncPurchaseReceiptResult(workspaceId, receiptResult)
         createdOrder = (await db.purchase_orders.get(order.id)) as PurchaseOrder
     }
 
+    reportOrderSaveProgress(options, 'confirming')
     await recalculateSupplierAndPartnerSummaries(workspaceId, createdOrder.supplierId, createdOrder.businessPartnerId)
 
     if (!isOrderApprovalRequested(createdOrder)) {
-        await appendInitialOrderPaymentTransaction('purchase', createdOrder)
+        await appendInitialOrderPaymentTransaction('purchase', createdOrder, options)
     }
 
+    reportOrderSaveProgress(options, 'complete')
     return createdOrder
 }
 
-export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrder>) {
+export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrder>, options?: OrderFormSaveOptions) {
+    reportOrderSaveProgress(options, 'preparing')
     const existing = await db.purchase_orders.get(id)
     if (!existing || existing.isDeleted) {
         throw new Error('Purchase order not found')
@@ -4638,12 +4751,20 @@ export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrde
     updated.nextDueDate = isOrderFinancingMethod(updated.paymentMethod) ? updated.firstDueDate || null : null
     await assertOrderStorageAccess(updated)
     await assertPurchaseOrderItemsAreInventoryProducts(updated)
-    await appendInitialOrderPaymentTransaction('purchase', updated)
+    reportOrderSaveProgress(options, 'payment')
+    await appendInitialOrderPaymentTransaction('purchase', updated, options)
     await db.purchase_orders.put(updated)
     const orderForSync = hasOrderAdjustmentsUpdate && confirmedAdjustments.length === 0
         ? { ...updated, orderAdjustments: null }
         : updated
-    await syncUpsertEntities('purchase_orders', [orderForSync as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
+    reportOrderSaveProgress(options, 'saving')
+    await syncUpsertEntities(
+        'purchase_orders',
+        [orderForSync as unknown as Record<string, unknown> & { id: string; version: number }],
+        existing.workspaceId,
+        { requireRemoteConfirmation: options?.requireRemoteConfirmation }
+    )
+    reportOrderSaveProgress(options, 'confirming')
 
     await Promise.all(
         Array.from(new Set([
@@ -4658,6 +4779,7 @@ export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrde
             )
         })
     )
+    reportOrderSaveProgress(options, 'complete')
     return updated
 }
 

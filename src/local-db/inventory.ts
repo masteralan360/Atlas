@@ -39,7 +39,7 @@ export type InventoryProduct = Product & {
 const INVENTORY_FETCH_PAGE_SIZE = 1000
 const INVENTORY_PRODUCT_FETCH_CHUNK_SIZE = 500
 const INVENTORY_CONFLICT_COOLDOWN_MS = 5000
-const inventoryWorkspaceFetchesInFlight = new Map<string, Promise<void>>()
+const inventoryWorkspaceFetchesInFlight = new Map<string, Promise<boolean>>()
 const inventorySnapshotConflictCooldowns = new Map<string, number>()
 
 export interface InventoryWorkspaceFetchOptions {
@@ -460,9 +460,9 @@ async function fetchProductsForInventoryRows(
 async function fetchInventoryWorkspaceFromSupabaseInternal(
     workspaceId: string,
     options: InventoryWorkspaceFetchOptions
-) {
+): Promise<boolean> {
     if (!await canReconcileCloudWorkspaceData(workspaceId)) {
-        return
+        return true
     }
 
     const storageId = options.storageId?.trim()
@@ -490,15 +490,15 @@ async function fetchInventoryWorkspaceFromSupabaseInternal(
         ])
 
     if (!remoteInventory) {
-        return
+        return false
     }
 
     if (!remoteProducts) {
-        return
+        return false
     }
 
     if (!await canReconcileCloudWorkspaceData(workspaceId)) {
-        return
+        return true
     }
 
     const normalizedRemoteProducts = remoteProducts.map((remoteProduct) => {
@@ -563,7 +563,7 @@ async function fetchInventoryWorkspaceFromSupabaseInternal(
     // A scoped storage fetch only contains a partial inventory view. Avoid updating
     // product.quantity snapshots from partial data.
     if (storageId) {
-        return
+        return true
     }
 
     const affectedIds = Array.from(affectedProductIds)
@@ -585,14 +585,16 @@ async function fetchInventoryWorkspaceFromSupabaseInternal(
             ))
         }
     }
+
+    return true
 }
 
 export async function fetchInventoryWorkspaceFromSupabase(
     workspaceId: string,
     options: InventoryWorkspaceFetchOptions = {}
-) {
+): Promise<boolean> {
     if (!workspaceId) {
-        return
+        return true
     }
 
     const storageId = options.storageId?.trim()
@@ -604,9 +606,9 @@ export async function fetchInventoryWorkspaceFromSupabase(
 
     const request = (async () => {
         if (!await canReconcileCloudWorkspaceData(workspaceId)) {
-            return
+            return true
         }
-        await fetchInventoryWorkspaceFromSupabaseInternal(workspaceId, { storageId })
+        return fetchInventoryWorkspaceFromSupabaseInternal(workspaceId, { storageId })
     })()
         .finally(() => {
             if (inventoryWorkspaceFetchesInFlight.get(key) === request) {
