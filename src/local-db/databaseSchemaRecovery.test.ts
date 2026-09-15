@@ -7,12 +7,12 @@ import { AtlasDatabase } from './database'
 
 const DATABASE_NAME = 'AtlasDatabaseSaleReturnSchemaRecoveryTest'
 
-describe('sale return schema recovery', () => {
+describe('POS return schema recovery', () => {
   afterEach(async () => {
     await Dexie.delete(DATABASE_NAME)
   })
 
-  it('repairs a current-version cache that is missing POS return stores without losing existing rows', async () => {
+  it('repairs return-ledger and staff storage-access stores without losing existing rows', async () => {
     const legacyCache = new Dexie(DATABASE_NAME)
     legacyCache.version(127).stores({ sales: 'id' })
     await legacyCache.open()
@@ -28,7 +28,11 @@ describe('sale return schema recovery', () => {
         totalAmount: 100
       })
 
-      await repairedCache.transaction('rw', [repairedCache.sale_returns, repairedCache.sale_return_items], async () => {
+      await repairedCache.transaction('rw', [
+        repairedCache.sale_returns,
+        repairedCache.sale_return_items,
+        repairedCache.storage_member_exclusions
+      ], async () => {
         await repairedCache.sale_returns.put({
           id: 'return-1',
           workspaceId: 'workspace-1',
@@ -45,10 +49,23 @@ describe('sale return schema recovery', () => {
           saleItemId: 'sale-item-1',
           updatedAt: '2026-09-15T00:00:00.000Z'
         } as never)
+        await repairedCache.storage_member_exclusions.put({
+          id: 'staff-storage-exclusion-1',
+          workspaceId: 'workspace-1',
+          storageId: 'storage-1',
+          userId: 'staff-1',
+          updatedAt: '2026-09-15T00:00:00.000Z',
+          isDeleted: false,
+          syncStatus: 'synced'
+        } as never)
       })
 
       expect(await repairedCache.sale_returns.get('return-1')).toMatchObject({ saleId: 'existing-pos-sale' })
       expect(await repairedCache.sale_return_items.get('return-item-1')).toMatchObject({ returnId: 'return-1' })
+      expect(await repairedCache.storage_member_exclusions
+        .where('[workspaceId+userId]')
+        .equals(['workspace-1', 'staff-1'])
+        .first()).toMatchObject({ storageId: 'storage-1' })
     } finally {
       repairedCache.close()
     }

@@ -3445,6 +3445,15 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, returnId, saleId, saleItemId, updatedAt, [returnId+saleItemId], [workspaceId+saleId]'
     })
 
+    // Staff inventory mutations consult the storage exclusion store before
+    // changing stock, while administrators bypass that lookup. Repair it in a
+    // separate version so devices that already reached version 128 but still
+    // lack this physical IndexedDB store are upgraded as well.
+    this.version(129).stores({
+      storage_member_exclusions:
+        'id, workspaceId, storageId, userId, updatedAt, isDeleted, syncStatus, [workspaceId+storageId], [workspaceId+userId], [storageId+userId]'
+    })
+
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
   }
