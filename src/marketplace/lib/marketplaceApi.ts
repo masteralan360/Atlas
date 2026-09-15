@@ -22,6 +22,7 @@ export interface MarketplaceStoreContact {
 export interface MarketplaceCategory {
     id: string
     name: string
+    cover_url?: string | null
 }
 
 export interface MarketplaceProduct {
@@ -54,6 +55,24 @@ export interface MarketplaceStoreCatalog {
     }
     categories: MarketplaceCategory[]
     products: MarketplaceProduct[]
+    total_products: number
+    has_more: boolean
+    next_cursor: string | null
+}
+
+export interface MarketplaceStorePage {
+    stores: MarketplaceStoreSummary[]
+    has_more: boolean
+    next_cursor: string | null
+}
+
+export interface MarketplaceCatalogQuery {
+    search?: string
+    categoryId?: string | null
+    sort?: 'featured' | 'newest'
+    priceMax?: number
+    currency?: string
+    includeProducts?: boolean
 }
 
 export interface MarketplaceOrderCustomer {
@@ -117,15 +136,43 @@ async function request<T>(path: string, init?: RequestInit) {
     return await response.json() as T
 }
 
-export async function getMarketplaceStores(language: MarketplaceLanguage) {
-    const payload = await request<{ stores: MarketplaceStoreSummary[] }>(`get-marketplace-stores?lang=${encodeURIComponent(language)}`)
-    return payload.stores
+export async function getMarketplaceStores(input: {
+    language: MarketplaceLanguage
+    search?: string
+    cursor?: string | null
+    signal?: AbortSignal
+}) {
+    const params = new URLSearchParams({ lang: input.language })
+    if (input.search) params.set('q', input.search)
+    if (input.cursor) params.set('cursor', input.cursor)
+
+    return await request<MarketplaceStorePage>(`get-marketplace-stores?${params.toString()}`, {
+        signal: input.signal
+    })
 }
 
-export async function getStoreCatalog(slug: string, language: MarketplaceLanguage) {
-    return await request<MarketplaceStoreCatalog>(
-        `get-store-catalog?slug=${encodeURIComponent(slug)}&lang=${encodeURIComponent(language)}`
-    )
+export async function getStoreCatalog(input: {
+    slug: string
+    language: MarketplaceLanguage
+    cursor?: string | null
+    query?: MarketplaceCatalogQuery
+    signal?: AbortSignal
+}) {
+    const params = new URLSearchParams({
+        slug: input.slug,
+        lang: input.language
+    })
+    if (input.cursor) params.set('cursor', input.cursor)
+    if (input.query?.search) params.set('q', input.query.search)
+    if (input.query?.categoryId) params.set('category_id', input.query.categoryId)
+    if (input.query?.sort) params.set('sort', input.query.sort)
+    if (typeof input.query?.priceMax === 'number') params.set('price_max', String(input.query.priceMax))
+    if (input.query?.currency) params.set('currency', input.query.currency)
+    if (input.query?.includeProducts === false) params.set('include_products', 'false')
+
+    return await request<MarketplaceStoreCatalog>(`get-store-catalog?${params.toString()}`, {
+        signal: input.signal
+    })
 }
 
 export async function placeInquiryOrder(input: {

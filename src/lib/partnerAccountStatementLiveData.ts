@@ -1,6 +1,7 @@
 export const PARTNER_ACCOUNT_STATEMENT_LIVE_TABLE_NAMES = [
   'business_partners',
   'agents',
+  'sales_order_agent_assignments',
   'agent_commission_entries',
   'agent_product_commission_entries',
   'sales_orders',

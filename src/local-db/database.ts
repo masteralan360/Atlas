@@ -3405,6 +3405,34 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, storageId, userId, updatedAt, isDeleted, syncStatus, [workspaceId+storageId], [workspaceId+userId], [storageId+userId]'
     })
 
+    this.version(127).upgrade(async (tx) => {
+      const removePartnerBalanceSnapshot = (row: Record<string, unknown>) => {
+        delete row.partnerBalanceSnapshot
+        delete row.partner_balance_snapshot
+      }
+      const removeQueuedPartnerBalanceSnapshot = (
+        row: { entityType?: unknown; payload?: unknown; data?: unknown },
+        field: 'payload' | 'data'
+      ) => {
+        if (row.entityType !== 'sales_orders' && row.entityType !== 'purchase_orders') return
+        const value = row[field]
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return
+        delete (value as Record<string, unknown>).partnerBalanceSnapshot
+        delete (value as Record<string, unknown>).partner_balance_snapshot
+      }
+
+      await Promise.all([
+        tx.table('sales_orders').toCollection().modify(removePartnerBalanceSnapshot),
+        tx.table('purchase_orders').toCollection().modify(removePartnerBalanceSnapshot),
+        tx.table('offline_mutations').toCollection().modify((row) =>
+          removeQueuedPartnerBalanceSnapshot(row, 'payload')
+        ),
+        tx.table('syncQueue').toCollection().modify((row) =>
+          removeQueuedPartnerBalanceSnapshot(row, 'data')
+        )
+      ])
+    })
+
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
   }

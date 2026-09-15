@@ -67,6 +67,7 @@ import {
 } from '@/ui/components/orders/OrderPrintTemplates'
 import {
     AtlasStandardOrderInvoiceTemplate,
+    ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS,
     ATLAS_STANDARD_ORDER_MOVABLE_COMPONENT_KEYS,
     ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS
 } from '@/ui/components/orders/AtlasStandardOrderInvoiceTemplate'
@@ -1902,6 +1903,7 @@ function createAtlasStandardOrderInvoicePreview(
         page: { widthMm: 210, heightMm: 297 },
         fixedPrintLang,
         requiresFreshPartnerBalance,
+        partnerBalanceFieldKeys: ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS,
         resetFreshPartnerBalance: () => resetAtlasStandardPartnerBalancePrintState(
             partnerBalancePrintState,
             requiresFreshPartnerBalance
@@ -1909,10 +1911,10 @@ function createAtlasStandardOrderInvoicePreview(
         freshPartnerBalanceRequest: requiresFreshPartnerBalance && options.workspaceId && partnerId
             ? { workspaceId: options.workspaceId, partnerId, order }
             : undefined,
-        onFreshPartnerBalanceStateChange: (status, balances, legacyOrderBalanceSnapshot) => {
+        onFreshPartnerBalanceStateChange: (status, balances, orderBalanceAtPosting) => {
             partnerBalancePrintState.status = status
             partnerBalancePrintState.balances = balances
-            partnerBalancePrintState.legacyOrderBalanceSnapshot = legacyOrderBalanceSnapshot
+            partnerBalancePrintState.orderBalanceAtPosting = orderBalanceAtPosting
         },
         createElement: (data, _effectiveId, printLangOverride, renderOptions) => (
             <AtlasStandardOrderInvoiceTemplate

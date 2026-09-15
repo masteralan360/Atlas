@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-    formatAtlasStandardPartnerBalanceSnapshot,
+    formatAtlasStandardPartnerBalanceAtPosting,
     formatAtlasStandardPartnerCurrentBalance
 } from '@/lib/atlasStandardPartnerBalance'
 import {
@@ -21,9 +21,7 @@ describe('Atlas Standard partner-balance print state', () => {
 
         state.status = 'ready'
         state.balances = [{ currency: 'iqd', closingBalance: 1_056_000 }]
-        state.legacyOrderBalanceSnapshot = {
-            version: 1,
-            capturedAt: '2026-09-13T00:00:00.000Z',
+        state.orderBalanceAtPosting = {
             balances: [{ currency: 'iqd', before: 1_056_000, after: 1_051_150 }]
         }
         resetAtlasStandardPartnerBalancePrintState(state, true)
@@ -31,7 +29,7 @@ describe('Atlas Standard partner-balance print state', () => {
         expect(state).toEqual({
             status: 'loading',
             balances: undefined,
-            legacyOrderBalanceSnapshot: undefined
+            orderBalanceAtPosting: undefined
         })
     })
 
@@ -53,23 +51,27 @@ describe('formatAtlasStandardPartnerCurrentBalance', () => {
     })
 })
 
-describe('formatAtlasStandardPartnerBalanceSnapshot', () => {
-    it('formats immutable before and after amounts independently for each currency', () => {
-        const snapshot = {
-            version: 1 as const,
-            capturedAt: '2026-09-11T10:00:00.000Z',
+describe('formatAtlasStandardPartnerBalanceAtPosting', () => {
+    it('formats reconstructed before and after amounts independently for each currency', () => {
+        const balanceAtPosting = {
             balances: [
                 { currency: 'iqd' as const, before: -50_000, after: -45_000 },
                 { currency: 'usd' as const, before: 12.34567, after: 10 }
             ]
         }
 
-        expect(formatAtlasStandardPartnerBalanceSnapshot(snapshot, 'before', 'IQD')).toBe('-50,000 IQD • $12.3457')
-        expect(formatAtlasStandardPartnerBalanceSnapshot(snapshot, 'after', 'IQD')).toBe('-45,000 IQD • $10')
+        expect(formatAtlasStandardPartnerBalanceAtPosting(balanceAtPosting, 'before', 'IQD')).toBe('-50,000 IQD • $12.3457')
+        expect(formatAtlasStandardPartnerBalanceAtPosting(balanceAtPosting, 'after', 'IQD')).toBe('-45,000 IQD • $10')
     })
 
-    it('does not infer a historical balance for legacy orders without a snapshot', () => {
-        expect(formatAtlasStandardPartnerBalanceSnapshot(null, 'before', 'IQD')).toBe('-')
+    it('uses a placeholder when the statement cannot reconstruct an order balance', () => {
+        expect(formatAtlasStandardPartnerBalanceAtPosting(null, 'before', 'IQD')).toBe('-')
+    })
+
+    it('does not substitute a numeric value for an unrequested balance position', () => {
+        expect(formatAtlasStandardPartnerBalanceAtPosting({
+            balances: [{ currency: 'iqd', before: 12_500 }]
+        }, 'after', 'IQD')).toBe('-')
     })
 })
 

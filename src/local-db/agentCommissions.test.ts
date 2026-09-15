@@ -878,9 +878,11 @@ describe("sales agent commission lifecycle", () => {
     order.subtotal = 500;
     order.total = 500;
     order.paidAmount = 500;
-    // POS customer checkout can leave the optional order-wide commission
-    // switch off. Creator product commission remains automatic.
-    order.commissionEnabled = false;
+    // Product-only attribution bypasses the normal plan for product-covered
+    // lines, but remains inside the order's enabled commission lane.
+    order.commissionEnabled = true;
+    order.commissionMode = "payable";
+    order.commissionModeCapturedAt = new Date().toISOString();
     await db.agents.put(creatorAgent);
     await db.sales_orders.put(order);
 
@@ -1006,6 +1008,114 @@ describe("sales agent commission lifecycle", () => {
     await commissions.accrueSalesOrderCommission(WORKSPACE_ID, order.id, order.createdBy);
 
     expect(await db.sales_order_agent_assignments.where("orderId").equals(order.id).count()).toBe(0);
+    expect(await db.agent_product_commission_entries.where("orderId").equals(order.id).count()).toBe(0);
+  });
+
+  it("credits an unpaid marketplace delivery to its field agent with product commission only", async () => {
+    const productCommissions = await import("./productCommissions");
+    const order = {
+      ...completedOrder(crypto.randomUUID()),
+      sourceChannel: "marketplace" as const,
+      marketplaceOrderId: crypto.randomUUID(),
+      isPaid: false,
+      paymentStatus: "unpaid" as const,
+      paidAmount: 0,
+      paidAt: null,
+      commissionEnabled: true,
+      commissionMode: "payable" as const,
+      commissionModeCapturedAt: new Date().toISOString(),
+    };
+    const deliveryAgent = {
+      ...fieldAgent(crypto.randomUUID()),
+      linkedUserId: order.createdBy,
+    };
+    await db.agents.put(deliveryAgent);
+    await db.sales_orders.put(order);
+
+    const plan = await commissions.createAgentCommissionPlan(WORKSPACE_ID, {
+      name: "Delivery agent ordinary plan",
+      level: "marketplace-delivery-plan",
+      ratePercent: 10,
+      calculationBasis: "net_revenue",
+    });
+    await commissions.setAgentCommissionMembership(WORKSPACE_ID, {
+      agentId: deliveryAgent.id,
+      planId: plan.id,
+    });
+    await productCommissions.replaceProductCommissionRule(WORKSPACE_ID, order.items[0].productId, {
+      commissionType: "fixed_amount",
+      fixedAmount: 7,
+      fixedCurrency: "usd",
+      recipientScope: "all_assigned",
+      effectiveFrom: new Date(Date.now() - 1_000).toISOString(),
+    });
+
+    await commissions.accrueSalesOrderCommission(WORKSPACE_ID, order.id, order.createdBy);
+
+    const assignments = await db.sales_order_agent_assignments.where("orderId").equals(order.id).toArray();
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0]).toMatchObject({
+      agentId: deliveryAgent.id,
+      assignmentSource: "marketplace_delivery_product",
+      assignedBy: order.createdBy,
+    });
+    const aggregate = await db.agent_commission_entries
+      .where("assignmentId").equals(assignments[0].id)
+      .and((entry) => entry.kind === "accrual")
+      .first();
+    const productLine = await db.agent_product_commission_entries
+      .where("assignmentId").equals(assignments[0].id)
+      .and((entry) => entry.kind === "accrual")
+      .first();
+    expect(aggregate).toMatchObject({
+      membershipId: null,
+      planId: null,
+      planCommissionAmount: 0,
+      productCommissionAmount: 70,
+      amount: 70,
+    });
+    expect(productLine).toMatchObject({
+      agentId: deliveryAgent.id,
+      quantity: 10,
+      commissionPerUnit: 7,
+      amount: 70,
+    });
+  });
+
+  it("does not assign marketplace delivery product commission when its field agent is not a selected recipient", async () => {
+    const productCommissions = await import("./productCommissions");
+    const order = {
+      ...completedOrder(crypto.randomUUID()),
+      sourceChannel: "marketplace" as const,
+      marketplaceOrderId: crypto.randomUUID(),
+      isPaid: false,
+      paymentStatus: "unpaid" as const,
+      paidAmount: 0,
+      paidAt: null,
+      commissionEnabled: true,
+      commissionMode: "tracked" as const,
+      commissionModeCapturedAt: new Date().toISOString(),
+    };
+    const deliveryAgent = {
+      ...fieldAgent(crypto.randomUUID()),
+      linkedUserId: order.createdBy,
+    };
+    const selectedAgent = fieldAgent(crypto.randomUUID());
+    await db.agents.bulkPut([deliveryAgent, selectedAgent]);
+    await db.sales_orders.put(order);
+    await productCommissions.replaceProductCommissionRule(WORKSPACE_ID, order.items[0].productId, {
+      commissionType: "fixed_amount",
+      fixedAmount: 7,
+      fixedCurrency: "usd",
+      recipientScope: "selected_assigned",
+      agentIds: [selectedAgent.id],
+      effectiveFrom: new Date(Date.now() - 1_000).toISOString(),
+    });
+
+    await commissions.accrueSalesOrderCommission(WORKSPACE_ID, order.id, order.createdBy);
+
+    expect(await db.sales_order_agent_assignments.where("orderId").equals(order.id).count()).toBe(0);
+    expect(await db.agent_commission_entries.where("orderId").equals(order.id).count()).toBe(0);
     expect(await db.agent_product_commission_entries.where("orderId").equals(order.id).count()).toBe(0);
   });
 

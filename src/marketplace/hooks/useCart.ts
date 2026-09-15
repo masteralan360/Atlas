@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import type { MarketplaceProduct } from '../lib/marketplaceApi'
 
@@ -29,6 +29,32 @@ function readCart(storageKey: string) {
     } catch {
         return []
     }
+}
+
+export function mergeCartWithCatalog(
+    currentItems: MarketplaceCartItem[],
+    products: MarketplaceProduct[]
+) {
+    const productsById = new Map(products.map((product) => [product.id, product]))
+
+    return currentItems.map((item) => {
+        const latest = productsById.get(item.product_id)
+        if (!latest) return item
+
+        return {
+            ...item,
+            name: latest.name,
+            sku: latest.sku,
+            unit_price: latest.discount_price ?? latest.price,
+            original_unit_price: latest.price,
+            currency: latest.currency,
+            image_url: latest.image_url,
+            unit: latest.unit,
+            discount_type: latest.discount_type,
+            discount_value: latest.discount_value,
+            discount_ends_at: latest.discount_ends_at
+        }
+    })
 }
 
 export function useCart(storeSlug: string) {
@@ -114,32 +140,9 @@ export function useCart(storeSlug: string) {
         setItems([])
     }
 
-    const syncCatalog = (products: MarketplaceProduct[]) => {
-        const productsById = new Map(products.map((product) => [product.id, product]))
-        setItems((currentItems) => currentItems
-            .map((item) => {
-                const latest = productsById.get(item.product_id)
-                if (!latest) {
-                    return null
-                }
-
-                return {
-                    ...item,
-                    name: latest.name,
-                    sku: latest.sku,
-                    unit_price: latest.discount_price ?? latest.price,
-                    original_unit_price: latest.price,
-                    currency: latest.currency,
-                    image_url: latest.image_url,
-                    unit: latest.unit,
-                    discount_type: latest.discount_type,
-                    discount_value: latest.discount_value,
-                    discount_ends_at: latest.discount_ends_at
-                }
-            })
-            .filter((item): item is MarketplaceCartItem => Boolean(item))
-        )
-    }
+    const syncCatalog = useCallback((products: MarketplaceProduct[]) => {
+        setItems((currentItems) => mergeCartWithCatalog(currentItems, products))
+    }, [])
 
     const itemCount = items.reduce((sum, item) => sum + item.quantity, 0)
     const total = items.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0)

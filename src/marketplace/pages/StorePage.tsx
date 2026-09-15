@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useState } from 'react'
 import { Link } from 'wouter'
 import { Banknote, Grid2X2, Minus, Search, Sparkles, Store } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -20,6 +20,7 @@ import { cn, formatCurrency } from '@/lib/utils'
 import { CartDrawer } from '../components/CartDrawer'
 import { CheckoutForm } from '../components/CheckoutForm'
 import { MobileStoreCart } from '../components/MobileStoreCart'
+import { MarketplaceVirtualGrid } from '../components/MarketplaceVirtualGrid'
 import { OrderConfirmation } from '../components/OrderConfirmation'
 import { ProductCard } from '../components/ProductCard'
 import { StoreAvatar } from '../components/StoreAvatar'
@@ -40,12 +41,6 @@ function normalizeCurrency(currency?: string | null) {
     return (currency || 'usd').trim().toLowerCase()
 }
 
-function getEffectiveProductPrice(product: MarketplaceProduct) {
-    return typeof product.discount_price === 'number' && product.discount_price < product.price
-        ? product.discount_price
-        : product.price
-}
-
 function getUnderPriceThreshold(currency?: string | null) {
     return normalizeCurrency(currency) === 'iqd' ? 50000 : 50
 }
@@ -63,12 +58,6 @@ function formatThresholdLabel(amount: number, currency?: string | null) {
     return `${amount.toLocaleString('en-US')} ${normalizedCurrency.toUpperCase()}`
 }
 
-function getTimestamp(value?: string | null) {
-    if (!value) return 0
-    const timestamp = new Date(value).getTime()
-    return Number.isFinite(timestamp) ? timestamp : 0
-}
-
 function getInitialSortMode(): SortMode {
     if (typeof window === 'undefined') return 'featured'
     return new URLSearchParams(window.location.search).get('sort') === 'new' ? 'newest' : 'featured'
@@ -82,18 +71,25 @@ type StorePageProps = {
 export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
     const { t, i18n } = useTranslation()
     const { toast } = useToast()
-    const { catalog, isLoading, error } = useStoreCatalog(storeSlug)
-    const cart = useCart(storeSlug)
     const [search, setSearch] = useState('')
     const [priceFilter, setPriceFilter] = useState<PriceFilter>('all')
     const [sortMode, setSortMode] = useState<SortMode>(getInitialSortMode)
+    const [knownStoreCurrency, setKnownStoreCurrency] = useState('usd')
     const [cartOpen, setCartOpen] = useState(false)
     const [checkoutMode, setCheckoutMode] = useState(false)
     const [submitting, setSubmitting] = useState(false)
     const [confirmation, setConfirmation] = useState<{ orderNumber: string; phone: string } | null>(null)
     const deferredSearch = useDeferredValue(search.trim().toLowerCase())
+    const { catalog, isLoading, isLoadingMore, hasMore, error, loadMoreError, loadMore } = useStoreCatalog(storeSlug, {
+        search: deferredSearch,
+        sort: sortMode,
+        priceMax: priceFilter === 'under-threshold' ? getUnderPriceThreshold(knownStoreCurrency) : undefined,
+        currency: priceFilter === 'under-threshold' ? knownStoreCurrency : undefined
+    })
+    const cart = useCart(storeSlug)
+    const syncCatalog = cart.syncCatalog
     const iqdPreference: 'IQD' | 'د.ع' = i18n.language === 'en' ? 'IQD' : 'د.ع'
-    const storeCurrency = catalog?.store.currency || 'usd'
+    const storeCurrency = catalog?.store.currency || knownStoreCurrency
     const underPriceThreshold = getUnderPriceThreshold(storeCurrency)
     const underPriceLabel = formatThresholdLabel(underPriceThreshold, storeCurrency)
     const effectiveRules = getEffectiveStorefrontRules(rules, catalog?.store.workspace_id)
@@ -104,46 +100,21 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
 
     useEffect(() => {
         if (catalog) {
-            cart.syncCatalog(catalog.products)
+            syncCatalog(catalog.products)
+            setKnownStoreCurrency(catalog.store.currency || 'usd')
         }
-    }, [catalog])
+    }, [catalog, syncCatalog])
+
+    useEffect(() => {
+        window.scrollTo({ top: 0, behavior: 'auto' })
+    }, [deferredSearch, priceFilter, sortMode])
 
     const closeCart = () => {
         setCartOpen(false)
         setCheckoutMode(false)
     }
 
-    const displayedProducts = useMemo(() => {
-        const normalizedStoreCurrency = normalizeCurrency(storeCurrency)
-        const rows = (catalog?.products ?? []).filter((product) => {
-            if (priceFilter === 'under-threshold') {
-                if (normalizeCurrency(product.currency) !== normalizedStoreCurrency) {
-                    return false
-                }
-
-                if (getEffectiveProductPrice(product) > underPriceThreshold) {
-                    return false
-                }
-            }
-
-            if (!deferredSearch) {
-                return true
-            }
-
-            return `${product.name} ${product.sku} ${product.description} ${product.category_name || ''}`
-                .toLowerCase()
-                .includes(deferredSearch)
-        })
-
-        if (sortMode !== 'newest') {
-            return rows
-        }
-
-        return [...rows].sort((left, right) => {
-            const createdComparison = getTimestamp(right.marketplace_added_at) - getTimestamp(left.marketplace_added_at)
-            return createdComparison || left.name.localeCompare(right.name)
-        })
-    }, [catalog?.products, deferredSearch, priceFilter, sortMode, storeCurrency, underPriceThreshold])
+    const displayedProducts = catalog?.products ?? []
 
     const formatMoney = (amount: number, currency: string) => formatCurrency(amount, currency, iqdPreference)
 
@@ -407,19 +378,33 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
                                 </CardContent>
                             </Card>
                         ) : (
-                            <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
-                                {displayedProducts.map((product) => (
-                                    <ProductCard
-                                        key={product.id}
-                                        product={product}
-                                        iqdPreference={iqdPreference}
-                                        showPrice={!hidePrice}
-                                        showAddToCart={!hideAddToCart}
-                                        addToCartLabel={hideAddToCart ? undefined : t('marketplace.addToCart', { defaultValue: 'Add to Cart' })}
-                                        onAdd={hideAddToCart ? undefined : handleAddToCart}
-                                    />
-                                ))}
-                            </div>
+                            <>
+                                <MarketplaceVirtualGrid
+                                    items={displayedProducts}
+                                    itemKey={(product) => product.id}
+                                    renderItem={(product) => (
+                                        <ProductCard
+                                            product={product}
+                                            iqdPreference={iqdPreference}
+                                            showPrice={!hidePrice}
+                                            showAddToCart={!hideAddToCart}
+                                            addToCartLabel={hideAddToCart ? undefined : t('marketplace.addToCart', { defaultValue: 'Add to Cart' })}
+                                            onAdd={hideAddToCart ? undefined : handleAddToCart}
+                                        />
+                                    )}
+                                    listClassName="grid gap-6 sm:grid-cols-2 xl:grid-cols-3"
+                                    onEndReached={loadMore}
+                                    hasMore={hasMore}
+                                    isLoadingMore={isLoadingMore}
+                                />
+                                {isLoadingMore && <p className="py-5 text-center text-sm text-muted-foreground">{t('marketplace.loadingMore')}</p>}
+                                {loadMoreError && (
+                                    <div className="flex flex-col items-center gap-3 py-5 text-center">
+                                        <p className="text-sm text-destructive">{t('marketplace.loadingMoreFailed')}</p>
+                                        <Button variant="outline" onClick={loadMore}>{t('common.retry')}</Button>
+                                    </div>
+                                )}
+                            </>
                         )}
 
                         {!hideAddToCart && (

@@ -24,6 +24,14 @@ export function findLinkedProductCommissionAgent<T extends LinkedProductCommissi
     )) ?? null
 }
 
+/** Resolves the linked field agent automatically attributed to an order creator. */
+export function findOrderCreatorProductCommissionAgent<T extends LinkedProductCommissionAgent>(
+    agents: readonly T[],
+    orderCreatedBy?: string | null
+) {
+    return findLinkedProductCommissionAgent(agents, orderCreatedBy)
+}
+
 /** Resolves an automatic product beneficiary only for an order they created. */
 export function findOwnedOrderCreatorProductCommissionAgent<T extends LinkedProductCommissionAgent>(
     agents: readonly T[],
@@ -31,7 +39,7 @@ export function findOwnedOrderCreatorProductCommissionAgent<T extends LinkedProd
     orderCreatedBy?: string | null
 ) {
     if (!userId || orderCreatedBy !== userId) return null
-    return findLinkedProductCommissionAgent(agents, userId)
+    return findOrderCreatorProductCommissionAgent(agents, orderCreatedBy)
 }
 
 /**
@@ -64,7 +72,14 @@ export function getProductCommissionPreviewAgentIds<T extends LinkedProductCommi
             return getAgent(assignment.agentId)?.linkedUserId === userId
         })
         .map((assignment) => assignment.agentId))
-    const ownedOrderCreatorAgent = findOwnedOrderCreatorProductCommissionAgent(agents, userId, orderCreatedBy)
-    if (ownedOrderCreatorAgent) agentIds.add(ownedOrderCreatorAgent.id)
+    const canViewOrderCreatorAttribution = (
+        userId === orderCreatedBy
+        || canAssignSalesAgents
+        || canViewAllAgentCommissions
+    )
+    const orderCreatorAgent = canViewOrderCreatorAttribution
+        ? findOrderCreatorProductCommissionAgent(agents, orderCreatedBy)
+        : null
+    if (orderCreatorAgent) agentIds.add(orderCreatorAgent.id)
     return [...agentIds]
 }

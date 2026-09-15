@@ -5,6 +5,7 @@ import type { AgentCommissionEntry, ProductCommissionRule, ProductCommissionRule
 import type { ProductCommissionPreviewItem } from './ProductCommissionPreview'
 import {
     findLinkedProductCommissionAgent,
+    findOrderCreatorProductCommissionAgent,
     findOwnedOrderCreatorProductCommissionAgent,
     getProductCommissionPreviewAgentIds
 } from './productCommissionAgent'
@@ -167,6 +168,8 @@ describe('hasEligibleProductCommission', () => {
         expect(findOwnedOrderCreatorProductCommissionAgent([agent], 'user-1', 'user-1')).toBe(agent)
         expect(findOwnedOrderCreatorProductCommissionAgent([agent], 'user-1', 'user-2')).toBeNull()
         expect(findOwnedOrderCreatorProductCommissionAgent([agent], null, 'user-1')).toBeNull()
+        expect(findOrderCreatorProductCommissionAgent([agent], 'user-1')).toBe(agent)
+        expect(findOrderCreatorProductCommissionAgent([agent], null)).toBeNull()
     })
 
     it('automatically qualifies an assigned agent for all-assigned product rules', () => {
@@ -226,6 +229,42 @@ describe('getProductCommissionPreviewAgentIds', () => {
             canViewAllAgentCommissions: false,
             canViewOwnAgentCommissions: true
         })).toEqual(['agent-owner'])
+    })
+
+    it('shows creator product attribution to a viewer with all-commission access', () => {
+        const agents = [
+            { id: 'agent-owner', linkedUserId: 'user-1', agentType: 'field_agent', status: 'active', isDeleted: false },
+            { id: 'agent-other', linkedUserId: 'user-2', agentType: 'field_agent', status: 'active', isDeleted: false }
+        ]
+
+        expect(getProductCommissionPreviewAgentIds({
+            activeAssignments: [],
+            agents,
+            getAgent: (agentId) => agents.find((agent) => agent.id === agentId),
+            userId: 'admin-user',
+            orderCreatedBy: 'user-1',
+            canAssignSalesAgents: false,
+            canViewAllAgentCommissions: true,
+            canViewOwnAgentCommissions: false
+        })).toEqual(['agent-owner'])
+    })
+
+    it('does not expose creator attribution to an unrelated own-only viewer', () => {
+        const agents = [
+            { id: 'agent-owner', linkedUserId: 'user-1', agentType: 'field_agent', status: 'active', isDeleted: false },
+            { id: 'agent-other', linkedUserId: 'user-2', agentType: 'field_agent', status: 'active', isDeleted: false }
+        ]
+
+        expect(getProductCommissionPreviewAgentIds({
+            activeAssignments: [],
+            agents,
+            getAgent: (agentId) => agents.find((agent) => agent.id === agentId),
+            userId: 'user-2',
+            orderCreatedBy: 'user-1',
+            canAssignSalesAgents: false,
+            canViewAllAgentCommissions: false,
+            canViewOwnAgentCommissions: true
+        })).toEqual([])
     })
 })
 

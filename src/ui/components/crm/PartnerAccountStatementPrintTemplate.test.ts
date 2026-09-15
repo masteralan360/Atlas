@@ -310,6 +310,64 @@ describe('buildPartnerAccountStatementLedger', () => {
         expect(footer).toContain('>15 iqd</td>')
     })
 
+    it('shows marketplace delivery product commission for the delivery agent without placing the buyer sale on their statement', () => {
+        const data = statementData()
+        data.isAgentCommissionStatement = true
+        data.statementOrders = []
+        data.settlementTransactions = []
+        data.linkedOrderCodes = { 'marketplace-sale': 'SO-MARKETPLACE-1' }
+        data.marketplaceDeliveryProductCommissionOrderIds = ['marketplace-sale']
+        data.agentProductCommissionEntries = [
+            {
+                id: 'marketplace-product-accrual', orderId: 'marketplace-sale', assignmentId: 'assignment-1', agentId: 'agent-1',
+                orderItemId: 'marketplace-line', productId: 'product-1', productNameSnapshot: 'Delivered coffee', unitSnapshot: 'pcs',
+                kind: 'accrual', status: 'earned', currency: 'iqd', commissionType: 'fixed_amount', ratePercent: 0,
+                quantity: 3, basisAmountPerUnit: 100, commissionMode: 'payable', commissionPerUnit: 10, amount: 30,
+                occurredAt: '2026-01-04T10:00:00.000Z', createdAt: '2026-01-04T10:00:00.000Z', isDeleted: false
+            },
+            {
+                id: 'marketplace-product-return', orderId: 'marketplace-sale', orderReturnId: 'marketplace-return', assignmentId: 'assignment-1', agentId: 'agent-1',
+                orderItemId: 'marketplace-line', productId: 'product-1', productNameSnapshot: 'Delivered coffee', unitSnapshot: 'pcs',
+                kind: 'reversal', status: 'reversed', currency: 'iqd', commissionType: 'fixed_amount', ratePercent: 0,
+                quantity: -1, basisAmountPerUnit: 100, commissionMode: 'payable', commissionPerUnit: 10, amount: -10,
+                occurredAt: '2026-01-05T10:00:00.000Z', createdAt: '2026-01-05T10:00:00.000Z', isDeleted: false
+            }
+        ] as any
+        data.agentCommissionEntries = [
+            {
+                id: 'marketplace-aggregate-accrual', orderId: 'marketplace-sale', assignmentId: 'assignment-1', agentId: 'agent-1',
+                kind: 'accrual', status: 'earned', currency: 'iqd', commissionMode: 'payable', amount: 30,
+                occurredAt: '2026-01-04T10:00:00.000Z', createdAt: '2026-01-04T10:00:00.000Z', isDeleted: false
+            },
+            {
+                id: 'marketplace-aggregate-return', orderId: 'marketplace-sale', orderReturnId: 'marketplace-return', assignmentId: 'assignment-1', agentId: 'agent-1',
+                kind: 'reversal', status: 'reversed', currency: 'iqd', commissionMode: 'payable', amount: -10,
+                occurredAt: '2026-01-05T10:00:00.000Z', createdAt: '2026-01-05T10:00:00.000Z', isDeleted: false
+            }
+        ] as any
+
+        const [ledger] = buildPartnerAccountStatementLedger(data)
+        const productRows = ledger.entries.filter((entry) => entry.descriptionKey === 'marketplaceDeliveryProductCommission')
+        expect(productRows).toMatchObject([
+            { reference: 'SO-MARKETPLACE-1', commissionPerProduct: 10, totalProductCommission: 30, delta: 0 },
+            { reference: 'SO-MARKETPLACE-1', commissionPerProduct: 10, totalProductCommission: -10, delta: 0 }
+        ])
+        expect(ledger.entries.map((entry) => [entry.descriptionKey, entry.delta])).toEqual(expect.arrayContaining([
+            ['marketplaceDeliveryProductCommission', 0],
+            ['commissionEarned', -30],
+            ['commissionReversed', 10]
+        ]))
+        expect(ledger.entries).toHaveLength(4)
+        expect(ledger).toMatchObject({ productCommissionTotal: 20, closingBalance: -20 })
+
+        const html = renderToStaticMarkup(createElement(PartnerAccountStatementPrintTemplate, {
+            printLang: 'en',
+            data: data as any
+        }))
+        expect(html).toContain('Marketplace delivery product commission')
+        expect(html).toContain('>20 iqd</td>')
+    })
+
     it('shows the tracked order product commission total when sale items are collapsed', () => {
         const data = statementData()
         data.itemizeSalesOrders = false

@@ -45,6 +45,12 @@ const ASSIGNMENT_TABLE = "sales_order_agent_assignments";
 const ENTRY_TABLE = "agent_commission_entries";
 const RECONCILIATION_ENTITY = "sales_agent_commission_reconciliation";
 export const ORDER_CREATOR_PRODUCT_ASSIGNMENT_SOURCE = "order_creator_product" as const;
+export const MARKETPLACE_DELIVERY_PRODUCT_ASSIGNMENT_SOURCE = "marketplace_delivery_product" as const;
+
+function isProductCommissionOnlyAssignment(assignment: Pick<SalesOrderAgentAssignment, "assignmentSource">) {
+  return assignment.assignmentSource === ORDER_CREATOR_PRODUCT_ASSIGNMENT_SOURCE
+    || assignment.assignmentSource === MARKETPLACE_DELIVERY_PRODUCT_ASSIGNMENT_SOURCE;
+}
 
 // Sales-account beneficiaries are derived from an order and can be requested
 // by its save lifecycle, form assignment lifecycle, and agent-details
@@ -1332,19 +1338,22 @@ function emptyCommissionCalculation(currency: CurrencyCode): CommissionCalculati
 }
 
 /**
- * Local Mode counterpart of the server-side creator attribution helper.
- * Creator-derived assignments intentionally carry product commission only;
- * a normal manual or sales-account assignment for the same agent takes
- * precedence and keeps its ordinary plan behavior.
+ * Local Mode counterpart of the server-derived product-attribution helpers.
+ * Marketplace sales orders use the delivery actor stored as `createdBy` by the
+ * delivery transaction. Both derived sources intentionally carry product
+ * commission only; a normal manual or sales-account assignment for the same
+ * agent takes precedence and keeps its ordinary plan behavior.
  */
 async function ensureLocalOrderCreatorProductCommissionAssignmentInternal(order: SalesOrder) {
+  const isMarketplaceDelivery = order.sourceChannel === "marketplace";
+  const assignmentSource = isMarketplaceDelivery
+    ? MARKETPLACE_DELIVERY_PRODUCT_ASSIGNMENT_SOURCE
+    : ORDER_CREATOR_PRODUCT_ASSIGNMENT_SOURCE;
   if (
     order.commissionEnabled === false
-    || order.commissionMode == null
-    ||
-    !order.createdBy
+    || !order.createdBy
     || order.status !== "completed"
-    || (!order.isPaid && order.paymentStatus !== "paid")
+    || (!isMarketplaceDelivery && !order.isPaid && order.paymentStatus !== "paid")
     || order.returnStatus === "full"
     || order.isDeleted
   ) {
@@ -1415,12 +1424,14 @@ async function ensureLocalOrderCreatorProductCommissionAssignmentInternal(order:
     workspaceId: order.workspaceId,
     orderId: order.id,
     agentId: creatorAgent.id,
-    assignmentSource: ORDER_CREATOR_PRODUCT_ASSIGNMENT_SOURCE,
+    assignmentSource,
     assignedAt,
     unassignedAt: null,
     assignedBy: order.createdBy,
     unassignedBy: null,
-    reassignmentReason: "Automatically attributed from the staff user who created the sale",
+    reassignmentReason: isMarketplaceDelivery
+      ? "Automatically attributed from the field agent who delivered the marketplace order"
+      : "Automatically attributed from the staff user who created the sale",
     previousAssignmentId: previous?.id ?? null,
     customerCitySnapshot: null,
     deliveryChargeAmount: 0,
@@ -1692,7 +1703,6 @@ export async function accrueSalesOrderCommission(
  */
 function isCommissionEligibleOrder(order: SalesOrder) {
   return order.commissionEnabled !== false
-    && order.commissionMode != null
     && !order.isDeleted
     && order.status !== 'cancelled'
     && order.returnStatus !== 'full';
@@ -1715,12 +1725,12 @@ async function accrueSalesOrderAssignmentCommission(
   const occurredAt = productCommissionEventAt(order, assignment);
   const productCommission = await reconcileProductCommissionLines(order, assignment, occurredAt, createdBy);
   const manualCommission = getAssignmentManualSalesAgentCommission(assignment);
-  const isCreatorProductOnly = assignment.assignmentSource === ORDER_CREATOR_PRODUCT_ASSIGNMENT_SOURCE;
-  const terms = manualCommission || isCreatorProductOnly
+  const isProductOnly = isProductCommissionOnlyAssignment(assignment);
+  const terms = manualCommission || isProductOnly
     ? null
     : await findMembershipAndPlan(assignment.agentId, occurredAt);
   if (!terms && !manualCommission && productCommission.amount <= 0) return null;
-  const calculation = isCreatorProductOnly
+  const calculation = isProductOnly
     ? emptyCommissionCalculation(order.currency)
     : manualCommission
     ? calculateManualSalesOrderCommission(order, assignment, productCommission.basisAmount)
@@ -1882,7 +1892,7 @@ async function reconcileSalesOrderAssignmentCommission(
     isEligible && !assignment.unassignedAt,
   );
   const calculation = isEligible && !assignment.unassignedAt
-    ? assignment.assignmentSource === ORDER_CREATOR_PRODUCT_ASSIGNMENT_SOURCE
+    ? isProductCommissionOnlyAssignment(assignment)
       ? emptyCommissionCalculation(order.currency)
       : accrual.membershipId == null && accrual.planId == null
       ? calculateManualSalesOrderCommission(order, assignment, productCommission.basisAmount)
@@ -2463,7 +2473,9 @@ export async function reverseCommissionForOrderReturn(
       currentAssignment && isCommissionEligibleOrder(order),
     );
     const targetCalculation = currentAssignment
-      ? accrual.membershipId == null && accrual.planId == null
+      ? isProductCommissionOnlyAssignment(assignment)
+        ? emptyCommissionCalculation(order.currency)
+        : accrual.membershipId == null && accrual.planId == null
         ? calculateManualSalesOrderCommission(order, assignment, productCommission.basisAmount)
         : calculateSalesOrderCommission(order, snapshotPlan ?? fallbackPlan, assignment, productCommission.productIds)
       : null;
@@ -3145,7 +3157,7 @@ export async function settlePaidSalesOrderCommissionsLocally(
   const payouts: AgentCommissionEntry[] = [];
   for (const assignment of assignments) {
     if (assignment.isDeleted || assignment.unassignedAt) continue;
-    if (order.commissionEnabled === false || order.commissionMode == null) continue;
+    if (order.commissionEnabled === false) continue;
     const entries = await db.agent_commission_entries
       .where('assignmentId')
       .equals(assignment.id)

@@ -1,7 +1,9 @@
 import { getPdfShapeBottom, type PdfShape, type UniversalInvoice } from '@/types'
 import type { ReactElement } from 'react'
 import type { PartnerAccountStatementClosingBalance } from '@/lib/partnerAccountStatement'
-import type { OrderPartnerBalanceSnapshot, PurchaseOrder, SalesOrder } from '@/local-db'
+import type { OrderPartnerBalanceAtPosting } from '@/lib/orderPartnerBalance'
+import type { OrderPartnerBalancePrintFieldKeys } from '@/lib/orderPartnerBalancePrintDemand'
+import type { PurchaseOrder, SalesOrder } from '@/local-db'
 
 export type PrintFormat = 'a4' | 'receipt' | 'barcode_35x15'
 export type CustomTemplatePrintLanguage = 'en' | 'ar' | 'ku'
@@ -63,6 +65,8 @@ export type TemplatePreview = {
     reflowLowerPageText?: boolean
     /** The final document must wait for a freshly calculated partner balance. */
     requiresFreshPartnerBalance?: boolean
+    /** Keys for the independently optional partner-balance fields in this template. */
+    partnerBalanceFieldKeys?: OrderPartnerBalancePrintFieldKeys
     /** Starts a fresh partner-balance load when this preview is opened. */
     resetFreshPartnerBalance?: () => void
     /** Live source required to verify the Atlas Standard partner balance. */
@@ -75,7 +79,7 @@ export type TemplatePreview = {
     onFreshPartnerBalanceStateChange?: (
         state: 'loading' | 'ready' | 'error',
         balances?: PartnerAccountStatementClosingBalance[],
-        legacyOrderBalanceSnapshot?: OrderPartnerBalanceSnapshot | null
+        orderBalanceAtPosting?: OrderPartnerBalanceAtPosting | null
     ) => void
     page?: {
         widthMm: number

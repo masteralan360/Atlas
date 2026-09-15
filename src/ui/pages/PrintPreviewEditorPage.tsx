@@ -1,4 +1,4 @@
-import { type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react'
+import { type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, Printer, Loader2, Edit3, X, ZoomIn, ZoomOut, Maximize, ImagePlus, Trash2, PenTool, Brush, Palette, Eraser, Hand, Type, RotateCw, Scaling, Move, Languages, Check, Shapes } from 'lucide-react'
 import {
@@ -48,6 +48,10 @@ import { resolveIsolatedTextDirection } from '@/lib/textDirection'
 import type { UniversalInvoice } from '@/types'
 import { useAuth } from '@/auth/AuthContext'
 import { usePartnerAccountStatementPrintBalances } from '@/hooks/usePartnerAccountStatement'
+import {
+    hasOrderPartnerBalancePrintDemand,
+    resolveOrderPartnerBalancePrintDemand
+} from '@/lib/orderPartnerBalancePrintDemand'
 import { UiAccessGate, useUiAccess } from '@/context/UiAccessContext'
 import { AttachedShapesOverlay } from '@/ui/components/AttachedShapesOverlay'
 import { PDF_SHAPE_OPTIONS } from '@/ui/components/PdfShapeGraphic'
@@ -584,43 +588,74 @@ export function PrintPreviewEditorPage() {
 
     // Template preview mode (loans, orders, budget)
     const templatePreview = source?.templatePreview
-    const [freshPartnerBalanceState, setFreshPartnerBalanceState] = useState<'loading' | 'ready' | 'error'>(
-        () => templatePreview?.requiresFreshPartnerBalance ? 'loading' : 'ready'
+    const initialTemplateLayout = source?.initialTemplateLayout
+    const [templateHiddenFields, setTemplateHiddenFields] = useState<Record<string, boolean>>(
+        () => initialTemplateLayout?.hiddenFields || {}
     )
-    const freshPartnerBalanceRequest = templatePreview?.freshPartnerBalanceRequest
+    const templateHiddenFieldsRef = useRef(templateHiddenFields)
+    const partnerBalanceDemand = useMemo(
+        () => resolveOrderPartnerBalancePrintDemand(
+            templatePreview?.partnerBalanceFieldKeys,
+            templateHiddenFields
+        ),
+        [templateHiddenFields, templatePreview?.partnerBalanceFieldKeys]
+    )
+    const requiresFreshPartnerBalance = Boolean(
+        templatePreview?.requiresFreshPartnerBalance
+        && hasOrderPartnerBalancePrintDemand(partnerBalanceDemand)
+    )
+    const [freshPartnerBalanceState, setFreshPartnerBalanceState] = useState<'loading' | 'ready' | 'error'>(
+        () => requiresFreshPartnerBalance ? 'loading' : 'ready'
+    )
+    const [partnerBalanceRefreshToken, setPartnerBalanceRefreshToken] = useState(0)
+    const freshPartnerBalanceRequest = requiresFreshPartnerBalance
+        ? templatePreview?.freshPartnerBalanceRequest
+        : undefined
     const {
         currentBalances: freshPartnerBalances,
+        hasStatementData: hasFreshPartnerBalanceStatementData,
         isRefreshing: isFreshPartnerBalanceRefreshing,
         refreshError: freshPartnerBalanceRefreshError,
-        legacyOrderBalanceSnapshot: freshLegacyOrderBalanceSnapshot
+        orderBalanceAtPosting: freshOrderBalanceAtPosting
     } = usePartnerAccountStatementPrintBalances(
         freshPartnerBalanceRequest?.workspaceId,
         freshPartnerBalanceRequest?.partnerId,
-        freshPartnerBalanceRequest?.order
+        freshPartnerBalanceRequest?.order,
+        partnerBalanceDemand,
+        partnerBalanceRefreshToken
     )
-    const nextFreshPartnerBalanceState: 'loading' | 'ready' | 'error' = !templatePreview?.requiresFreshPartnerBalance
+    const nextFreshPartnerBalanceState: 'loading' | 'ready' | 'error' = !requiresFreshPartnerBalance
         ? 'ready'
         : !freshPartnerBalanceRequest || freshPartnerBalanceRefreshError
             ? 'error'
-            : isFreshPartnerBalanceRefreshing || freshPartnerBalances === undefined
+            : isFreshPartnerBalanceRefreshing || !hasFreshPartnerBalanceStatementData
                 ? 'loading'
                 : 'ready'
 
     useEffect(() => {
         templatePreview?.onFreshPartnerBalanceStateChange?.(
             nextFreshPartnerBalanceState,
-            nextFreshPartnerBalanceState === 'ready' ? freshPartnerBalances : undefined,
-            nextFreshPartnerBalanceState === 'ready' ? freshLegacyOrderBalanceSnapshot : undefined
+            requiresFreshPartnerBalance && nextFreshPartnerBalanceState === 'ready'
+                ? freshPartnerBalances
+                : undefined,
+            requiresFreshPartnerBalance && nextFreshPartnerBalanceState === 'ready'
+                ? freshOrderBalanceAtPosting
+                : undefined
         )
         setFreshPartnerBalanceState((current) => (
             current === nextFreshPartnerBalanceState ? current : nextFreshPartnerBalanceState
         ))
-    }, [freshLegacyOrderBalanceSnapshot, freshPartnerBalances, nextFreshPartnerBalanceState, templatePreview])
+    }, [
+        freshOrderBalanceAtPosting,
+        freshPartnerBalances,
+        nextFreshPartnerBalanceState,
+        requiresFreshPartnerBalance,
+        templatePreview
+    ])
 
-    const isTemplatePrintReady = !templatePreview?.requiresFreshPartnerBalance
+    const isTemplatePrintReady = !requiresFreshPartnerBalance
         || freshPartnerBalanceState === 'ready'
     const fixedTemplatePrintLang = templatePreview?.fixedPrintLang
-    const initialTemplateLayout = source?.initialTemplateLayout
     const templatePage = initialTemplateLayout?.page || templatePreview?.page || {
         widthMm: 210,
         heightMm: 297
@@ -668,7 +703,6 @@ export function PrintPreviewEditorPage() {
         ])),
         ...(initialTemplateLayout?.componentPositions || {})
     }))
-    const [templateHiddenFields, setTemplateHiddenFields] = useState<Record<string, boolean>>(() => initialTemplateLayout?.hiddenFields || {})
     const [templateFieldOrders, setTemplateFieldOrders] = useState<Record<string, string[]>>(() => initialTemplateLayout?.fieldOrders || {})
     const [templateFieldLabelOverrides, setTemplateFieldLabelOverrides] = useState<Record<string, string>>(() => initialTemplateLayout?.fieldLabelOverrides || {})
     const [templateFieldDisplayModes, setTemplateFieldDisplayModes] = useState<Record<string, string>>(() => initialTemplateLayout?.fieldDisplayModes || {})
@@ -1216,16 +1250,30 @@ export function PrintPreviewEditorPage() {
     }, [])
 
     const handleTemplateHiddenFieldChange = useCallback((key: string, hidden: boolean) => {
-        setTemplateHiddenFields((current) => {
-            const next = { ...current }
-            if (hidden) {
-                next[key] = true
-            } else {
-                delete next[key]
-            }
-            return next
-        })
-    }, [])
+        const nextHiddenFields = { ...templateHiddenFieldsRef.current }
+        if (hidden) {
+            nextHiddenFields[key] = true
+        } else {
+            delete nextHiddenFields[key]
+        }
+
+        templateHiddenFieldsRef.current = nextHiddenFields
+        setTemplateHiddenFields(nextHiddenFields)
+
+        const balanceFieldKeys = templatePreview?.partnerBalanceFieldKeys
+        if (!balanceFieldKeys || !Object.values(balanceFieldKeys).includes(key)) return
+
+        const nextDemand = resolveOrderPartnerBalancePrintDemand(balanceFieldKeys, nextHiddenFields)
+        if (!hasOrderPartnerBalancePrintDemand(nextDemand)) {
+            templatePreview.onFreshPartnerBalanceStateChange?.('ready', undefined, undefined)
+            setFreshPartnerBalanceState('ready')
+            return
+        }
+
+        templatePreview.resetFreshPartnerBalance?.()
+        setFreshPartnerBalanceState('loading')
+        setPartnerBalanceRefreshToken((token) => token + 1)
+    }, [templatePreview])
 
     const handleTemplateFieldOrderChange = useCallback((sectionKey: string, fieldKeys: string[]) => {
         setTemplateFieldOrders((current) => ({

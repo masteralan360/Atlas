@@ -45,6 +45,10 @@ const NON_REMOTE_FIELDS_BY_ENTITY: Readonly<Record<string, ReadonlySet<string>>>
   business_partners: new Set(["name", "contact_name", "email", "country"]),
   customers: new Set(["is_locked", "name", "email", "country"]),
   suppliers: new Set(["is_locked", "name", "contact_name", "email", "country"]),
+  // Order balances are reconstructed from the Account Statement ledger. This
+  // retired field can survive in a queued mutation from an older client.
+  sales_orders: new Set(["partner_balance_snapshot"]),
+  purchase_orders: new Set(["partner_balance_snapshot"]),
   // Delivery recipient phone is the only current identifier. These fields may
   // remain in a local offline row created before the simplified contract, but
   // no longer exist in the delivery_shipments table.

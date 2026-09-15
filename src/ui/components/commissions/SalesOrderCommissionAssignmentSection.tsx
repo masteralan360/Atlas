@@ -133,9 +133,10 @@ export const SalesOrderCommissionAssignmentSection = forwardRef<
 
     useEffect(() => {
         if (!editingOrderId) return
-        const editableAssignments = activeAssignments.filter(
-            (assignment) => assignment.assignmentSource !== 'order_creator_product'
-        )
+        const editableAssignments = activeAssignments.filter((assignment) => (
+            assignment.assignmentSource !== 'order_creator_product'
+            && assignment.assignmentSource !== 'marketplace_delivery_product'
+        ))
         setDrafts(editableAssignments.length > 0
             ? editableAssignments.map((assignment) => createDraft(orderCurrency, assignment, customerCity))
             : [])

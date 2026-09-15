@@ -18,6 +18,16 @@ import { getReportOriginId } from '@/lib/printIdentity'
 import { buildOrderExchangeRatesSnapshot, convertCurrencyAmountWithLiveRates, getPrimaryExchangeDetails } from '@/lib/orderCurrency'
 import { ORDER_DECIMAL_STEP, roundOrderValue } from '@/lib/orderPrecision'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
+import {
+    clampOrdersPagination,
+    createOrdersPaginationState,
+    ORDERS_PAGE_SIZE_OPTIONS,
+    ORDERS_PAGE_SIZE_STORAGE_KEY,
+    paginateOrders,
+    resetOrdersPagination,
+    setOrdersPage,
+    setOrdersPageSize
+} from '@/lib/ordersListPagination'
 import { formatCurrency, formatDate, formatLocalDateTimeValue, generateId, parseLocalDateTimeValue } from '@/lib/utils'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import {
@@ -113,7 +123,8 @@ import {
     TooltipContent,
     TooltipProvider,
     TooltipTrigger,
-    useToast
+    useToast,
+    AppPagination
 } from '@/ui/components'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { FilterDropdown } from '@/ui/components/FilterDropdown'
@@ -450,6 +461,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
 
     const [activeTab, setActiveTab] = useState<OrderTab>(initialTab)
     const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => (localStorage.getItem('orders_view_mode') as 'table' | 'grid') || 'table')
+    const [pagination, setPagination] = useState(() => createOrdersPaginationState(localStorage.getItem(ORDERS_PAGE_SIZE_STORAGE_KEY)))
     const [search, setSearch] = useState('')
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
     const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all')
@@ -472,6 +484,10 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     useEffect(() => {
         localStorage.setItem('orders_view_mode', viewMode)
     }, [viewMode])
+
+    useEffect(() => {
+        localStorage.setItem(ORDERS_PAGE_SIZE_STORAGE_KEY, String(pagination.pageSize))
+    }, [pagination.pageSize])
     const [dialogOpen, setDialogOpen] = useState(false)
     const [editingSalesOrder, setEditingSalesOrder] = useState<SalesOrder | null>(null)
     const [editingPurchaseOrder, setEditingPurchaseOrder] = useState<PurchaseOrder | null>(null)
@@ -664,6 +680,29 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         () => activeTab === 'sales' ? filteredSalesOrders : filteredPurchaseOrders,
         [activeTab, filteredPurchaseOrders, filteredSalesOrders]
     )
+    const paginatedOrders = useMemo(
+        () => paginateOrders<SalesOrder | PurchaseOrder>(summaryOrders, pagination),
+        [pagination, summaryOrders]
+    )
+
+    useEffect(() => {
+        setPagination((current) => clampOrdersPagination(current, summaryOrders.length))
+    }, [summaryOrders.length])
+
+    useEffect(() => {
+        setPagination(resetOrdersPagination)
+    }, [
+        activeTab,
+        commissionModeFilter,
+        customDates,
+        dateRange,
+        ecommerceFilter,
+        fulfillmentCustomDates,
+        fulfillmentDateRange,
+        paymentFilter,
+        search,
+        statusFilter
+    ])
     const orderValueOrders = useMemo(
         () => summaryOrders.filter((order) => order.status !== 'cancelled'),
         [summaryOrders]
@@ -1515,7 +1554,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     }
 
     function renderOrderTable() {
-        const rows = activeTab === 'sales' ? filteredSalesOrders : filteredPurchaseOrders
+        const rows = paginatedOrders.rows
 
         return (
             <div className="overflow-x-auto">
@@ -1665,7 +1704,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     }
 
     function renderOrderGrid() {
-        const rows = activeTab === 'sales' ? filteredSalesOrders : filteredPurchaseOrders
+        const rows = paginatedOrders.rows
 
         return (
             <div className={cn(
@@ -2132,40 +2171,53 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                         </TabsTrigger>
                                     </TabsList>
 
-                                    {!isMobile() && (
-                                        <div className="flex items-center self-start rounded-xl border border-border/60 bg-muted/30 p-1 sm:self-auto">
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                allowViewer={true}
-                                                onClick={() => setViewMode('table')}
-                                                className={cn(
-                                                    'h-8 gap-1.5 rounded-lg px-3 text-[10px] font-bold uppercase tracking-wide transition-all',
-                                                    viewMode === 'table'
-                                                        ? 'bg-primary text-primary-foreground shadow-sm'
-                                                        : 'text-muted-foreground hover:bg-background hover:text-foreground'
-                                                )}
-                                            >
-                                                <List className="h-3.5 w-3.5" />
-                                                {t('orders.view.table') || 'Details'}
-                                            </Button>
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                allowViewer={true}
-                                                onClick={() => setViewMode('grid')}
-                                                className={cn(
-                                                    'h-8 gap-1.5 rounded-lg px-3 text-[10px] font-bold uppercase tracking-wide transition-all',
-                                                    viewMode === 'grid'
-                                                        ? 'bg-primary text-primary-foreground shadow-sm'
-                                                        : 'text-muted-foreground hover:bg-background hover:text-foreground'
-                                                )}
-                                            >
-                                                <LayoutGrid className="h-3.5 w-3.5" />
-                                                {t('orders.view.grid') || 'Grid'}
-                                            </Button>
+                                    <div className="flex flex-wrap items-center gap-3 self-start sm:self-auto">
+                                        {!isMobile() && (
+                                            <div className="flex items-center rounded-xl border border-border/60 bg-muted/30 p-1">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    allowViewer={true}
+                                                    onClick={() => setViewMode('table')}
+                                                    className={cn(
+                                                        'h-8 gap-1.5 rounded-lg px-3 text-[10px] font-bold uppercase tracking-wide transition-all',
+                                                        viewMode === 'table'
+                                                            ? 'bg-primary text-primary-foreground shadow-sm'
+                                                            : 'text-muted-foreground hover:bg-background hover:text-foreground'
+                                                    )}
+                                                >
+                                                    <List className="h-3.5 w-3.5" />
+                                                    {t('orders.view.table') || 'Details'}
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    allowViewer={true}
+                                                    onClick={() => setViewMode('grid')}
+                                                    className={cn(
+                                                        'h-8 gap-1.5 rounded-lg px-3 text-[10px] font-bold uppercase tracking-wide transition-all',
+                                                        viewMode === 'grid'
+                                                            ? 'bg-primary text-primary-foreground shadow-sm'
+                                                            : 'text-muted-foreground hover:bg-background hover:text-foreground'
+                                                    )}
+                                                >
+                                                    <LayoutGrid className="h-3.5 w-3.5" />
+                                                    {t('orders.view.grid') || 'Grid'}
+                                                </Button>
+                                            </div>
+                                        )}
+                                        <div className="flex flex-wrap items-center gap-3">
+                                            <AppPagination
+                                                currentPage={paginatedOrders.currentPage}
+                                                totalCount={summaryOrders.length}
+                                                pageSize={pagination.pageSize}
+                                                pageSizeOptions={[...ORDERS_PAGE_SIZE_OPTIONS]}
+                                                onPageChange={(page) => setPagination((current) => setOrdersPage(current, page))}
+                                                onPageSizeChange={(pageSize) => setPagination((current) => setOrdersPageSize(current, pageSize))}
+                                                className="w-auto"
+                                            />
                                         </div>
-                                    )}
+                                    </div>
                                 </div>
 
                                 <Button variant="outline" allowViewer={true} onClick={() => setShowPrintPreview(true)} className="gap-2 self-start rounded-xl print:hidden sm:self-auto">

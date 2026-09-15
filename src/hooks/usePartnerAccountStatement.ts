@@ -17,6 +17,7 @@ import {
   useInstallmentSales,
   usePaymentTransactions,
   usePurchaseOrders,
+  useSalesOrderAgentAssignments,
   useSalesOrderReturnItemsForWorkspace,
   useSalesOrderReturnsForWorkspace,
   useSales,
@@ -26,7 +27,12 @@ import { isPayableCommissionEntry } from '@/local-db/commissionMode'
 import type { PurchaseOrder, Sale, SalesOrder } from '@/local-db/models'
 import { isDirectTransactionPartnerAccountEffect } from '@/local-db/payments'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
-import { deriveLegacyOrderPartnerBalanceSnapshot } from '@/lib/orderPartnerBalanceSnapshot'
+import { deriveOrderPartnerBalanceAtPosting } from '@/lib/orderPartnerBalance'
+import {
+  ALL_ORDER_PARTNER_BALANCE_PRINT_DEMAND,
+  hasOrderPartnerBalancePrintDemand,
+  type OrderPartnerBalancePrintDemand
+} from '@/lib/orderPartnerBalancePrintDemand'
 import {
   getPartnerAccountStatementClosingBalances,
   type PartnerAccountStatementClosingBalance,
@@ -121,7 +127,8 @@ function posSaleItemsForStatement(sale: Sale): PartnerAccountStatementPosSaleIte
 export function usePartnerAccountStatement(
   workspaceId: string | undefined,
   partnerId: string | null | undefined,
-  period: PartnerAccountStatementData['period']
+  period: PartnerAccountStatementData['period'],
+  refreshToken?: string | number
 ) {
   const online = useNetworkStatus()
   const [liveRefreshGeneration, setLiveRefreshGeneration] = useState(0)
@@ -134,6 +141,7 @@ export function usePartnerAccountStatement(
   const agents = useAgents(workspaceId)
   const commissionEntries = useAgentCommissionEntries(workspaceId)
   const productCommissionEntries = useAgentProductCommissionEntries(workspaceId)
+  const salesOrderAgentAssignments = useSalesOrderAgentAssignments(workspaceId)
   const salesOrders = useSalesOrders(workspaceId)
   const sales = useSales(workspaceId)
   const salesOrderReturns = useSalesOrderReturnsForWorkspace(workspaceId)
@@ -148,7 +156,7 @@ export function usePartnerAccountStatement(
   const deliverySettlements = useDeliverySettlements(workspaceId)
 
   const liveRefreshKey = workspaceId && partnerId && online && !isLocalWorkspaceMode(workspaceId)
-    ? `${workspaceId}:${partnerId}:${liveRefreshGeneration}`
+    ? `${workspaceId}:${partnerId}:${liveRefreshGeneration}:${refreshToken ?? ''}`
     : null
 
   useEffect(() => {
@@ -277,6 +285,27 @@ export function usePartnerAccountStatement(
     () => productCommissionEntries.filter((entry) => commissionAgentIds.has(entry.agentId)),
     [commissionAgentIds, productCommissionEntries]
   )
+  const marketplaceDeliveryProductCommissionOrderIds = useMemo(() => {
+    const directPartnerOrderIds = new Set(partnerSalesOrders.map((order) => order.id))
+    const marketplaceDeliveryAssignmentIds = new Set(
+      salesOrderAgentAssignments
+        .filter((assignment) => assignment.assignmentSource === 'marketplace_delivery_product')
+        .map((assignment) => assignment.id)
+    )
+    const productCommissionOrderIds = new Set(
+      salesAccountProductCommissionEntries
+        .filter((entry) => marketplaceDeliveryAssignmentIds.has(entry.assignmentId))
+        .map((entry) => entry.orderId)
+    )
+    return salesOrders
+      .filter((order) => (
+        order.sourceChannel === 'marketplace'
+        && !order.isDeleted
+        && !directPartnerOrderIds.has(order.id)
+        && productCommissionOrderIds.has(order.id)
+      ))
+      .map((order) => order.id)
+  }, [partnerSalesOrders, salesAccountProductCommissionEntries, salesOrderAgentAssignments, salesOrders])
   const posSaleItemsBySaleId = useMemo<Record<string, PartnerAccountStatementPosSaleItem[]>>(
     () => Object.fromEntries(sales.flatMap((sale) => (
       !sale.isDeleted ? [[sale.id, posSaleItemsForStatement(sale)]] : []
@@ -364,6 +393,8 @@ export function usePartnerAccountStatement(
     if (!partner) return null
 
     const allOrders = [...partnerSalesOrders, ...partnerPurchaseOrders]
+    const marketplaceDeliveryOrderIds = new Set(marketplaceDeliveryProductCommissionOrderIds)
+    const marketplaceDeliveryOrders = salesOrders.filter((order) => marketplaceDeliveryOrderIds.has(order.id))
     return {
       partnerId: partner.id,
       period,
@@ -377,7 +408,9 @@ export function usePartnerAccountStatement(
       loanPayments,
       installmentSales: partnerInstallmentSales,
       linkedOrderCodes: Object.fromEntries(
-        allOrders.filter((order) => !order.isDeleted).map((order) => [order.id, order.orderNumber])
+        [...allOrders, ...marketplaceDeliveryOrders]
+          .filter((order) => !order.isDeleted)
+          .map((order) => [order.id, order.orderNumber])
       ),
       linkedPosSaleCodes: Object.fromEntries(
         sales
@@ -393,6 +426,7 @@ export function usePartnerAccountStatement(
       settlementTransactions,
       agentCommissionEntries: salesAccountCommissionEntries,
       agentProductCommissionEntries: salesAccountProductCommissionEntries,
+      marketplaceDeliveryProductCommissionOrderIds,
       deliveryLedgerEntries: merchantDeliveryEntries,
       deliveryShipmentReferences,
       deliverySettlementReferences
@@ -410,10 +444,12 @@ export function usePartnerAccountStatement(
     partnerSalesOrderReturnItems,
     partnerSalesOrderReturns,
     partnerSalesOrders,
+    marketplaceDeliveryProductCommissionOrderIds,
     period,
     posSaleItemsBySaleId,
     salesAccountCommissionEntries,
     salesAccountProductCommissionEntries,
+    salesOrders,
     sales,
     settlementTransactions
   ])
@@ -450,31 +486,39 @@ export function usePartnerAccountStatementClosingBalances(
 }
 
 /**
- * Supplies an invoice with both the live closing balance and a read-only
- * account-statement reconstruction for legacy orders that predate immutable
- * partner-balance snapshots.
+ * Supplies an invoice with both the live closing balance and its order-time
+ * reconstruction from the Account Statement ledger.
  */
 export function usePartnerAccountStatementPrintBalances(
   workspaceId: string | undefined,
   partnerId: string | null | undefined,
-  order: SalesOrder | PurchaseOrder | null | undefined
+  order: SalesOrder | PurchaseOrder | null | undefined,
+  demand: OrderPartnerBalancePrintDemand = ALL_ORDER_PARTNER_BALANCE_PRINT_DEMAND,
+  refreshToken?: string | number
 ) {
+  const shouldLoadBalances = hasOrderPartnerBalancePrintDemand(demand)
   const {
     statementData,
     isRefreshing,
     refreshError,
     retryLiveRefresh
-  } = usePartnerAccountStatement(workspaceId, partnerId, ALL_TIME_PERIOD)
+  } = usePartnerAccountStatement(
+    shouldLoadBalances ? workspaceId : undefined,
+    shouldLoadBalances ? partnerId : undefined,
+    ALL_TIME_PERIOD,
+    refreshToken
+  )
 
   return useMemo(() => ({
-    currentBalances: statementData
+    currentBalances: statementData && demand.current
       ? getPartnerAccountStatementClosingBalances(statementData)
       : undefined,
-    legacyOrderBalanceSnapshot: statementData && order && !order.partnerBalanceSnapshot
-      ? deriveLegacyOrderPartnerBalanceSnapshot(statementData, order)
+    orderBalanceAtPosting: statementData && order && (demand.before || demand.after)
+      ? deriveOrderPartnerBalanceAtPosting(statementData, order, demand)
       : null,
-    isRefreshing,
-    refreshError,
+    hasStatementData: Boolean(statementData),
+    isRefreshing: shouldLoadBalances && isRefreshing,
+    refreshError: shouldLoadBalances ? refreshError : null,
     retryLiveRefresh
-  }), [isRefreshing, order, refreshError, retryLiveRefresh, statementData])
+  }), [demand, isRefreshing, order, refreshError, retryLiveRefresh, shouldLoadBalances, statementData])
 }

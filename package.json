@@ -1,7 +1,7 @@
 {
   "name": "atlas",
   "private": true,
-  "version": "0.10.0",
+  "version": "0.10.1",
   "main": "electron/main.cjs",
   "type": "module",
   "repository": {
@@ -118,6 +118,7 @@
     "react-native-country-flag": "^2.0.2",
     "react-spreadsheet": "^0.10.1",
     "react-to-print": "^3.2.0",
+    "react-virtuoso": "4.18.13",
     "recharts": "^3.6.0",
     "scheduler": "^0.23.2",
     "shadcn": "^4.0.3",
@@ -153,8 +154,8 @@
     "vite": "^7.3.1",
     "vite-plugin-pwa": "^1.2.0",
     "vitest": "^4.1.8",
-    "wrangler": "^4.72.0",
-    "workbox-window": "^7.1.0"
+    "workbox-window": "^7.1.0",
+    "wrangler": "^4.72.0"
   },
-  "min_version": "0.10.0"
+  "min_version": "0.10.1"
 }

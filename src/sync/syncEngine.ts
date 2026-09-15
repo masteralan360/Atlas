@@ -256,7 +256,9 @@ export function isExistingCommissionEntryRetry(
 
 function isDerivedSalesOrderAssignment(payload: Record<string, unknown>) {
   const source = payload.assignmentSource ?? payload.assignment_source;
-  return source === "sales_account" || source === "order_creator_product";
+  return source === "sales_account"
+    || source === "order_creator_product"
+    || source === "marketplace_delivery_product";
 }
 
 interface MutationSyncOrderItem {

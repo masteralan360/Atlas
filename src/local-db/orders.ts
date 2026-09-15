@@ -97,7 +97,6 @@ import type {
 import { createInventoryTransaction } from './inventoryTransactions'
 import { appendPaymentTransaction, synchronizeOrderPaymentReferences } from './payments'
 import { mirrorPaymentAccountTransactionLocally } from './paymentAccounts'
-import { calculateInitialOrderPartnerBalanceSnapshot } from './orderPartnerBalanceSnapshots'
 
 export function isOrderFinancingMethod(method?: OrderPaymentMethod | null): method is 'loan' | 'installments' {
     return method === 'loan' || method === 'installments'
@@ -231,6 +230,13 @@ function sanitizeSyncPayload(tableName: SyncableTableName, entity: Record<string
     const payload = { ...entity }
     delete payload.syncStatus
     delete payload.lastSyncedAt
+
+    if (tableName === 'sales_orders' || tableName === 'purchase_orders') {
+        // A client upgraded from an older release may still have this retired
+        // field in IndexedDB. Do not let it recreate the removed column.
+        delete payload.partnerBalanceSnapshot
+        delete payload.partner_balance_snapshot
+    }
 
     const snakePayload = Object.fromEntries(
         Object.entries(payload).map(([key, value]) => [key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`), value])
@@ -384,37 +390,6 @@ async function syncUpsertEntities(
 
         await queueOfflineUpserts(tableName, entities, workspaceId)
     }
-}
-
-/**
- * Persists a snapshot exactly once, after the order and any initial payment or
- * financing records are already represented in the local partner ledger.
- */
-async function persistInitialOrderPartnerBalanceSnapshot<T extends SalesOrder | PurchaseOrder>(
-    orderType: OrderType,
-    order: T
-): Promise<T> {
-    const capturedAt = new Date().toISOString()
-    const partnerBalanceSnapshot = await calculateInitialOrderPartnerBalanceSnapshot(orderType, order, capturedAt)
-    if (!partnerBalanceSnapshot) return order
-
-    const updated = {
-        ...order,
-        partnerBalanceSnapshot,
-        updatedAt: capturedAt,
-        version: order.version + 1,
-        ...getSyncMetadata(order.workspaceId, capturedAt)
-    } as T
-    const tableName: OrderTableName = orderType === 'sales' ? 'sales_orders' : 'purchase_orders'
-    const table = orderType === 'sales' ? db.sales_orders : db.purchase_orders
-
-    await table.put(updated as SalesOrder & PurchaseOrder)
-    await syncUpsertEntities(
-        tableName,
-        [updated as unknown as Record<string, unknown> & { id: string; version: number }],
-        order.workspaceId
-    )
-    return updated
 }
 
 async function syncSoftDelete(tableName: SimpleEntityTableName | OrderTableName | OrderInstallmentTableName, entityId: string, workspaceId: string) {
@@ -2689,7 +2664,7 @@ export async function createSalesOrder(
         await reconcileSalesOrderCommissionBestEffort(workspaceId, createdOrder.id, createdBy)
     }
 
-    return persistInitialOrderPartnerBalanceSnapshot('sales', createdOrder)
+    return createdOrder
 }
 
 type CompletedQuickSalesOrderRpcResult = {
@@ -2839,8 +2814,6 @@ async function completePaidQuickSalesOrderAtomically(
         completedOrder.id,
         completedOrder.createdBy
     )
-    const snapshotOrder = await persistInitialOrderPartnerBalanceSnapshot('sales', completedOrder)
-
     // Customer/partner totals and reorder suggestions are derived projections.
     // Refresh them after the authoritative transaction without holding the POS
     // success dialog behind more network round trips.
@@ -2860,7 +2833,7 @@ async function completePaidQuickSalesOrderAtomically(
         console.error('[Orders] Failed to refresh Quick Order projections:', projectionError)
     })
 
-    return snapshotOrder
+    return completedOrder
 }
 
 export type QuickSalesOrderStatus = Extract<SalesOrderStatus, 'draft' | 'pending' | 'completed'>
@@ -3397,7 +3370,7 @@ async function updateSalesOrderStatusOnce(
     if (updated.status === 'completed') {
         await reconcileSalesOrderCommissionBestEffort(existing.workspaceId, updated.id, updated.createdBy)
     }
-    return persistInitialOrderPartnerBalanceSnapshot('sales', updated)
+    return updated
 }
 
 export async function approveSalesOrderRequest(id: string, reviewedBy?: string | null) {
@@ -4564,7 +4537,7 @@ export async function createPurchaseOrder(
         await appendInitialOrderPaymentTransaction('purchase', createdOrder)
     }
 
-    return persistInitialOrderPartnerBalanceSnapshot('purchase', createdOrder)
+    return createdOrder
 }
 
 export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrder>) {
@@ -4778,7 +4751,7 @@ export async function updatePurchaseOrderStatus(id: string, status: PurchaseOrde
             )
         })
     )
-    return persistInitialOrderPartnerBalanceSnapshot('purchase', persistedOrder)
+    return persistedOrder
 }
 
 export async function approvePurchaseOrderRequest(id: string, reviewedBy?: string | null) {

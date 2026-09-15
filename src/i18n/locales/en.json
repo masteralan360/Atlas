@@ -643,7 +643,9 @@
     "noProducts": "No products match this filter yet",
     "storeNotFound": "Store not found",
     "storeNotFoundHint": "This store may be private or the link may be incorrect.",
-    "mixedCurrency": "This store currently supports inquiry orders with one currency per cart."
+    "mixedCurrency": "This store currently supports inquiry orders with one currency per cart.",
+    "loadingMore": "Loading more…",
+    "loadingMoreFailed": "Could not load more items."
   },
   "discounts": {
     "title": "Discounts",
@@ -1597,6 +1599,7 @@
         "commissionEarned": "Commission earned",
         "commissionReversed": "Commission reversed",
         "commissionAdjustment": "Commission adjustment",
+        "marketplaceDeliveryProductCommission": "Marketplace delivery product commission",
         "directReceipt": "Direct receipt",
         "directPayment": "Direct payment",
         "orderLoanProvided": "Order loan provided",
@@ -2862,13 +2865,12 @@
       "nativeAtlasStandardTemplateDescription": "Use the built-in Orders Atlas Standard order invoice A4 layout.",
       "nativeAtlasStandardReturnTemplate": "Orders Atlas Standard Return",
       "nativeAtlasStandardReturnTemplateDescription": "Print only the returned items and their refunded amounts.",
-      "partnerBalanceSnapshot": "Partner balances",
       "partnerBalanceBefore": "Partner's Balance Before Order",
       "partnerBalanceAfter": "Partner's Balance After Order",
       "partnerBalanceCurrent": "Partner's Current Balance",
       "partnerBalanceLoading": "Loading",
       "partnerBalanceUnavailable": "Current balance is unavailable",
-      "partnerBalanceSnapshotUnavailable": "Partner balance is unavailable"
+      "partnerBalanceAtOrderUnavailable": "Partner balance is unavailable"
     },
     "table": {
       "orderNumber": "Order #",

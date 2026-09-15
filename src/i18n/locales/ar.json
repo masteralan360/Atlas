@@ -630,7 +630,9 @@
     "noProducts": "لا توجد منتجات تطابق هذا الفلتر حتى الآن",
     "storeNotFound": "المتجر غير موجود",
     "storeNotFoundHint": "قد يكون هذا المتجر خاصًا أو أن الرابط غير صحيح.",
-    "mixedCurrency": "يدعم هذا المتجر حاليًا طلبات الاستفسار بعملة واحدة لكل سلة."
+    "mixedCurrency": "يدعم هذا المتجر حاليًا طلبات الاستفسار بعملة واحدة لكل سلة.",
+    "loadingMore": "جارٍ تحميل المزيد…",
+    "loadingMoreFailed": "تعذر تحميل المزيد من العناصر."
   },
   "discounts": {
     "title": "الخصومات",
@@ -1517,13 +1519,12 @@
       "nativeAtlasStandardTemplateDescription": "استخدم تخطيط فاتورة الطلب A4 المدمج في Orders Atlas Standard.",
       "nativeAtlasStandardReturnTemplate": "Orders Atlas Standard Return",
       "nativeAtlasStandardReturnTemplateDescription": "اطبع العناصر المرتجعة فقط ومبالغها المستردة.",
-      "partnerBalanceSnapshot": "أرصدة الشريك",
       "partnerBalanceBefore": "رصيد الشريك قبل الطلب",
       "partnerBalanceAfter": "رصيد الشريك بعد الطلب",
       "partnerBalanceCurrent": "الرصيد الحالي للشريك",
       "partnerBalanceLoading": "جارٍ التحميل",
       "partnerBalanceUnavailable": "الرصيد الحالي غير متاح",
-      "partnerBalanceSnapshotUnavailable": "رصيد الشريك غير متاح"
+      "partnerBalanceAtOrderUnavailable": "رصيد الشريك غير متاح"
     },
     "table": {
       "orderNumber": "رقم الطلب",
@@ -4687,6 +4688,7 @@
         "commissionEarned": "نسبة مستحقة",
         "commissionReversed": "عكس النسبة",
         "commissionAdjustment": "تعديل النسبة",
+        "marketplaceDeliveryProductCommission": "نسبة منتج لتسليم السوق الإلكتروني",
         "directReceipt": "استلام مباشر",
         "directPayment": "دفع مباشر",
         "orderLoanProvided": "قرض طلب مُقدم",

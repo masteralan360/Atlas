@@ -632,7 +632,9 @@
     "noProducts": "هێشتا هیچ بەرهەمێک لەم پالاوەدا ناگونجێت",
     "storeNotFound": "فرۆشگا نەدۆزرایەوە",
     "storeNotFoundHint": "ڕەنگە ئەم فرۆشگایە تایبەت بێت یان بەستەرەکە هەڵە بێت.",
-    "mixedCurrency": "ئەم فرۆشگایە لە ئێستادا تەنها داواکارییەکان بە یەک دراو بۆ هەر سەبەتێک پشتگیری دەکات."
+    "mixedCurrency": "ئەم فرۆشگایە لە ئێستادا تەنها داواکارییەکان بە یەک دراو بۆ هەر سەبەتێک پشتگیری دەکات.",
+    "loadingMore": "زیاتر بار دەکرێت…",
+    "loadingMoreFailed": "بارکردنی دانەی زیاتر سەرکەوتوو نەبوو."
   },
   "discounts": {
     "title": "داشکاندنەکان",
@@ -1520,13 +1522,12 @@
       "nativeAtlasStandardTemplateDescription": "شێوازی بنەڕەتی A4ی پسوڵەی داواکاری لە Orders Atlas Standard بەکاربهێنە.",
       "nativeAtlasStandardReturnTemplate": "Orders Atlas Standard Return",
       "nativeAtlasStandardReturnTemplateDescription": "تەنها کاڵا گەڕاوەکان و بڕی پارە گەڕاوەکان چاپ بکە.",
-      "partnerBalanceSnapshot": "باڵانسەکانی هاوبەش",
       "partnerBalanceBefore": "باڵانسی هاوبەش پێش داواکاری",
       "partnerBalanceAfter": "باڵانسی هاوبەش دوای داواکاری",
       "partnerBalanceCurrent": "باڵانسی ئێستای هاوبەش",
       "partnerBalanceLoading": "باردەکرێت",
       "partnerBalanceUnavailable": "باڵانسی ئێستا بەردەست نییە",
-      "partnerBalanceSnapshotUnavailable": "باڵانسی هاوبەش بەردەست نییە"
+      "partnerBalanceAtOrderUnavailable": "باڵانسی هاوبەش بەردەست نییە"
     },
     "table": {
       "orderNumber": "داواکاری #",
@@ -4684,6 +4685,7 @@
         "commissionEarned": "نسبەی بەدەستهاتوو",
         "commissionReversed": "پاشگەزکردنەوەی نسبە",
         "commissionAdjustment": "ڕێکخستنی نسبە",
+        "marketplaceDeliveryProductCommission": "نسبەی بەرهەمی گەیاندنی بازاڕ",
         "directReceipt": "وەرگرتنی ڕاستەوخۆ",
         "directPayment": "پارەدانی ڕاستەوخۆ",
         "orderLoanProvided": "قەرزی داواکاری پێدراو",

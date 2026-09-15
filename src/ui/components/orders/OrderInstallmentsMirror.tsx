@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'wouter'
 
 import { useAuth } from '@/auth'
-import { usePartnerAccountStatementPrintBalances } from '@/hooks/usePartnerAccountStatement'
 import {
     recordObligationSettlement,
     type OrderInstallment,
@@ -47,7 +46,8 @@ import {
     OrderReceiptPrintTemplate
 } from './OrderPrintTemplates'
 import {
-    AtlasStandardOrderInvoiceTemplate
+    AtlasStandardOrderInvoiceTemplate,
+    ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS
 } from './AtlasStandardOrderInvoiceTemplate'
 import {
     createAtlasStandardPartnerBalancePrintState,
@@ -152,14 +152,6 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
     const printPartner = useBusinessPartner(printPartnerId)
     const atlasStandardPartnerBalanceStateRef = useRef(
         createAtlasStandardPartnerBalancePrintState(Boolean(workspaceId && printPartnerId))
-    )
-    const {
-        currentBalances: partnerAccountStatementBalances,
-        legacyOrderBalanceSnapshot
-    } = usePartnerAccountStatementPrintBalances(
-        printTarget ? workspaceId : undefined,
-        printTarget ? printPartnerId : undefined,
-        printTarget?.order
     )
     const counterpartyPhone = printPartner?.phone || ''
     const counterpartyAddress = printPartner?.address || ''
@@ -294,8 +286,6 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
                 iqdPreference={features.iqd_display_preference}
                 logoUrl={features.logo_url}
                 businessPartner={printPartner}
-                partnerAccountStatementBalances={partnerAccountStatementBalances}
-                partnerBalanceFallbackSnapshot={legacyOrderBalanceSnapshot}
                 printedBy={user?.name}
                 productImageUrls={productImageUrls}
             />
@@ -325,8 +315,6 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
         productUnits,
         counterpartyAddress,
         counterpartyPhone,
-        legacyOrderBalanceSnapshot,
-        partnerAccountStatementBalances,
         printPartner,
         user?.name,
         workspaceName
@@ -478,6 +466,7 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
         return {
             fields: [],
             requiresFreshPartnerBalance: Boolean(workspaceId && printPartnerId),
+            partnerBalanceFieldKeys: ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS,
             resetFreshPartnerBalance: () => resetAtlasStandardPartnerBalancePrintState(
                 atlasStandardPartnerBalanceStateRef.current,
                 Boolean(workspaceId && printPartnerId)
@@ -485,10 +474,10 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
             freshPartnerBalanceRequest: workspaceId && printPartnerId
                 ? { workspaceId, partnerId: printPartnerId, order: printTarget.order }
                 : undefined,
-            onFreshPartnerBalanceStateChange: (status, balances, legacyOrderBalanceSnapshot) => {
+            onFreshPartnerBalanceStateChange: (status, balances, orderBalanceAtPosting) => {
                 atlasStandardPartnerBalanceStateRef.current.status = status
                 atlasStandardPartnerBalanceStateRef.current.balances = balances
-                atlasStandardPartnerBalanceStateRef.current.legacyOrderBalanceSnapshot = legacyOrderBalanceSnapshot
+                atlasStandardPartnerBalanceStateRef.current.orderBalanceAtPosting = orderBalanceAtPosting
             },
             createElement: (_data, _effectiveId, printLangOverride, renderOptions) => (
                 <AtlasStandardOrderInvoiceTemplate
@@ -500,9 +489,7 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
                     iqdPreference={features.iqd_display_preference}
                     logoUrl={features.logo_url}
                     businessPartner={printPartner}
-                    partnerAccountStatementBalances={partnerAccountStatementBalances}
                     partnerBalancePrintState={atlasStandardPartnerBalanceStateRef.current}
-                    partnerBalanceFallbackSnapshot={legacyOrderBalanceSnapshot}
                     printedBy={user?.name}
                     productImageUrls={productImageUrls}
                     hiddenFields={renderOptions?.hiddenFields}
@@ -526,8 +513,6 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
         printLang,
         printPartner,
         printPartnerId,
-        partnerAccountStatementBalances,
-        legacyOrderBalanceSnapshot,
         printTarget,
         productImageUrls,
         user?.name,
@@ -544,7 +529,6 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
         order: printTarget?.order,
         orderKind: printTarget?.kind,
         installments: printInstallments,
-        partnerAccountStatementBalances,
         productUnits,
         productImageUrls,
         t

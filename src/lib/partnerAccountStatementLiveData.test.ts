@@ -7,7 +7,7 @@ import {
 } from './partnerAccountStatementLiveData'
 
 describe('partner account statement live data', () => {
-  it('refreshes every statement source, including loan payments', async () => {
+  it('refreshes every statement source, including commission assignment and loan-payment records', async () => {
     const refreshTable = vi.fn(async () => undefined)
     const refreshSales = vi.fn(async () => undefined)
 
@@ -17,8 +17,10 @@ describe('partner account statement live data', () => {
     })
 
     expect(PARTNER_ACCOUNT_STATEMENT_LIVE_TABLE_NAMES).toContain('loan_payments')
+    expect(PARTNER_ACCOUNT_STATEMENT_LIVE_TABLE_NAMES).toContain('sales_order_agent_assignments')
     expect(refreshTable).toHaveBeenCalledTimes(PARTNER_ACCOUNT_STATEMENT_LIVE_TABLE_NAMES.length)
     expect(refreshTable).toHaveBeenCalledWith('loan_payments', 'workspace-1')
+    expect(refreshTable).toHaveBeenCalledWith('sales_order_agent_assignments', 'workspace-1')
     expect(refreshSales).toHaveBeenCalledOnce()
     expect(refreshSales).toHaveBeenCalledWith('workspace-1')
     expect(PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES).toContain('sales')

@@ -1,23 +1,25 @@
-import { useDeferredValue, useState } from 'react'
+import { useDeferredValue, useEffect, useState } from 'react'
 import { Search, Store } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Card, CardContent, Input } from '@/ui/components'
+import { Button } from '@/ui/components/button'
 
 import { MarketplaceLayout } from '../components/MarketplaceLayout'
+import { MarketplaceVirtualGrid } from '../components/MarketplaceVirtualGrid'
 import { StoreCard } from '../components/StoreCard'
 import { useMarketplaceStores } from '../hooks/useMarketplaceStores'
 import { usePageMeta } from '../hooks/usePageMeta'
 
 export function MarketplaceGallery() {
     const { t } = useTranslation()
-    const { stores, isLoading, error } = useMarketplaceStores()
     const [search, setSearch] = useState('')
     const deferredSearch = useDeferredValue(search.trim().toLowerCase())
+    const { stores, isLoading, isLoadingMore, hasMore, error, loadMoreError, loadMore } = useMarketplaceStores(deferredSearch)
 
-    const filteredStores = deferredSearch
-        ? stores.filter((store) => `${store.name} ${store.description || ''}`.toLowerCase().includes(deferredSearch))
-        : stores
+    useEffect(() => {
+        window.scrollTo({ top: 0, behavior: 'auto' })
+    }, [deferredSearch])
 
     usePageMeta(
         t('marketplace.title', { defaultValue: 'Atlas Marketplace' }),
@@ -65,7 +67,7 @@ export function MarketplaceGallery() {
                             {error}
                         </CardContent>
                     </Card>
-                ) : filteredStores.length === 0 ? (
+                ) : stores.length === 0 ? (
                     <Card className="border-border/60 bg-card/80">
                         <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
                             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -82,11 +84,24 @@ export function MarketplaceGallery() {
                         </CardContent>
                     </Card>
                 ) : (
-                    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                        {filteredStores.map((store, index) => (
-                            <StoreCard key={store.slug} store={store} index={index} />
-                        ))}
-                    </div>
+                    <>
+                        <MarketplaceVirtualGrid
+                            items={stores}
+                            itemKey={(store) => store.slug}
+                            renderItem={(store, index) => <StoreCard store={store} index={index} />}
+                            listClassName="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
+                            onEndReached={loadMore}
+                            hasMore={hasMore}
+                            isLoadingMore={isLoadingMore}
+                        />
+                        {isLoadingMore && <div className="py-6 text-center text-sm text-muted-foreground">{t('marketplace.loadingMore')}</div>}
+                        {loadMoreError && (
+                            <div className="flex flex-col items-center gap-3 py-6 text-center">
+                                <p className="text-sm text-destructive">{t('marketplace.loadingMoreFailed')}</p>
+                                <Button variant="outline" onClick={loadMore}>{t('common.retry')}</Button>
+                            </div>
+                        )}
+                    </>
                 )}
             </section>
         </MarketplaceLayout>

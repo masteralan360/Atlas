@@ -8,7 +8,6 @@ import { Link, useLocation } from 'wouter'
 
 import { useAuth } from '@/auth'
 import { useDemoTutorial } from '@/demo'
-import { usePartnerAccountStatementPrintBalances } from '@/hooks/usePartnerAccountStatement'
 import { useProfileData } from '@/hooks/useProfileData'
 import { getOrderLineFreeBonusQuantity, getOrderLineFulfilledQuantity, getOrderLineInventoryQuantity, getOrderLinePaidQuantity, hasOrderLineFreeBonus, isFulfilledUnitsAvailableForOrder } from '@/lib/orderLineItems'
 import {
@@ -111,6 +110,7 @@ import {
 } from './OrderPrintTemplates'
 import {
     AtlasStandardOrderInvoiceTemplate,
+    ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS,
     ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS
 } from './AtlasStandardOrderInvoiceTemplate'
 import {
@@ -362,14 +362,6 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const atlasStandardPartnerBalanceStateRef = useRef(
         createAtlasStandardPartnerBalancePrintState(Boolean(workspaceId && partnerId))
     )
-    const {
-        currentBalances: partnerAccountStatementBalances,
-        legacyOrderBalanceSnapshot
-    } = usePartnerAccountStatementPrintBalances(
-        showPrintPreview ? workspaceId : undefined,
-        showPrintPreview ? partnerId : undefined,
-        showPrintPreview ? resolved?.order : undefined
-    )
     const counterpartyPhone = bizPartner?.phone || ''
     const counterpartyAddress = bizPartner?.address || ''
 
@@ -470,7 +462,6 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         orderKind: resolved?.kind,
         returnPrintData,
         installments,
-        partnerAccountStatementBalances,
         productUnits,
         productImageUrls,
         printedBy: creatorName,
@@ -753,15 +744,16 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
             ],
             supportsBackgroundEdit: true,
             requiresFreshPartnerBalance: Boolean(workspaceId && partnerId),
+            partnerBalanceFieldKeys: ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS,
             resetFreshPartnerBalance: () => resetAtlasStandardPartnerBalancePrintState(
                 atlasStandardPartnerBalanceStateRef.current,
                 Boolean(workspaceId && partnerId)
             ),
             freshPartnerBalanceRequest: workspaceId && partnerId ? { workspaceId, partnerId, order } : undefined,
-            onFreshPartnerBalanceStateChange: (status, balances, legacyOrderBalanceSnapshot) => {
+            onFreshPartnerBalanceStateChange: (status, balances, orderBalanceAtPosting) => {
                 atlasStandardPartnerBalanceStateRef.current.status = status
                 atlasStandardPartnerBalanceStateRef.current.balances = balances
-                atlasStandardPartnerBalanceStateRef.current.legacyOrderBalanceSnapshot = legacyOrderBalanceSnapshot
+                atlasStandardPartnerBalanceStateRef.current.orderBalanceAtPosting = orderBalanceAtPosting
             },
             createElement: (data, _effectiveId, printLangOverride, renderOptions) => {
                 const baseLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
@@ -776,9 +768,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                         logoUrl={features.logo_url}
                         workspaceFooterContacts={renderOptions?.workspaceFooterContacts || workspaceFooterContacts}
                         businessPartner={bizPartner}
-                        partnerAccountStatementBalances={partnerAccountStatementBalances}
                         partnerBalancePrintState={atlasStandardPartnerBalanceStateRef.current}
-                        partnerBalanceFallbackSnapshot={legacyOrderBalanceSnapshot}
                         printedBy={creatorName}
                         productImageUrls={productImageUrls}
                         hiddenFields={renderOptions?.hiddenFields}
@@ -798,7 +788,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 return generateTemplatePdf({ element, format: 'a4', printLang: printLangOverride || baseLang })
             }
         }
-    }, [resolved, features, installments, workspaceName, t, i18n, bizPartner, partnerId, partnerAccountStatementBalances, legacyOrderBalanceSnapshot, workspaceFooterContacts, creatorName, productImageUrls, customOrderPrint.selectedPrintVersion, workspaceId])
+    }, [resolved, features, installments, workspaceName, t, i18n, bizPartner, partnerId, workspaceFooterContacts, creatorName, productImageUrls, customOrderPrint.selectedPrintVersion, workspaceId])
 
     const orderAtlasStandardReturnPreview = useMemo<TemplatePreview | undefined>(() => {
         if (!resolved || resolved.kind !== 'sales' || !returnPrintData) return undefined
@@ -807,15 +797,16 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
             fields: [],
             supportsBackgroundEdit: true,
             requiresFreshPartnerBalance: Boolean(workspaceId && partnerId),
+            partnerBalanceFieldKeys: ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS,
             resetFreshPartnerBalance: () => resetAtlasStandardPartnerBalancePrintState(
                 atlasStandardPartnerBalanceStateRef.current,
                 Boolean(workspaceId && partnerId)
             ),
             freshPartnerBalanceRequest: workspaceId && partnerId ? { workspaceId, partnerId, order } : undefined,
-            onFreshPartnerBalanceStateChange: (status, balances, legacyOrderBalanceSnapshot) => {
+            onFreshPartnerBalanceStateChange: (status, balances, orderBalanceAtPosting) => {
                 atlasStandardPartnerBalanceStateRef.current.status = status
                 atlasStandardPartnerBalanceStateRef.current.balances = balances
-                atlasStandardPartnerBalanceStateRef.current.legacyOrderBalanceSnapshot = legacyOrderBalanceSnapshot
+                atlasStandardPartnerBalanceStateRef.current.orderBalanceAtPosting = orderBalanceAtPosting
             },
             createElement: (_data, _effectiveId, printLangOverride, renderOptions) => {
                 const baseLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
@@ -830,9 +821,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                         logoUrl={features.logo_url}
                         workspaceFooterContacts={renderOptions?.workspaceFooterContacts || workspaceFooterContacts}
                         businessPartner={bizPartner}
-                        partnerAccountStatementBalances={partnerAccountStatementBalances}
                         partnerBalancePrintState={atlasStandardPartnerBalanceStateRef.current}
-                        partnerBalanceFallbackSnapshot={legacyOrderBalanceSnapshot}
                         printedBy={creatorName}
                         productImageUrls={productImageUrls}
                         hiddenFields={renderOptions?.hiddenFields}
@@ -852,7 +841,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 return generateTemplatePdf({ element, format: 'a4', printLang: printLangOverride || baseLang })
             }
         }
-    }, [resolved, features, installments, workspaceName, i18n, bizPartner, partnerId, partnerAccountStatementBalances, legacyOrderBalanceSnapshot, workspaceFooterContacts, creatorName, productImageUrls, returnPrintData, workspaceId])
+    }, [resolved, features, installments, workspaceName, i18n, bizPartner, partnerId, workspaceFooterContacts, creatorName, productImageUrls, returnPrintData, workspaceId])
 
     if (!resolved) {
         return (
@@ -2376,8 +2365,6 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                         workspaceFooterContacts={workspaceFooterContacts}
                                         printVersion={customOrderPrint.selectedPrintVersion}
                                         businessPartner={bizPartner}
-                                        partnerAccountStatementBalances={partnerAccountStatementBalances}
-                                        partnerBalanceFallbackSnapshot={legacyOrderBalanceSnapshot}
                                         printedBy={creatorName}
                                         productImageUrls={productImageUrls}
                                         returnPrintData={customOrderPrint.isAtlasStandardReturnSelected ? returnPrintData : undefined}
@@ -2433,8 +2420,6 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             workspaceFooterContacts={workspaceFooterContacts}
                             printVersion={customOrderPrint.selectedPrintVersion}
                             businessPartner={bizPartner}
-                            partnerAccountStatementBalances={partnerAccountStatementBalances}
-                            partnerBalanceFallbackSnapshot={legacyOrderBalanceSnapshot}
                             printedBy={creatorName}
                             productImageUrls={productImageUrls}
                             returnPrintData={customOrderPrint.isAtlasStandardReturnSelected ? returnPrintData : undefined}

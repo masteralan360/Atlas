@@ -11,15 +11,6 @@ Price books selector order form and quick order
 
 storefront lazy loading image
 
-Hasan Mamad storefront fix
-Ecommerce Modify Prices
-Product Commission
-Right-Click Sell As
-
-Fix POS web slider
-
-Partner Balance Record Remove
-
 Multi-Color Partner
 
 Balance Color Settings

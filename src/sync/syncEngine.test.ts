@@ -325,6 +325,19 @@ describe('Price Book sync recovery', () => {
         expect(payload).not.toHaveProperty('country')
     })
 
+    it('does not send retired order balance data from an older offline cache', () => {
+        const payload = prepareRemoteMutationPayload('sales_orders', {
+            id: 'order-1',
+            orderNumber: 'SO-2026-00001',
+            partnerBalanceSnapshot: {
+                balances: [{ currency: 'iqd', before: 10, after: 30 }]
+            }
+        })
+
+        expect(payload).toMatchObject({ id: 'order-1', order_number: 'SO-2026-00001' })
+        expect(payload).not.toHaveProperty('partner_balance_snapshot')
+    })
+
     it('explains valid, excluded, and schema-rejected payload fields', () => {
         const rows = inspectRemoteMutationPayload('products', {
             id: 'product-1',
@@ -1143,7 +1156,7 @@ describe('fullSync error reporting', () => {
         expect(payload).not.toHaveProperty('storage_id')
     })
 
-    it.each(['sales_account', 'order_creator_product'] as const)(
+    it.each(['sales_account', 'order_creator_product', 'marketplace_delivery_product'] as const)(
         'adopts the existing server beneficiary for a duplicate %s assignment',
         async (assignmentSource) => {
             const duplicateAssignmentError = Object.assign(

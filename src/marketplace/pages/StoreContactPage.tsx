@@ -94,7 +94,7 @@ type StoreContactPageProps = {
 
 export function StoreContactPage({ storeSlug, rules = {} }: StoreContactPageProps) {
     const { t } = useTranslation()
-    const { catalog, isLoading, error } = useStoreCatalog(storeSlug)
+    const { catalog, isLoading, error } = useStoreCatalog(storeSlug, { includeProducts: false })
     const cart = useCart(storeSlug)
     const storeName = catalog?.store.name || t('marketplace.storeTitle', { defaultValue: 'Store' })
     const phoneContacts = getContactsOfType(catalog?.store.contacts ?? [], 'phone')

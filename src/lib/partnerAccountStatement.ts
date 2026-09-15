@@ -66,6 +66,13 @@ export type PartnerAccountStatementData = {
   agentCommissionEntries?: AgentCommissionEntry[]
   /** Historical product-line snapshots for an eligible agent statement. */
   agentProductCommissionEntries?: AgentProductCommissionEntry[]
+  /**
+   * Marketplace orders whose product commission belongs to the delivery agent.
+   * They are informational statement rows: the marketplace customer remains
+   * the order counterparty, so its sales total must not enter the agent's
+   * partner balance.
+   */
+  marketplaceDeliveryProductCommissionOrderIds?: string[]
   /** Merchant-facing Post Service subledger entries. */
   deliveryLedgerEntries?: DeliveryLedgerEntry[]
   deliveryShipmentReferences?: Record<string, string>
@@ -101,6 +108,7 @@ export type PartnerAccountStatementEntryDescriptionKey =
   | 'commissionEarned'
   | 'commissionReversed'
   | 'commissionAdjustment'
+  | 'marketplaceDeliveryProductCommission'
   | 'directReceipt'
   | 'directPayment'
   | 'orderLoanProvided'
@@ -591,6 +599,38 @@ function createOrderEntries(data: PartnerAccountStatementData): PartnerAccountSt
   return entries
 }
 
+/**
+ * A delivery agent earns product commission from a marketplace order without
+ * becoming the marketplace buyer. Keep the immutable product snapshots visible
+ * in the agent statement, but use a zero account delta so the buyer's sale
+ * never becomes a debt on the delivery agent's partner account.
+ */
+function createMarketplaceDeliveryProductCommissionEntries(
+  data: PartnerAccountStatementData
+): PartnerAccountStatementEntry[] {
+  const marketplaceOrderIds = new Set(data.marketplaceDeliveryProductCommissionOrderIds || [])
+  if (marketplaceOrderIds.size === 0) return []
+
+  return (data.agentProductCommissionEntries || [])
+    .filter((entry) => !entry.isDeleted && marketplaceOrderIds.has(entry.orderId))
+    .map((entry) => ({
+      id: `marketplace-delivery-product-commission:${entry.id}`,
+      date: entry.occurredAt || entry.createdAt,
+      reference: data.linkedOrderCodes?.[entry.orderId] || entry.orderId,
+      kind: 'agent_commission' as const,
+      description: 'Marketplace delivery product commission',
+      descriptionKey: 'marketplaceDeliveryProductCommission' as const,
+      itemName: entry.productNameSnapshot,
+      quantity: Number(entry.quantity || 0),
+      unit: entry.unitSnapshot || null,
+      commissionPerProduct: Number(entry.commissionPerUnit || 0),
+      totalProductCommission: Number(entry.amount || 0),
+      currency: entry.currency,
+      delta: 0,
+      source: { recordType: 'order' as const, recordId: entry.orderId }
+    }))
+}
+
 type AutomaticCommissionSettlement = {
   payoutEntryId: string
   recognizedEntryId: string
@@ -1000,12 +1040,17 @@ export function buildPartnerAccountStatementLedger(
 ): PartnerAccountStatementCurrencyLedger[] {
   const entries = [
     ...createOrderEntries(data),
+    ...createMarketplaceDeliveryProductCommissionEntries(data),
     ...createPaymentEntries(data),
     ...createAgentCommissionEntries(data),
     ...createLoanEntries(data),
     ...createInstallmentSaleEntries(data),
     ...createDeliveryEntries(data)
-  ].filter((entry) => Math.abs(entry.delta) > 0.000001 || entry.descriptionKey === 'commissionSettledAutomatically')
+  ].filter((entry) => (
+    Math.abs(entry.delta) > 0.000001
+    || entry.descriptionKey === 'commissionSettledAutomatically'
+    || entry.totalProductCommission != null
+  ))
 
   const entriesByCurrency = new Map<string, PartnerAccountStatementEntry[]>()
   for (const entry of entries) {

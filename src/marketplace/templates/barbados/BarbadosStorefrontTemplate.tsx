@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { cn, formatCurrency } from '@/lib/utils'
 
 import { usePageMeta } from '../../hooks/usePageMeta'
+import { MarketplaceVirtualGrid } from '../../components/MarketplaceVirtualGrid'
 import { useStoreCatalog } from '../../hooks/useStoreCatalog'
 import { getMarketplaceAssetUrl } from '../../lib/assets'
 import { StoreQrDialog } from '../../components/StoreQrDialog'
@@ -120,11 +121,15 @@ function BarbadosMenuCard({
 
 function BarbadosMenuPage({ slug, rules }: StorefrontTemplatePageProps) {
     const { t, i18n } = useTranslation()
-    const { catalog, isLoading, error } = useStoreCatalog(slug)
     const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null)
     const [search, setSearch] = useState('')
     const [hasHeroImageError, setHasHeroImageError] = useState(false)
+    const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null)
     const deferredSearch = useDeferredValue(search.trim().toLocaleLowerCase())
+    const { catalog, isLoading, isLoadingMore, hasMore, error, loadMoreError, loadMore } = useStoreCatalog(slug, {
+        search: deferredSearch,
+        categoryId: activeCategoryId
+    })
     const iqdPreference: 'IQD' | 'د.ع' = i18n.language === 'en' ? 'IQD' : 'د.ع'
 
     const hidePrice = rules.hidePrice === true
@@ -140,23 +145,7 @@ function BarbadosMenuPage({ slug, rules }: StorefrontTemplatePageProps) {
         })
     }, [categories])
 
-    const displayedProducts = useMemo(() => {
-        const products = catalog?.products ?? []
-
-        return products.filter((product) => {
-            if (activeCategoryId && product.category_id !== activeCategoryId) {
-                return false
-            }
-
-            if (!deferredSearch) {
-                return true
-            }
-
-            return `${product.name} ${product.description} ${product.category_name ?? ''}`
-                .toLocaleLowerCase()
-                .includes(deferredSearch)
-        })
-    }, [activeCategoryId, catalog?.products, deferredSearch])
+    const displayedProducts = catalog?.products ?? []
 
     const storeName = catalog?.store.name || 'Barbados'
     const storeDescription = catalog?.store.description || t('marketplace.storeSubtitle', {
@@ -171,6 +160,10 @@ function BarbadosMenuPage({ slug, rules }: StorefrontTemplatePageProps) {
     useEffect(() => {
         setHasHeroImageError(false)
     }, [heroImageUrl])
+
+    useEffect(() => {
+        scrollParent?.scrollTo({ top: 0, behavior: 'auto' })
+    }, [activeCategoryId, deferredSearch, scrollParent])
 
     usePageMeta(storeName, storeDescription)
 
@@ -199,6 +192,7 @@ function BarbadosMenuPage({ slug, rules }: StorefrontTemplatePageProps) {
 
     return (
         <div
+            ref={setScrollParent}
             className="h-dvh overflow-x-hidden overflow-y-auto overscroll-y-contain bg-[#1c0e07] text-[#fff4e9]"
             style={{ colorScheme: 'dark', fontFamily: 'Geist Variable, Inter, sans-serif' }}
         >
@@ -322,7 +316,7 @@ function BarbadosMenuPage({ slug, rules }: StorefrontTemplatePageProps) {
                             </h2>
                         </div>
                         <p className="hidden text-sm text-[#b99e89] sm:block">
-                            {displayedProducts.length} {t('marketplace.products', { defaultValue: 'items' }).toLowerCase()}
+                            {catalog.total_products} {t('marketplace.products', { defaultValue: 'items' }).toLowerCase()}
                         </p>
                     </div>
 
@@ -336,16 +330,40 @@ function BarbadosMenuPage({ slug, rules }: StorefrontTemplatePageProps) {
                             </p>
                         </div>
                     ) : (
-                        <div className="mx-auto grid w-full max-w-md grid-cols-1 gap-3 sm:mx-0 sm:max-w-none sm:grid-cols-2 sm:gap-5 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                            {displayedProducts.map((product) => (
-                                <BarbadosMenuCard
-                                    key={product.id}
-                                    product={product}
-                                    iqdPreference={iqdPreference}
-                                    hidePrice={hidePrice}
+                        <>
+                            {scrollParent && (
+                                <MarketplaceVirtualGrid
+                                    items={displayedProducts}
+                                    itemKey={(product) => product.id}
+                                    renderItem={(product) => (
+                                        <BarbadosMenuCard
+                                            product={product}
+                                            iqdPreference={iqdPreference}
+                                            hidePrice={hidePrice}
+                                        />
+                                    )}
+                                    listClassName="mx-auto grid w-full max-w-md grid-cols-1 gap-3 sm:mx-0 sm:max-w-none sm:grid-cols-2 sm:gap-5 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+                                    onEndReached={loadMore}
+                                    hasMore={hasMore}
+                                    isLoadingMore={isLoadingMore}
+                                    useWindowScroll={false}
+                                    customScrollParent={scrollParent}
                                 />
-                            ))}
-                        </div>
+                            )}
+                            {isLoadingMore && <p className="py-5 text-center text-sm text-[#b99e89]">{t('marketplace.loadingMore')}</p>}
+                            {loadMoreError && (
+                                <div className="flex flex-col items-center gap-3 py-5 text-center">
+                                    <p className="text-sm text-[#f8b4a8]">{t('marketplace.loadingMoreFailed')}</p>
+                                    <button
+                                        type="button"
+                                        onClick={loadMore}
+                                        className="rounded-xl border border-[#bd7c35] px-4 py-2 text-sm font-semibold text-[#f5bc24] hover:bg-[#3a2116]"
+                                    >
+                                        {t('common.retry')}
+                                    </button>
+                                </div>
+                            )}
+                        </>
                     )}
                 </section>
             </main>

@@ -69,11 +69,11 @@ const PaginationPrevious = ({
         <PaginationLink
             aria-label={t("common.pagination.previous")}
             size="default"
-            className={cn("gap-1 pl-2.5", className)}
+            className={cn("h-10 w-10 justify-center gap-0 px-0 sm:w-auto sm:justify-start sm:gap-1 sm:px-2.5", className)}
             {...props}
         >
-            <ChevronLeft className="h-4 w-4" />
-            <span>{t("common.pagination.previous")}</span>
+            <ChevronLeft className="h-5 w-5 rtl:rotate-180 sm:h-4 sm:w-4" />
+            <span className="hidden sm:inline">{t("common.pagination.previous")}</span>
         </PaginationLink>
     )
 }
@@ -88,11 +88,11 @@ const PaginationNext = ({
         <PaginationLink
             aria-label={t("common.pagination.next")}
             size="default"
-            className={cn("gap-1 pr-2.5", className)}
+            className={cn("h-10 w-10 justify-center gap-0 px-0 sm:w-auto sm:justify-start sm:gap-1 sm:px-2.5", className)}
             {...props}
         >
-            <span>{t("common.pagination.next")}</span>
-            <ChevronRight className="h-4 w-4" />
+            <span className="hidden sm:inline">{t("common.pagination.next")}</span>
+            <ChevronRight className="h-5 w-5 rtl:rotate-180 sm:h-4 sm:w-4" />
         </PaginationLink>
     )
 }

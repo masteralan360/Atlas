@@ -7,6 +7,7 @@ import { Button, useToast } from '@/ui/components'
 import { cn, formatCurrency } from '@/lib/utils'
 
 import { CartDrawer } from '../../components/CartDrawer'
+import { MarketplaceVirtualGrid } from '../../components/MarketplaceVirtualGrid'
 import { CheckoutForm } from '../../components/CheckoutForm'
 import { OrderConfirmation } from '../../components/OrderConfirmation'
 import { useCart } from '../../hooks/useCart'
@@ -517,8 +518,6 @@ function PosCartContent({ cart, storeCurrency, iqdPreference, checkoutMode, setC
 function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
     const { t, i18n } = useTranslation()
     const { toast } = useToast()
-    const { catalog, isLoading, error } = useStoreCatalog(slug)
-    const cart = useCart(slug)
     const [search, setSearch] = useState('')
     const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null)
     const [cartOpen, setCartOpen] = useState(false)
@@ -526,6 +525,12 @@ function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
     const [submitting, setSubmitting] = useState(false)
     const [confirmation, setConfirmation] = useState<{ orderNumber: string; phone: string } | null>(null)
     const deferredSearch = useDeferredValue(search.trim().toLocaleLowerCase())
+    const { catalog, isLoading, isLoadingMore, hasMore, error, loadMoreError, loadMore } = useStoreCatalog(slug, {
+        search: deferredSearch,
+        categoryId: activeCategoryId
+    })
+    const cart = useCart(slug)
+    const syncCatalog = cart.syncCatalog
     const iqdPreference: 'IQD' | 'د.ع' = i18n.language === 'en' ? 'IQD' : 'د.ع'
     const effectiveRules = getEffectiveStorefrontRules(rules, catalog?.store.workspace_id)
     const hidePrice = effectiveRules.hidePrice === true
@@ -534,42 +539,26 @@ function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
 
     useEffect(() => {
         if (catalog) {
-            cart.syncCatalog(catalog.products)
+            syncCatalog(catalog.products)
         }
-    }, [catalog])
+    }, [catalog, syncCatalog])
 
     const categories = useMemo<MarketplaceCategory[]>(() => catalog?.categories ?? [], [catalog?.categories])
 
     const categoryCoverUrls = useMemo(() => {
-        const productsWithImages = (catalog?.products ?? []).filter((product) => product.image_url)
         const covers = new Map<string | null, string>()
-
-        if (productsWithImages.length === 0) {
-            return covers
-        }
-
-        const pickRandomCover = (pool: MarketplaceProduct[]) => {
-            const picked = pool[Math.floor(Math.random() * pool.length)]
-            return picked ? getMarketplaceAssetUrl(picked.image_url) : null
-        }
-
-        const allCover = pickRandomCover(productsWithImages)
-
+        const allCover = getMarketplaceAssetUrl(catalog?.store.logo_url)
         if (allCover) {
             covers.set(null, allCover)
         }
-
         for (const category of categories) {
-            const pool = productsWithImages.filter((product) => product.category_id === category.id)
-            const cover = pickRandomCover(pool)
-
+            const cover = getMarketplaceAssetUrl(category.cover_url)
             if (cover) {
                 covers.set(category.id, cover)
             }
         }
-
         return covers
-    }, [categories, catalog?.products])
+    }, [categories, catalog?.store.logo_url])
 
     useEffect(() => {
         setActiveCategoryId((currentCategoryId) => {
@@ -581,23 +570,11 @@ function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
         })
     }, [categories])
 
-    const displayedProducts = useMemo(() => {
-        const products = catalog?.products ?? []
+    const displayedProducts = catalog?.products ?? []
 
-        return products.filter((product) => {
-            if (activeCategoryId && product.category_id !== activeCategoryId) {
-                return false
-            }
-
-            if (!deferredSearch) {
-                return true
-            }
-
-            return `${product.name} ${product.description} ${product.category_name ?? ''}`
-                .toLocaleLowerCase()
-                .includes(deferredSearch)
-        })
-    }, [activeCategoryId, catalog?.products, deferredSearch])
+    useEffect(() => {
+        window.scrollTo({ top: 0, behavior: 'auto' })
+    }, [activeCategoryId, deferredSearch])
 
     const storeName = catalog?.store.name || t('marketplace.storeTitle', { defaultValue: 'Store' })
     const storeDescription = catalog?.store.description || t('marketplace.storeSubtitle', { defaultValue: 'Browse products and send an inquiry order directly to the store.' })
@@ -724,17 +701,31 @@ function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
                                 </p>
                             </div>
                         ) : (
-                            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-5 min-[1200px]:grid-cols-8">
-                                {displayedProducts.map((product) => (
-                                    <PosProductCard
-                                        key={product.id}
-                                        product={product}
-                                        iqdPreference={iqdPreference}
-                                        hidePrice={hidePrice}
-                                        onAdd={hideAddToCart ? undefined : handleAddToCart}
-                                    />
-                                ))}
-                            </div>
+                            <>
+                                <MarketplaceVirtualGrid
+                                    items={displayedProducts}
+                                    itemKey={(product) => product.id}
+                                    renderItem={(product) => (
+                                        <PosProductCard
+                                            product={product}
+                                            iqdPreference={iqdPreference}
+                                            hidePrice={hidePrice}
+                                            onAdd={hideAddToCart ? undefined : handleAddToCart}
+                                        />
+                                    )}
+                                    listClassName="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-5 min-[1200px]:grid-cols-8"
+                                    onEndReached={loadMore}
+                                    hasMore={hasMore}
+                                    isLoadingMore={isLoadingMore}
+                                />
+                                {isLoadingMore && <p className="py-5 text-center text-sm text-muted-foreground">{t('marketplace.loadingMore')}</p>}
+                                {loadMoreError && (
+                                    <div className="flex flex-col items-center gap-3 py-5 text-center">
+                                        <p className="text-sm text-destructive">{t('marketplace.loadingMoreFailed')}</p>
+                                        <Button variant="outline" onClick={loadMore}>{t('common.retry')}</Button>
+                                    </div>
+                                )}
+                            </>
                         )}
                     </>
                 )}
@@ -785,7 +776,7 @@ function getContactsOfType(contacts: MarketplaceStoreContact[], type: 'phone' | 
 
 function PosContactPage({ slug, rules }: StorefrontTemplatePageProps) {
     const { t } = useTranslation()
-    const { catalog, isLoading, error } = useStoreCatalog(slug)
+    const { catalog, isLoading, error } = useStoreCatalog(slug, { includeProducts: false })
     const cart = useCart(slug)
     const storeName = catalog?.store.name || t('marketplace.storeTitle', { defaultValue: 'Store' })
     const phoneContacts = getContactsOfType(catalog?.store.contacts ?? [], 'phone')

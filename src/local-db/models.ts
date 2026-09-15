@@ -869,7 +869,11 @@ export type ManualSalesAgentCommissionType = CommissionPlanType
 export type ProductCommissionRecipientScope = 'all_assigned' | 'selected_assigned'
 export type CommissionEntryKind = 'estimate' | 'accrual' | 'approval' | 'reversal' | 'payout' | 'recovery' | 'adjustment'
 export type CommissionEntryStatus = 'estimated' | 'earned' | 'approved' | 'paid' | 'reversed'
-export type SalesOrderAgentAssignmentSource = 'manual' | 'sales_account' | 'order_creator_product'
+export type SalesOrderAgentAssignmentSource =
+  | 'manual'
+  | 'sales_account'
+  | 'order_creator_product'
+  | 'marketplace_delivery_product'
 
 /** Effective-dated commission terms. No commission fields are added to Agent. */
 export interface AgentCommissionPlan extends BaseEntity {
@@ -1119,21 +1123,6 @@ export interface CommissionCalculation {
   commissionAmount: number
 }
 
-/**
- * Immutable per-currency partner-statement balances captured with an order's
- * first financially active posting. Later payments and ledger activity must
- * never overwrite this historical print value.
- */
-export interface OrderPartnerBalanceSnapshot {
-  version: 1
-  capturedAt: string
-  balances: Array<{
-    currency: CurrencyCode
-    before: number
-    after: number
-  }>
-}
-
 export interface SalesOrder extends BaseEntity {
   orderNumber: string
   businessPartnerId?: string | null
@@ -1185,7 +1174,6 @@ export interface SalesOrder extends BaseEntity {
   /** Account selected for the first posted order payment, if any. */
   initialPaymentAccountId?: string | null
   initialPaymentAccountNameSnapshot?: string | null
-  partnerBalanceSnapshot?: OrderPartnerBalanceSnapshot | null
   linkedLoanId?: string | null
   isInstallmentBased: boolean
   installmentCount: number
@@ -1242,7 +1230,6 @@ export interface PurchaseOrder extends BaseEntity {
   /** Account selected for the first posted order payment, if any. */
   initialPaymentAccountId?: string | null
   initialPaymentAccountNameSnapshot?: string | null
-  partnerBalanceSnapshot?: OrderPartnerBalanceSnapshot | null
   linkedLoanId?: string | null
   isInstallmentBased: boolean
   installmentCount: number

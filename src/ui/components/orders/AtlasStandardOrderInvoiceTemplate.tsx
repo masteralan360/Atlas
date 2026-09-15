@@ -9,14 +9,14 @@ import {
     type BusinessPartner,
     type IQDDisplayPreference,
     type OrderInstallment,
-    type OrderPartnerBalanceSnapshot,
     type PurchaseOrder,
     type SalesOrder
 } from '@/local-db'
 import type { PartnerAccountStatementClosingBalance } from '@/lib/partnerAccountStatement'
+import type { OrderPartnerBalanceAtPosting } from '@/lib/orderPartnerBalance'
 import type { AtlasStandardPartnerBalancePrintState } from '@/lib/atlasStandardPartnerBalancePrintState'
 import {
-    formatAtlasStandardPartnerBalanceSnapshot,
+    formatAtlasStandardPartnerBalanceAtPosting,
     formatAtlasStandardPartnerCurrentBalance
 } from '@/lib/atlasStandardPartnerBalance'
 import { getOrderLineFreeBonusQuantity, getOrderLineInventoryQuantity, getOrderLinePaidQuantity } from '@/lib/orderLineItems'
@@ -95,8 +95,8 @@ export interface AtlasStandardOrderInvoiceTemplateProps {
     partnerAccountStatementBalances?: PartnerAccountStatementClosingBalance[]
     /** Mutable per-preview balance state shared with the final PDF build. */
     partnerBalancePrintState?: AtlasStandardPartnerBalancePrintState
-    /** Read-only Account Statement reconstruction for legacy orders without a saved snapshot. */
-    partnerBalanceFallbackSnapshot?: OrderPartnerBalanceSnapshot | null
+    /** Read-only Account Statement reconstruction for the order's original posting. */
+    partnerBalanceAtPosting?: OrderPartnerBalanceAtPosting | null
     printedBy?: string | null
     componentPositions?: Record<string, CustomTemplateComponentPosition>
     editableComponents?: boolean
@@ -408,6 +408,12 @@ const ATLAS_STANDARD_LABELS = {
         statuses: { draft: 'ڕەشنووس', pending: 'چاوەڕوان', completed: 'تەواوبوو', cancelled: 'هەڵوەشاوە', ordered: 'داواکراو', received: 'وەرگیراو' },
         paymentMethods: { cash: 'کاش', fib: 'FIB', qicard: 'کیو کارد', zaincash: 'زین کاش', fastpay: 'فاست پەی', bank_transfer: 'گواستنەوەی بانکی', loan: 'قەرز', installments: 'قسط' }
     }
+} as const
+
+export const ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS = {
+    before: ATLAS_STANDARD_ORDER_HIDDEN_FIELD_KEYS.financialSummary.balanceBefore,
+    after: ATLAS_STANDARD_ORDER_HIDDEN_FIELD_KEYS.financialSummary.balanceAfter,
+    current: ATLAS_STANDARD_ORDER_HIDDEN_FIELD_KEYS.financialSummary.currentBalance
 } as const
 
 export const ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS = {
@@ -1146,7 +1152,7 @@ export function AtlasStandardOrderInvoiceTemplate({
     businessPartner,
     partnerAccountStatementBalances,
     partnerBalancePrintState,
-    partnerBalanceFallbackSnapshot,
+    partnerBalanceAtPosting,
     printedBy,
     componentPositions,
     editableComponents,
@@ -1224,7 +1230,12 @@ export function AtlasStandardOrderInvoiceTemplate({
     const noteValue = order.notes?.trim() || '-'
     const outstanding = getOrderBalanceAmount(order)
     const paidAmount = getOrderPaidAmount(order)
-    const currentPartnerBalance = partnerBalanceStatus === 'loading'
+    const shouldShowPartnerBalanceBefore = !hiddenFields[financialKeys.balanceBefore]
+    const shouldShowPartnerBalanceAfter = !hiddenFields[financialKeys.balanceAfter]
+    const shouldShowPartnerCurrentBalance = !hiddenFields[financialKeys.currentBalance]
+    const currentPartnerBalance = !shouldShowPartnerCurrentBalance
+        ? '-'
+        : partnerBalanceStatus === 'loading'
         ? `${t('orders.print.partnerBalanceLoading')}${'.'.repeat(partnerBalanceLoadingDots)}`
         : partnerBalanceStatus === 'error'
             ? t('orders.print.partnerBalanceUnavailable')
@@ -1232,32 +1243,28 @@ export function AtlasStandardOrderInvoiceTemplate({
                 resolvedPartnerAccountStatementBalances,
                 iqdPreference
             )
-    const requiresLegacyPartnerBalanceReconstruction = !order.partnerBalanceSnapshot
-    const legacyPartnerBalanceStatus = requiresLegacyPartnerBalanceReconstruction
-        ? partnerBalanceStatus
-        : 'ready'
-    const freshLegacyPartnerBalanceSnapshot = partnerBalancePrintState?.legacyOrderBalanceSnapshot !== undefined
-        ? partnerBalancePrintState.legacyOrderBalanceSnapshot
-        : partnerBalanceFallbackSnapshot
-    const historicalPartnerBalanceSnapshot = order.partnerBalanceSnapshot
-        || (legacyPartnerBalanceStatus === 'ready'
-            ? freshLegacyPartnerBalanceSnapshot
-            : undefined)
-    const partnerBalanceBeforeOrder = legacyPartnerBalanceStatus === 'loading'
+    const resolvedOrderBalanceAtPosting = partnerBalancePrintState?.orderBalanceAtPosting !== undefined
+        ? partnerBalancePrintState.orderBalanceAtPosting
+        : partnerBalanceAtPosting
+    const partnerBalanceBeforeOrder = !shouldShowPartnerBalanceBefore
+        ? '-'
+        : partnerBalanceStatus === 'loading'
         ? `${t('orders.print.partnerBalanceLoading')}${'.'.repeat(partnerBalanceLoadingDots)}`
-        : legacyPartnerBalanceStatus === 'error'
-            ? t('orders.print.partnerBalanceSnapshotUnavailable')
-            : formatAtlasStandardPartnerBalanceSnapshot(
-                historicalPartnerBalanceSnapshot,
+        : partnerBalanceStatus === 'error'
+            ? t('orders.print.partnerBalanceAtOrderUnavailable')
+            : formatAtlasStandardPartnerBalanceAtPosting(
+                resolvedOrderBalanceAtPosting,
                 'before',
                 iqdPreference
             )
-    const partnerBalanceAfterOrder = legacyPartnerBalanceStatus === 'loading'
+    const partnerBalanceAfterOrder = !shouldShowPartnerBalanceAfter
+        ? '-'
+        : partnerBalanceStatus === 'loading'
         ? `${t('orders.print.partnerBalanceLoading')}${'.'.repeat(partnerBalanceLoadingDots)}`
-        : legacyPartnerBalanceStatus === 'error'
-            ? t('orders.print.partnerBalanceSnapshotUnavailable')
-            : formatAtlasStandardPartnerBalanceSnapshot(
-                historicalPartnerBalanceSnapshot,
+        : partnerBalanceStatus === 'error'
+            ? t('orders.print.partnerBalanceAtOrderUnavailable')
+            : formatAtlasStandardPartnerBalanceAtPosting(
+                resolvedOrderBalanceAtPosting,
                 'after',
                 iqdPreference
             )
