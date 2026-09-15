@@ -41,7 +41,8 @@ import {
 } from '@/lib/partnerAccountStatement'
 import {
   PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES,
-  refreshPartnerAccountStatementLiveData
+  refreshPartnerAccountStatementLiveData,
+  type PartnerAccountStatementLiveDataProgress
 } from '@/lib/partnerAccountStatementLiveData'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { readWorkspaceDataHydration } from '@/workspace/workspaceDataFreshness'
@@ -55,6 +56,7 @@ type PartnerAccountStatementLiveRefreshState = {
   key: string | null
   status: 'idle' | 'loading' | 'ready' | 'error'
   error: Error | null
+  progress: PartnerAccountStatementLiveDataProgress | null
 }
 
 function normalizeLiveRefreshError(error: unknown) {
@@ -135,7 +137,8 @@ export function usePartnerAccountStatement(
   const [liveRefreshState, setLiveRefreshState] = useState<PartnerAccountStatementLiveRefreshState>({
     key: null,
     status: 'idle',
-    error: null
+    error: null,
+    progress: null
   })
   const rawPartner = useBusinessPartner(partnerId || undefined)
   const agents = useAgents(workspaceId)
@@ -161,17 +164,33 @@ export function usePartnerAccountStatement(
 
   useEffect(() => {
     if (!workspaceId || !liveRefreshKey) {
-      setLiveRefreshState({ key: null, status: 'idle', error: null })
+      setLiveRefreshState({ key: null, status: 'idle', error: null, progress: null })
       return
     }
 
     let cancelled = false
-    setLiveRefreshState({ key: liveRefreshKey, status: 'loading', error: null })
+    setLiveRefreshState({
+      key: liveRefreshKey,
+      status: 'loading',
+      error: null,
+      progress: {
+        completedSources: 0,
+        totalSources: PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES.length
+      }
+    })
 
     void refreshPartnerAccountStatementLiveData(workspaceId, {
       refreshTable: (tableName, targetWorkspaceId) =>
         fetchTableFromSupabase(tableName, db[tableName], targetWorkspaceId),
-      refreshSales: syncSalesFromSupabase
+      refreshSales: syncSalesFromSupabase,
+      onProgress: (progress) => {
+        if (cancelled) return
+        setLiveRefreshState((currentState) => (
+          currentState.key === liveRefreshKey && currentState.status === 'loading'
+            ? { ...currentState, progress }
+            : currentState
+        ))
+      }
     })
       .then(() => {
         const hydration = readWorkspaceDataHydration(
@@ -183,16 +202,24 @@ export function usePartnerAccountStatement(
           throw new Error('One or more partner account statement sources could not be refreshed')
         }
         if (!cancelled) {
-          setLiveRefreshState({ key: liveRefreshKey, status: 'ready', error: null })
+          setLiveRefreshState((currentState) => (
+            currentState.key === liveRefreshKey
+              ? { ...currentState, status: 'ready', error: null }
+              : currentState
+          ))
         }
       })
       .catch((error) => {
         if (!cancelled) {
-          setLiveRefreshState({
-            key: liveRefreshKey,
-            status: 'error',
-            error: normalizeLiveRefreshError(error)
-          })
+          setLiveRefreshState((currentState) => (
+            currentState.key === liveRefreshKey
+              ? {
+                  ...currentState,
+                  status: 'error',
+                  error: normalizeLiveRefreshError(error)
+                }
+              : currentState
+          ))
         }
       })
 
@@ -209,6 +236,14 @@ export function usePartnerAccountStatement(
     && liveRefreshState.key === liveRefreshKey
     && liveRefreshState.status === 'error'
     ? liveRefreshState.error
+    : null
+  const liveRefreshProgress = isRefreshing
+    ? liveRefreshState.key === liveRefreshKey && liveRefreshState.progress
+      ? liveRefreshState.progress
+      : {
+          completedSources: 0,
+          totalSources: PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES.length
+        }
     : null
   const retryLiveRefresh = useCallback(() => {
     setLiveRefreshGeneration((generation) => generation + 1)
@@ -459,6 +494,7 @@ export function usePartnerAccountStatement(
     statementData: isRefreshing || refreshError ? null : statementData,
     isRefreshing,
     refreshError,
+    liveRefreshProgress,
     retryLiveRefresh,
     sourceCounts: {
       orders: partnerSalesOrders.length + partnerPurchaseOrders.length + partnerInstallmentSales.length,

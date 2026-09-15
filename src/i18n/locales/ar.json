@@ -1721,6 +1721,10 @@
       "commercials": "التجاريات",
       "created": "تم الإنشاء",
       "expectedDelivery": "التوصيل المتوقع",
+      "messages": {
+        "reserveSuccess": "تم حجز طلب المبيعات",
+        "completeSuccess": "تم إكمال الطلب"
+      },
       "paidAmount": "المبلغ المدفوع",
       "notes": "الملاحظات",
       "freeBonus": "بونص مجاني",
@@ -3922,6 +3926,8 @@
       "negativeQuantity": "لا يمكن أن تكون كمية المخزون سالبة.",
       "invalidQuantity": "أدخل كمية مخزون رقمية صحيحة ومحدودة.",
       "authoritativeResultMissing": "لم يُرجع الخادم المخزون المحدّث. حدّث البيانات وحاول مرة أخرى.",
+      "authoritativeReadFailed": "تعذر التحقق من أحدث مخزون. تحقق من الاتصال ثم حاول مرة أخرى.",
+      "stockChanged": "تغيّر المخزون أثناء إكمال هذا الطلب. تم تحميل أحدث مخزون؛ حاول مرة أخرى.",
       "legacyMutationQuarantined": "تم عزل لقطة مخزون قديمة. حدّث المخزون وطبّق التصحيح يدوياً."
     }
   },
@@ -4589,6 +4595,7 @@
       "selectPartnerDescription": "اختر شريكاً لعرض الرصيد الافتتاحي وحركة الحساب والرصيد الختامي.",
       "refreshingLiveData": "جاري تحميل حركة الحساب الحالية",
       "refreshingLiveDataDescription": "يتم التحقق من أحدث الطلبات والقروض ودفعات القروض والمدفوعات قبل عرض هذا الكشف.",
+      "refreshingLiveDataProgress": "جارٍ تحميل {{completed}} من {{total}} مصدر ({{percentage}}٪)",
       "liveDataUnavailable": "تعذر تحميل حركة الحساب الحالية",
       "liveDataUnavailableDescription": "تم إخفاء الكشف لمنع عرض أو طباعة رصيد غير مكتمل. تحقق من الاتصال ثم حاول مرة أخرى.",
       "accountActivity": "حركة الحساب",

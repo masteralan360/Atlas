@@ -63,6 +63,24 @@ export interface InventorySnapshotSyncOptions {
     expectedVersions?: ReadonlyArray<InventorySnapshotExpectedVersion>
 }
 
+export interface InventoryPositionHydrationOptions {
+    /**
+     * Critical write paths in Cloud and Hybrid workspaces must not proceed
+     * from a potentially stale local snapshot when the server read fails.
+     */
+    requireAuthoritative?: boolean
+}
+
+export class InventorySnapshotConflictError extends Error {
+    readonly retryAfterMs: number
+
+    constructor(retryAfterMs = INVENTORY_CONFLICT_COOLDOWN_MS) {
+        super(i18n.t('inventory.errors.stockChanged'))
+        this.name = 'InventorySnapshotConflictError'
+        this.retryAfterMs = Math.max(0, Math.trunc(Number(retryAfterMs) || 0))
+    }
+}
+
 function shouldUseCloudBusinessData(workspaceId?: string | null) {
     return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
 }
@@ -142,15 +160,23 @@ async function reconcileInventoryRowsSynced(
 export async function hydrateInventoryProductStoragesFromSupabase(
     workspaceId: string,
     productId: string,
-    storageIds: string[]
+    storageIds: string[],
+    options: InventoryPositionHydrationOptions = {}
 ) {
-    if (!shouldUseCloudBusinessData(workspaceId) || !isOnline()) {
-        return
+    if (!shouldUseCloudBusinessData(workspaceId)) {
+        return [] as Inventory[]
+    }
+
+    if (!isOnline(workspaceId)) {
+        if (options.requireAuthoritative) {
+            throw new Error(i18n.t('inventory.errors.onlineRequired'))
+        }
+        return [] as Inventory[]
     }
 
     const normalizedStorageIds = Array.from(new Set(storageIds.filter(Boolean)))
     if (normalizedStorageIds.length === 0) {
-        return
+        return [] as Inventory[]
     }
 
     const client = getSupabaseClientForTable('inventory')
@@ -172,7 +198,10 @@ export async function hydrateInventoryProductStoragesFromSupabase(
 
     const { data: remoteRows, error } = await runSupabaseAction('inventory.position.fetch', () => query)
     if (error || !remoteRows) {
-        return
+        if (options.requireAuthoritative) {
+            throw new Error(i18n.t('inventory.errors.authoritativeReadFailed'))
+        }
+        return [] as Inventory[]
     }
 
     const normalizedRemoteRows = remoteRows.map((remoteRow) => {
@@ -212,6 +241,8 @@ export async function hydrateInventoryProductStoragesFromSupabase(
             await db.inventory.put(remoteRow)
         }
     })
+
+    return normalizedRemoteRows
 }
 
 export async function syncInventoryRowsBestEffort(
@@ -243,7 +274,7 @@ export async function syncInventoryRowsBestEffort(
     const conflictKey = `${workspaceId}:${operationKind}:${operationId}`
     const conflictCooldownUntil = inventorySnapshotConflictCooldowns.get(conflictKey) ?? 0
     if (conflictCooldownUntil > Date.now()) {
-        throw new Error(i18n.t('inventory.errors.authoritativeResultMissing'))
+        throw new InventorySnapshotConflictError(conflictCooldownUntil - Date.now())
     }
     inventorySnapshotConflictCooldowns.delete(conflictKey)
     const changes = dedupedRows.map((row) => ({
@@ -278,6 +309,7 @@ export async function syncInventoryRowsBestEffort(
                 conflictKey,
                 Date.now() + INVENTORY_CONFLICT_COOLDOWN_MS
             )
+            throw new InventorySnapshotConflictError(INVENTORY_CONFLICT_COOLDOWN_MS)
         }
         throw normalizeSupabaseActionError(response.error)
     }
@@ -285,13 +317,18 @@ export async function syncInventoryRowsBestEffort(
     const result = response.data as {
         inventory?: Record<string, unknown>[] | null
         conflict?: boolean
+        retry_after_ms?: number
     } | null
     if (result?.conflict) {
+        const parsedRetryAfterMs = Number(result.retry_after_ms)
+        const retryAfterMs = Number.isFinite(parsedRetryAfterMs)
+            ? Math.max(0, Math.trunc(parsedRetryAfterMs))
+            : INVENTORY_CONFLICT_COOLDOWN_MS
         inventorySnapshotConflictCooldowns.set(
             conflictKey,
-            Date.now() + INVENTORY_CONFLICT_COOLDOWN_MS
+            Date.now() + retryAfterMs
         )
-        throw new Error(i18n.t('inventory.errors.authoritativeResultMissing'))
+        throw new InventorySnapshotConflictError(retryAfterMs)
     }
 
     const remoteRows = result?.inventory

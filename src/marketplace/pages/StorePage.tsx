@@ -393,6 +393,12 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
                                         />
                                     )}
                                     listClassName="grid gap-6 sm:grid-cols-2 xl:grid-cols-3"
+                                    rowClassName="pb-6"
+                                    gridColumns={[
+                                        { minWidth: 0, columns: 1 },
+                                        { minWidth: 640, columns: 2 },
+                                        { minWidth: 1280, columns: 3 }
+                                    ]}
                                     onEndReached={loadMore}
                                     hasMore={hasMore}
                                     isLoadingMore={isLoadingMore}

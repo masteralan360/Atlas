@@ -1499,6 +1499,7 @@
       "selectPartnerDescription": "Choose a partner to view opening balances, account activity, and closing balances.",
       "refreshingLiveData": "Loading current account activity",
       "refreshingLiveDataDescription": "Checking for the latest orders, loans, repayments, and payments before showing this statement.",
+      "refreshingLiveDataProgress": "Loading {{completed}} of {{total}} sources ({{percentage}}%)",
       "liveDataUnavailable": "Current account activity could not be loaded",
       "liveDataUnavailableDescription": "The statement is hidden to prevent showing or printing an incomplete balance. Check the connection and try again.",
       "accountActivity": "Account Activity",
@@ -3068,6 +3069,10 @@
       "commercials": "Commercials",
       "created": "Created",
       "expectedDelivery": "Expected Delivery",
+      "messages": {
+        "reserveSuccess": "Sales order reserved",
+        "completeSuccess": "Order completed"
+      },
       "notes": "Notes",
       "freeBonus": "Free Bonus",
       "createdBy": "Created by",
@@ -5607,6 +5612,8 @@
       "negativeQuantity": "Stock quantity cannot be negative.",
       "invalidQuantity": "Enter a valid finite stock quantity.",
       "authoritativeResultMissing": "The server did not return the updated stock. Refresh and try again.",
+      "authoritativeReadFailed": "Couldn't verify the latest stock. Check your connection and try again.",
+      "stockChanged": "Stock changed while this order was being completed. The latest stock has been loaded; try again.",
       "legacyMutationQuarantined": "A legacy stock snapshot was quarantined. Refresh inventory and apply the correction manually."
     }
   },

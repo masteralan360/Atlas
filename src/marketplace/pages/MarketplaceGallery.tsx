@@ -90,6 +90,12 @@ export function MarketplaceGallery() {
                             itemKey={(store) => store.slug}
                             renderItem={(store, index) => <StoreCard store={store} index={index} />}
                             listClassName="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
+                            rowClassName="pb-4"
+                            gridColumns={[
+                                { minWidth: 0, columns: 1 },
+                                { minWidth: 640, columns: 2 },
+                                { minWidth: 1280, columns: 3 }
+                            ]}
                             onEndReached={loadMore}
                             hasMore={hasMore}
                             isLoadingMore={isLoadingMore}

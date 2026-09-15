@@ -42,8 +42,8 @@ import {
     adjustInventoryQuantity,
     assertInventoryMutationConnectivity,
     getInventoryQuantityForProductStorage,
-    getInventoryVersionForProductStorage,
     hydrateInventoryProductStoragesFromSupabase,
+    InventorySnapshotConflictError,
     putInventoryQuantity,
     syncInventoryRowsBestEffort,
     syncProductStockSnapshot
@@ -971,7 +971,22 @@ async function assertPurchaseOrderItemsAreInventoryProducts(order: PurchaseOrder
     }
 }
 
-async function deductInventoryForSalesOrder(order: SalesOrder) {
+const SALES_ORDER_INVENTORY_CONFLICT_RETRY_LIMIT = 1
+
+function waitForInventoryConflictRetry(retryAfterMs: number) {
+    if (retryAfterMs <= 0) {
+        return Promise.resolve()
+    }
+
+    return new Promise<void>((resolve) => {
+        window.setTimeout(resolve, retryAfterMs)
+    })
+}
+
+async function deductInventoryForSalesOrder(
+    order: SalesOrder,
+    conflictRetryCount = 0
+) {
     const now = new Date().toISOString()
     const changedInventoryRows: Inventory[] = []
     const changedBatches: StockBatch[] = []
@@ -1006,20 +1021,27 @@ async function deductInventoryForSalesOrder(order: SalesOrder) {
     }
 
     await refreshStockBatchesFromSupabase(order.workspaceId)
-    await Promise.all(Array.from(inventoryDeductions.values()).map(async ({ productId, storageId }) => {
-        await hydrateInventoryProductStoragesFromSupabase(
+    const authoritativeInventoryRows = await Promise.all(Array.from(inventoryDeductions.values()).map(async ({ productId, storageId }) =>
+        hydrateInventoryProductStoragesFromSupabase(
             order.workspaceId,
             productId,
-            [storageId]
+            [storageId],
+            { requireAuthoritative: true }
         )
-    }))
-    const expectedVersions = await Promise.all(
-        Array.from(inventoryDeductions.values()).map(async ({ productId, storageId }) => ({
-            productId,
-            storageId,
-            version: await getInventoryVersionForProductStorage(productId, storageId)
-        }))
+    ))
+    const authoritativeVersions = new Map(
+        authoritativeInventoryRows
+            .flat()
+            .map((row) => [
+                buildInventoryReservationKey(row.productId, row.storageId),
+                Math.max(0, Math.trunc(Number(row.version) || 0))
+            ])
     )
+    const expectedVersions = Array.from(inventoryDeductions.values()).map(({ productId, storageId }) => ({
+        productId,
+        storageId,
+        version: authoritativeVersions.get(buildInventoryReservationKey(productId, storageId)) ?? 0
+    }))
     const salePlans = await getStockBatchSalePlans(physicalItems.map(({ item }) => ({
         productId: item.productId,
         storageId: resolveSalesOrderItemStorageId(order, item) as string,
@@ -1124,14 +1146,28 @@ async function deductInventoryForSalesOrder(order: SalesOrder) {
         }
     )
 
-    await Promise.all([
-        syncInventoryRowsBestEffort(changedInventoryRows, order.workspaceId, {
+    try {
+        // Inventory is the authoritative guard for a sale. Do not publish its
+        // matching batch deductions until the compare-and-set write succeeds.
+        await syncInventoryRowsBestEffort(changedInventoryRows, order.workspaceId, {
             operationId: uuidv5(order.id, SALES_ORDER_INVENTORY_OPERATION_UUID_NAMESPACE),
             operationKind: 'sales_order_completion',
             expectedVersions
-        }),
-        syncStockBatchesBestEffort(changedBatches, order.workspaceId)
-    ])
+        })
+    } catch (error) {
+        if (
+            error instanceof InventorySnapshotConflictError
+            && conflictRetryCount < SALES_ORDER_INVENTORY_CONFLICT_RETRY_LIMIT
+        ) {
+            await waitForInventoryConflictRetry(error.retryAfterMs)
+            // The next attempt reloads inventory and batches from Supabase and
+            // rebuilds the deduction from that authoritative snapshot.
+            return deductInventoryForSalesOrder(order, conflictRetryCount + 1)
+        }
+        throw error
+    }
+
+    await syncStockBatchesBestEffort(changedBatches, order.workspaceId)
 
     const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')
     await Promise.all(Array.from(new Set(physicalItems.map(({ item }) => item.productId))).map((productId) =>

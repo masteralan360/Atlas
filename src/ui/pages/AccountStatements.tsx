@@ -68,6 +68,7 @@ import {
     ContextMenuTrigger,
     DateRangeFilters,
     PrintPreviewModal,
+    Progress,
     Table,
     TableBody,
     TableCell,
@@ -466,8 +467,19 @@ export function AccountStatements() {
         statementData,
         isRefreshing,
         refreshError,
+        liveRefreshProgress,
         retryLiveRefresh
     } = usePartnerAccountStatement(workspaceId, selectedPartnerId, statementPeriod)
+    const liveRefreshProgressPercent = liveRefreshProgress && liveRefreshProgress.totalSources > 0
+        ? Math.min(100, Math.round((liveRefreshProgress.completedSources / liveRefreshProgress.totalSources) * 100))
+        : 0
+    const liveRefreshProgressLabel = liveRefreshProgress
+        ? t('businessPartners.accountStatement.refreshingLiveDataProgress', {
+            completed: liveRefreshProgress.completedSources.toLocaleString(i18n.resolvedLanguage ?? i18n.language),
+            total: liveRefreshProgress.totalSources.toLocaleString(i18n.resolvedLanguage ?? i18n.language),
+            percentage: liveRefreshProgressPercent.toLocaleString(i18n.resolvedLanguage ?? i18n.language)
+        })
+        : ''
     const isAgentStatement = isAgentBusinessPartnerRole(partner?.role)
     const itemizeSalesOrders = activeStatementTemplate.configuration.showOrderItems
     const itemizePosSaleLoans = activeStatementTemplate.configuration.showPosSaleItems
@@ -850,6 +862,17 @@ export function AccountStatements() {
                         <p className="mt-1 max-w-lg text-sm text-muted-foreground">
                             {t('businessPartners.accountStatement.refreshingLiveDataDescription')}
                         </p>
+                        <div className="mt-5 w-full max-w-lg space-y-2" aria-live="polite">
+                            <Progress
+                                value={liveRefreshProgressPercent}
+                                className="h-2.5 bg-primary/15"
+                                indicatorClassName="bg-primary"
+                                aria-valuetext={liveRefreshProgressLabel}
+                            />
+                            <p className="text-xs font-medium text-muted-foreground">
+                                {liveRefreshProgressLabel}
+                            </p>
+                        </div>
                     </CardContent>
                 </Card>
             ) : refreshError ? (

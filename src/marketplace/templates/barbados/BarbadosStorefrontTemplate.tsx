@@ -343,6 +343,14 @@ function BarbadosMenuPage({ slug, rules }: StorefrontTemplatePageProps) {
                                         />
                                     )}
                                     listClassName="mx-auto grid w-full max-w-md grid-cols-1 gap-3 sm:mx-0 sm:max-w-none sm:grid-cols-2 sm:gap-5 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+                                    rowClassName="pb-3 sm:pb-5"
+                                    gridColumns={[
+                                        { minWidth: 0, columns: 1 },
+                                        { minWidth: 640, columns: 2 },
+                                        { minWidth: 768, columns: 3 },
+                                        { minWidth: 1024, columns: 4 },
+                                        { minWidth: 1280, columns: 5 }
+                                    ]}
                                     onEndReached={loadMore}
                                     hasMore={hasMore}
                                     isLoadingMore={isLoadingMore}

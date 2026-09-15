@@ -26,12 +26,18 @@ export const PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES = [
 export type PartnerAccountStatementLiveTableName =
   (typeof PARTNER_ACCOUNT_STATEMENT_LIVE_TABLE_NAMES)[number]
 
+export type PartnerAccountStatementLiveDataProgress = {
+  completedSources: number
+  totalSources: number
+}
+
 export interface PartnerAccountStatementLiveDataRefreshers {
   refreshTable: (
     tableName: PartnerAccountStatementLiveTableName,
     workspaceId: string
   ) => Promise<void>
   refreshSales: (workspaceId: string) => Promise<void>
+  onProgress?: (progress: PartnerAccountStatementLiveDataProgress) => void
 }
 
 /**
@@ -42,10 +48,21 @@ export async function refreshPartnerAccountStatementLiveData(
   workspaceId: string,
   refreshers: PartnerAccountStatementLiveDataRefreshers
 ) {
+  const totalSources = PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES.length
+  let completedSources = 0
+  const reportSourceCompletion = () => {
+    completedSources += 1
+    refreshers.onProgress?.({ completedSources, totalSources })
+  }
+
   await Promise.all([
-    ...PARTNER_ACCOUNT_STATEMENT_LIVE_TABLE_NAMES.map((tableName) =>
-      refreshers.refreshTable(tableName, workspaceId)
-    ),
-    refreshers.refreshSales(workspaceId)
+    ...PARTNER_ACCOUNT_STATEMENT_LIVE_TABLE_NAMES.map(async (tableName) => {
+      await refreshers.refreshTable(tableName, workspaceId)
+      reportSourceCompletion()
+    }),
+    (async () => {
+      await refreshers.refreshSales(workspaceId)
+      reportSourceCompletion()
+    })()
   ])
 }

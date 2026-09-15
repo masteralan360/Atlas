@@ -2,6 +2,23 @@ import 'fake-indexeddb/auto'
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+vi.hoisted(() => {
+    const values = new Map<string, string>()
+    const storage = {
+        get length() {
+            return values.size
+        },
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+        removeItem: (key: string) => values.delete(key),
+        clear: () => values.clear(),
+        key: (index: number) => Array.from(values.keys())[index] ?? null
+    }
+
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage })
+    Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: storage })
+})
+
 const supabaseMock = vi.hoisted(() => {
     let queryResult: { data: Record<string, unknown>[] | null; error: unknown } = {
         data: [],
@@ -64,6 +81,7 @@ import { db } from './database'
 import {
     getInventoryVersionForProductStorage,
     hydrateInventoryProductStoragesFromSupabase,
+    InventorySnapshotConflictError,
     syncInventoryRowsBestEffort
 } from './inventory'
 import type { Inventory } from './models'
@@ -128,7 +146,7 @@ describe('authoritative inventory snapshot sync', () => {
                     version: 5
                 }]
             }
-        )).rejects.toThrow('Inventory changed on another device; refresh and retry')
+        )).rejects.toBeInstanceOf(InventorySnapshotConflictError)
 
         expect(supabaseMock.rpc).toHaveBeenCalledTimes(1)
         expect(supabaseMock.rpc).toHaveBeenCalledWith('apply_inventory_snapshot_changes', {
@@ -161,12 +179,17 @@ describe('authoritative inventory snapshot sync', () => {
             error: null
         })
 
-        await hydrateInventoryProductStoragesFromSupabase(
+        const hydratedRows = await hydrateInventoryProductStoragesFromSupabase(
             WORKSPACE_ID,
             PRODUCT_ID,
             [STORAGE_ID]
         )
 
+        expect(hydratedRows).toMatchObject([{
+            id: INVENTORY_ID,
+            version: 8,
+            isDeleted: true
+        }])
         expect(await db.inventory.get(INVENTORY_ID)).toMatchObject({
             quantity: 0,
             version: 8,
@@ -175,6 +198,27 @@ describe('authoritative inventory snapshot sync', () => {
         })
         expect(await getInventoryVersionForProductStorage(PRODUCT_ID, STORAGE_ID)).toBe(8)
         expect(supabaseMock.filters).not.toContainEqual(['is_deleted', false])
+    })
+
+    it('fails closed for a required authoritative read and leaves the cached position untouched', async () => {
+        await db.inventory.put(inventoryRow(4))
+        supabaseMock.setQueryResult({
+            data: null,
+            error: { message: 'network request failed' }
+        })
+
+        await expect(hydrateInventoryProductStoragesFromSupabase(
+            WORKSPACE_ID,
+            PRODUCT_ID,
+            [STORAGE_ID],
+            { requireAuthoritative: true }
+        )).rejects.toThrow("Couldn't verify the latest stock")
+
+        expect(await db.inventory.get(INVENTORY_ID)).toMatchObject({
+            quantity: 3,
+            version: 4,
+            syncStatus: 'pending'
+        })
     })
 
     it('honors the server conflict envelope and suppresses an immediate replay', async () => {
@@ -198,8 +242,8 @@ describe('authoritative inventory snapshot sync', () => {
             }]
         })
 
-        await expect(run()).rejects.toThrow('The server did not return the updated stock')
-        await expect(run()).rejects.toThrow('The server did not return the updated stock')
+        await expect(run()).rejects.toBeInstanceOf(InventorySnapshotConflictError)
+        await expect(run()).rejects.toThrow('Stock changed while this order was being completed')
         expect(supabaseMock.rpc).toHaveBeenCalledTimes(1)
     })
 })

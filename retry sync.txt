@@ -9,9 +9,13 @@ Transaction Reconciliation & Integrity Audit, Expandable, Plain English Explanat
 Price books selector order form and quick order
 ##
 
-storefront lazy loading image
+Syncing Workspace silent background and titlebar Badge
 
-localize insufficient stock error message
+Auto-Row Atlas Standard
+Optional Footer
+Add Row to summary
+
+Prevent Order form Back-Button
 
 General Hardening
 
@@ -19,7 +23,13 @@ Multi-Color Partner
 
 Balance Color Settings
 
+Account statement Loading Progress Bar
+
 Context-menu partner account statement & invoice redirect
+
+Accumilated Products and consider commission per product account statement
+Commission Total Match Order
+Product-Only Account Statement
 
 Accumilated account statement rows by types and for one day
 

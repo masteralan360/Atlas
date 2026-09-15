@@ -714,6 +714,14 @@ function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
                                         />
                                     )}
                                     listClassName="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-5 min-[1200px]:grid-cols-8"
+                                    rowClassName="pb-4 sm:pb-3"
+                                    gridColumns={[
+                                        { minWidth: 0, columns: 2 },
+                                        { minWidth: 640, columns: 3 },
+                                        { minWidth: 768, columns: 4 },
+                                        { minWidth: 1024, columns: 5 },
+                                        { minWidth: 1200, columns: 8 }
+                                    ]}
                                     onEndReached={loadMore}
                                     hasMore={hasMore}
                                     isLoadingMore={isLoadingMore}
