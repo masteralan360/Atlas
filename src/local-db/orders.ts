@@ -904,7 +904,9 @@ async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: str
         const globalReserved = reservedWithoutStorage.get(requirement.productId) || 0
         const available = storageQuantity - storageReserved - globalReserved
         if (available < requirement.quantity) {
-            throw new Error(`Insufficient stock for ${requirement.productName}`)
+            throw new Error(i18n.t('orders.form.errors.insufficientStock', {
+                productName: requirement.productName
+            }))
         }
     }
 }

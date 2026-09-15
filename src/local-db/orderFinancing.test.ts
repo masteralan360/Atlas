@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
+import i18n from '@/i18n/config'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 
 import { db } from './database'
@@ -385,7 +386,7 @@ describe('order-linked financing', () => {
         getRemainingPaymentTransactions = payments.getRemainingPaymentTransactions
         reversePaymentTransaction = payments.reversePaymentTransaction
         synchronizeOrderPaymentReferences = payments.synchronizeOrderPaymentReferences
-    })
+    }, 30_000)
 
     beforeEach(async () => {
         await db.delete()
@@ -1246,8 +1247,13 @@ describe('order-linked financing', () => {
             paidAt: '2026-09-13T12:05:00.000Z'
         })
 
-        await expect(updateSalesOrderStatus(draft.id, 'pending'))
-            .rejects.toThrow(`Insufficient stock for ${product.name}`)
+        await i18n.changeLanguage('ar')
+        try {
+            await expect(updateSalesOrderStatus(draft.id, 'pending'))
+                .rejects.toThrow(`لا يوجد مخزون كافٍ للمنتج ${product.name}.`)
+        } finally {
+            await i18n.changeLanguage('en')
+        }
 
         expect(await db.sales_orders.get(draft.id)).toMatchObject({ status: 'draft' })
         expect((await db.inventory

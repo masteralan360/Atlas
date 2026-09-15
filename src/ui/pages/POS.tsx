@@ -2616,11 +2616,14 @@ export function POS() {
             }
 
             if (item.quantity > product.inventoryQuantity) {
-                const storageName = storages.find((storage) => storage.id === storageId)?.name || 'Unknown'
+                const storageName = storages.find((storage) => storage.id === storageId)?.name || t('pos.unknownStorage')
                 toast({
                     variant: 'destructive',
                     title: t('messages.error'),
-                    description: `${product.name} ${t('pos.insufficientStock') || 'does not have enough stock in'} ${storageName}.`
+                    description: t('pos.insufficientStock', {
+                        productName: product.name,
+                        storageName
+                    })
                 })
                 return
             }
