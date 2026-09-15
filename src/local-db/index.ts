@@ -1,4 +1,5 @@
 export * from './database'
+export * from './liveCollection'
 export * from './models'
 export * from './inventory'
 export * from './storageUtils'

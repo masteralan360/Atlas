@@ -52,6 +52,7 @@ import {
     deleteLocalCustomTemplate,
     isAgentBusinessPartnerRole,
     saveLocalCustomTemplate,
+    useBusinessPartnersLoading,
     useWorkspaceContacts
 } from '@/local-db'
 import type { DateRangeType } from '@/context/DateRangeContext'
@@ -77,6 +78,7 @@ import {
     TableRow
 } from '@/ui/components'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
+import { AutocompleteLoadingIndicator } from '@/ui/components/AutocompleteLoadingIndicator'
 import { PartnerAccountStatementTemplateDialog } from '@/ui/components/crm/PartnerAccountStatementTemplateDialog'
 import type { PartnerAccountStatementPrintData } from '@/ui/components/crm/PartnerAccountStatementPrintTemplate'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
@@ -367,6 +369,9 @@ export function AccountStatements() {
     const { user } = useAuth()
     const { features, hasFeature, workspaceName, isLocalMode } = useWorkspace()
     const workspaceId = user?.workspaceId
+    const arePartnersLoading = useBusinessPartnersLoading(workspaceId, {
+        includeAgentRoles: hasFeature('agent_sales_accounts')
+    })
     const [location, navigate] = useLocation()
     const urlPartnerSelection = useMemo(() => readPartnerSelection(location), [location])
     const [selectedPartnerId, setSelectedPartnerId] = useState<string | null>(urlPartnerSelection.id)
@@ -816,8 +821,9 @@ export function AccountStatements() {
             <Card>
                 <CardContent className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
                     <div className="space-y-2">
-                        <label className="text-sm font-semibold">
+                        <label className="inline-flex items-center gap-1.5 text-sm font-semibold">
                             {t('businessPartners.title', { defaultValue: 'Business Partner' })}
+                            <AutocompleteLoadingIndicator isLoading={arePartnersLoading} />
                         </label>
                         <PartnerAutocompleteInput
                             value={partnerQuery}
@@ -825,6 +831,7 @@ export function AccountStatements() {
                             onSelectPartner={selectPartner}
                             workspaceId={workspaceId}
                             includeAgentRoles={hasFeature('agent_sales_accounts')}
+                            isLoading={arePartnersLoading}
                             placeholder={t('businessPartners.accountStatement.searchPartner', { defaultValue: 'Search for a business partner' })}
                         />
                     </div>

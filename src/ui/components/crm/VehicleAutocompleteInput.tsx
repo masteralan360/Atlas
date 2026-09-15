@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Car, Check } from "lucide-react";
 
@@ -27,6 +27,7 @@ interface VehicleAutocompleteInputProps {
   showLinkedIndicator?: boolean;
   excludeVehicleIds?: string[];
   statuses?: RentalVehicleStatus[];
+  isLoading?: boolean;
 }
 
 export function VehicleAutocompleteInput({
@@ -44,11 +45,19 @@ export function VehicleAutocompleteInput({
   showLinkedIndicator = true,
   excludeVehicleIds = [],
   statuses,
+  isLoading: isLoadingOverride,
 }: VehicleAutocompleteInputProps) {
   const { t } = useTranslation();
   const vehicles = useRentalVehicles(workspaceId);
   const [isFocused, setIsFocused] = useState(false);
   const [justSelected, setJustSelected] = useState(false);
+  const [showInitialSuggestions, setShowInitialSuggestions] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const pendingOpenRef = useRef(false);
+  const hadFocusRef = useRef(false);
+  const isLoading = isLoadingOverride ?? vehicles.isLoading;
+  const wasLoadingRef = useRef(isLoading);
+  const isDisabled = Boolean(disabled || isLoading);
 
   const query = value.trim().toLowerCase();
   const excludedVehicleIds = useMemo(
@@ -57,11 +66,14 @@ export function VehicleAutocompleteInput({
   );
 
   const filtered = useMemo(() => {
-    if (!query || query.length < 1) return [];
-
-    return vehicles
+    const eligibleVehicles = vehicles
       .filter((vehicle) => !excludedVehicleIds.has(vehicle.id))
       .filter((vehicle) => !statuses || statuses.includes(vehicle.status))
+    if (!query || query.length < 1) {
+      return showInitialSuggestions ? eligibleVehicles.slice(0, 8) : [];
+    }
+
+    return eligibleVehicles
       .filter((vehicle) =>
         [vehicle.make, vehicle.model, vehicle.plateNumber, vehicle.category]
           .filter(Boolean)
@@ -70,7 +82,7 @@ export function VehicleAutocompleteInput({
           .includes(query),
       )
       .slice(0, 8);
-  }, [excludedVehicleIds, query, statuses, vehicles]);
+  }, [excludedVehicleIds, query, showInitialSuggestions, statuses, vehicles]);
 
   const showDropdown = isFocused && !justSelected && filtered.length > 0;
   const shouldShowLinkedIndicator = hasSelection && showLinkedIndicator;
@@ -78,6 +90,7 @@ export function VehicleAutocompleteInput({
 
   const handleSelect = useCallback(
     (vehicle: RentalVehicle) => {
+      hadFocusRef.current = false;
       setJustSelected(true);
       setIsFocused(false);
       onChange(getRentalVehicleDisplayLabel(vehicle));
@@ -92,6 +105,24 @@ export function VehicleAutocompleteInput({
     const timeout = setTimeout(() => setJustSelected(false), 200);
     return () => clearTimeout(timeout);
   }, [justSelected]);
+
+  useEffect(() => {
+    if (isLoading && !wasLoadingRef.current && hadFocusRef.current) {
+      pendingOpenRef.current = true;
+      setIsFocused(false);
+    }
+
+    if (!isLoading && wasLoadingRef.current && pendingOpenRef.current) {
+      pendingOpenRef.current = false;
+      if (!disabled) {
+        setShowInitialSuggestions(true);
+        setIsFocused(true);
+        inputRef.current?.focus();
+      }
+    }
+
+    wasLoadingRef.current = isLoading;
+  }, [disabled, isLoading]);
 
   const linkedIndicator = (
     <div
@@ -108,18 +139,30 @@ export function VehicleAutocompleteInput({
   return (
     <AutocompletePopover
       open={showDropdown}
-      onOpenChange={setIsFocused}
+      onOpenChange={(open) => {
+        if (!open && !isLoading) hadFocusRef.current = false;
+        setIsFocused(open);
+      }}
       anchor={(
         <div data-autocomplete-popover-anchor className={cn("relative w-full", className)}>
           <Input
+            ref={inputRef}
             value={value}
             onChange={(event) => {
               setJustSelected(false);
+              setShowInitialSuggestions(false);
               onChange(event.target.value);
             }}
-            onFocus={() => setIsFocused(true)}
+            onFocus={() => {
+              hadFocusRef.current = true;
+              setIsFocused(true);
+            }}
+            onBlur={() => {
+              if (!isLoading) hadFocusRef.current = false;
+            }}
             placeholder={placeholder}
-            disabled={disabled}
+            disabled={isDisabled}
+            aria-busy={isLoading || undefined}
             required={required}
             className={cn(
               "flex-1",

@@ -4,7 +4,7 @@ import { ArrowDownLeft, ArrowUpRight, Users, X } from 'lucide-react'
 
 import { useAuth } from '@/auth'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
-import { createManualLoan, type CurrencyCode, type LoanDirection, type PaymentAccount } from '@/local-db'
+import { createManualLoan, useBusinessPartnersLoading, type CurrencyCode, type LoanDirection, type PaymentAccount } from '@/local-db'
 import { buildOrderExchangeRatesSnapshot } from '@/lib/orderCurrency'
 import { getLoanCounterpartyNameLabel, getLoanDirectionLabel } from '@/lib/loanPresentation'
 import { getLoanLinkedPartyTypeLabel, type LoanPartySelection } from '@/lib/loanParties'
@@ -53,6 +53,7 @@ export function CreateSimpleLoanModal({
     onCreated
 }: CreateSimpleLoanModalProps) {
     const { t } = useTranslation()
+    const arePartnersLoading = useBusinessPartnersLoading(workspaceId)
     const { toast } = useToast()
     const { user } = useAuth()
     const { features } = useWorkspace()
@@ -201,7 +202,7 @@ export function CreateSimpleLoanModal({
                         <div className="grid gap-5">
 
                             <div className="grid gap-2">
-                                <Label>{counterpartyNameLabel} <span className="text-destructive">*</span></Label>
+                                <Label isLoading={arePartnersLoading}>{counterpartyNameLabel} <span className="text-destructive">*</span></Label>
                                 <div className="flex flex-col gap-2 md:flex-row md:items-center">
                                     <PartnerAutocompleteInput
                                         value={borrowerName}
@@ -222,6 +223,7 @@ export function CreateSimpleLoanModal({
                                             setBorrowerAddress([partner.address, partner.city].filter(Boolean).join(', '))
                                         }}
                                         workspaceId={workspaceId}
+                                        isLoading={arePartnersLoading}
                                     />
                                     <Button type="button" variant="outline" className="w-full shrink-0 gap-2 md:w-auto" onClick={() => setIsPartyPickerOpen(true)}>
                                         <Users className="h-4 w-4" />

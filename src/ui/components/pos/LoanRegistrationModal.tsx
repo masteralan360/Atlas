@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Users, X } from 'lucide-react'
-import type { CurrencyCode, InstallmentFrequency } from '@/local-db'
+import { useBusinessPartnersLoading, type CurrencyCode, type InstallmentFrequency } from '@/local-db'
 import { getLoanLinkedPartyTypeLabel, type LoanPartySelection } from '@/lib/loanParties'
 import { formatCurrency, formatLocalDateValue, parseLocalDateValue } from '@/lib/utils'
 import {
@@ -65,6 +65,7 @@ export function LoanRegistrationModal({
     isSubmitting = false
 }: LoanRegistrationModalProps) {
     const { t } = useTranslation()
+    const arePartnersLoading = useBusinessPartnersLoading(workspaceId)
     const [form, setForm] = useState<LoanRegistrationFormData>({
         linkedPartyType: null,
         linkedPartyId: null,
@@ -161,7 +162,7 @@ export function LoanRegistrationModal({
                             </div>
 
                             <div className="grid gap-2">
-                                <Label>{t('loans.borrowerName') || 'Borrower Name'} <span className="text-destructive">*</span></Label>
+                                <Label isLoading={arePartnersLoading}>{t('loans.borrowerName') || 'Borrower Name'} <span className="text-destructive">*</span></Label>
                                 <div className="flex flex-col gap-2 md:flex-row md:items-center">
                                     <PartnerAutocompleteInput
                                         value={form.borrowerName}
@@ -178,6 +179,7 @@ export function LoanRegistrationModal({
                                             }))
                                         }}
                                         workspaceId={workspaceId}
+                                        isLoading={arePartnersLoading}
                                     />
                                     <Button type="button" variant="outline" className="w-full shrink-0 gap-2 md:w-auto" onClick={() => setIsPartyPickerOpen(true)}>
                                         <Users className="h-4 w-4" />

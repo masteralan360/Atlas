@@ -407,6 +407,7 @@ export function WorkspacePaymentController() {
     const [submitError, setSubmitError] = useState<string | null>(null)
     const [accountHolderName, setAccountHolderName] = useState('')
     const [savedAccountHolderNames, setSavedAccountHolderNames] = useState<string[]>([])
+    const [isSavedAccountHolderNamesLoading, setIsSavedAccountHolderNamesLoading] = useState(false)
     const [isConfirmationHighlighted, setIsConfirmationHighlighted] = useState(false)
     const [confirmationDelayEndsAt, setConfirmationDelayEndsAt] = useState<number | null>(
         () => paymentConfirmationDelayEndsAtForSession
@@ -446,6 +447,7 @@ export function WorkspacePaymentController() {
         setSubmitError(null)
         setAccountHolderName('')
         setSavedAccountHolderNames([])
+        setIsSavedAccountHolderNamesLoading(false)
         setPaygSummary(null)
         setIsConfirmationHighlighted(false)
         submissionGuardRef.current = false
@@ -543,11 +545,13 @@ export function WorkspacePaymentController() {
     }, [confirmationDelayEndsAt])
 
     const loadSavedAccountHolderNames = useCallback(() => {
+        setIsSavedAccountHolderNamesLoading(true)
         void getSavedWorkspacePaymentAccountHolderNames()
             .then(setSavedAccountHolderNames)
             .catch((error) => {
                 console.warn('[WorkspacePayment] Failed to load saved account holder names:', error)
             })
+            .finally(() => setIsSavedAccountHolderNamesLoading(false))
     }, [])
 
     if (!isAuthenticated || isDemoMode || user?.role !== 'admin') return null
@@ -892,7 +896,7 @@ export function WorkspacePaymentController() {
                                                 {selectedProvider !== 'free' && (
                                                     <div className="mt-5 space-y-2">
                                                         <div className="flex items-center justify-between gap-3">
-                                                            <Label htmlFor="workspace-payment-account-holder-name">
+                                                            <Label htmlFor="workspace-payment-account-holder-name" isLoading={isSavedAccountHolderNamesLoading}>
                                                                 {t('workspacePayments.accountHolderName')}
                                                             </Label>
                                                             <span className="text-xs font-semibold text-destructive">*</span>
@@ -917,6 +921,7 @@ export function WorkspacePaymentController() {
                                                             )}
                                                             required={true}
                                                             disabled={isSubmitting}
+                                                            isLoading={isSavedAccountHolderNamesLoading}
                                                         />
                                                         {isAccountHolderNameIncomplete && (
                                                             <p role="alert" aria-live="polite" className="text-xs font-medium text-destructive">

@@ -11,7 +11,8 @@ import {
     type PartnerSettlementProgress,
     type PaymentTransactionDirection,
     type WorkspacePaymentMethod,
-    useAgents
+    useAgents,
+    useBusinessPartnersLoading
 } from '@/local-db'
 import { STANDARD_PAYMENT_METHODS } from '@/lib/paymentMethods'
 import {
@@ -76,6 +77,10 @@ export function PartnerSettlementDialog({
 }: PartnerSettlementDialogProps) {
     const { t } = useTranslation()
     const { features } = useWorkspace()
+    const arePartnersLoading = useBusinessPartnersLoading(workspaceId, {
+        includeRealEstateRoles: true,
+        includeAgentRoles: includeSalesAgentCommissionPartners
+    })
     const [partnerName, setPartnerName] = useState('')
     const [partner, setPartner] = useState<BusinessPartner | null>(null)
     const [direction, setDirection] = useState<PaymentTransactionDirection | null>(defaultDirection)
@@ -361,7 +366,7 @@ export function PartnerSettlementDialog({
                     <DialogBody>
                         <div className="grid gap-4">
                             <div className="grid gap-2">
-                                <Label>
+                                <Label isLoading={arePartnersLoading}>
                                     {t('payments.table.counterparty', { defaultValue: 'Counterparty' })}
                                     <span className="text-destructive"> *</span>
                                 </Label>
@@ -380,6 +385,7 @@ export function PartnerSettlementDialog({
                                     disabled={isSubmitting}
                                     includeRealEstateRoles
                                     includeAgentRoles={includeSalesAgentCommissionPartners}
+                                    isLoading={arePartnersLoading}
                                     eligibleAgentPartnerIds={eligibleSalesAgentCommissionPartnerIds}
                                 />
                                 {partner ? (

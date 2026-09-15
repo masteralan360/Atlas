@@ -1016,7 +1016,7 @@ export function StockAdjustments() {
             <DialogBody>
               <div className="grid gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="batch-search">{t("stockAdjustments.dialog.batch.productSearch", "Product search")}</Label>
+                  <Label htmlFor="batch-search" isLoading={products.isLoading}>{t("stockAdjustments.dialog.batch.productSearch", "Product search")}</Label>
                   <div className="flex items-center">
                     {canOpenBatchProductsView ? (
                       <ProductsViewModalTrigger
@@ -1034,6 +1034,7 @@ export function StockAdjustments() {
                       }}
                       onSelectProduct={(product) => selectBatchProduct(product.id)}
                       products={batchProductOptions}
+                      isLoading={products.isLoading}
                       placeholder={t("stockAdjustments.dialog.batch.productSearchPlaceholder", "Search products by name or SKU")}
                       hasSelection={!!batchForm.productId}
                     />

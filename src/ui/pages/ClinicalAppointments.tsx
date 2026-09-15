@@ -633,13 +633,14 @@ function Beauty2AppointmentForm({ workspaceId, appointment, onCancel, onSaved }:
           <Input id="beauty2-appointment-number" value={appointmentNumber} onChange={(event) => setAppointmentNumber(event.target.value)} required />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="beauty2-sent-by">{t('clinicalAppointments.sentBy', { defaultValue: 'Sent by' })}</Label>
+          <Label htmlFor="beauty2-sent-by" isLoading={supplierPartners.isLoading}>{t('clinicalAppointments.sentBy', { defaultValue: 'Sent by' })}</Label>
           <PartnerAutocompleteInput
             workspaceId={workspaceId}
             value={sentByName}
             onChange={(value) => { setSentByName(value); if (value !== sentByName) setSentByPartnerId(null) }}
             onSelectPartner={(partner) => { setSentByName(partner.partnerName); setSentByPartnerId(partner.id) }}
             roles={['supplier']}
+            isLoading={supplierPartners.isLoading}
             placeholder={t('clinicalAppointments.sentByPlaceholder', { defaultValue: 'Search supplier or type a name...' })}
           />
           {sentByPartner ? (

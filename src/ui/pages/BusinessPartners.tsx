@@ -49,6 +49,7 @@ import {
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { BusinessPartnerFormDialog, type BusinessPartnerFormPayload } from '@/ui/components/crm/BusinessPartnerFormDialog'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
+import { AutocompleteLoadingIndicator } from '@/ui/components/AutocompleteLoadingIndicator'
 function roleLabel(role: BusinessPartnerRole, t: (key: string, options?: Record<string, unknown>) => string) {
     switch (role) {
         case 'customer':
@@ -569,6 +570,7 @@ export function BusinessPartners() {
                                 <CardTitle className="flex items-center gap-2">
                                     <MapPin className="h-5 w-5 text-primary" />
                                     {t('businessPartners.maps', { defaultValue: 'Maps' })}
+                                    <AutocompleteLoadingIndicator isLoading={partners.isLoading} />
                                 </CardTitle>
                                 <p className="text-sm text-muted-foreground">
                                     {t('businessPartners.mapsDescription', { defaultValue: 'All business partner locations in this workspace.' })}
@@ -592,6 +594,7 @@ export function BusinessPartners() {
                                     includeAgentRoles={features.agents}
                                     excludePartnerIds={partnerIdsWithoutLocations}
                                     disabled={!user?.workspaceId}
+                                    isLoading={partners.isLoading}
                                     placeholder={t('businessPartners.searchMapPlaceholder', { defaultValue: 'Search a partner on the map...' })}
                                 />
                                 <div className="shrink-0 rounded-full bg-primary/10 px-3 py-1 text-sm font-semibold text-primary">

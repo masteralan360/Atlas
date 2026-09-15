@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Users } from 'lucide-react'
 
@@ -22,6 +22,7 @@ interface PartnerAutocompleteInputProps {
     eligibleAgentPartnerIds?: string[]
     excludePartnerIds?: string[]
     roles?: BusinessPartnerRole[]
+    isLoading?: boolean
 }
 
 export function PartnerAutocompleteInput({
@@ -37,12 +38,20 @@ export function PartnerAutocompleteInput({
     includeAgentRoles = false,
     eligibleAgentPartnerIds,
     excludePartnerIds = [],
-    roles
+    roles,
+    isLoading: isLoadingOverride
 }: PartnerAutocompleteInputProps) {
     const { t } = useTranslation()
     const partners = useBusinessPartners(workspaceId, { includeRealEstateRoles, includeAgentRoles, roles })
     const [isFocused, setIsFocused] = useState(false)
     const [justSelected, setJustSelected] = useState(false)
+    const [showInitialSuggestions, setShowInitialSuggestions] = useState(false)
+    const inputRef = useRef<HTMLInputElement>(null)
+    const pendingOpenRef = useRef(false)
+    const hadFocusRef = useRef(false)
+    const wasLoadingRef = useRef(isLoadingOverride ?? partners.isLoading)
+    const isLoading = isLoadingOverride ?? partners.isLoading
+    const isDisabled = Boolean(disabled || isLoading)
 
     const query = value.trim().toLowerCase()
     const excludedPartnerIds = useMemo(() => new Set(excludePartnerIds.filter(Boolean)), [excludePartnerIds])
@@ -52,17 +61,21 @@ export function PartnerAutocompleteInput({
     )
 
     const filtered = useMemo(() => {
-        if (!query || query.length < 1) return []
-        return partners
+        const eligiblePartners = partners
             .filter((p) => !excludedPartnerIds.has(p.id))
             .filter((p) => p.role !== 'agent' || !eligibleAgentPartnerIdSet || eligibleAgentPartnerIdSet.has(p.id))
+        if (!query || query.length < 1) {
+            return showInitialSuggestions ? eligiblePartners.slice(0, 8) : []
+        }
+        return eligiblePartners
             .filter((p) => p.partnerName.toLowerCase().includes(query))
             .slice(0, 8)
-    }, [eligibleAgentPartnerIdSet, excludedPartnerIds, partners, query])
+    }, [eligibleAgentPartnerIdSet, excludedPartnerIds, partners, query, showInitialSuggestions])
 
     const showDropdown = isFocused && !justSelected && filtered.length > 0
 
     const handleSelect = useCallback((partner: BusinessPartner) => {
+        hadFocusRef.current = false
         setJustSelected(true)
         setIsFocused(false)
         onChange(partner.partnerName)
@@ -76,21 +89,51 @@ export function PartnerAutocompleteInput({
         }
     }, [justSelected])
 
+    useEffect(() => {
+        if (isLoading && !wasLoadingRef.current && hadFocusRef.current) {
+            pendingOpenRef.current = true
+            setIsFocused(false)
+        }
+
+        if (!isLoading && wasLoadingRef.current && pendingOpenRef.current) {
+            pendingOpenRef.current = false
+            if (!disabled) {
+                setShowInitialSuggestions(true)
+                setIsFocused(true)
+                inputRef.current?.focus()
+            }
+        }
+
+        wasLoadingRef.current = isLoading
+    }, [disabled, isLoading])
+
     return (
         <AutocompletePopover
             open={showDropdown}
-            onOpenChange={setIsFocused}
+            onOpenChange={(open) => {
+                if (!open && !isLoading) hadFocusRef.current = false
+                setIsFocused(open)
+            }}
             anchor={(
                 <div data-autocomplete-popover-anchor className={cn('w-full', className)}>
                     <Input
+                        ref={inputRef}
                         value={value}
                         onChange={(e) => {
                             setJustSelected(false)
+                            setShowInitialSuggestions(false)
                             onChange(e.target.value)
                         }}
-                        onFocus={() => setIsFocused(true)}
+                        onFocus={() => {
+                            hadFocusRef.current = true
+                            setIsFocused(true)
+                        }}
+                        onBlur={() => {
+                            if (!isLoading) hadFocusRef.current = false
+                        }}
                         placeholder={placeholder}
-                        disabled={disabled}
+                        disabled={isDisabled}
+                        aria-busy={isLoading || undefined}
                         required={required}
                         className="flex-1"
                     />

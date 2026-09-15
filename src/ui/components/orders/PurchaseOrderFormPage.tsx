@@ -762,7 +762,7 @@ export function PurchaseOrderFormPage({
                                     <CardContent>
                                         <div className="grid gap-4">
                                             <div className="grid gap-2">
-                                                <Label>{t('orders.form.supplier', { defaultValue: 'Supplier' })} <span className="text-destructive">*</span></Label>
+                                                <Label isLoading={supplierPartners.isLoading}>{t('orders.form.supplier', { defaultValue: 'Supplier' })} <span className="text-destructive">*</span></Label>
                                                 <div className="flex flex-col gap-2 md:flex-row md:items-center" data-tour-id="tutorial-order-partner-picker">
                                                     <PartnerAutocompleteInput
                                                         value={supplierSearch}
@@ -775,6 +775,7 @@ export function PurchaseOrderFormPage({
                                                         }}
                                                         workspaceId={workspaceId}
                                                         roles={['supplier']}
+                                                        isLoading={supplierPartners.isLoading}
                                                         placeholder={t('orders.form.selectSupplier', { defaultValue: 'Select Supplier' })}
                                                     />
                                                     <Button
@@ -945,7 +946,7 @@ export function PurchaseOrderFormPage({
                                                         data-tour-id={index === 0 ? 'tutorial-order-product-picker' : undefined}
                                                         data-demo-product-linked={item.productId ? 'true' : 'false'}
                                                     >
-                                                        <Label>{t('orders.form.selectProduct', { defaultValue: 'Select Product' })}</Label>
+                                                        <Label isLoading={products.isLoading}>{t('orders.form.selectProduct', { defaultValue: 'Select Product' })}</Label>
                                                         <div className="flex items-center">
                                                             {canOpenProductsView ? (
                                                                 <ProductsViewModalTrigger
@@ -961,6 +962,7 @@ export function PurchaseOrderFormPage({
                                                                 onChange={(value) => updateItem(index, { productSearch: value, productId: '' })}
                                                                 onSelectProduct={(product) => updateItem(index, { productId: product.id, productSearch: product.name })}
                                                                 products={purchasableProducts}
+                                                                isLoading={products.isLoading}
                                                                 disabled={priceBooksEnabled && (!isPriceBookCatalogReady || !selectedSupplier)}
                                                                 placeholder={priceBooksEnabled && !selectedSupplier
                                                                     ? t('priceBooks.selectPartnerFirst', { defaultValue: 'Select a business partner first' })

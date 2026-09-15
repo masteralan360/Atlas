@@ -1386,7 +1386,7 @@ export function Discounts() {
                                 <div className="space-y-5 sm:space-y-6">
                                     {activeTab === 'products' ? (
                                         <div className="space-y-3">
-                                            <Label>{t('discounts.product')}</Label>
+                                            <Label isLoading={products.isLoading}>{t('discounts.product')}</Label>
                                             <div className="flex items-center">
                                                 <ProductsViewModalTrigger
                                                     label={t('products.title', { defaultValue: 'Browse products' })}
@@ -1404,6 +1404,7 @@ export function Discounts() {
                                                         selectProductDiscountTarget(product)
                                                     }}
                                                     products={productDiscountTargets}
+                                                    isLoading={products.isLoading}
                                                     placeholder={t('discounts.searchProducts')}
                                                     hasSelection={!!form.targetId}
                                                 />

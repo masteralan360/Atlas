@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, Check, GitBranch, Package } from 'lucide-react'
 
@@ -27,6 +27,7 @@ interface ProductAutocompleteInputProps {
     onStorageMissingClick?: () => void
     storageMissingLabel?: string
     scannerTargetIndex?: number
+    isLoading?: boolean
 }
 
 function getDisplayImageUrl(url?: string): string {
@@ -78,13 +79,21 @@ export function ProductAutocompleteInput({
     storageMissing,
     onStorageMissingClick,
     storageMissingLabel = 'Select Storage',
-    scannerTargetIndex
+    scannerTargetIndex,
+    isLoading: isLoadingOverride
 }: ProductAutocompleteInputProps) {
     const { i18n, t } = useTranslation()
     const user = useOptionalAuth()?.user
     const { canSelectProduct, filterProducts } = useProductSelectionAccess(user?.workspaceId, user?.id)
     const [isFocused, setIsFocused] = useState(false)
     const [justSelected, setJustSelected] = useState(false)
+    const [showInitialSuggestions, setShowInitialSuggestions] = useState(false)
+    const inputRef = useRef<HTMLInputElement>(null)
+    const pendingOpenRef = useRef(false)
+    const hadFocusRef = useRef(false)
+    const isLoading = isLoadingOverride ?? ('isLoading' in products && Boolean(products.isLoading))
+    const wasLoadingRef = useRef(isLoading)
+    const isDisabled = Boolean(disabled || isLoading)
 
     const query = value.trim().toLowerCase()
     const selectableProducts = useMemo(
@@ -97,8 +106,6 @@ export function ProductAutocompleteInput({
     )
 
     const filtered = useMemo(() => {
-        if (!query || query.length < 1) return []
-
         const families = new Map<string, Product[]>()
         for (const product of selectableProducts) {
             const familyId = product.parentProductId || product.id
@@ -107,8 +114,8 @@ export function ProductAutocompleteInput({
             families.set(familyId, members)
         }
 
-        return Array.from(families.entries())
-            .filter(([, members]) => members.some((product) => (
+        const orderedProducts = Array.from(families.entries())
+            .filter(([, members]) => !query || members.some((product) => (
                 product.name.toLowerCase().includes(query)
                 || (product.sku && product.sku.toLowerCase().includes(query))
             )))
@@ -124,7 +131,13 @@ export function ProductAutocompleteInput({
                     ...members.slice(primaryIndex + 1)
                 ]
             })
-    }, [query, selectableProducts])
+
+        if (!query || query.length < 1) {
+            return showInitialSuggestions ? orderedProducts.slice(0, 8) : []
+        }
+
+        return orderedProducts
+    }, [query, selectableProducts, showInitialSuggestions])
 
     const showDropdown = isFocused && !justSelected && filtered.length > 0
     const shouldShowLinkedIndicator = Boolean(hasSelection && !storageMissing && showLinkedIndicator)
@@ -133,6 +146,7 @@ export function ProductAutocompleteInput({
         if (!canSelectProduct(product)) {
             return
         }
+        hadFocusRef.current = false
         setJustSelected(true)
         setIsFocused(false)
         onChange(product.name)
@@ -146,11 +160,30 @@ export function ProductAutocompleteInput({
         }
     }, [justSelected])
 
+    useEffect(() => {
+        if (isLoading && !wasLoadingRef.current && hadFocusRef.current) {
+            pendingOpenRef.current = true
+            setIsFocused(false)
+        }
+
+        if (!isLoading && wasLoadingRef.current && pendingOpenRef.current) {
+            pendingOpenRef.current = false
+            if (!disabled) {
+                setShowInitialSuggestions(true)
+                setIsFocused(true)
+                inputRef.current?.focus()
+            }
+        }
+
+        wasLoadingRef.current = isLoading
+    }, [disabled, isLoading])
+
     const handleFocus = () => {
         if (storageMissing) {
             onStorageMissingClick?.()
             return
         }
+        hadFocusRef.current = true
         setIsFocused(true)
     }
 
@@ -160,6 +193,7 @@ export function ProductAutocompleteInput({
             return
         }
         setJustSelected(false)
+        setShowInitialSuggestions(false)
         setIsFocused(true)
         onChange(e.target.value)
     }
@@ -183,18 +217,26 @@ export function ProductAutocompleteInput({
     return (
         <AutocompletePopover
             open={showDropdown}
-            onOpenChange={setIsFocused}
+            onOpenChange={(open) => {
+                if (!open && !isLoading) hadFocusRef.current = false
+                setIsFocused(open)
+            }}
             className="w-[max(var(--radix-popover-trigger-width),18rem)]"
             anchor={(
                 <div data-autocomplete-popover-anchor className={cn('relative w-full group', className)}>
                     <Input
+                        ref={inputRef}
                         value={value}
                         onChange={handleInputChange}
                         onFocus={handleFocus}
                         data-order-product-input={scannerTargetIndex === undefined ? undefined : 'true'}
                         data-order-product-index={scannerTargetIndex}
                         placeholder={placeholder}
-                        disabled={disabled}
+                        disabled={isDisabled}
+                        aria-busy={isLoading || undefined}
+                        onBlur={() => {
+                            if (!isLoading) hadFocusRef.current = false
+                        }}
                         className={cn(
                             'flex-1',
                             inputClassName,

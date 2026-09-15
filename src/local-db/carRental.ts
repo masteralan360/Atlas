@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
@@ -9,6 +9,7 @@ import { generateId, toSnakeCase } from "@/lib/utils";
 import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 
 import { db } from "./database";
+import { toLiveCollection } from "./liveCollection";
 import { canAccessBusinessPartnerInLocalCache } from "./businessPartnerPrivacy";
 import { addToOfflineMutations, fetchTableFromSupabase } from "./hooks";
 import { appendPaymentTransaction } from "./payments";
@@ -306,7 +307,13 @@ export function useRentalVehicles(workspaceId?: string) {
     });
   }, [online, workspaceId]);
 
-  return [...(vehicles ?? [])].sort((left, right) => left.plateNumber.localeCompare(right.plateNumber));
+  return useMemo(
+    () => toLiveCollection(
+      [...(vehicles ?? [])].sort((left, right) => left.plateNumber.localeCompare(right.plateNumber)),
+      Boolean(workspaceId) && vehicles === undefined,
+    ),
+    [vehicles, workspaceId],
+  );
 }
 
 export function useRentalRequests(workspaceId?: string) {

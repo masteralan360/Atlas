@@ -226,7 +226,7 @@ export function SettlementDialog({
 
                                 {showsCounterpartyPicker ? (
                                     <div className="grid gap-2">
-                                        <Label>
+                                        <Label isLoading={businessPartners.isLoading}>
                                             {t('payments.table.counterparty', { defaultValue: 'Counterparty' })}
                                             {requiresLinkedCounterparty ? <span className="text-destructive"> *</span> : null}
                                         </Label>
@@ -241,6 +241,7 @@ export function SettlementDialog({
                                             placeholder={t('settlementModal.counterpartyPlaceholder', { defaultValue: 'Search business partner' })}
                                             disabled={isSubmitting}
                                             includeRealEstateRoles
+                                            isLoading={businessPartners.isLoading}
                                         />
                                         {linkedCounterparty ? (
                                             <div className="flex flex-col gap-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 sm:flex-row sm:items-start sm:justify-between">

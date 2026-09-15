@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ArrowLeftRight, Users, X } from 'lucide-react'
 import { useAuth } from '@/auth'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
-import { createManualLoan, type CurrencyCode, type InstallmentFrequency, type LoanDirection, type PaymentAccount } from '@/local-db'
+import { createManualLoan, useBusinessPartnersLoading, type CurrencyCode, type InstallmentFrequency, type LoanDirection, type PaymentAccount } from '@/local-db'
 import { buildOrderExchangeRatesSnapshot } from '@/lib/orderCurrency'
 import { getLoanLinkedPartyTypeLabel, type LoanPartySelection } from '@/lib/loanParties'
 import { formatCurrency, formatLocalDateValue, formatNumericInput, parseFormattedNumber, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
@@ -56,6 +56,7 @@ export function CreateManualLoanModal({
     initialDirection = 'lent'
 }: CreateManualLoanModalProps) {
     const { t } = useTranslation()
+    const arePartnersLoading = useBusinessPartnersLoading(workspaceId)
     const { toast } = useToast()
     const { user } = useAuth()
     const { features } = useWorkspace()
@@ -192,7 +193,7 @@ export function CreateManualLoanModal({
                     <DialogBody className="py-5">
                         <div className="grid gap-5">
                             <div className="grid gap-2">
-                                <Label>{t('loans.borrowerName') || 'Borrower Name'} <span className="text-destructive">*</span></Label>
+                                <Label isLoading={arePartnersLoading}>{t('loans.borrowerName') || 'Borrower Name'} <span className="text-destructive">*</span></Label>
                                 <div className="flex flex-col gap-2 md:flex-row md:items-center">
                                     <PartnerAutocompleteInput
                                         value={borrowerName}
@@ -213,6 +214,7 @@ export function CreateManualLoanModal({
                                             setBorrowerAddress([partner.address, partner.city].filter(Boolean).join(', '))
                                         }}
                                         workspaceId={workspaceId}
+                                        isLoading={arePartnersLoading}
                                         disabled={lockParty}
                                     />
                                     {!lockParty ? (

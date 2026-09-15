@@ -7,6 +7,7 @@ import {
     createBusinessPartner,
     useAgents,
     useBusinessPartners,
+    useBusinessPartnersLoading,
     useProductCommissionRuleAgents,
     useProductCommissionRules,
     type BusinessPartner,
@@ -221,6 +222,7 @@ export function QuickOrderModal({
     onSubmit
 }: QuickOrderModalProps) {
     const { t } = useTranslation()
+    const areCustomersLoading = useBusinessPartnersLoading(workspaceId, { roles: ['customer'] })
     const { toast } = useToast()
     const commissionTriggerRef = useRef<HTMLButtonElement>(null)
     const commissionAssignmentRef = useRef<SalesOrderCommissionAssignmentHandle>(null)
@@ -555,7 +557,7 @@ export function QuickOrderModal({
                 ) : null}
 
                 <div className="grid gap-2">
-                    <Label className="flex items-center gap-2">
+                    <Label className="flex items-center gap-2" isLoading={areCustomersLoading}>
                         <UserRound className="h-4 w-4 text-muted-foreground" />
                         {selectedSalesAccount ? t('agentSalesAccounts.sellingAgent') : t('orders.form.customer')}
                         <span className="text-destructive">*</span>
@@ -565,6 +567,7 @@ export function QuickOrderModal({
                             <PartnerAutocompleteInput
                                 workspaceId={workspaceId}
                                 roles={['customer']}
+                                isLoading={areCustomersLoading}
                                 value={customerSearch}
                                 onChange={(value) => {
                                     setCustomerSearch(value)

@@ -5,6 +5,7 @@ import { useViewOwnRecordScope, type ViewOwnRecordScope } from '@/permissions/us
 import i18n from '@/i18n/config'
 
 import { db } from './database'
+import { toLiveCollection } from './liveCollection'
 import { canAccessBusinessPartnerInLocalCache } from './businessPartnerPrivacy'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
 import { createInventoryTransferTransactions } from './inventoryTransferTransactions'
@@ -721,7 +722,10 @@ export function useProducts(workspaceId: string | undefined, options: UseProduct
             })
     }, [enabled, isOnline, syncBarcodeCache, syncRemote, workspaceId])
 
-    return products ?? []
+    return useMemo(
+        () => toLiveCollection(products, Boolean(workspaceId) && products === undefined),
+        [products, workspaceId]
+    )
 }
 
 export function useProductsByIds(workspaceId: string | undefined, productIds: string[]) {

@@ -6,7 +6,7 @@ import { useAuth } from '@/auth'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { buildOrderExchangeRatesSnapshot, filterSnapshotByCurrency } from '@/lib/orderCurrency'
 import { formatCurrency, formatLocalDateValue, formatNumberWithCommas, formatNumericInput, parseFormattedNumber, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
-import { createBusinessPartner, createRealEstateTransaction, type BusinessPartner, type CurrencyCode, type InstallmentFrequency, type RealEstatePropertyType, type RealEstateTransactionType } from '@/local-db'
+import { createBusinessPartner, createRealEstateTransaction, useBusinessPartnersLoading, type BusinessPartner, type CurrencyCode, type InstallmentFrequency, type RealEstatePropertyType, type RealEstateTransactionType } from '@/local-db'
 import {
     Button,
     Card,
@@ -54,6 +54,7 @@ export function CreateRealEstateTransactionPage({
     const { toast } = useToast()
     const { user } = useAuth()
     const { features } = useWorkspace()
+    const arePartnersLoading = useBusinessPartnersLoading(workspaceId, { includeRealEstateRoles: features.real_estate })
     const { exchangeData, eurRates, tryRates } = useExchangeRate()
     const [isSaving, setIsSaving] = useState(false)
     const [location, setLocation] = useState('')
@@ -381,7 +382,7 @@ export function CreateRealEstateTransactionPage({
 
                                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                         <div className="grid gap-2">
-                                            <Label>{partyLabels.buyer.label} <span className="text-destructive">*</span></Label>
+                                            <Label isLoading={arePartnersLoading}>{partyLabels.buyer.label} <span className="text-destructive">*</span></Label>
                                             <div className="flex flex-col gap-2">
                                                 <div className="flex gap-2">
                                                     <PartnerAutocompleteInput
@@ -397,6 +398,7 @@ export function CreateRealEstateTransactionPage({
                                                         placeholder={partyLabels.buyer.placeholder}
                                                         className="flex-1"
                                                         includeRealEstateRoles={features.real_estate}
+                                                        isLoading={arePartnersLoading}
                                                         excludePartnerIds={sellerLink?.id ? [sellerLink.id] : []}
                                                     />
                                                     <AddPartnerButton onClick={() => setIsCreateBuyerOpen(true)} label={partyLabels.buyer.addButtonLabel} />
@@ -407,7 +409,7 @@ export function CreateRealEstateTransactionPage({
                                             </div>
                                         </div>
                                         <div className="grid gap-2">
-                                            <Label>{partyLabels.seller.label} <span className="text-destructive">*</span></Label>
+                                            <Label isLoading={arePartnersLoading}>{partyLabels.seller.label} <span className="text-destructive">*</span></Label>
                                             <div className="flex flex-col gap-2">
                                                 <div className="flex gap-2">
                                                     <PartnerAutocompleteInput
@@ -423,6 +425,7 @@ export function CreateRealEstateTransactionPage({
                                                         placeholder={partyLabels.seller.placeholder}
                                                         className="flex-1"
                                                         includeRealEstateRoles={features.real_estate}
+                                                        isLoading={arePartnersLoading}
                                                         excludePartnerIds={buyerLink?.id ? [buyerLink.id] : []}
                                                     />
                                                     <AddPartnerButton onClick={() => setIsCreateSellerOpen(true)} label={partyLabels.seller.addButtonLabel} />

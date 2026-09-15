@@ -2050,7 +2050,7 @@ export function PostService() {
         </DialogHeader>
         <form onSubmit={handleCreateMerchant} className="flex min-h-0 flex-1 flex-col">
           <DialogBody className="grid gap-4 py-5">
-            <Field label={t("postService.form.businessPartner")}>
+            <Field label={t("postService.form.businessPartner")} isLoading={partners.isLoading}>
               <div className="flex flex-col gap-2">
                 <div className="flex gap-2">
                   <PartnerAutocompleteInput
@@ -2060,6 +2060,7 @@ export function PostService() {
                     workspaceId={workspaceId}
                     placeholder={t("postService.placeholders.selectMerchantOrShop")}
                     excludePartnerIds={enabledMerchantPartnerIds}
+                    isLoading={partners.isLoading}
                     className="flex-1"
                   />
                   <AddPartnerButton onClick={() => setSupplierPartnerDialogOpen(true)} label={t("postService.actions.addBusinessPartner")} />
@@ -2583,8 +2584,8 @@ export function PostService() {
   </div>;
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div className="grid gap-2"><Label>{label}</Label>{children}</div>;
+function Field({ label, children, isLoading = false }: { label: string; children: React.ReactNode; isLoading?: boolean }) {
+  return <div className="grid gap-2"><Label isLoading={isLoading}>{label}</Label>{children}</div>;
 }
 function CurrencyAmountInput({ value, onChange, currency, iqdPreference, disabled = false }: { value: string; onChange: (value: string) => void; currency: CurrencyCode; iqdPreference: "IQD" | "د.ع"; disabled?: boolean }) {
   return <div className="relative"><Input className="pe-12 tabular-nums" value={formatNumericInput(value)} onChange={(event) => onChange(sanitizeNumericInput(event.target.value, { allowDecimal: currency !== "iqd" }))} inputMode={currency === "iqd" ? "numeric" : "decimal"} placeholder="0" required disabled={disabled} /><span className="pointer-events-none absolute end-3 top-1/2 -translate-y-1/2 text-xs font-bold uppercase tracking-wider text-muted-foreground/60">{currencySuffix(currency, iqdPreference)}</span></div>;

@@ -78,7 +78,7 @@ interface StockAdjustmentDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     preselectedProductId?: string;
-    products: Product[];
+    products: Product[] & { readonly isLoading?: boolean };
     storages: Storage[];
     inventory: InventoryRow[];
     workspaceId: string;
@@ -99,6 +99,7 @@ export function StockAdjustmentDialog({
 }: StockAdjustmentDialogProps) {
     const { t } = useTranslation();
     const { toast } = useToast();
+    const isProductsLoading = Boolean(products.isLoading);
 
     const reasonOptions = useMemo(() => getAdjustmentReasonOptions(t), [t]);
 
@@ -387,7 +388,7 @@ export function StockAdjustmentDialog({
                                     );
                                 })() : (
                                     <div className="space-y-2">
-                                        <Label htmlFor="adjustment-search">{t("stockAdjustments.dialog.adjustment.productSearch", "Product search")}</Label>
+                                        <Label htmlFor="adjustment-search" isLoading={isProductsLoading}>{t("stockAdjustments.dialog.adjustment.productSearch", "Product search")}</Label>
                                         <div className="flex items-center">
                                             {canOpenProductsView ? (
                                                 <ProductsViewModalTrigger
@@ -408,6 +409,7 @@ export function StockAdjustmentDialog({
                                                     setSearch(product.name);
                                                 }}
                                                 products={productOptions}
+                                                isLoading={isProductsLoading}
                                                 placeholder={t("stockAdjustments.dialog.adjustment.productSearchPlaceholder", "Search products by name or SKU")}
                                                 hasSelection={!!form.productId}
                                             />

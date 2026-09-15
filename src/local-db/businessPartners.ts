@@ -16,6 +16,7 @@ import { generateId } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
+import { toLiveCollection } from './liveCollection'
 import {
   canAccessBusinessPartner,
   getBusinessPartnerPrivacyContext as getPartnerPrivacyContext,
@@ -1439,13 +1440,10 @@ export async function ensurePartnerFacet(partnerId: string, facetType: PartnerFa
   return facet
 }
 
-export function useBusinessPartners(workspaceId: string | undefined, filters?: PartnerFilterOptions) {
-  const online = useNetworkStatus()
-
-  const partners = useLiveQuery(async () => {
-    if (!workspaceId) return []
-    const privacyContext = await getPartnerPrivacyContext(workspaceId)
-    const rows = await db.business_partners
+async function readBusinessPartners(workspaceId: string | undefined, filters?: PartnerFilterOptions) {
+  if (!workspaceId) return []
+  const privacyContext = await getPartnerPrivacyContext(workspaceId)
+  const rows = await db.business_partners
       .where('workspaceId')
       .equals(workspaceId)
       .and((item) => {
@@ -1472,12 +1470,21 @@ export function useBusinessPartners(workspaceId: string | undefined, filters?: P
         return true
       })
       .toArray()
-    return rows
-      .map((partner) => visiblePartnerForActor(partner, privacyContext))
-      .filter((partner): partner is BusinessPartner => Boolean(partner))
-      .filter((partner) => matchesPartnerRoleFilter(partner, filters?.roles))
-      .sort((a, b) => a.partnerName.localeCompare(b.partnerName))
-  }, [workspaceId, JSON.stringify(filters || {})])
+  return rows
+    .map((partner) => visiblePartnerForActor(partner, privacyContext))
+    .filter((partner): partner is BusinessPartner => Boolean(partner))
+    .filter((partner) => matchesPartnerRoleFilter(partner, filters?.roles))
+    .sort((a, b) => a.partnerName.localeCompare(b.partnerName))
+}
+
+export function useBusinessPartners(workspaceId: string | undefined, filters?: PartnerFilterOptions) {
+  const online = useNetworkStatus()
+  const filtersKey = JSON.stringify(filters || {})
+
+  const partners = useLiveQuery(
+    () => readBusinessPartners(workspaceId, filters),
+    [filtersKey, workspaceId]
+  )
 
   useEffect(() => {
     if (!workspaceId) {
@@ -1508,7 +1515,20 @@ export function useBusinessPartners(workspaceId: string | undefined, filters?: P
     })
   }, [online, workspaceId])
 
-  return partners ?? []
+  return useMemo(
+    () => toLiveCollection(partners, Boolean(workspaceId) && partners === undefined),
+    [partners, workspaceId]
+  )
+}
+
+export function useBusinessPartnersLoading(workspaceId: string | undefined, filters?: PartnerFilterOptions) {
+  const filtersKey = JSON.stringify(filters || {})
+  const partners = useLiveQuery(
+    () => readBusinessPartners(workspaceId, filters),
+    [filtersKey, workspaceId]
+  )
+
+  return Boolean(workspaceId) && partners === undefined
 }
 
 export function useBusinessPartner(partnerId: string | undefined) {

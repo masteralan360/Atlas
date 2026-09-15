@@ -556,6 +556,7 @@ export function CarRental({
         key={requestDialog ? "open-request" : "closed-request"}
         open={requestDialog}
         workspaceId={workspaceId}
+        vehicles={vehicles}
         partners={partners}
         isSaving={isSaving}
         onOpenChange={(open) => !isSaving && setRequestDialog(open)}
@@ -1565,6 +1566,7 @@ function VehicleDialog({
 function RequestDialog({
   open,
   workspaceId,
+  vehicles,
   partners,
   isSaving,
   onOpenChange,
@@ -1572,6 +1574,7 @@ function RequestDialog({
 }: {
   open: boolean;
   workspaceId: string;
+  vehicles: ReturnType<typeof useRentalVehicles>;
   partners: ReturnType<typeof useBusinessPartners>;
   isSaving: boolean;
   onOpenChange: (open: boolean) => void;
@@ -1666,7 +1669,7 @@ function RequestDialog({
                   required
                 />
               </Field>
-              <Field label={t("carRental.fields.preferredVehicle")}>
+              <Field label={t("carRental.fields.preferredVehicle")} isLoading={vehicles.isLoading}>
                 <VehicleAutocompleteInput
                   workspaceId={workspaceId}
                   value={form.preferredVehicleSearch}
@@ -1688,6 +1691,7 @@ function RequestDialog({
                   }
                   placeholder={t("carRental.placeholders.searchVehicle")}
                   disabled={isSaving}
+                  isLoading={vehicles.isLoading}
                 />
               </Field>
               <Field label={t("carRental.fields.pickup")}>
@@ -1761,7 +1765,7 @@ function ContractDialog({
   open: boolean;
   workspaceId: string;
   request: RentalRequest | null;
-  vehicles: RentalVehicle[];
+  vehicles: ReturnType<typeof useRentalVehicles>;
   partners: ReturnType<typeof useBusinessPartners>;
   currency: CurrencyCode;
   allowedCurrencies: CurrencyCode[];
@@ -1858,7 +1862,7 @@ function ContractDialog({
         >
           <AppDialogBody className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label={t("carRental.fields.vehicle")}>
+              <Field label={t("carRental.fields.vehicle")} isLoading={vehicles.isLoading}>
                 <VehicleAutocompleteInput
                   workspaceId={workspaceId}
                   value={form.vehicleSearch}
@@ -1874,6 +1878,7 @@ function ContractDialog({
                   placeholder={t("carRental.placeholders.searchVehicle")}
                   statuses={["available"]}
                   disabled={isSaving}
+                  isLoading={vehicles.isLoading}
                   required
                 />
               </Field>
@@ -2533,13 +2538,15 @@ function CancelRentalContractDialog({
 function Field({
   label,
   children,
+  isLoading = false,
 }: {
   label: string;
   children: React.ReactNode;
+  isLoading?: boolean;
 }) {
   return (
     <div className="grid gap-2">
-      <Label>{label}</Label>
+      <Label isLoading={isLoading}>{label}</Label>
       {children}
     </div>
   );
@@ -2569,7 +2576,7 @@ function LinkedPartnerField({
   const { t } = useTranslation();
   const linkedPartner = partners.find((partner) => partner.id === partnerId);
   return (
-    <Field label={label}>
+    <Field label={label} isLoading={partners.isLoading}>
       <div className="space-y-2">
         <PartnerAutocompleteInput
           workspaceId={workspaceId}
@@ -2579,6 +2586,7 @@ function LinkedPartnerField({
           placeholder={t("carRental.placeholders.searchCustomer")}
           roles={["customer"]}
           disabled={disabled}
+          isLoading={partners.isLoading}
           required
         />
         {partnerId ? (

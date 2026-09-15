@@ -41,6 +41,7 @@ import {
   useInstallmentSaleInstallments,
   useInstallmentSalePayments,
   useInstallmentSales,
+  useBusinessPartnersLoading,
   type BusinessPartner,
   type CurrencyCode,
   type InstallmentSale,
@@ -171,6 +172,7 @@ function CreateInstallmentSaleDialog({
   workspaceId: string;
 }) {
   const { t } = useTranslation();
+  const areCustomersLoading = useBusinessPartnersLoading(workspaceId, { roles: ["customer", "both"] });
   const { toast } = useToast();
   const { user } = useAuth();
   const { features } = useWorkspace();
@@ -300,7 +302,7 @@ function CreateInstallmentSaleDialog({
           <AppDialogBody className="space-y-6">
             <div className="grid gap-4">
               <div className="grid gap-2">
-                <Label>
+                <Label isLoading={areCustomersLoading}>
                   {t("installmentSales.customer")}{" "}
                   <span className="text-destructive">*</span>
                 </Label>
@@ -316,6 +318,7 @@ function CreateInstallmentSaleDialog({
                     }}
                     workspaceId={workspaceId}
                     roles={["customer", "both"]}
+                    isLoading={areCustomersLoading}
                     disabled={isSaving || !!customer}
                   />
                   <QuickCustomerButton
