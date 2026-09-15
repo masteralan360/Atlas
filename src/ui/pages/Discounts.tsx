@@ -337,7 +337,7 @@ export function Discounts() {
     const productsById = useMemo(() => new Map(products.map((product) => [product.id, product])), [products])
     const categoriesById = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories])
     const productsByCategory = useMemo(() => {
-        const map = new Map<string, typeof products>()
+        const map = new Map<string, Product[]>()
         for (const product of products) {
             if (!product.categoryId) {
                 continue

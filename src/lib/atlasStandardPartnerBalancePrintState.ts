@@ -26,7 +26,7 @@ export function resetAtlasStandardPartnerBalancePrintState(
 }
 
 export function getAtlasStandardPartnerBalanceLoadingPercentage(
-    progress: PartnerAccountStatementLiveDataProgress | null | undefined
+    progress?: PartnerAccountStatementLiveDataProgress | null
 ) {
     if (!progress || progress.totalSources <= 0) return 0
 

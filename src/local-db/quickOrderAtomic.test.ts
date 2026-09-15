@@ -467,7 +467,7 @@ describe('atomic POS Quick Order completion', () => {
             .mockImplementationOnce(() => ({
                 select: async () => ({ data: null, error: remoteFailure }),
                 then: (resolve: (value: { data: null; error: Error }) => unknown) => resolve({ data: null, error: remoteFailure })
-            }))
+            }) as unknown as ReturnType<typeof supabaseMock.upsert>)
 
         await expect(createSalesOrder(
             WORKSPACE_ID,
@@ -532,7 +532,7 @@ describe('atomic POS Quick Order completion', () => {
                     onfulfilled?: ((value: typeof response) => TResult1 | PromiseLike<TResult1>) | null,
                     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
                 ) => Promise.resolve(response).then(onfulfilled, onrejected)
-            }
+            } as unknown as ReturnType<typeof supabaseMock.upsert>
         })
 
         const options = {

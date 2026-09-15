@@ -43,6 +43,11 @@ const PASSIVE_SOURCES = new Set<OrderEditorLiveDataSource>([
     'productCommissionCatalog'
 ])
 
+type ActiveOrderEditorLiveDataSource = Exclude<
+    OrderEditorLiveDataSource,
+    'priceBooks' | 'productCommissionCatalog'
+>
+
 function toLoadError(error: unknown) {
     return error instanceof Error ? error : new Error(String(error))
 }
@@ -155,7 +160,7 @@ export function useOrderEditorLiveData({
         agentSalesAccountsEnabled
     }), [agentSalesAccountsEnabled, kind, priceBooksEnabled, salesAgentCommissionsEnabled])
     const activeSources = useMemo(
-        () => sources.filter((source) => !PASSIVE_SOURCES.has(source)),
+        () => sources.filter((source): source is ActiveOrderEditorLiveDataSource => !PASSIVE_SOURCES.has(source)),
         [sources]
     )
     const passiveSources = useMemo(
@@ -164,10 +169,12 @@ export function useOrderEditorLiveData({
     )
 
     useEffect(() => {
-        if (!shouldHydrateOrderEditorLiveData(editingOrderId)) {
+        if (!editingOrderId) {
             setLoadState({ completedSourceIds: [], isInitialFetchComplete: true, failure: null })
             return
         }
+
+        const orderId = editingOrderId
 
         let cancelled = false
         setLoadState({ completedSourceIds: [], isInitialFetchComplete: false, failure: null })
@@ -187,8 +194,8 @@ export function useOrderEditorLiveData({
             }
         })).then(async () => {
             const order = kind === 'sales'
-                ? await db.sales_orders.get(editingOrderId)
-                : await db.purchase_orders.get(editingOrderId)
+                ? await db.sales_orders.get(orderId)
+                : await db.purchase_orders.get(orderId)
             if (!order) {
                 throw new Error('order_editor_order_not_found')
             }

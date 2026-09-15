@@ -30,7 +30,7 @@ export const REMOTE_ORDER_SAVE_CONFIRMATION_ERROR = 'remote_order_save_confirmat
 export function createRemoteOrderSaveConfirmationError(cause?: unknown) {
     const error = new Error(REMOTE_ORDER_SAVE_CONFIRMATION_ERROR)
     if (cause instanceof Error) {
-        error.cause = cause
+        Object.defineProperty(error, 'cause', { value: cause })
     }
     return error
 }

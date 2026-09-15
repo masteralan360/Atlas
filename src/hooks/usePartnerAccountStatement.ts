@@ -180,8 +180,9 @@ export function usePartnerAccountStatement(
     })
 
     void refreshPartnerAccountStatementLiveData(workspaceId, {
-      refreshTable: (tableName, targetWorkspaceId) =>
-        fetchTableFromSupabase(tableName, db[tableName], targetWorkspaceId),
+      refreshTable: async (tableName, targetWorkspaceId) => {
+        await fetchTableFromSupabase(tableName, db[tableName], targetWorkspaceId)
+      },
       refreshSales: syncSalesFromSupabase,
       onProgress: (progress) => {
         if (cancelled) return
