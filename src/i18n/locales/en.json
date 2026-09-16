@@ -4837,6 +4837,7 @@
     },
     "return": {
       "returnedMessage": "This sale has been returned",
+      "failed": "We couldn't return the sale. Please try again.",
       "confirmTitle": "Return Sale",
       "partialReturnDetected": "This sale has already been partially returned",
       "confirmMessage": "Are you sure you want to return this sale?",

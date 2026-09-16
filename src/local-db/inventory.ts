@@ -912,7 +912,14 @@ export async function adjustInventoryQuantity(input: {
         await hydrateInventoryProductStoragesFromSupabase(input.workspaceId, input.productId, [input.storageId])
     }
 
-    const updatedProduct = await db.transaction('rw', [db.inventory, db.products, db.storages], async () => {
+    // Local staff permission checks in putInventoryQuantity read these mirrors
+    // within this transaction; all of their stores must be in its scope.
+    const updatedProduct = await db.transaction('rw', [
+        db.inventory, db.products, db.storages,
+        ...(isLocalWorkspaceMode(input.workspaceId)
+            ? [db.users, db.profiles, db.storage_member_exclusions]
+            : [])
+    ], async () => {
         const currentQuantity = await getInventoryQuantityForProductStorage(input.productId, input.storageId)
         const nextQuantity = roundQuantity(currentQuantity + input.quantityDelta)
 

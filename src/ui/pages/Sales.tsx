@@ -2278,7 +2278,9 @@ export function Sales() {
             } else {
                 toast({
                     title: t('common.error') || 'Error',
-                    description: `Failed to return sale: ${normalized.message || 'Unknown error'}`,
+                    description: isLocalMode
+                        ? t('sales.return.failed')
+                        : `Failed to return sale: ${normalized.message || 'Unknown error'}`,
                     variant: 'destructive'
                 })
             }

@@ -30,7 +30,10 @@ export async function applyOfflinePosStockEffects(input: {
 
   await db.transaction(
     "rw",
-    [db.inventory, db.products, db.storages, db.stock_batches],
+    [
+      db.inventory, db.products, db.storages, db.stock_batches,
+      db.users, db.profiles, db.storage_member_exclusions,
+    ],
     async () => {
       for (const item of input.items) {
         await adjustInventoryQuantity({
