@@ -38,6 +38,11 @@ import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { isMobile } from '@/lib/platform'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import {
+    MARKETPLACE_ORDER_REFRESH_EVENT,
+    notifyMarketplaceOrdersChanged,
+    type MarketplaceOrderRefreshDetail
+} from '@/services/marketplaceOrderRealtime'
+import {
     db,
     fetchTableFromSupabase,
     recordObligationSettlement,
@@ -47,6 +52,14 @@ import {
     type WorkspacePaymentMethod
 } from '@/local-db'
 import { useWorkspace } from '@/workspace'
+import {
+    cancelWorkspaceDataHydration,
+    completeWorkspaceDataHydration,
+    failWorkspaceDataHydration,
+    recordWorkspaceDataFetch,
+    startWorkspaceDataHydration,
+    updateWorkspaceDataHydrationProgress
+} from '@/workspace/workspaceDataFreshness'
 import { EcommerceDetailView } from '@/ui/components/ecommerce/EcommerceDetailView'
 import {
     EcommerceStatusBadge,
@@ -156,8 +169,6 @@ function getJumlaKhaleejDeliveryFee(items: unknown[], storefrontKey: string | nu
     const fee = Number(metadata?.delivery_fee)
     return Number.isInteger(fee) && fee > 0 ? fee : null
 }
-
-const MARKETPLACE_ORDER_REFRESH_EVENT = 'marketplace-orders:changed'
 
 const statusFilterIcons = {
     all: ListFilter,
@@ -675,7 +686,7 @@ function EcommerceListView({
                         )}
                     </h1>
                     <p className="text-muted-foreground">
-                        {t('ecommerce.subtitle', { defaultValue: 'Track and manage marketplace orders' })} <ModulePageFreshness className="ms-2" />
+                        {t('ecommerce.subtitle', { defaultValue: 'Track and manage marketplace orders' })} <ModulePageFreshness className="ms-2" tableNames={['marketplace_orders', 'crm.sales_orders']} />
                     </p>
                 </div>
                 <div className="flex flex-col sm:flex-row lg:items-center gap-4 self-start lg:self-auto w-full lg:w-auto">
@@ -820,13 +831,24 @@ export function Ecommerce() {
     const [isSubmittingSettlement, setIsSubmittingSettlement] = useState(false)
     const [isOpeningCollection, setIsOpeningCollection] = useState(false)
     const isOpeningCollectionRef = useRef(false)
+    const loadRequestRef = useRef(0)
 
-    const loadOrders = useCallback(async () => {
+    const loadOrders = useCallback(async ({ background = false }: { background?: boolean } = {}) => {
         if (!user?.workspaceId) {
             return
         }
 
-        setIsLoading(true)
+        const workspaceId = user.workspaceId
+        const requestId = ++loadRequestRef.current
+        const operationId = `ecommerce-order-list-${requestId}`
+        let marketplaceOrdersHydrated = false
+        let salesOrdersHydrated = false
+        const isCurrentRequest = () => loadRequestRef.current === requestId
+
+        startWorkspaceDataHydration(workspaceId, 'supabase', 'marketplace_orders', operationId)
+        startWorkspaceDataHydration(workspaceId, 'supabase', 'crm.sales_orders', operationId)
+        if (!background) setIsLoading(true)
+
         try {
             const { data, error } = await runSupabaseAction('ecommerce.fetchOrders', () =>
                 supabase
@@ -840,6 +862,11 @@ export function Ecommerce() {
             }
 
             const marketplaceOrders = data ?? []
+            updateWorkspaceDataHydrationProgress(workspaceId, 'supabase', 'marketplace_orders', marketplaceOrders.length, operationId)
+            completeWorkspaceDataHydration(workspaceId, 'supabase', 'marketplace_orders', undefined, operationId)
+            recordWorkspaceDataFetch(workspaceId, 'supabase', undefined, 'marketplace_orders')
+            marketplaceOrdersHydrated = true
+
             const salesOrderIds = [...new Set(
                 marketplaceOrders
                     .map((order) => order.sales_order_id)
@@ -862,9 +889,18 @@ export function Ecommerce() {
                     throw salesOrderReturnsError
                 }
 
+                updateWorkspaceDataHydrationProgress(workspaceId, 'supabase', 'crm.sales_orders', salesOrderReturns?.length ?? 0, operationId)
                 for (const salesOrder of salesOrderReturns ?? []) {
                     salesOrderReturnsById.set(salesOrder.id, salesOrder)
                 }
+            }
+
+            completeWorkspaceDataHydration(workspaceId, 'supabase', 'crm.sales_orders', undefined, operationId)
+            recordWorkspaceDataFetch(workspaceId, 'supabase', undefined, 'crm.sales_orders')
+            salesOrdersHydrated = true
+
+            if (!isCurrentRequest()) {
+                return
             }
 
             setOrders(marketplaceOrders.map((order) => {
@@ -881,19 +917,56 @@ export function Ecommerce() {
                 }
             }))
         } catch (error) {
+            if (!isCurrentRequest()) {
+                return
+            }
+
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
                 description: error instanceof Error ? error.message : 'Failed to load marketplace orders',
                 variant: 'destructive'
             })
         } finally {
-            setIsLoading(false)
+            if (!marketplaceOrdersHydrated) {
+                if (isCurrentRequest()) {
+                    failWorkspaceDataHydration(workspaceId, 'supabase', 'marketplace_orders', undefined, operationId)
+                } else {
+                    cancelWorkspaceDataHydration(workspaceId, 'supabase', 'marketplace_orders', operationId)
+                }
+            }
+            if (!salesOrdersHydrated) {
+                if (isCurrentRequest()) {
+                    failWorkspaceDataHydration(workspaceId, 'supabase', 'crm.sales_orders', undefined, operationId)
+                } else {
+                    cancelWorkspaceDataHydration(workspaceId, 'supabase', 'crm.sales_orders', operationId)
+                }
+            }
+            if (isCurrentRequest() && !background) {
+                setIsLoading(false)
+            }
         }
     }, [t, toast, user?.workspaceId])
 
     useEffect(() => {
         void loadOrders()
+        return () => {
+            // Any response that resolves after the page or workspace has
+            // changed must only cancel its freshness operation, never replace
+            // newer visible state.
+            loadRequestRef.current += 1
+        }
     }, [loadOrders])
+
+    useEffect(() => {
+        const handleMarketplaceOrderChange = (event: Event) => {
+            const detail = (event as CustomEvent<MarketplaceOrderRefreshDetail>).detail
+            if (detail?.workspaceId !== user?.workspaceId || detail.source === 'local') return
+            void loadOrders({ background: true })
+        }
+
+        window.addEventListener(MARKETPLACE_ORDER_REFRESH_EVENT, handleMarketplaceOrderChange)
+        return () => window.removeEventListener(MARKETPLACE_ORDER_REFRESH_EVENT, handleMarketplaceOrderChange)
+    }, [loadOrders, user?.workspaceId])
 
     const openRecordCollection = async (salesOrderId: string) => {
         if (!user?.workspaceId) {
@@ -970,7 +1043,12 @@ export function Ecommerce() {
 
             setSettlementTarget(null)
             await loadOrders()
-            window.dispatchEvent(new CustomEvent(MARKETPLACE_ORDER_REFRESH_EVENT))
+            if (user?.workspaceId) {
+                notifyMarketplaceOrdersChanged({
+                    workspaceId: user.workspaceId,
+                    source: 'local'
+                })
+            }
         } catch (error) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
@@ -1002,7 +1080,12 @@ export function Ecommerce() {
             }
 
             await loadOrders()
-            window.dispatchEvent(new CustomEvent(MARKETPLACE_ORDER_REFRESH_EVENT))
+            if (user?.workspaceId) {
+                notifyMarketplaceOrdersChanged({
+                    workspaceId: user.workspaceId,
+                    source: 'local'
+                })
+            }
 
             if (nextStatus === 'delivered' && data?.sales_order_id) {
                 if (data.warning) {
@@ -1046,7 +1129,12 @@ const editMarketplaceOrderItems = async (orderId: string, items: MarketplaceOrde
             }
 
             await loadOrders()
-            window.dispatchEvent(new CustomEvent(MARKETPLACE_ORDER_REFRESH_EVENT))
+            if (user?.workspaceId) {
+                notifyMarketplaceOrdersChanged({
+                    workspaceId: user.workspaceId,
+                    source: 'local'
+                })
+            }
             toast({
                 title: t('common.success', { defaultValue: 'Success' }),
                 description: t('ecommerce.itemsEdited', { defaultValue: 'Order items updated.' })

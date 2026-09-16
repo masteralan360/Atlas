@@ -40,6 +40,7 @@ import { ManualRateModals } from './exchange/ManualRateModals'
 import { LoanPaymentModalProvider } from './loans/LoanPaymentModalProvider'
 import { UnifiedSnoozeProvider } from '@/context/UnifiedSnoozeContext'
 import { GlobalExchangeRateReminders } from './exchange/GlobalExchangeRateReminders'
+import { MarketplaceOrderRealtimeBridge } from './ecommerce/MarketplaceOrderRealtimeBridge'
 import { CurrencyConverterPopup } from './CurrencyConverterPopup'
 import { AtlasAssistantPopup } from './AtlasAssistantPopup'
 import { UnifiedSnoozedRemindersBell } from './reminders/UnifiedSnoozedRemindersBell'
@@ -159,6 +160,8 @@ import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, C
 import { useTranslation } from 'react-i18next'
 import { supabase, isSupabaseConfigured } from '@/auth/supabase'
 import { isMobile, isDesktop } from '@/lib/platform'
+import { MARKETPLACE_ORDER_REFRESH_EVENT } from '@/services/marketplaceOrderRealtime'
+import { connectionManager } from '@/lib/connectionManager'
 import { useWebHaptics } from 'web-haptics/react'
 import { useTheme } from './theme-provider'
 
@@ -598,10 +601,12 @@ export function Layout({ children }: LayoutProps) {
 
   useEffect(() => {
     if (
+      !isSupabaseConfigured ||
       !user?.workspaceId ||
       features.data_mode === 'local' ||
       features.data_mode === 'demo' ||
-      !hasFeature('ecommerce')
+      !hasFeature('ecommerce') ||
+      !hasPermission('ecommerce.access')
     ) {
       setPendingEcommerceCount(0)
       return
@@ -622,23 +627,23 @@ export function Layout({ children }: LayoutProps) {
       }
     }
 
-    fetchPendingOrders()
+    void fetchPendingOrders()
 
     const handleEcommerceUpdate = () => {
       void fetchPendingOrders()
     }
-    window.addEventListener('focus', handleEcommerceUpdate)
-    window.addEventListener('marketplace-orders:changed', handleEcommerceUpdate)
-    const intervalId = window.setInterval(() => {
-      void fetchPendingOrders()
-    }, 60_000)
+    window.addEventListener(MARKETPLACE_ORDER_REFRESH_EVENT, handleEcommerceUpdate)
+    const unsubscribeConnection = connectionManager.subscribe((event) => {
+      if (event === 'online' || event === 'wake') {
+        void fetchPendingOrders()
+      }
+    })
 
     return () => {
-      window.removeEventListener('focus', handleEcommerceUpdate)
-      window.removeEventListener('marketplace-orders:changed', handleEcommerceUpdate)
-      window.clearInterval(intervalId)
+      window.removeEventListener(MARKETPLACE_ORDER_REFRESH_EVENT, handleEcommerceUpdate)
+      unsubscribeConnection()
     }
-  }, [user?.workspaceId, features.data_mode, hasFeature])
+  }, [user?.workspaceId, features.data_mode, hasFeature, hasPermission])
 
   const handleAddToDesktop = async (name: string, href: string) => {
     if (!isDesktop()) return
@@ -1483,6 +1488,7 @@ export function Layout({ children }: LayoutProps) {
       <LoanPaymentModalProvider>
         <div className="atlas-dynamic-viewport overflow-hidden bg-transparent">
           <ResourceSyncOverlay />
+          <MarketplaceOrderRealtimeBridge />
           {features.allowed_currencies.length > 1 && <ManualRateModals />}
           {features.allowed_currencies.length > 1 && <GlobalExchangeRateReminders />}
           {/* Mobile sidebar backdrop */}
