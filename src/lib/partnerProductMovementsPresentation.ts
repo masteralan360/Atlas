@@ -1,14 +1,19 @@
 import type { PartnerProductMovement } from './partnerProductMovements'
 import type { PartnerProductMovementsColumnId } from './partnerProductMovementsTemplates'
+import { formatProductQuantity } from './productUnitPresentation'
 
 export const PRODUCT_MOVEMENTS_COLUMN_KEYS: Record<PartnerProductMovementsColumnId, string> = {
   reference: 'businessPartners.accountStatement.templateColumns.reference', description: 'common.description', item: 'businessPartners.accountStatement.item',
   quantity: 'businessPartners.accountStatement.quantity', commissionPerProduct: 'salesAgentCommissions.productCommission.perUnit',
   totalProductCommission: 'salesAgentCommissions.productCommission.lineTotal'
 }
-export function formatProductMovementQuantity(quantity: number, unit: string | null, language: string) {
-  const value = new Intl.NumberFormat(language, { maximumFractionDigits: 6 }).format(quantity)
-  return unit ? `${value} ${unit}` : value
+export function formatProductMovementQuantity(
+  quantity: number,
+  unit: string | null,
+  language: string,
+  t: (key: string, options?: Record<string, unknown>) => string
+) {
+  return formatProductQuantity(quantity, unit, language, t)
 }
 export function getProductMovementDescription(row: PartnerProductMovement, t: (key: string) => string) {
   return [t(`businessPartners.productMovements.kinds.${row.kind}`), row.note].filter(Boolean).join(' · ')

@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { BadgeCheck, BadgeDollarSign, BadgePercent, CircleDollarSign, Eye, ReceiptText, RotateCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useDateRange } from '@/context/DateRangeContext'
+import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 
 import { useAgentCommissionEntries, usePaymentObligations, useSalesOrderAgentAssignments, useSalesOrders, type IQDDisplayPreference, type PaymentObligation } from '@/local-db'
 import {
@@ -21,6 +23,7 @@ import { CommissionCurrencyTotalsView } from './CommissionCurrencyTotals'
 import { formatCommissionPlanTerms, summarizeCommissionEntries } from './agentCommissionPresentation'
 import { useCommissionAgentDirectory } from './useCommissionAgentDirectory'
 import { AgentCommissionSettlementDialog } from './AgentCommissionSettlementDialog'
+import { filterAgentCommissionPeriod } from './agentCommissionDateRange'
 
 export function AgentCommissionAdminOverview({
     workspaceId,
@@ -36,9 +39,14 @@ export function AgentCommissionAdminOverview({
     onSettleCommission?: (obligation: PaymentObligation) => void
 }) {
     const { t } = useTranslation()
-    const entries = useAgentCommissionEntries(workspaceId)
-    const assignments = useSalesOrderAgentAssignments(workspaceId)
-    const salesOrders = useSalesOrders(workspaceId)
+    const { dateRange, customDates } = useDateRange()
+    const allEntries = useAgentCommissionEntries(workspaceId)
+    const allAssignments = useSalesOrderAgentAssignments(workspaceId)
+    const allSalesOrders = useSalesOrders(workspaceId)
+    const { entries, assignments, salesOrders, isScoped } = useMemo(
+        () => filterAgentCommissionPeriod(allEntries, allAssignments, allSalesOrders, dateRange, customDates),
+        [allEntries, allAssignments, allSalesOrders, dateRange, customDates],
+    )
     const directory = useCommissionAgentDirectory(workspaceId)
     const paymentObligations = usePaymentObligations(workspaceId)
     const [settlementAgentId, setSettlementAgentId] = useState<string | null>(null)
@@ -78,9 +86,9 @@ export function AgentCommissionAdminOverview({
                 totalOrderValue
             }
         })
-        .filter((row) => row.entry.membership || row.summary.entryCount > 0 || row.trackedSummary.entryCount > 0 || row.assignedOrders > 0)
+        .filter((row) => (!isScoped && row.entry.membership) || row.summary.entryCount > 0 || row.trackedSummary.entryCount > 0 || row.assignedOrders > 0)
         .sort((left, right) => right.assignedOrders - left.assignedOrders || left.entry.name.localeCompare(right.entry.name)),
-    [assignedAssignments, directory.agents, entries, salesOrderById])
+    [assignedAssignments, directory.agents, entries, isScoped, salesOrderById])
     const settlementByAgentId = useMemo(() => {
         const result = new Map<string, PaymentObligation>()
         paymentObligations
@@ -108,6 +116,8 @@ export function AgentCommissionAdminOverview({
                 </p>
             </CardHeader>
             <CardContent className="space-y-5">
+                <DateRangeFilters showYesterday className="[&>div>div]:flex-wrap" />
+                <p className="text-xs text-muted-foreground">{t('salesAgentCommissions.periodDescription')}</p>
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
                     <OverviewMetric
                         label={t('salesAgentCommissions.assignedOrders')}
@@ -148,7 +158,7 @@ export function AgentCommissionAdminOverview({
 
                 {rows.length === 0 ? (
                     <div className="rounded-2xl border border-dashed py-8 text-center text-sm text-muted-foreground">
-                        {t('salesAgentCommissions.overviewEmpty')}
+                        {t(isScoped ? 'salesAgentCommissions.periodEmpty' : 'salesAgentCommissions.overviewEmpty')}
                     </div>
                 ) : (
                     <div className="overflow-x-auto rounded-2xl border bg-background">
@@ -231,6 +241,7 @@ export function AgentCommissionAdminOverview({
                     agentName={directory.agentById.get(settlementAgentId)?.name || t('salesAgentCommissions.agent')}
                     entries={entries.filter((entry) => entry.agentId === settlementAgentId && !entry.isDeleted)}
                     iqdPreference={iqdPreference}
+                    description={isScoped ? t('salesAgentCommissions.periodReviewDescription') : undefined}
                 />
             ) : null}
         </Card>

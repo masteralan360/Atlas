@@ -862,7 +862,7 @@ describe("sales agent commission lifecycle", () => {
     });
   });
 
-  it("keeps an all-assigned product commission outstanding for the linked staff creator", async () => {
+  it.each(["paid", "partial", "unpaid"] as const)("keeps a fulfilled %s creator sale's product commission outstanding", async (paymentStatus) => {
     const productCommissions = await import("./productCommissions");
     const order = completedOrder(crypto.randomUUID());
     const creatorAgent = {
@@ -877,7 +877,11 @@ describe("sales agent commission lifecycle", () => {
     ];
     order.subtotal = 500;
     order.total = 500;
-    order.paidAmount = 500;
+    order.paymentStatus = paymentStatus;
+    order.isPaid = paymentStatus === "paid";
+    order.paidAmount = paymentStatus === "paid" ? 500 : paymentStatus === "partial" ? 250 : 0;
+    order.balanceAmount = 500 - order.paidAmount;
+    order.paidAt = order.isPaid ? order.paidAt : null;
     // Product-only attribution bypasses the normal plan for product-covered
     // lines, but remains inside the order's enabled commission lane.
     order.commissionEnabled = true;
@@ -945,6 +949,40 @@ describe("sales agent commission lifecycle", () => {
       .and((entry) => entry.kind === "payout")
       .first();
     expect(payout).toBeUndefined();
+    expect(await db.payment_transactions.count()).toBe(0);
+  });
+
+  it.each(["unpaid", "partial"] as const)("tracks a fulfilled %s creator sale with bonuses excluded and no financial postings", async (paymentStatus) => {
+    const productCommissions = await import("./productCommissions");
+    const order = {
+      ...completedOrder(crypto.randomUUID()),
+      paymentStatus, isPaid: false, paidAt: null,
+      paidAmount: paymentStatus === "partial" ? 100 : 0,
+      balanceAmount: paymentStatus === "partial" ? 900 : 1_000,
+      commissionEnabled: true, commissionMode: "tracked" as const,
+      commissionModeCapturedAt: new Date().toISOString(),
+    };
+    order.items = [{ ...order.items[0], quantity: 3, freeBonusQuantity: 2 }];
+    const creator = { ...fieldAgent(crypto.randomUUID()), linkedUserId: order.createdBy };
+    await db.agents.put(creator);
+    await db.sales_orders.put(order);
+    await productCommissions.replaceProductCommissionRule(WORKSPACE_ID, order.items[0].productId, {
+      commissionType: "fixed_amount", fixedAmount: 7.1234564, fixedCurrency: "usd",
+      recipientScope: "all_assigned", effectiveFrom: new Date(Date.now() - 1_000).toISOString(),
+    });
+    await commissions.reconcileSalesOrderCommission(WORKSPACE_ID, order.id, order.createdBy);
+    const before = await db.agent_commission_entries.where("orderId").equals(order.id).toArray();
+    await commissions.reconcileSalesOrderCommission(WORKSPACE_ID, order.id, order.createdBy);
+    expect(await db.agent_commission_entries.where("orderId").equals(order.id).toArray()).toEqual(before);
+    expect(before).toHaveLength(1);
+    expect(before[0]).toMatchObject({ commissionMode: "tracked", amount: 21.369, productCommissionAmount: 21.369, planCommissionAmount: 0 });
+    expect(await db.agent_product_commission_entries.where("orderId").equals(order.id).first()).toMatchObject({
+      quantity: 3, commissionPerUnit: 7.123, amount: 21.369,
+    });
+    expect(await db.sales_orders.get(order.id)).toEqual(order);
+    expect(await db.payment_transactions.count()).toBe(0);
+    expect(await db.loans.count()).toBe(0);
+    expect(await db.inventory_transactions.count()).toBe(0);
   });
 
   it("credits a selected-assigned product rule to its linked staff creator with per-unit rounding", async () => {

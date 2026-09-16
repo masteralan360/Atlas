@@ -25,10 +25,6 @@ Balance Color Settings
 
 Context-menu partner account statement & invoice redirect
 
-Accumilated Products and consider commission per product account statement
-Commission Total Match Order
-Product-Only Account Statement
-
 Accumilated account statement rows by types and for one day
 
 Centralized Photo Compression

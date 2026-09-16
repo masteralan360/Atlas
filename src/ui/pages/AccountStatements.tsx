@@ -44,6 +44,7 @@ import {
 } from '@/lib/partnerAccountStatementPresentation'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { getLoanDetailsPath } from '@/lib/loanPresentation'
+import { formatProductQuantity } from '@/lib/productUnitPresentation'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import type { CustomTemplateLayout } from '@/lib/printPreviewEditorStore'
 import { cn, formatCurrency, formatDate } from '@/lib/utils'
@@ -126,12 +127,6 @@ function balanceClass(balance: number) {
     if (balance > 0.000001) return 'text-emerald-600'
     if (balance < -0.000001) return 'text-yellow-500'
     return ''
-}
-
-function formatStatementQuantity(quantity: number | null | undefined, unit: string | null | undefined, language: string) {
-    if (quantity === null || quantity === undefined) return '—'
-    const value = new Intl.NumberFormat(language, { maximumFractionDigits: 6 }).format(quantity)
-    return unit ? `${value} ${unit}` : value
 }
 
 function entrySourcePath(entry: PartnerAccountStatementEntry) {
@@ -306,7 +301,7 @@ function LedgerCard({
                                                 case 'item':
                                                     return <TableCell key={columnId} className="min-w-40 whitespace-pre-wrap">{entry.itemName || '—'}</TableCell>
                                                 case 'quantity':
-                                                    return <TableCell key={columnId} className="text-right tabular-nums whitespace-nowrap">{formatStatementQuantity(entry.quantity, entry.unit, language)}</TableCell>
+                                                    return <TableCell key={columnId} className="text-right tabular-nums whitespace-nowrap">{formatProductQuantity(entry.quantity, entry.unit, language, t)}</TableCell>
                                                 case 'commissionPerProduct':
                                                     return <TableCell key={columnId} className="text-right font-medium tabular-nums whitespace-nowrap">{entry.commissionPerProduct == null ? '—' : display(entry.commissionPerProduct)}</TableCell>
                                                 case 'totalProductCommission':

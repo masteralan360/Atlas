@@ -15,7 +15,7 @@ export function ProductMovementsTotals({ statement, language, iqdPreference, pri
   return <div className={cn('flex flex-wrap items-start gap-x-6 gap-y-2', print ? 'text-[9px]' : 'text-sm')}>
     <strong>{t('common.total')}</strong>
     {statement.quantityTotals.map(total => <span key={JSON.stringify([total.direction, total.unit])}>
-      {t(`businessPartners.productMovements.${total.direction}`)}: <strong className="tabular-nums">{formatProductMovementQuantity(total.quantity, total.unit || t('businessPartners.productMovements.unknownUnit'), language)}</strong>
+      {t(`businessPartners.productMovements.${total.direction}`)}: <strong className="tabular-nums">{formatProductMovementQuantity(total.quantity, total.unit || t('businessPartners.productMovements.unknownUnit'), language, t)}</strong>
     </span>)}
     {statement.commissionTotals.map(total => <span key={total.currency}>
       {t('salesAgentCommissions.productCommission.lineTotal')}: <strong className="tabular-nums">{formatCurrency(total.amount, total.currency, iqdPreference)}</strong>
@@ -49,9 +49,9 @@ export function PartnerProductMovementsTable({ statement, columns, language, iqd
           </span> : references.map((ref, i) => <span key={`${ref.path}:${ref.label}`}>{i > 0 ? ' - ' : ''}<Link className="text-primary underline-offset-4 hover:underline" href={ref.path}>{ref.label}</Link></span>); break
           case 'description': value = <>{getProductMovementDescription(entry, t)}{!entry.date && <span className="ms-1 text-muted-foreground">({t('businessPartners.productMovements.undated')})</span>}</>; break
           case 'item': value = entry.item; break
-          case 'quantity': value = formatProductMovementQuantity(entry.quantity, entry.unit, language); break
-          case 'commissionPerProduct': value = entry.commissionPerProduct === null ? '—' : formatCurrency(entry.commissionPerProduct, entry.currency, iqdPreference); break
-          case 'totalProductCommission': value = entry.totalProductCommission === null ? '—' : formatCurrency(entry.totalProductCommission, entry.currency, iqdPreference); break
+          case 'quantity': value = formatProductMovementQuantity(entry.quantity, entry.unit, language, t); break
+          case 'commissionPerProduct': value = entry.kind === 'bonus' ? t('businessPartners.productMovements.freeCommissionNotCounted') : entry.commissionPerProduct === null ? '—' : formatCurrency(entry.commissionPerProduct, entry.currency, iqdPreference); break
+          case 'totalProductCommission': value = entry.kind === 'bonus' ? t('businessPartners.productMovements.freeCommissionNotCounted') : entry.totalProductCommission === null ? '—' : formatCurrency(entry.totalProductCommission, entry.currency, iqdPreference); break
         }
         return <td key={column} className={cellClass(column)}>{value}</td>
       })}

@@ -33,7 +33,8 @@ export function AgentCommissionSettlementDialog({
     workspaceId,
     agentName,
     entries,
-    iqdPreference
+    iqdPreference,
+    description,
 }: {
     open: boolean
     onOpenChange: (open: boolean) => void
@@ -41,6 +42,7 @@ export function AgentCommissionSettlementDialog({
     agentName: string
     entries: AgentCommissionEntry[]
     iqdPreference: IQDDisplayPreference
+    description?: string
 }) {
     const { t } = useTranslation()
     const salesOrders = useSalesOrders(workspaceId)
@@ -59,7 +61,7 @@ export function AgentCommissionSettlementDialog({
                         {t('salesAgentCommissions.reviewAgentCommission', { name: agentName })}
                     </AppDialogTitle>
                     <AppDialogDescription>
-                        {t('salesAgentCommissions.reviewDescription')}
+                        {description || t('salesAgentCommissions.reviewDescription')}
                     </AppDialogDescription>
                 </AppDialogHeader>
                 <AppDialogBody className="space-y-5">

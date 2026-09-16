@@ -19,6 +19,7 @@ import {
     getPartnerAccountStatementVisibleColumns,
     type PartnerAccountStatementColumnId
 } from '@/lib/partnerAccountStatementTemplates'
+import { formatProductQuantity } from '@/lib/productUnitPresentation'
 import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { platformService } from '@/services/platformService'
 export {
@@ -108,12 +109,6 @@ function balanceClass(balance: number) {
     if (balance > 0.000001) return 'text-emerald-600'
     if (balance < -0.000001) return 'text-yellow-500'
     return ''
-}
-
-function formatStatementQuantity(quantity: number | null | undefined, unit: string | null | undefined, language: string) {
-    if (quantity === null || quantity === undefined) return '—'
-    const value = new Intl.NumberFormat(language, { maximumFractionDigits: 6 }).format(quantity)
-    return unit ? `${value} ${unit}` : value
 }
 
 // Keep the same fixed-table pagination model as Atlas Standard: the first
@@ -270,7 +265,7 @@ function LedgerTableChunk({
                                     case 'item':
                                         return <td key={columnId} className="border border-slate-300 px-1.5 py-1 align-top whitespace-pre-wrap">{entry.itemName || '—'}</td>
                                     case 'quantity':
-                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{formatStatementQuantity(entry.quantity, entry.unit, language)}</td>
+                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{formatProductQuantity(entry.quantity, entry.unit, language, t)}</td>
                                     case 'commissionPerProduct':
                                         return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{entry.commissionPerProduct == null ? '—' : displayAmount(entry.commissionPerProduct)}</td>
                                     case 'totalProductCommission':

@@ -1353,7 +1353,6 @@ async function ensureLocalOrderCreatorProductCommissionAssignmentInternal(order:
     order.commissionEnabled === false
     || !order.createdBy
     || order.status !== "completed"
-    || (!isMarketplaceDelivery && !order.isPaid && order.paymentStatus !== "paid")
     || order.returnStatus === "full"
     || order.isDeleted
   ) {
