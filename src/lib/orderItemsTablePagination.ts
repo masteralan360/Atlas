@@ -14,6 +14,8 @@
  * the exported document in sync.
  */
 
+import { fitPrintReferenceLists } from './printReferenceList'
+
 export const ORDER_ITEMS_PAGINATED_ATTR = 'data-order-items-paginated'
 export const ORDER_ITEMS_SECTION_ATTR = 'data-order-items-section'
 export const ORDER_ITEMS_TITLE_BAR_ATTR = 'data-order-items-section-title-bar'
@@ -58,25 +60,34 @@ export type OrderItemsTableHeaderSpacer = {
  * visible row and the continuation starts with a whole row. When the table's
  * very first row already crosses the line there is nothing to cut above it —
  * the keep-together pagination moves the whole table to the next page instead.
+ * When present, a footer is measured as part of the last data row.
  */
 export function findOrderItemsSplitIndex(
     rows: readonly OrderItemsRowSpan[],
     pageHeightMm: number,
-    pagePaddingMm = 0
+    pagePaddingMm = 0,
+    footerBottomMm?: number
 ): OrderItemsSplitDecision | null {
     if (rows.length === 0 || !Number.isFinite(pageHeightMm) || pageHeightMm <= 0 || !Number.isFinite(pagePaddingMm) || pagePaddingMm < 0) {
         return null
     }
 
     const firstTopMm = rows[0].topMm
-    const lastBottomMm = rows[rows.length - 1].bottomMm
+    // Keep a statement's totals and notes with its final data row. A footer
+    // participates in page fitting even though it lives outside tbody.
+    const lastRowIndex = rows.length - 1
+    const lastBottomMm = Number.isFinite(footerBottomMm)
+        ? Math.max(rows[lastRowIndex].bottomMm, footerBottomMm!)
+        : rows[lastRowIndex].bottomMm
     const lastBoundaryIndex = Math.floor((lastBottomMm + pagePaddingMm) / pageHeightMm)
 
     for (let boundaryIndex = 1; boundaryIndex <= lastBoundaryIndex; boundaryIndex += 1) {
         const boundaryMm = (boundaryIndex * pageHeightMm) - pagePaddingMm
         if (boundaryMm <= firstTopMm + SPLIT_EPSILON_MM) continue
 
-        const crossingRowIndex = rows.findIndex((row) => row.bottomMm > boundaryMm + SPLIT_EPSILON_MM)
+        const crossingRowIndex = rows.findIndex((row, index) => (
+            index === lastRowIndex ? lastBottomMm : row.bottomMm
+        ) > boundaryMm + SPLIT_EPSILON_MM)
         if (crossingRowIndex > 0) {
             return { rowIndex: crossingRowIndex, boundaryMm }
         }
@@ -131,7 +142,7 @@ export function planOrderItemsTableHeaderSpacer(
 }
 
 /**
- * Undoes every previous split: moves the chunk rows back into their original
+ * Undoes every previous split: moves the chunk rows and footer back into their original
  * table (in reverse document order so each chunk is appended after the rows of
  * the chunk before it) and removes the continuation wrappers.
  */
@@ -149,6 +160,8 @@ export function restoreOrderItemsTableSplits(root: HTMLElement): void {
         if (targetTable && movedRows.length > 0) {
             const targetBody = targetTable.querySelector('tbody') || targetTable
             movedRows.forEach((row) => targetBody.appendChild(row))
+            const footer = chunkTable?.querySelector('tfoot')
+            if (footer) targetTable.appendChild(footer)
         }
 
         continuation.remove()
@@ -182,6 +195,7 @@ export function paginateOrderItemsTables(
     if (!root.querySelector(`${ORDER_ITEMS_PAGINATED_SELECTOR}, ${ORDER_ITEMS_CONTINUATION_TABLE_SELECTOR}`)) return
 
     restoreOrderItemsTableSplits(root)
+    fitPrintReferenceLists(root)
 
     const rootRect = root.getBoundingClientRect()
     if (rootRect.width <= 0) return
@@ -224,9 +238,11 @@ function findNextOrderItemsTableHeaderSpacer(
 
         const tableRect = table.getBoundingClientRect()
         const firstRowRect = firstRow.getBoundingClientRect()
+        const singleRowFooter = firstRow.nextElementSibling ? null : table.querySelector('tfoot')
+        const firstRowBottom = Math.max(firstRowRect.bottom, singleRowFooter?.getBoundingClientRect().bottom || firstRowRect.bottom)
         const spacer = planOrderItemsTableHeaderSpacer(
             (tableRect.top - rootRect.top) * pxToMm,
-            (firstRowRect.bottom - rootRect.top) * pxToMm,
+            (firstRowBottom - rootRect.top) * pxToMm,
             pageHeightMm,
             pagePaddingMm
         )
@@ -267,7 +283,9 @@ function findNextOrderItemsTableSplit(
             }
         })
 
-        const decision = findOrderItemsSplitIndex(spans, pageHeightMm, pagePaddingMm)
+        const footer = table.querySelector('tfoot')
+        const footerBottomMm = footer ? (footer.getBoundingClientRect().bottom - rootRect.top) * pxToMm : undefined
+        const decision = findOrderItemsSplitIndex(spans, pageHeightMm, pagePaddingMm, footerBottomMm)
         if (decision) {
             return { table, rowIndex: decision.rowIndex }
         }
@@ -293,8 +311,8 @@ function getOrderItemsTitleParts(table: HTMLTableElement): { title: string; labe
 
 /**
  * Moves `rowIndex` and every following row of the table into a new chunk table
- * that repeats the section title (with its "continued" label) and the column
- * header row, and inserts that chunk right after the source table.
+ * that repeats the column header and any section title, and inserts that
+ * chunk right after the source table. Totals belong to the final chunk.
  */
 function applyOrderItemsTableSplit(table: HTMLTableElement, rowIndex: number): void {
     const sourceBody = table.querySelector('tbody')
@@ -310,6 +328,7 @@ function applyOrderItemsTableSplit(table: HTMLTableElement, rowIndex: number): v
     const chunk = table.cloneNode(false) as HTMLTableElement
     chunk.removeAttribute(ORDER_ITEMS_PAGINATED_ATTR)
     chunk.setAttribute(ORDER_ITEMS_CONTINUATION_TABLE_ATTR, '')
+    table.querySelectorAll(':scope > colgroup').forEach(group => chunk.appendChild(group.cloneNode(true)))
 
     const titleParts = getOrderItemsTitleParts(table)
     if (titleParts) {
@@ -326,12 +345,14 @@ function applyOrderItemsTableSplit(table: HTMLTableElement, rowIndex: number): v
 
     const chunkHead = head ? (head.cloneNode(true) as HTMLTableSectionElement) : document.createElement('thead')
     chunkHead.querySelector(`tr[${ORDER_ITEMS_CONTINUATION_LABEL_ATTR}]`)?.remove()
-    chunkHead.insertBefore(buildContinuationTitleRow(titleParts, columnCount), chunkHead.firstChild)
+    if (titleParts) chunkHead.insertBefore(buildContinuationTitleRow(titleParts, columnCount), chunkHead.firstChild)
     chunk.appendChild(chunkHead)
 
     const chunkBody = document.createElement('tbody')
     movedRows.forEach((row) => chunkBody.appendChild(row))
     chunk.appendChild(chunkBody)
+    const footer = table.querySelector('tfoot')
+    if (footer) chunk.appendChild(footer)
 
     continuation.appendChild(chunk)
     table.insertAdjacentElement('afterend', continuation)

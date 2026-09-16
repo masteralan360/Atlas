@@ -209,6 +209,11 @@ export function buildWorkspaceNavigation({
                       href: "/business-partners/account-statement",
                       icon: FileText,
                     },
+                    {
+                      name: t("businessPartners.productMovements.title"),
+                      href: "/business-partners/product-movements-statement",
+                      icon: PackageCheck,
+                    },
                   ]
                   : []),
                 ...(canUseEcommerce && canAccessPermission("ecommerce.access")

@@ -58,6 +58,31 @@ describe('findOrderItemsSplitIndex', () => {
             row(568, 16)
         ], 297, 14)).toEqual({ rowIndex: 1, boundaryMm: 580 })
     })
+
+    it('fills the first page and uses the larger continuation area without a fixed row limit', () => {
+        expect(findOrderItemsSplitIndex(Array.from({ length: 60 }, (_, index) => row(60 + index * 10, 10)), 297, 9))
+            .toEqual({ rowIndex: 22, boundaryMm: 288 })
+        expect(findOrderItemsSplitIndex(Array.from({ length: 38 }, (_, index) => row(316 + index * 10, 10)), 297, 9))
+            .toEqual({ rowIndex: 26, boundaryMm: 585 })
+    })
+
+    it('moves the last data row with its totals when the rows fit but the footer does not', () => {
+        expect(findOrderItemsSplitIndex([row(250, 10), row(260, 10), row(270, 10)], 297, 9, 300))
+            .toEqual({ rowIndex: 2, boundaryMm: 288 })
+    })
+
+    it('keeps totals ending exactly at the printable bottom and tolerates sub-pixel rounding', () => {
+        const rows = [row(250, 10), row(260, 10)]
+        expect(findOrderItemsSplitIndex(rows, 297, 9, 288)).toBeNull()
+        expect(findOrderItemsSplitIndex(rows, 297, 9, 288.04)).toBeNull()
+        expect(findOrderItemsSplitIndex(rows, 297, 9, 288.06)).toEqual({ rowIndex: 1, boundaryMm: 288 })
+    })
+
+    it('ignores invalid footer measurements and never splits the first row away from its totals', () => {
+        expect(findOrderItemsSplitIndex([row(250)], 297, 9, 300)).toBeNull()
+        expect(findOrderItemsSplitIndex([row(250), row(258)], 297, 9, Number.NaN)).toBeNull()
+        expect(findOrderItemsSplitIndex([row(250), row(258)], 297, 9, 200)).toBeNull()
+    })
 })
 
 describe('planOrderItemsTableHeaderSpacer', () => {

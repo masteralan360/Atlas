@@ -413,6 +413,10 @@
       "clearDescription": "This removes every module from Favorites on this device. The modules return to their original sidebar sections."
     },
     "modules": {
+      "/business-partners/product-movements-statement": {
+        "description": "Review and print a business partner's actual product movements, quantities and commissions.",
+        "badge": "Statement"
+      },
       "/post-service": {
         "description": "Operate COD shipments, courier dispatch, cash handovers, and merchant payouts.",
         "badge": "Delivery"
@@ -1440,6 +1444,35 @@
     "deleteWarning": "All customer data and transaction history will be permanently removed."
   },
   "businessPartners": {
+    "productMovements": {
+      "moreReferences": "+{{additionalCount}} More",
+      "title": "Partner Product Movements Statement",
+      "templatesTitle": "Partner Product Movements Statement Templates",
+      "defaultTemplateSavedDescription": "New product movement statements will use this template by default.",
+      "builtInDefaultTemplate": "Default Product Movements Statement",
+      "accumulate": "Accumulate products",
+      "accumulateDescription": "Combine quantities for the same product and unit, keeping sales, purchases, currencies and commission rates separate. Join the source references.",
+      "selectPartnerDescription": "Choose a partner to view fulfilled sales, received purchases, returns and product commissions.",
+      "sold": "Net sold",
+      "purchased": "Net purchased",
+      "undated": "Undated movement",
+      "unknownUnit": "Unspecified unit",
+      "undatedNotice": "{{count}} movement rows have no reliable movement date. They appear in All Time and are excluded from dated ranges.",
+      "footerNote": "Quantities include free bonus products. Returns reduce net movement. Commission uses recorded commission-bearing quantities; each currency is totaled separately.",
+      "accountStatementA4Template": "Partner Product Movements Statement A4",
+      "printAccountStatementA4": "Print Partner Product Movements Statement A4",
+      "accountStatementA4TemplateDescription": "Actual product movements, quantity totals by unit and historical product commissions.",
+      "customAccountStatementA4TemplateDescription": "Use this saved Partner Product Movements Statement layout.",
+      "kinds": {
+        "sale": "Fulfilled sale",
+        "purchase": "Received purchase",
+        "return": "Product return",
+        "exchange": "Exchange replacement",
+        "bonus": "Free Bonus"
+      },
+      "refreshingDescription": "Loading fulfilled sales, received purchases, returns and product commission snapshots.",
+      "templateLoadFailed": "Could not load statement templates. Check your connection and retry."
+    },
     "title": "Business Partners",
     "overview": "Overview",
     "subtitle": "Manage shared customer and supplier profiles in one place.",
@@ -1603,8 +1636,18 @@
         "marketplaceDeliveryProductCommission": "Marketplace delivery product commission",
         "directReceipt": "Direct receipt",
         "directPayment": "Direct payment",
-        "orderLoanProvided": "Order loan provided",
-        "orderLoanReceived": "Order loan received",
+        "saleOrderByPaymentMethod": "Sale Order By {{paymentMethod}}",
+        "paymentMethods": {
+          "cash": "Cash",
+          "fib": "FIB",
+          "qicard": "QiCard",
+          "zaincash": "ZainCash",
+          "fastpay": "FastPay",
+          "bank_transfer": "Bank Transfer",
+          "loan": "Loan",
+          "installments": "Installments",
+          "unknown": "Unknown"
+        },
         "posSaleLoanProvided": "POS sale loan provided",
         "posSaleLoanReceived": "POS sale loan received",
         "loanProvided": "Loan provided",

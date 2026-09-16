@@ -16,7 +16,9 @@ vi.mock('@/services/platformService', () => ({
 vi.mock('react-i18next', () => ({
     useTranslation: () => ({
         i18n: {
-            getFixedT: () => (key: string, options?: { defaultValue?: string }) => options?.defaultValue || key
+            getFixedT: () => (key: string, options?: Record<string, unknown> & { defaultValue?: string }) => (
+                options?.defaultValue || key
+            ).replace(/\{\{(\w+)\}\}/g, (_, name) => String(options?.[name] ?? ''))
         }
     })
 }))
@@ -781,7 +783,7 @@ describe('buildPartnerAccountStatementLedger', () => {
         ])
     })
 
-    it('prints an order loan once and keeps its source order reference', () => {
+    it('presents an order loan as a sales order paid by loan and keeps its source order reference', () => {
         const data = statementData()
         data.statementOrders = [{
             id: 'financed-sales-order',
@@ -814,11 +816,168 @@ describe('buildPartnerAccountStatementLedger', () => {
 
         expect(iqdLedger?.entries).toMatchObject([{
             reference: 'SO-LOAN · SL-0001',
-            description: 'Order loan provided',
+            kind: 'sales_order',
+            description: 'Sale Order By {{paymentMethod}}',
+            descriptionKey: 'saleOrderByPaymentMethod',
+            paymentMethod: 'loan',
             delta: 200000,
             runningBalance: 200000
         }])
         expect(iqdLedger?.entries).toHaveLength(1)
+
+        const html = renderToStaticMarkup(createElement(PartnerAccountStatementPrintTemplate, {
+            printLang: 'en',
+            data: data as any
+        }))
+        expect(html).toContain('>Sales Order</td>')
+        expect(html).toContain('>Sale Order By Loan</div>')
+    })
+
+    it('itemizes a financed sale from its source order without duplicating its loan balance or product commission', () => {
+        const data = statementData()
+        data.itemizeSalesOrders = true
+        data.isAgentCommissionStatement = true
+        data.statementOrders = [{
+            id: 'financed-sales-order', orderNumber: 'SO-INSTALLMENT', customerId: 'agent-partner',
+            total: 280, originalTotalAmount: 300, returnedAmount: 20, currency: 'iqd', status: 'completed',
+            paymentMethod: 'installments', createdAt: '2026-01-10T10:00:00.000Z', isDeleted: false,
+            linkedLoanId: 'order-loan',
+            items: [
+                { id: 'coffee-line', productName: 'Coffee', quantity: 2, unit: 'pcs', lineTotal: 100 },
+                { id: 'tea-line', productName: 'Tea', quantity: 4, unit: 'pcs', lineTotal: 200 }
+            ]
+        }] as any
+        data.settlementTransactions = []
+        data.loans = [{
+            id: 'order-loan', loanNo: 'SL-0002', source: 'order', orderId: 'financed-sales-order',
+            loanCategory: 'standard', direction: 'lent', principalAmount: 150, settlementCurrency: 'iqd',
+            status: 'active', createdAt: '2026-01-10T10:00:00.000Z', isDeleted: false
+        }] as any
+        data.linkedOrderCodes = { 'financed-sales-order': 'SO-INSTALLMENT' }
+        data.salesOrderReturns = [{
+            id: 'return-1', orderId: 'financed-sales-order', reason: 'customer_returned', status: 'posted',
+            refundAmount: 20, returnedAt: '2026-01-11T10:00:00.000Z', createdAt: '2026-01-11T10:00:00.000Z',
+            isDeleted: false
+        }] as any
+        data.salesOrderReturnItems = [{
+            id: 'returned-tea', returnId: 'return-1', orderId: 'financed-sales-order', orderItemId: 'tea-line',
+            quantity: 1, refundAmount: 20, isDeleted: false
+        }] as any
+        data.agentProductCommissionEntries = [
+            {
+                id: 'coffee-commission', orderId: 'financed-sales-order', assignmentId: 'assignment-1', agentId: 'agent-1',
+                orderItemId: 'coffee-line', productId: 'coffee', kind: 'accrual', status: 'earned', currency: 'iqd',
+                commissionType: 'fixed_amount', ratePercent: 0, quantity: 2, basisAmountPerUnit: 50,
+                commissionMode: 'tracked', commissionPerUnit: 5, amount: 10,
+                occurredAt: '2026-01-10T10:00:00.000Z', isDeleted: false
+            },
+            {
+                id: 'tea-commission', orderId: 'financed-sales-order', assignmentId: 'assignment-1', agentId: 'agent-1',
+                orderItemId: 'tea-line', productId: 'tea', kind: 'accrual', status: 'earned', currency: 'iqd',
+                commissionType: 'fixed_amount', ratePercent: 0, quantity: 4, basisAmountPerUnit: 50,
+                commissionMode: 'tracked', commissionPerUnit: 5, amount: 20,
+                occurredAt: '2026-01-10T10:00:00.000Z', isDeleted: false
+            },
+            {
+                id: 'tea-return-commission', orderId: 'financed-sales-order', orderReturnId: 'return-1',
+                assignmentId: 'assignment-1', agentId: 'agent-1', orderItemId: 'tea-line', productId: 'tea',
+                kind: 'reversal', status: 'reversed', currency: 'iqd', commissionType: 'fixed_amount', ratePercent: 0,
+                quantity: -1, basisAmountPerUnit: 50, commissionMode: 'tracked', commissionPerUnit: 5, amount: -5,
+                occurredAt: '2026-01-11T10:00:00.000Z', isDeleted: false
+            }
+        ] as any
+
+        const [ledger] = buildPartnerAccountStatementLedger(data)
+        const saleRows = ledger.entries.filter((entry) => entry.id.startsWith('loan:order-loan:item:'))
+        const returnRow = ledger.entries.find((entry) => entry.id === 'loan:order-loan:sales-order-return:return-1:item:returned-tea')
+
+        expect(saleRows.map((entry) => [entry.itemName, entry.quantity, entry.delta, entry.totalProductCommission]).sort()).toEqual([
+            ['Coffee', 2, 50, 10],
+            ['Tea', 4, 100, 20]
+        ])
+        expect(saleRows.reduce((sum, entry) => sum + entry.delta, 0)).toBe(150)
+        expect(returnRow).toMatchObject({
+            reference: 'SO-INSTALLMENT · return-1', itemName: 'Tea', quantity: -1, delta: 0, totalProductCommission: -5
+        })
+        expect(ledger).toMatchObject({ closingBalance: 150, productCommissionTotal: 25 })
+
+        const html = renderToStaticMarkup(createElement(PartnerAccountStatementPrintTemplate, {
+            printLang: 'en',
+            data: data as any
+        }))
+        expect(html).toContain('>Sale Order By Installments</div>')
+        expect(html).toContain('>Coffee</td>')
+        expect(html).toContain('>Tea</td>')
+    })
+
+    it('keeps a financed sale as one order row and retains its product commission when its source items are unavailable', () => {
+        const data = statementData()
+        data.itemizeSalesOrders = true
+        data.isAgentCommissionStatement = true
+        data.statementOrders = [{
+            id: 'financed-sale-without-items', orderNumber: 'SO-LOAN-NO-ITEMS', customerId: 'agent-partner',
+            total: 100, currency: 'iqd', status: 'completed', paymentMethod: 'loan',
+            createdAt: '2026-01-10T10:00:00.000Z', isDeleted: false, linkedLoanId: 'order-loan-without-items'
+        }] as any
+        data.settlementTransactions = []
+        data.loans = [{
+            id: 'order-loan-without-items', loanNo: 'SL-0003', source: 'order', orderId: 'financed-sale-without-items',
+            loanCategory: 'simple', direction: 'lent', principalAmount: 100, settlementCurrency: 'iqd',
+            status: 'active', createdAt: '2026-01-10T10:00:00.000Z', isDeleted: false
+        }] as any
+        data.agentProductCommissionEntries = [{
+            id: 'orphaned-product-snapshot', orderId: 'financed-sale-without-items', assignmentId: 'assignment-1', agentId: 'agent-1',
+            orderItemId: 'missing-line', productId: 'product-1', kind: 'accrual', status: 'earned', currency: 'iqd',
+            commissionType: 'fixed_amount', ratePercent: 0, quantity: 1, basisAmountPerUnit: 100,
+            commissionMode: 'tracked', commissionPerUnit: 12, amount: 12,
+            occurredAt: '2026-01-10T10:00:00.000Z', isDeleted: false
+        }] as any
+
+        const [ledger] = buildPartnerAccountStatementLedger(data)
+        expect(ledger.entries).toMatchObject([{
+            id: 'loan:order-loan-without-items', kind: 'sales_order', paymentMethod: 'loan', delta: 100,
+            totalProductCommission: 12
+        }])
+        expect(ledger.productCommissionTotal).toBe(12)
+    })
+
+    it('labels each sales order with its selected payment method', () => {
+        const data = statementData()
+        data.period = { type: 'allTime' }
+        data.statementOrders = [
+            {
+                id: 'cash-sale', orderNumber: 'SO-CASH', customerId: 'partner-1', total: 100,
+                currency: 'usd', status: 'completed', paymentMethod: 'cash',
+                createdAt: '2026-01-04T10:00:00.000Z', isDeleted: false, linkedLoanId: null
+            },
+            {
+                id: 'fib-sale', orderNumber: 'SO-FIB', customerId: 'partner-1', total: 100,
+                currency: 'usd', status: 'completed', paymentMethod: 'fib',
+                createdAt: '2026-01-05T10:00:00.000Z', isDeleted: false, linkedLoanId: null
+            }
+        ] as any
+        data.settlementTransactions = []
+
+        const entries = buildPartnerAccountStatementLedger(data).flatMap((ledger) => ledger.entries)
+        expect(entries).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: 'sales-order:cash-sale',
+                descriptionKey: 'saleOrderByPaymentMethod',
+                paymentMethod: 'cash'
+            }),
+            expect.objectContaining({
+                id: 'sales-order:fib-sale',
+                descriptionKey: 'saleOrderByPaymentMethod',
+                paymentMethod: 'fib'
+            })
+        ]))
+
+        const html = renderToStaticMarkup(createElement(PartnerAccountStatementPrintTemplate, {
+            printLang: 'en',
+            data: data as any
+        }))
+        expect(html).toContain('>Sale Order By Cash</div>')
+        expect(html).toContain('>Sale Order By FIB</div>')
     })
 
     it('names a POS sale loan and pairs it with its POS sale reference', () => {

@@ -17,15 +17,11 @@ Add Row to summary
 
 Revenue Analytics and accounting
 
-Prevent Order form Back-Button
-
 
 
 Multi-Color Partner
 
 Balance Color Settings
-
-Account statement Loading Progress Bar
 
 Context-menu partner account statement & invoice redirect
 

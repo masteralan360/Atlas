@@ -5,6 +5,7 @@ import type {
   InstallmentSale,
   Loan,
   LoanPayment,
+  OrderPaymentMethod,
   OrderReturn,
   OrderReturnItem,
   PaymentTransaction,
@@ -111,8 +112,7 @@ export type PartnerAccountStatementEntryDescriptionKey =
   | 'marketplaceDeliveryProductCommission'
   | 'directReceipt'
   | 'directPayment'
-  | 'orderLoanProvided'
-  | 'orderLoanReceived'
+  | 'saleOrderByPaymentMethod'
   | 'posSaleLoanProvided'
   | 'posSaleLoanReceived'
   | 'loanProvided'
@@ -149,6 +149,8 @@ export type PartnerAccountStatementEntry = {
   kind: PartnerAccountStatementEntryKind
   description: string
   descriptionKey?: PartnerAccountStatementEntryDescriptionKey
+  /** The order's selected payment method, retained for its statement label. */
+  paymentMethod?: OrderPaymentMethod | 'unknown'
   note?: string | null
   /** A persisted return-reason code or custom return reason, localized only when displayed. */
   returnReason?: string | null
@@ -473,6 +475,7 @@ function createOrderEntries(data: PartnerAccountStatementData): PartnerAccountSt
     // business-partner statements retain their original document-level
     // presentation unless the user explicitly enables item detail.
     const salesOrder = order as SalesOrder
+    const paymentMethod = salesOrder.paymentMethod || 'unknown'
     const saleItems = (salesOrder.items || []).filter((item) => Number(item.quantity || 0) > 0)
     const shouldItemizeSalesOrders = data.itemizeSalesOrders === true
     const orderProductCommissionAccruals = productCommissionEntries.filter(
@@ -501,8 +504,9 @@ function createOrderEntries(data: PartnerAccountStatementData): PartnerAccountSt
           date: salesOrder.createdAt,
           reference: salesOrder.orderNumber,
           kind: 'sales_order',
-          description: 'Sales order',
-          descriptionKey: 'salesOrder',
+          description: 'Sale Order By {{paymentMethod}}',
+          descriptionKey: 'saleOrderByPaymentMethod',
+          paymentMethod,
           itemName: item.productName,
           quantity: Number(item.quantity || 0),
           unit: item.unit || null,
@@ -528,8 +532,9 @@ function createOrderEntries(data: PartnerAccountStatementData): PartnerAccountSt
         date: salesOrder.createdAt,
         reference: salesOrder.orderNumber,
         kind: 'sales_order',
-        description: 'Sales order',
-        descriptionKey: 'salesOrder',
+        description: 'Sale Order By {{paymentMethod}}',
+        descriptionKey: 'saleOrderByPaymentMethod',
+        paymentMethod,
         note: salesOrder.notes,
         totalProductCommission: orderProductCommissionTotal,
         currency: salesOrder.currency,
@@ -817,26 +822,55 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
   const loans = data.loans || []
   const payments = data.loanPayments || []
   const loanById = new Map(loans.map((loan) => [loan.id, loan]))
+  const salesOrderById = new Map(
+    (data.statementOrders || data.salesOrders)
+      .filter(isSalesOrder)
+      .map((order) => [order.id, order])
+  )
+  // Product snapshots are informational: the linked loan remains the sole
+  // balance movement for a financed order, while these snapshots keep the
+  // sale and agent commission audit trail visible on the statement.
+  const productCommissionEntries = (data.agentProductCommissionEntries || [])
+    .filter((entry) => !entry.isDeleted)
+  const returnsByOrderId = new Map<string, OrderReturn[]>()
+  const returnItemsByReturnId = new Map<string, OrderReturnItem[]>()
+  for (const orderReturn of data.salesOrderReturns || []) {
+    if (orderReturn.isDeleted || orderReturn.status !== 'posted') continue
+    const rows = returnsByOrderId.get(orderReturn.orderId) || []
+    rows.push(orderReturn)
+    returnsByOrderId.set(orderReturn.orderId, rows)
+  }
+  for (const returnItem of data.salesOrderReturnItems || []) {
+    if (returnItem.isDeleted) continue
+    const rows = returnItemsByReturnId.get(returnItem.returnId) || []
+    rows.push(returnItem)
+    returnItemsByReturnId.set(returnItem.returnId, rows)
+  }
   const entries: PartnerAccountStatementEntry[] = []
 
   for (const loan of loans) {
     if (loan.isDeleted || loan.status === 'cancelled') continue
     const lent = loan.direction !== 'borrowed'
+    const linkedSalesOrder = loan.orderId ? salesOrderById.get(loan.orderId) : undefined
+    const isOrderSaleLoan = loan.source === 'order' && linkedSalesOrder != null
+    const paymentMethod = loan.source === 'order'
+      ? linkedSalesOrder?.paymentMethod || 'loan'
+      : undefined
     const linkedOrderCode = loan.orderId ? data.linkedOrderCodes?.[loan.orderId]?.trim() : undefined
     const linkedPosSaleCode = loan.saleId ? data.linkedPosSaleCodes?.[loan.saleId]?.trim() : undefined
     const linkedDocumentCode = linkedOrderCode || linkedPosSaleCode
     const isPosSaleLoan = loan.source === 'pos'
-    const kind: PartnerAccountStatementEntryKind = isPosSaleLoan
-      ? loan.loanCategory === 'simple'
-        ? 'pos_sale_loan'
-        : 'pos_sale_installment_loan'
-      : 'loan_disbursal'
+    const kind: PartnerAccountStatementEntryKind = loan.source === 'order'
+      ? 'sales_order'
+      : isPosSaleLoan
+        ? loan.loanCategory === 'simple'
+          ? 'pos_sale_loan'
+          : 'pos_sale_installment_loan'
+        : 'loan_disbursal'
     const reference = linkedDocumentCode ? `${linkedDocumentCode} · ${loan.loanNo}` : loan.loanNo
     const descriptionKey: PartnerAccountStatementEntryDescriptionKey =
       loan.source === 'order'
-        ? lent
-          ? 'orderLoanProvided'
-          : 'orderLoanReceived'
+        ? 'saleOrderByPaymentMethod'
         : isPosSaleLoan
           ? lent
             ? 'posSaleLoanProvided'
@@ -850,9 +884,7 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
       kind,
       description:
         loan.source === 'order'
-          ? lent
-            ? 'Order loan provided'
-            : 'Order loan received'
+          ? 'Sale Order By {{paymentMethod}}'
           : isPosSaleLoan
             ? lent
               ? 'POS sale loan provided'
@@ -861,6 +893,7 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
             ? 'Loan provided'
             : 'Loan received',
       descriptionKey,
+      paymentMethod,
       currency: loan.settlementCurrency,
       delta: lent ? Math.abs(Number(loan.principalAmount || 0)) : -Math.abs(Number(loan.principalAmount || 0)),
       source: {
@@ -869,41 +902,128 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
         loanCategory: loan.loanCategory
       }
     }
+    const orderSaleItems = isOrderSaleLoan && data.itemizeSalesOrders === true
+      ? (linkedSalesOrder.items || []).filter((item) => Number(item.quantity || 0) > 0)
+      : []
     const posSaleItems = isPosSaleLoan && loan.saleId && data.itemizePosSaleLoans === true
       ? (data.posSaleItemsBySaleId?.[loan.saleId] || []).filter((item) => Number(item.quantity || 0) > 0)
       : []
+    const orderProductCommissionEntries = linkedSalesOrder
+      ? productCommissionEntries.filter((entry) => entry.orderId === linkedSalesOrder.id)
+      : []
+    const orderProductCommissionTotal = orderProductCommissionEntries.length > 0
+      ? roundStatementAmount(
+        orderProductCommissionEntries.reduce((sum, entry) => sum + Number(entry.amount || 0), 0)
+      )
+      : null
 
-    if (posSaleItems.length === 0) {
+    if (orderSaleItems.length === 0 && posSaleItems.length === 0) {
       entries.push({
         id: `loan:${loan.id}`,
         ...loanEntry,
+        totalProductCommission: orderProductCommissionTotal,
         delta: lent ? Math.abs(Number(loan.principalAmount || 0)) : -Math.abs(Number(loan.principalAmount || 0))
       })
       continue
     }
 
     // The loan principal remains the accounting authority. Allocate it over
-    // immutable original POS lines and reserve the rounded remainder for the
-    // final line so itemized presentation always nets to the original row.
+    // immutable source-order or POS lines and reserve the rounded remainder
+    // for the final line so itemized presentation always nets to the loan.
+    const itemizedLoanItems = orderSaleItems.length > 0 ? orderSaleItems : posSaleItems
     const principalAmount = Math.abs(Number(loan.principalAmount || 0))
-    const totalLineValue = posSaleItems.reduce((sum, item) => sum + Math.max(0, Number(item.lineTotal || 0)), 0)
+    const totalLineValue = itemizedLoanItems.reduce((sum, item) => sum + Math.max(0, Number(item.lineTotal || 0)), 0)
     let remainingPrincipal = principalAmount
-    posSaleItems.forEach((item, index) => {
-      const isLastItem = index === posSaleItems.length - 1
+    itemizedLoanItems.forEach((item, index) => {
+      const isLastItem = index === itemizedLoanItems.length - 1
       const weightedAmount = totalLineValue > 0
         ? (principalAmount * Math.max(0, Number(item.lineTotal || 0))) / totalLineValue
-        : principalAmount / posSaleItems.length
+        : principalAmount / itemizedLoanItems.length
       const lineAmount = isLastItem ? remainingPrincipal : roundStatementAmount(weightedAmount)
       remainingPrincipal = roundStatementAmount(remainingPrincipal - lineAmount)
+      const itemProductCommissionEntries = linkedSalesOrder
+        ? orderProductCommissionEntries.filter(
+          (entry) => entry.orderItemId === item.id && !entry.orderReturnId
+        )
+        : []
       entries.push({
         id: `loan:${loan.id}:item:${item.id}`,
         ...loanEntry,
         itemName: item.productName,
         quantity: Number(item.quantity || 0),
         unit: item.unit,
+        commissionPerProduct:
+          itemProductCommissionEntries.find((entry) => entry.kind === 'accrual')?.commissionPerUnit ?? null,
+        totalProductCommission: itemProductCommissionEntries.length > 0
+          ? roundStatementAmount(
+            itemProductCommissionEntries.reduce((sum, entry) => sum + Number(entry.amount || 0), 0)
+          )
+          : null,
         delta: lent ? Math.abs(lineAmount) : -Math.abs(lineAmount)
       })
     })
+
+    // A return against an order-financing loan already changes the loan
+    // principal and/or its repayment transactions. Keep that financial effect
+    // out of this presentation-only return row, but retain the returned item
+    // and its product-commission reversal for an auditable agent statement.
+    if (!linkedSalesOrder || orderSaleItems.length === 0) continue
+
+    const itemsByOrderItemId = new Map((linkedSalesOrder.items || []).map((item) => [item.id, item]))
+    for (const orderReturn of returnsByOrderId.get(linkedSalesOrder.id) || []) {
+      const returnItems = returnItemsByReturnId.get(orderReturn.id) || []
+      const returnReference = `${linkedSalesOrder.orderNumber} · ${orderReturn.id}`
+      if (returnItems.length === 0) {
+        const returnProductCommissionTotal = orderProductCommissionEntries
+          .filter((entry) => entry.orderReturnId === orderReturn.id)
+          .reduce((sum, entry) => sum + Number(entry.amount || 0), 0)
+        entries.push({
+          id: `loan:${loan.id}:sales-order-return:${orderReturn.id}`,
+          date: orderReturn.returnedAt || orderReturn.createdAt,
+          reference: returnReference,
+          kind: 'sales_order_return',
+          description: 'Sales order return',
+          descriptionKey: 'salesOrderReturn',
+          returnReason: orderReturn.reason,
+          totalProductCommission: returnProductCommissionTotal || null,
+          currency: loan.settlementCurrency,
+          delta: 0,
+          source: loanEntry.source
+        })
+        continue
+      }
+
+      for (const returnItem of returnItems) {
+        const sourceItem = itemsByOrderItemId.get(returnItem.orderItemId)
+        const returnProductCommissionEntries = orderProductCommissionEntries.filter(
+          (entry) => entry.orderReturnId === orderReturn.id && entry.orderItemId === returnItem.orderItemId
+        )
+        entries.push({
+          id: `loan:${loan.id}:sales-order-return:${orderReturn.id}:item:${returnItem.id}`,
+          date: orderReturn.returnedAt || orderReturn.createdAt,
+          reference: returnReference,
+          kind: 'sales_order_return',
+          description: 'Sales order return',
+          descriptionKey: 'salesOrderReturn',
+          itemName: sourceItem?.productName || null,
+          quantity: -Math.abs(Number(returnItem.quantity || 0)),
+          unit: sourceItem?.unit || null,
+          commissionPerProduct:
+            orderProductCommissionEntries.find(
+              (entry) => entry.orderItemId === returnItem.orderItemId && entry.kind === 'accrual'
+            )?.commissionPerUnit ?? null,
+          totalProductCommission: returnProductCommissionEntries.length > 0
+            ? roundStatementAmount(
+              returnProductCommissionEntries.reduce((sum, entry) => sum + Number(entry.amount || 0), 0)
+            )
+            : null,
+          returnReason: orderReturn.reason,
+          currency: loan.settlementCurrency,
+          delta: 0,
+          source: loanEntry.source
+        })
+      }
+    }
   }
 
   for (const payment of payments) {
@@ -1050,6 +1170,10 @@ export function buildPartnerAccountStatementLedger(
     Math.abs(entry.delta) > 0.000001
     || entry.descriptionKey === 'commissionSettledAutomatically'
     || entry.totalProductCommission != null
+    // A financed-order return is already reflected by the linked loan or its
+    // repayment transaction. Preserve its item audit row even when no product
+    // commission rule applied, without treating it as another balance move.
+    || (entry.kind === 'sales_order_return' && entry.itemName != null)
   ))
 
   const entriesByCurrency = new Map<string, PartnerAccountStatementEntry[]>()
