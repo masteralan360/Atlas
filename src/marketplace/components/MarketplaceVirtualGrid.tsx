@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Virtuoso, type Components } from 'react-virtuoso'
 
 import { createMarketplaceGridRows, type MarketplaceGridRow } from './marketplaceVirtualGridRows'
@@ -51,6 +51,21 @@ function useResponsiveColumnCount(breakpoints: readonly MarketplaceGridBreakpoin
     return columnCount
 }
 
+function findScrollParent(element: HTMLElement | null) {
+    let parent = element?.parentElement ?? null
+
+    while (parent) {
+        const overflowY = window.getComputedStyle(parent).overflowY
+        if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') {
+            return parent
+        }
+
+        parent = parent.parentElement
+    }
+
+    return null
+}
+
 type MarketplaceVirtualGridProps<Item> = {
     items: Item[]
     itemKey: (item: Item) => string
@@ -80,6 +95,8 @@ export function MarketplaceVirtualGrid<Item>({
     useWindowScroll = true,
     customScrollParent
 }: MarketplaceVirtualGridProps<Item>) {
+    const hostRef = useRef<HTMLDivElement | null>(null)
+    const [detectedScrollParent, setDetectedScrollParent] = useState<HTMLElement | null>(null)
     const columnCount = useResponsiveColumnCount(gridColumns)
     const handleEndReached = useCallback(() => {
         if (hasMore && !isLoadingMore) {
@@ -98,26 +115,39 @@ export function MarketplaceVirtualGrid<Item>({
             </div>
         )
     }), [rowClassName])
+    const resolvedScrollParent = customScrollParent ?? detectedScrollParent
+
+    useLayoutEffect(() => {
+        if (customScrollParent) {
+            setDetectedScrollParent(null)
+            return
+        }
+
+        setDetectedScrollParent(findScrollParent(hostRef.current))
+    }, [customScrollParent])
 
     return (
-        <Virtuoso
-            data={rows}
-            useWindowScroll={useWindowScroll}
-            customScrollParent={customScrollParent ?? undefined}
-            components={components}
-            computeItemKey={(_, row) => row.key}
-            itemContent={(_, row) => (
-                <div className={listClassName}>
-                    {row.items.map(({ item, index }) => (
-                        <div key={itemKey(item)} className={itemClassName}>
-                            {renderItem(item, index)}
-                        </div>
-                    ))}
-                </div>
-            )}
-            increaseViewportBy={{ top: 480, bottom: 960 }}
-            overscan={360}
-            endReached={handleEndReached}
-        />
+        <div ref={hostRef}>
+            <Virtuoso
+                key={resolvedScrollParent ? 'element-scroll' : 'window-scroll'}
+                data={rows}
+                useWindowScroll={useWindowScroll && !resolvedScrollParent}
+                customScrollParent={resolvedScrollParent ?? undefined}
+                components={components}
+                computeItemKey={(_, row) => row.key}
+                itemContent={(_, row) => (
+                    <div className={listClassName}>
+                        {row.items.map(({ item, index }) => (
+                            <div key={itemKey(item)} className={itemClassName}>
+                                {renderItem(item, index)}
+                            </div>
+                        ))}
+                    </div>
+                )}
+                increaseViewportBy={{ top: 480, bottom: 960 }}
+                overscan={360}
+                endReached={handleEndReached}
+            />
+        </div>
     )
 }
