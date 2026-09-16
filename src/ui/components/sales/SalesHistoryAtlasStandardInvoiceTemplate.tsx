@@ -51,6 +51,11 @@ import { ReorderablePickerGrid } from '@/ui/components/ReorderablePickerGrid'
 
 import { ProductPrintImage, type ProductPrintImageUrls } from '@/ui/components/print/ProductPrintImage'
 import { OrderPrintReturnValue } from '@/ui/components/orders/OrderPrintReturnValue'
+import {
+    ATLAS_STANDARD_DEFAULT_HEADER_HEIGHT_MM,
+    ATLAS_STANDARD_HEADER_HEIGHT_FIELD_KEY,
+    parseAtlasStandardHeaderHeightMm
+} from '@/lib/atlasStandardHeaderLayout'
 
 interface WorkspaceContactPair {
     primary?: string
@@ -84,6 +89,7 @@ export interface SalesHistoryAtlasStandardInvoiceTemplateProps {
     onFieldDisplayModeChange?: (fieldKey: string, mode: string) => void
     productImageUrls?: ProductPrintImageUrls
     background?: CustomTemplateBackground | null
+    templateFields?: Record<string, string>
     /** Renders a return-only document with the same Atlas Standard editor controls. */
     returnPrintData?: SalesOrderReturnPrintData | null
     /** Whether to show adjusted values, original order values, or return-only values. */
@@ -357,7 +363,9 @@ const ATLAS_STANDARD_LABELS = {
 } as const
 
 export const SALES_HISTORY_ATLAS_STANDARD_TEMPLATE_FIELD_KEYS = {
-    showOrderAdjustments: 'showOrderAdjustments'
+    headerHeightMm: ATLAS_STANDARD_HEADER_HEIGHT_FIELD_KEY,
+    showOrderAdjustments: 'showOrderAdjustments',
+    showPrintFooter: 'showPrintFooter'
 } as const
 
 const ATLAS_STANDARD_RETURN_LABELS = {
@@ -1208,6 +1216,7 @@ export function SalesHistoryAtlasStandardInvoiceTemplate({
     onFieldDisplayModeChange,
     productImageUrls,
     background,
+    templateFields,
     returnPrintData,
     printVersion
 }: SalesHistoryAtlasStandardInvoiceTemplateProps) {
@@ -1273,6 +1282,10 @@ export function SalesHistoryAtlasStandardInvoiceTemplate({
     const paymentMethod = order.paymentMethod
         ? labels.paymentMethods[order.paymentMethod as keyof typeof labels.paymentMethods] || order.paymentMethod
         : '-'
+    const showPrintFooter = templateFields?.[SALES_HISTORY_ATLAS_STANDARD_TEMPLATE_FIELD_KEYS.showPrintFooter] !== 'false'
+    const headerHeightMm = parseAtlasStandardHeaderHeightMm(
+        templateFields?.[SALES_HISTORY_ATLAS_STANDARD_TEMPLATE_FIELD_KEYS.headerHeightMm]
+    )
     const originalPaidTotal = Number(sale.original_total_amount) || Number(sale.total_amount) || 0
     const refundedAmount = Number(sale.returned_amount) || effectiveReturnPrintData?.totalRefundAmount || 0
     const netTotal = Math.max(0, originalPaidTotal - refundedAmount)
@@ -1696,6 +1709,9 @@ export function SalesHistoryAtlasStandardInvoiceTemplate({
             style={{ width: '210mm', minHeight: '297mm', margin: '0 auto', padding: '8mm', position: 'relative', isolation: 'isolate' }}
             data-order-print-page=""
             data-page-width-mm="210"
+            data-page-padding-mm="8"
+            data-atlas-standard-layout=""
+            data-atlas-standard-header-height-mm={headerHeightMm}
         >
             <style dangerouslySetInnerHTML={{
                 __html: `
@@ -1732,7 +1748,20 @@ export function SalesHistoryAtlasStandardInvoiceTemplate({
                 />
             ) : null}
 
-            <header className="mb-1 flex min-h-[13mm] items-center justify-between border-b-2 px-1 pb-1" style={{ borderColor: INK }}>
+            <header
+                data-atlas-standard-header=""
+                data-atlas-standard-header-height-mm={headerHeightMm}
+                className="relative mb-1 border-b-2"
+                style={{
+                    borderColor: INK,
+                    height: `${headerHeightMm}mm`,
+                    minHeight: `${ATLAS_STANDARD_DEFAULT_HEADER_HEIGHT_MM}mm`
+                }}
+            >
+                <div
+                    data-atlas-standard-header-content=""
+                    className="absolute inset-x-0 top-0 flex h-[13mm] items-center justify-between px-1 pb-1"
+                >
                 <MovableOrderPrintBlock
                     componentKey={SALES_HISTORY_ATLAS_STANDARD_MOVABLE_COMPONENT_KEYS.workspaceName}
                     label={labels.workspaceName}
@@ -1770,8 +1799,10 @@ export function SalesHistoryAtlasStandardInvoiceTemplate({
                         <div className="flex h-[11mm] w-[11mm] items-center justify-center border-[2px] text-[9px] font-bold tracking-[0.1em]" style={{ borderColor: INK, color: INK }}>{labels.logo}</div>
                     )}
                 </MovableOrderPrintBlock>
+                </div>
             </header>
 
+            <div data-atlas-standard-body="">
             <HideableSection
                 title={labels.invoiceDetails}
                 dialogDescription={labels.selectValues}
@@ -1857,11 +1888,17 @@ export function SalesHistoryAtlasStandardInvoiceTemplate({
                 </div>
             </div>
 
-            <footer className="grid grid-cols-3 border-t pt-1 text-center text-[10px] font-bold" style={{ borderColor: INK, color: '#374151' }}>
-                <span>{labels.madeBy}</span>
-                <span>{labels.page} 1 {labels.pageOf} 1</span>
-                <span>{labels.printDate}: {issuedAt.date}</span>
-            </footer>
+            {showPrintFooter ? (
+                <footer
+                    data-atlas-standard-print-footer=""
+                    className="grid grid-cols-3 border-t pt-1 text-center text-[10px] font-bold"
+                    style={{ borderColor: INK, color: '#374151' }}
+                >
+                    <span>{labels.madeBy}</span>
+                    <span>{labels.page} 1 {labels.pageOf} 1</span>
+                    <span>{labels.printDate}: {issuedAt.date}</span>
+                </footer>
+            ) : null}
 
             {visibleTableColumns.length > 0
                 ? itemChunks.slice(1).map((chunk, chunkIndex) => (
@@ -1874,6 +1911,8 @@ export function SalesHistoryAtlasStandardInvoiceTemplate({
                     )
                 ))
                 : null}
+            <div data-atlas-standard-content-end="" aria-hidden="true" />
+            </div>
         </div>
     )
 }

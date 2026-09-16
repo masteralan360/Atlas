@@ -14,6 +14,12 @@ import { paginateOrderItemsStatementPages, paginateOrderItemsTables } from '@/li
 import { centerTablesOnPages } from '@/lib/centeredTablePagination'
 import { reportPdfProgress } from '@/services/pdfProgress'
 import { inlineCaptureableImages, waitForPdfImages } from '@/services/pdfImageCapture'
+import { preparePdfPageCapture } from '@/services/pdfPageCapture'
+import { resolvePdfPageRenderScale, streamPdfPages } from '@/services/pdfPageStream'
+import {
+    applyAtlasStandardHeaderLayout,
+    snapAtlasStandardBodyOverlaysToPages
+} from '@/lib/atlasStandardHeaderLayout'
 
 /** Formats that can be stored as invoice versions. */
 export type InvoicePrintFormat = 'a4' | 'receipt'
@@ -32,9 +38,6 @@ interface RenderResult {
     background: HTMLCanvasElement
     widthMm: number
     heightMm: number
-    keepTogetherBlocks: A4KeepTogetherBlock[]
-    pageCanvases?: HTMLCanvasElement[]
-    pageHeightsMm?: number[]
 }
 
 type JsPDFConstructor = typeof import('jspdf').jsPDF
@@ -80,24 +83,6 @@ const TARGET_CANVAS_WIDTH_PX = 1600
 const MAX_CANVAS_DIMENSION_PX = 16_384
 const CSS_PX_PER_MM = 96 / 25.4
 
-function createCanvasSlice(
-    source: HTMLCanvasElement,
-    sourceHeightMm: number,
-    pageStartMm: number,
-    pageEndMm: number
-) {
-    const sourceHeightPx = source.height
-    const topPx = Math.max(0, Math.floor((pageStartMm / sourceHeightMm) * sourceHeightPx))
-    const bottomPx = Math.min(sourceHeightPx, Math.ceil((pageEndMm / sourceHeightMm) * sourceHeightPx))
-    const heightPx = Math.max(1, bottomPx - topPx)
-    const slice = document.createElement('canvas')
-    slice.width = source.width
-    slice.height = heightPx
-    const context = slice.getContext('2d', { alpha: false })
-    if (!context) return slice
-    context.drawImage(source, 0, topPx, source.width, heightPx, 0, 0, source.width, heightPx)
-    return slice
-}
 // html-to-image needs a valid data URL when an image cannot be downloaded.
 // An empty source makes its cloned <img> emit an error event, which rejects
 // the entire PDF render. This transparent GIF preserves the image's layout
@@ -315,7 +300,8 @@ function collectA4KeepTogetherBlocks(container: HTMLElement, widthMm: number): A
  * foreignObject), allowing the browser to paint the clone consistently across
  * desktop, Android, and iOS/iPadOS.
  */
-async function renderToCanvas(element: ReturnType<typeof createElement>, widthMm: number): Promise<RenderResult> {
+async function renderTemplateToPdf(element: ReturnType<typeof createElement>, widthMm: number): Promise<Blob> {
+    const { jsPDF } = await import('jspdf')
     const container = document.createElement('div')
     container.id = 'pdf-render-container'
     // Must live in the viewport: html-to-image clones the node with its
@@ -337,204 +323,142 @@ async function renderToCanvas(element: ReturnType<typeof createElement>, widthMm
     document.body.appendChild(container)
 
     const root = createRoot(container)
-    root.render(element)
+    try {
+        root.render(element)
 
-    await new Promise(requestAnimationFrame)
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    if (document.fonts?.ready) {
-        await document.fonts.ready
-    }
-    await waitForPdfImages(container)
-    await inlineCaptureableImages(container)
-    await reflowTemplateTextAfterContent(container, widthMm)
-    await expandContainerToRenderedBounds(container)
-    reportPdfProgress(0.1, 'print.progressPreparing')
-
-    if (widthMm === A4_WIDTH_MM) {
-        // Pack complete orders into whole A4 pages (statement templates only),
-        // then cut any oversized single-order table exactly at the A4 red line
-        // and give each continuation chunk its own title and column header row.
-        paginateOrderItemsStatementPages(container, {
+        await new Promise(requestAnimationFrame)
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        if (document.fonts?.ready) {
+            await document.fonts.ready
+        }
+        await waitForPdfImages(container)
+        await inlineCaptureableImages(container)
+        await reflowTemplateTextAfterContent(container, widthMm)
+        applyAtlasStandardHeaderLayout(container, {
+            pageWidthMm: widthMm,
             pageHeightMm: A4_HEIGHT_MM,
-            pageWidthMm: widthMm
+            pagePaddingMm: 8
         })
         await expandContainerToRenderedBounds(container)
-        paginateOrderItemsTables(container, {
-            pageHeightMm: A4_HEIGHT_MM,
-            pageWidthMm: widthMm
+        reportPdfProgress(0.1, 'print.progressPreparing')
+
+        if (widthMm === A4_WIDTH_MM) {
+            // Pack complete orders into whole A4 pages (statement templates only),
+            // then cut any oversized single-order table exactly at the A4 red line
+            // and give each continuation chunk its own title and column header row.
+            paginateOrderItemsStatementPages(container, {
+                pageHeightMm: A4_HEIGHT_MM,
+                pageWidthMm: widthMm
+            })
+            await expandContainerToRenderedBounds(container)
+            paginateOrderItemsTables(container, {
+                pageHeightMm: A4_HEIGHT_MM,
+                pageWidthMm: widthMm
+            })
+            await expandContainerToRenderedBounds(container)
+            // Vertically center continuation tables (for example the Atlas Standard
+            // order invoice's follow-up tables) on their own A4 page.
+            centerTablesOnPages(container, {
+                pageHeightMm: A4_HEIGHT_MM,
+                pageWidthMm: widthMm
+            })
+            snapAtlasStandardBodyOverlaysToPages(container, {
+                pageWidthMm: widthMm,
+                pageHeightMm: A4_HEIGHT_MM,
+                pagePaddingMm: 8
+            })
+            await expandContainerToRenderedBounds(container)
+            reportPdfProgress(0.25, 'print.progressLayingOut')
+        }
+
+        const keepTogetherBlocks = collectA4KeepTogetherBlocks(container, widthMm)
+
+        // The container is invisible (opacity 0) while it lives in the viewport;
+        // restore the clone's opacity so the SVG foreignObject paints it.
+        reportPdfProgress(0.4, 'print.progressRendering')
+
+        const containerPixelWidth = container.offsetWidth
+        const containerPixelHeight = Math.max(container.scrollHeight, container.offsetHeight, 1)
+        const renderScale = resolveRenderScale(containerPixelWidth)
+        const { toCanvas } = await import('html-to-image')
+
+        if (widthMm === A4_WIDTH_MM) {
+            const pxToMm = widthMm / containerPixelWidth
+            const heightMm = containerPixelHeight * pxToMm
+            const pageStarts = getA4PageStarts(heightMm, keepTogetherBlocks, A4_HEIGHT_MM)
+            const safeRenderScale = Math.min(
+                renderScale,
+                Math.max(1, Math.floor(MAX_CANVAS_DIMENSION_PX / containerPixelWidth))
+            )
+            const restorePageWatermarks = repeatA4WatermarksForPages(container, pageStarts, widthMm)
+
+            try {
+                // Ensure html-to-image observes the temporary page watermark layers
+                // before it clones the source for the first canvas slice.
+                await new Promise(requestAnimationFrame)
+                const preparePage = preparePdfPageCapture(container)
+                const pages = pageStarts.map((pageOffset, pageIndex) => {
+                    const pageEnd = pageStarts[pageIndex + 1] ?? heightMm
+                    const pageOffsetPx = Math.floor(pageOffset / pxToMm)
+                    const pageHeightPx = Math.max(1, Math.ceil((pageEnd / pxToMm)) - pageOffsetPx)
+                    return { offsetPx: pageOffsetPx, heightPx: pageHeightPx, heightMm: pageHeightPx * pxToMm }
+                })
+                const pageRenderScale = resolvePdfPageRenderScale(safeRenderScale, pages.length)
+                const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' })
+                await streamPdfPages(pdf, pages, widthMm, async (page) => {
+                    const restorePage = preparePage(page.offsetPx, page.heightPx)
+                    try {
+                        return await renderTemplateCanvasSlice(container, toCanvas,
+                            containerPixelWidth, page.heightPx, page.offsetPx,
+                            Math.min(pageRenderScale, Math.max(1, Math.floor(MAX_CANVAS_DIMENSION_PX / page.heightPx))))
+                    } finally {
+                        restorePage()
+                    }
+                }, (page, total) => reportPdfProgress(
+                    0.4 + (0.55 * page) / total, 'print.progressBuildingPdf', { page, total }
+                ))
+                return pdf.output('blob') as Blob
+            } finally {
+                restorePageWatermarks()
+            }
+
+        }
+
+        const background = await toCanvas(container, {
+            width: containerPixelWidth,
+            height: containerPixelHeight,
+            pixelRatio: renderScale,
+            backgroundColor: '#ffffff',
+            // Product image providers such as Google thumbnails use a shared path
+            // and identify the actual image entirely through query parameters.
+            // html-to-image otherwise drops those parameters from its cache key,
+            // causing a previously downloaded product photo to be reused for
+            // different rows in the same PDF.
+            includeQueryParams: true,
+            imagePlaceholder: TRANSPARENT_IMAGE_PLACEHOLDER,
+            skipAutoScale: false,
+            style: { opacity: '1' }
         })
-        await expandContainerToRenderedBounds(container)
-        // Vertically center continuation tables (for example the Atlas Standard
-        // order invoice's follow-up tables) on their own A4 page.
-        centerTablesOnPages(container, {
-            pageHeightMm: A4_HEIGHT_MM,
-            pageWidthMm: widthMm
-        })
-        await expandContainerToRenderedBounds(container)
-        reportPdfProgress(0.25, 'print.progressLayingOut')
-    }
+        reportPdfProgress(0.6, 'print.progressRendering')
 
-    const keepTogetherBlocks = collectA4KeepTogetherBlocks(container, widthMm)
-
-    // The container is invisible (opacity 0) while it lives in the viewport;
-    // restore the clone's opacity so the SVG foreignObject paints it.
-    reportPdfProgress(0.4, 'print.progressRendering')
-
-    const containerPixelWidth = container.offsetWidth
-    const containerPixelHeight = Math.max(container.scrollHeight, container.offsetHeight, 1)
-    const renderScale = resolveRenderScale(containerPixelWidth)
-    const { toCanvas } = await import('html-to-image')
-
-    if (widthMm === A4_WIDTH_MM) {
         const pxToMm = widthMm / containerPixelWidth
-        const heightMm = containerPixelHeight * pxToMm
-        const pageStarts = getA4PageStarts(heightMm, keepTogetherBlocks, A4_HEIGHT_MM)
-        const pageCanvases: HTMLCanvasElement[] = []
-        const pageHeightsMm: number[] = []
-        const safeRenderScale = Math.min(
-            renderScale,
-            Math.max(1, Math.floor(MAX_CANVAS_DIMENSION_PX / containerPixelWidth))
-        )
-        const restorePageWatermarks = repeatA4WatermarksForPages(container, pageStarts, widthMm)
 
         try {
-            // Ensure html-to-image observes the temporary page watermark layers
-            // before it clones the source for the first canvas slice.
-            await new Promise(requestAnimationFrame)
-
-            for (let pageIndex = 0; pageIndex < pageStarts.length; pageIndex += 1) {
-                const pageOffset = pageStarts[pageIndex]
-                const pageEnd = pageStarts[pageIndex + 1] || heightMm
-                const pageOffsetPx = Math.floor(pageOffset / pxToMm)
-                const pageHeightPx = Math.max(1, Math.ceil((pageEnd / pxToMm)) - pageOffsetPx)
-
-                const pageSlice = await renderTemplateCanvasSlice(
-                    container,
-                    toCanvas,
-                    containerPixelWidth,
-                    pageHeightPx,
-                    pageOffsetPx,
-                    Math.min(safeRenderScale, Math.max(1, Math.floor(MAX_CANVAS_DIMENSION_PX / pageHeightPx)))
-                )
-
-                pageCanvases.push(pageSlice)
-                pageHeightsMm.push(pageHeightPx * pxToMm)
-            }
+            return canvasToReceiptPdf({
+                background,
+                widthMm,
+                heightMm: background.width > 0
+                    ? (background.height * widthMm) / background.width
+                    : (background.height * pxToMm),
+            }, jsPDF)
         } finally {
-            restorePageWatermarks()
+            background.width = 0
+            background.height = 0
         }
-
+    } finally {
         root.unmount()
         container.remove()
-
-        return {
-            background: pageCanvases[0],
-            widthMm,
-            heightMm,
-            keepTogetherBlocks,
-            pageCanvases,
-            pageHeightsMm
-        }
     }
-
-    const background = await toCanvas(container, {
-        width: containerPixelWidth,
-        height: containerPixelHeight,
-        pixelRatio: renderScale,
-        backgroundColor: '#ffffff',
-        // Product image providers such as Google thumbnails use a shared path
-        // and identify the actual image entirely through query parameters.
-        // html-to-image otherwise drops those parameters from its cache key,
-        // causing a previously downloaded product photo to be reused for
-        // different rows in the same PDF.
-        includeQueryParams: true,
-        imagePlaceholder: TRANSPARENT_IMAGE_PLACEHOLDER,
-        skipAutoScale: false,
-        style: { opacity: '1' }
-    })
-    reportPdfProgress(0.6, 'print.progressRendering')
-
-    const pxToMm = widthMm / containerPixelWidth
-
-    root.unmount()
-    container.remove()
-
-    return {
-        background,
-        widthMm,
-        heightMm: background.width > 0
-            ? (background.height * widthMm) / background.width
-            : (background.height * pxToMm),
-        keepTogetherBlocks
-    }
-}
-
-function canvasToA4Pdf(renderResult: RenderResult, PdfDocument: JsPDFConstructor) {
-    const pdf = new PdfDocument({ orientation: 'p', unit: 'mm', format: 'a4' })
-
-    if (renderResult.pageCanvases?.length) {
-        for (let pageIndex = 0; pageIndex < renderResult.pageCanvases.length; pageIndex += 1) {
-            reportPdfProgress(
-                0.65 + (0.3 * (pageIndex + 1)) / renderResult.pageCanvases.length,
-                'print.progressBuildingPdf',
-                { page: pageIndex + 1, total: renderResult.pageCanvases.length }
-            )
-
-            if (pageIndex > 0) {
-                pdf.addPage('a4', 'p')
-            }
-
-            const pageHeight = renderResult.pageHeightsMm?.[pageIndex] || A4_HEIGHT_MM
-            pdf.addImage(
-                renderResult.pageCanvases[pageIndex].toDataURL('image/jpeg', 0.92),
-                'JPEG',
-                0,
-                0,
-                renderResult.widthMm,
-                pageHeight,
-                undefined,
-                'FAST'
-            )
-        }
-
-        return pdf.output('blob') as Blob
-    }
-
-    const pageStarts = getA4PageStarts(renderResult.heightMm, renderResult.keepTogetherBlocks, A4_HEIGHT_MM)
-
-    for (let pageIndex = 0; pageIndex < pageStarts.length; pageIndex += 1) {
-        reportPdfProgress(
-            0.65 + (0.3 * (pageIndex + 1)) / pageStarts.length,
-            'print.progressBuildingPdf',
-            { page: pageIndex + 1, total: pageStarts.length }
-        )
-
-        if (pageIndex > 0) {
-            pdf.addPage('a4', 'p')
-        }
-
-        const pageOffset = pageStarts[pageIndex]
-        const pageEnd = pageStarts[pageIndex + 1] || renderResult.heightMm
-        const pageContentHeight = pageEnd - pageOffset
-        const pageSlice = createCanvasSlice(
-            renderResult.background,
-            renderResult.heightMm,
-            pageOffset,
-            pageEnd
-        )
-        pdf.addImage(
-            pageSlice.toDataURL('image/jpeg', 0.92),
-            'JPEG',
-            0,
-            0,
-            renderResult.widthMm,
-            pageContentHeight,
-            undefined,
-            'FAST'
-        )
-    }
-
-    return pdf.output('blob') as Blob
 }
 
 function canvasToReceiptPdf(renderResult: RenderResult, PdfDocument: JsPDFConstructor) {
@@ -631,9 +555,7 @@ export async function generateInvoicePdf(options: PDFGeneratorOptions): Promise<
                 })
             )
         )
-        const renderResult = await renderToCanvas(element, RECEIPT_WIDTH_MM)
-        const { jsPDF } = await import('jspdf')
-        return canvasToReceiptPdf(renderResult, jsPDF)
+        return renderTemplateToPdf(element, RECEIPT_WIDTH_MM)
     }
 
     const isRefundA4 = !!data.is_refund_invoice
@@ -681,9 +603,7 @@ export async function generateInvoicePdf(options: PDFGeneratorOptions): Promise<
                 workspaceFooterContacts
             })
     )
-    const renderResult = await renderToCanvas(element, A4_WIDTH_MM)
-    const { jsPDF } = await import('jspdf')
-    return canvasToA4Pdf(renderResult, jsPDF)
+    return renderTemplateToPdf(element, A4_WIDTH_MM)
 
 }
 
@@ -706,10 +626,7 @@ export async function generateTemplatePdf({
     const wrappedElement = createElement(I18nextProvider, { i18n: pdfI18n }, element)
 
     const widthMm = format === 'receipt' ? RECEIPT_WIDTH_MM : A4_WIDTH_MM
-    const renderResult = await renderToCanvas(wrappedElement, widthMm)
-    const { jsPDF } = await import('jspdf')
-
-    return format === 'receipt' ? canvasToReceiptPdf(renderResult, jsPDF) : canvasToA4Pdf(renderResult, jsPDF)
+    return renderTemplateToPdf(wrappedElement, widthMm)
 }
 
 /**

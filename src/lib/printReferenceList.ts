@@ -23,6 +23,12 @@ export function findFittingPrintReferenceCount(labels: readonly string[], fits: 
  * The complete list remains in the attribute so repeated layout passes can
  * expand as well as shorten the visible references. */
 export function fitPrintReferenceLists(root: HTMLElement) {
+  const measurements: {
+    element: HTMLElement; probe: HTMLElement; labels: string[]; availableHeight: number
+    moreLabel: (count: number) => string; low: number; high: number; middle: number
+  }[] = []
+  // Read every row before adding probes. Interleaving a probe/text mutation
+  // with the next row's bounds forced layout of the complete statement.
   root.querySelectorAll<HTMLElement>('[data-print-reference-list]').forEach(element => {
     let labels: string[]
     try { labels = JSON.parse(element.dataset.printReferenceList || '[]') as string[] } catch { return }
@@ -47,15 +53,40 @@ export function fitPrintReferenceLists(root: HTMLElement) {
     const probe = element.cloneNode(false) as HTMLElement
     probe.removeAttribute('data-print-reference-list')
     Object.assign(probe.style, { position: 'absolute', visibility: 'hidden', pointerEvents: 'none', width: `${width}px`, left: '0', top: '0' })
-    element.appendChild(probe)
-    try {
-      const count = findFittingPrintReferenceCount(labels, text => {
-        probe.textContent = text
-        return probe.getBoundingClientRect().height <= availableHeight + 0.5
-      }, moreLabel)
-      // Remove the measuring node before replacing the visible text.
-      probe.remove()
-      element.textContent = formatPrintReferenceList(labels, count, moreLabel)
-    } finally { probe.remove() }
+    measurements.push({ element, probe, labels, availableHeight, moreLabel,
+      low: 0, high: labels.length - 1, middle: 0 })
   })
+  try {
+    measurements.forEach(({ element, probe, labels }) => {
+      probe.textContent = labels.join(' - ')
+      element.appendChild(probe)
+    })
+    measurements.forEach(measurement => {
+      if (!measurement.labels.length || measurement.probe.getBoundingClientRect().height <= measurement.availableHeight + 0.5) {
+        measurement.low = measurement.high = measurement.labels.length
+      }
+    })
+    // Each binary-search round writes all candidates, then reads all heights.
+    // Thus the browser lays out once per round instead of once per product.
+    for (;;) {
+      const pending = measurements.filter(({ low, high }) => low < high)
+      if (!pending.length) break
+      pending.forEach(measurement => {
+        measurement.middle = Math.ceil((measurement.low + measurement.high) / 2)
+        measurement.probe.textContent = formatPrintReferenceList(
+          measurement.labels, measurement.middle, measurement.moreLabel
+        )
+      })
+      pending.forEach(measurement => {
+        if (measurement.probe.getBoundingClientRect().height <= measurement.availableHeight + 0.5) measurement.low = measurement.middle
+        else measurement.high = measurement.middle - 1
+      })
+    }
+    measurements.forEach(({ element, probe, labels, low, moreLabel }) => {
+      probe.remove()
+      element.textContent = formatPrintReferenceList(labels, low, moreLabel)
+    })
+  } finally {
+    measurements.forEach(({ probe }) => probe.remove())
+  }
 }

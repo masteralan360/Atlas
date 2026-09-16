@@ -2960,6 +2960,9 @@
   },
   "printPreviewEditor": {
     "title": "دەستکاریکەری پێشبینینی چاپ",
+    "atlasStandardHeaderHeight": "بەرزی سەرپەڕە",
+    "atlasStandardHeaderNoSpace": "هیچ بۆشاییەکی چاپی بەکارنەهاتوو بۆ بەرزکردنەوەی سەرپەڕە بەردەست نییە.",
+    "showAtlasStandardFooter": "دروستکراوە لەلایەن و لاپەڕە و بەرواری چاپ نیشان بدە",
     "fitPage": "لەگونج بکە",
     "bottomWarning": "خۆت لە دانانی پێکهاتەکان لێرە بپارێزە — لەوانەیە لە کاتی چاپکردن لە A4دا ببڕدرێن.",
     "loadingPdf": "PDF باردەکرێت…",

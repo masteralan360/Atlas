@@ -19,6 +19,7 @@ import {
     normalizeOrderAdjustments
 } from '@/lib/orderAdjustments'
 import { getOrderPrintOriginalTotal, getOrderPrintReturnState } from '@/lib/orderPrintReturnState'
+import { ATLAS_STANDARD_HEADER_PREVIEW_FIELD } from '@/lib/atlasStandardHeaderLayout'
 import { createSalesOrderReturnPrintData } from '@/lib/orderReturnPrintData'
 import { isPositiveQuantity } from '@/lib/quantity'
 import { cn, formatCurrency, formatDate, formatDateTime, formatSnapshotTime } from '@/lib/utils'
@@ -805,7 +806,9 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         const { order, kind } = resolved
         return {
             fields: [
-                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showOrderAdjustments, label: t('orders.adjustments.showInPrint', { defaultValue: 'Show order adjustments' }), value: 'true', type: 'boolean' }
+                ATLAS_STANDARD_HEADER_PREVIEW_FIELD,
+                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showOrderAdjustments, label: t('orders.adjustments.showInPrint', { defaultValue: 'Show order adjustments' }), value: 'true', type: 'boolean' },
+                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter, label: t('printPreviewEditor.showAtlasStandardFooter', { defaultValue: 'Show Made by, page, and print date' }), value: 'true', type: 'boolean' }
             ],
             supportsBackgroundEdit: true,
             requiresFreshPartnerBalance: Boolean(workspaceId && partnerId),
@@ -861,7 +864,10 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         if (!resolved || resolved.kind !== 'sales' || !returnPrintData) return undefined
         const { order } = resolved
         return {
-            fields: [],
+            fields: [
+                ATLAS_STANDARD_HEADER_PREVIEW_FIELD,
+                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter, label: t('printPreviewEditor.showAtlasStandardFooter', { defaultValue: 'Show Made by, page, and print date' }), value: 'true', type: 'boolean' }
+            ],
             supportsBackgroundEdit: true,
             requiresFreshPartnerBalance: Boolean(workspaceId && partnerId),
             partnerBalanceFieldKeys: ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS,
@@ -876,7 +882,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 atlasStandardPartnerBalanceStateRef.current.orderBalanceAtPosting = orderBalanceAtPosting
                 atlasStandardPartnerBalanceStateRef.current.progress = progress
             },
-            createElement: (_data, _effectiveId, printLangOverride, renderOptions) => {
+            createElement: (data, _effectiveId, printLangOverride, renderOptions) => {
                 const baseLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
                 return (
                     <AtlasStandardOrderInvoiceTemplate
@@ -900,6 +906,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                         fieldDisplayModes={renderOptions?.fieldDisplayModes}
                         onFieldDisplayModeChange={renderOptions?.onFieldDisplayModeChange}
                         background={renderOptions?.background}
+                        templateFields={data}
                         returnPrintData={returnPrintData}
                         printVersion="returned"
                     />
@@ -910,7 +917,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 return generateTemplatePdf({ element, format: 'a4', printLang: printLangOverride || baseLang })
             }
         }
-    }, [resolved, features, installments, workspaceName, i18n, bizPartner, partnerId, workspaceFooterContacts, creatorName, productImageUrls, returnPrintData, workspaceId])
+    }, [resolved, features, installments, workspaceName, t, i18n, bizPartner, partnerId, workspaceFooterContacts, creatorName, productImageUrls, returnPrintData, workspaceId])
 
     if (orderLookupStatus === 'loading') {
         return (

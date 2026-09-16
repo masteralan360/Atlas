@@ -7,6 +7,13 @@ import type { CartItem, CustomerForm } from '@/components/storefront-ui-types'
 import { getJumlaKhaleejDeliveryCity } from '@/lib/storefront-delivery'
 import { storefrontApiUrl } from '@/lib/storefront-runtime'
 import './storefront-atlas-standard-pdf.css'
+import {
+  applyAtlasStandardHeaderLayout,
+  ATLAS_STANDARD_DEFAULT_HEADER_HEIGHT_MM,
+  ATLAS_STANDARD_HEADER_HEIGHT_FIELD_KEY,
+  classifyAtlasStandardOverlay,
+  parseAtlasStandardHeaderHeightMm
+} from '@/lib/atlasStandardHeaderLayout'
 
 type StorefrontPrintStore = {
   name: string
@@ -54,7 +61,7 @@ const ATLAS_STANDARD_LAYOUT = {
   moduleTypeKey: 'orders.AtlasStandard',
   nativeTemplateKey: 'orders.AtlasStandard',
   printLanguage: 'ku',
-  fields: { hideUnit: 'false', showNotes: 'false', hideDueDate: 'false', hideNextDue: 'false', hideDiscount: 'false', tableRowCount: '10' },
+  fields: { hideUnit: 'false', showNotes: 'false', hideDueDate: 'false', hideNextDue: 'false', hideDiscount: 'false', tableRowCount: '10', atlasStandardHeaderHeightMm: '13' },
   images: [],
   shapes: [],
   texts: [
@@ -360,6 +367,10 @@ function StorefrontAtlasStandardTemplate({ input, createdAt, documentNumber }: {
   const label = ATLAS_STANDARD_LABELS
   const namePosition = ATLAS_STANDARD_LAYOUT.componentPositions.atlasStandardWorkspaceName
   const logoPosition = ATLAS_STANDARD_LAYOUT.componentPositions.atlasStandardWorkspaceLogo
+  const headerHeightMm = parseAtlasStandardHeaderHeightMm(
+    ATLAS_STANDARD_LAYOUT.fields[ATLAS_STANDARD_HEADER_HEIGHT_FIELD_KEY]
+  )
+  const headerDeltaMm = headerHeightMm - ATLAS_STANDARD_DEFAULT_HEADER_HEIGHT_MM
   const invoiceDetailFields: PrintField[] = [
     { key: 'atlasStandard.invoiceDetails.partner', label: label.partner, value: input.customer.name, span: 2 },
     { key: 'atlasStandard.invoiceDetails.invoice', label: label.invoice, value: 'داواکاری فرۆشتن', span: 1 },
@@ -387,16 +398,28 @@ function StorefrontAtlasStandardTemplate({ input, createdAt, documentNumber }: {
   return (
     <div className="storefront-atlas-standard" dir="rtl">
 
-      <section className="storefront-atlas-page">
-        <header>
+      <section
+        className="storefront-atlas-page"
+        data-atlas-standard-layout=""
+        data-atlas-standard-header-height-mm={headerHeightMm}
+        data-page-padding-mm="8"
+      >
+        <header
+          data-atlas-standard-header=""
+          data-atlas-standard-header-height-mm={headerHeightMm}
+          style={{ height: `${headerHeightMm}mm`, minHeight: `${ATLAS_STANDARD_DEFAULT_HEADER_HEIGHT_MM}mm` }}
+        >
+          <div className="storefront-atlas-header-content" data-atlas-standard-header-content="">
           <div className="storefront-atlas-component" style={{ transform: `translate(${namePosition.x}mm, ${namePosition.y}mm) scale(${namePosition.scale})` }}>
             <h1 dir={resolveIsolatedTextDirection(input.store.name || 'Atlas')}>{input.store.name || 'Atlas'}</h1>
           </div>
           <div className="storefront-atlas-component" style={{ transform: `translate(${logoPosition.x}mm, ${logoPosition.y}mm) scale(${logoPosition.scale})` }}>
             <div className="storefront-atlas-logo">{input.store.logo_url ? <img src={fallbackImageDataUrl('LOGO')} data-inquiry-store-logo="true" data-inquiry-fallback="LOGO" alt="" /> : 'LOGO'}</div>
           </div>
+          </div>
         </header>
 
+        <div data-atlas-standard-body="">
         <AtlasFieldsSection fields={invoiceDetailFields} />
 
         <AtlasItemsTable items={itemChunks[0]} rowStart={0} allItems={input.items} total={total} currency={currency} />
@@ -408,11 +431,22 @@ function StorefrontAtlasStandardTemplate({ input, createdAt, documentNumber }: {
           <div>{footerAddress.length ? <div>{footerAddress.join(' - ')}</div> : null}{footerPhone.length ? <div>{footerPhone.join(' - ')}</div> : null}</div>
         </div>
         <footer className="storefront-atlas-footer"><span>دروستکراوە لەلایەن AtlasERP</span><span>لاپەڕە 1 لە 1</span><span>بەرواری چاپ: {dateTime.date}</span></footer>
+        <div data-atlas-standard-content-end="" aria-hidden="true" />
+        </div>
 
         <div className="storefront-atlas-overlay" aria-hidden="true">
-          {ATLAS_STANDARD_LAYOUT.texts.map((text, index) => <div key={text.id} dir={resolveIsolatedTextDirection(text.text)} className="storefront-atlas-overlay-text" style={{ left: `${(text.x / PAGE_WIDTH_MM) * 100}%`, top: `${text.y}mm`, width: `${(text.width / PAGE_WIDTH_MM) * 100}%`, color: text.color, fontSize: `${text.fontSize}px`, transform: `rotate(${text.rotation}deg)`, zIndex: 100 + index }}>{text.text}</div>)}
+          {ATLAS_STANDARD_LAYOUT.texts.map((text, index) => {
+            const heightMm = text.fontSize * 0.2645833333 * 1.3 * Math.max(1, text.text.split('\n').length)
+            const anchor = classifyAtlasStandardOverlay(text.y, text.y + heightMm)
+            return <div key={text.id} dir={resolveIsolatedTextDirection(text.text)} data-atlas-standard-overlay-anchor={anchor} data-atlas-standard-overlay-can-translate="true" data-atlas-standard-overlay-base-top-mm={text.y} className="storefront-atlas-overlay-text" style={{ left: `${(text.x / PAGE_WIDTH_MM) * 100}%`, top: `${text.y}mm`, width: `${(text.width / PAGE_WIDTH_MM) * 100}%`, color: text.color, fontSize: `${text.fontSize}px`, transform: `rotate(${text.rotation}deg)`, zIndex: 100 + index }}>{text.text}</div>
+          })}
           <svg viewBox={`0 0 ${PAGE_WIDTH_MM} ${PAGE_HEIGHT_MM}`} preserveAspectRatio="none" width="100%" height="100%">
-            {ATLAS_STANDARD_LAYOUT.annotations.map((annotation, index) => <path key={index} d={`M ${annotation.points.map((point) => `${point.x},${point.y}`).join(' L ')}`} fill="none" stroke={annotation.color} strokeWidth={annotation.brushSize} strokeLinecap="round" strokeLinejoin="round" opacity={(annotation.type as string) === 'brush' ? .5 : 1} />)}
+            {ATLAS_STANDARD_LAYOUT.annotations.map((annotation, index) => {
+              const yValues = annotation.points.map((point) => point.y)
+              if (yValues.length === 0) return null
+              const anchor = classifyAtlasStandardOverlay(Math.min(...yValues) - annotation.brushSize, Math.max(...yValues) + annotation.brushSize)
+              return <path key={index} d={`M ${annotation.points.map((point) => `${point.x},${point.y}`).join(' L ')}`} data-atlas-standard-overlay-anchor={anchor} data-atlas-standard-overlay-translation={anchor === 'body' ? 'svg' : undefined} transform={anchor === 'body' ? `translate(0 ${headerDeltaMm})` : undefined} fill="none" stroke={annotation.color} strokeWidth={annotation.brushSize} strokeLinecap="round" strokeLinejoin="round" opacity={(annotation.type as string) === 'brush' ? .5 : 1} />
+            })}
           </svg>
         </div>
       </section>
@@ -661,6 +695,11 @@ export async function createStorefrontInquiryPdf(input: PrintInput & {
     reportProgress(8)
     await inlineImages(container, input.mode, (completed, total) => {
       reportProgress(total === 0 ? 46 : 8 + (completed / total) * 38)
+    })
+    applyAtlasStandardHeaderLayout(container, {
+      pageWidthMm: PAGE_WIDTH_MM,
+      pageHeightMm: PAGE_HEIGHT_MM,
+      pagePaddingMm: 8
     })
 
     const [{ toCanvas }, { jsPDF }] = await renderDependencies

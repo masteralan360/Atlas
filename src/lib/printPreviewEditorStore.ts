@@ -19,6 +19,7 @@ export type TemplatePreviewField = {
     max?: number
     step?: number
     unit?: string
+    dynamicRange?: 'atlasStandardHeaderHeight'
 }
 
 export type TemplatePreviewDataKey = {
@@ -128,6 +129,8 @@ export type CustomTemplateImage = {
     y: number
     width: number
     rotation?: number
+    /** Persisted after a drag so Atlas Standard header/body coordinate conversion stays stable. */
+    atlasStandardAnchor?: 'header' | 'body' | 'crossing'
 }
 
 export type CustomTemplateShape = PdfShape

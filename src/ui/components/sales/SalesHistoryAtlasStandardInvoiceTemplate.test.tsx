@@ -123,6 +123,8 @@ describe('Sales History Atlas Standard template', () => {
         expect(html).toContain('SKU-001')
         expect(html).toContain('Paid total')
         expect(html).toContain('Net total')
+        expect(html).toContain('data-atlas-standard-print-footer')
+        expect(html).toContain('Made By AtlasERP')
         expect(html).not.toContain('Customer')
         expect(html).not.toContain('Source reference')
         expect(html).not.toContain('Refund status')
@@ -143,5 +145,36 @@ describe('Sales History Atlas Standard template', () => {
         expect(html).toContain('Returned Qty')
         expect(html).toContain('Total Refunded')
         expect(html).not.toContain('Paid total')
+    })
+
+    it('removes the print metadata footer from the layout when Common edit disables it', () => {
+        const html = renderToStaticMarkup(
+            <SalesHistoryAtlasStandardInvoiceTemplate
+                workspaceName="Atlas"
+                printLang="en"
+                sale={sale}
+                templateFields={{ showPrintFooter: 'false' }}
+            />
+        )
+
+        expect(html).not.toContain('data-atlas-standard-print-footer')
+        expect(html).not.toContain('Made By AtlasERP')
+        expect(html).not.toContain('Print date')
+    })
+
+    it('applies the effective Common edit header height to the shared layout markers', () => {
+        const html = renderToStaticMarkup(
+            <SalesHistoryAtlasStandardInvoiceTemplate
+                workspaceName="Atlas"
+                printLang="en"
+                sale={sale}
+                templateFields={{ atlasStandardHeaderHeightMm: '42.5' }}
+            />
+        )
+
+        expect(html).toContain('data-atlas-standard-layout=""')
+        expect(html).toContain('data-atlas-standard-header-height-mm="42.5"')
+        expect(html).toContain('height:42.5mm')
+        expect(html).toContain('data-atlas-standard-content-end=""')
     })
 })

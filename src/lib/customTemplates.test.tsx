@@ -851,13 +851,26 @@ describe('Atlas Standard order invoice custom print template', () => {
             onFieldDisplayModeChange
         })
 
-        expect(preview.fields).toEqual([
+        expect(preview.fields).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                key: 'atlasStandardHeaderHeightMm',
+                value: '13',
+                type: 'range',
+                step: 0.5,
+                dynamicRange: 'atlasStandardHeaderHeight'
+            }),
             expect.objectContaining({
                 key: 'showOrderAdjustments',
                 value: 'true',
                 type: 'boolean'
+            }),
+            expect.objectContaining({
+                key: 'showPrintFooter',
+                label: 'printPreviewEditor.showAtlasStandardFooter',
+                value: 'true',
+                type: 'boolean'
             })
-        ])
+        ]))
         expect(preview.reflowLowerPageText).toBe(true)
         expect(preview.movableComponents).toEqual([
             { key: 'atlasStandardWorkspaceLogo', label: 'Workspace Logo' },
@@ -877,7 +890,8 @@ describe('Atlas Standard order invoice custom print template', () => {
 
         const html = renderToStaticMarkup(element)
         expect(html).toContain('Atlas Test')
-        expect(html).toContain('min-h-[13mm]')
+        expect(html).toContain('data-atlas-standard-header=""')
+        expect(html).toContain('data-atlas-standard-content-end=""')
         expect(html).toContain('Sample Product')
         expect(html).toContain('Sample line item note.')
         expect(html).toContain('>Image</th>')
@@ -908,6 +922,11 @@ describe('Atlas Standard order invoice custom print template', () => {
         expect(html).toContain('data-order-print-component="atlasStandardWorkspaceLogo"')
         expect(html).toContain('data-template-text-flow-anchor')
         expect((html.match(/data-order-print-component=/g) || [])).toHaveLength(2)
+        expect(html).toContain('data-atlas-standard-print-footer')
+
+        const footerHiddenHtml = renderToStaticMarkup(preview.createElement({ showPrintFooter: 'false' }))
+        expect(footerHiddenHtml).not.toContain('data-atlas-standard-print-footer')
+        expect(footerHiddenHtml).not.toContain('Made By AtlasERP')
 
         const purchasePreview = customTemplates.createCustomTemplatePreview(target!, {
             workspaceName: 'Atlas Test',
@@ -1195,6 +1214,11 @@ describe('Atlas Standard return custom print template', () => {
             printFormat: 'a4',
             nativeTemplateAvailable: true
         })
+        expect(customTemplates.createCustomTemplatePreview(returnTarget!, { printLang: 'en' }).fields)
+            .toEqual(expect.arrayContaining([
+                expect.objectContaining({ key: 'atlasStandardHeaderHeightMm', value: '13', type: 'range' }),
+                expect.objectContaining({ key: 'showPrintFooter', value: 'true', type: 'boolean' })
+            ]))
         expect(customTemplates.getCustomTemplateDisplayName(customTemplates.ORDER_ATLAS_STANDARD_RETURN_TEMPLATE_KEY))
             .toBe('Orders Atlas Standard Return')
         expect(customTemplates.ORDER_ATLAS_STANDARD_RETURN_TEMPLATE_KEY).toBe('orders.AtlasStandardReturn')
@@ -1328,6 +1352,21 @@ describe('Atlas Standard return custom print template', () => {
             typeLabel: 'Atlas Standard Return Print',
             printFormat: 'a4'
         })
+
+        const standardPreview = customTemplates.createCustomTemplatePreview(standardTarget!, { printLang: 'en' })
+        const returnPreview = customTemplates.createCustomTemplatePreview(returnTarget!, { printLang: 'en' })
+        expect(standardPreview.fields).toEqual(expect.arrayContaining([
+            expect.objectContaining({ key: 'atlasStandardHeaderHeightMm', value: '13', type: 'range' }),
+            expect.objectContaining({ key: 'showPrintFooter', value: 'true', type: 'boolean' })
+        ]))
+        expect(returnPreview.fields).toEqual(expect.arrayContaining([
+            expect.objectContaining({ key: 'atlasStandardHeaderHeightMm', value: '13', type: 'range' }),
+            expect.objectContaining({ key: 'showPrintFooter', value: 'true', type: 'boolean' })
+        ]))
+        expect(renderToStaticMarkup(standardPreview.createElement({ showPrintFooter: 'false' })))
+            .not.toContain('data-atlas-standard-print-footer')
+        expect(renderToStaticMarkup(returnPreview.createElement({ showPrintFooter: 'false' })))
+            .not.toContain('data-atlas-standard-print-footer')
     })
 })
 

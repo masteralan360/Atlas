@@ -19,7 +19,7 @@ import {
 import { setPendingPDFPreview } from '@/lib/pdfPreviewStore'
 import { platformService } from '@/services/platformService'
 import { paginateOrderItemsStatementPages, paginateOrderItemsTables } from '@/lib/orderItemsTablePagination'
-import { centerTablesOnPages } from '@/lib/centeredTablePagination'
+import { CENTERED_TABLE_SPACER_ATTR, centerTablesOnPages } from '@/lib/centeredTablePagination'
 import { EditableField } from '@/ui/components/EditableField'
 import {
     A4InvoiceTemplate,
@@ -60,6 +60,16 @@ import { useToast } from '@/ui/components/use-toast'
 import { ProgressToast } from '@/ui/components/ProgressToast'
 import { subscribePdfProgress } from '@/services/pdfProgress'
 import type { PdfShapeKind } from '@/types'
+import {
+    applyAtlasStandardHeaderLayout,
+    ATLAS_STANDARD_HEADER_HEIGHT_FIELD_KEY,
+    classifyAtlasStandardOverlay,
+    getAtlasStandardHeaderDeltaMm,
+    parseAtlasStandardHeaderHeightMm,
+    resolveAtlasStandardOverlayDrag,
+    snapAtlasStandardBodyOverlaysToPages,
+    type AtlasStandardHeaderRange
+} from '@/lib/atlasStandardHeaderLayout'
 
 const PREVIEW_PAGE_BREAK_SELECTOR = [
     '[data-pdf-keep-together]',
@@ -694,6 +704,16 @@ export function PrintPreviewEditorPage() {
             return initial
         }
     )
+    const [atlasStandardHeaderRange, setAtlasStandardHeaderRange] = useState<AtlasStandardHeaderRange | null>(null)
+    const hasAtlasStandardHeaderControl = Boolean(
+        templatePreview?.fields.some((field) => field.dynamicRange === 'atlasStandardHeaderHeight')
+    )
+    const atlasStandardHeaderHeightMm = hasAtlasStandardHeaderControl
+        ? parseAtlasStandardHeaderHeightMm(fieldValues[ATLAS_STANDARD_HEADER_HEIGHT_FIELD_KEY])
+        : null
+    const atlasStandardHeaderDeltaMm = atlasStandardHeaderHeightMm === null
+        ? 0
+        : getAtlasStandardHeaderDeltaMm(atlasStandardHeaderHeightMm)
     const [editPanelOpen, setEditPanelOpen] = useState(false)
 
     const [templateAnnotations, setTemplateAnnotations] = useState<CustomTemplateAnnotation[]>(() => initialTemplateLayout?.annotations || [])
@@ -855,6 +875,38 @@ export function PrintPreviewEditorPage() {
         if (!stage || !contentLayer || !templatePreview || !isFixedPageTemplatePreview) return
 
         resetPreviewPageBreakMargins(contentLayer)
+        contentLayer.querySelectorAll<HTMLElement>(`[${CENTERED_TABLE_SPACER_ATTR}]`)
+            .forEach((spacer) => spacer.remove())
+
+        const nextHeaderRange = applyAtlasStandardHeaderLayout(stage, {
+            pageWidthMm: templatePageWidth,
+            pageHeightMm: templatePageHeight || A4_PAGE_HEIGHT_MM,
+            pagePaddingMm: 8
+        })
+        if (nextHeaderRange) {
+            setAtlasStandardHeaderRange((current) => (
+                current
+                && current.effectiveHeightMm === nextHeaderRange.effectiveHeightMm
+                && current.minHeightMm === nextHeaderRange.minHeightMm
+                && current.maxHeightMm === nextHeaderRange.maxHeightMm
+                    ? current
+                    : nextHeaderRange
+            ))
+
+            if (nextHeaderRange.requestedHeightMm !== nextHeaderRange.effectiveHeightMm) {
+                setFieldValues((current) => {
+                    const effectiveValue = String(nextHeaderRange.effectiveHeightMm)
+                    return current[ATLAS_STANDARD_HEADER_HEIGHT_FIELD_KEY] === effectiveValue
+                        ? current
+                        : { ...current, [ATLAS_STANDARD_HEADER_HEIGHT_FIELD_KEY]: effectiveValue }
+                })
+                measureTemplatePreviewHeight()
+                measureTemplateTextFlowStart()
+                return
+            }
+        } else {
+            setAtlasStandardHeaderRange((current) => current === null ? current : null)
+        }
 
         const stageRect = stage.getBoundingClientRect()
         if (stageRect.width <= 0) return
@@ -922,6 +974,12 @@ export function PrintPreviewEditorPage() {
                 anchor.dataset[PREVIEW_PAGE_BREAK_ORIGINAL_MARGIN] = anchor.style.marginTop
             }
             anchor.style.marginTop = `${pageBreakOffsetMm}mm`
+        })
+
+        snapAtlasStandardBodyOverlaysToPages(stage, {
+            pageWidthMm: templatePageWidth,
+            pageHeightMm,
+            pagePaddingMm: 8
         })
 
         measureTemplatePreviewHeight()
@@ -1888,8 +1946,16 @@ export function PrintPreviewEditorPage() {
                                     }}
                                 >
                                     {/* Saved annotations */}
-                                    {templateAnnotations.map((ann, idx) => (
-                                        <path
+                                    {templateAnnotations.map((ann, idx) => {
+                                        const yValues = ann.points.map((point) => point.y)
+                                        const anchor = hasAtlasStandardHeaderControl && yValues.length > 0
+                                            ? classifyAtlasStandardOverlay(
+                                                Math.min(...yValues) - ann.brushSize,
+                                                Math.max(...yValues) + ann.brushSize
+                                            )
+                                            : undefined
+
+                                        return <path
                                             key={idx}
                                             d={`M ${ann.points.map(p => `${p.x},${p.y}`).join(' L ')}`}
                                             stroke={ann.color}
@@ -1898,6 +1964,9 @@ export function PrintPreviewEditorPage() {
                                             strokeLinecap="round"
                                             strokeLinejoin="round"
                                             opacity={ann.type === 'brush' ? 0.5 : 1}
+                                            data-atlas-standard-overlay-anchor={anchor}
+                                            data-atlas-standard-overlay-translation={anchor === 'body' ? 'svg' : undefined}
+                                            transform={anchor === 'body' ? `translate(0 ${atlasStandardHeaderDeltaMm})` : undefined}
                                             onPointerDown={(e) => {
                                                 if (drawingMode === 'eraser') {
                                                     e.stopPropagation();
@@ -1907,7 +1976,7 @@ export function PrintPreviewEditorPage() {
                                             className={cn(drawingMode === 'eraser' && "cursor-pointer hover:stroke-destructive transition-colors")}
                                             style={{ pointerEvents: drawingMode === 'eraser' ? 'all' : 'auto' }}
                                         />
-                                    ))}
+                                    })}
                                     {/* Current active path preview */}
                                     {currentPath && (
                                         <path
@@ -1924,12 +1993,23 @@ export function PrintPreviewEditorPage() {
                                 </svg>
 
                                 {/* Attached images overlay */}
-                                {templateImages.map((img, idx) => (
+                                {templateImages.map((img, idx) => {
+                                    const anchor = hasAtlasStandardHeaderControl
+                                        ? img.atlasStandardAnchor
+                                            ?? classifyAtlasStandardOverlay(img.y, img.y + img.width)
+                                        : undefined
+
+                                    return (
                                     <div
                                         key={`timg-${idx}`}
                                         data-template-overflow-measure=""
                                         data-pdf-template-object-id={`image:${idx}`}
                                         data-pdf-template-object-kind="image"
+                                        data-atlas-standard-overlay-anchor={anchor}
+                                        data-atlas-standard-overlay-anchor-locked={img.atlasStandardAnchor ? 'true' : undefined}
+                                        data-atlas-standard-overlay-translation={anchor === 'body' ? 'css' : undefined}
+                                        data-atlas-standard-overlay-can-translate={hasAtlasStandardHeaderControl ? 'true' : undefined}
+                                        data-atlas-standard-overlay-base-top-mm={hasAtlasStandardHeaderControl ? img.y : undefined}
                                         className={cn("absolute z-[35] cursor-move group/img", selectedTemplateObjectId === `image:${idx}` && "ring-1 ring-primary")}
                                         style={{
                                             left: `${(img.x / templatePageWidth) * 100}%`,
@@ -1937,6 +2017,7 @@ export function PrintPreviewEditorPage() {
                                             width: `${(img.width / templatePageWidth) * 100}%`,
                                             transform: `rotate(${img.rotation || 0}deg)`,
                                             transformOrigin: 'top left',
+                                            translate: anchor === 'body' ? `0 ${atlasStandardHeaderDeltaMm}mm` : undefined,
                                             zIndex: selectedTemplateObjectId === `image:${idx}` ? 200 : 50 + idx,
                                         }}
                                         onPointerDown={(e) => {
@@ -1946,15 +2027,44 @@ export function PrintPreviewEditorPage() {
                                             const startX = e.clientX
                                             const startY = e.clientY
                                             const origX = img.x
-                                            const origY = img.y
                                             const container = (e.currentTarget.parentElement as HTMLElement)
                                             const cRect = container.getBoundingClientRect()
                                             const scaleX = templatePageWidth / cRect.width
                                             const scaleY = templateStackHeight / cRect.height
+                                            const renderedAnchor = e.currentTarget.dataset.atlasStandardOverlayAnchor
+                                            const dragStartAnchor = renderedAnchor === 'header'
+                                                || renderedAnchor === 'body'
+                                                || renderedAnchor === 'crossing'
+                                                ? renderedAnchor
+                                                : anchor
+                                            const renderedOffsetMm = Number(
+                                                e.currentTarget.dataset.atlasStandardOverlayAppliedOffsetMm
+                                            )
+                                            const origVisualY = img.y + (
+                                                dragStartAnchor === 'body'
+                                                    ? Number.isFinite(renderedOffsetMm)
+                                                        ? renderedOffsetMm
+                                                        : atlasStandardHeaderDeltaMm
+                                                    : 0
+                                            )
+                                            const imageHeightMm = e.currentTarget.offsetHeight * scaleY
                                             const onMove = (ev: PointerEvent) => {
                                                 const dx = (ev.clientX - startX) * scaleX
                                                 const dy = (ev.clientY - startY) * scaleY
-                                                setTemplateImages(prev => prev.map((im, i) => i === idx ? { ...im, x: origX + dx, y: origY + dy } : im))
+                                                const visualY = origVisualY + dy
+                                                const nextPosition = hasAtlasStandardHeaderControl && atlasStandardHeaderHeightMm !== null
+                                                    ? resolveAtlasStandardOverlayDrag({
+                                                        visualTopMm: visualY,
+                                                        heightMm: imageHeightMm,
+                                                        headerHeightMm: atlasStandardHeaderHeightMm
+                                                    })
+                                                    : null
+                                                setTemplateImages(prev => prev.map((im, i) => i === idx ? {
+                                                    ...im,
+                                                    x: origX + dx,
+                                                    y: nextPosition?.storedTopMm ?? visualY,
+                                                    atlasStandardAnchor: nextPosition?.anchor ?? im.atlasStandardAnchor
+                                                } : im))
                                             }
                                             const onUp = () => {
                                                 window.removeEventListener('pointermove', onMove)
@@ -2034,7 +2144,8 @@ export function PrintPreviewEditorPage() {
                                             <X className="w-3 h-3" />
                                         </button>
                                     </div>
-                                ))}
+                                    )
+                                })}
 
                                 <AttachedShapesOverlay
                                     shapes={templateShapes}
@@ -2044,6 +2155,7 @@ export function PrintPreviewEditorPage() {
                                         ? selectedTemplateObjectId.slice('shape:'.length)
                                         : null}
                                     onSelectionClear={() => setSelectedTemplateObjectId(null)}
+                                    atlasStandardHeaderHeightMm={atlasStandardHeaderHeightMm}
                                 />
 
                                 {/* Attached texts overlay */}
@@ -2056,6 +2168,14 @@ export function PrintPreviewEditorPage() {
                                     const displayY = reflowsAfterContent && templateTextFlowStartMm !== null
                                         ? Math.max(txt.y, templateTextFlowStartMm)
                                         : txt.y
+                                    const estimatedTextHeightMm = Math.max(1, txt.text.split('\n').length)
+                                        * (Number(txt.fontSize) || 16)
+                                        * 0.2645833333
+                                        * 1.3
+                                    const atlasStandardAnchor = hasAtlasStandardHeaderControl
+                                        ? classifyAtlasStandardOverlay(txt.y, txt.y + estimatedTextHeightMm)
+                                        : undefined
+                                    const shouldShiftWithAtlasBody = !reflowsAfterContent && atlasStandardAnchor === 'body'
 
                                     return (
                                         <div
@@ -2064,6 +2184,10 @@ export function PrintPreviewEditorPage() {
                                             data-template-text-flow={reflowsAfterContent ? 'after-content' : undefined}
                                             data-pdf-template-object-id={`text:${txt.id}`}
                                             data-pdf-template-object-kind="text"
+                                            data-atlas-standard-overlay-anchor={atlasStandardAnchor}
+                                            data-atlas-standard-overlay-translation={shouldShiftWithAtlasBody ? 'css' : undefined}
+                                            data-atlas-standard-overlay-can-translate={!reflowsAfterContent && hasAtlasStandardHeaderControl ? 'true' : undefined}
+                                            data-atlas-standard-overlay-base-top-mm={!reflowsAfterContent && hasAtlasStandardHeaderControl ? txt.y : undefined}
                                             className={cn("absolute z-[35] group/txt", selectedTemplateObjectId === `text:${txt.id}` && "ring-1 ring-primary")}
                                             style={{
                                                 left: `${(txt.x / templatePageWidth) * 100}%`,
@@ -2071,6 +2195,7 @@ export function PrintPreviewEditorPage() {
                                                 width: `${(txt.width / templatePageWidth) * 100}%`,
                                                 transform: `rotate(${txt.rotation}deg)`,
                                                 transformOrigin: 'top left',
+                                                translate: shouldShiftWithAtlasBody ? `0 ${atlasStandardHeaderDeltaMm}mm` : undefined,
                                                 zIndex: selectedTemplateObjectId === `text:${txt.id}` ? 200 : 100 + idx,
                                             }}
                                         >
@@ -2402,13 +2527,29 @@ export function PrintPreviewEditorPage() {
                                             <input
                                                 id={`template-field-${f.key}`}
                                                 type="range"
-                                                min={f.min}
-                                                max={f.max}
+                                                min={f.dynamicRange === 'atlasStandardHeaderHeight'
+                                                    ? atlasStandardHeaderRange?.minHeightMm ?? f.min
+                                                    : f.min}
+                                                max={f.dynamicRange === 'atlasStandardHeaderHeight'
+                                                    ? atlasStandardHeaderRange?.maxHeightMm ?? f.max
+                                                    : f.max}
                                                 step={f.step}
                                                 value={fieldValues[f.key] ?? f.value}
+                                                disabled={f.dynamicRange === 'atlasStandardHeaderHeight'
+                                                    && Boolean(atlasStandardHeaderRange)
+                                                    && atlasStandardHeaderRange!.maxHeightMm <= atlasStandardHeaderRange!.minHeightMm}
                                                 className="w-full accent-primary"
                                                 onChange={(event) => handleFieldChange(f.key, event.target.value)}
                                             />
+                                            {f.dynamicRange === 'atlasStandardHeaderHeight'
+                                                && atlasStandardHeaderRange
+                                                && atlasStandardHeaderRange.maxHeightMm <= atlasStandardHeaderRange.minHeightMm ? (
+                                                <p className="text-[10px] leading-4 text-muted-foreground">
+                                                    {t('printPreviewEditor.atlasStandardHeaderNoSpace', {
+                                                        defaultValue: 'No unused printable space is available for a taller header.'
+                                                    })}
+                                                </p>
+                                            ) : null}
                                         </div>
                                     ) : (
                                         <>

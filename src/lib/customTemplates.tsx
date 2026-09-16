@@ -4,6 +4,7 @@ import type {
     CustomTemplateBackground,
     CustomTemplateLayout,
     CustomTemplatePrintLanguage,
+    CustomTemplateText,
     TemplatePreview,
     TemplatePreviewDataKey
 } from '@/lib/printPreviewEditorStore'
@@ -80,7 +81,8 @@ import {
 } from '@/lib/atlasStandardPartnerBalancePrintState'
 import {
     SalesHistoryAtlasStandardInvoiceTemplate,
-    SALES_HISTORY_ATLAS_STANDARD_MOVABLE_COMPONENT_KEYS
+    SALES_HISTORY_ATLAS_STANDARD_MOVABLE_COMPONENT_KEYS,
+    SALES_HISTORY_ATLAS_STANDARD_TEMPLATE_FIELD_KEYS
 } from '@/ui/components/sales/SalesHistoryAtlasStandardInvoiceTemplate'
 import type { PartnerAccountStatementClosingBalance } from '@/lib/partnerAccountStatement'
 import {
@@ -95,6 +97,12 @@ import {
     PROFESSIONAL_A4_MOVABLE_COMPONENT_KEYS,
     PROFESSIONAL_A4_TABLE_ROW_COUNT
 } from '@/ui/components/ProfessionalA4InvoiceTemplate'
+import {
+    ATLAS_STANDARD_HEADER_HEIGHT_FIELD_KEY,
+    ATLAS_STANDARD_HEADER_PREVIEW_FIELD,
+    classifyAtlasStandardOverlay,
+    getAtlasStandardHeaderDeltaMm
+} from '@/lib/atlasStandardHeaderLayout'
 
 export const SALES_HISTORY_RECEIPT_TEMPLATE_KEY = 'salesHistory.Receipt'
 export const INSTANT_HISTORY_RECEIPT_TEMPLATE_KEY = 'instantHistory.Receipt'
@@ -1050,9 +1058,26 @@ const ORDER_DETAILS_FIELDS = [
 ]
 
 const ATLAS_STANDARD_ORDER_FIELDS = [
+    ATLAS_STANDARD_HEADER_PREVIEW_FIELD,
     {
         key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showOrderAdjustments,
         label: 'Show order adjustments',
+        value: 'true',
+        type: 'boolean' as const
+    },
+    {
+        key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter,
+        label: 'printPreviewEditor.showAtlasStandardFooter',
+        value: 'true',
+        type: 'boolean' as const
+    }
+]
+
+const ATLAS_STANDARD_PRINT_FOOTER_FIELDS = [
+    ATLAS_STANDARD_HEADER_PREVIEW_FIELD,
+    {
+        key: SALES_HISTORY_ATLAS_STANDARD_TEMPLATE_FIELD_KEYS.showPrintFooter,
+        label: 'printPreviewEditor.showAtlasStandardFooter',
         value: 'true',
         type: 'boolean' as const
     }
@@ -1539,7 +1564,7 @@ function createSalesHistoryAtlasStandardPreview(
         : options.salesHistoryPrintVersion || 'adjusted'
 
     return {
-        fields: [],
+        fields: ATLAS_STANDARD_PRINT_FOOTER_FIELDS,
         reflowLowerPageText: true,
         supportsBackgroundEdit: true,
         movableComponents: [
@@ -1548,7 +1573,7 @@ function createSalesHistoryAtlasStandardPreview(
         ],
         page: { widthMm: 210, heightMm: 297 },
         fixedPrintLang,
-        createElement: (_data, _effectiveId, printLangOverride, renderOptions) => (
+        createElement: (data, _effectiveId, printLangOverride, renderOptions) => (
             <SalesHistoryAtlasStandardInvoiceTemplate
                 workspaceName={options.workspaceName}
                 printLang={printLangOverride || fixedPrintLang}
@@ -1570,6 +1595,7 @@ function createSalesHistoryAtlasStandardPreview(
                 fieldDisplayModes={renderOptions?.fieldDisplayModes}
                 onFieldDisplayModeChange={renderOptions?.onFieldDisplayModeChange}
                 background={renderOptions?.background}
+                templateFields={data}
                 printVersion={printVersion}
             />
         ),
@@ -1948,7 +1974,9 @@ function createAtlasStandardOrderInvoicePreview(
             : 'en'
 
     return {
-        fields: printMode === 'order' ? ATLAS_STANDARD_ORDER_FIELDS : [],
+        fields: printMode === 'order'
+            ? ATLAS_STANDARD_ORDER_FIELDS
+            : ATLAS_STANDARD_PRINT_FOOTER_FIELDS,
         reflowLowerPageText: true,
         supportsBackgroundEdit: true,
         movableComponents: [
@@ -2192,6 +2220,15 @@ function CustomTemplateLayoutOverlay({
 }) {
     const pageWidth = layout.page.widthMm || 210
     const pageHeight = layout.page.heightMm || 297
+    const headerDeltaMm = getAtlasStandardHeaderDeltaMm(
+        layout.fields?.[ATLAS_STANDARD_HEADER_HEIGHT_FIELD_KEY]
+    )
+    const textHeightMm = (text: CustomTemplateText) => (
+        Math.max(1, text.text.split('\n').length)
+        * (Number(text.fontSize) || 16)
+        * 0.2645833333
+        * 1.3
+    )
 
     return (
         <div
@@ -2199,8 +2236,14 @@ function CustomTemplateLayoutOverlay({
             style={{ width: '100%', height: `${heightMm}mm` }}
         >
             <svg className="absolute inset-0 z-40 h-full w-full" viewBox={`0 0 ${pageWidth} ${heightMm}`}>
-                {layout.annotations.map((annotation, index) => (
-                    <path
+                {layout.annotations.map((annotation, index) => {
+                    const yValues = annotation.points.map((point) => point.y)
+                    if (yValues.length === 0) return null
+                    const topMm = Math.min(...yValues) - annotation.brushSize
+                    const bottomMm = Math.max(...yValues) + annotation.brushSize
+                    const anchor = classifyAtlasStandardOverlay(topMm, bottomMm)
+
+                    return <path
                         key={`annotation-${index}`}
                         d={`M ${annotation.points.map((point) => `${point.x},${point.y}`).join(' L ')}`}
                         stroke={annotation.color}
@@ -2209,31 +2252,53 @@ function CustomTemplateLayoutOverlay({
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         opacity={annotation.type === 'brush' ? 0.5 : 1}
+                        data-atlas-standard-overlay-anchor={anchor}
+                        data-atlas-standard-overlay-translation={anchor === 'body' ? 'svg' : undefined}
+                        transform={anchor === 'body' ? `translate(0 ${headerDeltaMm})` : undefined}
                     />
-                ))}
+                })}
             </svg>
 
-            {layout.images.map((image, index) => (
-                <img
+            {layout.images.map((image, index) => {
+                const anchor = image.atlasStandardAnchor
+                    ?? classifyAtlasStandardOverlay(image.y, image.y + image.width)
+
+                return <img
                     key={`image-${index}`}
                     src={platformService.convertFileSrc(image.path)}
                     alt=""
                     className="absolute block select-none"
+                    data-atlas-standard-overlay-anchor={anchor}
+                    data-atlas-standard-overlay-anchor-locked={image.atlasStandardAnchor ? 'true' : undefined}
+                    data-atlas-standard-overlay-translation={anchor === 'body' ? 'css' : undefined}
+                    data-atlas-standard-overlay-can-translate="true"
+                    data-atlas-standard-overlay-base-top-mm={image.y}
                     style={{
                         left: `${(image.x / pageWidth) * 100}%`,
                         top: `${(image.y / heightMm) * 100}%`,
                         width: `${(image.width / pageWidth) * 100}%`,
                         transform: `rotate(${image.rotation || 0}deg)`,
                         transformOrigin: 'top left',
+                        translate: anchor === 'body' ? `0 ${headerDeltaMm}mm` : undefined,
                         zIndex: 60 + index
                     }}
                 />
-            ))}
+            })}
 
-            {(layout.shapes || []).map((shape, index) => (
-                <div
+            {(layout.shapes || []).map((shape, index) => {
+                const shapeHeight = getPdfShapeHeight(shape)
+                const anchor = classifyAtlasStandardOverlay(
+                    shape.y - shapeHeight / 2,
+                    shape.y + shapeHeight / 2
+                )
+
+                return <div
                     key={`shape-${shape.id || index}`}
                     className="absolute"
+                    data-atlas-standard-overlay-anchor={anchor}
+                    data-atlas-standard-overlay-translation={anchor === 'body' ? 'css' : undefined}
+                    data-atlas-standard-overlay-can-translate="true"
+                    data-atlas-standard-overlay-base-top-mm={shape.y - shapeHeight / 2}
                     style={{
                         left: `${(shape.x / pageWidth) * 100}%`,
                         top: `${(shape.y / heightMm) * 100}%`,
@@ -2241,15 +2306,19 @@ function CustomTemplateLayoutOverlay({
                         height: `${(getPdfShapeHeight(shape) / heightMm) * 100}%`,
                         transform: `translate(-50%, -50%) rotate(${shape.rotation || 0}deg)`,
                         transformOrigin: 'center',
+                        translate: anchor === 'body' ? `0 ${headerDeltaMm}mm` : undefined,
                         zIndex: getPdfShapeZIndex(shape)
                     }}
                 >
                     <PdfShapeGraphic kind={shape.kind} color={shape.color} />
                 </div>
-            ))}
+            })}
 
             {layout.texts.map((text, index) => {
                 const reflowsAfterContent = shouldReflowCustomTemplateText(text, pageHeight, reflowLowerPageText)
+                const anchor = reflowsAfterContent
+                    ? 'body'
+                    : classifyAtlasStandardOverlay(text.y, text.y + textHeightMm(text))
 
                 return (
                     <div
@@ -2257,6 +2326,10 @@ function CustomTemplateLayoutOverlay({
                         dir={resolveIsolatedTextDirection(text.text)}
                         data-template-text-flow={reflowsAfterContent ? 'after-content' : undefined}
                         data-template-text-y-mm={reflowsAfterContent ? text.y : undefined}
+                        data-atlas-standard-overlay-anchor={anchor}
+                        data-atlas-standard-overlay-translation={!reflowsAfterContent && anchor === 'body' ? 'css' : undefined}
+                        data-atlas-standard-overlay-can-translate={!reflowsAfterContent ? 'true' : undefined}
+                        data-atlas-standard-overlay-base-top-mm={!reflowsAfterContent ? text.y : undefined}
                         className="absolute whitespace-pre-wrap break-words font-bold leading-snug"
                         style={{
                             left: `${(text.x / pageWidth) * 100}%`,
@@ -2264,6 +2337,7 @@ function CustomTemplateLayoutOverlay({
                             width: `${(text.width / pageWidth) * 100}%`,
                             transform: `rotate(${text.rotation || 0}deg)`,
                             transformOrigin: 'top left',
+                            translate: !reflowsAfterContent && anchor === 'body' ? `0 ${headerDeltaMm}mm` : undefined,
                             zIndex: 100 + index,
                             fontSize: `${text.fontSize || 16}px`,
                             color: text.color || '#000000'

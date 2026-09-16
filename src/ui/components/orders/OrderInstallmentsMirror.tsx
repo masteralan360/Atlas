@@ -18,6 +18,7 @@ import {
     useWorkspaceOrderInstallments
 } from '@/local-db'
 import { cn, formatCurrency, formatDate } from '@/lib/utils'
+import { ATLAS_STANDARD_HEADER_PREVIEW_FIELD } from '@/lib/atlasStandardHeaderLayout'
 import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import {
@@ -47,7 +48,8 @@ import {
 } from './OrderPrintTemplates'
 import {
     AtlasStandardOrderInvoiceTemplate,
-    ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS
+    ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS,
+    ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS
 } from './AtlasStandardOrderInvoiceTemplate'
 import {
     createAtlasStandardPartnerBalancePrintState,
@@ -464,7 +466,10 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
     const orderInstallmentAtlasStandardPreview = useMemo<TemplatePreview | undefined>(() => {
         if (!printTarget) return undefined
         return {
-            fields: [],
+            fields: [
+                ATLAS_STANDARD_HEADER_PREVIEW_FIELD,
+                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter, label: t('printPreviewEditor.showAtlasStandardFooter', { defaultValue: 'Show Made by, page, and print date' }), value: 'true', type: 'boolean' }
+            ],
             requiresFreshPartnerBalance: Boolean(workspaceId && printPartnerId),
             partnerBalanceFieldKeys: ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS,
             resetFreshPartnerBalance: () => resetAtlasStandardPartnerBalancePrintState(
@@ -480,7 +485,7 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
                 atlasStandardPartnerBalanceStateRef.current.orderBalanceAtPosting = orderBalanceAtPosting
                 atlasStandardPartnerBalanceStateRef.current.progress = progress
             },
-            createElement: (_data, _effectiveId, printLangOverride, renderOptions) => (
+            createElement: (data, _effectiveId, printLangOverride, renderOptions) => (
                 <AtlasStandardOrderInvoiceTemplate
                     workspaceName={workspaceName}
                     printLang={printLangOverride || printLang}
@@ -500,6 +505,7 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
                     onFieldLabelChange={renderOptions?.onFieldLabelChange}
                     fieldDisplayModes={renderOptions?.fieldDisplayModes}
                     onFieldDisplayModeChange={renderOptions?.onFieldDisplayModeChange}
+                    templateFields={data}
                 />
             ),
             buildPdf: async (element: ReactElement, printLangOverride?: string) => generateTemplatePdf({
@@ -517,6 +523,7 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
         printPartnerId,
         printTarget,
         productImageUrls,
+        t,
         user?.name,
         workspaceId,
         workspaceName
