@@ -11,6 +11,7 @@ import {
     getCustomTemplateLayoutHeightMm,
     getCustomTemplateLayoutOverflowHeightMm,
     getCustomTemplateLayoutPageCount,
+    isTemplateTextFlowEnabled,
     shouldReflowCustomTemplateText
 } from '@/lib/printPreviewEditorStore'
 import { PdfShapeGraphic } from '@/ui/components/PdfShapeGraphic'
@@ -1062,6 +1063,12 @@ const ATLAS_STANDARD_ORDER_FIELDS = [
         label: 'printPreviewEditor.showAtlasStandardFooter',
         value: 'true',
         type: 'boolean' as const
+    },
+    {
+        key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.enableTextPositionAnchor,
+        label: 'printPreviewEditor.enableTextPositionAnchor',
+        value: 'true',
+        type: 'boolean' as const
     }
 ]
 
@@ -1965,8 +1972,9 @@ function createAtlasStandardOrderInvoicePreview(
     return {
         fields: printMode === 'order'
             ? ATLAS_STANDARD_ORDER_FIELDS
-            : ATLAS_STANDARD_PRINT_FOOTER_FIELDS,
+            : ATLAS_STANDARD_ORDER_FIELDS.filter((field) => field.key !== ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showOrderAdjustments),
         reflowLowerPageText: true,
+        textFlowAnchorField: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.enableTextPositionAnchor,
         supportsBackgroundEdit: true,
         movableComponents: [
             { key: ATLAS_STANDARD_ORDER_MOVABLE_COMPONENT_KEYS.logo, label: 'Workspace Logo' },
@@ -2273,6 +2281,7 @@ function CustomTemplateLayoutOverlay({
                         key={`text-${text.id || index}`}
                         dir={resolveIsolatedTextDirection(text.text)}
                         data-template-text-flow={reflowsAfterContent ? 'after-content' : undefined}
+                        data-template-custom-text={text.text.trim() ? '' : undefined}
                         data-template-text-y-mm={reflowsAfterContent ? text.y : undefined}
                         className="absolute whitespace-pre-wrap break-words font-bold leading-snug"
                         style={{
@@ -2325,6 +2334,7 @@ export function renderCustomTemplateLayoutElement({
     return (
         <div
             data-custom-template-export-root=""
+            data-template-layout-root=""
             className="relative mx-auto overflow-visible bg-white text-black"
             style={{
                 width: `${layout.page.widthMm || 210}mm`,
@@ -2368,7 +2378,7 @@ export function renderCustomTemplateLayoutElement({
                 heightMm={isReceiptTemplate
                     ? layoutHeight
                     : Math.max(layoutHeight, getCustomTemplateLayoutHeightMm(layout))}
-                reflowLowerPageText={preview.reflowLowerPageText}
+                reflowLowerPageText={isTemplateTextFlowEnabled(preview, fieldValues)}
             />
         </div>
     )

@@ -4,6 +4,68 @@ export const ATLAS_STANDARD_FIRST_PAGE_TABLE_DATA_AREA_MM = 145
 // 240 mm yields 30 rows with the default 8 mm row height, while retaining 20 mm
 // of breathing room above and below the complete table.
 export const ATLAS_STANDARD_CONTINUATION_TABLE_DATA_AREA_MM = 240
+export const ATLAS_STANDARD_TEXT_ANCHOR_FIELD = 'enableTextPositionAnchor'
+export const ATLAS_STANDARD_PRINTABLE_BOTTOM_MM = 297 - 8
+
+export function isAtlasStandardSmartRowExpansionEnabled(fields?: Record<string, string>) {
+    return fields?.showPrintFooter === 'false' && fields?.[ATLAS_STANDARD_TEXT_ANCHOR_FIELD] === 'false'
+}
+
+/** Fit ordered, indivisible rows. Real content always takes priority over filler. */
+export function fitAtlasStandardOrderRows(
+    rowHeightsMm: readonly number[],
+    firstPageDataAreaMm: number,
+    emptyRowHeightMm: number,
+    continuationDataAreaMm = ATLAS_STANDARD_CONTINUATION_TABLE_DATA_AREA_MM
+) {
+    const minimumRowMm = Number.isFinite(emptyRowHeightMm) && emptyRowHeightMm > 0 ? emptyRowHeightMm : 8
+    const heights = rowHeightsMm.map((height) => Number.isFinite(height) && height > 0 ? height : minimumRowMm)
+    const availableMm = Number.isFinite(firstPageDataAreaMm) ? Math.max(0, firstPageDataAreaMm) : 0
+    // Browser subpixel arithmetic can differ by a few millionths of a mm.
+    const epsilonMm = 0.00001
+    let usedMm = 0
+    let firstPageRows = 0
+    while (firstPageRows < heights.length && usedMm + heights[firstPageRows] <= availableMm + epsilonMm) {
+        usedMm += heights[firstPageRows++]
+    }
+    const fillerRows = Math.max(0, Math.floor((availableMm - usedMm + epsilonMm) / minimumRowMm))
+    const continuationCapacityMm = Number.isFinite(continuationDataAreaMm) && continuationDataAreaMm > 0
+        ? continuationDataAreaMm : ATLAS_STANDARD_CONTINUATION_TABLE_DATA_AREA_MM
+    const continuationRows: number[] = []
+    let index = firstPageRows
+    while (index < heights.length) {
+        let count = 0
+        let pageUsedMm = 0
+        while (index < heights.length && (count === 0 || pageUsedMm + heights[index] <= continuationCapacityMm + epsilonMm)) {
+            pageUsedMm += heights[index++]
+            count++
+        }
+        continuationRows.push(count)
+    }
+    // Never add a fractional table row. Use its remainder above the summary,
+    // rather than leaving extra unused space underneath the document.
+    const summaryOffsetMm = Math.max(0, availableMm - usedMm - fillerRows * minimumRowMm)
+    return { firstPageRows, fillerRows, continuationRows, rowHeightsMm: heights, summaryOffsetMm }
+}
+
+/** Reserve the measured native tail and any saved text in the usable first-page region. */
+export function getAtlasStandardAvailableTableAreaMm({
+    tableTopMm, tableChromeMm, tailHeightMm, textBounds = [], printableBottomMm = ATLAS_STANDARD_PRINTABLE_BOTTOM_MM
+}: {
+    tableTopMm: number
+    tableChromeMm: number
+    tailHeightMm: number
+    textBounds?: readonly { topMm: number; bottomMm: number }[]
+    printableBottomMm?: number
+}) {
+    let bottomMm = printableBottomMm
+    for (const text of textBounds) {
+        if (text.bottomMm > tableTopMm && text.topMm < printableBottomMm) {
+            bottomMm = Math.min(bottomMm, text.topMm - 1)
+        }
+    }
+    return Math.max(0, bottomMm - tableTopMm - tableChromeMm - tailHeightMm)
+}
 
 const TABLE_ITEM_ROW_MIN_MM = 8
 export const DEFAULT_PRODUCT_IMAGE_COLUMN_WIDTH = 6

@@ -4645,6 +4645,7 @@
   "printPreviewEditor": {
     "title": "Print Preview Editor",
     "showAtlasStandardFooter": "Show Made by, page, and print date",
+    "enableTextPositionAnchor": "Enable invisible text-position anchor",
     "fitPage": "Fit",
     "bottomWarning": "Avoid placing components here — they may be cut off when printing on A4.",
     "loadingPdf": "Loading PDF…",

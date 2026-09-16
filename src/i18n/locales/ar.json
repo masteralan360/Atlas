@@ -2945,6 +2945,7 @@
   "printPreviewEditor": {
     "title": "محرر معاينة الطباعة",
     "showAtlasStandardFooter": "إظهار تم الإنشاء بواسطة والصفحة وتاريخ الطباعة",
+    "enableTextPositionAnchor": "تفعيل نقطة تثبيت موضع النص غير المرئية",
     "fitPage": "ملائمة",
     "bottomWarning": "تجنب وضع المكونات هنا — قد يتم قصها عند الطباعة على A4.",
     "loadingPdf": "جارٍ تحميل ملف PDF…",

@@ -11,6 +11,7 @@ import {
     type A4KeepTogetherBlock
 } from '@/services/a4Pagination'
 import { paginateOrderItemsStatementPages, paginateOrderItemsTables } from '@/lib/orderItemsTablePagination'
+import { settleAtlasStandardOrderLayouts } from '@/lib/useAtlasStandardOrderLayout'
 import { centerTablesOnPages } from '@/lib/centeredTablePagination'
 import { reportPdfProgress } from '@/services/pdfProgress'
 import { inlineCaptureableImages, waitForPdfImages } from '@/services/pdfImageCapture'
@@ -329,6 +330,7 @@ async function renderTemplateToPdf(element: ReturnType<typeof createElement>, wi
         }
         await waitForPdfImages(container)
         await inlineCaptureableImages(container)
+        await settleAtlasStandardOrderLayouts(container)
         await reflowTemplateTextAfterContent(container, widthMm)
         await expandContainerToRenderedBounds(container)
         reportPdfProgress(0.1, 'print.progressPreparing')

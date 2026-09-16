@@ -466,8 +466,10 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
         if (!printTarget) return undefined
         return {
             fields: [
-                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter, label: t('printPreviewEditor.showAtlasStandardFooter', { defaultValue: 'Show Made by, page, and print date' }), value: 'true', type: 'boolean' }
+                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter, label: t('printPreviewEditor.showAtlasStandardFooter', { defaultValue: 'Show Made by, page, and print date' }), value: 'true', type: 'boolean' },
+                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.enableTextPositionAnchor, label: t('printPreviewEditor.enableTextPositionAnchor'), value: 'true', type: 'boolean' }
             ],
+            textFlowAnchorField: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.enableTextPositionAnchor,
             requiresFreshPartnerBalance: Boolean(workspaceId && printPartnerId),
             partnerBalanceFieldKeys: ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS,
             resetFreshPartnerBalance: () => resetAtlasStandardPartnerBalancePrintState(

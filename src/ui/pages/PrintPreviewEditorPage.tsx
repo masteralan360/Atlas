@@ -8,6 +8,7 @@ import {
     getCustomTemplateLayoutHeightMm,
     getFixedPageCountForHeight,
     shouldReflowCustomTemplateText,
+    isTemplateTextFlowEnabled,
     type CustomTemplateAnnotation,
     type CustomTemplateBackground,
     type CustomTemplateComponentPosition,
@@ -798,7 +799,7 @@ export function PrintPreviewEditorPage() {
         : templateContentHeightMm
     const drawingCoordinateHeight = templatePreview ? templateStackHeight : templatePageHeight
     const measureTemplateTextFlowStart = useCallback(() => {
-        if (!templatePreview?.reflowLowerPageText) {
+        if (!isTemplateTextFlowEnabled(templatePreview, fieldValues)) {
             setTemplateTextFlowStartMm((current) => current === null ? current : null)
             return
         }
@@ -821,7 +822,7 @@ export function PrintPreviewEditorPage() {
         setTemplateTextFlowStartMm((current) => (
             current !== null && Math.abs(current - nextStartMm) < 0.25 ? current : nextStartMm
         ))
-    }, [templatePageWidth, templatePreview?.reflowLowerPageText])
+    }, [templatePageWidth, templatePreview, fieldValues])
     const measureTemplatePreviewHeight = useCallback(() => {
         const stage = templateStageRef.current
         if (!stage || !templatePreview) return
@@ -954,6 +955,10 @@ export function PrintPreviewEditorPage() {
         templateAnnotations,
         templateComponentPositions,
         templateHiddenFields,
+        templateFieldOrders,
+        templateFieldLabelOverrides,
+        templateFieldDisplayModes,
+        sourceWorkspaceFooterContacts,
         templateImages,
         templatePageHeight,
         templatePageWidth,
@@ -1824,6 +1829,7 @@ export function PrintPreviewEditorPage() {
                             >
                                 <div
                                     ref={templateStageRef}
+                                    data-template-layout-root=""
                                     className="relative mx-auto overflow-visible text-black"
                                     onPointerDownCapture={handleTemplateStackSelection}
                                     style={{
@@ -2051,7 +2057,7 @@ export function PrintPreviewEditorPage() {
                                     const reflowsAfterContent = shouldReflowCustomTemplateText(
                                         txt,
                                         templatePageHeight,
-                                        templatePreview?.reflowLowerPageText
+                                        isTemplateTextFlowEnabled(templatePreview, fieldValues)
                                     )
                                     const displayY = reflowsAfterContent && templateTextFlowStartMm !== null
                                         ? Math.max(txt.y, templateTextFlowStartMm)
@@ -2061,6 +2067,7 @@ export function PrintPreviewEditorPage() {
                                         <div
                                             key={`ttxt-${txt.id}`}
                                             data-template-overflow-measure=""
+                                            data-template-custom-text={txt.text.trim() ? '' : undefined}
                                             data-template-text-flow={reflowsAfterContent ? 'after-content' : undefined}
                                             data-pdf-template-object-id={`text:${txt.id}`}
                                             data-pdf-template-object-kind="text"

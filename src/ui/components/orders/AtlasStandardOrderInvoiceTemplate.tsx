@@ -39,6 +39,7 @@ import type { SalesOrderReturnPrintData } from '@/lib/orderReturnPrintData'
 import {
     ATLAS_STANDARD_CONTINUATION_TABLE_DATA_AREA_MM,
     ATLAS_STANDARD_FIRST_PAGE_TABLE_DATA_AREA_MM,
+    ATLAS_STANDARD_TEXT_ANCHOR_FIELD,
     chunkAtlasStandardTableRows,
     clampProductImageColumnWidth,
     DEFAULT_PRODUCT_IMAGE_COLUMN_WIDTH,
@@ -46,8 +47,10 @@ import {
     getProductImageSizeMm,
     MAX_PRODUCT_IMAGE_COLUMN_WIDTH,
     MIN_PRODUCT_IMAGE_COLUMN_WIDTH,
+    isAtlasStandardSmartRowExpansionEnabled,
     resolveAtlasStandardTableCapacities
 } from '@/lib/atlasStandardOrderTablePagination'
+import { useAtlasStandardOrderLayout } from '@/lib/useAtlasStandardOrderLayout'
 import { cn, formatCurrency, formatDate } from '@/lib/utils'
 import { normalizeUnitCode } from '@/local-db/models'
 import { platformService } from '@/services/platformService'
@@ -424,7 +427,8 @@ export const ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS = {
 
 export const ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS = {
     showOrderAdjustments: 'showOrderAdjustments',
-    showPrintFooter: 'showPrintFooter'
+    showPrintFooter: 'showPrintFooter',
+    enableTextPositionAnchor: ATLAS_STANDARD_TEXT_ANCHOR_FIELD
 } as const
 
 const ATLAS_STANDARD_RETURN_LABELS = {
@@ -1222,7 +1226,7 @@ export function AtlasStandardOrderInvoiceTemplate({
         productImageColumnWidth,
         productImageSizeMm,
         tableItemRowMm,
-        firstPageRows: maxFirstPageRows,
+        firstPageRows: defaultFirstPageRows,
         continuationRows: maxContinuationRows
     } = resolveAtlasStandardTableCapacities(fieldDisplayModes[tableSettingKeys.productImageWidth])
     const returnLineByOrderItemId = new Map(returnPrintData?.lines.map((line) => [line.orderItemId, line]) || [])
@@ -1284,6 +1288,8 @@ export function AtlasStandardOrderInvoiceTemplate({
         : '-'
     const showOrderAdjustments = templateFields?.[ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showOrderAdjustments] !== 'false'
     const showPrintFooter = templateFields?.[ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter] !== 'false'
+    const enableTextPositionAnchor = templateFields?.[ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.enableTextPositionAnchor] !== 'false'
+    const smartRowsEnabled = isAtlasStandardSmartRowExpansionEnabled(templateFields)
     const normalizedOrderAdjustments = normalizeOrderAdjustments(order.orderAdjustments, currency)
     const orderAdjustments = isReturnPrint
         ? returnPrintData?.adjustments || []
@@ -1305,11 +1311,27 @@ export function AtlasStandardOrderInvoiceTemplate({
         ...items.map((item) => ({ kind: 'item' as const, item })),
         ...orderAdjustments.map((adjustment) => ({ kind: 'adjustment' as const, adjustment }))
     ]
-    const itemChunks = chunkAtlasStandardTableRows(
+    const { pageRef, fit: smartRowFit } = useAtlasStandardOrderLayout(smartRowsEnabled, printableTableRows.length, tableItemRowMm)
+    const maxFirstPageRows = smartRowFit?.firstPageRows ?? defaultFirstPageRows
+    const defaultChunks = chunkAtlasStandardTableRows(
         printableTableRows,
         maxFirstPageRows,
         maxContinuationRows
     )
+    let nextRowIndex = maxFirstPageRows
+    const itemChunks = smartRowFit
+        ? [printableTableRows.slice(0, maxFirstPageRows), ...smartRowFit.continuationRows.map((count) => {
+            const chunk = printableTableRows.slice(nextRowIndex, nextRowIndex + count)
+            nextRowIndex += count
+            return chunk
+        })]
+        : defaultChunks
+    let chunkRowOffset = 0
+    const chunkStartIndexes = itemChunks.map((chunk) => {
+        const startIndex = chunkRowOffset
+        chunkRowOffset += chunk.length
+        return startIndex
+    })
     const paidQuantityTotal = items.reduce((sum, item) => sum + (isReturnPrint
         ? returnLineByOrderItemId.get(item.id)?.returnedQuantity || 0
         : isSales && !isOriginalPrint
@@ -1389,16 +1411,18 @@ export function AtlasStandardOrderInvoiceTemplate({
         tableKey: string,
         tableDataAreaMm: number,
         centered = false,
-        fillFirstPageWithWholeRows = false
+        fillFirstPageWithWholeRows = false,
+        populatedHeightMm = tableItems.length * tableItemRowMm
     ) => {
-        const tableEmptyAreaMm = Math.max(0, tableDataAreaMm - (tableItems.length * tableItemRowMm))
+        const tableEmptyAreaMm = Math.max(0, tableDataAreaMm - populatedHeightMm)
         const firstPageFillerRowCount = fillFirstPageWithWholeRows
-            ? getAtlasStandardFirstPageFillerRowCount(tableDataAreaMm, tableItems.length, tableItemRowMm)
+            ? smartRowFit?.fillerRows ?? getAtlasStandardFirstPageFillerRowCount(tableDataAreaMm, tableItems.length, tableItemRowMm)
             : 0
         return (
             <table
                 key={tableKey}
                 data-centered-table={centered ? '' : undefined}
+                data-atlas-standard-first-table={fillFirstPageWithWholeRows ? '' : undefined}
                 className="mb-2 w-full table-fixed border-collapse border text-[10px] leading-none"
                 style={{ borderColor: INK }}
             >
@@ -1451,6 +1475,7 @@ export function AtlasStandardOrderInvoiceTemplate({
                             return (
                                 <tr
                                     key={`order-adjustment-${adjustment.id}`}
+                                    data-atlas-standard-row-index={rowStartIndex + index}
                                     style={{ height: `${tableItemRowMm}mm` }}
                                     data-order-print-row-type="adjustment"
                                 >
@@ -1534,6 +1559,7 @@ export function AtlasStandardOrderInvoiceTemplate({
                         return (
                             <tr
                                 key={item.id}
+                                data-atlas-standard-row-index={rowStartIndex + index}
                                 style={{
                                     height: `${tableItemRowMm}mm`,
                                     ...(!isReturnPrint ? getA4OrderPrintReturnRowStyle(returnState?.status || 'active') : {})
@@ -1588,7 +1614,7 @@ export function AtlasStandardOrderInvoiceTemplate({
                             ))}
                         </tr>
                         ) : null}
-                    <tr className="h-[8mm] bg-[#f3f4f6] font-bold">
+                    <tr data-atlas-standard-table-total="" className="h-[8mm] bg-[#f3f4f6] font-bold">
                         {visibleTableColumns.map((column) => {
                             const value = column.key === tableKeys.product
                                 ? productKgTotalLabel || '\u00a0'
@@ -1812,6 +1838,8 @@ export function AtlasStandardOrderInvoiceTemplate({
 
     return (
         <div
+            ref={pageRef}
+            data-atlas-standard-smart-rows={smartRowsEnabled ? 'true' : undefined}
             dir={isRTL(printLang) ? 'rtl' : 'ltr'}
             className="atlas-standard-order-invoice bg-white text-slate-800"
             style={{ width: '210mm', minHeight: '297mm', margin: '0 auto', padding: '8mm', position: 'relative', isolation: 'isolate' }}
@@ -1946,41 +1974,50 @@ export function AtlasStandardOrderInvoiceTemplate({
                 )}
             </HideableTable>
 
-            <HideableSection
-                title={isReturnPrint ? returnLabels.returnSummary : labels.financialSummary}
-                dialogDescription={labels.selectValues}
-                fields={financialFields}
-                fieldOrder={fieldOrders[fieldOrderKeys.financialSummary]}
-                fieldLabelOverrides={fieldLabelOverrides}
-                hiddenFields={hiddenFields}
-                onHiddenFieldChange={onHiddenFieldChange}
-                onFieldOrderChange={onFieldOrderChange
-                    ? (fieldKeys) => onFieldOrderChange(fieldOrderKeys.financialSummary, fieldKeys)
-                    : undefined}
-                onFieldLabelChange={onFieldLabelChange}
-                className="mb-2"
-                dialogClassName="max-w-3xl"
-                dialogFieldsClassName={isReturnPrint ? 'grid grid-cols-3 gap-2' : 'grid grid-cols-6 gap-2'}
-                dialogFieldClassName="min-h-[68px] flex-col justify-start gap-1"
-                layoutColumns={6}
-                useFieldSpans={!isReturnPrint}
-                dragInstruction={labels.dragToSwap}
-                renameTitleLabel={labels.renameTitle}
-                resetTitleLabel={labels.resetTitle}
-                renameTitleDescription={labels.renameTitleDescription}
-                titleFieldLabel={labels.title}
-                saveLabel={labels.save}
-                cancelLabel={labels.cancel}
-            />
-            <div data-template-text-flow-anchor="" aria-hidden="true" />
-
-            <div className="flex min-h-[13mm] items-start justify-between gap-4 text-[10px]" style={{ color: '#374151' }}>
-                <div className="truncate pt-1 font-bold">{footerEmail.length ? `${labels.email}: ${footerEmail.join(' - ')}` : ''}</div>
-                <div className="max-w-[125mm] truncate text-end leading-4">
-                    {footerAddress.length ? <div className="truncate">{footerAddress.join(' - ')}</div> : null}
-                    {footerPhone.length ? <div className="truncate">{footerPhone.join(' - ')}</div> : null}
-                </div>
+            <div
+                data-atlas-standard-summary=""
+                data-atlas-standard-summary-offset-mm={smartRowFit?.summaryOffsetMm ?? 0}
+                className="flow-root"
+                style={smartRowsEnabled ? { breakInside: 'avoid', paddingTop: `${smartRowFit?.summaryOffsetMm ?? 0}mm` } : undefined}
+            >
+                <HideableSection
+                    title={isReturnPrint ? returnLabels.returnSummary : labels.financialSummary}
+                    dialogDescription={labels.selectValues}
+                    fields={financialFields}
+                    fieldOrder={fieldOrders[fieldOrderKeys.financialSummary]}
+                    fieldLabelOverrides={fieldLabelOverrides}
+                    hiddenFields={hiddenFields}
+                    onHiddenFieldChange={onHiddenFieldChange}
+                    onFieldOrderChange={onFieldOrderChange
+                        ? (fieldKeys) => onFieldOrderChange(fieldOrderKeys.financialSummary, fieldKeys)
+                        : undefined}
+                    onFieldLabelChange={onFieldLabelChange}
+                    className={smartRowsEnabled ? undefined : 'mb-2'}
+                    dialogClassName="max-w-3xl"
+                    dialogFieldsClassName={isReturnPrint ? 'grid grid-cols-3 gap-2' : 'grid grid-cols-6 gap-2'}
+                    dialogFieldClassName="min-h-[68px] flex-col justify-start gap-1"
+                    layoutColumns={6}
+                    useFieldSpans={!isReturnPrint}
+                    dragInstruction={labels.dragToSwap}
+                    renameTitleLabel={labels.renameTitle}
+                    resetTitleLabel={labels.resetTitle}
+                    renameTitleDescription={labels.renameTitleDescription}
+                    titleFieldLabel={labels.title}
+                    saveLabel={labels.save}
+                    cancelLabel={labels.cancel}
+                />
             </div>
+            {enableTextPositionAnchor ? <div data-template-text-flow-anchor="" aria-hidden="true" /> : null}
+
+            {!smartRowsEnabled || footerEmail.length > 0 || footerAddress.length > 0 || footerPhone.length > 0 ? (
+                <div data-atlas-standard-contacts="" className="flex min-h-[13mm] items-start justify-between gap-4 text-[10px]" style={{ color: '#374151' }}>
+                    <div className="truncate pt-1 font-bold">{footerEmail.length ? `${labels.email}: ${footerEmail.join(' - ')}` : ''}</div>
+                    <div className="max-w-[125mm] truncate text-end leading-4">
+                        {footerAddress.length ? <div className="truncate">{footerAddress.join(' - ')}</div> : null}
+                        {footerPhone.length ? <div className="truncate">{footerPhone.join(' - ')}</div> : null}
+                    </div>
+                </div>
+            ) : null}
 
             {showPrintFooter ? (
                 <footer
@@ -1998,10 +2035,14 @@ export function AtlasStandardOrderInvoiceTemplate({
                 ? itemChunks.slice(1).map((chunk, chunkIndex) => (
                     renderItemsTable(
                         chunk,
-                        maxFirstPageRows + (chunkIndex * maxContinuationRows),
+                        chunkStartIndexes[chunkIndex + 1],
                         `atlas-standard-order-items-page-${chunkIndex + 2}`,
                         ATLAS_STANDARD_CONTINUATION_TABLE_DATA_AREA_MM,
-                        true
+                        true,
+                        false,
+                        smartRowFit
+                            ? smartRowFit.rowHeightsMm.slice(chunkStartIndexes[chunkIndex + 1], chunkStartIndexes[chunkIndex + 1] + chunk.length).reduce((sum, height) => sum + height, 0)
+                            : chunk.length * tableItemRowMm
                     )
                 ))
                 : null}

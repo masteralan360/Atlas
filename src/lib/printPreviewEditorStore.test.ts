@@ -7,9 +7,22 @@ import {
     getCustomTemplateLayoutPageCount,
     getPrintPreviewEditorSource,
     setPrintPreviewEditorSource,
-    shouldReflowCustomTemplateText
+    shouldReflowCustomTemplateText,
+    isTemplateTextFlowEnabled
 } from './printPreviewEditorStore'
-import type { CustomTemplateLayout } from './printPreviewEditorStore'
+import type { CustomTemplateLayout, TemplatePreview } from './printPreviewEditorStore'
+
+describe('optional native text-position anchor', () => {
+    it('keeps saved text absolute when disabled without changing text or other templates', () => {
+        const preview = { reflowLowerPageText: true, textFlowAnchorField: 'enableTextPositionAnchor' } as TemplatePreview
+        const text = { id: 'note', text: 'Saved note', x: 10, y: 250, width: 80, rotation: 0, anchor: 'afterContent' as const }
+        expect(isTemplateTextFlowEnabled(preview, {})).toBe(true)
+        expect(shouldReflowCustomTemplateText(text, 297, isTemplateTextFlowEnabled(preview, { enableTextPositionAnchor: 'false' }))).toBe(false)
+        expect(text.y).toBe(250)
+        expect(text.text).toBe('Saved note')
+        expect(isTemplateTextFlowEnabled({ reflowLowerPageText: true } as TemplatePreview, { enableTextPositionAnchor: 'false' })).toBe(true)
+    })
+})
 
 function createLayout(overrides: Partial<CustomTemplateLayout> = {}): CustomTemplateLayout {
     return {

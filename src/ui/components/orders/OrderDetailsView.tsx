@@ -806,9 +806,11 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         return {
             fields: [
                 { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showOrderAdjustments, label: t('orders.adjustments.showInPrint', { defaultValue: 'Show order adjustments' }), value: 'true', type: 'boolean' },
-                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter, label: t('printPreviewEditor.showAtlasStandardFooter', { defaultValue: 'Show Made by, page, and print date' }), value: 'true', type: 'boolean' }
+                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter, label: t('printPreviewEditor.showAtlasStandardFooter', { defaultValue: 'Show Made by, page, and print date' }), value: 'true', type: 'boolean' },
+                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.enableTextPositionAnchor, label: t('printPreviewEditor.enableTextPositionAnchor'), value: 'true', type: 'boolean' }
             ],
             supportsBackgroundEdit: true,
+            textFlowAnchorField: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.enableTextPositionAnchor,
             requiresFreshPartnerBalance: Boolean(workspaceId && partnerId),
             partnerBalanceFieldKeys: ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS,
             resetFreshPartnerBalance: () => resetAtlasStandardPartnerBalancePrintState(
@@ -863,9 +865,11 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         const { order } = resolved
         return {
             fields: [
-                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter, label: t('printPreviewEditor.showAtlasStandardFooter', { defaultValue: 'Show Made by, page, and print date' }), value: 'true', type: 'boolean' }
+                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter, label: t('printPreviewEditor.showAtlasStandardFooter', { defaultValue: 'Show Made by, page, and print date' }), value: 'true', type: 'boolean' },
+                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.enableTextPositionAnchor, label: t('printPreviewEditor.enableTextPositionAnchor'), value: 'true', type: 'boolean' }
             ],
             supportsBackgroundEdit: true,
+            textFlowAnchorField: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.enableTextPositionAnchor,
             requiresFreshPartnerBalance: Boolean(workspaceId && partnerId),
             partnerBalanceFieldKeys: ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS,
             resetFreshPartnerBalance: () => resetAtlasStandardPartnerBalancePrintState(

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
     render: vi.fn(), unmount: vi.fn(), toCanvas: vi.fn(), addPage: vi.fn(), addImage: vi.fn(),
     output: vi.fn(), prepare: vi.fn(), restore: vi.fn(), progress: vi.fn(),
     statementPages: vi.fn(), tables: vi.fn(), centers: vi.fn(),
+    settleLayout: vi.fn(),
 }))
 vi.mock('react-dom/client', () => ({ createRoot: () => ({ render: mocks.render, unmount: mocks.unmount }) }))
 vi.mock('@/i18n/config', () => ({ default: {
@@ -18,6 +19,7 @@ vi.mock('@/lib/orderItemsTablePagination', () => ({
     paginateOrderItemsStatementPages: mocks.statementPages, paginateOrderItemsTables: mocks.tables,
 }))
 vi.mock('@/lib/centeredTablePagination', () => ({ centerTablesOnPages: mocks.centers }))
+vi.mock('@/lib/useAtlasStandardOrderLayout', () => ({ settleAtlasStandardOrderLayouts: mocks.settleLayout }))
 vi.mock('@/services/pdfProgress', () => ({ reportPdfProgress: mocks.progress }))
 vi.mock('@/services/pdfImageCapture', () => ({ waitForPdfImages: async () => {}, inlineCaptureableImages: async () => {} }))
 vi.mock('@/services/pdfPageCapture', () => ({ preparePdfPageCapture: mocks.prepare }))
@@ -66,6 +68,9 @@ describe('final template PDF rendering', () => {
         expect(await pending).toBe(blob)
         expect(mocks.render.mock.calls[0][0].props.children).toBe(edited)
         expect(mocks.toCanvas).toHaveBeenCalledTimes(3)
+        expect(mocks.settleLayout).toHaveBeenCalledWith(container)
+        expect(mocks.settleLayout.mock.invocationCallOrder[0]).toBeLessThan(mocks.tables.mock.invocationCallOrder[0])
+        expect(mocks.settleLayout.mock.invocationCallOrder[0]).toBeLessThan(mocks.toCanvas.mock.invocationCallOrder[0])
         expect(mocks.addPage).toHaveBeenCalledTimes(2)
         expect(mocks.restore).toHaveBeenCalledTimes(3)
         expect(mocks.unmount).toHaveBeenCalledOnce()

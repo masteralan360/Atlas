@@ -862,9 +862,21 @@ describe('Atlas Standard order invoice custom print template', () => {
                 label: 'printPreviewEditor.showAtlasStandardFooter',
                 value: 'true',
                 type: 'boolean'
+            }),
+            expect.objectContaining({
+                key: 'enableTextPositionAnchor',
+                value: 'true',
+                type: 'boolean'
             })
         ])
         expect(preview.reflowLowerPageText).toBe(true)
+        expect(preview.textFlowAnchorField).toBe('enableTextPositionAnchor')
+        const smartHtml = renderToStaticMarkup(preview.createElement({ showPrintFooter: 'false', enableTextPositionAnchor: 'false' }))
+        expect(smartHtml).toContain('data-atlas-standard-smart-rows="true"')
+        expect(smartHtml).not.toContain('data-template-text-flow-anchor')
+        expect(smartHtml).not.toContain('data-atlas-standard-contacts')
+        expect(renderToStaticMarkup(preview.createElement({ enableTextPositionAnchor: 'false' })))
+            .not.toContain('data-atlas-standard-smart-rows')
         expect(preview.movableComponents).toEqual([
             { key: 'atlasStandardWorkspaceLogo', label: 'Workspace Logo' },
             { key: 'atlasStandardWorkspaceName', label: 'Workspace Name' }

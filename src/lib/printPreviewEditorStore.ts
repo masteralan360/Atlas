@@ -66,6 +66,8 @@ export type TemplatePreview = {
     supportsBackgroundEdit?: boolean
     /** Keeps legacy lower-page notes below dynamic native content when it expands. */
     reflowLowerPageText?: boolean
+    /** Common Edit field that disables native text anchoring without hiding saved text. */
+    textFlowAnchorField?: string
     /** The final document must wait for a freshly calculated partner balance. */
     requiresFreshPartnerBalance?: boolean
     /** Keys for the independently optional partner-balance fields in this template. */
@@ -182,6 +184,11 @@ const DEFAULT_OVERFLOW_COMPONENT_HEIGHT_MM = 40
 const DEFAULT_OVERFLOW_IMAGE_HEIGHT_RATIO = 1
 const PX_TO_MM = 0.2645833333
 const LEGACY_LOWER_PAGE_TEXT_START_OFFSET_MM = 52
+
+export function isTemplateTextFlowEnabled(preview: TemplatePreview | undefined, fields: Record<string, string>) {
+    return Boolean(preview?.reflowLowerPageText)
+        && (!preview?.textFlowAnchorField || fields[preview.textFlowAnchorField] !== 'false')
+}
 
 export function shouldReflowCustomTemplateText(
     text: CustomTemplateText,
