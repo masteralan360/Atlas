@@ -104,9 +104,15 @@ import {
     completeWorkspaceDataHydration,
     failWorkspaceDataHydration,
     recordWorkspaceDataFetch,
+    recordWorkspaceTableHydrationFetch,
     startWorkspaceDataHydration,
     updateWorkspaceDataHydrationProgress
 } from '@/workspace/workspaceDataFreshness'
+import {
+    acquireWorkspaceTableHydration,
+    type WorkspaceTableHydrationLease,
+    type WorkspaceTableHydrationPriority
+} from '@/workspace/workspaceTableHydrationCoordinator'
 
 export { addToOfflineMutations } from './offlineMutations'
 
@@ -1831,15 +1837,25 @@ export async function deleteCategoryDiscount(id: string) {
 
 // Helpers for repetitive logic
 const TABLE_FETCH_PAGE_SIZE = 1000
-const tableFetchesInFlight = new Map<string, Promise<boolean>>()
+
+export type TableHydrationOptions = {
+    includeDeleted?: boolean
+    /** Override the table's navigation freshness budget when a caller needs a tighter check. */
+    freshnessMs?: number
+    /** Bypass the navigation cache for an explicit repair or user-requested refresh. */
+    force?: boolean
+    priority?: WorkspaceTableHydrationPriority
+}
 
 async function fetchTableFromSupabaseInternal<T extends { id: string, syncStatus: any, lastSyncedAt: any }>(
     tableName: string,
     table: any,
     workspaceId: string,
-    options?: { includeDeleted?: boolean },
-    hydrationOperationId?: string
+    options?: TableHydrationOptions,
+    hydrationOperationId?: string,
+    signal?: AbortSignal
 ): Promise<boolean> {
+    if (signal?.aborted) return false
     if (!await canReconcileCloudWorkspaceData(workspaceId)) {
         return false
     }
@@ -1851,6 +1867,7 @@ async function fetchTableFromSupabaseInternal<T extends { id: string, syncStatus
     const remoteRows: any[] = []
 
     for (let from = 0; ; from += TABLE_FETCH_PAGE_SIZE) {
+        if (signal?.aborted) return false
         let query = visibilityScopedRpc
             ? client.rpc(visibilityScopedRpc, { p_workspace_id: workspaceId })
             : client
@@ -1867,7 +1884,12 @@ async function fetchTableFromSupabaseInternal<T extends { id: string, syncStatus
             .order('id', { ascending: true })
             .range(from, from + TABLE_FETCH_PAGE_SIZE - 1)
 
+        if (signal) {
+            query = (query as any).abortSignal(signal)
+        }
+
         const { data, error } = await query
+        if (signal?.aborted) return false
         if (error) {
             throw error
         }
@@ -1877,6 +1899,7 @@ async function fetchTableFromSupabaseInternal<T extends { id: string, syncStatus
         if (!await canReconcileCloudWorkspaceData(workspaceId)) {
             return false
         }
+        if (signal?.aborted) return false
 
         remoteRows.push(...data)
         updateWorkspaceDataHydrationProgress(
@@ -1912,12 +1935,15 @@ async function fetchTableFromSupabaseInternal<T extends { id: string, syncStatus
         return localItem
     })
 
+    if (signal?.aborted) return false
     if (!await canReconcileCloudWorkspaceData(workspaceId)) {
         return false
     }
 
+    let reconciled = false
     await db.transaction('rw', table, async () => {
         const localItems = await table.where('workspaceId').equals(workspaceId).toArray()
+        if (signal?.aborted) return
         const deletedIds = (localItems as any[])
             .filter((local) => !remoteIds.has(local.id) && local.syncStatus === 'synced')
             .map((local) => local.id)
@@ -1928,57 +1954,83 @@ async function fetchTableFromSupabaseInternal<T extends { id: string, syncStatus
         if (remoteItems.length > 0) {
             await table.bulkPut(remoteItems)
         }
+        reconciled = true
     })
 
+    if (!reconciled || signal?.aborted) return false
     recordWorkspaceDataFetch(workspaceId, 'supabase', undefined, tableName)
+    recordWorkspaceTableHydrationFetch(
+        workspaceId,
+        'supabase',
+        tableName,
+        includeDeleted ? 'all' : 'active'
+    )
     return true
+}
+
+export function acquireTableHydrationFromSupabase<T extends { id: string, syncStatus: any, lastSyncedAt: any }>(
+    tableName: string,
+    table: any,
+    workspaceId: string,
+    options?: TableHydrationOptions
+): WorkspaceTableHydrationLease {
+    if (!workspaceId) {
+        return { promise: Promise.resolve(true), release: () => undefined, isFresh: true }
+    }
+
+    return acquireWorkspaceTableHydration(
+        {
+            workspaceId,
+            tableName,
+            includeDeleted: options?.includeDeleted,
+            freshnessMs: options?.freshnessMs,
+            force: options?.force,
+            priority: options?.priority
+        },
+        async (signal, operationId) => {
+            if (!await canReconcileCloudWorkspaceData(workspaceId)) {
+                // Keep the established no-op success semantics for Local Mode;
+                // an aborted Cloud/Hybrid lease is the distinct false result.
+                return !signal.aborted
+            }
+
+            startWorkspaceDataHydration(workspaceId, 'supabase', tableName, operationId)
+            try {
+                const completed = await fetchTableFromSupabaseInternal<T>(
+                    tableName,
+                    table,
+                    workspaceId,
+                    options,
+                    operationId,
+                    signal
+                )
+                if (completed) {
+                    completeWorkspaceDataHydration(workspaceId, 'supabase', tableName, undefined, operationId)
+                } else {
+                    cancelWorkspaceDataHydration(workspaceId, 'supabase', tableName, operationId)
+                }
+                return completed
+            } catch (error) {
+                if (signal.aborted) {
+                    cancelWorkspaceDataHydration(workspaceId, 'supabase', tableName, operationId)
+                    return false
+                }
+                failWorkspaceDataHydration(workspaceId, 'supabase', tableName, undefined, operationId)
+                console.error(`[${tableName}] Failed to hydrate from Supabase:`, error)
+                return false
+            }
+        }
+    )
 }
 
 export function fetchTableFromSupabase<T extends { id: string, syncStatus: any, lastSyncedAt: any }>(
     tableName: string,
     table: any,
     workspaceId: string,
-    options?: { includeDeleted?: boolean }
+    options?: TableHydrationOptions
 ): Promise<boolean> {
-    if (!workspaceId) {
-        return Promise.resolve(true)
-    }
-
-    const includeDeleted = options?.includeDeleted ?? false
-    const key = `${tableName}:${workspaceId}:${includeDeleted ? 'all' : 'active'}`
-    const existing = tableFetchesInFlight.get(key)
-    if (existing) {
-        return existing
-    }
-
-    const request = (async () => {
-        if (!await canReconcileCloudWorkspaceData(workspaceId)) {
-            return true
-        }
-
-        startWorkspaceDataHydration(workspaceId, 'supabase', tableName, key)
-        try {
-            const completed = await fetchTableFromSupabaseInternal<T>(tableName, table, workspaceId, options, key)
-            if (completed) {
-                completeWorkspaceDataHydration(workspaceId, 'supabase', tableName, undefined, key)
-            } else {
-                cancelWorkspaceDataHydration(workspaceId, 'supabase', tableName, key)
-            }
-            return completed
-        } catch (error) {
-            failWorkspaceDataHydration(workspaceId, 'supabase', tableName, undefined, key)
-            console.error(`[${tableName}] Failed to hydrate from Supabase:`, error)
-            return false
-        }
-    })()
-        .finally(() => {
-            if (tableFetchesInFlight.get(key) === request) {
-                tableFetchesInFlight.delete(key)
-            }
-        })
-
-    tableFetchesInFlight.set(key, request)
-    return request
+    const lease = acquireTableHydrationFromSupabase<T>(tableName, table, workspaceId, options)
+    return lease.promise.finally(lease.release)
 }
 
 async function saveEntity<T extends { id: string }>(tableName: string, table: any, entity: T, workspaceId: string) {
@@ -2555,13 +2607,37 @@ export async function generateLocalSaleSequenceId(workspaceId: string): Promise<
   return maxSequenceId + 1;
 }
 
-type SalesSyncOptions = { startDate?: string; endDate?: string }
+type SalesSyncOptions = { startDate?: string; endDate?: string; force?: boolean }
 type SalesSyncResult = 'complete' | 'cancelled' | 'error'
 
 const SALES_VERSION_PAGE_SIZE = 1000
 const SALES_DETAIL_CHUNK_SIZE = 100
 const SALES_FETCH_CONCURRENCY = 4
+const SALES_SYNC_FRESHNESS_MS = 15_000
+const SALES_SYNC_FRESHNESS_PREFIX = 'atlas_workspace_sales_sync:v1:'
 const salesSyncsInFlight = new Map<string, Promise<void>>()
+
+function getSalesSyncFreshnessKey(workspaceId: string, options?: SalesSyncOptions) {
+  return `${SALES_SYNC_FRESHNESS_PREFIX}${workspaceId}:${options?.startDate || ''}:${options?.endDate || ''}`
+}
+
+function isSalesSyncFresh(workspaceId: string, options?: SalesSyncOptions) {
+  if (options?.force || typeof localStorage === 'undefined') return false
+  const value = localStorage.getItem(getSalesSyncFreshnessKey(workspaceId, options))
+  if (!value) return false
+
+  const completedAt = new Date(value).getTime()
+  if (Number.isNaN(completedAt) || Date.now() - completedAt >= SALES_SYNC_FRESHNESS_MS) {
+    localStorage.removeItem(getSalesSyncFreshnessKey(workspaceId, options))
+    return false
+  }
+  return true
+}
+
+function recordSalesSyncFreshness(workspaceId: string, options?: SalesSyncOptions) {
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem(getSalesSyncFreshnessKey(workspaceId, options), new Date().toISOString())
+}
 
 async function fetchSalesChunks<T>(
   ids: string[],
@@ -2869,6 +2945,7 @@ export function syncSalesFromSupabase(workspaceId: string, options?: SalesSyncOp
   if (!workspaceId) return Promise.resolve()
 
   const key = `${workspaceId}:${options?.startDate || ''}:${options?.endDate || ''}`
+  if (isSalesSyncFresh(workspaceId, options)) return Promise.resolve()
   const existing = salesSyncsInFlight.get(key)
   if (existing) return existing
 
@@ -2880,6 +2957,7 @@ export function syncSalesFromSupabase(workspaceId: string, options?: SalesSyncOp
       const result = await performSalesSync(workspaceId, options, key)
       if (result === 'complete') {
         recordWorkspaceDataFetch(workspaceId, 'supabase', undefined, 'sales')
+        recordSalesSyncFreshness(workspaceId, options)
         completeWorkspaceDataHydration(workspaceId, 'supabase', 'sales', undefined, key)
       } else if (result === 'error') {
         failWorkspaceDataHydration(workspaceId, 'supabase', 'sales', undefined, key)

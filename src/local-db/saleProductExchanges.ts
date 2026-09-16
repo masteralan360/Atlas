@@ -506,11 +506,11 @@ async function applyLocalSaleProductExchange(input: ProcessSaleProductExchangeIn
 async function refreshAfterCloudExchange(workspaceId: string) {
     await Promise.all([
         syncSalesFromSupabase(workspaceId),
-        fetchTableFromSupabase('inventory', db.inventory, workspaceId, { includeDeleted: true }),
-        fetchTableFromSupabase('loans', db.loans, workspaceId, { includeDeleted: true }),
-        fetchTableFromSupabase('loan_installments', db.loan_installments, workspaceId, { includeDeleted: true }),
-        fetchTableFromSupabase('loan_payments', db.loan_payments, workspaceId, { includeDeleted: true }),
-        fetchTableFromSupabase('payment_transactions', db.payment_transactions, workspaceId, { includeDeleted: true }),
+        fetchTableFromSupabase('inventory', db.inventory, workspaceId, { includeDeleted: true, force: true }),
+        fetchTableFromSupabase('loans', db.loans, workspaceId, { includeDeleted: true, force: true }),
+        fetchTableFromSupabase('loan_installments', db.loan_installments, workspaceId, { includeDeleted: true, force: true }),
+        fetchTableFromSupabase('loan_payments', db.loan_payments, workspaceId, { includeDeleted: true, force: true }),
+        fetchTableFromSupabase('payment_transactions', db.payment_transactions, workspaceId, { includeDeleted: true, force: true }),
         refreshStockBatchesFromSupabase(workspaceId),
     ])
 }

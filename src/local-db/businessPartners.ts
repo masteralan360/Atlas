@@ -23,7 +23,7 @@ import {
   getBusinessPartnerStaffVisibility,
   type BusinessPartnerPrivacyContext
 } from './businessPartnerPrivacy'
-import { fetchTableFromSupabase } from './hooks'
+import { acquireTableHydrationFromSupabase, fetchTableFromSupabase } from './hooks'
 import { addToOfflineMutations } from './offlineMutations'
 import { getOrderBalanceAmount } from './orderInstallments'
 import { isDirectTransactionPartnerAccountEffect } from './payments'
@@ -1491,28 +1491,46 @@ export function useBusinessPartners(workspaceId: string | undefined, filters?: P
       return
     }
 
-    const hydrate = async () => {
-      if (online && shouldUseCloudBusinessData(workspaceId)) {
-        await Promise.all([
-          fetchTableFromSupabase('business_partners', db.business_partners, workspaceId),
-          fetchTableFromSupabase('customers', db.customers, workspaceId),
-          fetchTableFromSupabase('suppliers', db.suppliers, workspaceId),
-          fetchTableFromSupabase('agents', db.agents, workspaceId),
-          fetchTableFromSupabase('agent_excluded_categories', db.agent_excluded_categories, workspaceId),
-          fetchTableFromSupabase('sales_orders', db.sales_orders, workspaceId),
-          fetchTableFromSupabase('purchase_orders', db.purchase_orders, workspaceId),
-          fetchTableFromSupabase('loans', db.loans, workspaceId),
-          fetchTableFromSupabase('installment_sales', db.installment_sales, workspaceId),
-          fetchTableFromSupabase('payment_transactions', db.payment_transactions, workspaceId)
-        ])
+    let disposed = false
+    const shouldHydrate = online && shouldUseCloudBusinessData(workspaceId)
+    const leases = shouldHydrate
+      ? [
+          acquireTableHydrationFromSupabase('business_partners', db.business_partners, workspaceId),
+          acquireTableHydrationFromSupabase('customers', db.customers, workspaceId),
+          acquireTableHydrationFromSupabase('suppliers', db.suppliers, workspaceId),
+          acquireTableHydrationFromSupabase('agents', db.agents, workspaceId),
+          acquireTableHydrationFromSupabase('agent_excluded_categories', db.agent_excluded_categories, workspaceId),
+          acquireTableHydrationFromSupabase('sales_orders', db.sales_orders, workspaceId),
+          acquireTableHydrationFromSupabase('purchase_orders', db.purchase_orders, workspaceId),
+          acquireTableHydrationFromSupabase('loans', db.loans, workspaceId),
+          acquireTableHydrationFromSupabase('installment_sales', db.installment_sales, workspaceId),
+          acquireTableHydrationFromSupabase('payment_transactions', db.payment_transactions, workspaceId)
+        ]
+      : []
+
+    const finishHydration = async () => {
+      if (!shouldHydrate) {
+        await recalculateAllBusinessPartnerSummaries(workspaceId)
+        return
       }
 
-      await recalculateAllBusinessPartnerSummaries(workspaceId)
+      const results = await Promise.all(leases.map((lease) => lease.promise))
+      // Recomputing partner summaries is expensive. It is only needed when a
+      // remote reader actually reconciled one of its source tables.
+      const hydrated = leases.some((lease, index) => !lease.isFresh && results[index])
+      if (!disposed && hydrated) {
+        await recalculateAllBusinessPartnerSummaries(workspaceId)
+      }
     }
 
-    void hydrate().catch((error) => {
+    void finishHydration().catch((error) => {
       console.error('[BusinessPartners] Failed to hydrate partners:', error)
     })
+
+    return () => {
+      disposed = true
+      leases.forEach((lease) => lease.release())
+    }
   }, [online, workspaceId])
 
   return useMemo(

@@ -148,6 +148,37 @@ describe('sales cloud reconciliation', () => {
     expect(supabaseMocks.from).not.toHaveBeenCalled()
   })
 
+  it('attaches an AbortSignal to Cloud table reads and reconciles a completed result', async () => {
+    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
+    const abortSignal = vi.fn((signal: AbortSignal) => {
+      expect(signal).toBeInstanceOf(AbortSignal)
+      return Promise.resolve({ data: [], error: null })
+    })
+    const query = {
+      eq: vi.fn(),
+      order: vi.fn(),
+      range: vi.fn(),
+      abortSignal,
+    }
+    query.eq.mockReturnValue(query)
+    query.order.mockReturnValue(query)
+    query.range.mockReturnValue(query)
+    supabaseMocks.from.mockReturnValueOnce({ select: vi.fn(() => query) })
+
+    await expect(fetchTableFromSupabase('categories', db.categories, WORKSPACE_ID)).resolves.toBe(true)
+
+    expect(abortSignal).toHaveBeenCalledOnce()
+  })
+
+  it('does not repeat a completed sales version check during rapid route revisits', async () => {
+    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
+
+    await syncSalesFromSupabase(WORKSPACE_ID)
+    await syncSalesFromSupabase(WORKSPACE_ID)
+
+    expect(supabaseMocks.from).toHaveBeenCalledTimes(1)
+  })
+
   it('cancels reconciliation when Local Mode is restored during the cloud request', async () => {
     writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
     await db.sales.put({

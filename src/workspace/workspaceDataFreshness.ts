@@ -1,6 +1,7 @@
 import type { WorkspaceDataMode } from '@/local-db/models'
 
 const WORKSPACE_DATA_FETCH_PREFIX = 'atlas_workspace_data_fetch:v2:'
+const WORKSPACE_TABLE_HYDRATION_FETCH_PREFIX = 'atlas_workspace_table_hydration_fetch:v1:'
 
 export const WORKSPACE_DATA_FETCH_EVENT = 'atlas:workspace-data-fetch'
 export const WORKSPACE_DATA_HYDRATION_EVENT = 'atlas:workspace-data-hydration'
@@ -12,6 +13,19 @@ export interface WorkspaceDataFetchSnapshot {
     source: WorkspaceDataFetchSource
     fetchedAt: string
     tableName?: string
+}
+
+/**
+ * Internal cache freshness for a precise remote table read. Unlike the UI
+ * freshness indicator, this must distinguish an active-rows snapshot from a
+ * tombstone-inclusive snapshot so reconciliation is never skipped incorrectly.
+ */
+export interface WorkspaceTableHydrationFetchSnapshot {
+    workspaceId: string
+    source: WorkspaceDataFetchSource
+    tableName: string
+    scope: 'active' | 'all'
+    fetchedAt: string
 }
 
 /**
@@ -55,6 +69,15 @@ function getWorkspaceDataFetchKey(
     tableName?: string
 ) {
     return `${WORKSPACE_DATA_FETCH_PREFIX}${source}:${workspaceId}${tableName ? `:${tableName}` : ''}`
+}
+
+function getWorkspaceTableHydrationFetchKey(
+    workspaceId: string,
+    source: WorkspaceDataFetchSource,
+    tableName: string,
+    scope: WorkspaceTableHydrationFetchSnapshot['scope']
+) {
+    return `${WORKSPACE_TABLE_HYDRATION_FETCH_PREFIX}${source}:${workspaceId}:${tableName}:${scope}`
 }
 
 function getWorkspaceDataHydrationKey(
@@ -142,6 +165,44 @@ export function readWorkspaceDataFetch(
     }
 
     return snapshot
+}
+
+export function readWorkspaceTableHydrationFetch(
+    workspaceId: string | undefined | null,
+    source: WorkspaceDataFetchSource,
+    tableName: string,
+    scope: WorkspaceTableHydrationFetchSnapshot['scope']
+): WorkspaceTableHydrationFetchSnapshot | null {
+    if (!workspaceId || !tableName || !canUseLocalStorage()) return null
+
+    const key = getWorkspaceTableHydrationFetchKey(workspaceId, source, tableName, scope)
+    const value = localStorage.getItem(key)
+    if (!value) return null
+
+    try {
+        const parsed = JSON.parse(value) as Partial<WorkspaceTableHydrationFetchSnapshot>
+        if (
+            parsed.workspaceId !== workspaceId
+            || parsed.source !== source
+            || parsed.tableName !== tableName
+            || parsed.scope !== scope
+            || !isValidTimestamp(parsed.fetchedAt)
+        ) {
+            localStorage.removeItem(key)
+            return null
+        }
+
+        return {
+            workspaceId,
+            source,
+            tableName,
+            scope,
+            fetchedAt: new Date(parsed.fetchedAt).toISOString()
+        }
+    } catch {
+        localStorage.removeItem(key)
+        return null
+    }
 }
 
 export function readWorkspaceDataHydration(
@@ -304,6 +365,31 @@ export function recordWorkspaceDataFetch(
         window.dispatchEvent(new CustomEvent<WorkspaceDataFetchSnapshot>(WORKSPACE_DATA_FETCH_EVENT, {
             detail: snapshot
         }))
+    }
+
+    return snapshot
+}
+
+export function recordWorkspaceTableHydrationFetch(
+    workspaceId: string,
+    source: WorkspaceDataFetchSource,
+    tableName: string,
+    scope: WorkspaceTableHydrationFetchSnapshot['scope'],
+    fetchedAt = new Date().toISOString()
+): WorkspaceTableHydrationFetchSnapshot {
+    const snapshot: WorkspaceTableHydrationFetchSnapshot = {
+        workspaceId,
+        source,
+        tableName,
+        scope,
+        fetchedAt: isValidTimestamp(fetchedAt) ? new Date(fetchedAt).toISOString() : new Date().toISOString()
+    }
+
+    if (canUseLocalStorage()) {
+        localStorage.setItem(
+            getWorkspaceTableHydrationFetchKey(workspaceId, source, tableName, scope),
+            JSON.stringify(snapshot)
+        )
     }
 
     return snapshot

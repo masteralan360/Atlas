@@ -37,7 +37,7 @@ import {
   isPayableCommissionEntry,
   isTrackedCommissionEntry,
 } from './commissionMode'
-import { addToOfflineMutations, fetchTableFromSupabase } from './hooks'
+import { acquireTableHydrationFromSupabase, addToOfflineMutations } from './hooks'
 import { getOrderBalanceAmount } from './orderInstallments'
 import {
     assertPaymentAccountTransactionCanBeAppliedLocally,
@@ -565,52 +565,120 @@ function getActivePaymentTransactionAmount(rows: PaymentTransaction[]) {
   return getRemainingPaymentTransactions(rows).reduce((sum, row) => sum + Math.max(0, Number(row.amount || 0)), 0)
 }
 
-async function hydratePaymentSourceTables(workspaceId: string) {
+type PaymentSourceHydrationLease = {
+  promise: Promise<void>
+  release: () => void
+}
+
+type ActivePaymentSourceHydration = {
+  consumers: number
+  tableLeases: ReturnType<typeof acquireTableHydrationFromSupabase>[]
+  promise: Promise<void>
+}
+
+const paymentSourceHydrationsInFlight = new Map<string, ActivePaymentSourceHydration>()
+
+function acquirePaymentSourceTablesHydration(workspaceId: string): PaymentSourceHydrationLease {
   if (!shouldUseCloudBusinessData(workspaceId)) {
-    return
+    return { promise: Promise.resolve(), release: () => undefined }
   }
 
-  await Promise.all([
-    fetchTableFromSupabase('payment_transactions', db.payment_transactions, workspaceId, { includeDeleted: true }),
-    fetchTableFromSupabase('clinical_appointments', db.clinical_appointments, workspaceId, {
+  const existing = paymentSourceHydrationsInFlight.get(workspaceId)
+  if (existing) {
+    existing.consumers += 1
+    let released = false
+    return {
+      promise: existing.promise,
+      release: () => {
+        if (released) return
+        released = true
+        existing.consumers = Math.max(0, existing.consumers - 1)
+        if (existing.consumers === 0) {
+          existing.tableLeases.forEach((lease) => lease.release())
+          if (paymentSourceHydrationsInFlight.get(workspaceId) === existing) {
+            paymentSourceHydrationsInFlight.delete(workspaceId)
+          }
+        }
+      }
+    }
+  }
+
+  const tableLeases = [
+    acquireTableHydrationFromSupabase('payment_transactions', db.payment_transactions, workspaceId, { includeDeleted: true }),
+    acquireTableHydrationFromSupabase('clinical_appointments', db.clinical_appointments, workspaceId, {
       includeDeleted: true
     }),
-    fetchTableFromSupabase('loans', db.loans, workspaceId, {
+    acquireTableHydrationFromSupabase('loans', db.loans, workspaceId, {
       includeDeleted: true
     }),
-    fetchTableFromSupabase('loan_installments', db.loan_installments, workspaceId, { includeDeleted: true }),
-    fetchTableFromSupabase('installment_sales', db.installment_sales, workspaceId, { includeDeleted: true }),
-    fetchTableFromSupabase('installment_sale_installments', db.installment_sale_installments, workspaceId, {
+    acquireTableHydrationFromSupabase('loan_installments', db.loan_installments, workspaceId, { includeDeleted: true }),
+    acquireTableHydrationFromSupabase('installment_sales', db.installment_sales, workspaceId, { includeDeleted: true }),
+    acquireTableHydrationFromSupabase('installment_sale_installments', db.installment_sale_installments, workspaceId, {
       includeDeleted: true
     }),
-    fetchTableFromSupabase('real_estate_transactions', db.real_estate_transactions, workspaceId, {
+    acquireTableHydrationFromSupabase('real_estate_transactions', db.real_estate_transactions, workspaceId, {
       includeDeleted: true
     }),
-    fetchTableFromSupabase('rental_vehicles', db.rental_vehicles, workspaceId, {
+    acquireTableHydrationFromSupabase('rental_vehicles', db.rental_vehicles, workspaceId, {
       includeDeleted: true
     }),
-    fetchTableFromSupabase('rental_contracts', db.rental_contracts, workspaceId, { includeDeleted: true }),
-    fetchTableFromSupabase('sales_orders', db.sales_orders, workspaceId, {
+    acquireTableHydrationFromSupabase('rental_contracts', db.rental_contracts, workspaceId, { includeDeleted: true }),
+    acquireTableHydrationFromSupabase('sales_orders', db.sales_orders, workspaceId, {
       includeDeleted: true
     }),
-    fetchTableFromSupabase('purchase_orders', db.purchase_orders, workspaceId, {
+    acquireTableHydrationFromSupabase('purchase_orders', db.purchase_orders, workspaceId, {
       includeDeleted: true
     }),
-    fetchTableFromSupabase('order_installments', db.order_installments, workspaceId, { includeDeleted: true }),
-    fetchTableFromSupabase('expense_series', db.expense_series, workspaceId, {
+    acquireTableHydrationFromSupabase('order_installments', db.order_installments, workspaceId, { includeDeleted: true }),
+    acquireTableHydrationFromSupabase('expense_series', db.expense_series, workspaceId, {
       includeDeleted: true
     }),
-    fetchTableFromSupabase('expense_items', db.expense_items, workspaceId, {
+    acquireTableHydrationFromSupabase('expense_items', db.expense_items, workspaceId, {
       includeDeleted: true
     }),
-    fetchTableFromSupabase('payroll_statuses', db.payroll_statuses, workspaceId, { includeDeleted: true }),
-    fetchTableFromSupabase('employees', db.employees, workspaceId, {
+    acquireTableHydrationFromSupabase('payroll_statuses', db.payroll_statuses, workspaceId, { includeDeleted: true }),
+    acquireTableHydrationFromSupabase('employees', db.employees, workspaceId, {
       includeDeleted: true
     })
-  ])
+  ]
 
-  await repairPendingOrderPaymentReferences(workspaceId)
-  await ensureManualLoanOriginationTransactions(workspaceId)
+  const request: ActivePaymentSourceHydration = {
+    consumers: 0,
+    tableLeases,
+    promise: Promise.all(tableLeases.map((lease) => lease.promise))
+      .then(async (completed) => {
+        // Do not derive payment references from a cancelled partial snapshot.
+        if (!completed.every(Boolean)) return
+        const hydrated = tableLeases.some((lease) => !lease.isFresh)
+        if (!hydrated) return
+        await repairPendingOrderPaymentReferences(workspaceId)
+        await ensureManualLoanOriginationTransactions(workspaceId)
+      })
+      .finally(() => {
+        tableLeases.forEach((lease) => lease.release())
+        if (paymentSourceHydrationsInFlight.get(workspaceId) === request) {
+          paymentSourceHydrationsInFlight.delete(workspaceId)
+        }
+      })
+  }
+  paymentSourceHydrationsInFlight.set(workspaceId, request)
+  request.consumers += 1
+
+  let released = false
+  return {
+    promise: request.promise,
+    release: () => {
+      if (released) return
+      released = true
+      request.consumers = Math.max(0, request.consumers - 1)
+      if (request.consumers === 0) {
+        request.tableLeases.forEach((lease) => lease.release())
+        if (paymentSourceHydrationsInFlight.get(workspaceId) === request) {
+          paymentSourceHydrationsInFlight.delete(workspaceId)
+        }
+      }
+    }
+  }
 }
 
 async function ensureExpenseItemsThroughCurrentMonth(workspaceId: string) {
@@ -1260,14 +1328,16 @@ export function usePaymentTransactions(
     }
 
     const hydration = hydrateSourceTables
-      ? hydratePaymentSourceTables(workspaceId)
-      : fetchTableFromSupabase('payment_transactions', db.payment_transactions, workspaceId, {
+      ? acquirePaymentSourceTablesHydration(workspaceId)
+      : acquireTableHydrationFromSupabase('payment_transactions', db.payment_transactions, workspaceId, {
           includeDeleted: true
         })
 
-    void hydration.catch((error) => {
+    void hydration.promise.catch((error) => {
       console.error('[Payments] Failed to hydrate transaction tables', error)
     })
+
+    return hydration.release
   }, [hydrateSourceTables, online, workspaceId])
 
   return transactions ?? []
@@ -1306,9 +1376,12 @@ export function usePaymentObligations(workspaceId: string | undefined, filters: 
       return
     }
 
-    void hydratePaymentSourceTables(workspaceId).catch((error) => {
+    const hydration = acquirePaymentSourceTablesHydration(workspaceId)
+    void hydration.promise.catch((error) => {
       console.error('[Payments] Failed to hydrate obligation tables', error)
     })
+
+    return hydration.release
   }, [online, workspaceId])
 
   return obligations ?? []
