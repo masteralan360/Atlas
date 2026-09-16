@@ -3,10 +3,6 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 
 import { getPdfShapeHeight, getPdfShapeZIndex, type PdfShape, type PdfShapeLayer } from '@/types'
 import { PdfShapeGraphic } from '@/ui/components/PdfShapeGraphic'
-import {
-    classifyAtlasStandardOverlay,
-    getAtlasStandardHeaderDeltaMm
-} from '@/lib/atlasStandardHeaderLayout'
 
 type AttachedShapesOverlayProps = {
     shapes?: PdfShape[]
@@ -14,7 +10,6 @@ type AttachedShapesOverlayProps = {
     pageWidthMm?: number
     selectedShapeId?: string | null
     onSelectionClear?: () => void
-    atlasStandardHeaderHeightMm?: number | null
 }
 
 type Corner = {
@@ -48,8 +43,7 @@ export function AttachedShapesOverlay({
     onShapesChange,
     pageWidthMm = 210,
     selectedShapeId,
-    onSelectionClear,
-    atlasStandardHeaderHeightMm
+    onSelectionClear
 }: AttachedShapesOverlayProps) {
     const updateShape = (index: number, nextShape: PdfShape) => {
         onShapesChange?.(shapes.map((shape, shapeIndex) => (
@@ -173,37 +167,20 @@ export function AttachedShapesOverlay({
         <>
             {shapes.map((shape, index) => {
                 const isSelected = selectedShapeId === shape.id
-                const shapeHeight = getPdfShapeHeight(shape)
-                const atlasStandardAnchor = atlasStandardHeaderHeightMm == null
-                    ? undefined
-                    : classifyAtlasStandardOverlay(
-                        shape.y - shapeHeight / 2,
-                        shape.y + shapeHeight / 2
-                    )
-                const atlasStandardHeaderDeltaMm = atlasStandardHeaderHeightMm == null
-                    ? 0
-                    : getAtlasStandardHeaderDeltaMm(atlasStandardHeaderHeightMm)
 
                 return (
                     <div
                         key={shape.id || `${shape.kind}-${index}`}
                         data-pdf-template-object-id={`shape:${shape.id}`}
                         data-pdf-template-object-kind="shape"
-                        data-atlas-standard-overlay-anchor={atlasStandardAnchor}
-                        data-atlas-standard-overlay-translation={atlasStandardAnchor === 'body' ? 'css' : undefined}
-                        data-atlas-standard-overlay-can-translate={atlasStandardHeaderHeightMm == null ? undefined : 'true'}
-                        data-atlas-standard-overlay-base-top-mm={atlasStandardHeaderHeightMm == null
-                            ? undefined
-                            : shape.y - shapeHeight / 2}
                         className={`absolute group/pdf-shape ${isSelected ? 'ring-1 ring-primary' : ''}`}
                         style={{
                             left: `${shape.x}mm`,
                             top: `${shape.y}mm`,
                             width: `${shape.width}mm`,
-                            height: `${shapeHeight}mm`,
+                            height: `${getPdfShapeHeight(shape)}mm`,
                             transform: `translate(-50%, -50%) rotate(${shape.rotation || 0}deg)`,
                             transformOrigin: 'center',
-                            translate: atlasStandardAnchor === 'body' ? `0 ${atlasStandardHeaderDeltaMm}mm` : undefined,
                             zIndex: isSelected ? 200 : getPdfShapeZIndex(shape)
                         }}
                     >

@@ -851,14 +851,7 @@ describe('Atlas Standard order invoice custom print template', () => {
             onFieldDisplayModeChange
         })
 
-        expect(preview.fields).toEqual(expect.arrayContaining([
-            expect.objectContaining({
-                key: 'atlasStandardHeaderHeightMm',
-                value: '13',
-                type: 'range',
-                step: 0.5,
-                dynamicRange: 'atlasStandardHeaderHeight'
-            }),
+        expect(preview.fields).toEqual([
             expect.objectContaining({
                 key: 'showOrderAdjustments',
                 value: 'true',
@@ -870,7 +863,7 @@ describe('Atlas Standard order invoice custom print template', () => {
                 value: 'true',
                 type: 'boolean'
             })
-        ]))
+        ])
         expect(preview.reflowLowerPageText).toBe(true)
         expect(preview.movableComponents).toEqual([
             { key: 'atlasStandardWorkspaceLogo', label: 'Workspace Logo' },
@@ -890,8 +883,7 @@ describe('Atlas Standard order invoice custom print template', () => {
 
         const html = renderToStaticMarkup(element)
         expect(html).toContain('Atlas Test')
-        expect(html).toContain('data-atlas-standard-header=""')
-        expect(html).toContain('data-atlas-standard-content-end=""')
+        expect(html).toContain('min-h-[13mm]')
         expect(html).toContain('Sample Product')
         expect(html).toContain('Sample line item note.')
         expect(html).toContain('>Image</th>')
@@ -1216,7 +1208,6 @@ describe('Atlas Standard return custom print template', () => {
         })
         expect(customTemplates.createCustomTemplatePreview(returnTarget!, { printLang: 'en' }).fields)
             .toEqual(expect.arrayContaining([
-                expect.objectContaining({ key: 'atlasStandardHeaderHeightMm', value: '13', type: 'range' }),
                 expect.objectContaining({ key: 'showPrintFooter', value: 'true', type: 'boolean' })
             ]))
         expect(customTemplates.getCustomTemplateDisplayName(customTemplates.ORDER_ATLAS_STANDARD_RETURN_TEMPLATE_KEY))
@@ -1356,11 +1347,9 @@ describe('Atlas Standard return custom print template', () => {
         const standardPreview = customTemplates.createCustomTemplatePreview(standardTarget!, { printLang: 'en' })
         const returnPreview = customTemplates.createCustomTemplatePreview(returnTarget!, { printLang: 'en' })
         expect(standardPreview.fields).toEqual(expect.arrayContaining([
-            expect.objectContaining({ key: 'atlasStandardHeaderHeightMm', value: '13', type: 'range' }),
             expect.objectContaining({ key: 'showPrintFooter', value: 'true', type: 'boolean' })
         ]))
         expect(returnPreview.fields).toEqual(expect.arrayContaining([
-            expect.objectContaining({ key: 'atlasStandardHeaderHeightMm', value: '13', type: 'range' }),
             expect.objectContaining({ key: 'showPrintFooter', value: 'true', type: 'boolean' })
         ]))
         expect(renderToStaticMarkup(standardPreview.createElement({ showPrintFooter: 'false' })))

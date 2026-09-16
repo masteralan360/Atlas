@@ -16,10 +16,6 @@ import { reportPdfProgress } from '@/services/pdfProgress'
 import { inlineCaptureableImages, waitForPdfImages } from '@/services/pdfImageCapture'
 import { preparePdfPageCapture } from '@/services/pdfPageCapture'
 import { resolvePdfPageRenderScale, streamPdfPages } from '@/services/pdfPageStream'
-import {
-    applyAtlasStandardHeaderLayout,
-    snapAtlasStandardBodyOverlaysToPages
-} from '@/lib/atlasStandardHeaderLayout'
 
 /** Formats that can be stored as invoice versions. */
 export type InvoicePrintFormat = 'a4' | 'receipt'
@@ -334,11 +330,6 @@ async function renderTemplateToPdf(element: ReturnType<typeof createElement>, wi
         await waitForPdfImages(container)
         await inlineCaptureableImages(container)
         await reflowTemplateTextAfterContent(container, widthMm)
-        applyAtlasStandardHeaderLayout(container, {
-            pageWidthMm: widthMm,
-            pageHeightMm: A4_HEIGHT_MM,
-            pagePaddingMm: 8
-        })
         await expandContainerToRenderedBounds(container)
         reportPdfProgress(0.1, 'print.progressPreparing')
 
@@ -361,11 +352,6 @@ async function renderTemplateToPdf(element: ReturnType<typeof createElement>, wi
             centerTablesOnPages(container, {
                 pageHeightMm: A4_HEIGHT_MM,
                 pageWidthMm: widthMm
-            })
-            snapAtlasStandardBodyOverlaysToPages(container, {
-                pageWidthMm: widthMm,
-                pageHeightMm: A4_HEIGHT_MM,
-                pagePaddingMm: 8
             })
             await expandContainerToRenderedBounds(container)
             reportPdfProgress(0.25, 'print.progressLayingOut')

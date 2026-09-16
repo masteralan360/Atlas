@@ -18,7 +18,6 @@ import {
     useWorkspaceOrderInstallments
 } from '@/local-db'
 import { cn, formatCurrency, formatDate } from '@/lib/utils'
-import { ATLAS_STANDARD_HEADER_PREVIEW_FIELD } from '@/lib/atlasStandardHeaderLayout'
 import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import {
@@ -467,7 +466,6 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
         if (!printTarget) return undefined
         return {
             fields: [
-                ATLAS_STANDARD_HEADER_PREVIEW_FIELD,
                 { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter, label: t('printPreviewEditor.showAtlasStandardFooter', { defaultValue: 'Show Made by, page, and print date' }), value: 'true', type: 'boolean' }
             ],
             requiresFreshPartnerBalance: Boolean(workspaceId && printPartnerId),

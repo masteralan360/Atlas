@@ -19,7 +19,6 @@ import {
     normalizeOrderAdjustments
 } from '@/lib/orderAdjustments'
 import { getOrderPrintOriginalTotal, getOrderPrintReturnState } from '@/lib/orderPrintReturnState'
-import { ATLAS_STANDARD_HEADER_PREVIEW_FIELD } from '@/lib/atlasStandardHeaderLayout'
 import { createSalesOrderReturnPrintData } from '@/lib/orderReturnPrintData'
 import { isPositiveQuantity } from '@/lib/quantity'
 import { cn, formatCurrency, formatDate, formatDateTime, formatSnapshotTime } from '@/lib/utils'
@@ -806,7 +805,6 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         const { order, kind } = resolved
         return {
             fields: [
-                ATLAS_STANDARD_HEADER_PREVIEW_FIELD,
                 { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showOrderAdjustments, label: t('orders.adjustments.showInPrint', { defaultValue: 'Show order adjustments' }), value: 'true', type: 'boolean' },
                 { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter, label: t('printPreviewEditor.showAtlasStandardFooter', { defaultValue: 'Show Made by, page, and print date' }), value: 'true', type: 'boolean' }
             ],
@@ -865,7 +863,6 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         const { order } = resolved
         return {
             fields: [
-                ATLAS_STANDARD_HEADER_PREVIEW_FIELD,
                 { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter, label: t('printPreviewEditor.showAtlasStandardFooter', { defaultValue: 'Show Made by, page, and print date' }), value: 'true', type: 'boolean' }
             ],
             supportsBackgroundEdit: true,

@@ -2944,8 +2944,6 @@
   },
   "printPreviewEditor": {
     "title": "محرر معاينة الطباعة",
-    "atlasStandardHeaderHeight": "ارتفاع الرأس",
-    "atlasStandardHeaderNoSpace": "لا توجد مساحة طباعة غير مستخدمة متاحة لزيادة ارتفاع الرأس.",
     "showAtlasStandardFooter": "إظهار تم الإنشاء بواسطة والصفحة وتاريخ الطباعة",
     "fitPage": "ملائمة",
     "bottomWarning": "تجنب وضع المكونات هنا — قد يتم قصها عند الطباعة على A4.",
