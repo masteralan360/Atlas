@@ -155,7 +155,7 @@ function createEmptyItem(storageId = '', seq = 1): FormItem {
         productSearch: '',
         storageId,
         quantity: '1',
-        freeBonusQuantity: '0',
+        freeBonusQuantity: '',
         freeBonusUnit: '',
         unitPrice: '',
         batchId: '',
@@ -1812,7 +1812,7 @@ export function SalesOrderFormPage({
                                                                 step={isDynamicUnit(product?.unit) ? ORDER_DECIMAL_STEP : '1'}
                                                                 value={item.freeBonusQuantity}
                                                                 onChange={(event) => updateItem(index, { freeBonusQuantity: event.target.value })}
-                                                                placeholder={t('orders.form.freeBonus', { defaultValue: 'Free Bonus' })}
+                                                                placeholder="0"
                                                             />
                                                             {freeBonusDisplayUnit && <span className="text-xs text-muted-foreground shrink-0">{t(`products.units.${freeBonusDisplayUnit}`, freeBonusDisplayUnit)}</span>}
                                                         </div>

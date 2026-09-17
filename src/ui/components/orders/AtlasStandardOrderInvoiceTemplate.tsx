@@ -1475,7 +1475,7 @@ export function AtlasStandardOrderInvoiceTemplate({
 
                             return (
                                 <tr
-                                    key={`order-adjustment-${adjustment.id}`}
+                                    key={`order-adjustment-${rowStartIndex + index}`}
                                     data-atlas-standard-row-index={rowStartIndex + index}
                                     style={{ height: `${tableItemRowMm}mm` }}
                                     data-order-print-row-type="adjustment"
@@ -1559,7 +1559,10 @@ export function AtlasStandardOrderInvoiceTemplate({
                         }
                         return (
                             <tr
-                                key={item.id}
+                                // Historic/imported lines may share an ID. Use the
+                                // document position so capacity changes cannot leave
+                                // duplicated stale rows in React's table reconciliation.
+                                key={`order-item-${rowStartIndex + index}`}
                                 data-atlas-standard-row-index={rowStartIndex + index}
                                 style={{
                                     height: `${tableItemRowMm}mm`,
