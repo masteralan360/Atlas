@@ -502,6 +502,73 @@ html[lang] pre {
   animation: pageFadeIn 0.5s ease-out forwards;
 }
 
+/* All Sera-style glow layers sweep together, keeping the bright core locked
+   to its surrounding bloom instead of rendering as separate streaks. */
+.glow-line__sweep {
+  animation: glow-line-sweep-fade 4.6s linear infinite;
+  will-change: opacity;
+}
+
+.glow-line__travel--horizontal {
+  background-size: 260% 100%;
+  background-position: 180% 50%;
+  animation: glow-line-travel-horizontal 4.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  will-change: background-position;
+}
+
+.glow-line__travel--vertical {
+  background-size: 100% 260%;
+  background-position: 50% 180%;
+  animation: glow-line-travel-vertical 4.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  will-change: background-position;
+}
+
+@keyframes glow-line-travel-horizontal {
+  from {
+    background-position: 180% 50%;
+  }
+
+  to {
+    background-position: -80% 50%;
+  }
+}
+
+@keyframes glow-line-sweep-fade {
+  0%,
+  6% {
+    opacity: 0;
+  }
+
+  20%,
+  80% {
+    opacity: 1;
+  }
+
+  94%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes glow-line-travel-vertical {
+  from {
+    background-position: 50% 180%;
+  }
+
+  to {
+    background-position: 50% -80%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glow-line__travel--horizontal,
+  .glow-line__travel--vertical,
+  .glow-line__sweep {
+    animation: none;
+    background-position: 50% 50%;
+  }
+}
+
 @keyframes pageFadeIn {
   from {
     opacity: 0;

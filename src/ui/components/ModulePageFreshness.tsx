@@ -1,4 +1,13 @@
-import { useEffect, useState } from 'react'
+import {
+    createContext,
+    type ReactNode,
+    useCallback,
+    useContext,
+    useEffect,
+    useId,
+    useMemo,
+    useState
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { CheckCircle2, CircleAlert, Loader2 } from 'lucide-react'
 
@@ -14,6 +23,59 @@ import {
     type WorkspaceDataFetchSnapshot
 } from '@/workspace/workspaceDataFreshness'
 import { cn } from '@/lib/utils'
+
+type ModulePageFreshnessLoadingContextValue = {
+    setLoading: (id: string, isLoading: boolean) => void
+}
+
+const ModulePageFreshnessLoadingContext = createContext<ModulePageFreshnessLoadingContextValue | null>(null)
+
+/**
+ * Aggregates only the freshness readers mounted by the current module. This
+ * keeps the shell animation scoped to the page's own declared data tables.
+ */
+export function ModulePageFreshnessLoadingProvider({
+    children
+}: {
+    children: (isLoading: boolean) => ReactNode
+}) {
+    const [activeLoaderIds, setActiveLoaderIds] = useState<ReadonlySet<string>>(() => new Set())
+
+    const setLoading = useCallback((id: string, isLoading: boolean) => {
+        setActiveLoaderIds((current) => {
+            if (current.has(id) === isLoading) return current
+
+            const next = new Set(current)
+            if (isLoading) {
+                next.add(id)
+            } else {
+                next.delete(id)
+            }
+            return next
+        })
+    }, [])
+
+    const value = useMemo<ModulePageFreshnessLoadingContextValue>(() => ({ setLoading }), [setLoading])
+
+    return (
+        <ModulePageFreshnessLoadingContext.Provider value={value}>
+            {children(activeLoaderIds.size > 0)}
+        </ModulePageFreshnessLoadingContext.Provider>
+    )
+}
+
+function useRegisterModulePageFreshnessLoading(isLoading: boolean) {
+    const context = useContext(ModulePageFreshnessLoadingContext)
+    const id = useId()
+    const setLoading = context?.setLoading
+
+    useEffect(() => {
+        if (!setLoading) return
+
+        setLoading(id, isLoading)
+        return () => setLoading(id, false)
+    }, [id, isLoading, setLoading])
+}
 
 function formatRelativeTime(timestamp: string, locale: string) {
     const date = new Date(timestamp)
@@ -120,6 +182,7 @@ export function ModulePageFreshness({
         : t('launcher.freshness.unavailable', { defaultValue: 'Update unavailable' })
 
     const isChecking = hydration?.isLoading === true
+    useRegisterModulePageFreshnessLoading(isChecking)
     const hasFailed = !isChecking && hydration?.lastResult?.state === 'error'
     const label = isChecking
         ? t('launcher.freshness.checking', { defaultValue: 'Checking for updates…' })

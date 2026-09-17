@@ -3817,6 +3817,20 @@
     "allSynced": "All data synced!",
     "syncNow": "Sync Now",
     "syncingBtn": "Syncing...",
+    "reviewPayload": "Review sync payload",
+    "payloadTitle": "{{entity}} sync payload",
+    "payloadDescription": "Review which fields are valid for sync, intentionally excluded, or rejected by Supabase.",
+    "payloadFields": {
+      "field": "Field",
+      "status": "Status",
+      "reason": "Reason",
+      "value": "Value"
+    },
+    "payloadStatus": {
+      "valid": "Valid",
+      "invalid": "Invalid",
+      "excluded": "Excluded"
+    },
     "discardBtn": "Discard Changes",
     "confirmDiscard": "Confirm Discard",
     "discardDescription": "Are you sure you want to discard {{count}} pending changes? This action cannot be undone and your offline edits will be permanently lost.",
@@ -3828,7 +3842,30 @@
     "toastSyncFailed": "Sync Failed",
     "toastSyncFailedDesc": "There were errors during synchronization.",
     "toastSyncError": "Sync Error",
-    "discardError": "Failed to discard changes."
+    "discardError": "Failed to discard changes.",
+    "recovery": {
+      "action": "Discard and restore",
+      "confirmTitle": "Discard queued change?",
+      "confirmDescription": "Discard this queued {{entity}} change and restore the local record from current cloud data. This cannot be undone.",
+      "successTitle": "Queued change discarded",
+      "successDescription": {
+        "restored": "The local record now matches the current cloud data.",
+        "removed": "The local-only record was removed because it does not exist in cloud data."
+      },
+      "failureTitle": "Could not discard queued change",
+      "unavailable": "This selected change affects linked records and needs a targeted recovery. Retry it or resolve the original issue.",
+      "unavailableLocal": "Cloud recovery is not available in Local mode.",
+      "unavailableOffline": "Reconnect to the internet before restoring this record.",
+      "errors": {
+        "not_found": "This queued change is no longer available.",
+        "not_recoverable": "This selected change affects linked records and needs a targeted recovery.",
+        "cloud_authority_unavailable": "Cloud data is not available to safely restore this record.",
+        "dependent_changes": "Later queued changes depend on this record. Resolve or retry those changes first.",
+        "remote_missing": "The record no longer exists in cloud data, so it cannot be safely restored.",
+        "changed_during_recovery": "The queue changed while this record was being restored. Review it again and retry.",
+        "remote_request_failed": "We could not verify the current cloud record. No local data was changed. Please try again."
+      }
+    }
   },
   "customTemplates": {
     "title": "Custom Templates",

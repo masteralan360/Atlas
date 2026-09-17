@@ -51,6 +51,8 @@ interface DeleteConfirmationModalProps {
     isLoading?: boolean
     itemName?: string
     simpleConfirmation?: boolean
+    contentClassName?: string
+    overlayClassName?: string
 }
 
 export function DeleteConfirmationModal({
@@ -61,7 +63,9 @@ export function DeleteConfirmationModal({
     description,
     isLoading = false,
     itemName = '',
-    simpleConfirmation = false
+    simpleConfirmation = false,
+    contentClassName,
+    overlayClassName
 }: DeleteConfirmationModalProps) {
     const { t } = useTranslation()
     const [typedText, setTypedText] = useState('')
@@ -144,9 +148,10 @@ export function DeleteConfirmationModal({
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className={cn(
+            <DialogContent overlayClassName={overlayClassName} className={cn(
                 "max-w-md w-[95vw] sm:w-full overflow-hidden p-0 rounded-[2.5rem]",
-                "dark:bg-zinc-950/90 backdrop-blur-2xl border-zinc-200 dark:border-zinc-800 shadow-2xl animate-in fade-in zoom-in duration-300"
+                "dark:bg-zinc-950/90 backdrop-blur-2xl border-zinc-200 dark:border-zinc-800 shadow-2xl animate-in fade-in zoom-in duration-300",
+                contentClassName
             )}>
                 <div className="relative p-8 flex flex-col items-center text-center space-y-6">
                     {/* Background Glow */}

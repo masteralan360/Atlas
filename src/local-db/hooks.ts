@@ -3141,18 +3141,6 @@ export async function clearSyncQueue(): Promise<void> {
     await db.syncQueue.clear()
 }
 
-export async function clearOfflineMutations(): Promise<void> {
-    await db.offline_mutations.clear()
-
-    // Also reset syncStatus for items if possible? 
-    // Actually, discarding mutations means we won't sync them.
-    // The simplest way to "discard" is just to clear the mutation queue.
-    // But local items will still have syncStatus: 'pending'.
-    // We should probably reset them to 'synced' (as if they were never intended to be synced) 
-    // or just leave them as 'pending' (they will stay local only).
-    // The user said "pending info will get deleted or discarded".
-}
-
 // ===================
 // DASHBOARD STATS
 // ===================

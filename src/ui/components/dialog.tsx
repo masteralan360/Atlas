@@ -9,6 +9,7 @@ type DialogLayout = "default" | "structured"
 type DialogContentProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     showCloseButton?: boolean
     layout?: DialogLayout
+    overlayClassName?: string
 }
 
 const Dialog = DialogPrimitive.Root
@@ -37,7 +38,7 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 const DialogContent = React.forwardRef<
     React.ElementRef<typeof DialogPrimitive.Content>,
     DialogContentProps
->(({ className, children, showCloseButton = true, layout = "default", ...props }, ref) => {
+>(({ className, children, showCloseButton = true, layout = "default", overlayClassName, ...props }, ref) => {
     const internalRef = React.useRef<HTMLDivElement>(null)
     const [scroller, setScroller] = React.useState<HTMLDivElement | null>(null)
 
@@ -75,7 +76,7 @@ const DialogContent = React.forwardRef<
 
     return (
         <DialogPortal>
-            <DialogOverlay />
+            <DialogOverlay className={overlayClassName} />
             <DialogPrimitive.Content
                 ref={(node) => {
                     // Handle both the forwarded ref and our internal ref

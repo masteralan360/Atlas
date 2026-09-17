@@ -13,10 +13,6 @@ Syncing Workspace silent background and titlebar Badge
 
 A4 Different Canvas
 
-Auto-Row Atlas Standard
-Optional Footer
-Add Row to summary
-
 Revenue Analytics and accounting
 
 Multi-Color Partner

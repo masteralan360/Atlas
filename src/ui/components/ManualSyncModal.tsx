@@ -1,7 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
+    AppDialog,
+    AppDialogBody,
+    AppDialogContent,
+    AppDialogFooter,
+    AppDialogHeader,
+    AppDialogTitle,
     Dialog,
-    DialogBody,
     DialogContent,
     DialogHeader,
     DialogTitle,
@@ -10,11 +15,12 @@ import {
 } from '@/ui/components/dialog'
 import { Button } from '@/ui/components/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/components/table'
-import { Loader2, CheckCircle2, AlertTriangle, ListTodo } from 'lucide-react'
+import { Loader2, CheckCircle2, AlertTriangle, ListTodo, RotateCcw } from 'lucide-react'
 import { useAuth } from '@/auth/AuthContext'
 import { useToast } from '@/ui/components/use-toast'
-import { usePendingSyncMutations, clearOfflineMutations } from '@/local-db/hooks'
+import { usePendingSyncMutations } from '@/local-db/hooks'
 import { retrySyncIntegrityMutations } from '@/local-db/offlineMutations'
+import { canRecoverOfflineMutation, discardAndRestoreOfflineMutation, type OfflineMutationRecoveryFailure } from '@/local-db/offlineMutationRecovery'
 import type { OfflineMutation } from '@/local-db/models'
 import { getCapitalPoolConflictFromSyncError, isSyncIntegrityError } from '@/sync/syncErrors'
 import { inspectRemoteMutationPayload, type RemoteMutationFieldInspection } from '@/sync/syncPayloadContract'
@@ -23,6 +29,8 @@ import { runManagedFullSync } from '@/sync/syncCoordinator'
 import { LAST_SYNC_KEY } from '@/sync/constants'
 import { connectionManager } from '@/lib/connectionManager'
 import { cn } from '@/lib/utils'
+import { useWorkspace } from '@/workspace'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 
 interface ManualSyncModalProps {
     open: boolean
@@ -87,19 +95,20 @@ function formatPayloadValue(value: unknown) {
     }
 }
 
-function getFieldStatusDisplay(status: RemoteMutationFieldInspection['status']) {
+function getFieldStatusClassName(status: RemoteMutationFieldInspection['status']) {
     if (status === 'invalid') {
-        return { label: 'Invalid', className: 'bg-destructive/10 text-destructive' }
+        return 'bg-destructive/10 text-destructive'
     }
     if (status === 'excluded') {
-        return { label: 'Excluded', className: 'bg-muted text-muted-foreground' }
+        return 'bg-muted text-muted-foreground'
     }
-    return { label: 'Valid', className: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' }
+    return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
 }
 
 export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentClassName }: ManualSyncModalProps) {
     const { t, i18n } = useTranslation()
     const { user } = useAuth()
+    const { isLocalMode } = useWorkspace()
     const { toast } = useToast()
     const pendingMutations = usePendingSyncMutations()
     const pendingCount = pendingMutations.length
@@ -108,8 +117,15 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
     const [isSyncing, setIsSyncing] = useState(false)
     const [status, setStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle')
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
-    const [showDiscardConfirm, setShowDiscardConfirm] = useState(false)
+    const [mutationToDiscard, setMutationToDiscard] = useState<OfflineMutation | null>(null)
+    const [isDiscarding, setIsDiscarding] = useState(false)
     const [selectedMutation, setSelectedMutation] = useState<OfflineMutation | null>(null)
+
+    const selectedMutationCanRecover = useMemo(() => (
+        !isLocalMode
+        && isOnline
+        && canRecoverOfflineMutation(selectedMutation)
+    ), [isLocalMode, isOnline, selectedMutation])
 
     const selectedMutationFields = selectedMutation
         ? inspectRemoteMutationPayload(selectedMutation.entityType, selectedMutation.payload, selectedMutation.error)
@@ -123,9 +139,10 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
         : selectedMutation?.error
 
     function handleOpenChange(nextOpen: boolean) {
+        if (isSyncing || isDiscarding) return
         if (!nextOpen) {
             setSelectedMutation(null)
-            setShowDiscardConfirm(false)
+            setMutationToDiscard(null)
         }
         onOpenChange(nextOpen)
     }
@@ -194,29 +211,61 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
         }
     }
 
+    function getRecoveryFailureMessage(reason: OfflineMutationRecoveryFailure) {
+        return t(`sync.recovery.errors.${reason}`)
+    }
+
     async function handleDiscard() {
+        if (!user || !mutationToDiscard || isDiscarding) return
+
+        setIsDiscarding(true)
         try {
-            await clearOfflineMutations()
+            const result = await discardAndRestoreOfflineMutation(
+                user.workspaceId,
+                mutationToDiscard.id,
+                user.id
+            )
+
+            if (result.status === 'discarded') {
+                toast({
+                    title: t('sync.recovery.successTitle'),
+                    description: t(`sync.recovery.successDescription.${result.action}`),
+                    variant: 'default'
+                })
+                setSelectedMutation(null)
+                setMutationToDiscard(null)
+                return
+            }
+
             toast({
-                title: t('sync.toastDiscardTitle'),
-                description: t('sync.toastDiscardDesc'),
-                variant: 'default'
-            })
-            setShowDiscardConfirm(false)
-            onOpenChange(false)
-        } catch (_error: any) {
-            toast({
-                title: t('common.error', 'Error'),
-                description: t('sync.discardError'),
+                title: t('sync.recovery.failureTitle'),
+                description: getRecoveryFailureMessage(result.reason),
                 variant: 'destructive'
             })
+        } catch (_error: unknown) {
+            toast({
+                title: t('sync.recovery.failureTitle'),
+                description: t('sync.recovery.errors.remote_request_failed'),
+                variant: 'destructive'
+            })
+        } finally {
+            setIsDiscarding(false)
         }
     }
 
     return (
         <>
-            <Dialog open={open} onOpenChange={isSyncing ? undefined : handleOpenChange}>
-                <DialogContent className={cn('sm:max-w-lg', contentClassName)}>
+            <Dialog open={open} onOpenChange={isSyncing || isDiscarding ? undefined : handleOpenChange}>
+                <DialogContent
+                    className={cn('sm:max-w-lg', contentClassName)}
+                    showCloseButton={!isSyncing && !isDiscarding}
+                    onEscapeKeyDown={(event) => {
+                        if (isSyncing || isDiscarding) event.preventDefault()
+                    }}
+                    onPointerDownOutside={(event) => {
+                        if (isSyncing || isDiscarding) event.preventDefault()
+                    }}
+                >
                     <DialogHeader>
                         <DialogTitle>{t('sync.title')}</DialogTitle>
                         <DialogDescription>
@@ -261,7 +310,7 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                                                 type="button"
                                                 onClick={() => setSelectedMutation(mutation)}
                                                 className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                                title="Review sync payload"
+                                                title={t('sync.reviewPayload')}
                                             >
                                                 <div className="min-w-0">
                                                     <p className="truncate text-sm font-medium text-foreground">
@@ -318,24 +367,15 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                             <Button
                                 variant="ghost"
                                 onClick={() => handleOpenChange(false)}
-                                disabled={isSyncing}
+                                disabled={isSyncing || isDiscarding}
                             >
                                 {status === 'success' ? t('common.close', 'Close') : t('common.cancel', 'Cancel')}
                             </Button>
-                            {status === 'idle' && pendingCount > 0 && (
-                                <Button
-                                    variant="destructive"
-                                    onClick={() => setShowDiscardConfirm(true)}
-                                    disabled={isSyncing}
-                                >
-                                    {t('sync.discardBtn')}
-                                </Button>
-                            )}
                         </div>
                         {status !== 'success' && (
                             <Button
                                 onClick={handleSync}
-                                disabled={isSyncing || !isOnline}
+                                disabled={isSyncing || isDiscarding || !isOnline}
                             >
                                 {isSyncing ? t('sync.syncingBtn') : t('sync.syncNow')}
                             </Button>
@@ -344,67 +384,70 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                 </DialogContent>
             </Dialog>
 
-            <Dialog open={showDiscardConfirm} onOpenChange={setShowDiscardConfirm}>
-                <DialogContent className={cn('sm:max-w-[400px]', contentClassName)}>
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2 text-destructive">
-                            <AlertTriangle className="h-5 w-5" />
-                            {t('sync.confirmDiscard')}
-                        </DialogTitle>
-                        <DialogDescription>
-                            {t('sync.discardDescription', { count: pendingCount })}
-                        </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter className="sm:justify-end gap-2">
-                        <Button variant="ghost" onClick={() => setShowDiscardConfirm(false)}>
-                            {t('common.cancel', 'Cancel')}
-                        </Button>
-                        <Button variant="destructive" onClick={handleDiscard}>
-                            {t('sync.yesDiscard')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <DeleteConfirmationModal
+                isOpen={mutationToDiscard !== null}
+                onClose={() => {
+                    if (!isDiscarding) setMutationToDiscard(null)
+                }}
+                onConfirm={() => void handleDiscard()}
+                isLoading={isDiscarding}
+                title={t('sync.recovery.confirmTitle')}
+                description={t('sync.recovery.confirmDescription', {
+                    entity: mutationToDiscard ? getEntityLabel(mutationToDiscard.entityType) : ''
+                })}
+                itemName={mutationToDiscard ? getEntityLabel(mutationToDiscard.entityType) : ''}
+                contentClassName={cn(contentClassName, 'z-[10030]')}
+                overlayClassName="z-[10025]"
+            />
 
-            <Dialog
+            <AppDialog
                 open={selectedMutation !== null}
                 onOpenChange={(nextOpen) => {
-                    if (!nextOpen) setSelectedMutation(null)
+                    if (!nextOpen && !isDiscarding) setSelectedMutation(null)
                 }}
             >
-                <DialogContent layout="structured" className={cn('max-w-4xl', contentClassName)}>
-                    <DialogHeader layout="structured">
-                        <DialogTitle>{getEntityLabel(selectedMutation?.entityType ?? 'products')} sync payload</DialogTitle>
+                <AppDialogContent
+                    className={cn('max-w-4xl', contentClassName)}
+                    showCloseButton={!isDiscarding}
+                    onEscapeKeyDown={(event) => {
+                        if (isDiscarding) event.preventDefault()
+                    }}
+                    onPointerDownOutside={(event) => {
+                        if (isDiscarding) event.preventDefault()
+                    }}
+                >
+                    <AppDialogHeader>
+                        <AppDialogTitle>{t('sync.payloadTitle', { entity: getEntityLabel(selectedMutation?.entityType ?? 'products') })}</AppDialogTitle>
                         <DialogDescription>
-                            Review exactly which fields are valid for sync, intentionally excluded, or rejected by Supabase.
+                            {t('sync.payloadDescription')}
                         </DialogDescription>
-                    </DialogHeader>
+                    </AppDialogHeader>
 
-                    <DialogBody>
+                    <AppDialogBody>
                         {selectedMutation?.error && (
                             <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
                                 {selectedMutationError}
                             </div>
                         )}
 
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Field</TableHead>
-                                    <TableHead>Status</TableHead>
-                                    <TableHead>Reason</TableHead>
-                                    <TableHead>Value</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {selectedMutationFields.map((field) => {
-                                    const statusDisplay = getFieldStatusDisplay(field.status)
-                                    return (
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>{t('sync.payloadFields.field')}</TableHead>
+                                        <TableHead>{t('sync.payloadFields.status')}</TableHead>
+                                        <TableHead>{t('sync.payloadFields.reason')}</TableHead>
+                                        <TableHead>{t('sync.payloadFields.value')}</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {selectedMutationFields.map((field) => {
+                                        const statusClassName = getFieldStatusClassName(field.status)
+                                        return (
                                         <TableRow key={field.field}>
                                             <TableCell className="font-mono text-xs font-medium">{field.field}</TableCell>
                                             <TableCell>
-                                                <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusDisplay.className}`}>
-                                                    {statusDisplay.label}
+                                                <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusClassName}`}>
+                                                    {t(`sync.payloadStatus.${field.status}`)}
                                                 </span>
                                             </TableCell>
                                             <TableCell className="min-w-48 text-xs text-muted-foreground">{field.reason}</TableCell>
@@ -415,16 +458,36 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                                     )
                                 })}
                             </TableBody>
-                        </Table>
-                    </DialogBody>
+                            </Table>
+                    </AppDialogBody>
 
-                    <DialogFooter layout="structured">
-                        <Button variant="ghost" onClick={() => setSelectedMutation(null)}>
+                    <AppDialogFooter>
+                        <Button variant="ghost" onClick={() => setSelectedMutation(null)} disabled={isDiscarding}>
                             {t('common.close', 'Close')}
                         </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                        {selectedMutationCanRecover ? (
+                            <Button
+                                variant="destructive"
+                                onClick={() => {
+                                    if (selectedMutation) setMutationToDiscard(selectedMutation)
+                                }}
+                                disabled={isDiscarding}
+                            >
+                                {isDiscarding ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                                {t('sync.recovery.action')}
+                            </Button>
+                        ) : (
+                            <p className="text-xs text-muted-foreground">
+                                {isLocalMode
+                                    ? t('sync.recovery.unavailableLocal')
+                                    : !isOnline
+                                        ? t('sync.recovery.unavailableOffline')
+                                        : t('sync.recovery.unavailable')}
+                            </p>
+                        )}
+                    </AppDialogFooter>
+                </AppDialogContent>
+            </AppDialog>
         </>
     )
 }

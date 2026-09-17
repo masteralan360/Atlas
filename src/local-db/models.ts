@@ -2626,7 +2626,7 @@ export interface SyncQueueItem {
 }
 
 // Offline Mutation for manual sync queue
-export type MutationStatus = 'pending' | 'syncing' | 'failed' | 'synced'
+export type MutationStatus = 'pending' | 'syncing' | 'failed' | 'synced' | 'discarded'
 
 export interface Workspace extends BaseEntity {
   name: string
@@ -2862,6 +2862,8 @@ export interface OfflineMutation {
   createdAt: string
   status: MutationStatus
   error?: string
+  discardedAt?: string
+  discardedBy?: string
 }
 
 export interface AppSetting {

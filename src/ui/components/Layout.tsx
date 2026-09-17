@@ -51,6 +51,8 @@ import { LocalAccountSwitcher } from './LocalAccountSwitcher'
 import { DeploymentRefreshVersion } from './DeploymentRefreshVersion'
 import { ModuleLockerOverlay } from './module-locker/ModuleLockerOverlay'
 import { ModuleLockerPasskeyDialog, type ModuleLockerPasskeyAction } from './module-locker/ModuleLockerPasskeyDialog'
+import { LoadingGlowLine } from './GlowLine'
+import { ModulePageFreshnessLoadingProvider } from './ModulePageFreshness'
 import { buildWorkspaceNavigation, type WorkspaceNavigationGroup, type WorkspaceNavigationItem } from '@/ui/navigation/workspaceNavigation'
 import { launcherSectionOrder, type NavigationSectionKey } from '@/ui/navigation/navigationMeta'
 import {
@@ -3228,9 +3230,12 @@ export function Layout({ children }: LayoutProps) {
           ) : null}
 
           {/* Main content Scroll Container */}
+          <ModulePageFreshnessLoadingProvider>
+            {(isModulePageFreshnessLoading) => (
           <div
             className={cn(
-              'h-full bg-background transition-[padding] duration-300 ease-in-out flex flex-col overflow-hidden',
+              'h-full transition-[padding] duration-300 ease-in-out flex flex-col overflow-hidden',
+              location === '/whatsapp' || isPosLikeRoute ? 'bg-background' : 'bg-muted/30',
               isTauri && 'mt-[var(--titlebar-height)] h-[calc(100vh-var(--titlebar-height))]',
               // Desktop Sidebar Padding Logic
               desktopSidebarOpen
@@ -3246,7 +3251,7 @@ export function Layout({ children }: LayoutProps) {
             {/* Top bar */}
             <header
               className={cn(
-                'flex-shrink-0 z-30 flex items-center gap-4 px-4 py-3 bg-background/60 backdrop-blur-xl border-b border-border/50',
+                'flex-shrink-0 z-30 flex items-center gap-4 px-4 py-3 bg-background/60 backdrop-blur-xl',
                 'pt-[calc(0.75rem+var(--safe-area-top))]',
                 isPosLikeRoute && 'hidden lg:flex' // Hide on mobile if POS
               )}
@@ -3420,9 +3425,18 @@ export function Layout({ children }: LayoutProps) {
                   ? 'p-0'
                   : isPosLikeRoute
                     ? 'p-0 lg:p-6'
-                    : 'p-4 lg:p-6 overflow-y-auto overscroll-contain custom-scrollbar'
+                    : 'bg-background p-4 lg:p-6 lg:rounded-t-[2rem] lg:border-t lg:border-border/80 overflow-y-auto overscroll-contain custom-scrollbar'
               )}
             >
+              {location !== '/whatsapp' && !isPosLikeRoute && (
+                <LoadingGlowLine
+                  isLoading={isModulePageFreshnessLoading}
+                  orientation="horizontal"
+                  position="0"
+                  color="primary"
+                  className="hidden -translate-y-1/2 lg:block"
+                />
+              )}
               <Suspense fallback={<PageLoading />}>{children}</Suspense>
               <ModuleLockerOverlay
                 containerRef={pageContentRef}
@@ -3433,6 +3447,8 @@ export function Layout({ children }: LayoutProps) {
             </main>
             {!activeModuleLock && !isModuleLockerLoading && <PageFind contentRef={pageContentRef} />}
           </div>
+            )}
+          </ModulePageFreshnessLoadingProvider>
 
           {/* Sign Out Confirmation Modal */}
           {isDemoWorkspace(user?.workspaceCode) ? (
