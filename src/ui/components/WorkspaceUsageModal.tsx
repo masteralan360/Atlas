@@ -253,8 +253,8 @@ export function WorkspacePaygChargeButton({
             title={`${label}: ${amount} ${summary.currency}`}
             aria-label={`${label}: ${amount} ${summary.currency}`}
             className={cn(
-                'relative z-0 -me-2 flex h-6 shrink-0 items-center rounded-full border border-amber-600/30 bg-[#f59e0b] pe-4 ps-2 text-black shadow-sm transition-colors hover:bg-[#e69008] focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-background',
-                compact ? 'min-w-12 text-[9px] font-black' : 'min-w-20 gap-1 text-[10px] font-bold',
+                'relative z-0 flex shrink-0 items-center rounded-full border border-amber-600/30 bg-[#f59e0b] text-black shadow-sm transition-colors hover:bg-[#e69008] focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-background',
+                compact ? 'h-7 min-w-[66px] gap-1 px-2 text-[9px] font-black' : '-me-2 h-6 min-w-20 gap-1 pe-4 ps-2 text-[10px] font-bold',
                 className
             )}
         >

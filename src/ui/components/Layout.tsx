@@ -3234,7 +3234,9 @@ export function Layout({ children }: LayoutProps) {
             {(isModulePageFreshnessLoading) => (
           <div
             className={cn(
-              'h-full transition-[padding] duration-300 ease-in-out flex flex-col overflow-hidden',
+              // Mobile uses this shared container as its scroller, so the top bar
+              // follows the content. Desktop retains its isolated page scroller.
+              'h-full transition-[padding] duration-300 ease-in-out flex flex-col overflow-x-hidden overflow-y-auto overscroll-contain custom-scrollbar lg:overflow-hidden',
               location === '/whatsapp' || isPosLikeRoute ? 'bg-background' : 'bg-muted/30',
               isTauri && 'mt-[var(--titlebar-height)] h-[calc(100vh-var(--titlebar-height))]',
               // Desktop Sidebar Padding Logic
@@ -3248,22 +3250,120 @@ export function Layout({ children }: LayoutProps) {
               'pb-[var(--safe-area-bottom)]'
             )}
           >
-            {/* Top bar */}
+            {/* Mobile floating navigation: regular page flow, so it scrolls away with content. */}
+            {!isPosLikeRoute && (
+              <div className="z-30 flex flex-shrink-0 items-start gap-5 px-4 pb-2 pt-[calc(0.8125rem+var(--safe-area-top))] lg:hidden">
+                <button
+                  type="button"
+                  className="flex h-[42px] w-[50px] shrink-0 items-center justify-center rounded-full border border-border/70 bg-background/95 text-foreground shadow-[0_12px_28px_rgba(15,23,42,0.1)] backdrop-blur-xl transition-colors hover:bg-secondary active:scale-95 dark:shadow-[0_12px_28px_rgba(0,0,0,0.28)]"
+                  onClick={() => setMobileSidebarOpen(true)}
+                  aria-label={t('nav.openMenu', { defaultValue: 'Open navigation menu' })}
+                >
+                  <Menu className="h-5 w-5" />
+                </button>
+
+                <div className="ms-auto w-fit max-w-[calc(100%-3.5rem)] shrink-0 overflow-x-auto overflow-y-hidden no-scrollbar rounded-full border border-border/70 bg-background/95 shadow-[0_12px_28px_rgba(15,23,42,0.1)] backdrop-blur-xl dark:shadow-[0_12px_28px_rgba(0,0,0,0.28)]">
+                  <div className="flex h-[43px] w-max items-center gap-1.5 px-1.5">
+                    {!isTauri && webUsageMeter && (
+                      <div className="flex items-center">
+                        {webPaygSummary && <WorkspacePaygChargeButton compact summary={webPaygSummary} onClick={() => setUsageModalOpen(true)} />}
+                        {!webPaygSummary && (
+                          <WorkspaceUsageCircleButton
+                            usageMeter={webUsageMeter}
+                            onClick={() => setUsageModalOpen(true)}
+                            className="relative z-10"
+                          />
+                        )}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (location !== '/modules') {
+                          setLocation('/modules')
+                        }
+                        triggerHaptic('selection')
+                      }}
+                      className={cn(
+                        'relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-lg border transition-all duration-300',
+                        isModuleLauncherRoute
+                          ? 'border-primary/30 bg-primary/10 shadow-[0_10px_22px_rgba(79,70,229,0.16)]'
+                          : 'border-border/60 bg-background/75 hover:border-primary/20 hover:bg-primary/5'
+                      )}
+                      title={t('nav.modulesLauncher', { defaultValue: 'Open module launcher' })}
+                      aria-label={t('nav.modulesLauncher', { defaultValue: 'Open module launcher' })}
+                    >
+                      <div
+                        className={cn(
+                          'absolute inset-[1px] rounded-[calc(0.5rem-1px)] bg-gradient-to-br transition-opacity duration-300',
+                          isModuleLauncherRoute
+                            ? 'from-primary/18 via-primary/8 to-transparent opacity-100'
+                            : 'from-emerald-500/14 via-sky-500/8 to-transparent opacity-80'
+                        )}
+                      />
+                      <ThemeAwareLogo className="relative z-10 h-[18px] w-[18px]" />
+                    </button>
+                    {hasCapability('whatsappIntegration') && isTauri && location === '/whatsapp' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => whatsappManager.setEnabled(!whatsappManager.isEnabled())}
+                        className={cn(
+                          'h-9 w-9 p-0 border-border/50 hover:bg-secondary/50 transition-all duration-300',
+                          whatsappStatus === 'live' ? 'text-emerald-500' : 'text-red-500'
+                        )}
+                        title={whatsappStatus === 'live' ? 'Turn Off WhatsApp Webview' : 'Turn On WhatsApp Webview'}
+                      >
+                        <MessageSquare className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {(!isTauri || isMobile()) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          window.dispatchEvent(new CustomEvent('toggle-atlas-assistant'))
+                          triggerHaptic('selection')
+                        }}
+                        className={cn(
+                          'rounded-lg border p-1.5 transition-all',
+                          assistantOpen
+                            ? 'border-primary/20 bg-primary/10 text-primary'
+                            : 'border-transparent text-muted-foreground hover:border-border hover:bg-secondary hover:text-primary'
+                        )}
+                        title={t('assistant.title', { defaultValue: 'Atlas Assistant' })}
+                        aria-label={t('assistant.title', { defaultValue: 'Atlas Assistant' })}
+                      >
+                        <Bot className="h-4 w-4" />
+                      </button>
+                    )}
+                    <P2PSyncIndicator />
+                    {features.allowed_currencies.length > 1 && <ExchangeRateIndicator compact />}
+                    {(!isTauri || isMobile()) && <NotificationCenter />}
+                    <UnifiedSnoozedRemindersBell />
+                    {(!isTauri || isMobile()) && (
+                      <button
+                        type="button"
+                        onClick={() => window.location.reload()}
+                        className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-secondary"
+                        title={t('common.refresh', { defaultValue: 'Refresh' })}
+                        aria-label={t('common.refresh', { defaultValue: 'Refresh' })}
+                      >
+                        <RotateCw className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Desktop top bar */}
             <header
               className={cn(
-                'flex-shrink-0 z-30 flex items-center gap-4 px-4 py-3 bg-background/60 backdrop-blur-xl',
+                'hidden flex-shrink-0 z-30 items-center gap-4 px-4 py-3 bg-background/60 backdrop-blur-xl lg:flex',
                 'pt-[calc(0.75rem+var(--safe-area-top))]',
-                isPosLikeRoute && 'hidden lg:flex' // Hide on mobile if POS
+                isPosLikeRoute && 'hidden'
               )}
             >
-              {/* Mobile Toggle */}
-              <button
-                className="lg:hidden p-2 -ms-2 rounded-lg hover:bg-secondary"
-                onClick={() => setMobileSidebarOpen(true)}
-              >
-                <Menu className="w-5 h-5" />
-              </button>
-
               {/* Desktop Toggle */}
               <button
                 className="hidden lg:block p-2 -ms-2 rounded-lg hover:bg-secondary"
@@ -3303,11 +3403,13 @@ export function Layout({ children }: LayoutProps) {
                 {!isTauri && webUsageMeter && (
                   <div className="flex items-center lg:hidden">
                     {webPaygSummary && <WorkspacePaygChargeButton compact summary={webPaygSummary} onClick={() => setUsageModalOpen(true)} />}
-                    <WorkspaceUsageCircleButton
-                      usageMeter={webUsageMeter}
-                      onClick={() => setUsageModalOpen(true)}
-                      className="relative z-10"
-                    />
+                    {!webPaygSummary && (
+                      <WorkspaceUsageCircleButton
+                        usageMeter={webUsageMeter}
+                        onClick={() => setUsageModalOpen(true)}
+                        className="relative z-10"
+                      />
+                    )}
                   </div>
                 )}
                 <button
@@ -3425,17 +3527,19 @@ export function Layout({ children }: LayoutProps) {
                   ? 'p-0'
                   : isPosLikeRoute
                     ? 'p-0 lg:p-6'
-                    : 'bg-background p-4 lg:p-6 lg:rounded-t-[2rem] lg:border-t lg:border-border/80 overflow-y-auto overscroll-contain custom-scrollbar'
+                    : 'bg-background p-4 rounded-t-[2rem] border-t border-border/80 lg:p-6 lg:overflow-y-auto lg:overscroll-contain custom-scrollbar'
               )}
             >
               {location !== '/whatsapp' && !isPosLikeRoute && (
-                <LoadingGlowLine
-                  isLoading={isModulePageFreshnessLoading}
-                  orientation="horizontal"
-                  position="0"
-                  color="primary"
-                  className="hidden -translate-y-1/2 lg:block"
-                />
+                <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden rounded-t-[2rem]">
+                  <LoadingGlowLine
+                    isLoading={isModulePageFreshnessLoading}
+                    orientation="horizontal"
+                    position="0"
+                    color="primary"
+                    className="block -translate-y-1/2"
+                  />
+                </div>
               )}
               <Suspense fallback={<PageLoading />}>{children}</Suspense>
               <ModuleLockerOverlay

@@ -323,6 +323,7 @@
     "ledger": "Ledger",
     "payments": "Payments",
     "paymentAccounts": "Payment Accounts",
+    "openMenu": "Open navigation menu",
     "directTransactions": "Direct Transactions",
     "uploadFiles": "Upload Files",
     "tools": "Tools",

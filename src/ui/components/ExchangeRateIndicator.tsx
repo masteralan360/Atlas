@@ -234,7 +234,7 @@ export function ExchangeRateList({ isMobile = false }: { isMobile?: boolean }) {
     )
 }
 
-export function ExchangeRateIndicator() {
+export function ExchangeRateIndicator({ compact = false }: { compact?: boolean }) {
     const [location, setLocation] = useLocation()
     const { status, refresh } = useExchangeRate()
     const { t, i18n } = useTranslation()
@@ -248,7 +248,7 @@ export function ExchangeRateIndicator() {
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
             <div className="flex items-center gap-2">
                 {/* Desktop View */}
-                <div className="hidden md:flex items-center gap-2">
+                <div className={cn('items-center gap-2', compact ? 'hidden' : 'hidden md:flex')}>
                     <button
                         onClick={() => setLocation('/notebook')}
                         className={cn(
@@ -302,11 +302,12 @@ export function ExchangeRateIndicator() {
                 </div>
 
                 {/* Mobile View */}
-                <div className="md:hidden flex items-center gap-1.5">
+                <div className={cn('items-center gap-1.5', compact ? 'flex' : 'md:hidden flex')}>
                     <DialogTrigger asChild>
                         <Button
                             variant="outline"
                             size="sm"
+                            aria-label={t('common.exchangeRates')}
                             className={cn(
                                 "flex items-center gap-1.5 h-8 px-2.5 transition-all",
                                 style === 'neo-orange' ? "neo-indicator" : cn(
@@ -317,27 +318,29 @@ export function ExchangeRateIndicator() {
                             )}
                         >
                             <Globe className={cn("w-4 h-4 shrink-0", status === 'loading' && "animate-spin")} />
-                            <span className="text-xs font-bold uppercase tracking-tight hidden min-[380px]:inline">Live Rate</span>
+                            {!compact && <span className="text-xs font-bold uppercase tracking-tight hidden min-[380px]:inline">Live Rate</span>}
                         </Button>
                     </DialogTrigger>
 
-                    <Button
-                        variant="outline"
-                        size="icon"
-                        className={cn(
-                            "h-8 w-8 rounded-full transition-all",
-                            style === 'neo-orange'
-                                ? "rounded-[var(--radius)] border-black dark:border-white bg-white dark:bg-black"
-                                : cn(
-                                    "border-border/70 bg-background text-muted-foreground hover:bg-secondary hover:text-foreground",
-                                    isNotebookPage && "border-primary/20 bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-                                )
-                        )}
-                        onClick={() => setLocation('/notebook')}
-                        title={t('notebook.label') || 'Notebook'}
-                    >
-                        <NotebookPen className="w-4 h-4" />
-                    </Button>
+                    {!compact && (
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            className={cn(
+                                "h-8 w-8 rounded-full transition-all",
+                                style === 'neo-orange'
+                                    ? "rounded-[var(--radius)] border-black dark:border-white bg-white dark:bg-black"
+                                    : cn(
+                                        "border-border/70 bg-background text-muted-foreground hover:bg-secondary hover:text-foreground",
+                                        isNotebookPage && "border-primary/20 bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                                    )
+                            )}
+                            onClick={() => setLocation('/notebook')}
+                            title={t('notebook.label') || 'Notebook'}
+                        >
+                            <NotebookPen className="w-4 h-4" />
+                        </Button>
+                    )}
                 </div>
             </div>
 
