@@ -1,6 +1,5 @@
 Post Service Archiver
 icon
-usage calculator
 remove R2 Print only
 account switch
 Fix SQLITE loading
@@ -25,10 +24,6 @@ Accumilated account statement rows by types and for one day
 
 Centralized Photo Compression
 ##
-
-General Hardening
-
-fix retry sync
 
 Simplify E-commerce
 Restrict Phone number in khaleej cosmetic
