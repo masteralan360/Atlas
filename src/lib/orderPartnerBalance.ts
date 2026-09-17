@@ -41,7 +41,10 @@ function isLinkedLoanPosting(entry: PartnerAccountStatementEntry, order: Stateme
     order.linkedLoanId
       && entry.source?.recordType === 'loan'
       && entry.source.recordId === order.linkedLoanId
-      && entry.kind === 'loan_disbursal'
+      // Order-financing loans are deliberately presented as sales-order
+      // entries in the partner statement, while standalone loans use
+      // loan_disbursal. Both are the original posting for the linked loan.
+      && (entry.kind === 'loan_disbursal' || entry.kind === 'sales_order')
   )
 }
 

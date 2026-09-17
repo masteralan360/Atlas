@@ -6,7 +6,7 @@ import {
   resolveOrderPartnerBalancePrintDemand
 } from '@/lib/orderPartnerBalancePrintDemand'
 import type { PartnerAccountStatementData } from '@/lib/partnerAccountStatement'
-import type { PaymentTransaction, SalesOrder } from '@/local-db'
+import type { Loan, PaymentTransaction, SalesOrder } from '@/local-db'
 
 const TIMESTAMP = '2026-09-11T10:00:00.000Z'
 
@@ -116,6 +116,60 @@ describe('order partner balances at posting', () => {
 
   it('returns no balance when the account statement has no original order posting', () => {
     expect(deriveOrderPartnerBalanceAtPosting(statementData(), salesOrder('missing', 50))).toBeNull()
+  })
+
+  it('reconstructs an order-financing loan that is presented as a sales-order ledger entry', () => {
+    const earlier = {
+      ...salesOrder('earlier-financed', 100),
+      createdAt: '2026-09-11T08:00:00.000Z',
+      updatedAt: '2026-09-11T08:00:00.000Z'
+    }
+    const order = {
+      ...salesOrder('financed-order', 50),
+      paymentMethod: 'loan' as const,
+      linkedLoanId: 'loan-1',
+      createdAt: '2026-09-11T09:00:00.000Z',
+      updatedAt: '2026-09-11T09:00:00.000Z'
+    }
+    const loan: Loan = {
+      id: 'loan-1',
+      workspaceId: 'workspace-1',
+      orderId: order.id,
+      orderType: 'sales',
+      loanNo: 'SL-1',
+      source: 'order',
+      loanCategory: 'simple',
+      direction: 'lent',
+      linkedPartyType: 'business_partner',
+      linkedPartyId: 'partner-1',
+      linkedPartyName: 'Partner',
+      borrowerName: 'Partner',
+      borrowerPhone: '',
+      borrowerAddress: '',
+      borrowerNationalId: '',
+      principalAmount: 50,
+      totalPaidAmount: 0,
+      balanceAmount: 50,
+      settlementCurrency: 'iqd',
+      installmentCount: 1,
+      installmentFrequency: 'monthly',
+      firstDueDate: null,
+      nextDueDate: null,
+      status: 'active',
+      createdAt: '2026-09-11T09:10:00.000Z',
+      updatedAt: '2026-09-11T09:10:00.000Z',
+      syncStatus: 'synced',
+      lastSyncedAt: TIMESTAMP,
+      version: 1,
+      isDeleted: false
+    }
+
+    expect(deriveOrderPartnerBalanceAtPosting(
+      statementData({ salesOrders: [earlier, order], loans: [loan] }),
+      order
+    )).toEqual({
+      balances: [{ currency: 'iqd', before: 100, after: 150 }]
+    })
   })
 
   it('rounds each reconstructed balance to the statement precision', () => {
