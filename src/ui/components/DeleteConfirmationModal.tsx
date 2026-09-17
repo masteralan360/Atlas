@@ -51,6 +51,7 @@ interface DeleteConfirmationModalProps {
     isLoading?: boolean
     itemName?: string
     simpleConfirmation?: boolean
+    confirmLabel?: string
     contentClassName?: string
     overlayClassName?: string
 }
@@ -64,6 +65,7 @@ export function DeleteConfirmationModal({
     isLoading = false,
     itemName = '',
     simpleConfirmation = false,
+    confirmLabel,
     contentClassName,
     overlayClassName
 }: DeleteConfirmationModalProps) {
@@ -224,7 +226,7 @@ export function DeleteConfirmationModal({
                                     ) : (
                                         <span className="flex items-center justify-center gap-2">
                                             <Trash2 className="w-4 h-4" />
-                                            {t('common.delete') || 'Delete'}
+                                            {confirmLabel || t('common.delete') || 'Delete'}
                                         </span>
                                     )}
                                 </Button>
@@ -329,7 +331,7 @@ export function DeleteConfirmationModal({
                                             <Trash2 className="w-4 h-4" />
                                             {holdProgress > 0 && holdProgress < 100
                                                 ? t('common.holdToDelete') || 'Hold To Delete'
-                                                : t('common.delete') || 'Delete'}
+                                                : confirmLabel || t('common.delete') || 'Delete'}
                                         </span>
                                     )}
                                 </Button>

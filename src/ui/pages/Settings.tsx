@@ -5,6 +5,7 @@ import { useSyncStatus, clearQueue } from '@/sync'
 import { db, hasCurrencyExchangeAccountingData, listLocalCustomTemplates, saveRestaurantTableSettings, usePriceBookCatalogState, useRestaurantPosTickets, useRestaurantTableSettings } from '@/local-db'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button, Label, LanguageSwitcher, Input, CurrencySelector, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tabs, TabsList, TabsTrigger, TabsContent, Switch, Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, AppDialog, AppDialogBody, AppDialogContent, AppDialogDescription, AppDialogFooter, AppDialogHeader, AppDialogTitle, Textarea, useToast, RegisterWorkspaceContactsModal } from '@/ui/components'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'wouter'
 import { useWorkspace } from '@/workspace'
 import { Coins } from 'lucide-react'
 import type { IQDDisplayPreference, CurrencyCode } from '@/local-db/models'
@@ -3989,6 +3990,27 @@ export function Settings() {
 
                     {user?.role === 'admin' && (
                         <>
+                            {!isLocalMode && (
+                                <Card className="border-primary/20 bg-primary/[0.03]">
+                                    <CardHeader>
+                                        <CardTitle className="flex items-center gap-2">
+                                            <Database className="h-5 w-5 text-primary" />
+                                            {t('settings.mutationQueue.title')}
+                                        </CardTitle>
+                                        <CardDescription>{t('settings.mutationQueue.description')}</CardDescription>
+                                    </CardHeader>
+                                    <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                        <p className="text-sm text-muted-foreground">{t('settings.mutationQueue.deviceOnly')}</p>
+                                        <Button asChild type="button" className="shrink-0 gap-2">
+                                            <Link href="/mutation-queue">
+                                                <ExternalLink className="h-4 w-4" />
+                                                {t('settings.mutationQueue.open')}
+                                            </Link>
+                                        </Button>
+                                    </CardContent>
+                                </Card>
+                            )}
+
                             {/* WhatsApp Integration Setting */}
                             {canUseWhatsapp && (
                             <Card className="border-primary/20 bg-primary/5">

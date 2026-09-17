@@ -533,4 +533,9 @@ export const moduleMetaByHref: Record<string, ModuleMeta> = {
     description: "Review console errors recorded locally on this device.",
     badge: "Errors",
   },
+  "/mutation-queue": {
+    section: "people-and-workspace",
+    description: "Review mutation history stored locally for this workspace.",
+    badge: "Sync",
+  },
 };

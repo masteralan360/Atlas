@@ -134,6 +134,9 @@ const Settings = lazy(() =>
 const Logs = lazy(() =>
   import("@/ui/pages/Logs").then((m) => ({ default: m.Logs })),
 );
+const MutationQueue = lazy(() =>
+  import("@/ui/pages/MutationQueue").then((m) => ({ default: m.MutationQueue })),
+);
 const Help = lazy(() =>
   import("@/ui/pages/Help").then((m) => ({ default: m.Help })),
 );
@@ -1373,6 +1376,18 @@ function UsbBackupStartupValidator() {
   ) : null;
 }
 
+function MutationQueueRoute() {
+  const { isLocalMode } = useWorkspace();
+
+  if (isLocalMode) return <Redirect to="/settings" />;
+
+  return (
+    <Layout>
+      <MutationQueue />
+    </Layout>
+  );
+}
+
 function App() {
   const { showModal, currentPatch, version, dismissModal } = usePatchNotes();
 
@@ -2484,6 +2499,11 @@ function App() {
                           <Layout>
                             <Logs />
                           </Layout>
+                        </ProtectedRoute>
+                      </Route>
+                      <Route path="/mutation-queue">
+                        <ProtectedRoute allowedRoles={["admin"]}>
+                          <MutationQueueRoute />
                         </ProtectedRoute>
                       </Route>
                       <Route path="/workspace-configuration">
