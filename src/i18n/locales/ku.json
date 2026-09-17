@@ -9303,5 +9303,15 @@
       "cancelled": "فرۆشتنی قیست هەڵوەشایەوە و پارەدانەکان پێچەوانە کرانەوە.",
       "cancelFailed": "نەتوانرا فرۆشتنی قیست هەڵبوەشێندرێتەوە."
     }
+  },
+  "workspaceResourceSync": {
+    "checking": "پشکنینی سەرچاوەکان",
+    "downloading": "داگرتنی سەرچاوەکان ({{current}}/{{total}})",
+    "downloadingFile": "داگرتنی {{fileName}}",
+    "upToDate": "هەموو سەرچاوەکان نوێن",
+    "newResourcesReady": "سەرچاوە نوێکان ئامادەن",
+    "reloadToApply": "بارکردنەوە بۆ جێبەجێکردن",
+    "downloadNeedsAttention": "داگرتنی سەرچاوەکان پێویستی بە سەرنج هەیە",
+    "retry": "دووبارە هەوڵدانەوە"
   }
 }

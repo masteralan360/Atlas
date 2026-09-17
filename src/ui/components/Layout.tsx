@@ -34,7 +34,6 @@ import { startR2BackupInterval, stopR2BackupInterval } from '@/local-db/sqliteBa
 import { platformService } from '@/services/platformService'
 import { whatsappManager } from '@/lib/whatsappWebviewManager'
 import { recordTauriStartupVersion } from '@/lib/tauriVersionReporting'
-import { ResourceSyncOverlay } from './p2p/ResourceSyncOverlay'
 import { NotificationCenter } from './NotificationCenter'
 import { ManualRateModals } from './exchange/ManualRateModals'
 import { LoanPaymentModalProvider } from './loans/LoanPaymentModalProvider'
@@ -1489,7 +1488,6 @@ export function Layout({ children }: LayoutProps) {
     <UnifiedSnoozeProvider>
       <LoanPaymentModalProvider>
         <div className="atlas-dynamic-viewport overflow-hidden bg-transparent">
-          <ResourceSyncOverlay />
           <MarketplaceOrderRealtimeBridge />
           {features.allowed_currencies.length > 1 && <ManualRateModals />}
           {features.allowed_currencies.length > 1 && <GlobalExchangeRateReminders />}

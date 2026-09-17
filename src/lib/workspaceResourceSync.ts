@@ -25,7 +25,6 @@ export interface DownloadWorkspaceResourcesOptions {
     workspaceId: string;
     folders?: string[];
     onProgress?: (progress: WorkspaceResourceProgress) => void;
-    shouldSkip?: () => boolean;
 }
 
 /**
@@ -38,7 +37,6 @@ export async function downloadWorkspaceResources({
     workspaceId,
     folders = [...WORKSPACE_RESOURCE_FOLDERS],
     onProgress,
-    shouldSkip,
 }: DownloadWorkspaceResourcesOptions): Promise<WorkspaceResourceResult> {
     const keySet = new Set<string>();
 
@@ -56,11 +54,6 @@ export async function downloadWorkspaceResources({
     let failed = 0;
 
     for (let i = 0; i < keys.length; i++) {
-        if (shouldSkip?.()) {
-            console.log('[WorkspaceResourceSync] Skip requested, aborting remaining downloads');
-            break;
-        }
-
         const key = keys[i];
         const parts = key.split('/');
         const wsPart = parts[0];

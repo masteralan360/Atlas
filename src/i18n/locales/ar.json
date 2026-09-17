@@ -9183,5 +9183,15 @@
       "cancelled": "تم إلغاء مبيعة التقسيط وعكس الدفعات.",
       "cancelFailed": "تعذر إلغاء مبيعة التقسيط."
     }
+  },
+  "workspaceResourceSync": {
+    "checking": "جارٍ التحقق من الموارد",
+    "downloading": "جارٍ تنزيل الموارد ({{current}}/{{total}})",
+    "downloadingFile": "جارٍ تنزيل {{fileName}}",
+    "upToDate": "الموارد محدّثة",
+    "newResourcesReady": "الموارد الجديدة جاهزة",
+    "reloadToApply": "أعد التحميل للتطبيق",
+    "downloadNeedsAttention": "تنزيل الموارد يحتاج إلى انتباه",
+    "retry": "إعادة المحاولة"
   }
 }

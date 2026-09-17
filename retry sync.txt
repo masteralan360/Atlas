@@ -8,7 +8,7 @@ Transaction Reconciliation & Integrity Audit, Expandable, Plain English Explanat
 Price books selector order form and quick order
 ##
 
-Syncing Workspace silent background and titlebar Badge
+Jumla-Khaleej App
 
 A4 Different Canvas
 

@@ -40,13 +40,29 @@ export interface AssetProgress {
     total?: number;
 }
 
-const COLD_START_SESSION_STORAGE_KEY = 'atlas_asset_cold_start_synced';
+export type WorkspaceResourceSyncStatus =
+    | 'idle'
+    | 'checking'
+    | 'downloading'
+    | 'upToDate'
+    | 'reloadRequired'
+    | 'error';
+
+export interface WorkspaceResourceSyncProgress {
+    status: WorkspaceResourceSyncStatus;
+    current?: number;
+    total?: number;
+    currentFile?: string;
+}
+
+const COLD_START_SESSION_STORAGE_KEY_PREFIX = 'atlas_workspace_resource_sync_completed:';
 
 export class AssetManager extends SimpleEventEmitter {
     private isScanning = false;
-    private isInitialSync = false;
-    private coldStartStarted = false;
-    private forceEnterRequested = false;
+    private coldStartWorkspaceId: string | null = null;
+    private workspaceResourceSyncProgress: WorkspaceResourceSyncProgress = { status: 'idle' };
+    private downloadedResourcesDuringColdStart = 0;
+    private workspaceResourceSyncRunId = 0;
     private workspaceId: string | null = null;
     private workspaceMode: WorkspaceDataMode | null = null;
     private watchInterval: any = null;
@@ -67,18 +83,26 @@ export class AssetManager extends SimpleEventEmitter {
             // have not resolved the workspace state yet.
             if (this.isLocalMode()) {
                 this.stopWatcher();
-                this.isInitialSync = false;
+                this.coldStartWorkspaceId = null;
+                this.downloadedResourcesDuringColdStart = 0;
+                this.workspaceResourceSyncRunId++;
                 this.emitStatus({ status: 'idle' });
+                this.emitWorkspaceResourceSyncStatus({ status: 'idle' });
                 return;
             }
 
-            // Full workspace resource download (the "Syncing Workspace" overlay)
-            // runs on cold startup only: once per app process AND once per webview
-            // session, so a reload/refresh never re-triggers it.
-            if (!this.coldStartStarted && !this.hasCompletedColdStartThisSession()) {
-                this.coldStartStarted = true;
-                this.markColdStartCompletedThisSession();
-                void this.coldStartResourceSync();
+            // Full workspace resource download runs silently on cold startup. A
+            // successful run is remembered per workspace, so reloading after a
+            // resource update does not show the status again.
+            if (this.coldStartWorkspaceId !== workspaceId) {
+                this.coldStartWorkspaceId = workspaceId;
+                this.downloadedResourcesDuringColdStart = 0;
+
+                if (this.hasCompletedColdStartThisSession(workspaceId)) {
+                    this.emitWorkspaceResourceSyncStatus({ status: 'idle' });
+                } else {
+                    this.startColdStartResourceSync();
+                }
             }
             this.startWatcher();
         }
@@ -92,18 +116,22 @@ export class AssetManager extends SimpleEventEmitter {
         return isLocalWorkspaceMode(this.workspaceId);
     }
 
-    private hasCompletedColdStartThisSession(): boolean {
+    private hasCompletedColdStartThisSession(workspaceId: string): boolean {
         try {
             return typeof window !== 'undefined'
-                && window.sessionStorage?.getItem(COLD_START_SESSION_STORAGE_KEY) === '1';
+                && window.sessionStorage?.getItem(this.getColdStartSessionStorageKey(workspaceId)) === '1';
         } catch {
             return false;
         }
     }
 
-    private markColdStartCompletedThisSession(): void {
+    private getColdStartSessionStorageKey(workspaceId: string): string {
+        return `${COLD_START_SESSION_STORAGE_KEY_PREFIX}${workspaceId}`;
+    }
+
+    private markColdStartCompletedThisSession(workspaceId: string): void {
         try {
-            window.sessionStorage?.setItem(COLD_START_SESSION_STORAGE_KEY, '1');
+            window.sessionStorage?.setItem(this.getColdStartSessionStorageKey(workspaceId), '1');
         } catch {
             // Session storage unavailable; the in-process flag still guards re-runs.
         }
@@ -113,11 +141,13 @@ export class AssetManager extends SimpleEventEmitter {
         this.emit('progress', progress);
     }
 
-    public getProgress(): AssetProgress & { isInitialSync: boolean } {
-        return {
-            status: this.isScanning ? 'scanning' : 'idle',
-            isInitialSync: this.isInitialSync
-        };
+    private emitWorkspaceResourceSyncStatus(progress: WorkspaceResourceSyncProgress) {
+        this.workspaceResourceSyncProgress = progress;
+        this.emit('workspace-resource-sync', progress);
+    }
+
+    public getWorkspaceResourceSyncProgress(): WorkspaceResourceSyncProgress {
+        return this.workspaceResourceSyncProgress;
     }
 
     public triggerScan() {
@@ -273,27 +303,34 @@ export class AssetManager extends SimpleEventEmitter {
     }
 
     /**
-     * Cold-start-only full workspace resource download (visible overlay).
-     * Runs one time per app process; the 60s watcher never re-runs it.
+     * Cold-start-only full workspace resource download. The title bar consumes
+     * its dedicated progress stream; the regular asset stream remains reserved
+     * for ordinary uploads, downloads, and P2P activity.
      */
-    private async coldStartResourceSync() {
+    private startColdStartResourceSync() {
         if (!this.workspaceId) return;
-        if (this.isLocalMode()) {
-            this.isInitialSync = false;
-            this.emitStatus({ status: 'idle' });
-            return;
-        }
 
-        this.forceEnterRequested = false;
-        this.isInitialSync = true;
-        this.emitStatus({ status: 'scanning' });
+        const workspaceId = this.workspaceId;
+        const runId = ++this.workspaceResourceSyncRunId;
+        void this.coldStartResourceSync(workspaceId, runId);
+    }
+
+    private isActiveWorkspaceResourceSyncRun(workspaceId: string, runId: number): boolean {
+        return this.workspaceId === workspaceId && this.workspaceResourceSyncRunId === runId;
+    }
+
+    private async coldStartResourceSync(workspaceId: string, runId: number) {
+        if (!this.isActiveWorkspaceResourceSyncRun(workspaceId, runId)) return;
+
+        this.emitWorkspaceResourceSyncStatus({ status: 'checking' });
 
         try {
             const result = await downloadWorkspaceResources({
-                workspaceId: this.workspaceId,
-                shouldSkip: () => this.forceEnterRequested,
+                workspaceId,
                 onProgress: ({ current, total, fileName }) => {
-                    this.emitStatus({
+                    if (!this.isActiveWorkspaceResourceSyncRun(workspaceId, runId)) return;
+
+                    this.emitWorkspaceResourceSyncStatus({
                         status: 'downloading',
                         current,
                         total,
@@ -303,35 +340,34 @@ export class AssetManager extends SimpleEventEmitter {
             });
 
             console.log('[AssetManager] Cold start resource sync complete:', result);
+            if (!this.isActiveWorkspaceResourceSyncRun(workspaceId, runId)) return;
+
+            this.downloadedResourcesDuringColdStart += result.downloaded;
+
+            if (result.failed > 0) {
+                this.emitWorkspaceResourceSyncStatus({ status: 'error' });
+                return;
+            }
+
+            this.markColdStartCompletedThisSession(workspaceId);
+            this.emitWorkspaceResourceSyncStatus({
+                status: this.downloadedResourcesDuringColdStart > 0 ? 'reloadRequired' : 'upToDate',
+            });
         } catch (error) {
             console.error('[AssetManager] Cold start resource sync failed:', error);
-            this.emitStatus({ status: 'error', error: String(error) });
-        } finally {
-            this.isInitialSync = false;
-            this.emitStatus({ status: 'idle' });
+            if (!this.isActiveWorkspaceResourceSyncRun(workspaceId, runId)) return;
+            this.emitWorkspaceResourceSyncStatus({ status: 'error' });
         }
-    }
-
-    public requestForceEnter() {
-        this.forceEnterRequested = true;
-        // R2 listing requests cannot be reliably aborted once in flight. Let the
-        // user into the app immediately while the current request unwinds and
-        // the sync's skip callback prevents any remaining downloads.
-        this.dismissInitialSync();
     }
 
     public retryColdStartSync() {
         if (!this.workspaceId || this.coldStartResourceSyncRunning) return;
-        void this.coldStartResourceSync();
+        this.startColdStartResourceSync();
     }
 
     private get coldStartResourceSyncRunning() {
-        return this.isInitialSync;
-    }
-
-    public dismissInitialSync() {
-        this.isInitialSync = false;
-        this.emitStatus({ status: 'idle' });
+        return this.workspaceResourceSyncProgress.status === 'checking'
+            || this.workspaceResourceSyncProgress.status === 'downloading';
     }
 
     /**

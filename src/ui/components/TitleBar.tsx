@@ -13,6 +13,7 @@ import { useSubscriptionExpiryWarning } from '@/hooks/useSubscriptionExpiryWarni
 import { WorkspacePaygChargeButton, WorkspaceUsageButton, WorkspaceUsageCircleButton, WorkspaceUsageModal } from './WorkspaceUsageModal'
 import { useWorkspaceUsageMeter } from './workspaceUsageMeter'
 import { useNavigationHistory } from '@/hooks/useNavigationHistory'
+import { WorkspaceResourceSyncPill } from './WorkspaceResourceSyncPill'
 
 export function TitleBar() {
     const [isMaximized, setIsMaximized] = useState(false)
@@ -176,6 +177,7 @@ export function TitleBar() {
                         <ArrowRight className="w-4 h-4" />
                     </button>
                 </div>
+                <WorkspaceResourceSyncPill />
             </div>
 
             {/* Center: Search Box */}

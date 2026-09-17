@@ -9527,5 +9527,15 @@
       "cancelled": "Installment sale cancelled and payments reversed.",
       "cancelFailed": "Unable to cancel the installment sale."
     }
+  },
+  "workspaceResourceSync": {
+    "checking": "Checking resources",
+    "downloading": "Downloading resources ({{current}}/{{total}})",
+    "downloadingFile": "Downloading {{fileName}}",
+    "upToDate": "Resources up to date",
+    "newResourcesReady": "New resources ready",
+    "reloadToApply": "Reload to apply",
+    "downloadNeedsAttention": "Resource download needs attention",
+    "retry": "Retry"
   }
 }

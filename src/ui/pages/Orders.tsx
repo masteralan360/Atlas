@@ -1968,7 +1968,6 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                         <Button
                             className="gap-2 self-start sm:self-center w-full sm:w-auto rounded-xl"
                             onClick={() => navigate(activeTab === 'sales' ? '/orders/new/sales' : '/orders/new/purchase')}
-                            disabled={(activeTab === 'sales' && salesDisabled) || (activeTab === 'purchase' && purchaseDisabled)}
                         >
                             <Plus className="h-4 w-4" />
                             {activeTab === 'sales' ? (t('orders.form.newSalesOrder') || 'New Sales Order') : (t('orders.form.newPurchaseOrder') || 'New Purchase Order')}
