@@ -2106,7 +2106,9 @@ export function PrintPreviewEditorPage() {
                                             onPointerDown={(e) => e.stopPropagation()}
                                         >
                                             <input
-                                                type="number"
+                                                type="text"
+                                                lang="en"
+                                                inputMode="numeric"
                                                 min="8"
                                                 max="72"
                                                 value={txt.fontSize === '' ? '' : (txt.fontSize ?? 16)}
@@ -2939,7 +2941,9 @@ export function PrintPreviewEditorPage() {
                                             {'Table row count'}
                                         </label>
                                         <input
-                                            type="number"
+                                            type="text"
+                                            lang="en"
+                                            inputMode="numeric"
                                             min={1}
                                             max={50}
                                             value={fieldValues.tableRowCount ?? '10'}

@@ -1,13 +1,27 @@
 import * as React from "react"
-import { cn, convertArabicIndicToLatin, formatDate, formatDateTime, formatTime } from "@/lib/utils"
+import { cn, convertArabicIndicToLatin, formatDate, formatDateTime, formatTime, sanitizeNumericInput } from "@/lib/utils"
 import { useOptionalAuth } from "@/auth"
 
 const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input"> & { allowViewer?: boolean }>(
-    ({ className, type, allowViewer = false, disabled, onChange, onWheel, value, defaultValue, placeholder, ...props }, ref) => {
+    ({ className, type, allowViewer = false, disabled, onChange, onWheel, value, defaultValue, placeholder, inputMode, lang, dir, step, ...props }, ref) => {
         const user = useOptionalAuth()?.user
         const isViewer = user?.role === 'viewer'
         const effectiveDisabled = disabled || (isViewer && !allowViewer)
         const isFormattedNativeInput = type === 'date' || type === 'datetime-local' || type === 'time'
+        const isNativeNumberInput = type === 'number'
+        const numericStep = step === 'any' ? Number.NaN : Number(step)
+        const allowsDecimals = step === 'any' || (step !== undefined && Number.isFinite(numericStep) && !Number.isInteger(numericStep))
+        // Windows can replace digits inside native number controls based on a
+        // user's regional setting after focus leaves the field. Use a text
+        // control with a numeric keyboard instead, so Atlas owns the rendered
+        // value and always shows Latin digits.
+        const renderedInputType = isNativeNumberInput ? 'text' : type
+        const resolvedInputMode = isNativeNumberInput ? inputMode ?? (allowsDecimals ? 'decimal' : 'numeric') : inputMode
+        const usesNumericKeyboard = isNativeNumberInput || resolvedInputMode === 'numeric' || resolvedInputMode === 'decimal'
+        const numericLanguage = usesNumericKeyboard ? 'en' : lang
+        // Direction remains inherited from the selected app language (RTL for
+        // Arabic/Kurdish, LTR for English); only the numeric language is fixed.
+        const numericDirection = dir
 
         const getInitialValue = React.useCallback(() => {
             const raw = typeof value === 'string' ? value :
@@ -65,6 +79,13 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input"> &
                 event.target.value = convertArabicIndicToLatin(event.target.value)
             }
 
+            if (isNativeNumberInput) {
+                event.target.value = sanitizeNumericInput(event.target.value, {
+                    allowDecimal: allowsDecimals,
+                    maxFractionDigits: 20
+                })
+            }
+
             if (isFormattedNativeInput) {
                 setDisplaySourceValue(event.target.value)
             }
@@ -72,7 +93,7 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input"> &
         }
 
         const handleWheel = (event: React.WheelEvent<HTMLInputElement>) => {
-            if (type === 'number') {
+            if (isNativeNumberInput) {
                 (event.target as HTMLInputElement).blur()
             }
             onWheel?.(event)
@@ -84,7 +105,7 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input"> &
             return (
                 <div className="relative">
                     <input
-                        type={type}
+                        type={renderedInputType}
                         className="peer absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
                         ref={ref}
                         disabled={effectiveDisabled}
@@ -93,6 +114,10 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input"> &
                         value={value}
                         defaultValue={defaultValue}
                         placeholder={placeholder}
+                        inputMode={resolvedInputMode}
+                        lang={numericLanguage}
+                        dir={numericDirection}
+                        step={isNativeNumberInput ? undefined : step}
                         {...props}
                     />
                     <div
@@ -113,7 +138,7 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input"> &
 
         return (
             <input
-                type={type}
+                type={renderedInputType}
                 className={inputClasses}
                 ref={ref}
                 disabled={effectiveDisabled}
@@ -122,6 +147,10 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input"> &
                 value={value}
                 defaultValue={defaultValue}
                 placeholder={placeholder}
+                inputMode={resolvedInputMode}
+                lang={numericLanguage}
+                dir={numericDirection}
+                step={isNativeNumberInput ? undefined : step}
                 {...props}
             />
         )

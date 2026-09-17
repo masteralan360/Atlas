@@ -719,7 +719,9 @@ export const ModernA4InvoiceTemplate = forwardRef<HTMLDivElement, ModernA4Invoic
                                             onPointerDown={(e) => e.stopPropagation()}
                                         >
                                             <input
-                                                type="number"
+                                                type="text"
+                                                lang="en"
+                                                inputMode="numeric"
                                                 min="8"
                                                 max="72"
                                                 value={txt.fontSize === '' ? '' : (txt.fontSize ?? 16)}

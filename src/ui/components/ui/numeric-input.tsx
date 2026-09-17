@@ -12,7 +12,7 @@ export interface NumericInputProps extends Omit<React.InputHTMLAttributes<HTMLIn
 }
 
 const NumericInput = React.forwardRef<HTMLInputElement, NumericInputProps>(
-  ({ value, onValueChange, allowDecimal = true, maxFractionDigits = 2, className, ...props }, ref) => {
+  ({ value, onValueChange, allowDecimal = true, maxFractionDigits = 2, className, inputMode, ...props }, ref) => {
     
     // The display value is the formatted version of the internal value
     const displayValue = React.useMemo(() => formatNumericInput(value), [value])
@@ -33,6 +33,8 @@ const NumericInput = React.forwardRef<HTMLInputElement, NumericInputProps>(
         ref={ref}
         value={displayValue}
         onChange={handleChange}
+        inputMode={inputMode ?? (allowDecimal ? "decimal" : "numeric")}
+        lang="en"
         className={className}
       />
     )

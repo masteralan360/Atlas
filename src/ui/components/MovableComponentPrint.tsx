@@ -216,7 +216,9 @@ export function MovableOrderPrintBlock({
                             onPointerDown={(event) => event.stopPropagation()}
                         >
                             <input
-                                type="number"
+                                type="text"
+                                lang="en"
+                                inputMode="numeric"
                                 min={minFontSize}
                                 max={maxFontSize}
                                 value={position?.fontSize === '' ? '' : (position?.fontSize ?? defaultFontSize)}

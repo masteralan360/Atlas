@@ -226,7 +226,8 @@ function ImageColumnWidthControl({
                 <span>Width (%)</span>
                 <input
                     id="atlas-standard-product-image-column-width"
-                    type="number"
+                    type="text"
+                    lang="en"
                     min={MIN_PRODUCT_IMAGE_COLUMN_WIDTH}
                     max={MAX_PRODUCT_IMAGE_COLUMN_WIDTH}
                     step="0.5"

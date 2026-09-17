@@ -154,9 +154,10 @@ export function ReturnConfirmationModal({
                                     {t('sales.return.selectQuantity', { item: itemName }) || `How many "${itemName}" would you like to return?`}
                                 </Label>
                                 <div className="flex flex-col gap-2">
-                                    <div className="relative" dir="ltr">
+                                    <div className="relative">
                                         <input
-                                            type="number"
+                                            type="text"
+                                            lang="en"
                                             min="0.01"
                                             max={maxQuantity}
                                             step="0.01"
