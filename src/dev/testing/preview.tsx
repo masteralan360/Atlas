@@ -7,13 +7,16 @@ import '@/i18n/config'
 import '@/index.css'
 import DeveloperTestButton from './DeveloperTestButton'
 import DeveloperTestDialog from './DeveloperTestDialog'
+import registry from './suites.json'
 
 export default function Preview() {
     const [open, setOpen] = useState(true)
     const { t } = useTranslation()
-    const suiteId = new URLSearchParams(window.location.search).get('suite') === 'pos' ? 'pos' : 'sale-orders'
+    const requested = new URLSearchParams(window.location.search).get('suite')
+    const suiteId = requested && Object.prototype.hasOwnProperty.call(registry, requested) ? requested : 'sale-orders'
     return <main className="p-4">
-        <nav className="mb-4 flex gap-4"><a href="?suite=sale-orders">{t('devTesting.saleOrders')}</a><a href="?suite=pos">{t('devTesting.pos')}</a></nav>
+        <nav className="mb-4 flex flex-wrap gap-4">{Object.entries(registry).map(([id, suite]) =>
+            <a key={id} href={`?suite=${id}`}>{t(suite.titleKey)}</a>)}</nav>
         <DeveloperTestButton suiteId={suiteId} />
         <DeveloperTestDialog suiteId={suiteId} open={open} onOpenChange={setOpen} />
     </main>

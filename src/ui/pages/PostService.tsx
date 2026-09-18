@@ -1,5 +1,6 @@
-import { type FormEvent, Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { flushSync } from "react-dom";
+import { postServiceErrorMessage as localizedError } from "@/lib/postServiceErrors";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Banknote, CheckCircle2, ChevronDown, CircleDollarSign, ClipboardList, Clock, FilePenLine, HandCoins, History, Inbox, LayoutGrid, List, ListFilter, Loader2, PackageCheck, Pencil, Play, Plus, Route, Search, Send, Store, Trash2, Truck, Undo2, Users, WalletCards, X, XCircle, type LucideIcon } from "lucide-react";
@@ -204,91 +205,9 @@ function numericValue(value: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function localizedError(t: TFunction, error: unknown) {
-  const message = error instanceof Error
-    ? error.message
-    : error && typeof error === "object" && "message" in error && typeof error.message === "string"
-      ? error.message
-      : "";
-  const keys: Record<string, string> = {
-    "Select a business partner in this workspace": "selectBusinessPartner",
-    "Select an active delivery merchant": "selectMerchant",
-    "Recipient phone and delivery address are required": "recipientRequired",
-    "COD amount must be greater than zero": "cashOnDeliveryCodRequired",
-    "Select an active courier": "selectCourier",
-    "Select at least one shipment": "selectShipment",
-    "Only unassigned, received, or postponed shipments can be dispatched": "shipmentNotDispatchable",
-    "Only returned shipments can be transferred": "returnedTransferOnly",
-    "A received return cannot be transferred": "receivedReturnTransferBlocked",
-    "Only an administrator can receive a returned post": "returnReceiptAdminOnly",
-    "Only returned posts can be received": "returnReceiptOnly",
-    "This returned post has already been received": "returnAlreadyReceived",
-    "This post has changed. Refresh it before receiving its return": "returnReceiptChanged",
-    "Select a different courier": "differentCourierRequired",
-    "Shipment not found": "shipmentNotFound",
-    "A completed shipment cannot be changed. Record an adjustment instead.": "completedShipment",
-    "A reason is required for this status": "reasonRequired",
-    "Assign the shipment to a courier first": "assignCourierFirst",
-    "A courier can only update shipments assigned to them": "courierAssignmentOnly",
-    "Only cash-on-delivery posts can have a COD change requested": "codChangeCashOnly",
-    "COD changes can only be requested for an assigned or postponed post": "codChangeStatusOnly",
-    "A courier can only request a COD change for posts assigned to them": "codChangeCourierOnly",
-    "Requested COD amount must differ from the current COD amount": "codChangeMustDiffer",
-    "This post already has a pending COD change request": "codChangeAlreadyPending",
-    "Review the pending COD change before marking the post delivered": "codChangePendingDeliveryBlocked",
-    "COD change request not found": "codChangeRequestNotFound",
-    "This COD change request has already been reviewed": "codChangeAlreadyReviewed",
-    "Only an administrator can review a COD change request": "codChangeReviewAdminOnly",
-    "This COD change request can no longer be approved": "codChangeNoLongerReviewable",
-    "Review the pending COD change before changing the post COD details": "codChangePendingEditBlocked",
-    "Only electronically prepaid posts can have a recipient payout change requested": "recipientPayoutChangePrepaidOnly",
-    "Recipient payout changes can only be requested for an assigned or postponed post": "recipientPayoutChangeStatusOnly",
-    "A courier can only request a recipient payout change for posts assigned to them": "recipientPayoutChangeCourierOnly",
-    "Requested recipient payout amount must differ from the current recipient payout amount": "recipientPayoutChangeMustDiffer",
-    "Requested recipient payout amount must be zero or greater": "recipientPayoutChangeAmountInvalid",
-    "Approved recipient payout amount must be zero or greater": "recipientPayoutChangeAmountInvalid",
-    "This post already has a pending recipient payout change request": "recipientPayoutChangeAlreadyPending",
-    "Review the pending recipient payout change before marking the post delivered": "recipientPayoutChangePendingDeliveryBlocked",
-    "Recipient payout change request not found": "recipientPayoutChangeRequestNotFound",
-    "This recipient payout change request has already been reviewed": "recipientPayoutChangeAlreadyReviewed",
-    "Only an administrator can review a recipient payout change request": "recipientPayoutChangeReviewAdminOnly",
-    "This recipient payout change request can no longer be approved": "recipientPayoutChangeNoLongerReviewable",
-    "Review the pending recipient payout change before changing the post payout details": "recipientPayoutChangePendingEditBlocked",
-    "Settlement amount cannot exceed the outstanding balance": "amountExceedsBalance",
-    "Explain a partial settlement before confirming it": "partialExplanationRequired",
-    "Courier not found": "courierNotFound",
-    "Merchant not found": "merchantNotFound",
-    "A merchant with delivery history cannot be permanently deleted. Make it inactive instead.": "merchantDeleteHistory",
-    "The post has no outstanding amount to settle": "postNoOutstanding",
-    "Post created but assignment could not be completed. Retry to finish assigning the same post.": "postCreatedAssignmentPending",
-    "This post is no longer available for create and dispatch": "createAndDispatchUnavailable",
-    "This create-and-dispatch operation cannot be resumed": "createAndDispatchUnavailable",
-    "Only an administrator can edit a received post": "adminEditReceivedOnly",
-    "Only received posts can be edited without dispatch": "receivedEditStatusOnly",
-    "This post has changed. Refresh it before editing": "receivedEditChanged",
-    "Only an administrator can edit and redispatch a post": "adminRedispatchOnly",
-    "Only received, assigned, or postponed posts can be edited and redispatched": "redispatchStatusOnly",
-    "This post has changed. Refresh it before editing and redispatching": "redispatchChanged",
-    "This admin redispatch operation cannot be resumed": "redispatchUnavailable",
-    "Only an administrator can correct a delivered COD amount": "deliveredCodCorrectionAdminOnly",
-    "Corrected COD amount must be greater than zero": "deliveredCodCorrectionAmountInvalid",
-    "Corrected COD amount must differ from the current COD amount": "deliveredCodCorrectionMustDiffer",
-    "Only delivered cash-on-delivery posts can have their COD corrected": "deliveredCodCorrectionStatusOnly",
-    "Both related settlement obligations must still be fully outstanding": "deliveredCodCorrectionSettlementStarted",
-    "This post has changed. Refresh it before correcting the COD": "deliveredCodCorrectionChanged",
-    "Connect to the internet before correcting a delivered COD amount": "deliveredCodCorrectionOnlineRequired",
-    "This delivered COD correction operation cannot be reused": "deliveredCodCorrectionUnavailable",
-    "Only an administrator can correct a delivered recipient payout amount": "deliveredRecipientPayoutCorrectionAdminOnly",
-    "Corrected recipient payout amount must be zero or greater": "deliveredRecipientPayoutCorrectionAmountInvalid",
-    "Corrected recipient payout amount must differ from the current recipient payout amount": "deliveredRecipientPayoutCorrectionMustDiffer",
-    "Only delivered courier-funded electronically prepaid posts can have their recipient payout corrected": "deliveredRecipientPayoutCorrectionStatusOnly",
-    "Courier reimbursement and merchant repayment must still be fully outstanding": "deliveredRecipientPayoutCorrectionSettlementStarted",
-    "This post has changed. Refresh it before correcting the recipient payout": "deliveredRecipientPayoutCorrectionChanged",
-    "Connect to the internet before correcting a delivered recipient payout": "deliveredRecipientPayoutCorrectionOnlineRequired",
-    "This delivered recipient payout correction operation cannot be reused": "deliveredRecipientPayoutCorrectionUnavailable",
-  };
-  return keys[message] ? t(`postService.errors.${keys[message]}`) : message || t("postService.errors.generic");
-}
+
+const DeveloperTestButton = import.meta.env.DEV && __ATLAS_DEV_TESTING__
+  ? lazy(() => import("@/dev/testing/DeveloperTestButton")) : null;
 
 export function PostService() {
   const { t, i18n } = useTranslation();
@@ -1815,7 +1734,7 @@ export function PostService() {
 
   if (!workspaceId) return null;
   return <div className="w-full min-w-0 space-y-6 overflow-x-hidden" dir={pageDirection}>
-    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><h1 className="flex items-center gap-2 text-2xl font-bold"><PackageCheck className="h-6 w-6 text-primary" />{t("postService.title")}</h1><p className="text-muted-foreground">{t("postService.subtitle")} <ModulePageFreshness className="ms-2" /></p></div>{isAdmin && <div className="flex flex-wrap gap-2"><Button variant="outline" className="gap-2" onClick={() => setMerchantDialogOpen(true)}><Store className="h-4 w-4" />{t("postService.actions.enableMerchant")}</Button><Button className="gap-2" onClick={() => setShipmentDialogOpen(true)}><Plus className="h-4 w-4" />{t("postService.actions.newPost")}</Button></div>}</div>
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><h1 className="flex items-center gap-2 text-2xl font-bold"><PackageCheck className="h-6 w-6 text-primary" />{t("postService.title")}</h1><p className="text-muted-foreground">{t("postService.subtitle")} <ModulePageFreshness className="ms-2" /></p></div><div className="flex flex-wrap items-center gap-2">{DeveloperTestButton && <Suspense fallback={null}><DeveloperTestButton suiteId="post-service" /></Suspense>}{isAdmin && <div className="flex flex-wrap gap-2"><Button variant="outline" className="gap-2" onClick={() => setMerchantDialogOpen(true)}><Store className="h-4 w-4" />{t("postService.actions.enableMerchant")}</Button><Button className="gap-2" onClick={() => setShipmentDialogOpen(true)}><Plus className="h-4 w-4" />{t("postService.actions.newPost")}</Button></div>}</div></div>
     <div className="space-y-3">
       <div className={cn("grid sm:grid-cols-2", isAdmin ? "gap-3 lg:grid-cols-6" : "gap-4 xl:grid-cols-6")}>{postStatusMetrics.filter(({ status }) => !isAdmin ? status !== "cancelled" : !["returned", "cancelled"].includes(status)).map(({ status, value }) => <StatusMetric key={status} compact={isAdmin} icon={statusFilterIcons[status]} title={status === "returned" ? t("postService.status.returnAwaitingReceipt") : shipmentStatusLabel(t, status)} value={value} active={isStatusMetricActive(status)} selectionTone={status === "returned" ? "amber" : status === "cancelled" ? "rose" : "primary"} onClick={() => handleStatusMetricClick(status)} />)}{isAdmin ? <><StatusMetric compact icon={PackageCheck} title={t("postService.status.completed")} value={completedPostCount} active={completedOnly} onClick={handleCompletedPostMetricClick} /><StatusMetric compact icon={FilePenLine} title={t("postService.status.requestChange")} value={pendingChangeRequestCount} active={pendingChangeRequestFilter} selectionTone="amber" onClick={handlePendingChangeRequestMetricClick} /></> : <><StatusMetric icon={PackageCheck} title={t("postService.status.completed")} value={completedPostCount} active={completedOnly} onClick={handleCompletedPostMetricClick} />{postStatusMetrics.filter(({ status }) => status === "cancelled").map(({ status, value }) => <StatusMetric key={status} icon={statusFilterIcons[status]} title={shipmentStatusLabel(t, status)} value={value} active={isStatusMetricActive(status)} selectionTone="rose" onClick={() => handleStatusMetricClick(status)} />)}</>}</div>
       {isAdmin ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">

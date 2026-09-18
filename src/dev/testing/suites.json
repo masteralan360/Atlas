@@ -187,5 +187,128 @@
       "local-native",
       "hardware"
     ]
+  },
+  "post-service": {
+    "titleKey": "devTesting.postService",
+    "samplesHelpKey": "devTesting.postServiceSamplesHelp",
+    "coverageHelpKey": "devTesting.postServiceCoverageHelp",
+    "groups": [
+      {
+        "id": "merchants",
+        "titleKey": "devTesting.postServiceGroups.merchants",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/postServiceMerchants.test.ts"
+        ]
+      },
+      {
+        "id": "shipment-creation",
+        "titleKey": "devTesting.postServiceGroups.creation",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/postServiceCreation.test.ts"
+        ]
+      },
+      {
+        "id": "dispatch",
+        "titleKey": "devTesting.postServiceGroups.dispatch",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/postServiceDispatch.test.ts"
+        ]
+      },
+      {
+        "id": "lifecycle",
+        "titleKey": "devTesting.postServiceGroups.lifecycle",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/postServiceLifecycle.test.ts",
+          "src/local-db/postService.test.ts"
+        ]
+      },
+      {
+        "id": "returns-redispatch",
+        "titleKey": "devTesting.postServiceGroups.returns",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/postServiceReturns.test.ts"
+        ]
+      },
+      {
+        "id": "cod-accounting",
+        "titleKey": "devTesting.postServiceGroups.cod",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/postServiceCod.test.ts"
+        ]
+      },
+      {
+        "id": "prepaid-accounting",
+        "titleKey": "devTesting.postServiceGroups.prepaid",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/postServicePrepaid.test.ts"
+        ]
+      },
+      {
+        "id": "adjustments",
+        "titleKey": "devTesting.postServiceGroups.adjustments",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/postServiceAdjustments.test.ts"
+        ]
+      },
+      {
+        "id": "settlements-payments",
+        "titleKey": "devTesting.postServiceGroups.settlements",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/postServiceSettlements.test.ts"
+        ]
+      },
+      {
+        "id": "calculations-reporting",
+        "titleKey": "devTesting.postServiceGroups.reporting",
+        "layer": "calculation",
+        "files": [
+          "src/dev/testing/suites/postServiceReporting.test.ts",
+          "src/lib/postServiceSettlementStatus.test.ts",
+          "src/lib/postServiceSettlementNet.test.ts",
+          "src/lib/postServiceStaffCourierMetrics.test.ts"
+        ]
+      },
+      {
+        "id": "permissions-visibility",
+        "titleKey": "devTesting.postServiceGroups.permissions",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/postServicePermissions.test.ts",
+          "src/lib/postServiceLedgerVisibility.test.ts"
+        ]
+      },
+      {
+        "id": "remote-contract",
+        "titleKey": "devTesting.postServiceGroups.remote",
+        "layer": "contract",
+        "files": [
+          "src/dev/testing/suites/postServiceRemote.test.ts"
+        ]
+      },
+      {
+        "id": "failure-recovery",
+        "titleKey": "devTesting.postServiceGroups.recovery",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/postServiceRecovery.test.ts"
+        ]
+      }
+    ],
+    "unavailable": [
+      "browser-workflow",
+      "cloud-database",
+      "hybrid-native",
+      "local-native",
+      "voice-storage-hardware"
+    ]
   }
 }

@@ -6,7 +6,7 @@ first independent V1 suite using shared infrastructure; its business scenarios
 are a reference implementation, not a universal specification for other modules.
 
 Start the development server with `npm run dev`, open its localhost URL, and go
-to **Orders → Sale Orders → Developer tests** or **POS → Developer tests**. The button and runner are enabled
+to **Orders → Sale Orders → Developer tests**, **POS → Developer tests**, or **Post Service → Developer tests**. The button and runner are enabled
 automatically during development and excluded from production builds.
 
 If another development server occupies port 1420, use
@@ -14,6 +14,7 @@ If another development server occupies port 1420, use
 works and binds the server to localhost. For reviewing the modal without logging
 into Atlas, open `/__atlas-dev-testing/preview` for Sale Orders or
 `/__atlas-dev-testing/preview?suite=pos` for regular POS on the local development server.
+Use `/__atlas-dev-testing/preview?suite=post-service` for Post Service.
 
 The modal selects test groups, accepts a reproducible unsigned 32-bit seed and
 1–100 generated cases, streams individual results, retains failed diagnostics,
@@ -31,6 +32,8 @@ npm run test:sale-orders
 npm run test:sale-orders -- --groups matrix,remote-contract --seed 42 --samples 100
 npm run test:pos
 npm run test:pos -- --groups checkout,remote-contract,failure-recovery --seed 42 --samples 100
+npm run test:post-service
+npm run test:post-service -- --groups remote-contract,failure-recovery --seed 42 --samples 16
 ```
 
 The CLI exits nonzero for failed, skipped, empty, timed-out, or cancelled runs.
@@ -78,6 +81,18 @@ SQLite adapter test for commit/rollback. Real Supabase SQL/RLS, native Local and
 Hybrid persistence/restart, and scanner/camera/printer hardware remain unavailable.
 Read [the POS implementation and agent handoff](./developer-testing-pos.md) before
 expanding the suite or changing its production transaction boundaries.
+
+## Independent Post Service coverage
+
+The `post-service` suite has 13 groups covering merchant profiles, shipment
+creation, dispatch, status lifecycle, returns and redispatch, COD/prepaid
+obligations, adjustments, settlements and actual payments, account movements,
+balances, calculations/reporting, permissions, remote contracts and failure
+recovery. Fixed currency/payment matrices run alongside independent seeded
+lifecycles. Existing application defects remain visible as failing checks,
+following the agent guide's rule against fixing bugs during suite implementation.
+Read the [Post Service handoff](./developer-testing-post-service.md) for accounting
+expectations, reproduction details and unavailable environments.
 
 ## Extending it to another existing module
 

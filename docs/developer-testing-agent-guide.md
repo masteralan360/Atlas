@@ -16,7 +16,7 @@ runner architecture, rather than a universal test specification.
 ## 1. What exists today
 
 - `npm run dev` automatically enables developer testing. Open Atlas through
-  localhost, then **Orders → Sale Orders → Developer tests** or **POS → Developer tests**.
+  localhost, then **Orders → Sale Orders → Developer tests**, **POS → Developer tests**, or **Post Service → Developer tests**.
 - Production builds exclude the entry point and runner client from the emitted
   application dependency graph. Production preview servers do not install the
   runner. Keep both protections when extending the system.
@@ -26,8 +26,8 @@ runner architecture, rather than a universal test specification.
   The browser never substitutes its current workspace database with test data.
 - UI runs and CLI runs share the registry, execution controller, reporter, and
   isolated Vitest configuration.
-- Sale Orders V1 and the independent regular POS suite have business-function, calculation, and mocked remote-contract coverage.
-  It has no real order-form browser automation, Supabase integration adapter,
+- Sale Orders V1, regular POS and Post Service are independent suites with business-function, calculation, and mocked remote-contract coverage.
+  Current suites have no complete business-form browser automation, Supabase integration adapter,
   Hybrid native adapter, or Local native persistence adapter.
 
 "Selected checks passed" means precisely that. It is not a guarantee of no
@@ -57,7 +57,7 @@ CLI → the same TestController and registered suite
 | CLI and localhost convenience server | `scripts/dev-testing/cli.mjs`, `dev.mjs` | CLI already accepts any registered suite |
 | Button, modal, HTTP client | `src/dev/testing/DeveloperTestButton.tsx`, `DeveloperTestDialog.tsx`, `client.ts` | Reusable components with suite-specific description metadata |
 | Runner/client regression tests | `scripts/dev-testing/controller.test.mjs`, `src/dev/testing/client.test.ts` | Test the infrastructure independently of business coverage |
-| Browser visual harness | `src/dev/testing/preview.tsx` | Sale Orders by default; `?suite=pos` selects regular POS |
+| Browser visual harness | `src/dev/testing/preview.tsx` | Registry-driven navigation; Sale Orders by default, `?suite=pos` or `?suite=post-service` |
 | Minimal browser import stubs | `src/dev/testing/fixtures/browser.ts` | Reuse only for compatible Node tests; not a rendered browser |
 | Sale Orders scenario suite | `src/dev/testing/suites/saleOrders.test.ts` | Sale Orders-specific |
 | Sale Orders inputs and generation | `src/dev/testing/fixtures/saleOrder.ts` | Sale Orders-specific |
@@ -68,6 +68,9 @@ CLI → the same TestController and registered suite
 | POS SQLite adapter stub | `src/dev/testing/fixtures/sqlite.ts` | Recording contract adapter, not native persistence |
 | POS production persistence | `src/local-db/posCheckout.ts`, `posSaleReturns.ts` | Used by the actual POS and Sales pages as well as tests |
 | POS cart and retry snapshot logic | `src/lib/posCart.ts`, `posCheckoutAttempt.ts`, `posPaymentPolicy.ts` | Production calculations, held carts, retry identities and domain routing |
+| Post Service suite | `src/dev/testing/suites/postService*.test.ts` | Independent shipment, obligation, payment and remote-contract scenarios; includes existing domain regressions |
+| Post Service fixtures/assertions | `src/dev/testing/fixtures/postService.ts`, `postServiceHarness.ts`, `src/dev/testing/assertions/postService.ts` | Domain-specific and independent of Orders/POS |
+| Post Service production boundary | `src/local-db/postService.ts`, `src/lib/postService*.ts`, Post Service page | Actual production APIs and shared page error mapper; see `developer-testing-post-service.md` |
 | UI language strings | `src/i18n/locales/{en,ku,ar}.json`, `devTesting` namespace | Shared labels plus suite-specific descriptions |
 
 Existing tests elsewhere in `src/` are included by the registry without moving

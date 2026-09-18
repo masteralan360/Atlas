@@ -43,7 +43,8 @@
       "cloud-database": "Cloud · real Supabase database and permissions",
       "hybrid-native": "Hybrid · Supabase and native SQLite mirror",
       "local-native": "Local · native SQLite persistence and restart",
-      "hardware": "Barcode scanner, camera and printer hardware"
+      "hardware": "Barcode scanner, camera and printer hardware",
+      "voice-storage-hardware": "Microphone, actual voice recording and real private Storage"
     },
     "status": {
       "pending": "Waiting",
@@ -83,6 +84,24 @@
       "routing": "Barcode entry, Activities and Quick Order routing",
       "remote": "Cloud / Hybrid requests, results and retries",
       "recovery": "Validation failures, atomic rollback and recovery"
+    },
+    "postService": "Post Service",
+    "postServiceSamplesHelp": "1–100 additional reproducible Post Service lifecycles varying currencies, COD/prepaid, fee payer, recipient funding, payment methods, accounts, corrections, redispatch and partial or collective settlement. Fixed matrices and regressions always run.",
+    "postServiceCoverageHelp": "Checks Post Service production functions, persisted shipments and events, delivery obligations, actual payments, account movements, party balances, FIFO and reporting in disposable IndexedDB, plus mocked Cloud / Hybrid contracts. Real Supabase/RLS, native SQLite, complete browser workflows and voice hardware/storage remain unavailable.",
+    "postServiceGroups": {
+      "merchants": "Merchant profiles and defaults",
+      "creation": "Shipment creation and validation",
+      "dispatch": "Dispatch, manifests and courier fee snapshots",
+      "lifecycle": "Statuses, audit events and voice reasons",
+      "returns": "Returns, physical receipt and administrative redispatch",
+      "cod": "COD obligations and party balances",
+      "prepaid": "Prepaid obligations and recipient funding",
+      "adjustments": "Change requests and delivered corrections",
+      "settlements": "Settlements, payments, accounts and generated lifecycles",
+      "reporting": "FIFO, completion, calculations and reporting",
+      "permissions": "Permissions and courier record visibility",
+      "remote": "Cloud / Hybrid requests, hydration and offline queue",
+      "recovery": "Injected failures, rollback and recovery"
     }
   },
   "lockedWorkspace": {
@@ -8660,7 +8679,7 @@
     "notEnabled": "Agent Sales Accounts is not enabled for this workspace.",
     "unavailable": "The selected agent does not have an active sales account."
   },
-    "salesAgentCommissions": {
+  "salesAgentCommissions": {
     "title": "Sales Agent Commissions",
     "commissionMode": "Commission mode",
     "trackWithoutPayment": "Track commissions without payment",

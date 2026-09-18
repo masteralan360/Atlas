@@ -6,6 +6,7 @@ import {
   writeWorkspaceModeSnapshot,
 } from "@/workspace/workspaceMode";
 
+import { installTestBrowser } from "@/dev/testing/fixtures/browser";
 import { db } from "./database";
 import type { Agent, BusinessPartner } from "./models";
 
@@ -35,23 +36,7 @@ let requestDeliveryShipmentRecipientPayoutAdjustment: typeof import("./postServi
 let reviewDeliveryShipmentRecipientPayoutAdjustment: typeof import("./postService").reviewDeliveryShipmentRecipientPayoutAdjustment;
 
 function installBrowserEnvironment() {
-  const rows = new Map<string, string>();
-  const documentHead = { appendChild: () => undefined };
-  const storage = {
-    get length() { return rows.size; },
-    getItem: (key: string) => rows.get(key) ?? null,
-    setItem: (key: string, value: string) => rows.set(key, value),
-    removeItem: (key: string) => rows.delete(key),
-    clear: () => rows.clear(),
-    key: (index: number) => Array.from(rows.keys())[index] ?? null,
-  };
-  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
-  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: storage });
-  Object.defineProperty(globalThis, "window", { configurable: true, value: { localStorage: storage, sessionStorage: storage, location: { origin: "http://localhost", hash: "", pathname: "/" }, URL: globalThis.URL, addEventListener: () => undefined, removeEventListener: () => undefined } });
-  Object.defineProperty(globalThis, "document", { configurable: true, value: { visibilityState: "visible", documentElement: { lang: "en", dir: "ltr" }, head: documentHead, createElement: () => ({ appendChild: () => undefined }), createTextNode: () => ({}), getElementsByTagName: () => [documentHead], addEventListener: () => undefined, removeEventListener: () => undefined } });
-  Object.defineProperty(globalThis, "DOMMatrix", { configurable: true, value: class DOMMatrix {} });
-  Object.defineProperty(globalThis.URL, "createObjectURL", { configurable: true, value: () => "" });
-  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { onLine: false } });
+  installTestBrowser();
 }
 
 function partner(id: string): BusinessPartner {
