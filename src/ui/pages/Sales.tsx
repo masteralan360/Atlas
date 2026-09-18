@@ -15,7 +15,8 @@ import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { getLoanDetailsPath } from '@/lib/loanPresentation'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
-import { adjustInventoryQuantity, applySalesOrderReturnQuantities, appendPaymentTransaction, commitStockBatchAllocations, db, getActiveTravelBookingPayments, markPosLoanCancelledForFullSaleReturn, processSaleProductExchange, recordLoanPayment, resolveReturnStorageId, restoreStockBatchAllocations, splitStockBatchAllocationsForReturn, useLoanBySaleId, useLoanInstallments, useLoanPayments, useLoans, usePriceBookCatalogState, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useInventory, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useDeliveryMerchantProfiles, useDeliveryShipments, useRentalContracts, useRentalVehicles, toUISale, toUISaleFromOrder, toUISaleFromExchangeTransaction, toUISaleFromRealEstateCommissionTransaction, toUISaleFromPaidClinicalAppointment, toUISaleFromActivityTransaction, toUISaleFromDeliveryShipment, toUISaleFromRentalContract, toUISaleFromTravelBookingPayment, type CurrencyCode, type Loan, type PaymentAccount, type SaleReturn as LocalSaleReturn, type SaleReturnItem as LocalSaleReturnItem, type StockBatchAllocation, type WorkspacePaymentMethod } from '@/local-db'
+import { adjustInventoryQuantity, applySalesOrderReturnQuantities, commitStockBatchAllocations, db, getActiveTravelBookingPayments, markPosLoanCancelledForFullSaleReturn, processSaleProductExchange, recordLoanPayment, resolveReturnStorageId, restoreStockBatchAllocations, splitStockBatchAllocationsForReturn, useLoanBySaleId, useLoanInstallments, useLoanPayments, useLoans, usePriceBookCatalogState, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useInventory, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useDeliveryMerchantProfiles, useDeliveryShipments, useRentalContracts, useRentalVehicles, toUISale, toUISaleFromOrder, toUISaleFromExchangeTransaction, toUISaleFromRealEstateCommissionTransaction, toUISaleFromPaidClinicalAppointment, toUISaleFromActivityTransaction, toUISaleFromDeliveryShipment, toUISaleFromRentalContract, toUISaleFromTravelBookingPayment, type Loan, type PaymentAccount, type StockBatchAllocation } from '@/local-db'
+import { persistSaleReturnLedger, commitLocalSaleReturn, calculateSaleReturnAmount } from '@/local-db/posSaleReturns'
 import { persistLoanAggregateRpcResult } from '@/local-db/loanTransactions'
 import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
 import { useWorkspace } from '@/workspace'
@@ -1556,109 +1557,8 @@ export function Sales() {
         }))
     }, [toLocalBatchAllocations, toUiBatchAllocations])
 
-    const persistLocalReturnLedger = useCallback(async (input: {
-        returnId: string
-        sale: Sale
-        reason: string
-        timestamp: string
-        refundAmount: number
-        linePayloads: Array<{ id: string; sale_item_id: string; quantity: number }>
-        restoredPlans: Array<{
-            storageId: string | null
-            restoredBatchAllocations: StockBatchAllocation[]
-        }>
-        pendingSync: boolean
-        paymentAccount?: PaymentAccount | null
-        hasPaymentAccountSelection?: boolean
-    }) => {
-        const syncStatus = input.pendingSync ? 'pending' : 'synced'
-        const saleReturn: LocalSaleReturn = {
-            id: input.returnId,
-            workspaceId: input.sale.workspace_id,
-            saleId: input.sale.id,
-            reason: input.reason || 'Return',
-            status: 'posted',
-            refundMethod: null,
-            refundAmount: input.refundAmount,
-            returnedBy: user?.id ?? null,
-            returnedAt: input.timestamp,
-            source: 'app',
-            createdAt: input.timestamp,
-            updatedAt: input.timestamp,
-            syncStatus,
-            lastSyncedAt: input.pendingSync ? null : input.timestamp,
-            version: 1,
-            isDeleted: false
-        }
-        const saleReturnItems: LocalSaleReturnItem[] = input.linePayloads.map((line, index) => {
-            const saleItem = input.sale.items?.find((item) => item.id === line.sale_item_id)
-            const unitRefundAmount = saleItem?.converted_unit_price || saleItem?.unit_price || 0
-
-            return {
-                id: line.id,
-                workspaceId: input.sale.workspace_id,
-                returnId: input.returnId,
-                saleId: input.sale.id,
-                saleItemId: line.sale_item_id,
-                quantity: line.quantity,
-                unitRefundAmount,
-                refundAmount: unitRefundAmount * line.quantity,
-                restoredStorageId: input.restoredPlans[index]?.storageId ?? null,
-                restoredBatchAllocations: input.restoredPlans[index]?.restoredBatchAllocations ?? null,
-                createdAt: input.timestamp,
-                updatedAt: input.timestamp,
-                syncStatus,
-                lastSyncedAt: input.pendingSync ? null : input.timestamp,
-                version: 1,
-                isDeleted: false
-            }
-        })
-
-        await db.transaction('rw', [db.sale_returns, db.sale_return_items], async () => {
-            await db.sale_returns.put(saleReturn)
-            await db.sale_return_items.bulkPut(saleReturnItems)
-        })
-
-        if (input.sale.origin !== 'pos' || input.sale.payment_method === 'loan' || input.refundAmount <= 0) {
-            return
-        }
-
-        const salePayments = await db.payment_transactions
-            .where('[workspaceId+sourceType+sourceRecordId]')
-            .equals([input.sale.workspace_id, 'pos_sale', input.sale.id])
-            .toArray()
-        const originalPayment = salePayments
-            .filter((payment) => !payment.isDeleted && !payment.reversalOfTransactionId)
-            .sort((left, right) => right.paidAt.localeCompare(left.paidAt) || right.createdAt.localeCompare(left.createdAt))[0]
-        const saleCurrency = input.sale.settlement_currency?.toLowerCase()
-        const paymentCurrency: CurrencyCode = saleCurrency === 'usd' || saleCurrency === 'eur' || saleCurrency === 'iqd' || saleCurrency === 'try'
-            ? saleCurrency
-            : 'usd'
-
-        await appendPaymentTransaction(input.sale.workspace_id, {
-            sourceModule: 'sales',
-            sourceType: 'pos_sale',
-            sourceRecordId: input.sale.id,
-            sourceSubrecordId: input.returnId,
-            direction: 'incoming',
-            amount: -Math.abs(input.refundAmount),
-            currency: paymentCurrency,
-            paymentMethod: (input.sale.payment_method || 'cash') as WorkspacePaymentMethod,
-            paidAt: input.timestamp,
-            counterpartyName: input.sale._counterpartyName || null,
-            referenceLabel: input.sale._orderNumber || input.sale.id,
-            note: `Sale return ${input.returnId}: ${input.reason || 'Return'}`,
-            createdBy: user?.id || null,
-            reversalOfTransactionId: originalPayment?.id ?? null,
-            ...(input.hasPaymentAccountSelection
-                ? {
-                    accountId: input.paymentAccount?.id ?? null,
-                    accountNameSnapshot: input.paymentAccount?.name ?? null
-                }
-                : {}),
-            metadata: { saleReturnId: input.returnId, returnReason: input.reason || 'Return' }
-        })
-    }, [user?.id])
+    const persistLocalReturnLedger = useCallback((input: Omit<Parameters<typeof persistSaleReturnLedger>[0], 'userId'>) =>
+        persistSaleReturnLedger({ ...input, userId: user?.id }), [user?.id])
 
     const handleReturnConfirm = async (reason: string, quantity?: number) => {
         if (!saleToReturn) return
@@ -1697,6 +1597,7 @@ export function Sales() {
                         })
                     }
                 } catch (e) {
+                    if (isLocalMode) throw e
                     console.error('[Sales] Failed to apply loan return payment:', e)
                 }
             }
@@ -1733,6 +1634,8 @@ export function Sales() {
             }
 
             if (isLocalMode || shouldQueueOfflineReturn) {
+                let nextSelectedSale: Sale | null = null
+                await commitLocalSaleReturn(saleToReturn.workspace_id, async () => {
                 if (isIndividualItemReturn || isPartialReturn) {
                     const itemsToReturn = saleToReturn.items || []
                     if (itemsToReturn.length === 0) return
@@ -1754,10 +1657,7 @@ export function Sales() {
                         timestamp: returnTimestamp,
                         syncSource: isLocalMode ? 'local' : 'remote'
                     })
-                    const returnValue = itemsToReturn.reduce((sum, item, index) => {
-                        const unitPrice = item.converted_unit_price || item.unit_price || 0
-                        return sum + (unitPrice * quantities[index])
-                    }, 0)
+                    const returnValue = calculateSaleReturnAmount(itemsToReturn, quantities)
                     await persistLocalReturnLedger({
                         returnId,
                         sale: saleToReturn,
@@ -1839,7 +1739,7 @@ export function Sales() {
                         } as any)
                     }))
                     if (selectedSale?.id === saleToReturn.id) {
-                        setSelectedSale(updateSale(selectedSale))
+                        nextSelectedSale = updateSale(selectedSale)
                     }
                     if (shouldQueueOfflineReturn) {
                         await queueOfflineReturnMutation({
@@ -1878,10 +1778,7 @@ export function Sales() {
                         timestamp: returnTimestamp,
                         syncSource: isLocalMode ? 'local' : 'remote'
                     })
-                    const returnValue = itemsToReturn.reduce((sum, item, index) => {
-                        const unitPrice = item.converted_unit_price || item.unit_price || 0
-                        return sum + (unitPrice * quantities[index])
-                    }, 0)
+                    const returnValue = calculateSaleReturnAmount(itemsToReturn, quantities)
                     await persistLocalReturnLedger({
                         returnId,
                         sale: saleToReturn,
@@ -1953,7 +1850,7 @@ export function Sales() {
                         await db.sales.put(existingLocal)
                     }
                     if (selectedSale?.id === saleToReturn.id) {
-                        setSelectedSale(updateSale(selectedSale))
+                        nextSelectedSale = updateSale(selectedSale)
                     }
                     await Promise.all(itemsToReturn.map((item, index) =>
                         db.sale_items.update(item.id, {
@@ -1993,6 +1890,8 @@ export function Sales() {
                     })
                 }
 
+                })
+                if (nextSelectedSale) setSelectedSale(nextSelectedSale)
                 if (tutorialSaleId === saleToReturn.id) {
                     demoTutorial.completeSaleReturned()
                 }
@@ -2161,10 +2060,7 @@ export function Sales() {
                         timestamp: returnTimestamp,
                         syncSource: 'remote'
                     })
-                    const returnValue = data.return_value || itemsToReturn.reduce((sum, item, index) => {
-                        const unitPrice = item.converted_unit_price || item.unit_price || 0
-                        return sum + (unitPrice * quantities[index])
-                    }, 0)
+                    const returnValue = data.return_value ?? calculateSaleReturnAmount(itemsToReturn, quantities)
                     await persistLocalReturnLedger({
                         returnId,
                         sale: saleToReturn,

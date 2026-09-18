@@ -33,6 +33,12 @@ vi.mock('./inventory', () => ({
     useInventoryProducts: vi.fn(() => [])
 }))
 
+vi.mock('./storagePermissions', () => ({
+    assertCurrentUserCanAccessStorage: vi.fn(async () => undefined),
+    canAccessStorage: vi.fn(() => true),
+    useStorageAccess: vi.fn(() => ({ isAdmin: true, excludedStorageIds: new Set() }))
+}))
+
 vi.mock('./offlineMutations', () => ({
     addToOfflineMutations: vi.fn()
 }))

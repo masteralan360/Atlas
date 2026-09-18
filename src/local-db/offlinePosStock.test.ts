@@ -1,3 +1,4 @@
+import { installTestBrowser } from '@/dev/testing/fixtures/browser';
 import "fake-indexeddb/auto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -15,40 +16,7 @@ const TIMESTAMP = "2026-09-09T10:00:00.000Z";
 
 let applyOfflinePosStockEffects: typeof import("./offlinePosStock").applyOfflinePosStockEffects;
 
-function installBrowserGlobals() {
-  const rows = new Map<string, string>();
-  const storage = {
-    get length() { return rows.size; },
-    getItem: (key: string) => rows.get(key) ?? null,
-    setItem: (key: string, value: string) => rows.set(key, value),
-    removeItem: (key: string) => rows.delete(key),
-    clear: () => rows.clear(),
-    key: (index: number) => Array.from(rows.keys())[index] ?? null,
-  };
-
-  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
-  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: storage });
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: {
-      localStorage: storage,
-      sessionStorage: storage,
-      location: { hash: "", origin: "http://localhost", pathname: "/" },
-      addEventListener: () => undefined,
-    },
-  });
-  Object.defineProperty(globalThis, "document", {
-    configurable: true,
-    value: {
-      visibilityState: "visible",
-      dir: "ltr",
-      documentElement: { lang: "en", dir: "ltr" },
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-    },
-  });
-  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { onLine: false } });
-}
+const installBrowserGlobals = installTestBrowser;
 
 async function seedStock() {
   const base = {

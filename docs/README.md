@@ -12,8 +12,9 @@
 | [SYNC_ENGINE.md](./SYNC_ENGINE.md) | Offline sync and conflict resolution |
 | [AUTHENTICATION.md](./AUTHENTICATION.md) | Auth system, roles, and workspace management |
 | [FEATURES.md](./FEATURES.md) | Feature modules and their implementation |
-| [developer-testing.md](./developer-testing.md) | Developer test runner quick start and V1 Sale Orders coverage |
+| [developer-testing.md](./developer-testing.md) | Developer runner quick start, Sale Orders V1 and regular POS coverage |
 | [developer-testing-agent-guide.md](./developer-testing-agent-guide.md) | Agent handoff for extending shared infrastructure and independent module suites |
+| [developer-testing-pos.md](./developer-testing-pos.md) | Regular POS suite, production transaction boundaries and extension handoff |
 | [NOTIFICATION_POPUP_SYSTEM.md](./NOTIFICATION_POPUP_SYSTEM.md) | Scalable registry-driven notification popup system |
 | [API_REFERENCE.md](./API_REFERENCE.md) | Supabase functions and API endpoints |
 | [DEPLOYMENT.md](./DEPLOYMENT.md) | Build and deployment instructions |

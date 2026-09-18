@@ -35,6 +35,7 @@
     "dev": "vite --host",
     "dev:testing": "node scripts/dev-testing/dev.mjs",
     "test:sale-orders": "node scripts/dev-testing/cli.mjs",
+    "test:pos": "node scripts/dev-testing/cli.mjs --suite pos",
     "build": "node scripts/build.mjs",
     "cf:dev": "wrangler dev --config cloudflare-web/wrangler.toml",
     "cf:deploy": "node scripts/deploy-cloudflare.mjs",

@@ -24,3 +24,11 @@ export function isPosPaymentTypeAllowed(
 
     return false
 }
+
+/** Route regular POS checkout without mixing its three transaction domains. */
+export function getPosCheckoutRoute(paymentType: PosPaymentType, policy: PosPaymentPolicyInput) {
+    if (!isPosPaymentTypeAllowed(paymentType, policy)) return 'blocked' as const
+    if (paymentType === 'order') return 'quick-order' as const
+    if (policy.isActivitiesStorage) return 'activity' as const
+    return 'sale' as const
+}

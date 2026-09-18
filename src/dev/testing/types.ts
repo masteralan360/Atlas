@@ -16,6 +16,8 @@ export interface TestGroup {
 }
 export interface SuiteDefinition {
     titleKey: string
+    samplesHelpKey?: string
+    coverageHelpKey?: string
     groups: TestGroup[]
     unavailable: string[]
 }

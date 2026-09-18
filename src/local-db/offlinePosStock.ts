@@ -23,6 +23,8 @@ export async function applyOfflinePosStockEffects(input: {
   items: OfflinePosStockItem[];
   batchPlans: OfflinePosBatchPlan[];
   timestamp: string;
+  /** A larger sale transaction schedules reorder rules after it commits. */
+  skipReorderCheck?: boolean;
 }) {
   if (!isLocalWorkspaceMode(input.workspaceId)) {
     throw new Error(i18n.t("inventory.errors.onlineRequired"));
@@ -63,6 +65,7 @@ export async function applyOfflinePosStockEffects(input: {
     },
   );
 
+  if (input.skipReorderCheck) return;
   const { evaluateReorderTransferRulesForProduct } = await import("./reorderTransferRules");
   await Promise.all(
     [...new Set(input.items.map((item) => item.productId))].map((productId) =>

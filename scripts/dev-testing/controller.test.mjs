@@ -49,6 +49,9 @@ describe('developer runner boundaries', () => {
       expect(() => validateRunOptions(options)).toThrow()
     }
     expect(validateRunOptions({ suiteId: 'sale-orders' }).groups.length).toBe(suites['sale-orders'].groups.length)
+    expect(validateRunOptions({ suiteId: 'pos' }).groups.length).toBe(10)
+    expect(validateRunOptions({ suiteId: 'pos', groupIds: ['checkout', 'remote-contract'] }).groups.map((group) => group.id)).toEqual(['checkout', 'remote-contract'])
+    expect(() => validateRunOptions({ suiteId: 'instant-pos' })).toThrow('invalid_suite')
   })
 
   it('does not pass application credentials or arbitrary Node injection settings to tests', () => {

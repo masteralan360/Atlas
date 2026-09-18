@@ -1,23 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 
-vi.hoisted(() => {
-  const eventTarget = {
-    addEventListener: () => undefined,
-    removeEventListener: () => undefined
-  }
-  vi.stubGlobal('localStorage', {
-    getItem: () => null,
-    setItem: () => undefined,
-    removeItem: () => undefined,
-    clear: () => undefined
-  })
-  vi.stubGlobal('navigator', { onLine: true })
-  vi.stubGlobal('document', {
-    ...eventTarget,
-    visibilityState: 'visible',
-    documentElement: {}
-  })
-  vi.stubGlobal('window', { ...eventTarget, location: { hash: '' } })
+vi.hoisted(async () => {
+  const { installTestBrowser } = await import('@/dev/testing/fixtures/browser')
+  installTestBrowser()
 })
 
 import type { Inventory, Product, PurchaseOrder, SalesOrder } from './models'

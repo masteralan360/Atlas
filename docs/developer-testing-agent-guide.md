@@ -16,7 +16,7 @@ runner architecture, rather than a universal test specification.
 ## 1. What exists today
 
 - `npm run dev` automatically enables developer testing. Open Atlas through
-  localhost, then **Orders → Sale Orders → Developer tests**.
+  localhost, then **Orders → Sale Orders → Developer tests** or **POS → Developer tests**.
 - Production builds exclude the entry point and runner client from the emitted
   application dependency graph. Production preview servers do not install the
   runner. Keep both protections when extending the system.
@@ -26,7 +26,7 @@ runner architecture, rather than a universal test specification.
   The browser never substitutes its current workspace database with test data.
 - UI runs and CLI runs share the registry, execution controller, reporter, and
   isolated Vitest configuration.
-- V1 has business-function, calculation, and mocked remote-contract coverage.
+- Sale Orders V1 and the independent regular POS suite have business-function, calculation, and mocked remote-contract coverage.
   It has no real order-form browser automation, Supabase integration adapter,
   Hybrid native adapter, or Local native persistence adapter.
 
@@ -55,14 +55,19 @@ CLI → the same TestController and registered suite
 | Reporter protocol | `scripts/dev-testing/reporter.mjs` | Shared infrastructure |
 | Isolated test configuration and fetch guard | `scripts/dev-testing/vitest.config.mts`, `networkGuard.ts` | Shared baseline for current Vitest groups |
 | CLI and localhost convenience server | `scripts/dev-testing/cli.mjs`, `dev.mjs` | CLI already accepts any registered suite |
-| Button, modal, HTTP client | `src/dev/testing/DeveloperTestButton.tsx`, `DeveloperTestDialog.tsx`, `client.ts` | Reusable components, with remaining V1 copy described below |
+| Button, modal, HTTP client | `src/dev/testing/DeveloperTestButton.tsx`, `DeveloperTestDialog.tsx`, `client.ts` | Reusable components with suite-specific description metadata |
 | Runner/client regression tests | `scripts/dev-testing/controller.test.mjs`, `src/dev/testing/client.test.ts` | Test the infrastructure independently of business coverage |
-| Browser visual harness | `src/dev/testing/preview.tsx` | Currently opens the Sale Orders suite |
+| Browser visual harness | `src/dev/testing/preview.tsx` | Sale Orders by default; `?suite=pos` selects regular POS |
 | Minimal browser import stubs | `src/dev/testing/fixtures/browser.ts` | Reuse only for compatible Node tests; not a rendered browser |
 | Sale Orders scenario suite | `src/dev/testing/suites/saleOrders.test.ts` | Sale Orders-specific |
 | Sale Orders inputs and generation | `src/dev/testing/fixtures/saleOrder.ts` | Sale Orders-specific |
 | Order financial/stock assertions | `src/dev/testing/assertions/saleOrders.ts` | Sale Orders-specific |
 | Page integration | `src/ui/pages/Orders.tsx` | Entry point on the sales tab only |
+| Regular POS scenario suites | `src/dev/testing/suites/pos*.test.ts` | POS-specific, excluding Instant POS |
+| POS fixtures and assertions | `src/dev/testing/fixtures/pos.ts`, `src/dev/testing/assertions/pos.ts` | Independent of Sale Orders fixtures and business rules |
+| POS SQLite adapter stub | `src/dev/testing/fixtures/sqlite.ts` | Recording contract adapter, not native persistence |
+| POS production persistence | `src/local-db/posCheckout.ts`, `posSaleReturns.ts` | Used by the actual POS and Sales pages as well as tests |
+| POS cart and retry snapshot logic | `src/lib/posCart.ts`, `posCheckoutAttempt.ts`, `posPaymentPolicy.ts` | Production calculations, held carts, retry identities and domain routing |
 | UI language strings | `src/i18n/locales/{en,ku,ar}.json`, `devTesting` namespace | Shared labels plus suite-specific descriptions |
 
 Existing tests elsewhere in `src/` are included by the registry without moving
@@ -72,7 +77,9 @@ relevant to both; this does not couple their business scenario definitions.
 ## 3. Registry contract
 
 The registry is a JSON object keyed by stable suite IDs. Each definition has
-`titleKey`, `groups`, and `unavailable`. Each group has `id`, `titleKey`, `layer`,
+`titleKey`, `groups`, and `unavailable`, plus optional `samplesHelpKey` and
+`coverageHelpKey` for suite-specific localized descriptions. New suites should
+provide both description keys. Each group has `id`, `titleKey`, `layer`,
 and `files`. Keep group IDs unique within a suite and use explicit repository
 test paths. Registry edits are trusted code changes, not user-supplied input.
 
@@ -197,8 +204,9 @@ seed/sample count. Export downloads the current suite's run as JSON.
 Reopening/reloading attaches to the controller's current run. Starting another
 run replaces that in-memory run; disk reports remain. Vite restart loses active
 session state and creates a new token. There is no history API or automatic disk
-report restoration. The preview currently hardcodes `sale-orders`; expand the
-harness explicitly if another suite needs preview coverage.
+report restoration. `/__atlas-dev-testing/preview?suite=pos` opens the regular POS
+suite; the default preview opens Sale Orders. Registry file changes restart Vite
+and create a fresh runner session, so finish a run before editing its registry.
 
 ## 5. Isolation and Atlas data modes
 
@@ -278,7 +286,41 @@ Do not reuse `saleOrderInput`, `seededCases`, or order-stock/payment assertions 
 unrelated modules merely because they already exist. Extract a shared helper only
 when its semantics actually apply to multiple independently defined suites.
 
+### Independent regular POS suite
+
+Regular POS is registered as `pos` and mounted on `/pos`, without an Instant POS
+entry point. Its fixture, assertions, generator and ten groups are independent
+from Sale Orders V1. Cash, FIB, QiCard, ZainCash and FastPay use the shared immediate
+payment registry; loans create obligations. POS Quick Orders remain normal Sales
+Orders and Activities retain their own transaction domain.
+
+Read [the POS agent handoff](./developer-testing-pos.md) for production entry
+points, transaction boundaries, group ownership, failure/recovery behavior and
+coverage limits. Existing stock, payment, exchange and Quick Order regressions
+can support both suites without coupling their scenario definitions.
+
 ## 7. Extension workflow
+
+### Bugs discovered during suite implementation
+
+When implementing or expanding a testing suite, agents **must not immediately
+fix bugs they discover in existing application behavior**. Continue the planned
+suite implementation without turning it into a bug-fixing task. Suite
+implementation does not implicitly authorize repairs to the behavior being
+tested; those fixes require a separate, explicit user instruction.
+
+Either capture the bug in a reproducible test that remains failing until the
+behavior is fixed, or report it after completing the suite implementation. A
+failing case must not interrupt work on the remaining coverage. Do not weaken
+assertions, change expected results to match incorrect behavior, or skip a known
+bug just to make the suite pass. Report the delivered suite's actual result
+honestly, including any failures left for follow-up.
+
+For reported bugs, include the affected workflow, reproduction steps or test
+name, expected and observed behavior, and relevant run details such as the
+group, seed, and sample count. This rule concerns discovered application bugs;
+agents should still correct defects in the new fixtures, assertions, or runner
+code they introduce as part of implementing the suite.
 
 ### Add a scenario to an existing suite
 
@@ -332,12 +374,11 @@ when its semantics actually apply to multiple independently defined suites.
    This is build/server development gating, not a developer-account role check.
    Preserve the existing module's access rules. Adding an actual new commercial
    module still requires explicit plan/admin-grant configuration under `AGENTS.md`.
-6. Generalize remaining Sale Orders-specific copy before exposing another suite.
-   Today `devTesting.samplesHelp`, `coverageHelp`, and the browser-workflow label
-   describe checkout/returns or the order form; the dialog's title fallback also
-   uses Sale Orders. Add suite-level descriptive metadata or neutral shared copy
-   with suite-specific detail. Update types, registry, all three locales, and
-   consumers together. Do not present Sale Orders' claims for an unrelated module.
+6. Set `samplesHelpKey` and `coverageHelpKey` to suite-specific localized keys.
+   The dialog consumes these metadata fields, uses a neutral title fallback, and
+   shares the neutral module browser-workflow label. Add new unavailable adapter
+   labels to all three locales. Do not present Sale Orders' coverage claims for
+   an unrelated module.
 7. Run the suite using `--suite`, verify button/modal behavior at desktop and
    narrow mobile widths, and update this guide and the quick start.
 
@@ -371,6 +412,10 @@ npm run dev:testing -- --port 1422
 # Sale Orders, default seed and generated-case count
 npm run test:sale-orders
 npm run test:sale-orders -- --groups matrix,remote-contract --seed 42 --samples 100
+
+# Regular POS, including its own generated checkout cases
+npm run test:pos
+npm run test:pos -- --groups checkout,remote-contract,failure-recovery --seed 42 --samples 100
 
 # Generic runner, after another suite has actually been registered
 node scripts/dev-testing/cli.mjs --suite purchase-orders --groups receiving --seed 42 --samples 16

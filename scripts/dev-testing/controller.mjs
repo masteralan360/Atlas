@@ -6,7 +6,8 @@ import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const suites = JSON.parse(readFileSync(new URL('../../src/dev/testing/suites.json', import.meta.url), 'utf8'))
+const registryUrl = new URL('../../src/dev/testing/suites.json', import.meta.url)
+export const suites = JSON.parse(readFileSync(registryUrl, 'utf8'))
 const ROOT = fileURLToPath(new URL('../../', import.meta.url))
 const PREFIX = '/__atlas-dev-testing'
 
@@ -215,9 +216,17 @@ export function atlasDevTestingPlugin(enabled) {
     name: 'atlas-dev-testing', apply: 'serve',
     configureServer(server) {
       if (!enabled) return
+      // The registry is read with fs, so include it in Vite's watched inputs.
+      const latestSuites = JSON.parse(readFileSync(registryUrl, 'utf8'))
+      for (const key of Object.keys(suites)) delete suites[key]
+      Object.assign(suites, latestSuites)
+      const registryPath = fileURLToPath(registryUrl)
+      const registryChanged = (path) => { if (path.replaceAll('\\', '/') === registryPath.replaceAll('\\', '/')) void server.restart() }
+      server.watcher.add(registryPath)
+      server.watcher.on('change', registryChanged)
       const controller = new TestController({ root: server.config.root })
       server.middlewares.use(async (req, res, next) => {
-        if (req.url !== `${PREFIX}/preview`) return next()
+        if (req.url?.split('?')[0] !== `${PREFIX}/preview`) return next()
         if (!isLocalRequest(req)) return json(res, 403, { error: 'local_only' })
         try {
           const html = await server.transformIndexHtml(req.url, '<!doctype html><html class="theme-modern light"><head><meta name="viewport" content="width=device-width, initial-scale=1" /></head><body><div id="root"></div><script type="module" src="/src/dev/testing/preview.tsx"></script></body></html>')
@@ -226,7 +235,7 @@ export function atlasDevTestingPlugin(enabled) {
         } catch (error) { next(error) }
       })
       server.middlewares.use(testingMiddleware(controller))
-      server.httpServer?.once('close', () => controller.dispose())
+      server.httpServer?.once('close', () => { controller.dispose(); server.watcher.off('change', registryChanged) })
     }
   }
 }

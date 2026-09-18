@@ -2,12 +2,190 @@
   "sale-orders": {
     "titleKey": "devTesting.saleOrders",
     "groups": [
-      { "id": "matrix", "titleKey": "devTesting.groups.matrix", "layer": "business", "files": ["src/dev/testing/suites/saleOrders.test.ts"] },
-      { "id": "lifecycle", "titleKey": "devTesting.groups.lifecycle", "layer": "business", "files": ["src/local-db/orderFinancing.test.ts", "src/local-db/orderInstallments.test.ts"] },
-      { "id": "remote-contract", "titleKey": "devTesting.groups.remoteContract", "layer": "contract", "files": ["src/local-db/quickOrderAtomic.test.ts", "src/local-db/orders.test.ts", "src/lib/orderSaveProgress.test.ts"] },
-      { "id": "pricing", "titleKey": "devTesting.groups.pricing", "layer": "calculation", "files": ["src/lib/orderAdjustments.test.ts", "src/lib/orderLineItems.test.ts", "src/lib/salesExchange.test.ts", "src/lib/orderPartnerBalance.test.ts", "src/lib/priceBooks.test.ts", "src/local-db/orderPriceBooks.test.ts", "src/ui/components/orders/SalesOrderFormPage.test.ts"] },
-      { "id": "payments", "titleKey": "devTesting.groups.payments", "layer": "business", "files": ["src/local-db/paymentAccounts.test.ts", "src/local-db/payments.test.ts", "src/local-db/paymentReversalState.test.ts", "src/lib/ledgerPaymentTransactions.test.ts", "src/lib/ledgerOrderLoan.test.ts", "src/lib/ledgerCashSummary.test.ts", "src/lib/ledgerFlow.test.ts", "src/lib/ledgerSettlement.test.ts", "src/lib/ledgerCashMovementEntries.test.ts"] }
+      {
+        "id": "matrix",
+        "titleKey": "devTesting.groups.matrix",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/saleOrders.test.ts"
+        ]
+      },
+      {
+        "id": "lifecycle",
+        "titleKey": "devTesting.groups.lifecycle",
+        "layer": "business",
+        "files": [
+          "src/local-db/orderFinancing.test.ts",
+          "src/local-db/orderInstallments.test.ts"
+        ]
+      },
+      {
+        "id": "remote-contract",
+        "titleKey": "devTesting.groups.remoteContract",
+        "layer": "contract",
+        "files": [
+          "src/local-db/quickOrderAtomic.test.ts",
+          "src/local-db/orders.test.ts",
+          "src/lib/orderSaveProgress.test.ts"
+        ]
+      },
+      {
+        "id": "pricing",
+        "titleKey": "devTesting.groups.pricing",
+        "layer": "calculation",
+        "files": [
+          "src/lib/orderAdjustments.test.ts",
+          "src/lib/orderLineItems.test.ts",
+          "src/lib/salesExchange.test.ts",
+          "src/lib/orderPartnerBalance.test.ts",
+          "src/lib/priceBooks.test.ts",
+          "src/local-db/orderPriceBooks.test.ts",
+          "src/ui/components/orders/SalesOrderFormPage.test.ts"
+        ]
+      },
+      {
+        "id": "payments",
+        "titleKey": "devTesting.groups.payments",
+        "layer": "business",
+        "files": [
+          "src/local-db/paymentAccounts.test.ts",
+          "src/local-db/payments.test.ts",
+          "src/local-db/paymentReversalState.test.ts",
+          "src/lib/ledgerPaymentTransactions.test.ts",
+          "src/lib/ledgerOrderLoan.test.ts",
+          "src/lib/ledgerCashSummary.test.ts",
+          "src/lib/ledgerFlow.test.ts",
+          "src/lib/ledgerSettlement.test.ts",
+          "src/lib/ledgerCashMovementEntries.test.ts"
+        ]
+      }
     ],
-    "unavailable": ["browser-workflow", "cloud-database", "hybrid-native", "local-native"]
+    "unavailable": [
+      "browser-workflow",
+      "cloud-database",
+      "hybrid-native",
+      "local-native"
+    ],
+    "samplesHelpKey": "devTesting.samplesHelp",
+    "coverageHelpKey": "devTesting.coverageHelp"
+  },
+  "pos": {
+    "titleKey": "devTesting.pos",
+    "samplesHelpKey": "devTesting.posSamplesHelp",
+    "coverageHelpKey": "devTesting.posCoverageHelp",
+    "groups": [
+      {
+        "id": "checkout",
+        "titleKey": "devTesting.posGroups.checkout",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/posCheckout.test.ts",
+          "src/local-db/payments.test.ts",
+          "src/local-db/paymentAccounts.test.ts",
+          "src/lib/ledgerPaymentTransactions.test.ts",
+          "src/lib/ledgerCashSummary.test.ts",
+          "src/lib/ledgerCashMovementEntries.test.ts"
+        ]
+      },
+      {
+        "id": "cart",
+        "titleKey": "devTesting.posGroups.cart",
+        "layer": "calculation",
+        "files": [
+          "src/dev/testing/suites/posCart.test.ts"
+        ]
+      },
+      {
+        "id": "pricing",
+        "titleKey": "devTesting.posGroups.pricing",
+        "layer": "calculation",
+        "files": [
+          "src/dev/testing/suites/posPricing.test.ts",
+          "src/lib/discounts.test.ts",
+          "src/lib/priceBooks.test.ts",
+          "src/lib/productCost.test.ts"
+        ]
+      },
+      {
+        "id": "currency",
+        "titleKey": "devTesting.posGroups.currency",
+        "layer": "calculation",
+        "files": [
+          "src/dev/testing/suites/posCurrency.test.ts",
+          "src/lib/salesExchange.test.ts"
+        ]
+      },
+      {
+        "id": "inventory",
+        "titleKey": "devTesting.posGroups.inventory",
+        "layer": "business",
+        "files": [
+          "src/local-db/stockBatches.test.ts",
+          "src/local-db/offlinePosStock.test.ts",
+          "src/local-db/storagePermissions.test.ts"
+        ]
+      },
+      {
+        "id": "financing",
+        "titleKey": "devTesting.posGroups.financing",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/posFinancing.test.ts",
+          "src/lib/ledgerOrderLoan.test.ts"
+        ]
+      },
+      {
+        "id": "returns-exchanges",
+        "titleKey": "devTesting.posGroups.returns",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/posReturns.test.ts",
+          "src/local-db/saleReturnInventory.test.ts",
+          "src/local-db/saleProductExchanges.test.ts",
+          "src/local-db/posLoanFullReturn.test.ts",
+          "src/local-db/paymentReversalState.test.ts"
+        ]
+      },
+      {
+        "id": "entry-routing",
+        "titleKey": "devTesting.posGroups.routing",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/posRouting.test.ts",
+          "src/lib/posPaymentPolicy.test.ts",
+          "src/lib/barcodeScanner.test.ts",
+          "src/dev/testing/suites/posActivities.test.ts",
+          "src/local-db/activities.test.ts",
+          "src/local-db/quickOrderAtomic.test.ts"
+        ]
+      },
+      {
+        "id": "remote-contract",
+        "titleKey": "devTesting.posGroups.remote",
+        "layer": "contract",
+        "files": [
+          "src/dev/testing/suites/posRemote.test.ts",
+          "src/local-db/salesSync.test.ts"
+        ]
+      },
+      {
+        "id": "failure-recovery",
+        "titleKey": "devTesting.posGroups.recovery",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/posRecovery.test.ts",
+          "src/dev/testing/suites/posAttempt.test.ts",
+          "src/local-db/offlineMutations.test.ts",
+          "src/local-db/localModeSqliteAuthority.test.ts"
+        ]
+      }
+    ],
+    "unavailable": [
+      "browser-workflow",
+      "cloud-database",
+      "hybrid-native",
+      "local-native",
+      "hardware"
+    ]
   }
 }

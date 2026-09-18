@@ -1,17 +1,11 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
 import {
-    addToOfflineMutations,
-    adjustInventoryQuantity,
     calculateStockBatchUnitCost,
-    commitStockBatchAllocations,
-    createLoanFromPosSale,
-    generateLocalSaleSequenceId,
     getStockBatchSalePlans,
     getPrimaryStorageFromList,
-    refreshStockBatchesFromSupabase,
     useBatchAwareInventoryProducts,
     useProductSelectionAccess,
     useDiscountPriceResolver,
@@ -20,7 +14,6 @@ import {
     useStorages,
     createActivityTransaction,
     createQuickSalesOrder,
-    appendPaymentTransaction,
     isOrderFinancingMethod,
     updateActivityTransactionNotes,
     useActivityCatalog,
@@ -40,10 +33,10 @@ import {
     type SalesOrderItem
 } from '@/local-db'
 import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
-import { isPosPaymentTypeAllowed, type PosPaymentType } from '@/lib/posPaymentPolicy'
-import { db } from '@/local-db/database'
-import { applyOfflinePosStockEffects } from '@/local-db/offlinePosStock'
-import { persistLoanAggregateRpcResult } from '@/local-db/loanTransactions'
+import { isPosPaymentTypeAllowed, getPosCheckoutRoute, type PosPaymentType } from '@/lib/posPaymentPolicy'
+import { convertPosPrice, getCartBasePrice, getCartEffectivePrice, restorePosCart, snapshotPosCart, applyPosBulkDiscount, hasPosConversionRate } from '@/lib/posCart'
+import { commitPosCheckout, PosCheckoutError, loadPosCurrencyConversionPolicy } from '@/local-db/posCheckout'
+import { PosCheckoutAttempt, PosCheckoutPendingError } from '@/lib/posCheckoutAttempt'
 import { formatCurrency, generateId, cn } from '@/lib/utils'
 import { roundOrderValue } from '@/lib/orderPrecision'
 import { CartItem } from '@/types'
@@ -75,7 +68,6 @@ import { ExchangeRateResult } from '@/lib/exchangeRate'
 import { buildCheckoutRatesSnapshot, getPrimaryCheckoutRate } from '@/lib/currencyRates'
 import { buildOrderExchangeRatesSnapshot } from '@/lib/orderCurrency'
 import { exchangeSnapshotsToPayloads } from '@/lib/salesExchange'
-import { verifySale, createVerificationSale } from '@/lib/saleVerification'
 import type { ResolvedActiveDiscount } from '@/lib/discounts'
 import {
     Button,
@@ -166,6 +158,9 @@ import {
 } from '@/ui/components/pos/QuickOrderSuccessModal'
 import { useLocation } from 'wouter'
 
+const DeveloperTestButton = import.meta.env.DEV && __ATLAS_DEV_TESTING__
+    ? lazy(() => import('@/dev/testing/DeveloperTestButton')) : null
+
 const CART_IMAGE_VISIBILITY_THRESHOLD = 450
 const POS_MOBILE_BREAKPOINT = 1024
 const POS_TABLET_MAX_WIDTH = 1366
@@ -221,14 +216,6 @@ function addBarcodeLookupCode(map: Map<string, string>, code: string | undefined
             map.set(key, productId)
         }
     }
-}
-
-function getCartBasePrice(item: CartItem) {
-    return item.discounted_price ?? item.price
-}
-
-function getCartEffectivePrice(item: CartItem) {
-    return item.negotiated_price ?? getCartBasePrice(item)
 }
 
 function hasAutomaticDiscount(item: CartItem) {
@@ -520,6 +507,7 @@ export function POS() {
     // lock as well so two rapid clicks (or keyboard and pointer activation) cannot
     // start separate checkout transactions in that interval.
     const checkoutSubmissionInProgress = useRef(false)
+    const posCheckoutAttempt = useRef(new PosCheckoutAttempt())
     const [isPreprinting, setIsPreprinting] = useState(false)
     const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false)
     const [isPosAdjustOpen, setIsPosAdjustOpen] = useState(false)
@@ -1301,70 +1289,10 @@ export function POS() {
         }
     }, [currencyConversionDraft, isAdmin, refreshFeatures, t, toast, user])
 
-    const convertPrice = useCallback((amount: number, from: CurrencyCode, to: CurrencyCode) => {
-        if (from === to) return amount
-
-        // Helper to get raw rate (amount per 1 USD/EUR)
-        const getRate = (pair: 'usd_iqd' | 'usd_eur' | 'eur_iqd') => {
-            if (pair === 'usd_iqd') return exchangeData ? exchangeData.rate / 100 : null
-            if (pair === 'usd_eur') return eurRates.usd_eur ? eurRates.usd_eur.rate / 100 : null
-            if (pair === 'eur_iqd') return eurRates.eur_iqd ? eurRates.eur_iqd.rate / 100 : null
-            return null
-        }
-
-        let converted = amount
-
-        // PATH LOGIC
-        if (from === 'usd' && to === 'iqd') {
-            const r = getRate('usd_iqd'); if (!r) return amount; converted = amount * r
-        } else if (from === 'iqd' && to === 'usd') {
-            const r = getRate('usd_iqd'); if (!r) return amount; converted = amount / r
-        } else if (from === 'usd' && to === 'eur') {
-            const r = getRate('usd_eur'); if (!r) return amount; converted = amount * r
-        } else if (from === 'eur' && to === 'usd') {
-            const r = getRate('usd_eur'); if (!r) return amount; converted = amount / r
-        } else if (from === 'eur' && to === 'iqd') {
-            const r = getRate('eur_iqd'); if (!r) return amount; converted = amount * r
-        } else if (from === 'iqd' && to === 'eur') {
-            const r = getRate('eur_iqd'); if (!r) return amount; converted = amount / r
-        } else if (from === 'try' && to === 'iqd') {
-            // Use TRY/IQD directly
-            if (tryRates.try_iqd) converted = amount * (tryRates.try_iqd.rate / 100);
-        } else if (from === 'iqd' && to === 'try') {
-            if (tryRates.try_iqd) converted = amount / (tryRates.try_iqd.rate / 100);
-        } else if (from === 'usd' && to === 'try') {
-            if (tryRates.usd_try) converted = amount * (tryRates.usd_try.rate / 100);
-        } else if (from === 'try' && to === 'usd') {
-            if (tryRates.usd_try) converted = amount / (tryRates.usd_try.rate / 100);
-        }
-        // TRY <-> EUR: Chain through IQD
-        else if (from === 'try' && to === 'eur') {
-            // TRY -> IQD -> EUR
-            const tryIqdRate = tryRates.try_iqd ? tryRates.try_iqd.rate / 100 : null;
-            const eurIqdRate = eurRates.eur_iqd ? eurRates.eur_iqd.rate / 100 : null;
-            if (tryIqdRate && eurIqdRate) {
-                const inIqd = amount * tryIqdRate;
-                converted = inIqd / eurIqdRate;
-            }
-        } else if (from === 'eur' && to === 'try') {
-            // EUR -> IQD -> TRY
-            const eurIqdRate = eurRates.eur_iqd ? eurRates.eur_iqd.rate / 100 : null;
-            const tryIqdRate = tryRates.try_iqd ? tryRates.try_iqd.rate / 100 : null;
-            if (eurIqdRate && tryIqdRate) {
-                const inIqd = amount * eurIqdRate;
-                converted = inIqd / tryIqdRate;
-            }
-        }
-        // CHAINED PATHS (If needed based on default_currency)
-        else if (from === 'iqd' && to === 'eur') {
-            const r1 = getRate('usd_iqd'); const r2 = getRate('usd_eur')
-            if (r1 && r2) converted = (amount / r1) * r2
-        }
-
-        // Rounding rules
-        if (to === 'iqd') return Math.round(converted)
-        return Math.round(converted * 100) / 100
-    }, [exchangeData, eurRates, tryRates])
+    const convertPrice = useCallback((amount: number, from: CurrencyCode, to: CurrencyCode) => convertPosPrice(amount, from, to, {
+        usdIqd: exchangeData, eurIqd: eurRates.eur_iqd, usdEur: eurRates.usd_eur,
+        tryIqd: tryRates.try_iqd, usdTry: tryRates.usd_try
+    }), [exchangeData, eurRates, tryRates])
 
     // Calculate totals
     const totalAmount = cart.reduce((sum, item) => {
@@ -1547,35 +1475,7 @@ export function POS() {
 
     // Bulk Discount Effect — only runs when the user changes discountValue/discountType
     useEffect(() => {
-        const numValue = parseFloat(discountValue)
-
-        // If empty or 0, clear only bulk-discount negotiated prices (reset to original)
-        if (isNaN(numValue) || numValue <= 0) {
-            setCart(prev => prev.map(item => {
-                if (item.negotiated_price === undefined) return item
-                const { negotiated_price, ...rest } = item
-                return rest as CartItem
-            }))
-            return
-        }
-
-        let percentToApply = 0
-        if (discountType === 'percent') {
-            percentToApply = numValue
-        } else {
-            const subtotal = originalSubtotalRef.current
-            if (subtotal > 0) {
-                percentToApply = (numValue / subtotal) * 100
-            }
-        }
-
-        // Apply to all items by updating negotiated_price
-        setCart(prev => prev.map(item => {
-            const newPrice = getCartBasePrice(item) * (1 - Math.min(percentToApply, 100) / 100)
-            // Only update if significantly different to avoid state churn
-            if (item.negotiated_price !== undefined && Math.abs(item.negotiated_price - newPrice) < 0.001) return item
-            return { ...item, negotiated_price: newPrice }
-        }))
+        setCart(prev => applyPosBulkDiscount(prev, discountValue, discountType, originalSubtotalRef.current))
     }, [discountValue, discountType])
 
     // Keyboard Navigation Effect
@@ -2312,7 +2212,7 @@ export function POS() {
 
         const newHeldSale: HeldSale = {
             id: generateId(),
-            items: [...cart],
+            items: snapshotPosCart(cart),
             rates: {
                 usd_iqd: exchangeData ? exchangeData.rate / 100 : 0,
                 eur_iqd: eurRates.eur_iqd ? eurRates.eur_iqd.rate / 100 : 0,
@@ -2353,16 +2253,7 @@ export function POS() {
             }
         }
 
-        const normalizedItems = sale.items.map((item) => {
-            const storageId = item.storageId || selectedStorageId
-            const product = findStockProduct(item.product_id, storageId)
-
-            return {
-                ...item,
-                storageId,
-                max_stock: product?.inventoryQuantity ?? item.max_stock
-            }
-        })
+        const normalizedItems = restorePosCart(sale.items, selectedStorageId, findStockProduct)
         const restoredStorageIds = Array.from(new Set(normalizedItems.map((item) => item.storageId).filter(Boolean)))
         if (restoredStorageIds.length === 1) {
             setSelectedStorageId(restoredStorageIds[0])
@@ -2477,17 +2368,15 @@ export function POS() {
         try {
         if (cart.length === 0 || !user) return
 
-        if (paymentType === 'order') {
-            if (!quickOrderEnabled || isActivitiesStorage) {
-                setPaymentType('cash')
-                return
-            }
+        const checkoutRoute = getPosCheckoutRoute(paymentType, { isActivitiesStorage, isServicesStorage, quickOrderEnabled })
+        if (checkoutRoute === 'blocked') { setPaymentType('cash'); return }
+        if (checkoutRoute === 'quick-order') {
             setQuickOrderProgressStage(null)
             setIsQuickOrderModalOpen(true)
             return
         }
 
-        if (isActivitiesStorage) {
+        if (checkoutRoute === 'activity') {
             await handleActivitiesCheckout()
             return
         }
@@ -2524,28 +2413,12 @@ export function POS() {
         // feature cache cannot submit conversion snapshots against a disabled
         // policy.
         if (!isLocalMode && isOnline(user.workspaceId)) {
-            const { data: currencyPolicy, error: currencyPolicyError } = await runSupabaseAction(
-                'pos.getCurrencyConversionPolicy',
-                () => supabase
-                    .from('workspaces')
-                    .select('pos_convert_to_workspace_currency')
-                    .eq('id', user.workspaceId)
-                    .maybeSingle()
-            )
-
-            if (currencyPolicyError || !currencyPolicy) {
-                const normalized = normalizeSupabaseActionError(
-                    currencyPolicyError || new Error('Workspace currency conversion policy could not be loaded.')
-                )
-                toast({
-                    variant: 'destructive',
-                    title: t('messages.error'),
-                    description: normalized.message
-                })
+            let authoritativeCurrencyConversionEnabled: boolean
+            try { authoritativeCurrencyConversionEnabled = await loadPosCurrencyConversionPolicy(user.workspaceId) }
+            catch (error) {
+                toast({ variant: 'destructive', title: t('messages.error'), description: normalizeSupabaseActionError(error).message })
                 return
             }
-
-            const authoritativeCurrencyConversionEnabled = currencyPolicy.pos_convert_to_workspace_currency !== false
             if (authoritativeCurrencyConversionEnabled !== currencyConversionEnabled) {
                 await refreshFeatures()
                 toast({
@@ -2565,8 +2438,9 @@ export function POS() {
             return
         }
 
-        const validLoanRegistrationData = isLoanRegistrationData(loanRegistrationData)
-            ? loanRegistrationData
+        const requestedLoanRegistration = loanRegistrationData ?? posCheckoutAttempt.current.input?.loanRegistration
+        const validLoanRegistrationData = isLoanRegistrationData(requestedLoanRegistration)
+            ? requestedLoanRegistration
             : undefined
 
         if (paymentType === 'loan' && !validLoanRegistrationData) {
@@ -2578,12 +2452,11 @@ export function POS() {
             setIsLoanRegistrationModalOpen(false)
         }
 
-        const isMixedCurrency = cart.some(item => {
-            const product = findStockProduct(item.product_id, item.storageId)
-            return product && product.currency !== settlementCurrency
-        })
-
-        if (isMixedCurrency && !exchangeData) {
+        const checkoutRates = { usdIqd: exchangeData, eurIqd: eurRates.eur_iqd, usdEur: eurRates.usd_eur,
+            tryIqd: tryRates.try_iqd, usdTry: tryRates.usd_try }
+        const missingConversionRate = cart.some(item => !hasPosConversionRate(
+            getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId)), settlementCurrency, checkoutRates))
+        if (missingConversionRate) {
             toast({
                 variant: 'destructive',
                 title: t('messages.error'),
@@ -2651,7 +2524,6 @@ export function POS() {
 
         const snapshotRate = primary?.rate || 0
         const snapshotSource = primary?.source || 'none'
-        const snapshotTimestamp = primary?.timestamp || new Date().toISOString()
         const hasExchangeSnapshot = exchangeRatesSnapshot.length > 0
         const exchangeRatesPayload = hasExchangeSnapshot ? exchangeRatesSnapshot : null
         const salesExchangePayload = exchangeSnapshotsToPayloads(exchangeRatesPayload)
@@ -2793,407 +2665,59 @@ export function POS() {
             }
             : null
 
-        const recordPosPayment = async (referenceLabel: string) => {
-            // A financed POS sale creates its own loan obligation; it is not a
-            // cash receipt at checkout. Every immediately paid sale is posted
-            // through the payment transaction layer and then mirrored to Ledger.
-            if (paymentType === 'loan') return
-            await appendPaymentTransaction(user.workspaceId, {
-                sourceModule: 'sales',
-                sourceType: 'pos_sale',
-                sourceRecordId: saleId,
-                sourceSubrecordId: null,
-                direction: 'incoming',
-                amount: totalAmount,
-                currency: settlementCurrency as CurrencyCode,
-                paymentMethod: checkoutPayload.payment_method,
-                paidAt: checkoutTimestamp,
-                counterpartyName: null,
-                referenceLabel,
-                note: null,
-                createdBy: user.id,
-                accountId: paymentAccount?.id ?? null,
-                accountNameSnapshot: paymentAccount?.name ?? null,
-                metadata: { saleId, origin: 'pos' }
-            })
-        }
-
-        let saleCommitted = false
-
         try {
-            if (isLocalMode || !isOnline(user.workspaceId)) {
-                throw new Error(isLocalMode ? 'local_workspace_sale' : 'offline_workspace_sale')
-            }
-
-            // Attempt online checkout
-            const completeSale = () => atomicLoanPayload
-                ? supabase.rpc('complete_sale_with_loan', {
-                    payload: checkoutPayload,
-                    p_loan: atomicLoanPayload
-                })
-                : supabase.rpc('complete_sale', { payload: checkoutPayload })
-            let completeSaleResponse = await runSupabaseAction('pos.completeSale', completeSale)
-
-            if (completeSaleResponse.error && isRetriableWebRequestError(completeSaleResponse.error)) {
-                completeSaleResponse = await runSupabaseAction('pos.completeSale.verify', completeSale)
-            }
-
-            const { data, error } = completeSaleResponse
-
-            if (error) {
-                throw normalizeSupabaseActionError(error)
-            }
-
-            saleCommitted = true
-
-            // Capture sequence_id and result from server
-            const serverResult = data as any
-            const sequenceId = serverResult?.sequence_id
-            const formattedInvoiceId = sequenceId ? `#${String(sequenceId).padStart(5, '0')}` : `#${saleId.slice(0, 8)}`
-            const atomicLoanAggregate = serverResult?.loan_aggregate
-                ? await persistLoanAggregateRpcResult(serverResult.loan_aggregate)
-                : null
-
-            await recordPosPayment(formattedInvoiceId)
-
-            // 1. Update local inventory
-            await Promise.all(physicalCart.map(async (item) => {
-                const storageId = item.storageId || selectedStorageId
-                if (!storageId) return
-
-                await adjustInventoryQuantity({
-                    workspaceId: user.workspaceId,
-                    productId: item.product_id,
-                    storageId,
-                    quantityDelta: -item.quantity,
-                    timestamp: snapshotTimestamp,
-                    syncSource: 'remote',
-                    skipRemoteSync: true
-                })
+            const attemptSignature = JSON.stringify({ cart, selectedStorageId, settlementCurrency,
+                paymentType, digitalProvider, accountId: paymentAccount?.id ?? null, loan: validLoanRegistrationData })
+            const checkoutInput = posCheckoutAttempt.current.getOrCreate(attemptSignature, () => ({
+                payload: { ...checkoutPayload, origin: 'pos' }, user,
+                timestamp: checkoutTimestamp, exchangeRates: exchangeRatesPayload,
+                primaryRate: hasExchangeSnapshot ? { rate: snapshotRate, source: snapshotSource } : null,
+                maxDiscountPercent: features.max_discount_percent,
+                batchPlans: batchSalePlans, loanRegistration: validLoanRegistrationData,
+                atomicLoanPayload, account: paymentAccount
             }))
-
-            await Promise.all(batchSalePlans.map((plan) =>
-                commitStockBatchAllocations(
-                    user.workspaceId,
-                    plan.productId,
-                    plan.storageId,
-                    plan.allocations,
-                    {
-                        timestamp: snapshotTimestamp,
-                        syncSource: 'remote',
-                        skipRemoteSync: true
-                    }
-                )
-            ))
-            await refreshStockBatchesFromSupabase(user.workspaceId)
-
-            const saleData = mapSaleToUniversal({
-                ...checkoutPayload,
-                sequenceId: sequenceId,
-                created_at: snapshotTimestamp,
-                workspace_id: user?.workspaceId || '',
-                cashier_id: user?.id || '',
-                cashier_name: user?.name || ''
-            } as any)
-
-            await db.invoices.add({
-                id: saleId,
-                invoiceid: formattedInvoiceId,
-                sequenceId: sequenceId,
-                workspaceId: user?.workspaceId || '',
-                customerId: '', // POS sales are guest by default
-                status: 'paid',
-                totalAmount: totalAmount,
-                settlementCurrency: settlementCurrency,
-                origin: 'pos',
-                cashierName: user?.name || 'System',
-                createdByName: user?.name || 'System',
-                createdAt: snapshotTimestamp,
-                updatedAt: snapshotTimestamp,
-                syncStatus: 'synced',
-                lastSyncedAt: new Date().toISOString(),
-                version: 1,
-                isDeleted: false
-            })
-
-            if (
-                atomicLoanAggregate
-                && validLoanRegistrationData
-                && !validLoanRegistrationData.linkedPartyType
-                && validLoanRegistrationData.borrowerName.trim()
-            ) {
+            const result = await commitPosCheckout(checkoutInput)
+            posCheckoutAttempt.current.clear()
+            if (result.loanId && validLoanRegistrationData
+                && !validLoanRegistrationData.linkedPartyType && validLoanRegistrationData.borrowerName.trim()) {
                 setPosLoanSavePartnerData({
-                    loanId: atomicLoanAggregate.loan.id,
-                    borrowerName: validLoanRegistrationData.borrowerName.trim(),
+                    loanId: result.loanId, borrowerName: validLoanRegistrationData.borrowerName.trim(),
                     borrowerPhone: validLoanRegistrationData.borrowerPhone.trim(),
                     borrowerAddress: validLoanRegistrationData.borrowerAddress.trim(),
                     settlementCurrency: settlementCurrency as CurrencyCode
                 })
             }
-
+            const saleData = mapSaleToUniversal({
+                ...checkoutInput.payload, sequenceId: result.sequenceId, created_at: checkoutInput.timestamp,
+                cashier_id: user.id, cashier_name: user.name
+            } as any)
             setCart([])
             setDiscountValue('')
             setPaymentAccount(null)
             setIsLoanRegistrationModalOpen(false)
             setCompletedActivityCheckout(null)
             setCompletedSaleData(saleData)
-            demoTutorial.recordPosSaleCreated(saleId)
+            demoTutorial.recordPosSaleCreated(checkoutInput.payload.id)
             setIsSuccessModalOpen(true)
             hapticTrigger('success')
             playCheckoutSound()
-
-            // Refresh exchange rate for the next sale
             refreshExchangeRate()
-        } catch (err: any) {
-            console.error('Checkout failed, attempting offline save:', err)
-            const normalizedError = normalizeSupabaseActionError(err)
-
-            // The sale RPC already succeeded. Never fall through to the offline
-            // sale path here or the customer would be charged twice. Surface the
-            // posting fault for recovery instead.
-            if (saleCommitted) {
-                toast({
-                    variant: 'destructive',
-                    title: t('messages.error'),
-                    description: normalizedError.message
-                })
-                return
+        } catch (error) {
+            // A confirmed sale stays committed even if its local projection or
+            // payment posting fails. Clear the submitted cart to prevent a new
+            // sale ID from charging the same cart again; recovery uses saleId.
+            if (error instanceof PosCheckoutError && error.committed) {
+                posCheckoutAttempt.current.clear()
+                setCart([])
+                setDiscountValue('')
+                setPaymentAccount(null)
+                setIsLoanRegistrationModalOpen(false)
             }
-
-            if (isLocalMode) {
-                try {
-                    // Run local verification FIRST (before save, but using the data we're about to save)
-                    const verificationSale = createVerificationSale(
-                        totalAmount,
-                        settlementCurrency,
-                        hasExchangeSnapshot ? snapshotRate : null,
-                        hasExchangeSnapshot ? snapshotSource : null,
-                        itemsWithMetadata,
-                        exchangeRatesPayload
-                    )
-                    const verificationResult = verifySale(verificationSale, {
-                        maxDiscountPercent: features.max_discount_percent
-                    })
-
-                    const localSequenceId = await generateLocalSaleSequenceId(user.workspaceId)
-                    const localSaleItems = itemsWithMetadata.map((item) => ({
-                        id: generateId(),
-                        workspaceId: user.workspaceId,
-                        saleId,
-                        createdAt: item.created_at,
-                        updatedAt: item.updated_at,
-                        productId: item.product_id,
-                        storageId: item.storage_id,
-                        quantity: item.quantity,
-                        unitPrice: item.unit_price,
-                        totalPrice: item.total_price,
-                        costPrice: item.cost_price,
-                        convertedCostPrice: item.converted_cost_price,
-                        originalCurrency: item.original_currency,
-                        originalUnitPrice: item.original_unit_price,
-                        convertedUnitPrice: item.converted_unit_price,
-                        settlementCurrency: item.settlement_currency,
-                        negotiatedPrice: item.negotiated_price,
-                        priceBookId: item.price_book_id ?? null,
-                        inventorySnapshot: item.inventory_snapshot,
-                        batchAllocations: item.batch_allocations?.map((allocation) => ({
-                            batchId: allocation.batch_id,
-                            batchNumber: allocation.batch_number,
-                            quantity: allocation.quantity,
-                            price: allocation.price ?? null,
-                            costPrice: allocation.cost_price ?? null,
-                            currency: allocation.currency ?? null,
-                            expiryDate: allocation.expiry_date ?? null,
-                            manufacturingDate: allocation.manufacturing_date ?? null
-                        })),
-                        originalBatchAllocations: item.batch_allocations?.map((allocation) => ({
-                            batchId: allocation.batch_id,
-                            batchNumber: allocation.batch_number,
-                            quantity: allocation.quantity,
-                            price: allocation.price ?? null,
-                            costPrice: allocation.cost_price ?? null,
-                            currency: allocation.currency ?? null,
-                            expiryDate: allocation.expiry_date ?? null,
-                            manufacturingDate: allocation.manufacturing_date ?? null
-                        }))
-                    }))
-
-                    // Keep the sale header and every line item inseparable.
-                    // This also commits them together to the Tauri SQLite mirror.
-                    await db.transaction('rw', [db.sales, db.sale_items, db.sales_exchange], async () => {
-                        await db.sales.add({
-                        id: saleId,
-                        workspaceId: user.workspaceId,
-                        cashierId: user.id,
-                        totalAmount: totalAmount,
-                        originalTotalAmount: totalAmount,
-                        returnedAmount: 0,
-                        returnStatus: 'none',
-                        settlementCurrency: settlementCurrency,
-                        currencyConversionApplied: currencyConversionEnabled,
-                        origin: 'pos',
-                        payment_method: checkoutPayload.payment_method,
-                        sequenceId: localSequenceId,
-                        createdAt: checkoutTimestamp,
-                        updatedAt: checkoutTimestamp,
-                        syncStatus: 'pending',
-                        lastSyncedAt: null,
-                        version: 1,
-                        isDeleted: false,
-                        // System Verification (immutable)
-                        systemVerified: verificationResult.verified,
-                        systemReviewStatus: verificationResult.status,
-                        systemReviewReason: verificationResult.reason
-                        })
-
-                        if (salesExchangePayload.length > 0) {
-                            await db.sales_exchange.bulkAdd(
-                                salesExchangePayload.map((row) => ({
-                                    id: generateId(),
-                                    saleId,
-                                    workspaceId: user.workspaceId,
-                                    baseCurrency: row.base_currency,
-                                    quoteCurrency: row.quote_currency,
-                                    baseAmount: row.base_amount,
-                                    quoteAmount: row.quote_amount,
-                                    source: row.source,
-                                    capturedAt: row.captured_at,
-                                    rateSide: row.rate_side,
-                                    sourcePriceId: row.source_price_id,
-                                    sourcePriceUpdatedAt: row.source_price_updated_at,
-                                    createdAt: snapshotTimestamp
-                                }))
-                            )
-                        }
-
-                        if (localSaleItems.length > 0) {
-                            await db.sale_items.bulkAdd(localSaleItems)
-                        }
-                    })
-
-                    // 3. Update the local projection only. complete_sale owns
-                    // the authoritative inventory and batch changes on replay.
-                    await applyOfflinePosStockEffects({
-                        workspaceId: user.workspaceId,
-                        items: physicalCart.flatMap((item) => {
-                            const storageId = item.storageId || selectedStorageId
-                            return storageId
-                                ? [{ productId: item.product_id, storageId, quantity: item.quantity }]
-                                : []
-                        }),
-                        batchPlans: batchSalePlans,
-                        timestamp: snapshotTimestamp
-                    })
-
-                    const localFormattedInvoiceId = `#${String(localSequenceId).padStart(5, '0')}`
-                    const saleDataOffline = mapSaleToUniversal({
-                        ...checkoutPayload,
-                        sequenceId: localSequenceId,
-                        invoiceid: localFormattedInvoiceId,
-                        created_at: snapshotTimestamp,
-                        workspace_id: user?.workspaceId || '',
-                        cashier_id: user?.id || '',
-                        cashier_name: user?.name || ''
-                    } as any)
-
-                    if (!isLocalMode) {
-                        await db.invoices.add({
-                            id: saleId,
-                            invoiceid: `#${String(localSequenceId).padStart(5, '0')}`,
-                            sequenceId: localSequenceId,
-                            workspaceId: user?.workspaceId || '',
-                            customerId: '',
-                            status: 'paid',
-                            totalAmount: totalAmount,
-                            settlementCurrency: settlementCurrency,
-                            origin: 'pos',
-                            cashierName: user?.name || 'System',
-                            createdByName: user?.name || 'System',
-                            createdAt: snapshotTimestamp,
-                            updatedAt: snapshotTimestamp,
-                            syncStatus: 'pending',
-                            lastSyncedAt: null,
-                            version: 1,
-                            isDeleted: false
-                        })
-                    }
-
-                    // 5. Add to Sync Queue (server will compute authoritative review fields)
-                    await addToOfflineMutations('sales', saleId, 'create', checkoutPayload, user.workspaceId)
-                    await recordPosPayment(localFormattedInvoiceId)
-
-                    if (paymentType === 'loan' && validLoanRegistrationData) {
-                        try {
-                            const loanResult = await createLoanFromPosSale(user.workspaceId, {
-                                saleId,
-                                linkedPartyType: validLoanRegistrationData.linkedPartyType || null,
-                                linkedPartyId: validLoanRegistrationData.linkedPartyId || null,
-                                linkedPartyName: validLoanRegistrationData.linkedPartyName || null,
-                                borrowerName: validLoanRegistrationData.borrowerName,
-                                borrowerPhone: validLoanRegistrationData.borrowerPhone,
-                                borrowerAddress: validLoanRegistrationData.borrowerAddress,
-                                borrowerNationalId: validLoanRegistrationData.borrowerNationalId,
-                                principalAmount: totalAmount,
-                                settlementCurrency: settlementCurrency as CurrencyCode,
-                                exchangeRateSnapshot: exchangeRatesPayload,
-                                installmentCount: validLoanRegistrationData.installmentCount,
-                                installmentFrequency: validLoanRegistrationData.installmentFrequency,
-                                firstDueDate: validLoanRegistrationData.firstDueDate,
-                                notes: validLoanRegistrationData.notes,
-                                createdBy: user.id
-                            })
-
-                            if (!validLoanRegistrationData.linkedPartyType && validLoanRegistrationData.borrowerName.trim()) {
-                                setPosLoanSavePartnerData({
-                                    loanId: loanResult.loan.id,
-                                    borrowerName: validLoanRegistrationData.borrowerName.trim(),
-                                    borrowerPhone: validLoanRegistrationData.borrowerPhone.trim(),
-                                    borrowerAddress: validLoanRegistrationData.borrowerAddress.trim(),
-                                    settlementCurrency: settlementCurrency as CurrencyCode
-                                })
-                            }
-                        } catch (loanErr) {
-                            console.error('[POS] Offline loan registration failed:', loanErr)
-                            toast({
-                                variant: 'destructive',
-                                title: t('messages.error'),
-                                description: t('loans.messages.loanCreateFailed') || 'Loan registration failed. Sale was completed.'
-                            })
-                        }
-                    }
-
-                    setCart([])
-                    setDiscountValue('')
-                    setPaymentAccount(null)
-                    setIsLoanRegistrationModalOpen(false)
-                    setCompletedActivityCheckout(null)
-                    setCompletedSaleData(saleDataOffline)
-                    demoTutorial.recordPosSaleCreated(saleId)
-                    setIsSuccessModalOpen(true)
-                    hapticTrigger('success')
-                    playCheckoutSound()
-                    return
-                } catch (saveErr: any) {
-                    console.error('Offline save failed:', saveErr)
-                }
-            }
-
-            if (!isLocalMode && (!isOnline(user.workspaceId) || isRetriableWebRequestError(normalizedError))) {
-                toast({
-                    variant: 'destructive',
-                    title: t('messages.error'),
-                    description: t('inventory.errors.onlineRequired'),
-                })
-                return
-            }
-
-            toast({
-                variant: 'destructive',
-                title: t('messages.error'),
-                description: t('messages.checkoutFailed') + ': ' + normalizedError.message,
-            })
-        } finally {
-            setIsLoading(false)
+            if (!(error instanceof PosCheckoutPendingError)
+                && !(error instanceof PosCheckoutError && isRetriableWebRequestError(error.cause))) posCheckoutAttempt.current.clear()
+            toast({ variant: 'destructive', title: t('messages.error'),
+                description: error instanceof PosCheckoutPendingError
+                    ? t('pos.checkoutPendingRecovery', { saleId: error.saleId }) : normalizeSupabaseActionError(error).message })
         }
         } finally {
             checkoutSubmissionInProgress.current = false
@@ -3398,7 +2922,9 @@ export function POS() {
 
 
     return (
-        <div className="h-full min-w-0 flex flex-col lg:flex-row gap-4 overflow-hidden lg:m-0">
+        <div className="h-full min-w-0 flex flex-col gap-2">
+            {DeveloperTestButton && <div className="flex shrink-0 justify-end"><Suspense fallback={null}><DeveloperTestButton suiteId="pos" /></Suspense></div>}
+            <div className="min-h-0 flex-1 min-w-0 flex flex-col lg:flex-row gap-4 overflow-hidden lg:m-0">
             {isLayoutMobile ? (
                 <div className="flex-1 flex flex-col bg-background relative overflow-hidden">
                     <MobileHeader
@@ -4891,6 +4417,7 @@ export function POS() {
                     }
                 }}
             />
+            </div>
         </div>
     )
 }

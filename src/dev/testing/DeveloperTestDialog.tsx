@@ -132,7 +132,7 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
     return <AppDialog open={open} onOpenChange={(next) => { if (!busy) onOpenChange(next) }}>
         <AppDialogContent className="max-w-5xl" showCloseButton={!busy} onInteractOutside={blockClose} onEscapeKeyDown={blockClose}>
             <AppDialogHeader>
-                <AppDialogTitle className="flex items-center gap-2"><FlaskConical className="h-5 w-5" />{t('devTesting.title', { module: t(suite?.titleKey ?? 'devTesting.saleOrders') })}</AppDialogTitle>
+                <AppDialogTitle className="flex items-center gap-2"><FlaskConical className="h-5 w-5" />{t('devTesting.title', { module: t(suite?.titleKey ?? 'devTesting.checks') })}</AppDialogTitle>
                 <AppDialogDescription>{t('devTesting.description')}</AppDialogDescription>
             </AppDialogHeader>
             <AppDialogBody className="space-y-5">
@@ -165,7 +165,7 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
                                 const value = event.target.value.replace(/,/g, '')
                                 if (/^\d*$/.test(value)) setSamples(formatInput(value))
                             }} />
-                            <p className="text-xs text-muted-foreground">{t('devTesting.samplesHelp')}</p>
+                            <p className="text-xs text-muted-foreground">{t(suite?.samplesHelpKey ?? 'devTesting.samplesHelp')}</p>
                         </div>
                     </div>
                 </fieldset>
@@ -174,7 +174,7 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
                     <ul className="space-y-1">
                         {suite?.unavailable.map((id) => <li key={id} className="flex flex-wrap items-center justify-between gap-2"><span>{t(`devTesting.environments.${id}`)}</span><span className="text-xs text-amber-700 dark:text-amber-400">{t('devTesting.blocked')}</span></li>)}
                     </ul>
-                    <p className="mt-2 text-xs text-muted-foreground">{t('devTesting.coverageHelp')}</p>
+                    <p className="mt-2 text-xs text-muted-foreground">{t(suite?.coverageHelpKey ?? 'devTesting.coverageHelp')}</p>
                 </div>
                 {activeRun && <section className="select-text space-y-3" aria-label={t('devTesting.results')}>
                     <div role="status" aria-live="polite" className="flex flex-wrap items-center justify-between gap-2 text-sm">

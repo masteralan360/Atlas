@@ -33,10 +33,32 @@
       "pricing": "Pricing, currency, rounding, and line storage",
       "payments": "Payments, accounts, reversals, and ledger"
     },
-    "layers": { "business": "Production functions · isolated IndexedDB", "contract": "Remote request and result handling · mocked backend", "calculation": "Calculations and validation" },
-    "environments": { "browser-workflow": "Order-form browser workflow", "cloud-database": "Cloud · real Supabase database and permissions", "hybrid-native": "Hybrid · Supabase and native SQLite mirror", "local-native": "Local · native SQLite persistence and restart" },
-    "status": { "pending": "Waiting", "running": "Running", "passed": "Passed", "failed": "Failed", "skipped": "Skipped", "cancelled": "Cancelled" },
-    "runStatus": { "running": "Running selected checks", "passed": "Selected checks passed", "failed": "Selected checks failed or incomplete", "cancelled": "Run cancelled" },
+    "layers": {
+      "business": "Production functions · isolated IndexedDB",
+      "contract": "Remote request and result handling · mocked backend",
+      "calculation": "Calculations and validation"
+    },
+    "environments": {
+      "browser-workflow": "Module browser workflow",
+      "cloud-database": "Cloud · real Supabase database and permissions",
+      "hybrid-native": "Hybrid · Supabase and native SQLite mirror",
+      "local-native": "Local · native SQLite persistence and restart",
+      "hardware": "Barcode scanner, camera and printer hardware"
+    },
+    "status": {
+      "pending": "Waiting",
+      "running": "Running",
+      "passed": "Passed",
+      "failed": "Failed",
+      "skipped": "Skipped",
+      "cancelled": "Cancelled"
+    },
+    "runStatus": {
+      "running": "Running selected checks",
+      "passed": "Selected checks passed",
+      "failed": "Selected checks failed or incomplete",
+      "cancelled": "Run cancelled"
+    },
     "errors": {
       "unavailable": "The local test runner could not be reached. Start Atlas with npm run dev and open it through localhost.",
       "local_only": "Developer tests are available only when Atlas is opened through localhost on the development computer.",
@@ -46,6 +68,21 @@
       "invalid_groups": "Select at least one available test group.",
       "invalid_suite": "This module has no registered test suite.",
       "run_not_found": "This run is no longer available. Reconnect and start a new run."
+    },
+    "pos": "POS",
+    "posSamplesHelp": "1–100 additional paid POS checkout scenarios with varied currencies, methods, fractional quantities and service lines. Fixed regressions run alongside them.",
+    "posCoverageHelp": "Checks regular POS production checkout, cart calculations, inventory, financing, exchange and reversal helpers, Activities and Quick Order routing, with disposable IndexedDB and mocked backend contracts. Sales return inventory and financing components are covered; the complete Sales return dialog is not automated. SQLite checks use an adapter stub. Real browser checkout, Supabase permissions, native restart and hardware remain unavailable.",
+    "posGroups": {
+      "checkout": "Checkout, payments, accounts and ledger",
+      "cart": "Cart and held-sale restoration",
+      "pricing": "Pricing, discounts and price books",
+      "currency": "Currency conversion and rate snapshots",
+      "inventory": "Inventory, batches and storage access",
+      "financing": "Simple loans and installment financing",
+      "returns": "Return inventory, exchanges and linked reversals",
+      "routing": "Barcode entry, Activities and Quick Order routing",
+      "remote": "Cloud / Hybrid requests, results and retries",
+      "recovery": "Validation failures, atomic rollback and recovery"
     }
   },
   "lockedWorkspace": {
@@ -4558,6 +4595,8 @@
     }
   },
   "pos": {
+    "checkoutPendingRecovery": "Sale {{saleId}} is still awaiting confirmation. Retry the same cart and payment details so Atlas can confirm it safely. Review Sales before changing this checkout.",
+    "checkoutCommittedRecovery": "Sale {{saleId}} was saved, but its payment or local display could not be completed. Review it in Sales and Payments before making another sale.",
     "quickOrder": {
       "title": "Quick Order",
       "description": "Select the customer, order status, and payment details for this sales order.",
