@@ -4,7 +4,7 @@ import { GripVertical, ImagePlus, Images, LoaderCircle, Package, X } from 'lucid
 
 import { supabase } from '@/auth/supabase'
 import { assetManager } from '@/lib/assetManager'
-import { getProductImageDisplayUrl, storeProductImageFile } from '@/lib/productImageStorage'
+import { getProductImageDisplayUrl, isProductImagePath, storeProductImageFile } from '@/lib/productImageStorage'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { cn, generateId } from '@/lib/utils'
 import { ReorderablePickerGrid } from '@/ui/components/ReorderablePickerGrid'
@@ -246,7 +246,7 @@ export function ProductAdditionalImagesModal({
             const finalImagePayload: Array<{ id?: string; image_url: string }> = []
 
             for (const draft of draftImages) {
-                if (draft.id && draft.imageUrl) {
+                if (draft.id && draft.imageUrl && isProductImagePath(draft.imageUrl)) {
                     finalImagePayload.push({ id: draft.id, image_url: draft.imageUrl })
                     continue
                 }
@@ -312,7 +312,9 @@ export function ProductAdditionalImagesModal({
             isDragging && 'rotate-2 shadow-xl ring-2 ring-primary/40'
         )}>
             <img
-                src={getProductImageDisplayUrl(image.previewUrl)}
+                // Object URLs exist only for unsaved local drafts. Persisted
+                // product images always go through the strict R2/file resolver.
+                src={image.file ? image.previewUrl : getProductImageDisplayUrl(image.previewUrl)}
                 alt="Additional product image"
                 className="h-full w-full object-cover"
             />

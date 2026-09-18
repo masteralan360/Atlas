@@ -1,10 +1,197 @@
 function createCorsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Workspace-Usage-Client-Recorded",
     "Access-Control-Max-Age": "86400",
   };
+}
+
+const MAX_PRODUCT_IMAGE_IMPORT_BYTES = 10 * 1024 * 1024;
+const MAX_PRODUCT_IMAGE_IMPORT_REQUEST_BYTES = 4096;
+const MAX_PRODUCT_IMAGE_REDIRECTS = 3;
+
+function matchesBytes(bytes, expected, offset = 0) {
+  return expected.every((value, index) => bytes[offset + index] === value);
+}
+
+function detectProductImageMime(bytes) {
+  // Wait for enough bytes to distinguish the supported formats. A later full
+  // browser decode is still required before the resulting file reaches R2.
+  if (bytes.length < 12) return null;
+  if (matchesBytes(bytes, [0xff, 0xd8, 0xff])) return "image/jpeg";
+  if (matchesBytes(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "image/png";
+  if (matchesBytes(bytes, [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]) || matchesBytes(bytes, [0x47, 0x49, 0x46, 0x38, 0x39, 0x61])) return "image/gif";
+  if (matchesBytes(bytes, [0x52, 0x49, 0x46, 0x46]) && matchesBytes(bytes, [0x57, 0x45, 0x42, 0x50], 8)) return "image/webp";
+  if (matchesBytes(bytes, [0x66, 0x74, 0x79, 0x70], 4)
+      && (matchesBytes(bytes, [0x61, 0x76, 0x69, 0x66], 8) || matchesBytes(bytes, [0x61, 0x76, 0x69, 0x73], 8))) {
+    return "image/avif";
+  }
+  return false;
+}
+
+function isBlockedIpv4(hostname) {
+  const parts = hostname.split(".");
+  if (parts.length !== 4 || parts.some((part) => !/^\d+$/.test(part))) return false;
+  const values = parts.map(Number);
+  if (values.some((part) => part < 0 || part > 255)) return true;
+  const [first, second] = values;
+  return first === 0
+    || first === 10
+    || first === 127
+    || (first === 100 && second >= 64 && second <= 127)
+    || (first === 169 && second === 254)
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && (second === 0 || second === 168))
+    || (first === 198 && (second === 18 || second === 19 || second === 51))
+    || (first === 203 && second === 0)
+    || first >= 224;
+}
+
+function validateExternalProductImageUrl(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error("A public image URL is required");
+  }
+
+  let url;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error("The image URL is invalid");
+  }
+
+  const hostname = url.hostname.replace(/^\[|\]$/g, "").toLowerCase().replace(/\.$/, "");
+  if (!["http:", "https:"].includes(url.protocol) || !hostname || url.username || url.password) {
+    throw new Error("The image URL must be a public HTTP or HTTPS address");
+  }
+
+  // Hostname-based requests run from Cloudflare's network. Explicit local,
+  // private, multicast, and IPv6 literals are rejected before any fetch; every
+  // redirect is validated again below.
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")
+      || hostname.includes(":") || isBlockedIpv4(hostname)) {
+    throw new Error("The image URL must not point to a private network");
+  }
+
+  return url;
+}
+
+async function readImportRequestJson(request) {
+  const declaredLength = parseContentLength(request.headers.get("Content-Length"));
+  if (declaredLength !== null && declaredLength > MAX_PRODUCT_IMAGE_IMPORT_REQUEST_BYTES) {
+    throw new Error("The import request is too large");
+  }
+  if (!request.body) throw new Error("An image URL is required");
+
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_PRODUCT_IMAGE_IMPORT_REQUEST_BYTES) {
+        throw new Error("The import request is too large");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw new Error("The import request is invalid");
+  }
+}
+
+function createValidatedProductImageStream(body) {
+  let total = 0;
+  let prefix = new Uint8Array(0);
+  let detectedMime = null;
+
+  return body.pipeThrough(new TransformStream({
+    transform(chunk, controller) {
+      const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+      total += bytes.byteLength;
+      if (total > MAX_PRODUCT_IMAGE_IMPORT_BYTES) {
+        throw new Error("The downloaded image exceeds the 10 MB limit");
+      }
+
+      if (prefix.length < 12) {
+        const remaining = 12 - prefix.length;
+        const next = new Uint8Array(prefix.length + Math.min(remaining, bytes.length));
+        next.set(prefix);
+        next.set(bytes.subarray(0, remaining), prefix.length);
+        prefix = next;
+      }
+      if (!detectedMime && prefix.length >= 12) {
+        detectedMime = detectProductImageMime(prefix);
+        if (!detectedMime) {
+          throw new Error("The downloaded file is not a supported image");
+        }
+      }
+      controller.enqueue(bytes);
+    },
+    flush() {
+      if (!detectedMime) {
+        throw new Error("The downloaded file is not a supported image");
+      }
+    },
+  }));
+}
+
+async function fetchExternalProductImage(value, corsHeaders) {
+  let target = validateExternalProductImageUrl(value);
+
+  for (let redirectCount = 0; redirectCount <= MAX_PRODUCT_IMAGE_REDIRECTS; redirectCount += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    let response;
+    try {
+      response = await fetch(target, {
+        redirect: "manual",
+        signal: controller.signal,
+        headers: { Accept: "image/avif,image/webp,image/png,image/jpeg,image/gif;q=0.9,*/*;q=0.1" },
+      });
+    } catch {
+      throw new Error("The image could not be downloaded");
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("Location");
+      if (!location || redirectCount === MAX_PRODUCT_IMAGE_REDIRECTS) {
+        throw new Error("The image URL redirected too many times");
+      }
+      target = validateExternalProductImageUrl(new URL(location, target).toString());
+      continue;
+    }
+    if (!response.ok || !response.body) {
+      throw new Error("The image could not be downloaded");
+    }
+
+    const declaredLength = parseContentLength(response.headers.get("Content-Length"));
+    if (declaredLength !== null && declaredLength > MAX_PRODUCT_IMAGE_IMPORT_BYTES) {
+      throw new Error("The downloaded image exceeds the 10 MB limit");
+    }
+
+    const headers = new Headers(corsHeaders);
+    headers.set("Content-Type", "application/octet-stream");
+    headers.set("Cache-Control", "no-store");
+    return new Response(createValidatedProductImageStream(response.body), { headers });
+  }
+
+  throw new Error("The image could not be downloaded");
 }
 
 function jsonResponse(payload, init = {}) {
@@ -209,6 +396,21 @@ export default {
 
     const url = new URL(request.url);
     const path = url.pathname.slice(1);
+
+    if (request.method === "POST" && path === "__product-image-import__") {
+      const authResult = await requireAuthenticatedUser(request, env, corsHeaders);
+      if (authResult.response) return authResult.response;
+
+      try {
+        const payload = await readImportRequestJson(request);
+        return await fetchExternalProductImage(payload?.url, corsHeaders);
+      } catch (error) {
+        return jsonResponse(
+          { error: error?.message || "The image could not be imported" },
+          { status: 400, headers: corsHeaders },
+        );
+      }
+    }
 
     if (request.method === "GET") {
       const isListRequest = url.searchParams.get("list") === "1";

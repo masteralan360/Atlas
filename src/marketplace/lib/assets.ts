@@ -1,5 +1,6 @@
 import { platformService } from '@/services/platformService'
 import { r2Service } from '@/services/r2Service'
+import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 
 const MARKETPLACE_ASSET_FOLDERS = new Set([
     'product-images',
@@ -83,4 +84,9 @@ export function getMarketplaceAssetUrl(rawPath?: string | null) {
     }
 
     return platformService.convertFileSrc(path)
+}
+
+/** Product cards must never use legacy external or data image values. */
+export function getMarketplaceProductImageUrl(rawPath?: string | null) {
+    return getProductImageDisplayUrl(rawPath) || null
 }

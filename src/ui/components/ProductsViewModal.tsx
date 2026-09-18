@@ -4,7 +4,7 @@ import { ChevronDown, LayoutGrid, Package, Search, Warehouse } from 'lucide-reac
 import { useProductSelectionAccess, type Product, type Storage } from '@/local-db'
 import { useOptionalAuth } from '@/auth'
 import { cn } from '@/lib/utils'
-import { platformService } from '@/services/platformService'
+import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import {
     Button,
     Dialog,
@@ -97,11 +97,7 @@ export interface ProductsViewModalProps {
     labels?: ProductsViewModalLabels
 }
 
-function getDisplayImageUrl(url?: string): string {
-    if (!url) return ''
-    if (url.startsWith('http') || url.startsWith('data:')) return url
-    return platformService.convertFileSrc(url)
-}
+const getDisplayImageUrl = getProductImageDisplayUrl
 
 function ProductThumbnail({ product }: { product: Product }) {
     const [loadError, setLoadError] = useState(false)

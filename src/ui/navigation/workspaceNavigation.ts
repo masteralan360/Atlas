@@ -140,7 +140,7 @@ export function buildWorkspaceNavigation({
         {
           name: t("nav.pos", { defaultValue: "Point of Sale" }),
           href: "/pos",
-          icon: CreditCard,
+          icon: ShoppingCart,
         },
       ]
       : []),

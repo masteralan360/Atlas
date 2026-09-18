@@ -127,7 +127,7 @@ import {
     Receipt
 } from 'lucide-react'
 import { isDesktop, isMobile } from '@/lib/platform'
-import { platformService } from '@/services/platformService'
+import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { ExchangeRateList } from '@/ui/components'
 import { CheckoutSuccessModal, HeldSalesModal, type HeldSale, StorageSelector, CrossStorageWarningModal } from '@/ui/components'
 import { BarcodeScannerModal } from '@/ui/components/pos/BarcodeScannerModal'
@@ -1210,13 +1210,7 @@ export function POS() {
         return shouldCommitBarcodeScannerValue(value, knownScannerCodeIndex)
     }, [knownScannerCodeIndex])
 
-    const getDisplayImageUrl = (url?: string) => {
-        if (!url) return '';
-        if (url.startsWith('http')) return url;
-        if (url.startsWith('data:')) return url;
-
-        return platformService.convertFileSrc(url);
-    }
+    const getDisplayImageUrl = (url?: string) => getProductImageDisplayUrl(url)
 
 
     // Exchange Rate for advisory display and calculations

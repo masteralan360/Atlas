@@ -295,6 +295,31 @@ class R2Service {
     }
 
     /**
+     * Requests an external product image through the authenticated R2 Worker.
+     * The worker validates the URL, follows only safe redirects, and streams a
+     * signature-checked image back to the browser. It never stores the source
+     * URL or turns it into a public product-image URL.
+     */
+    public async fetchExternalProductImage(sourceUrl: string): Promise<Blob> {
+        if (!this.workerUrl) {
+            throw new Error('R2 configuration missing');
+        }
+
+        const response = await this.fetchPrivileged(this.getUrl('__product-image-import__'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: sourceUrl })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => '');
+            throw new Error(`Product image import failed: ${response.status}${errorText ? ` ${errorText}` : ''}`);
+        }
+
+        return response.blob();
+    }
+
+    /**
      * Check if R2 is configured
      */
     public isConfigured(): boolean {

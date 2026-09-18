@@ -18,11 +18,17 @@ import {
     type Storage
 } from '@/local-db'
 import { assetManager } from '@/lib/assetManager'
-import { getProductImageDisplayUrl, storeProductImageFile } from '@/lib/productImageStorage'
+import {
+    getProductImageDisplayUrl,
+    importProductImageFromUrl,
+    ProductImageStorageError,
+    storeProductImageFile
+} from '@/lib/productImageStorage'
 import { saveInitialProductAdditionalImages } from '@/lib/productAdditionalImages'
 import { isTauri } from '@/lib/platform'
 import { normalizeBarcodeScannerText } from '@/lib/barcodeScanner'
 import { platformService } from '@/services/platformService'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { cn, formatCurrency, formatNumericInput, sanitizeNumericInput } from '@/lib/utils'
 import { ProductUnitIcon } from '@/ui/components/ProductUnitIcon'
 import type { WorkspaceUnitOption } from '@/ui/components/unitRegistry'
@@ -157,8 +163,9 @@ function getCurrencySymbol(currency: CurrencyCode, iqdDisplayPreference: IQDDisp
 }
 
 function VariantImage({ product }: { product: Product }) {
-    if (product.imageUrl) {
-        return <img src={product.imageUrl.startsWith('http') ? product.imageUrl : platformService.convertFileSrc(product.imageUrl)} alt="" className="h-10 w-10 rounded-lg border border-border/60 object-cover" />
+    const imageUrl = getProductImageDisplayUrl(product.imageUrl)
+    if (imageUrl) {
+        return <img src={imageUrl} alt="" className="h-10 w-10 rounded-lg border border-border/60 object-cover" />
     }
 
     return (
@@ -251,6 +258,7 @@ export function ProductVariantsSection({
     const { toast } = useToast()
     const imageInputRef = useRef<HTMLInputElement>(null)
     const cameraInputRef = useRef<HTMLInputElement>(null)
+    const pendingImportedImagePathRef = useRef<string | null>(null)
     const variantSkuInputRef = useRef<HTMLInputElement>(null)
     const [isCreateOpen, setIsCreateOpen] = useState(false)
     const [isLinkOpen, setIsLinkOpen] = useState(false)
@@ -262,6 +270,8 @@ export function ProductVariantsSection({
     const [draft, setDraft] = useState<VariantDraft>(() => createVariantDraft(parent, hideCosts))
     const [useParentCost, setUseParentCost] = useState(true)
     const [imageError, setImageError] = useState(false)
+    const [externalImageUrl, setExternalImageUrl] = useState('')
+    const [isImageProcessing, setIsImageProcessing] = useState(false)
     const [isAdditionalImagesOpen, setIsAdditionalImagesOpen] = useState(false)
     const [additionalImageFiles, setAdditionalImageFiles] = useState<File[]>([])
     const [priceBookRows, setPriceBookRows] = useState<ProductPriceBookDraft[]>([])
@@ -320,9 +330,19 @@ export function ProductVariantsSection({
         setDraft(createVariantDraft(parent, hideCosts))
         setUseParentCost(true)
         setImageError(false)
+        setExternalImageUrl('')
         setAdditionalImageFiles([])
         setPriceBookRows(priceBooksEnabled && isPriceBookCatalogReady ? parentPriceBookRows : [])
         priceBookRowsInitializedRef.current = !priceBooksEnabled || isPriceBookCatalogReady
+    }
+
+    const discardPendingImportedImage = () => {
+        const path = pendingImportedImagePathRef.current
+        if (!path) return
+        pendingImportedImagePathRef.current = null
+        assetManager.deleteAsset(path).catch((error) =>
+            console.error('[ProductVariants] Failed to clean up imported image:', error)
+        )
     }
 
     const openCreateDialog = () => {
@@ -332,6 +352,8 @@ export function ProductVariantsSection({
     }
 
     const handleCreateDialogOpenChange = (open: boolean) => {
+        if (!open && isImageProcessing) return
+        if (!open) discardPendingImportedImage()
         setIsCreateOpen(open)
         if (open) onVariantSkuScannerDialogOpen()
         else onVariantSkuScannerDialogClose()
@@ -343,11 +365,46 @@ export function ProductVariantsSection({
         setDraft((current) => ({ ...current, sku: normalizeBarcodeScannerText(value) }))
     }
 
+    const showProductImageError = (error: unknown) => {
+        const code = error instanceof ProductImageStorageError ? error.code : 'import_failed'
+        toast({
+            title: t('products.form.imageImportErrorTitle', { defaultValue: 'Image import failed' }),
+            description: t(`products.form.imageErrors.${code}`, { defaultValue: 'The image could not be processed and stored.' }),
+            variant: 'destructive'
+        })
+    }
+
     const savePrimaryImageFile = async (image: File) => {
-        const imageUrl = await storeProductImageFile(image, workspaceId)
-        if (imageUrl) {
+        if (isImageProcessing) return
+        setIsImageProcessing(true)
+        try {
+            const imageUrl = await storeProductImageFile(image, workspaceId)
+            if (imageUrl) {
+                discardPendingImportedImage()
+                setDraft((current) => ({ ...current, imageUrl }))
+                setImageError(false)
+            }
+        } catch (error) {
+            showProductImageError(error)
+        } finally {
+            setIsImageProcessing(false)
+        }
+    }
+
+    const handleImportPrimaryImage = async () => {
+        if (isImageProcessing || !externalImageUrl.trim()) return
+        setIsImageProcessing(true)
+        try {
+            const imageUrl = await importProductImageFromUrl(externalImageUrl, workspaceId)
+            discardPendingImportedImage()
+            pendingImportedImagePathRef.current = imageUrl
             setDraft((current) => ({ ...current, imageUrl }))
+            setExternalImageUrl('')
             setImageError(false)
+        } catch (error) {
+            showProductImageError(error)
+        } finally {
+            setIsImageProcessing(false)
         }
     }
 
@@ -360,9 +417,11 @@ export function ProductVariantsSection({
     }
 
     const handlePrimaryImageUpload = async () => {
+        if (isImageProcessing) return
         if (isDesktopShell) {
             const imageUrl = await platformService.pickAndSaveImage(workspaceId)
             if (imageUrl) {
+                discardPendingImportedImage()
                 setDraft((current) => ({ ...current, imageUrl }))
                 setImageError(false)
                 assetManager.uploadFromPath(imageUrl).catch(console.error)
@@ -440,6 +499,8 @@ export function ProductVariantsSection({
                 returnRules: '',
                 createdBy: userId || null
             })
+            // This imported object is now owned by the persisted variant.
+            pendingImportedImagePathRef.current = null
             if (priceBooksEnabled) {
                 postCreateStep = 'priceBooks'
                 await replaceProductPriceBookItems(
@@ -731,21 +792,24 @@ export function ProductVariantsSection({
                                             ) : (
                                                 <>
                                                     <img src={getProductImageDisplayUrl(draft.imageUrl)} alt={draft.name || t('products.variants.productImage', { defaultValue: 'Product image' })} className="h-full w-full object-cover" onError={() => setImageError(true)} />
-                                                    <Button type="button" variant="ghost" size="icon" aria-label={t('common.remove', { defaultValue: 'Remove' })} onClick={() => { setDraft((current) => ({ ...current, imageUrl: '' })); setImageError(false) }} className="absolute right-2 top-2 h-8 w-8 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground"><Trash2 className="h-4 w-4" /></Button>
+                                                    <Button type="button" variant="ghost" size="icon" aria-label={t('common.remove', { defaultValue: 'Remove' })} onClick={() => { discardPendingImportedImage(); setDraft((current) => ({ ...current, imageUrl: '' })); setImageError(false) }} className="absolute right-2 top-2 h-8 w-8 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground"><Trash2 className="h-4 w-4" /></Button>
                                                 </>
                                             )}
                                         </div>
 
                                         <div className="w-full flex-1 space-y-4">
-                                            <div className="space-y-2">
-                                                <Label htmlFor="variant-image-url" className="flex items-center gap-2 font-bold"><Info className="h-4 w-4 text-primary/60" />{t('products.form.imageUrl', { defaultValue: 'Image Source' })}</Label>
-                                                <div className="flex flex-col gap-3 sm:flex-row">
-                                                    <Input id="variant-image-url" value={draft.imageUrl} onChange={(event) => { setDraft((current) => ({ ...current, imageUrl: event.target.value })); setImageError(false) }} placeholder={t('products.form.imageUrlPlaceholder', { defaultValue: 'Image URL or local path' })} className="h-12 flex-1 rounded-xl border-border/80 bg-background/80 shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50" />
-                                                    <div className="flex gap-2">
-                                                        <Button type="button" variant="outline" onClick={() => void handlePrimaryImageUpload()} className="h-12 gap-2 rounded-lg border-primary/20 px-5 font-bold"><ImagePlus className="h-4 w-4" />{t('products.form.upload', { defaultValue: 'Upload' })}</Button>
-                                                        <Button type="button" variant="outline" onClick={() => cameraInputRef.current?.click()} className="h-12 gap-2 rounded-lg border-primary/20 px-4 font-bold text-primary sm:px-5"><Camera className="h-4 w-4" /><span className="hidden sm:inline">{t('products.form.camera', { defaultValue: 'Camera' })}</span></Button>
+                                            {(isDesktopShell || !isLocalWorkspaceMode(workspaceId)) && (
+                                                <div className="space-y-2">
+                                                    <Label htmlFor="variant-image-url" className="flex items-center gap-2 font-bold"><Link2 className="h-4 w-4 text-primary/60" />{t('products.form.importImageUrl', { defaultValue: 'Import image from URL' })}</Label>
+                                                    <div className="flex flex-col gap-3 sm:flex-row">
+                                                        <Input id="variant-image-url" value={externalImageUrl} onChange={(event) => setExternalImageUrl(event.target.value)} readOnly={isImageProcessing} placeholder={t('products.form.imageUrlPlaceholder', { defaultValue: 'Paste a public image URL...' })} className="h-12 flex-1 rounded-xl border-border/80 bg-background/80 shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50" />
+                                                        <Button type="button" variant="outline" onClick={() => void handleImportPrimaryImage()} disabled={isImageProcessing || !externalImageUrl.trim()} className="h-12 gap-2 rounded-lg border-primary/20 px-5 font-bold">{isImageProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}{isImageProcessing ? t('products.form.importingImage', { defaultValue: 'Importing...' }) : t('products.form.importImage', { defaultValue: 'Import' })}</Button>
                                                     </div>
                                                 </div>
+                                            )}
+                                            <div className="flex flex-wrap gap-2">
+                                                <Button type="button" variant="outline" onClick={() => void handlePrimaryImageUpload()} disabled={isImageProcessing || (!isDesktopShell && isLocalWorkspaceMode(workspaceId))} className="h-12 gap-2 rounded-lg border-primary/20 px-5 font-bold">{isImageProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}{isImageProcessing ? t('products.form.processingImage', { defaultValue: 'Processing...' }) : t('products.form.upload', { defaultValue: 'Upload' })}</Button>
+                                                <Button type="button" variant="outline" onClick={() => cameraInputRef.current?.click()} disabled={isImageProcessing || (!isDesktopShell && isLocalWorkspaceMode(workspaceId))} className="h-12 gap-2 rounded-lg border-primary/20 px-4 font-bold text-primary sm:px-5"><Camera className="h-4 w-4" /><span className="hidden sm:inline">{t('products.form.camera', { defaultValue: 'Camera' })}</span></Button>
                                             </div>
 
                                             <div className="flex items-start gap-3 rounded-xl border border-border/40 bg-muted/30 p-4">
@@ -753,7 +817,9 @@ export function ProductVariantsSection({
                                                 <p className="text-[11px] font-medium leading-relaxed text-muted-foreground/80">
                                                     {isDesktopShell
                                                         ? t('products.form.localPathDesc', { defaultValue: 'Image will be stored locally on this device.' })
-                                                        : t('products.form.webUploadDesc', { defaultValue: 'Image will be securely uploaded and synced via cloud storage.' })}
+                                                        : isLocalWorkspaceMode(workspaceId)
+                                                            ? t('products.form.imageErrors.cloud_required', { defaultValue: 'Product images need cloud storage in this workspace.' })
+                                                            : t('products.form.webUploadDesc', { defaultValue: 'Image will be securely uploaded and synced via cloud storage.' })}
                                                 </p>
                                             </div>
 
@@ -764,7 +830,7 @@ export function ProductVariantsSection({
                                 </section>
                             </div>
                         </DialogBody>
-                        <DialogFooter layout="structured" className="shrink-0 bg-muted/15 px-6 py-4 sm:px-8"><Button type="button" variant="outline" onClick={() => handleCreateDialogOpenChange(false)} disabled={isCreating} className="h-11 rounded-xl">{t('common.cancel', { defaultValue: 'Cancel' })}</Button><Button type="submit" disabled={isCreating || (priceBooksEnabled && !isPriceBookCatalogReady)} className="h-11 gap-2 rounded-xl">{isCreating && <Loader2 className="h-4 w-4 animate-spin" />}{t('products.variants.create', { defaultValue: 'Create Variant' })}</Button></DialogFooter>
+                        <DialogFooter layout="structured" className="shrink-0 bg-muted/15 px-6 py-4 sm:px-8"><Button type="button" variant="outline" onClick={() => handleCreateDialogOpenChange(false)} disabled={isCreating || isImageProcessing} className="h-11 rounded-xl">{t('common.cancel', { defaultValue: 'Cancel' })}</Button><Button type="submit" disabled={isCreating || isImageProcessing || (priceBooksEnabled && !isPriceBookCatalogReady)} className="h-11 gap-2 rounded-xl">{(isCreating || isImageProcessing) && <Loader2 className="h-4 w-4 animate-spin" />}{t('products.variants.create', { defaultValue: 'Create Variant' })}</Button></DialogFooter>
                     </form>
                 </DialogContent>
             </Dialog>

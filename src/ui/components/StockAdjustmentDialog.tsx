@@ -12,7 +12,7 @@ import {
 } from "@/local-db";
 import { isNonNegativeQuantity, quantitiesEqual, QUANTITY_EPSILON, roundQuantity } from "@/lib/quantity";
 import { cn, formatNumericInput, parseFormattedNumber, sanitizeNumericInput } from "@/lib/utils";
-import { platformService } from "@/services/platformService";
+import { getProductImageDisplayUrl } from "@/lib/productImageStorage";
 import { ProductAutocompleteInput } from "@/ui/components/orders/ProductAutocompleteInput";
 import { ProductsViewModal, ProductsViewModalTrigger } from "@/ui/components/ProductsViewModal";
 import {
@@ -372,7 +372,7 @@ export function StockAdjustmentDialog({
                                             <div className="flex items-center gap-3 rounded-xl border bg-muted/30 px-4 py-3">
                                                 <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/40">
                                                     {product?.imageUrl ? (
-                                                        <img src={platformService.convertFileSrc(product.imageUrl)} alt={product.name} className="h-full w-full object-cover" />
+                                                        <img src={getProductImageDisplayUrl(product.imageUrl)} alt={product.name} className="h-full w-full object-cover" />
                                                     ) : (
                                                         <Package className="h-5 w-5 text-muted-foreground" />
                                                     )}

@@ -27,6 +27,7 @@ import { supabase } from '@/auth/supabase'
 import { useDateRange, type DateRangeType } from '@/context/DateRangeContext'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { getLanguageDirection } from '@/lib/i18nRouting'
+import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import {
     getMarketplaceOrderDisplayStatus,
     type MarketplaceSalesOrderReturnStatus
@@ -267,7 +268,8 @@ function EcommerceProductMosaic({ items }: { items: MarketplaceOrderItemRecord[]
             aria-label={products.map((item) => item.name).join(', ')}
         >
             {products.map((item, index) => {
-                const hasImage = Boolean(item.image_url && !failedProductIds.has(item.product_id))
+                const imageUrl = getProductImageDisplayUrl(item.image_url)
+                const hasImage = Boolean(imageUrl && !failedProductIds.has(item.product_id))
                 const hasStartDivider = products.length === 2
                     ? index === 1
                     : products.length === 3
@@ -287,7 +289,7 @@ function EcommerceProductMosaic({ items }: { items: MarketplaceOrderItemRecord[]
                     >
                         {hasImage ? (
                             <img
-                                src={item.image_url as string}
+                                src={imageUrl}
                                 alt={item.name}
                                 loading="lazy"
                                 decoding="async"

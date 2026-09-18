@@ -13,7 +13,7 @@ import { OrderConfirmation } from '../../components/OrderConfirmation'
 import { useCart } from '../../hooks/useCart'
 import { usePageMeta } from '../../hooks/usePageMeta'
 import { useStoreCatalog } from '../../hooks/useStoreCatalog'
-import { getMarketplaceAssetUrl } from '../../lib/assets'
+import { getMarketplaceAssetUrl, getMarketplaceProductImageUrl } from '../../lib/assets'
 import { getEffectiveStorefrontRules } from '../rules'
 import {
     placeInquiryOrder,
@@ -262,7 +262,7 @@ function PosProductCard({
     onAdd?: (product: MarketplaceProduct) => void
 }) {
     const { t } = useTranslation()
-    const imageUrl = getMarketplaceAssetUrl(product.image_url)
+    const imageUrl = getMarketplaceProductImageUrl(product.image_url)
     const [hasImageError, setHasImageError] = useState(false)
     const hasDiscount = typeof product.discount_price === 'number' && product.discount_price < product.price
 
@@ -438,7 +438,7 @@ function PosCartContent({ cart, storeCurrency, iqdPreference, checkoutMode, setC
         <div className="space-y-3">
             <div className="space-y-3">
                 {cart.items.map((item) => {
-                    const itemImageUrl = getMarketplaceAssetUrl(item.image_url)
+                    const itemImageUrl = getMarketplaceProductImageUrl(item.image_url)
 
                     return (
                         <div key={item.product_id} className="flex gap-4 rounded-xl border border-border bg-card p-3">

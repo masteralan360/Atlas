@@ -12,6 +12,8 @@ import {
     Images,
     ImagePlus,
     Info,
+    Link,
+    LoaderCircle,
     Package,
     Plus,
     Ruler,
@@ -60,7 +62,13 @@ import type { CurrencyCode } from '@/local-db/models'
 import { assetManager } from '@/lib/assetManager'
 import { normalizeBarcodeDigits, normalizeBarcodeScannerText } from '@/lib/barcodeScanner'
 import { getClipboardImageFile } from '@/lib/clipboardImage'
-import { storeProductImageFile } from '@/lib/productImageStorage'
+import {
+    getProductImageDisplayUrl,
+    importProductImageFromUrl,
+    isProductImagePath,
+    ProductImageStorageError,
+    storeProductImageFile
+} from '@/lib/productImageStorage'
 import { generateRandomUpc } from '@/lib/upc'
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
@@ -279,7 +287,7 @@ function mapProductToFormData(product: Product, hideCosts = false): ProductFormD
         unit: normalizeUnitCode(product.unit) || 'pcs',
         perQuantity: '1',
         currency: product.currency,
-        imageUrl: product.imageUrl || '',
+        imageUrl: isProductImagePath(product.imageUrl) ? product.imageUrl : '',
         canBeReturned: product.canBeReturned ?? true,
         returnRules: product.returnRules || '',
         storageId: product.storageId || ''
@@ -378,6 +386,8 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const [isSaving, setIsSaving] = useState(false)
     const [overrideAttention, setOverrideAttention] = useState(false)
     const [imageError, setImageError] = useState(false)
+    const [externalImageUrl, setExternalImageUrl] = useState('')
+    const [isImageProcessing, setIsImageProcessing] = useState(false)
     const [storageError, setStorageError] = useState(false)
     const [returnRulesModalOpen, setReturnRulesModalOpen] = useState(false)
     const [visualsModalOpen, setVisualsModalOpen] = useState(false)
@@ -401,6 +411,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const newBarcodeInputRef = useRef<HTMLInputElement>(null)
     const cameraInputRef = useRef<HTMLInputElement>(null)
     const imageUploadInputRef = useRef<HTMLInputElement>(null)
+    const pendingImportedImagePathRef = useRef<string | null>(null)
     const initializedKeyRef = useRef<string | null>(null)
     const initialFormSnapshotRef = useRef<string | null>(null)
     const initializedPriceBookRowsKeyRef = useRef<string | null>(null)
@@ -480,6 +491,14 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     useEffect(() => {
         createdProductIdRef.current = null
     }, [mode, productId])
+
+    useEffect(() => () => {
+        const pendingPath = pendingImportedImagePathRef.current
+        if (!pendingPath) return
+        assetManager.deleteAsset(pendingPath).catch((error) =>
+            console.error('[Products] Failed to clean up abandoned imported image:', error)
+        )
+    }, [])
 
     useEffect(() => {
         setProductHydrationResolved(false)
@@ -661,21 +680,54 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         }
     }
 
-    const getDisplayImageUrl = (url?: string) => {
-        if (!url) return ''
-        if (url.startsWith('http')) return url
-        return platformService.convertFileSrc(url)
+    const getDisplayImageUrl = (url?: string) => getProductImageDisplayUrl(url)
+
+    const releasePendingImportedImage = (path = pendingImportedImagePathRef.current) => {
+        if (!path) return
+        if (pendingImportedImagePathRef.current === path) {
+            pendingImportedImagePathRef.current = null
+        }
+        assetManager.deleteAsset(path).catch((error) =>
+            console.error('[Products] Failed to clean up imported image:', error)
+        )
+    }
+
+    const setProductImagePath = (path: string, imported = false) => {
+        const previousImportedPath = pendingImportedImagePathRef.current
+        if (previousImportedPath && previousImportedPath !== path) {
+            releasePendingImportedImage(previousImportedPath)
+        }
+        pendingImportedImagePathRef.current = imported ? path : null
+        setFormData((current) => ({ ...current, imageUrl: path }))
+        setImageError(false)
+    }
+
+    const showProductImageErrorToast = (error: unknown) => {
+        const code = error instanceof ProductImageStorageError ? error.code : 'import_failed'
+        const defaultMessages: Record<string, string> = {
+            invalid_url: 'Enter a valid public image URL.',
+            cloud_required: 'Product images need cloud storage in this workspace.',
+            unsupported_image: 'Choose a JPEG, PNG, WebP, GIF, or AVIF image.',
+            image_too_large: 'The image must be 10 MB or smaller.',
+            image_decode_failed: 'This file could not be decoded as an image.',
+            image_processing_failed: 'The image could not be optimized.',
+            upload_failed: 'The image could not be uploaded to cloud storage.',
+            import_failed: 'The image could not be downloaded from that URL.'
+        }
+        toast({
+            title: t('products.form.imageImportErrorTitle', { defaultValue: 'Image import failed' }),
+            description: t(`products.form.imageErrors.${code}`, { defaultValue: defaultMessages[code] }),
+            variant: 'destructive'
+        })
     }
 
     const handleImageUpload = async () => {
-        if (!canEdit) return
+        if (!canEdit || isImageProcessing) return
 
         if (isDesktopShell) {
             const targetPath = await platformService.pickAndSaveImage(workspaceId)
             if (targetPath) {
-                setFormData((current) => ({ ...current, imageUrl: targetPath }))
-                setImageError(false)
-
+                setProductImagePath(targetPath)
                 assetManager.uploadFromPath(targetPath).catch(console.error)
             }
             return
@@ -685,10 +737,35 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     }
 
     const handleFileSelected = async (file: File) => {
-        const targetPath = await storeProductImageFile(file, workspaceId)
-        if (targetPath) {
-            setFormData((current) => ({ ...current, imageUrl: targetPath }))
-            setImageError(false)
+        if (isImageProcessing) return
+        setIsImageProcessing(true)
+        try {
+            const targetPath = await storeProductImageFile(file, workspaceId)
+            if (targetPath) setProductImagePath(targetPath)
+        } catch (error) {
+            showProductImageErrorToast(error)
+        } finally {
+            setIsImageProcessing(false)
+        }
+    }
+
+    const handleImportProductImage = async () => {
+        if (!canEdit || isImageProcessing || !externalImageUrl.trim()) return
+        setIsImageProcessing(true)
+        try {
+            const targetPath = await importProductImageFromUrl(externalImageUrl, workspaceId)
+            setProductImagePath(targetPath, true)
+            setExternalImageUrl('')
+            toast({
+                title: t('products.form.imageImportSuccessTitle', { defaultValue: 'Image imported' }),
+                description: isDesktopShell
+                    ? t('products.form.imageImportSuccessLocal', { defaultValue: 'The image was saved locally on this device.' })
+                    : t('products.form.imageImportSuccess', { defaultValue: 'The image was optimized and saved to cloud storage.' })
+            })
+        } catch (error) {
+            showProductImageErrorToast(error)
+        } finally {
+            setIsImageProcessing(false)
         }
     }
 
@@ -715,7 +792,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     }
 
     const handleVisualsPaste = async (event: React.ClipboardEvent<HTMLDivElement>) => {
-        if (!canEdit) return
+        if (!canEdit || isImageProcessing) return
 
         const file = getClipboardImageFile(event.clipboardData)
         if (!file) return
@@ -731,6 +808,9 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
 
         try {
             await assetManager.deleteAsset(formData.imageUrl)
+            if (pendingImportedImagePathRef.current === formData.imageUrl) {
+                pendingImportedImagePathRef.current = null
+            }
             setFormData((current) => ({ ...current, imageUrl: '' }))
             setImageError(false)
         } catch (error) {
@@ -984,7 +1064,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     }
 
     const persistProduct = async ({ navigateAfterSave = true }: { navigateAfterSave?: boolean } = {}) => {
-        if (!workspaceId || !canEdit) {
+        if (!workspaceId || !canEdit || isImageProcessing) {
             return false
         }
 
@@ -1055,6 +1135,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                 storageName: storageName || undefined,
                 categoryId: formData.categoryId || null,
                 storageId: formData.storageId || null,
+                imageUrl: isProductImagePath(formData.imageUrl) ? formData.imageUrl : '',
                 price: isDynamicUnit(formData.unit)
                     ? (Number(formData.price) || 0) / (Number(formData.perQuantity) || 1)
                     : Number(formData.price) || 0,
@@ -1089,6 +1170,10 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                 savedProductId = createdProduct.id
                 demoTutorial.completeProductCreated(createdProduct)
             }
+
+            // The database now owns this imported object even if a later
+            // optional price-book/commission save needs to be retried.
+            pendingImportedImagePathRef.current = null
 
             if (priceBooksEnabled) {
                 const savedItems = await replaceProductPriceBookItems(
@@ -1325,7 +1410,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                         <Button
                             type="submit"
                             form="product-form-page"
-                            disabled={isSaving || (priceBooksEnabled && !isPriceBookCatalogReady) || Boolean(productCommissionValidationMessage)}
+                            disabled={isSaving || isImageProcessing || (priceBooksEnabled && !isPriceBookCatalogReady) || Boolean(productCommissionValidationMessage)}
                             className="h-10 gap-2 px-4 font-bold"
                             data-tour-id="tutorial-product-save"
                         >
@@ -2306,7 +2391,12 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                         />
                     )}
 
-                    <Dialog open={visualsModalOpen} onOpenChange={setVisualsModalOpen}>
+                    <Dialog
+                        open={visualsModalOpen}
+                        onOpenChange={(nextOpen) => {
+                            if (!isImageProcessing) setVisualsModalOpen(nextOpen)
+                        }}
+                    >
                         <DialogContent
                             className="max-h-[calc(100dvh-2rem)] w-[calc(100vw-1rem)] max-w-3xl overflow-y-auto rounded-2xl border-border/60 p-0 sm:w-[calc(100vw-2rem)]"
                             onPaste={handleVisualsPaste}
@@ -2379,49 +2469,67 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                         )}
                                     </div>
 
-                                    <div className="w-full flex-1 space-y-4">
-                                        <div className="space-y-2">
-                                            <Label htmlFor="product-image-url" className="flex items-center gap-2 font-bold">
-                                                <Info className="h-4 w-4 text-primary/60" />
-                                                {t('products.form.imageUrl') || 'Image Source'}
-                                            </Label>
-                                            <div className="flex flex-col gap-3 sm:flex-row">
-                                                <Input
-                                                    id="product-image-url"
-                                                    value={formData.imageUrl}
-                                                    onChange={(event) => {
-                                                        setFormData((current) => ({ ...current, imageUrl: event.target.value }))
-                                                        setImageError(false)
-                                                    }}
-                                                    placeholder={t('products.form.imageUrlPlaceholder') || 'Image URL or local path'}
-                                                    readOnly={isReadOnly}
-                                                    className="h-12 flex-1 rounded-xl border-border/80 bg-background/80 shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50"
-                                                />
-                                                {!isReadOnly && (
-                                                    <div className="flex gap-2">
+                                        <div className="w-full flex-1 space-y-4">
+                                        {(isDesktopShell || !isLocalWorkspaceMode(workspaceId)) && (
+                                            <div className="space-y-2">
+                                                <Label htmlFor="product-image-url" className="flex items-center gap-2 font-bold">
+                                                    <Link className="h-4 w-4 text-primary/60" />
+                                                    {t('products.form.importImageUrl', { defaultValue: 'Import image from URL' })}
+                                                </Label>
+                                                <div className="flex flex-col gap-3 sm:flex-row">
+                                                    <Input
+                                                        id="product-image-url"
+                                                        value={externalImageUrl}
+                                                        onChange={(event) => setExternalImageUrl(event.target.value)}
+                                                        placeholder={t('products.form.imageUrlPlaceholder', { defaultValue: 'Paste a public image URL...' })}
+                                                        readOnly={isReadOnly || isImageProcessing}
+                                                        className="h-12 flex-1 rounded-xl border-border/80 bg-background/80 shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50"
+                                                    />
+                                                    {!isReadOnly && (
                                                         <Button
                                                             type="button"
                                                             variant="outline"
-                                                            onClick={handleImageUpload}
+                                                            onClick={handleImportProductImage}
+                                                            disabled={isImageProcessing || !externalImageUrl.trim()}
                                                             className="h-12 gap-2 rounded-lg border-primary/20 px-6 font-bold"
                                                         >
-                                                            <ImagePlus className="h-4 w-4" />
-                                                            {t('products.form.upload') || 'Upload'}
+                                                            {isImageProcessing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Link className="h-4 w-4" />}
+                                                            {isImageProcessing
+                                                                ? t('products.form.importingImage', { defaultValue: 'Importing...' })
+                                                                : t('products.form.importImage', { defaultValue: 'Import' })}
                                                         </Button>
-                                                        <Button
-                                                            type="button"
-                                                            variant="outline"
-                                                            aria-label={t('products.form.camera') || 'Camera'}
-                                                            onClick={() => cameraInputRef.current?.click()}
-                                                            className="h-12 gap-2 rounded-lg border-primary/20 px-4 font-bold text-primary sm:px-6"
-                                                        >
-                                                            <Camera className="h-4 w-4" />
-                                                            <span className="hidden sm:inline">{t('products.form.camera') || 'Camera'}</span>
-                                                        </Button>
-                                                    </div>
-                                                )}
+                                                    )}
+                                                </div>
                                             </div>
-                                        </div>
+                                        )}
+
+                                        {!isReadOnly && (
+                                            <div className="flex flex-wrap gap-2">
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    onClick={handleImageUpload}
+                                                    disabled={isImageProcessing || (!isDesktopShell && isLocalWorkspaceMode(workspaceId))}
+                                                    className="h-12 gap-2 rounded-lg border-primary/20 px-6 font-bold"
+                                                >
+                                                    {isImageProcessing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+                                                    {isImageProcessing
+                                                        ? t('products.form.processingImage', { defaultValue: 'Processing...' })
+                                                        : t('products.form.upload', { defaultValue: 'Upload' })}
+                                                </Button>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    aria-label={t('products.form.camera') || 'Camera'}
+                                                    onClick={() => cameraInputRef.current?.click()}
+                                                    disabled={isImageProcessing || (!isDesktopShell && isLocalWorkspaceMode(workspaceId))}
+                                                    className="h-12 gap-2 rounded-lg border-primary/20 px-4 font-bold text-primary sm:px-6"
+                                                >
+                                                    <Camera className="h-4 w-4" />
+                                                    <span className="hidden sm:inline">{t('products.form.camera') || 'Camera'}</span>
+                                                </Button>
+                                            </div>
+                                        )}
 
                                         <div className="flex items-start gap-3 rounded-xl border border-border/40 bg-muted/30 p-4">
                                             <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
@@ -2429,6 +2537,8 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                 <p>
                                                     {isDesktopShell
                                                         ? (t('products.form.localPathDesc') || 'Image will be stored locally on this device and synced to other devices in your workspace.')
+                                                        : isLocalWorkspaceMode(workspaceId)
+                                                            ? t('products.form.imageErrors.cloud_required', { defaultValue: 'Product images need cloud storage in this workspace.' })
                                                         : (t('products.form.webUploadDesc') || 'Image will be securely uploaded and synced via cloud storage.')}
                                                 </p>
                                                 {!isReadOnly && <p>{t('products.form.pasteImageHint')}</p>}
@@ -2523,7 +2633,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                 <Button
                                     type="submit"
                                     form="product-form-page"
-                                    disabled={isSaving || (priceBooksEnabled && !isPriceBookCatalogReady) || Boolean(productCommissionValidationMessage)}
+                                    disabled={isSaving || isImageProcessing || (priceBooksEnabled && !isPriceBookCatalogReady) || Boolean(productCommissionValidationMessage)}
                                     className="h-12 w-full rounded-xl font-black"
                                     data-tour-id="tutorial-product-save"
                                 >
@@ -2666,7 +2776,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                     {t('common.unsavedChanges.continue') || 'Continue Editing'}
                                 </Button>
                                 <Button
-                                    disabled={isSaving || (priceBooksEnabled && !isPriceBookCatalogReady) || Boolean(productCommissionValidationMessage)}
+                                    disabled={isSaving || isImageProcessing || (priceBooksEnabled && !isPriceBookCatalogReady) || Boolean(productCommissionValidationMessage)}
                                     onClick={async () => {
                                         const didSave = await persistProduct({ navigateAfterSave: false })
                                         if (didSave) {

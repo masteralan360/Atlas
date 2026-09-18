@@ -30,6 +30,7 @@ import {
 } from '@/lib/marketplaceOrderPresentation'
 import { ORDER_STATUS_ADVANCE_HOLD_DURATION_MS } from '@/lib/pressAndHold'
 import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
+import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { buildWorkflowGradientFill } from '@/lib/workflowProgressGradient'
 import { generateJumlaKhaleejInquiryPdf } from '@/lib/jumlaKhaleejInquiryPdf'
 import { setPDFPreviewSource } from '@/lib/pdfPreviewStore'
@@ -298,7 +299,7 @@ export function EcommerceDetailView({
                                     <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/60 bg-muted/40">
                                         {item.image_url ? (
                                             <img
-                                                src={item.image_url}
+                                                src={getProductImageDisplayUrl(item.image_url)}
                                                 alt=""
                                                 className="h-full w-full object-contain p-1"
                                                 loading="lazy"
@@ -333,7 +334,7 @@ export function EcommerceDetailView({
                             <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/60 bg-muted/40">
                                 {item.image_url ? (
                                     <img
-                                        src={item.image_url}
+                                        src={getProductImageDisplayUrl(item.image_url)}
                                         alt=""
                                         className="h-full w-full object-contain p-1"
                                         loading="lazy"

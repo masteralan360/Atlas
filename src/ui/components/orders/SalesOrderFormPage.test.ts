@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { clearSalesItemProductForServicesStorage } from '@/lib/salesOrderLineStorage'
+import {
+    clearSalesItemProductForServicesStorage,
+    getPersistedSalesOrderItemStorageId,
+    getSalesOrderFormItemStorageId
+} from '@/lib/salesOrderLineStorage'
 
 describe('clearSalesItemProductForServicesStorage', () => {
     it('clears the selected product and selling-price fields while preserving the rest of the line', () => {
@@ -38,5 +42,13 @@ describe('clearSalesItemProductForServicesStorage', () => {
             priceSourceCurrency: '',
             priceBookCostPrice: ''
         })
+    })
+
+    it('keeps the Services location in the form but never in the saved order line', () => {
+        const service = { isService: true }
+
+        expect(getSalesOrderFormItemStorageId(service, null, 'storage-1')).toBe('__atlas_services__')
+        expect(getPersistedSalesOrderItemStorageId(service, '__atlas_services__')).toBeNull()
+        expect(getPersistedSalesOrderItemStorageId({ isService: false }, 'storage-1')).toBe('storage-1')
     })
 })

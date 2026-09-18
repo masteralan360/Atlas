@@ -10,20 +10,16 @@ Price books selector order form and quick order
 
 Jumla-Khaleej App
 
-A4 Different Canvas
-
 Revenue Analytics and accounting
 
 Multi-Color Partner
-
 Balance Color Settings
-
 Context-menu partner account statement & invoice redirect
-
 Accumilated account statement rows by types and for one day
 
-Centralized Photo Compression
+
 ##
 
+Centralized Photo Compression
 Simplify E-commerce
 Restrict Phone number in khaleej cosmetic

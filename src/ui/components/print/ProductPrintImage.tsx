@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import { cn } from '@/lib/utils'
-import { platformService } from '@/services/platformService'
+import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 
 /**
  * Product image paths are deliberately passed into print templates separately
@@ -11,11 +11,7 @@ import { platformService } from '@/services/platformService'
 export type ProductPrintImageUrls = Record<string, string | null | undefined>
 
 function resolveProductPrintImageSrc(imageUrl?: string | null) {
-    if (!imageUrl) return null
-    if (imageUrl.startsWith('http') || imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) {
-        return imageUrl
-    }
-    return platformService.convertFileSrc(imageUrl)
+    return getProductImageDisplayUrl(imageUrl) || null
 }
 
 interface ProductPrintImageProps {

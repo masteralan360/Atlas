@@ -7,7 +7,7 @@ import { cn, formatCurrency } from '@/lib/utils'
 import { usePageMeta } from '../../hooks/usePageMeta'
 import { MarketplaceVirtualGrid } from '../../components/MarketplaceVirtualGrid'
 import { useStoreCatalog } from '../../hooks/useStoreCatalog'
-import { getMarketplaceAssetUrl } from '../../lib/assets'
+import { getMarketplaceAssetUrl, getMarketplaceProductImageUrl } from '../../lib/assets'
 import { StoreQrDialog } from '../../components/StoreQrDialog'
 import type { MarketplaceCategory, MarketplaceProduct } from '../../lib/marketplaceApi'
 import type { StorefrontTemplate, StorefrontTemplatePageProps } from '../types'
@@ -67,7 +67,7 @@ function BarbadosMenuCard({
     hidePrice: boolean
     iqdPreference: 'IQD' | 'د.ع'
 }) {
-    const imageUrl = getMarketplaceAssetUrl(product.image_url)
+    const imageUrl = getMarketplaceProductImageUrl(product.image_url)
     const [hasImageError, setHasImageError] = useState(false)
     const hasDiscount = typeof product.discount_price === 'number' && product.discount_price < product.price
 
@@ -152,7 +152,7 @@ function BarbadosMenuPage({ slug, rules }: StorefrontTemplatePageProps) {
         defaultValue: 'Browse the menu and find something you will enjoy.'
     })
     const logoUrl = getMarketplaceAssetUrl(catalog?.store.logo_url)
-    const heroImageUrl = getMarketplaceAssetUrl(catalog?.products.find((product) => product.image_url)?.image_url)
+    const heroImageUrl = getMarketplaceProductImageUrl(catalog?.products.find((product) => product.image_url)?.image_url)
     const activeCategoryName = activeCategoryId
         ? categories.find((category) => category.id === activeCategoryId)?.name
         : undefined

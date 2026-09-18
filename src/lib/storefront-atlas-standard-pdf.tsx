@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 
 import type { CartItem, CustomerForm } from '@/components/storefront-ui-types'
+import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { getJumlaKhaleejDeliveryCity } from '@/lib/storefront-delivery'
 import { storefrontApiUrl } from '@/lib/storefront-runtime'
 import './storefront-atlas-standard-pdf.css'
@@ -302,8 +303,9 @@ function AtlasFieldsSection({ fields, fieldOrder, className }: { fields: PrintFi
 
 function ProductImage({ item }: { item: CartItem }) {
   const fallback = fallbackImageDataUrl(item.name.slice(0, 1).toUpperCase())
-  return item.image_url
-    ? <img className="storefront-atlas-product-image" src={fallback} data-inquiry-product-id={item.product_id} data-inquiry-image-url={item.image_url} data-inquiry-fallback={item.name.slice(0, 1).toUpperCase()} alt="" />
+  const imageUrl = getProductImageDisplayUrl(item.image_url)
+  return imageUrl
+    ? <img className="storefront-atlas-product-image" src={fallback} data-inquiry-product-id={item.product_id} data-inquiry-image-url={imageUrl} data-inquiry-fallback={item.name.slice(0, 1).toUpperCase()} alt="" />
     : <span className="storefront-atlas-product-image placeholder">{item.name.slice(0, 1).toUpperCase()}</span>
 }
 

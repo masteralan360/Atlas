@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Minus, PackageSearch, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn, formatCurrency } from '@/lib/utils'
+import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { useWorkspace } from '@/workspace'
 import {
     Button,
@@ -222,7 +223,7 @@ export function EditMarketplaceOrderItemsDialog({
                             <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/60 bg-muted/40">
                                 {group.imageUrl ? (
                                     <img
-                                        src={group.imageUrl}
+                                        src={getProductImageDisplayUrl(group.imageUrl)}
                                         alt=""
                                         className="h-full w-full object-contain p-1"
                                         loading="lazy"

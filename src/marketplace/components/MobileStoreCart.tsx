@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Button, Card, CardContent } from '@/ui/components'
 import { cn, formatCurrency } from '@/lib/utils'
-import { getMarketplaceAssetUrl } from '../lib/assets'
+import { getMarketplaceProductImageUrl } from '../lib/assets'
 import { CheckoutForm } from './CheckoutForm'
 import type { MarketplaceOrderCustomer } from '../lib/marketplaceApi'
 
@@ -231,7 +231,7 @@ export function MobileStoreCart({
                         ) : (
                             <div className="space-y-3">
                                 {items.map((item) => {
-                                    const itemImageUrl = getMarketplaceAssetUrl(item.image_url)
+                                    const itemImageUrl = getMarketplaceProductImageUrl(item.image_url)
 
                                     return (
                                         <Card key={item.product_id} className="border-border/60 bg-card/70 shadow-sm rounded-3xl overflow-hidden">

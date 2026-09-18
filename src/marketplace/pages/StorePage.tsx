@@ -29,7 +29,7 @@ import { StoreQrDialog } from '../components/StoreQrDialog'
 import { useCart } from '../hooks/useCart'
 import { usePageMeta } from '../hooks/usePageMeta'
 import { useStoreCatalog } from '../hooks/useStoreCatalog'
-import { getMarketplaceAssetUrl } from '../lib/assets'
+import { getMarketplaceProductImageUrl } from '../lib/assets'
 import { placeInquiryOrder, type MarketplaceProduct } from '../lib/marketplaceApi'
 import { getEffectiveStorefrontRules } from '../templates/rules'
 import type { StorefrontRules } from '../templates/types'
@@ -447,7 +447,7 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
                                         <>
                                             <div className="space-y-3">
                                                 {cart.items.map((item) => {
-                                                    const itemImageUrl = getMarketplaceAssetUrl(item.image_url)
+                                                    const itemImageUrl = getMarketplaceProductImageUrl(item.image_url)
 
                                                     return (
                                                         <Card key={item.product_id} className="border-border/60 bg-card/70">

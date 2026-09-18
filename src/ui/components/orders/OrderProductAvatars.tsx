@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Package } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { platformService } from '@/services/platformService'
+import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 
 export type OrderMosaicItem = {
     productId: string
@@ -10,8 +10,7 @@ export type OrderMosaicItem = {
 }
 
 function getOrderProductImageSource(imageUrl?: string) {
-    if (!imageUrl) return ''
-    return /^(https?:|data:|blob:)/i.test(imageUrl) ? imageUrl : platformService.convertFileSrc(imageUrl)
+    return getProductImageDisplayUrl(imageUrl)
 }
 
 export function OrderProductMosaic({ items, productImageUrls }: { items: OrderMosaicItem[]; productImageUrls: Record<string, string> }) {

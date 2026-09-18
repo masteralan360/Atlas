@@ -6,7 +6,7 @@ import { useProductSelectionAccess, type Product } from '@/local-db'
 import { useOptionalAuth } from '@/auth'
 import { Input, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/components'
 import { cn } from '@/lib/utils'
-import { platformService } from '@/services/platformService'
+import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { AutocompletePopover } from '@/ui/components/AutocompletePopover'
 
 interface ProductAutocompleteInputProps {
@@ -30,12 +30,7 @@ interface ProductAutocompleteInputProps {
     isLoading?: boolean
 }
 
-function getDisplayImageUrl(url?: string): string {
-    if (!url) return ''
-    if (url.startsWith('http')) return url
-    if (url.startsWith('data:')) return url
-    return platformService.convertFileSrc(url)
-}
+const getDisplayImageUrl = getProductImageDisplayUrl
 
 function ProductThumbnail({ url, name }: { url?: string; name: string }) {
     const [loadError, setLoadError] = useState(false)

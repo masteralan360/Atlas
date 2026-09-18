@@ -1424,6 +1424,54 @@ describe('fullSync error reporting', () => {
         expect(dbMock.rows[0]).toMatchObject({ status: 'synced' })
     })
 
+    it('syncs a legacy service order without sending the virtual Services storage as a UUID', async () => {
+        supabaseMock.orderUpsert.mockReturnValueOnce({
+            select: vi.fn(async () => ({
+                data: [{ id: 'sales-order-service-1', order_number: 'SO-2026-00052' }],
+                error: null
+            }))
+        })
+        dbMock.rows.push({
+            id: 'sales-order-service-mutation',
+            workspaceId: 'workspace-1',
+            entityType: 'sales_orders',
+            entityId: 'sales-order-service-1',
+            operation: 'create',
+            payload: {
+                id: 'sales-order-service-1',
+                workspaceId: 'workspace-1',
+                orderNumber: 'SO-PENDING-LOCAL',
+                items: [{
+                    productId: 'service-product-1',
+                    storageId: '__atlas_services__',
+                    quantity: 1
+                }],
+                version: 1
+            },
+            createdAt: '2026-09-18T00:00:00.000Z',
+            status: 'pending'
+        })
+
+        const result = await fullSync('user-1', 'workspace-1', null)
+
+        expect(result.success).toBe(true)
+        expect(supabaseMock.orderUpsert).toHaveBeenCalledWith(expect.objectContaining({
+            items: [{
+                productId: 'service-product-1',
+                storageId: null,
+                quantity: 1
+            }]
+        }))
+        expect(dbMock.salesOrders.update).toHaveBeenCalledWith(
+            'sales-order-service-1',
+            expect.objectContaining({
+                orderNumber: 'SO-2026-00052',
+                syncStatus: 'synced'
+            })
+        )
+        expect(dbMock.rows[0]).toMatchObject({ status: 'synced' })
+    })
+
     it('preserves an invoice order link when pushing an offline mutation', async () => {
         supabaseMock.upsert.mockResolvedValueOnce({ data: null, error: null })
         dbMock.rows.push({

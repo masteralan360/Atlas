@@ -4,7 +4,7 @@ import { Package2, Plus } from 'lucide-react'
 import { Button, Card, CardContent } from '@/ui/components'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import type { MarketplaceProduct } from '../lib/marketplaceApi'
-import { getMarketplaceAssetUrl } from '../lib/assets'
+import { getMarketplaceProductImageUrl } from '../lib/assets'
 
 type ProductCardProps = {
     product: MarketplaceProduct
@@ -23,7 +23,7 @@ export function ProductCard({
     showPrice = true,
     showAddToCart = true
 }: ProductCardProps) {
-    const resolvedImageUrl = getMarketplaceAssetUrl(product.image_url)
+    const resolvedImageUrl = getMarketplaceProductImageUrl(product.image_url)
     const [hasImageError, setHasImageError] = useState(false)
     const hasDiscount = typeof product.discount_price === 'number' && product.discount_price < product.price
     const endsAt = product.discount_ends_at ? new Date(product.discount_ends_at) : null

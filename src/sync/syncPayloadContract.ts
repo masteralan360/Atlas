@@ -1,3 +1,4 @@
+import { SERVICES_VIRTUAL_STORAGE_ID } from "@/lib/catalogItem";
 import { getSchemaMismatchColumnName } from "./syncErrors";
 
 /**
@@ -85,6 +86,26 @@ function toSnakeCase(payload: Record<string, unknown>): Record<string, unknown> 
   return result;
 }
 
+/**
+ * `__atlas_services__` is a client-only selector value, not a storage UUID.
+ * Strip it from queued orders created by older desktop clients before sending
+ * their JSONB line items to Supabase.
+ */
+function removeServicesVirtualStorageFromOrderItems(
+  remotePayload: Record<string, unknown>,
+): void {
+  if (!Array.isArray(remotePayload.items)) return;
+
+  remotePayload.items = remotePayload.items.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+
+    const line = { ...(item as Record<string, unknown>) };
+    if (line.storageId === SERVICES_VIRTUAL_STORAGE_ID) line.storageId = null;
+    if (line.storage_id === SERVICES_VIRTUAL_STORAGE_ID) line.storage_id = null;
+    return line;
+  });
+}
+
 export function prepareRemoteMutationPayload(
   entityType: string,
   payload: Record<string, unknown>,
@@ -97,6 +118,10 @@ export function prepareRemoteMutationPayload(
   }
   for (const field of nonRemoteFields ?? []) {
     delete remotePayload[field];
+  }
+
+  if (entityType === "sales_orders") {
+    removeServicesVirtualStorageFromOrderItems(remotePayload);
   }
 
   if (FORCE_PRODUCT_SCHEMA_MISMATCH && entityType === "products") {

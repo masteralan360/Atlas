@@ -25,7 +25,11 @@ import {
 import { getOrderLineFreeBonusQuantity, hasOrderLineInventoryQuantity } from '@/lib/orderLineItems'
 import { ORDER_DECIMAL_STEP, roundOrderValue } from '@/lib/orderPrecision'
 import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
-import { clearSalesItemProductForServicesStorage } from '@/lib/salesOrderLineStorage'
+import {
+    clearSalesItemProductForServicesStorage,
+    getPersistedSalesOrderItemStorageId,
+    getSalesOrderFormItemStorageId
+} from '@/lib/salesOrderLineStorage'
 import {
     createSalesOrder,
     buildAgentCommissionObligations,
@@ -430,7 +434,11 @@ export function SalesOrderFormPage({
                     seq: idx + 1,
                     productId: item.productId,
                     productSearch: product?.name || '',
-                    storageId: item.storageId || editingOrder.sourceStorageId || defaultStorageId,
+                    storageId: getSalesOrderFormItemStorageId(
+                        product,
+                        item.storageId,
+                        editingOrder.sourceStorageId || defaultStorageId
+                    ),
                     quantity: String(item.quantity),
                     freeBonusQuantity: String(getOrderLineFreeBonusQuantity(item)),
                     freeBonusUnit: item.freeBonusUnit || '',
@@ -502,7 +510,11 @@ export function SalesOrderFormPage({
                 seq: idx + 1,
                 productId: item.productId,
                 productSearch: product?.name || '',
-                storageId: item.storageId || editingOrder.sourceStorageId || defaultStorageId,
+                storageId: getSalesOrderFormItemStorageId(
+                    product,
+                    item.storageId,
+                    editingOrder.sourceStorageId || defaultStorageId
+                ),
                 quantity: String(item.quantity),
                 freeBonusQuantity: String(getOrderLineFreeBonusQuantity(item)),
                 freeBonusUnit: item.freeBonusUnit || '',
@@ -1129,7 +1141,7 @@ export function SalesOrderFormPage({
                         note: item.note.trim() || null,
                         priceBookId: hasPriceBookProvenance ? item.priceBookId : null,
                         priceBookItemId: hasPriceBookProvenance ? item.priceBookItemId : null,
-                        storageId: service ? SERVICES_VIRTUAL_STORAGE_ID : item.storageId,
+                        storageId: getPersistedSalesOrderItemStorageId(product, item.storageId),
                         productName: product.name,
                         productSku: product.sku,
                         unit: product.unit,

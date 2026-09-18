@@ -14,7 +14,7 @@ import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogH
 import { AlertCircle, CheckCircle2, ChefHat, ChevronDown, ChevronRight, ChevronUp, Loader2, Menu, Minus, Package, Plus, Receipt, Search, ShoppingCart, StickyNote, Table2, Trash2 } from 'lucide-react'
 import { UiAccessGate } from '@/context/UiAccessContext'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
-import { platformService } from '@/services/platformService'
+import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { useKdsStream } from '@/hooks/useKdsStream'
 import { createVerificationSale, verifySale } from '@/lib/saleVerification'
 import { convertCurrencyAmountWithAvailableSnapshot } from '@/lib/orderCurrency'
@@ -2191,11 +2191,7 @@ export function InstantPOS() {
         }
     }
 
-    const getDisplayImageUrl = (url?: string) => {
-        if (!url) return ''
-        if (url.startsWith('http') || url.startsWith('data:')) return url
-        return platformService.convertFileSrc(url)
-    }
+    const getDisplayImageUrl = (url?: string) => getProductImageDisplayUrl(url)
 
     const checkoutSuccessModal = (
         <CheckoutSuccessModal

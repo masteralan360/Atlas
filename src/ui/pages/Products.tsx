@@ -33,7 +33,7 @@ import {
     type ProductImportSubmissionResult,
     type ProductImportValidationContext
 } from '@/lib/productImport'
-import { platformService } from '@/services/platformService'
+import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { useWorkspace } from '@/workspace'
 import { useHideCosts } from '@/permissions'
 import { hasValidProductCost } from '@/lib/productCost'
@@ -435,11 +435,7 @@ export function Products() {
         })
     }, [cloneTargets, selectedCloneTargetWorkspaceId])
 
-    const getDisplayImageUrl = (url?: string) => {
-        if (!url) return ''
-        if (url.startsWith('http')) return url
-        return platformService.convertFileSrc(url)
-    }
+    const getDisplayImageUrl = (url?: string) => getProductImageDisplayUrl(url)
 
     const getCategoryName = useCallback((id?: string | null) => {
         if (!id) return t('categories.noCategory')

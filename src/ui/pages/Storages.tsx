@@ -19,7 +19,7 @@ import { useTranslation } from 'react-i18next'
 import { useToast } from '@/ui/components/use-toast'
 import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle, StorageSelector, Switch, Tabs, TabsList, TabsTrigger, TabsContent, Select, SelectContent, SelectTrigger, SelectValue, SelectItem, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/components'
 import { formatCurrency, cn } from '@/lib/utils'
-import { platformService } from '@/services/platformService'
+import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { useDemoTutorial } from '@/demo'
 
 export default function Storages() {
@@ -265,11 +265,7 @@ const totalStorageValue = useMemo(() => {
         return byUnit
     }, [inventoryProducts])
 
-    const getDisplayImageUrl = (url?: string) => {
-        if (!url) return '';
-        if (url.startsWith('http')) return url;
-        return platformService.convertFileSrc(url);
-    }
+    const getDisplayImageUrl = (url?: string) => getProductImageDisplayUrl(url)
 
     const handleCreate = async () => {
         if (!activeWorkspace || !storageName.trim()) return
