@@ -8,11 +8,11 @@ import {
     hashMarketplaceValue,
     isMarketplaceOriginAllowed,
     normalizeMarketplaceLanguage,
-    resolvePublicAssetUrl,
     resolveStorefrontVisibleProductIds,
     sanitizeMarketplaceText,
     sanitizeNullableMarketplaceText
 } from '../_shared/marketplace.ts'
+import { getCanonicalProductImagePath } from '../_shared/productImagePath.ts'
 
 type PlaceInquiryOrderRequest = {
     store_slug?: string
@@ -377,7 +377,7 @@ Deno.serve(async (req) => {
                 quantity,
                 line_total: lineTotal,
                 cost_price: resolvedCostPrice,
-                image_url: resolvePublicAssetUrl(product.image_url),
+                image_url: getCanonicalProductImagePath(product.image_url),
                 storage_id: marketplaceStorageId,
                 discount_type: resolvedDiscount?.discount_type ?? null,
                 discount_value: resolvedDiscount?.discount_value ?? null,

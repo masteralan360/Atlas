@@ -28,6 +28,7 @@ import {
     getMarketplaceInventoryDisplayStatus,
     getMarketplaceOrderDisplayStatus
 } from '@/lib/marketplaceOrderPresentation'
+import { getMarketplaceProductImageUrl, type MarketplaceProductImageUrls } from '@/lib/marketplaceProductImages'
 import { ORDER_STATUS_ADVANCE_HOLD_DURATION_MS } from '@/lib/pressAndHold'
 import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
@@ -212,6 +213,7 @@ function MarketplaceInquiryPdfCard({ order }: { order: MarketplaceOrderRecord })
 
 export function EcommerceDetailView({
     order,
+    productImageUrls,
     isSaving,
     isOpeningCollection,
     onAdvance,
@@ -220,6 +222,7 @@ export function EcommerceDetailView({
     onSaveItems
 }: {
     order: MarketplaceOrderRecord
+    productImageUrls: MarketplaceProductImageUrls
     isSaving: boolean
     isOpeningCollection: boolean
     onAdvance: (nextStatus: MarketplaceOrderStatus) => Promise<void>
@@ -292,14 +295,18 @@ export function EcommerceDetailView({
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {displayItems.map((item, index) => (
-                        <TableRow key={`${item.product_id}-${index}`}>
+                    {displayItems.map((item, index) => {
+                        const imageUrl = getProductImageDisplayUrl(
+                            getMarketplaceProductImageUrl(item.product_id, productImageUrls)
+                        )
+
+                        return <TableRow key={`${item.product_id}-${index}`}>
                             <TableCell>
                                 <div className="flex items-center gap-3">
                                     <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/60 bg-muted/40">
-                                        {item.image_url ? (
+                                        {imageUrl ? (
                                             <img
-                                                src={getProductImageDisplayUrl(item.image_url)}
+                                                src={imageUrl}
                                                 alt=""
                                                 className="h-full w-full object-contain p-1"
                                                 loading="lazy"
@@ -319,7 +326,7 @@ export function EcommerceDetailView({
                                 {formatCurrency(item.line_total, item.currency, features.iqd_display_preference)}
                             </TableCell>
                         </TableRow>
-                    ))}
+                    })}
                 </TableBody>
             </Table>
         </div>
@@ -327,14 +334,18 @@ export function EcommerceDetailView({
 
     const renderGrid = () => (
         <div className="grid gap-4 md:grid-cols-2">
-            {displayItems.map((item, index) => (
-                <div key={`${item.product_id}-${index}`} className="rounded-3xl border bg-background/80 p-4 shadow-sm">
+            {displayItems.map((item, index) => {
+                const imageUrl = getProductImageDisplayUrl(
+                    getMarketplaceProductImageUrl(item.product_id, productImageUrls)
+                )
+
+                return <div key={`${item.product_id}-${index}`} className="rounded-3xl border bg-background/80 p-4 shadow-sm">
                     <div className="flex items-start justify-between gap-3">
                         <div className="flex min-w-0 items-center gap-3">
                             <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/60 bg-muted/40">
-                                {item.image_url ? (
+                                {imageUrl ? (
                                     <img
-                                        src={getProductImageDisplayUrl(item.image_url)}
+                                        src={imageUrl}
                                         alt=""
                                         className="h-full w-full object-contain p-1"
                                         loading="lazy"
@@ -363,7 +374,7 @@ export function EcommerceDetailView({
                         </div>
                     </div>
                 </div>
-            ))}
+            })}
         </div>
     )
 
@@ -747,6 +758,7 @@ export function EcommerceDetailView({
             <EditMarketplaceOrderItemsDialog
                 isOpen={editItemsOpen}
                 order={order}
+                productImageUrls={productImageUrls}
                 isSaving={isSaving}
                 onOpenChange={setEditItemsOpen}
                 onSave={(items) => onSaveItems(order.id, items)}

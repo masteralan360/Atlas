@@ -3,6 +3,7 @@ import { Minus, PackageSearch, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn, formatCurrency } from '@/lib/utils'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
+import { getMarketplaceProductImageUrl, type MarketplaceProductImageUrls } from '@/lib/marketplaceProductImages'
 import { useWorkspace } from '@/workspace'
 import {
     Button,
@@ -38,6 +39,7 @@ export interface EditableMarketplaceOrder {
 interface EditMarketplaceOrderItemsDialogProps {
     isOpen: boolean
     order: EditableMarketplaceOrder
+    productImageUrls: MarketplaceProductImageUrls
     isSaving?: boolean
     onOpenChange: (open: boolean) => void
     onSave: (items: EditableMarketplaceOrderItem[]) => Promise<void>
@@ -47,7 +49,7 @@ type DraftGroup = {
     key: string
     name: string
     sku: string
-    imageUrl?: string | null
+    productId: string
     currency: string
     lines: EditableMarketplaceOrderItem[]
     quantity: number
@@ -72,7 +74,7 @@ function buildDraftGroups(lines: EditableMarketplaceOrderItem[]): DraftGroup[] {
                 key,
                 name: line.name,
                 sku: line.sku,
-                imageUrl: line.image_url,
+                productId: line.product_id,
                 currency: line.currency,
                 lines: [{ ...line }],
                 quantity: Math.trunc(Number(line.quantity ?? 0)),
@@ -120,6 +122,7 @@ function distributeReduction(lines: EditableMarketplaceOrderItem[], targetQuanti
 export function EditMarketplaceOrderItemsDialog({
     isOpen,
     order,
+    productImageUrls,
     isSaving = false,
     onOpenChange,
     onSave
@@ -218,12 +221,16 @@ export function EditMarketplaceOrderItemsDialog({
                                 })}
                             </p>
                         </div>
-                    ) : groups.map((group) => (
-                        <div key={group.key} className="flex items-center gap-3 rounded-2xl border border-border/60 bg-card/60 p-3">
+                    ) : groups.map((group) => {
+                        const imageUrl = getProductImageDisplayUrl(
+                            getMarketplaceProductImageUrl(group.productId, productImageUrls)
+                        )
+
+                        return <div key={group.key} className="flex items-center gap-3 rounded-2xl border border-border/60 bg-card/60 p-3">
                             <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/60 bg-muted/40">
-                                {group.imageUrl ? (
+                                {imageUrl ? (
                                     <img
-                                        src={getProductImageDisplayUrl(group.imageUrl)}
+                                        src={imageUrl}
                                         alt=""
                                         className="h-full w-full object-contain p-1"
                                         loading="lazy"
@@ -267,7 +274,7 @@ export function EditMarketplaceOrderItemsDialog({
                                 </Button>
                             </div>
                         </div>
-                    ))}
+                    })}
                 </DialogBody>
 
                 <DialogFooter layout="structured">

@@ -179,6 +179,41 @@ class R2Service {
         return `${baseUrl}${cleanPath}`;
     }
 
+    /**
+     * Converts an existing public R2 URL from this exact Worker origin back to
+     * its object key. This is intentionally origin-bound: third-party URLs,
+     * query strings, fragments, and traversal paths are never accepted.
+     */
+    public getObjectKeyFromPublicUrl(value?: string | null): string | null {
+        if (!this.workerUrl || !value) return null;
+
+        try {
+            const workerUrl = new URL(this.workerUrl);
+            const objectUrl = new URL(value);
+            if (workerUrl.origin !== objectUrl.origin || objectUrl.search || objectUrl.hash) return null;
+
+            const basePath = workerUrl.pathname.replace(/\/+$/, '');
+            const objectPath = objectUrl.pathname;
+            if (basePath && (objectPath === basePath || !objectPath.startsWith(`${basePath}/`))) return null;
+
+            const encodedKey = objectPath.slice(basePath.length).replace(/^\/+/, '');
+            if (!encodedKey) return null;
+
+            const keySegments = encodedKey.split('/').map((segment) => {
+                try {
+                    return decodeURIComponent(segment);
+                } catch {
+                    return '';
+                }
+            });
+            if (keySegments.some((segment) => !segment || segment === '.' || segment === '..')) return null;
+
+            return keySegments.join('/');
+        } catch {
+            return null;
+        }
+    }
+
     private getClientRecordedUsageUrl(path: string): string {
         const url = new URL(this.getUrl(path));
         url.searchParams.set(WORKSPACE_USAGE_CLIENT_RECORDED_PARAM, '1');

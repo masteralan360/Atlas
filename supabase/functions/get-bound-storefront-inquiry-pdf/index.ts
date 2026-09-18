@@ -1,6 +1,7 @@
 import { createAdminClient } from '../_shared/supabase.ts'
 import { errorResponse, jsonResponse } from '../_shared/http.ts'
 import { listMarketplaceAssetUrls, resolvePublicAssetUrl } from '../_shared/marketplace.ts'
+import { getCanonicalProductImagePath } from '../_shared/productImagePath.ts'
 import {
     isWebsiteStorefrontGatewayRequest,
     JUMLA_KHALEEJ_SITE_KEY,
@@ -31,18 +32,14 @@ type StoredInquiryItem = {
     delivery_city_key?: unknown
 }
 
-type ProductUnitRow = {
+type ProductDetailsRow = {
     id: string
     unit: string | null
+    image_url: string | null
 }
 
 function text(value: unknown, maxLength = 500) {
     return typeof value === 'string' ? value.trim().slice(0, maxLength) : ''
-}
-
-function nullableText(value: unknown, maxLength = 500) {
-    const result = text(value, maxLength)
-    return result || null
 }
 
 function finiteNumber(value: unknown) {
@@ -104,8 +101,7 @@ Deno.serve(async (req) => {
 
         const rawItems = Array.isArray(order.items) ? order.items as StoredInquiryItem[] : []
         const itemRows = rawItems.filter((item) => text(item.metadata_type) !== 'jumla_khaleej_delivery_fee')
-        const productIdsMissingUnit = Array.from(new Set(itemRows
-            .filter((item) => !text(item.unit, 80))
+        const productIds = Array.from(new Set(itemRows
             .map((item) => text(item.product_id, 80))
             .filter(Boolean)))
 
@@ -116,14 +112,14 @@ Deno.serve(async (req) => {
                 .eq('workspace_id', context.workspace.id)
                 .order('is_primary', { ascending: false })
                 .order('created_at', { ascending: true }),
-            productIdsMissingUnit.length > 0
+            productIds.length > 0
                 ? adminClient
                     .from('products')
-                    .select('id, unit')
+                    .select('id, unit, image_url')
                     .eq('workspace_id', context.workspace.id)
                     .eq('is_deleted', false)
-                    .in('id', productIdsMissingUnit)
-                : Promise.resolve({ data: [] as ProductUnitRow[], error: null }),
+                    .in('id', productIds)
+                : Promise.resolve({ data: [] as ProductDetailsRow[], error: null }),
             (async () => resolvePublicAssetUrl(context.workspace.logo_url)
                 ?? (await listMarketplaceAssetUrls([
                     `${context.workspace.id}/workspace-logos/`,
@@ -134,7 +130,7 @@ Deno.serve(async (req) => {
 
         if (contactsError || unitResult.error) return errorResponse(contactsError?.message ?? unitResult.error?.message ?? 'Document unavailable', 500)
 
-        const unitByProductId = new Map((unitResult.data as ProductUnitRow[]).map((row) => [row.id, row.unit ?? ''] as const))
+        const productsById = new Map((unitResult.data as ProductDetailsRow[]).map((row) => [row.id, row] as const))
         const groupedItems = new Map<string, {
             product_id: string
             name: string
@@ -152,6 +148,7 @@ Deno.serve(async (req) => {
             const quantity = finiteNumber(item.quantity)
             if (!productId || !name || quantity <= 0) continue
             const groupId = text(item.allocation_group_id, 80) || productId
+            const product = productsById.get(productId)
             const current = groupedItems.get(groupId)
             const lineTotal = finiteNumber(item.line_total)
             if (current) {
@@ -162,10 +159,10 @@ Deno.serve(async (req) => {
             groupedItems.set(groupId, {
                 product_id: productId,
                 name,
-                image_url: nullableText(item.image_url, 2_000),
+                image_url: resolvePublicAssetUrl(getCanonicalProductImagePath(product?.image_url)),
                 price: finiteNumber(item.unit_price),
                 currency: text(item.currency, 16).toLowerCase() || text(order.currency, 16).toLowerCase() || 'iqd',
-                unit: text(item.unit, 80) || unitByProductId.get(productId) || '',
+                unit: text(item.unit, 80) || product?.unit || '',
                 quantity,
                 line_total: lineTotal
             })

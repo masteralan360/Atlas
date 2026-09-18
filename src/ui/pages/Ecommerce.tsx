@@ -27,6 +27,10 @@ import { supabase } from '@/auth/supabase'
 import { useDateRange, type DateRangeType } from '@/context/DateRangeContext'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { getLanguageDirection } from '@/lib/i18nRouting'
+import {
+    createMarketplaceProductImageUrls,
+    type MarketplaceProductImageUrls
+} from '@/lib/marketplaceProductImages'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import {
     getMarketplaceOrderDisplayStatus,
@@ -47,6 +51,7 @@ import {
     db,
     fetchTableFromSupabase,
     recordObligationSettlement,
+    useProducts,
     type CurrencyCode,
     type PaymentObligation,
     type SalesOrder,
@@ -252,7 +257,13 @@ function getEcommerceOrderSummary(items: MarketplaceOrderItemRecord[]) {
     return `${firstItems.join(', ')} +${displayItems.length - 2}`
 }
 
-function EcommerceProductMosaic({ items }: { items: MarketplaceOrderItemRecord[] }) {
+function EcommerceProductMosaic({
+    items,
+    productImageUrls
+}: {
+    items: MarketplaceOrderItemRecord[]
+    productImageUrls: MarketplaceProductImageUrls
+}) {
     const [failedProductIds, setFailedProductIds] = useState<Set<string>>(() => new Set())
     const products = Array.from(new Map(items.map((item) => [item.product_id, item])).values()).slice(0, 4)
     const layoutClass = products.length === 1
@@ -268,7 +279,7 @@ function EcommerceProductMosaic({ items }: { items: MarketplaceOrderItemRecord[]
             aria-label={products.map((item) => item.name).join(', ')}
         >
             {products.map((item, index) => {
-                const imageUrl = getProductImageDisplayUrl(item.image_url)
+                const imageUrl = getProductImageDisplayUrl(productImageUrls.get(item.product_id))
                 const hasImage = Boolean(imageUrl && !failedProductIds.has(item.product_id))
                 const hasStartDivider = products.length === 2
                     ? index === 1
@@ -455,10 +466,12 @@ function EcommerceSummaryCards({ orders, totalOrdersTrend }: { orders: Marketpla
 
 function EcommerceListView({
     orders,
+    productImageUrls,
     isLoading,
     onRefresh
 }: {
     orders: MarketplaceOrderRecord[]
+    productImageUrls: MarketplaceProductImageUrls
     isLoading: boolean
     onRefresh: () => Promise<void>
 }) {
@@ -574,7 +587,7 @@ function EcommerceListView({
                             <TableRow key={order.id} className="hover:bg-muted/40">
                                 <TableCell className="font-semibold">
                                     <div className="flex min-w-[11rem] items-center gap-3">
-                                        <EcommerceProductMosaic items={order.items} />
+                                        <EcommerceProductMosaic items={order.items} productImageUrls={productImageUrls} />
                                         <div className="min-w-0">
                                             <span>{order.order_number}</span>
                                             <div className="truncate text-xs text-muted-foreground">
@@ -624,7 +637,7 @@ function EcommerceListView({
                     >
                         <div className="flex justify-between items-start">
                             <div className="flex min-w-0 items-start gap-3">
-                                <EcommerceProductMosaic items={order.items} />
+                                <EcommerceProductMosaic items={order.items} productImageUrls={productImageUrls} />
                                 <div className="min-w-0 space-y-1">
                                     <div className="flex flex-wrap items-center gap-2">
                                         <span className="text-sm font-bold text-primary">{order.order_number}</span>
@@ -827,6 +840,11 @@ export function Ecommerce() {
     const { user } = useAuth()
     const [detailMatch, params] = useRoute('/ecommerce/:orderId')
     const [orders, setOrders] = useState<MarketplaceOrderRecord[]>([])
+    const products = useProducts(user?.workspaceId)
+    const productImageUrls = useMemo(
+        () => createMarketplaceProductImageUrls(products),
+        [products]
+    )
     const [isLoading, setIsLoading] = useState(true)
     const [isSaving, setIsSaving] = useState(false)
     const [settlementTarget, setSettlementTarget] = useState<PaymentObligation | null>(null)
@@ -1164,6 +1182,7 @@ const editMarketplaceOrderItems = async (orderId: string, items: MarketplaceOrde
             <>
                 <EcommerceDetailView
                     order={activeOrder}
+                    productImageUrls={productImageUrls}
                     isSaving={isSaving}
                     isOpeningCollection={isOpeningCollection}
                     onAdvance={(nextStatus) => transitionOrder(activeOrder.id, nextStatus)}
@@ -1191,6 +1210,7 @@ const editMarketplaceOrderItems = async (orderId: string, items: MarketplaceOrde
         <>
             <EcommerceListView
                 orders={orders}
+                productImageUrls={productImageUrls}
                 isLoading={isLoading}
                 onRefresh={loadOrders}
             />

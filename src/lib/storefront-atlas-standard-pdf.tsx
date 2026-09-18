@@ -4,7 +4,6 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 
 import type { CartItem, CustomerForm } from '@/components/storefront-ui-types'
-import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { getJumlaKhaleejDeliveryCity } from '@/lib/storefront-delivery'
 import { storefrontApiUrl } from '@/lib/storefront-runtime'
 import './storefront-atlas-standard-pdf.css'
@@ -303,9 +302,10 @@ function AtlasFieldsSection({ fields, fieldOrder, className }: { fields: PrintFi
 
 function ProductImage({ item }: { item: CartItem }) {
   const fallback = fallbackImageDataUrl(item.name.slice(0, 1).toUpperCase())
-  const imageUrl = getProductImageDisplayUrl(item.image_url)
-  return imageUrl
-    ? <img className="storefront-atlas-product-image" src={fallback} data-inquiry-product-id={item.product_id} data-inquiry-image-url={imageUrl} data-inquiry-fallback={item.name.slice(0, 1).toUpperCase()} alt="" />
+  // Inquiry snapshots retain an historical image path, but PDFs must always
+  // request the current image attached to products.image_url by product ID.
+  return item.product_id
+    ? <img className="storefront-atlas-product-image" src={fallback} data-inquiry-product-id={item.product_id} data-inquiry-fallback={item.name.slice(0, 1).toUpperCase()} alt="" />
     : <span className="storefront-atlas-product-image placeholder">{item.name.slice(0, 1).toUpperCase()}</span>
 }
 
@@ -474,16 +474,6 @@ async function imageBlobToPdfDataUrl(blob: Blob) {
   }
 }
 
-async function storedImageDataUrl(url: string) {
-  // A live inquiry is a bearer URL. Product image requests must not forward
-  // that signed URL to an asset host through a Referer header.
-  const response = await fetch(url, { credentials: 'omit', referrerPolicy: 'no-referrer' })
-  if (!response.ok) return null
-  const blob = await response.blob()
-  if (!blob.type.startsWith('image/')) return null
-  return await imageBlobToPdfDataUrl(blob)
-}
-
 async function forEachWithConcurrency<T>(items: T[], limit: number, callback: (item: T) => Promise<void>) {
   let nextIndex = 0
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -566,14 +556,15 @@ async function inlineImages(
   await forEachWithConcurrency(images, PDF_IMAGE_INLINE_CONCURRENCY, async (image) => {
     const productId = image.dataset.inquiryProductId
     const isStoreLogo = image.dataset.inquiryStoreLogo === 'true'
-    const storedImageUrl = image.dataset.inquiryImageUrl
     const fallback = fallbackImageDataUrl(image.dataset.inquiryFallback || '?')
     const asset = productId
       ? productImageAsset(mode, productId)
       : isStoreLogo ? storeLogoImageAsset(mode) : null
 
-    const storedImage = storedImageUrl ? await storedImageDataUrl(storedImageUrl).catch(() => null) : null
-    image.src = storedImage || (asset ? (await cacheInquiryPdfImage(asset)) || fallback : fallback)
+    // Product assets are deliberately fetched only through the storefront
+    // resolver. It reads the current products.image_url and normalizes the
+    // R2 response before it reaches the PDF canvas.
+    image.src = asset ? (await cacheInquiryPdfImage(asset)) || fallback : fallback
     completed += 1
     onProgress?.(completed, images.length)
   })

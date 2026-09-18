@@ -5,10 +5,10 @@ import {
     getLocalizedMarketplaceOrderMessage,
     hashMarketplaceValue,
     normalizeMarketplaceLanguage,
-    resolvePublicAssetUrl,
     sanitizeMarketplaceText,
     sanitizeNullableMarketplaceText
 } from '../_shared/marketplace.ts'
+import { getCanonicalProductImagePath } from '../_shared/productImagePath.ts'
 import {
     getTrustedStorefrontClientIp,
     isWebsiteStorefrontGatewayRequest,
@@ -286,7 +286,7 @@ Deno.serve(async (req) => {
                     quantity: allocatedQuantity,
                     line_total: lineTotal,
                     cost_price: resolvedPrice.costPrice,
-                    image_url: resolvePublicAssetUrl(product.image_url),
+                    image_url: getCanonicalProductImagePath(product.image_url),
                     unit: product.unit,
                     storage_id: source.storageId,
                     allocation_group_id: product.id,

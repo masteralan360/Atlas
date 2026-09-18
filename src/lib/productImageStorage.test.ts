@@ -17,6 +17,9 @@ vi.mock('@/services/platformService', () => ({
 vi.mock('@/services/r2Service', () => ({
     r2Service: {
         getUrl: (path: string) => `https://r2.example/${path}`,
+        getObjectKeyFromPublicUrl: (url: string) => url.startsWith('https://r2.example/')
+            ? url.slice('https://r2.example/'.length)
+            : null,
         isConfigured: () => true,
         upload: r2UploadMock,
         fetchExternalProductImage: fetchExternalProductImageMock
@@ -54,10 +57,12 @@ describe('product image storage policy', () => {
         expect(() => validateExternalProductImageUrl('https://user:secret@images.example.com/item.png')).toThrow(ProductImageStorageError)
     })
 
-    it('renders canonical product paths from R2 and never renders legacy external/data values', () => {
+    it('renders canonical paths and re-resolves only a trusted R2 URL without hotlinking it', () => {
         const canonicalPath = 'product-images/6f8cf944-4663-4eb8-bdf0-6dd35e68b6c1/image.webp'
+        const r2Key = '6f8cf944-4663-4eb8-bdf0-6dd35e68b6c1/product-images/image.webp'
         expect(isProductImagePath(canonicalPath)).toBe(true)
-        expect(getProductImageDisplayUrl(canonicalPath)).toBe('https://r2.example/6f8cf944-4663-4eb8-bdf0-6dd35e68b6c1/product-images/image.webp')
+        expect(getProductImageDisplayUrl(canonicalPath)).toBe(`https://r2.example/${r2Key}`)
+        expect(getProductImageDisplayUrl(`https://r2.example/${r2Key}`)).toBe(`https://r2.example/${r2Key}`)
         expect(getProductImageDisplayUrl('https://external.example/image.png')).toBe('')
         expect(getProductImageDisplayUrl('data:image/png;base64,abc')).toBe('')
     })

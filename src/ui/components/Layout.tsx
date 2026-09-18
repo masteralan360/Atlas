@@ -1,4 +1,4 @@
-import { type ReactNode, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, Suspense, type UIEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useLocation } from 'wouter'
 import { cn } from '@/lib/utils'
@@ -260,6 +260,9 @@ const routePrefetchMap: Record<string, () => Promise<unknown>> = {
 // Prefetch a route's chunk on hover (only triggers once per route)
 const prefetchedRoutes = new Set<string>()
 const SIDEBAR_WORKSPACE_LABEL_MAX_LENGTH = 10
+const MODULE_SURFACE_SHADOW_FADE_DISTANCE = 112
+const DESKTOP_STICKY_BAR_COLLAPSE_DISTANCE = 144
+const DESKTOP_STICKY_BAR_HEIGHT = 68
 
 function getSidebarWorkspaceLabel(workspaceLabel: string) {
   const characters = Array.from(workspaceLabel)
@@ -300,6 +303,14 @@ export function Layout({ children }: LayoutProps) {
   const { hasPermission } = useWorkspacePermissions()
   const demoExpiryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pageContentRef = useRef<HTMLElement>(null)
+  const desktopStickyBarScrollFrameRef = useRef<number | null>(null)
+  const desktopStickyBarScrollTopRef = useRef(0)
+  const desktopStickyBarProgressRef = useRef(0)
+  const moduleSurfaceShadowScrollFrameRef = useRef<number | null>(null)
+  const moduleSurfaceShadowScrollTopRef = useRef(0)
+  const moduleSurfaceShadowStrengthRef = useRef(1)
+  const [desktopStickyBarProgress, setDesktopStickyBarProgress] = useState(0)
+  const [moduleSurfaceShadowStrength, setModuleSurfaceShadowStrength] = useState(1)
   const moduleLockerSnapshot = useLiveQuery(
     () => (user?.workspaceId ? getModuleLockerSnapshot(user.workspaceId) : undefined),
     [user?.workspaceId]
@@ -394,6 +405,7 @@ export function Layout({ children }: LayoutProps) {
   const [isClearSidebarFavoritesDialogOpen, setIsClearSidebarFavoritesDialogOpen] = useState(false)
   const [isSidebarHeaderCompact, setIsSidebarHeaderCompact] = useState(false)
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1440))
+  const desktopStickyBarCollapseProgress = isTauri && viewportWidth >= 1024 ? desktopStickyBarProgress : 0
   const showSidebarThemeSelector = !isTauri && !isMobile() && viewportWidth >= 1024
   const fullWorkspaceLabel = currentWorkspaceLabel || workspaceName || 'Atlas'
   const sidebarWorkspaceLabel = getSidebarWorkspaceLabel(fullWorkspaceLabel)
@@ -415,6 +427,34 @@ export function Layout({ children }: LayoutProps) {
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
   }, [])
+
+  useEffect(() => {
+    return () => {
+      if (desktopStickyBarScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(desktopStickyBarScrollFrameRef.current)
+      }
+
+      if (moduleSurfaceShadowScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(moduleSurfaceShadowScrollFrameRef.current)
+      }
+
+    }
+  }, [])
+
+  useEffect(() => {
+    desktopStickyBarScrollTopRef.current = 0
+    desktopStickyBarProgressRef.current = 0
+    setDesktopStickyBarProgress(0)
+  }, [location])
+
+  useEffect(() => {
+    const scrollTop = pageContentRef.current?.scrollTop ?? 0
+    const nextStrength = viewportWidth >= 1024 ? Math.max(1 - scrollTop / MODULE_SURFACE_SHADOW_FADE_DISTANCE, 0) : 1
+
+    moduleSurfaceShadowScrollTopRef.current = scrollTop
+    moduleSurfaceShadowStrengthRef.current = nextStrength
+    setModuleSurfaceShadowStrength(nextStrength)
+  }, [location, viewportWidth])
 
   useEffect(() => {
     const syncUpdatePreference = () => setUpdatesDisabled(areApplicationUpdatesDisabled())
@@ -1449,6 +1489,43 @@ export function Layout({ children }: LayoutProps) {
   const isSidebarMini = !isSidebarCustomizationMode && (isMini || isPosTabletLayout)
   const showCompactWorkspaceHeader = isSidebarHeaderCompact && !isSidebarMini && !mobileSidebarOpen
   const isModuleLauncherRoute = location === '/modules'
+
+  const setDesktopStickyBarProgressFromScroll = (scrollTop: number) => {
+    const nextProgress = Math.min(scrollTop / DESKTOP_STICKY_BAR_COLLAPSE_DISTANCE, 1)
+
+    if (Math.abs(nextProgress - desktopStickyBarProgressRef.current) < 0.005) return
+
+    desktopStickyBarProgressRef.current = nextProgress
+    setDesktopStickyBarProgress(nextProgress)
+  }
+
+  const setModuleSurfaceShadowStrengthFromScroll = (scrollTop: number) => {
+    const nextStrength = viewportWidth >= 1024 ? Math.max(1 - scrollTop / MODULE_SURFACE_SHADOW_FADE_DISTANCE, 0) : 1
+
+    if (Math.abs(nextStrength - moduleSurfaceShadowStrengthRef.current) < 0.01) return
+
+    moduleSurfaceShadowStrengthRef.current = nextStrength
+    setModuleSurfaceShadowStrength(nextStrength)
+  }
+
+  const handleModuleContentScroll = (event: UIEvent<HTMLElement>) => {
+    desktopStickyBarScrollTopRef.current = event.currentTarget.scrollTop
+    moduleSurfaceShadowScrollTopRef.current = event.currentTarget.scrollTop
+
+    if (isTauri && viewportWidth >= 1024 && desktopStickyBarScrollFrameRef.current === null) {
+      desktopStickyBarScrollFrameRef.current = window.requestAnimationFrame(() => {
+        desktopStickyBarScrollFrameRef.current = null
+        setDesktopStickyBarProgressFromScroll(desktopStickyBarScrollTopRef.current)
+      })
+    }
+
+    if (moduleSurfaceShadowScrollFrameRef.current !== null) return
+
+    moduleSurfaceShadowScrollFrameRef.current = window.requestAnimationFrame(() => {
+      moduleSurfaceShadowScrollFrameRef.current = null
+      setModuleSurfaceShadowStrengthFromScroll(moduleSurfaceShadowScrollTopRef.current)
+    })
+  }
 
   const openInventoryTransferAutomationTab = (event: { preventDefault: () => void; stopPropagation: () => void }) => {
     event.preventDefault()
@@ -3357,10 +3434,16 @@ export function Layout({ children }: LayoutProps) {
             {/* Desktop top bar */}
             <header
               className={cn(
-                'hidden flex-shrink-0 z-30 items-center gap-4 px-4 py-3 bg-background/60 backdrop-blur-xl lg:flex',
+                'hidden z-10 flex-shrink-0 origin-top items-center gap-4 px-4 py-3 bg-background/60 backdrop-blur-xl transition-[margin-bottom,opacity,transform] duration-200 ease-out lg:flex',
                 'pt-[calc(0.75rem+var(--safe-area-top))]',
                 isPosLikeRoute && 'hidden'
               )}
+              style={{
+                marginBottom: `${-DESKTOP_STICKY_BAR_HEIGHT * desktopStickyBarCollapseProgress}px`,
+                opacity: 1 - desktopStickyBarCollapseProgress,
+                pointerEvents: desktopStickyBarCollapseProgress > 0.92 ? 'none' : undefined,
+                transform: `translateY(${-12 * desktopStickyBarCollapseProgress}px) scale(${1 - 0.025 * desktopStickyBarCollapseProgress})`
+              }}
             >
               {/* Desktop Toggle */}
               <button
@@ -3519,13 +3602,17 @@ export function Layout({ children }: LayoutProps) {
             {/* Page content */}
             <main
               ref={pageContentRef}
+              onScroll={handleModuleContentScroll}
+              style={{
+                '--module-content-surface-shadow-strength': `${Math.round(moduleSurfaceShadowStrength * 100)}%`
+              } as CSSProperties}
               className={cn(
-                'page-enter relative flex-1 min-h-0',
+                'page-enter relative z-20 flex-1 min-h-0',
                 location === '/whatsapp'
                   ? 'p-0'
                   : isPosLikeRoute
                     ? 'p-0 lg:p-6'
-                    : 'bg-background p-4 rounded-t-[2rem] border-t border-border/80 lg:p-6 lg:overflow-y-auto lg:overscroll-contain custom-scrollbar'
+                    : 'module-content-surface bg-background p-4 rounded-t-[2rem] border-t border-border/80 lg:p-6 lg:overflow-y-auto lg:overscroll-contain custom-scrollbar'
               )}
             >
               {location !== '/whatsapp' && !isPosLikeRoute && (

@@ -20,6 +20,8 @@ export function storefrontApiUrl(path: string) {
   const storefrontMode = runtimeMode?.split(':', 1)[0]
   if (storefrontMode === 'retail' || storefrontMode === 'wholesale') {
     url.searchParams.set('mode', storefrontMode)
+    const generation = runtimeMode?.split(':').slice(1).join(':')
+    if (generation) url.searchParams.set('generation', generation)
   }
   return url.toString()
 }

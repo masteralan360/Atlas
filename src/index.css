@@ -502,6 +502,27 @@ html[lang] pre {
   animation: pageFadeIn 0.5s ease-out forwards;
 }
 
+/* The top edge of each regular module surface subtly casts back into the
+   header behind it, preserving the existing curved silhouette and layout. */
+.module-content-surface {
+  box-shadow: 0 -8px 20px -11px hsl(var(--foreground) / 0.13);
+  box-shadow: 0 -8px 20px -11px color-mix(
+    in srgb,
+    hsl(var(--foreground) / 0.13) var(--module-content-surface-shadow-strength, 100%),
+    transparent
+  );
+  transition: box-shadow 120ms linear;
+}
+
+.dark .module-content-surface {
+  box-shadow: 0 -8px 20px -11px hsl(0 0% 0% / 0.42);
+  box-shadow: 0 -8px 20px -11px color-mix(
+    in srgb,
+    hsl(0 0% 0% / 0.42) var(--module-content-surface-shadow-strength, 100%),
+    transparent
+  );
+}
+
 /* All Sera-style glow layers sweep together, keeping the bright core locked
    to its surrounding bloom instead of rendering as separate streaks. */
 .glow-line__sweep {

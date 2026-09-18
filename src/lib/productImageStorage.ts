@@ -228,8 +228,19 @@ function toProductImageR2Key(value: string): string | null {
 
 /** Browser product images must resolve from R2; Tauri may render local files. */
 export function getProductImageDisplayUrl(value?: string | null): string {
-    if (!value || !isProductImagePath(value)) return ''
-    if (isTauri()) return platformService.convertFileSrc(value)
-    const r2Key = toProductImageR2Key(value)
+    if (!value) return ''
+
+    if (isProductImagePath(value)) {
+        if (isTauri()) return platformService.convertFileSrc(value)
+        const r2Key = toProductImageR2Key(value)
+        return r2Key ? r2Service.getUrl(r2Key) : ''
+    }
+
+    // Old marketplace payloads stored the application's own public R2 URL.
+    // Re-resolve only an exact configured R2 Worker URL to its key; never
+    // render the supplied URL or permit an arbitrary HTTP(S) image source.
+    if (isTauri()) return ''
+    const r2Key = r2Service.getObjectKeyFromPublicUrl(value)
+    if (!r2Key || !/^[0-9a-f-]+\/product-images\/[^/]+$/i.test(r2Key)) return ''
     return r2Key ? r2Service.getUrl(r2Key) : ''
 }
