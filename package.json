@@ -33,6 +33,8 @@
     "optimize:tips": "node scripts/optimize-tips.mjs",
     "prebuild": "npm run optimize:tips",
     "dev": "vite --host",
+    "dev:testing": "node scripts/dev-testing/dev.mjs",
+    "test:sale-orders": "node scripts/dev-testing/cli.mjs",
     "build": "node scripts/build.mjs",
     "cf:dev": "wrangler dev --config cloudflare-web/wrangler.toml",
     "cf:deploy": "node scripts/deploy-cloudflare.mjs",

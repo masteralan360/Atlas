@@ -1,0 +1,13 @@
+{
+  "sale-orders": {
+    "titleKey": "devTesting.saleOrders",
+    "groups": [
+      { "id": "matrix", "titleKey": "devTesting.groups.matrix", "layer": "business", "files": ["src/dev/testing/suites/saleOrders.test.ts"] },
+      { "id": "lifecycle", "titleKey": "devTesting.groups.lifecycle", "layer": "business", "files": ["src/local-db/orderFinancing.test.ts", "src/local-db/orderInstallments.test.ts"] },
+      { "id": "remote-contract", "titleKey": "devTesting.groups.remoteContract", "layer": "contract", "files": ["src/local-db/quickOrderAtomic.test.ts", "src/local-db/orders.test.ts", "src/lib/orderSaveProgress.test.ts"] },
+      { "id": "pricing", "titleKey": "devTesting.groups.pricing", "layer": "calculation", "files": ["src/lib/orderAdjustments.test.ts", "src/lib/orderLineItems.test.ts", "src/lib/salesExchange.test.ts", "src/lib/orderPartnerBalance.test.ts", "src/lib/priceBooks.test.ts", "src/local-db/orderPriceBooks.test.ts", "src/ui/components/orders/SalesOrderFormPage.test.ts"] },
+      { "id": "payments", "titleKey": "devTesting.groups.payments", "layer": "business", "files": ["src/local-db/paymentAccounts.test.ts", "src/local-db/payments.test.ts", "src/local-db/paymentReversalState.test.ts", "src/lib/ledgerPaymentTransactions.test.ts", "src/lib/ledgerOrderLoan.test.ts", "src/lib/ledgerCashSummary.test.ts", "src/lib/ledgerFlow.test.ts", "src/lib/ledgerSettlement.test.ts", "src/lib/ledgerCashMovementEntries.test.ts"] }
+    ],
+    "unavailable": ["browser-workflow", "cloud-database", "hybrid-native", "local-native"]
+  }
+}

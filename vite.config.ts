@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
 import { execSync } from 'child_process'
+import { atlasDevTestingPlugin } from './scripts/dev-testing/controller.mjs'
 
 function getGitInfo() {
     try {
@@ -21,7 +22,8 @@ function getGitInfo() {
     }
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command, isPreview }) => {
+    const devTestingEnabled = command === 'serve' && !isPreview
     const isTauriBuild = Boolean(process.env.TAURI_ENV_PLATFORM)
     const git = getGitInfo()
 
@@ -33,6 +35,7 @@ export default defineConfig(({ mode }) => {
         base: isTauriBuild ? './' : '/',
         plugins: [
             react(),
+            atlasDevTestingPlugin(devTestingEnabled),
             VitePWA({
                 disable: isTauriBuild,
                 injectRegister: false,
@@ -184,6 +187,7 @@ export default defineConfig(({ mode }) => {
             }
         },
         define: {
+            __ATLAS_DEV_TESTING__: JSON.stringify(devTestingEnabled),
             __ATLAS_GIT_COMMIT_MESSAGE__: JSON.stringify(git.message),
             __ATLAS_GIT_COMMIT_HASH__: JSON.stringify(git.hash),
             __ATLAS_GIT_COMMIT_DATE__: JSON.stringify(git.date),

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { BadgeCheck, BadgeDollarSign, CalendarDays, ChevronDown, CircleCheck, CircleDashed, CircleDollarSign, Clock3, CreditCard, EllipsisVertical, Eye, HandCoins, LayoutGrid, List, ListFilter, Loader2, Lock, Package, PackageCheck, PackagePlus, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse, XCircle, type LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -8,6 +8,10 @@ import { useLocation, useRoute } from 'wouter'
 
 import { SalesOrderFormPage } from '@/ui/components/orders/SalesOrderFormPage'
 import { PurchaseOrderFormPage } from '@/ui/components/orders/PurchaseOrderFormPage'
+
+const DeveloperTestButton = import.meta.env.DEV && __ATLAS_DEV_TESTING__
+    ? lazy(() => import('@/dev/testing/DeveloperTestButton'))
+    : null
 
 import { useAuth } from '@/auth'
 import { useDateRange, type DateRangeType } from '@/context/DateRangeContext'
@@ -2169,6 +2173,10 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                             {t('orders.tabs.purchase') || 'Purchase Orders'}
                                         </TabsTrigger>
                                     </TabsList>
+
+                                    {activeTab === 'sales' && DeveloperTestButton && <Suspense fallback={null}>
+                                        <DeveloperTestButton suiteId="sale-orders" />
+                                    </Suspense>}
 
                                     <div className="flex flex-wrap items-center gap-3 self-start sm:self-auto">
                                         {!isMobile() && (

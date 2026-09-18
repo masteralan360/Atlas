@@ -21,6 +21,7 @@ lib-cov
 
 # Coverage directory used by tools like istanbul
 coverage
+.atlas-test-runs/
 *.lcov
 
 # nyc test coverage

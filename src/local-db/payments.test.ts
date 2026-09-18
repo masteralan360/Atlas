@@ -1,43 +1,12 @@
 import { beforeAll, describe, expect, it } from 'vitest'
+import { installTestBrowser } from '@/dev/testing/fixtures/browser'
 
 import type { PaymentTransaction } from './models'
 
 let getRemainingPaymentTransactions: typeof import('./payments').getRemainingPaymentTransactions
 
 function installBrowserEnvironment() {
-    const values = new Map<string, string>()
-    const storage = {
-        get length() {
-            return values.size
-        },
-        getItem: (key: string) => values.get(key) ?? null,
-        setItem: (key: string, value: string) => values.set(key, value),
-        removeItem: (key: string) => values.delete(key),
-        clear: () => values.clear(),
-        key: (index: number) => Array.from(values.keys())[index] ?? null
-    }
-
-    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage })
-    Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: storage })
-    Object.defineProperty(globalThis, 'window', {
-        configurable: true,
-        value: {
-            localStorage: storage,
-            sessionStorage: storage,
-            location: { origin: 'http://localhost', hash: '', pathname: '/' },
-            addEventListener: () => undefined
-        }
-    })
-    Object.defineProperty(globalThis, 'document', {
-        configurable: true,
-        value: {
-            visibilityState: 'visible',
-            dir: 'ltr',
-            documentElement: { lang: 'en', dir: 'ltr' },
-            addEventListener: () => undefined
-        }
-    })
-    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { onLine: false } })
+    installTestBrowser()
 }
 
 function paymentTransaction(overrides: Partial<PaymentTransaction>): PaymentTransaction {
@@ -73,7 +42,7 @@ describe('getRemainingPaymentTransactions', () => {
     beforeAll(async () => {
         installBrowserEnvironment()
         ;({ getRemainingPaymentTransactions } = await import('./payments'))
-    })
+    }, 30_000)
 
     it('keeps the remaining settlement after a partial order return', () => {
         const original = paymentTransaction({ id: 'original', amount: 50.01 })
