@@ -24,6 +24,7 @@ import { isMobile } from '@/lib/platform'
 import { whatsappManager } from '@/lib/whatsappWebviewManager'
 import { useDateRange } from '@/context/DateRangeContext'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { useTheme } from '@/ui/components/theme-provider'
 import {
     Table,
@@ -2345,14 +2346,9 @@ export function Sales() {
                                     <Loader2 className="w-4 h-4 animate-spin text-primary/50 ml-1" />
                                 )}
                             </h1>
-                            {getDateDisplay() && (
-                                <div className={cn(
-                                    "px-3 py-1 text-sm font-bold bg-primary text-primary-foreground shadow-sm animate-pop-in",
-                                    style === 'neo-orange' ? "rounded-[var(--radius)] neo-border" : "rounded-lg"
-                                )}>
-                                    {getDateDisplay()}
-                                </div>
-                            )}
+                            <DateRangeBadge className={style === 'neo-orange' ? 'rounded-[var(--radius)] neo-border' : undefined}>
+                                {getDateDisplay()}
+                            </DateRangeBadge>
                         </div>
                         <p className="text-muted-foreground">
                             {t('sales.subtitle') || 'View past transactions'} <ModulePageFreshness className="ms-2" tableNames={['sales']} />

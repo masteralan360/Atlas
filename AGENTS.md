@@ -35,6 +35,10 @@ Tests must cover both the successful path and important validation or failure pa
 Any new or changed Cloud or Hybrid feature that reads or writes Supabase data MUST include Vitest coverage for its client-side request contract, successful result handling, and user-friendly failure handling.
 For Cloud or Hybrid transaction flows, Vitest coverage MUST additionally verify the expected returned or updated records and all relevant inventory, payment-transaction, balance, and ledger effects.
 
+When changing production behavior in a module that has a developer testing suite, the agent MUST update that suite in the same task so it continues to represent the module accurately. This applies to new or changed features, workflows, validations, calculations, transaction effects, persistence behavior, permissions, and remote request contracts. Update the relevant scenarios, fixtures, assertions, registry metadata, and suite documentation as needed, and run the affected suite before considering the work complete.
+
+If the change exposes an existing product bug while the suite is being updated, preserve the failing scenario and report the bug according to the developer testing guide; do not silently weaken the assertion or fix an unrelated bug unless the user requested that fix.
+
 # Atlas UI conventions
 
 All full-page forms and detail/view pages MUST use the full available content area. Do not constrain them with a centered max-width wrapper unless the user explicitly requests it.

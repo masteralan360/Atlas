@@ -70,6 +70,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/ui/components";
+import { DateRangeBadge } from "@/ui/components/DateRangeBadge";
 import { useDateRange } from "@/context/DateRangeContext";
 import { useWorkspace } from "@/workspace";
 
@@ -847,6 +848,7 @@ export function InventoryTransactionsPage() {
         <h1 className="flex items-center gap-2 text-2xl font-bold">
           <History className="h-6 w-6 text-primary" />
           {t("inventoryTransfer.transactions.title", "Inventory Transactions")}
+          <DateRangeBadge dateRange={inventoryDateRange} customDates={customDates} />
         </h1>
         <p className="text-muted-foreground">
           {t(

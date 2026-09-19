@@ -64,6 +64,7 @@ import { useWorkspace } from "@/workspace";
 import { PartnerAutocompleteInput } from "@/ui/components/crm/PartnerAutocompleteInput";
 import { VehicleAutocompleteInput } from "@/ui/components/crm/VehicleAutocompleteInput";
 import { DateRangeFilters } from "@/ui/components/DateRangeFilters";
+import { DateRangeBadge } from "@/ui/components/DateRangeBadge";
 import { ModulePageFreshness } from "@/ui/components/ModulePageFreshness";
 import { PaymentAccountSelector } from "@/ui/components/payments/PaymentAccountSelector";
 import {
@@ -414,6 +415,7 @@ export function CarRental({
           <h1 className="flex items-center gap-2 text-2xl font-bold">
             <Car className="h-6 w-6 text-primary" />
             {t("carRental.title")}
+            {tab === "requests" || tab === "contracts" ? <DateRangeBadge /> : null}
           </h1>
           <p className="text-muted-foreground">
             {t("carRental.subtitle")} <ModulePageFreshness className="ms-2" />

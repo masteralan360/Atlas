@@ -35,6 +35,7 @@ import { useAuth } from '@/auth'
 import { useWorkspace } from '@/workspace'
 import { useDateRange } from '@/context/DateRangeContext'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { r2Service } from '@/services/r2Service'
 import { UploadFilesTab } from './UploadFile'
 import { setPDFPreviewSource } from '@/lib/pdfPreviewStore'
@@ -362,11 +363,7 @@ export function InvoicesHistory() {
                             <FileText className="h-6 w-6 text-primary" />
                             {t('invoices.historyTitle') || 'Invoices History'}
                         </h1>
-                        {activeTab === 'history' && getDateDisplay() && (
-                            <div className="animate-pop-in rounded-lg bg-primary px-3 py-1 text-sm font-bold text-primary-foreground shadow-sm">
-                                {getDateDisplay()}
-                            </div>
-                        )}
+                        {activeTab === 'history' ? <DateRangeBadge>{getDateDisplay()}</DateRangeBadge> : null}
                     </div>
                     <p className="text-muted-foreground">
                         {activeTab === 'history'

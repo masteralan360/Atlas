@@ -80,6 +80,7 @@ import {
 } from '@/ui/components'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import { AutocompleteLoadingIndicator } from '@/ui/components/AutocompleteLoadingIndicator'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { PartnerAccountStatementTemplateDialog } from '@/ui/components/crm/PartnerAccountStatementTemplateDialog'
 import type { PartnerAccountStatementPrintData } from '@/ui/components/crm/PartnerAccountStatementPrintTemplate'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
@@ -788,6 +789,7 @@ export function AccountStatements() {
                         {t('businessPartners.accountStatement.title', { defaultValue: 'Account Statement' })}
                         <ModulePageFreshness tableNames={PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES} className="ms-2" />
                     </span>
+                    <DateRangeBadge dateRange={dateRange} customDates={customDates} />
                 </div>
                 <div className="flex items-center gap-2">
                     <Button

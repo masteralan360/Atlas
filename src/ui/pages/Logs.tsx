@@ -56,6 +56,7 @@ import {
     TableRow,
     useToast,
 } from '@/ui/components'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 
 function getLogSummary(argument: SerializedConsoleValue | undefined) {
     if (typeof argument === 'string') return argument
@@ -185,7 +186,10 @@ export function Logs() {
                         <FileWarning className="h-5 w-5" />
                     </span>
                     <div className="min-w-0">
-                        <h1 className="text-3xl font-bold tracking-tight">{t('errorLogs.title')}</h1>
+                        <h1 className="flex flex-wrap items-center gap-3 text-3xl font-bold tracking-tight">
+                            {t('errorLogs.title')}
+                            <DateRangeBadge dateRange={dateRange} customDates={customDates} />
+                        </h1>
                         <p className="mt-1 text-sm text-muted-foreground">{t('errorLogs.subtitle')}</p>
                     </div>
                 </div>

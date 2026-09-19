@@ -39,6 +39,7 @@ import {
     useToast
 } from '@/ui/components'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { DirectTransactionDialog } from '@/ui/components/payments/DirectTransactionDialog'
 import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
 import { useWorkspace } from '@/workspace'
@@ -210,7 +211,10 @@ export function DirectTransactions() {
         <div className="space-y-6 p-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div className="space-y-3">
-                    <h1 className="text-3xl font-bold tracking-tight">{t('directTransactions.title', { defaultValue: 'Direct Transactions' })}</h1>
+                    <h1 className="flex flex-wrap items-center gap-3 text-3xl font-bold tracking-tight">
+                        {t('directTransactions.title', { defaultValue: 'Direct Transactions' })}
+                        <DateRangeBadge />
+                    </h1>
                     <p className="text-sm text-muted-foreground">
                         {t('directTransactions.subtitle', { defaultValue: 'Manual incoming and outgoing money for activity outside the tracked modules. Payroll stays out of this page.' })} <ModulePageFreshness className="ms-2" />
                     </p>

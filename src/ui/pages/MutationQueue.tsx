@@ -54,6 +54,7 @@ import {
     TableRow,
     useToast,
 } from '@/ui/components'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import {
     MUTATION_QUEUE_STATUSES,
     canStartMutationQueueSync,
@@ -184,7 +185,10 @@ export function MutationQueue() {
                         <Database className="h-5 w-5" />
                     </span>
                     <div className="min-w-0">
-                        <h1 className="text-3xl font-bold tracking-tight">{t('mutationQueue.title')}</h1>
+                        <h1 className="flex flex-wrap items-center gap-3 text-3xl font-bold tracking-tight">
+                            {t('mutationQueue.title')}
+                            <DateRangeBadge dateRange={dateRange} customDates={customDates} />
+                        </h1>
                         <p className="mt-1 text-sm text-muted-foreground">{t('mutationQueue.subtitle')}</p>
                     </div>
                 </div>

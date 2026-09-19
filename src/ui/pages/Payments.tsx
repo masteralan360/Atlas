@@ -57,6 +57,7 @@ import {
     useToast
 } from '@/ui/components'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { SettlementDialog } from '@/ui/components/payments/SettlementDialog'
 import { PartnerSettlementDialog } from '@/ui/components/payments/PartnerSettlementDialog'
 import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
@@ -545,7 +546,10 @@ export function Payments() {
         <div className="space-y-6 p-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div className="space-y-3">
-                    <h1 className="text-3xl font-bold tracking-tight">{t('payments.title', { defaultValue: 'Payments' })}</h1>
+                    <h1 className="flex flex-wrap items-center gap-3 text-3xl font-bold tracking-tight">
+                        {t('payments.title', { defaultValue: 'Payments' })}
+                        {activeTab === 'transactions' ? <DateRangeBadge /> : null}
+                    </h1>
                     <p className="text-sm text-muted-foreground">
                         {t('payments.subtitle', { defaultValue: 'Unified open obligations and central transaction history across loans, orders, appointments, payroll, expenses, and Real Estate commissions.' })} <ModulePageFreshness className="ms-2" />
                     </p>

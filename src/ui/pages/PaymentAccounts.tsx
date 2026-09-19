@@ -82,6 +82,7 @@ import {
   useToast,
   PaymentMethodSelector,
 } from '@/ui/components'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { CurrencySelector } from '@/ui/components/CurrencySelector'
 import { CapitalPoolsPanel } from '@/ui/components/payments/CapitalPoolsPanel'
@@ -894,7 +895,10 @@ export function PaymentAccounts() {
     <div className="space-y-8 p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">{t('paymentAccounts.title', { defaultValue: 'Payment Accounts' })}</h1>
+          <h1 className="flex flex-wrap items-center gap-3 text-3xl font-bold tracking-tight">
+            {t('paymentAccounts.title', { defaultValue: 'Payment Accounts' })}
+            {activeModuleTab === 'accounts' ? <DateRangeBadge /> : null}
+          </h1>
           <p className="mt-1 text-sm text-muted-foreground">{t('paymentAccounts.subtitle', { defaultValue: 'Optional payment destinations. Payments without an account remain normal ledger transactions.' })}</p>
         </div>
         {activeModuleTab === 'accounts' ? (

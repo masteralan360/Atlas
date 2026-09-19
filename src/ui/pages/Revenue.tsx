@@ -14,6 +14,7 @@ import { getReportOriginId } from '@/lib/printIdentity'
 import { useWorkspace } from '@/workspace'
 import { useDateRange } from '@/context/DateRangeContext'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { ProductAutocompleteInput } from '@/ui/components/orders/ProductAutocompleteInput'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import {
@@ -1332,14 +1333,9 @@ export function Revenue() {
                     <div>
                         <div className="flex items-center gap-3">
                             <h1 className="text-3xl font-bold tracking-tight">{t('revenue.title')}{(isLoading || isDateLoading) && <Loader2 className="w-5 h-5 animate-spin text-muted-foreground inline-block ml-3" />}</h1>
-                            {getDateDisplay() && (
-                                <div className={cn(
-                                    "px-3 py-1 text-sm font-bold bg-primary text-primary-foreground shadow-sm animate-pop-in",
-                                    style === 'neo-orange' ? "rounded-[var(--radius)] neo-border" : "rounded-lg"
-                                )}>
-                                    {getDateDisplay()}
-                                </div>
-                            )}
+                            <DateRangeBadge className={style === 'neo-orange' ? 'rounded-[var(--radius)] neo-border' : undefined}>
+                                {getDateDisplay()}
+                            </DateRangeBadge>
                         </div>
                         <p className="text-muted-foreground">
                             {t('revenue.subtitle')} <ModulePageFreshness className="ms-2" />

@@ -72,6 +72,7 @@ import {
     MarketplaceDeliveryFeeBadge
 } from '@/ui/components/ecommerce/MarketplaceOrderPresentation'
 import { getMarketplaceDisplayItems } from '@/ui/components/ecommerce/MarketplaceOrderDisplayItems'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import type {
     MarketplaceOrderItemRecord,
     MarketplaceOrderRecord,
@@ -694,11 +695,7 @@ function EcommerceListView({
                     <h1 className="flex flex-wrap items-center gap-2 text-2xl font-bold">
                         <ShoppingBag className="h-6 w-6 text-primary" />
                         {t('ecommerce.title', { defaultValue: 'E-Commerce' })}
-                        {getDateDisplay() && (
-                            <span className="animate-pop-in rounded-lg bg-primary px-3 py-1 text-sm font-bold text-primary-foreground shadow-sm">
-                                {getDateDisplay()}
-                            </span>
-                        )}
+                        <DateRangeBadge>{getDateDisplay()}</DateRangeBadge>
                     </h1>
                     <p className="text-muted-foreground">
                         {t('ecommerce.subtitle', { defaultValue: 'Track and manage marketplace orders' })} <ModulePageFreshness className="ms-2" tableNames={['marketplace_orders', 'crm.sales_orders']} />

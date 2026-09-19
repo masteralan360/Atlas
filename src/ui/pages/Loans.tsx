@@ -51,6 +51,7 @@ import { formatCurrency, formatDate, formatDateTime, cn, formatLoanDetailsForWha
 import { whatsappManager } from '@/lib/whatsappWebviewManager'
 import { WhatsAppNumberInputModal } from '@/ui/components/modals/WhatsAppNumberInputModal'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { isMobile } from '@/lib/platform'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import type { TemplatePreview, TemplatePreviewRenderOptions } from '@/lib/printPreviewEditorStore'
@@ -484,7 +485,11 @@ function LoanListView({
 
     return (
         <div className="space-y-4">
-            <div className="flex min-h-10 items-center justify-end">
+            <div className="flex min-h-10 flex-wrap items-center justify-between gap-3">
+                <h1 className="flex flex-wrap items-center gap-3 text-2xl font-bold">
+                    {getStandardLoanModuleTitle(t)}
+                    <DateRangeBadge />
+                </h1>
                 {!isReadOnly && (
                     <Button onClick={() => setCreateOpen(true)} className="gap-2 print:hidden h-10 rounded-xl px-4">
                         <Plus className="w-4 h-4" />

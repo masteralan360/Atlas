@@ -83,6 +83,7 @@ import { useWorkspace } from '@/workspace'
 import { hasEffectiveSalesAgentCommissionPermission, useWorkspacePermissions } from '@/permissions'
 import { isMobile } from '@/lib/platform'
 import { cn } from '@/lib/utils'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import {
     Button,
     Card,
@@ -1900,11 +1901,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                     <h1 className="flex flex-wrap items-center gap-2 text-2xl font-bold">
                         <ShoppingCart className="h-6 w-6 text-primary" />
                         {t('orders.title') || 'Orders'}
-                        {getDateDisplay() && (
-                            <span className="animate-pop-in rounded-lg bg-primary px-3 py-1 text-sm font-bold text-primary-foreground shadow-sm">
-                                {getDateDisplay()}
-                            </span>
-                        )}
+                        <DateRangeBadge>{getDateDisplay()}</DateRangeBadge>
                     </h1>
                     <p className="text-muted-foreground">
                         {t('orders.subtitle') || 'Track sales and purchase orders'} <ModulePageFreshness className="ms-2" />

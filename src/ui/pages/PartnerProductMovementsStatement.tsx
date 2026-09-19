@@ -48,6 +48,7 @@ import {
     PrintPreviewModal,
     Progress,
 } from '@/ui/components'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import { AutocompleteLoadingIndicator } from '@/ui/components/AutocompleteLoadingIndicator'
 import { PartnerProductMovementsTemplateDialog } from '@/ui/components/crm/PartnerProductMovementsTemplateDialog'
@@ -515,7 +516,10 @@ export function PartnerProductMovementsStatement() {
                                 <FileText className="h-5 w-5" />
                             </div>
                             <div className="min-w-0 flex-1">
-                                <h1 className="truncate text-lg font-bold">{partner.partnerName}</h1>
+                                <h1 className="flex flex-wrap items-center gap-3 text-lg font-bold">
+                                    <span className="truncate">{partner.partnerName}</span>
+                                    <DateRangeBadge dateRange={dateRange} customDates={customDates} />
+                                </h1>
                                 <p className="text-sm text-muted-foreground">
                                     {[partner.phone, partner.address].filter(Boolean).join(' · ')
                                         || t('businessPartners.productMovements.title')}

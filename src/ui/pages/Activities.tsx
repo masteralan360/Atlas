@@ -34,6 +34,7 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { PaymentMethodSelect } from '@/ui/components/payments/PaymentMethodSelect'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
@@ -701,7 +702,10 @@ export function Activities() {
                         <Activity className="h-5 w-5" />
                         <span className="text-sm font-medium">{t('activities.workspaceModule', { defaultValue: 'Workspace module' })}</span>
                     </div>
-                    <h1 className="mt-1 text-3xl font-bold tracking-tight">{t('activities.title', { defaultValue: 'Activities' })}</h1>
+                    <h1 className="mt-1 flex flex-wrap items-center gap-3 text-3xl font-bold tracking-tight">
+                        {t('activities.title', { defaultValue: 'Activities' })}
+                        <DateRangeBadge />
+                    </h1>
                     <p className="mt-1 text-sm text-muted-foreground">
                         {t('activities.description', { defaultValue: 'Sell configurable activities with inventory-aware availability and custom receipts.' })} <ModulePageFreshness className="ms-2" />
                     </p>

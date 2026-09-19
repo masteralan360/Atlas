@@ -5703,6 +5703,8 @@
     "title": "HR Management",
     "subtitle": "Manage your team and payroll",
     "addEmployee": "Add Employee",
+    "editEmployee": "Edit Employee",
+    "updateEmployee": "Update Employee",
     "updateSuccess": "Employee updated successfully",
     "addSuccess": "Employee added successfully",
     "deleteSuccess": "Employee removed successfully",
@@ -5720,8 +5722,15 @@
     "onLeave": "On Leave",
     "monthlyPayroll": "Monthly Payroll",
     "searchPlaceholder": "Search by name, role, or email...",
+    "invalidJoiningDate": "Choose a joining date between 1900 and today.",
+    "dividendExceeds": "Total dividends cannot exceed 100%. Available: {{percentage}}%",
+    "noPercentageLeft": "No percentage available (100% allocated)",
+    "availablePercentage": "Available: {{percentage}}%",
     "form": {
       "name": "Full Name",
+      "category": "Department / Category",
+      "selectCategory": "Select a category",
+      "selectRole": "Select a role",
       "email": "Email Address",
       "phone": "Phone Number",
       "role": "Role / Position",
@@ -5730,6 +5739,7 @@
       "female": "Female",
       "other": "Other",
       "joiningDate": "Joining Date",
+      "selectJoiningDate": "Select joining date",
       "location": "Location",
       "salary": "Monthly Salary",
       "salaryPayday": "Salary Payday (1-31)",
@@ -5739,9 +5749,30 @@
       "fixedValue": "Manual Value",
       "percentageValue": "Percentage (%)",
       "payday": "Dividend Payday (1-31)",
+      "amount": "Amount",
       "linkAccount": "Link Workspace Account",
       "linkAccountDesc": "Connect this record to a workspace member account",
-      "selectMember": "Select Member"
+      "selectMember": "Select Member",
+      "completeRequiredFields": "Complete all required fields before saving.",
+      "categories": {
+        "management": "Management",
+        "staff": "Staff",
+        "technical": "Technical"
+      },
+      "roles": {
+        "manager": "Manager",
+        "assistantManager": "Assistant Manager",
+        "supervisor": "Supervisor",
+        "salesman": "Salesman",
+        "cashier": "Cashier",
+        "accountant": "Accountant",
+        "security": "Security",
+        "cleaning": "Cleaning",
+        "driver": "Driver",
+        "itSupport": "IT Support",
+        "maintenance": "Maintenance",
+        "developer": "Developer"
+      }
     }
   },
   "workspaceConfig": {

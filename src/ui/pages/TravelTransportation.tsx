@@ -28,6 +28,7 @@ import {
     TableHeader,
     TableRow
 } from '@/ui/components'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { TravelBookingDetailsView } from '@/ui/components/travel/TravelBookingDetailsView'
 import { TravelBookingFormPage } from '@/ui/components/travel/TravelBookingFormPage'
 
@@ -146,7 +147,10 @@ export function TravelTransportation() {
                     <div className="flex items-center gap-3">
                         <span className="rounded-2xl bg-primary/10 p-3 text-primary"><Plane className="h-6 w-6" /></span>
                         <div>
-                            <h1 className="text-3xl font-bold tracking-tight">{t('travelTransportation.title')}</h1>
+                            <h1 className="flex flex-wrap items-center gap-3 text-3xl font-bold tracking-tight">
+                                {t('travelTransportation.title')}
+                                <DateRangeBadge />
+                            </h1>
                             <p className="mt-1 text-sm text-muted-foreground">{t('travelTransportation.subtitle')}</p>
                         </div>
                     </div>

@@ -155,6 +155,7 @@ import {
     DropdownMenuTrigger,
     ExportPreviewModal,
 } from '@/ui/components'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { useWorkspace } from '@/workspace'
 import { useTheme } from '@/ui/components/theme-provider'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
@@ -3626,16 +3627,9 @@ export function Ledger() {
                             {t('ledger.title')}
                             {(isLoading || isDateLoading) && <Loader2 className="ms-1 h-4 w-4 animate-spin text-primary/50" />}
                         </h1>
-                        {dateDisplay && (
-                            <div
-                                className={cn(
-                                    'animate-pop-in bg-primary px-3 py-1 text-sm font-bold text-primary-foreground shadow-sm',
-                                    style === 'neo-orange' ? 'rounded-[var(--radius)] neo-border' : 'rounded-lg',
-                                )}
-                            >
-                                {dateDisplay}
-                            </div>
-                        )}
+                        <DateRangeBadge className={style === 'neo-orange' ? 'rounded-[var(--radius)] neo-border' : undefined}>
+                            {dateDisplay}
+                        </DateRangeBadge>
                     </div>
                     <p className="text-muted-foreground">
                         {t('ledger.subtitle')} <ModulePageFreshness className="ms-2" tableNames={LEDGER_FRESHNESS_TABLES} />

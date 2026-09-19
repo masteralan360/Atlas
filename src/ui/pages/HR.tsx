@@ -1,25 +1,27 @@
-import { useState, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useAuth } from '@/auth'
 import { useTranslation } from 'react-i18next'
-import { Plus, Search, Mail, Phone, Trash2, Edit, AlertTriangle, MessageCircle } from 'lucide-react'
+import { Plus, Search, Mail, Phone, Trash2, Edit, AlertTriangle, Loader2, MessageCircle, UserRoundPlus } from 'lucide-react'
 import { useLocation } from 'wouter'
 import { useWorkspace } from '@/workspace'
 import { useEmployees, createEmployee, updateEmployee, deleteEmployee, useWorkspaceUsers } from '@/local-db'
-import type { Employee } from '@/local-db'
+import type { CurrencyCode, Employee } from '@/local-db'
 import { platformService } from '@/services/platformService'
 import { whatsappManager } from '@/lib/whatsappWebviewManager'
 import {
     Button,
     Input,
     Card, CardContent,
-    Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+    AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle,
     Label,
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
     Switch,
+    CurrencySelector,
+    DateTimePicker,
     useToast
 } from '@/ui/components'
-import { formatDate, formatCurrency, cn, formatNumberWithCommas, parseFormattedNumber } from '@/lib/utils'
+import { formatDate, formatCurrency, cn, formatNumericInput, parseFormattedNumber, sanitizeNumericInput } from '@/lib/utils'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { FireConfirmationModal } from '@/ui/components/FireConfirmationModal'
 
@@ -31,12 +33,55 @@ const ROLE_HIERARCHY: Record<string, string[]> = {
 
 const MIN_EMPLOYEE_JOINING_DATE = '1900-01-01'
 
+type EmployeeRoleCategory = keyof typeof ROLE_HIERARCHY
+
+const ROLE_CATEGORY_LABELS: Record<EmployeeRoleCategory, string> = {
+    Management: 'hr.form.categories.management',
+    Staff: 'hr.form.categories.staff',
+    Technical: 'hr.form.categories.technical'
+}
+
+const ROLE_LABELS: Record<string, string> = {
+    Manager: 'hr.form.roles.manager',
+    'Assistant Manager': 'hr.form.roles.assistantManager',
+    Supervisor: 'hr.form.roles.supervisor',
+    Salesman: 'hr.form.roles.salesman',
+    Cashier: 'hr.form.roles.cashier',
+    Accountant: 'hr.form.roles.accountant',
+    Security: 'hr.form.roles.security',
+    Cleaning: 'hr.form.roles.cleaning',
+    Driver: 'hr.form.roles.driver',
+    'IT Support': 'hr.form.roles.itSupport',
+    Maintenance: 'hr.form.roles.maintenance',
+    Developer: 'hr.form.roles.developer'
+}
+
 function isValidEmployeeJoiningDate(value: string) {
-    const today = new Date().toISOString().slice(0, 10)
+    const today = formatDateInputValue(new Date())
     return /^\d{4}-\d{2}-\d{2}$/.test(value)
         && !Number.isNaN(new Date(`${value}T00:00:00`).getTime())
         && value >= MIN_EMPLOYEE_JOINING_DATE
         && value <= today
+}
+
+function formatDateInputValue(date: Date | undefined) {
+    if (!date || Number.isNaN(date.getTime())) return ''
+
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+}
+
+function toLocalDate(value: string | undefined) {
+    if (!value) return undefined
+    const date = new Date(`${value.slice(0, 10)}T00:00:00`)
+    return Number.isNaN(date.getTime()) ? undefined : date
+}
+
+function isDayOfMonth(value: string) {
+    const day = Number(value)
+    return Number.isInteger(day) && day >= 1 && day <= 31
 }
 
 export default function HR() {
@@ -48,7 +93,6 @@ export default function HR() {
     const { toast } = useToast()
     const { activeWorkspace, features } = useWorkspace()
     const workspaceId = activeWorkspace?.id
-    const baseCurrency = features.default_currency
     const employees = useEmployees(workspaceId)
     const [search, setSearch] = useState('')
     const [, setLocation] = useLocation()
@@ -56,13 +100,16 @@ export default function HR() {
     const [editingEmployee, setEditingEmployee] = useState<Employee | undefined>(undefined)
     const workspaceUsers = useWorkspaceUsers(workspaceId)
 
-    const [selectedCategory, setSelectedCategory] = useState<string>('')
+    const [employeeName, setEmployeeName] = useState('')
+    const [selectedCategory, setSelectedCategory] = useState<EmployeeRoleCategory | ''>('')
     const [selectedRole, setSelectedRole] = useState<string>('')
     const [hasDividends, setHasDividends] = useState(false)
     const [dividendType, setDividendType] = useState<'fixed' | 'percentage'>('fixed')
-    const [dividendCurrency, setDividendCurrency] = useState<string>(features.default_currency || 'usd')
-    const [salaryPayday, setSalaryPayday] = useState<number>(30)
-    const [dividendPayday, setDividendPayday] = useState<number>(30)
+    const [salaryCurrency, setSalaryCurrency] = useState<CurrencyCode>((features.default_currency || 'usd') as CurrencyCode)
+    const [dividendCurrency, setDividendCurrency] = useState<CurrencyCode>((features.default_currency || 'usd') as CurrencyCode)
+    const [salaryPayday, setSalaryPayday] = useState('30')
+    const [dividendPayday, setDividendPayday] = useState('30')
+    const [joiningDate, setJoiningDate] = useState<Date | undefined>(() => new Date())
     const [salaryDisplay, setSalaryDisplay] = useState<string>('')
     const [dividendAmountDisplay, setDividendAmountDisplay] = useState<string>('')
 
@@ -75,30 +122,36 @@ export default function HR() {
     const [isSaving, setIsSaving] = useState(false)
     const [confirmTarget, setConfirmTarget] = useState<Employee | undefined>(undefined)
 
-    useMemo(() => {
+    useEffect(() => {
         if (editingEmployee) {
             const [cat, role] = editingEmployee.role.includes(':')
                 ? editingEmployee.role.split(':')
                 : ['', editingEmployee.role]
-            setSelectedCategory(cat || '')
+            setEmployeeName(editingEmployee.name)
+            setSelectedCategory((cat in ROLE_HIERARCHY ? cat : '') as EmployeeRoleCategory | '')
             setSelectedRole(role || editingEmployee.role || '')
             setHasDividends(editingEmployee.hasDividends || false)
             setDividendType(editingEmployee.dividendType || 'fixed')
-            setDividendCurrency(editingEmployee.dividendCurrency || features.default_currency || 'usd')
-            setSalaryPayday(editingEmployee.salaryPayday || 30)
-            setDividendPayday(editingEmployee.dividendPayday || 30)
-            setSalaryDisplay(formatNumberWithCommas(editingEmployee.salary || 0))
-            setDividendAmountDisplay(formatNumberWithCommas(editingEmployee.dividendAmount || 0))
+            setSalaryCurrency((editingEmployee.salaryCurrency || features.default_currency || 'usd') as CurrencyCode)
+            setDividendCurrency((editingEmployee.dividendCurrency || features.default_currency || 'usd') as CurrencyCode)
+            setSalaryPayday(String(editingEmployee.salaryPayday ?? 30))
+            setDividendPayday(String(editingEmployee.dividendPayday ?? 30))
+            setJoiningDate(toLocalDate(editingEmployee.joiningDate))
+            setSalaryDisplay(editingEmployee.salary === undefined ? '' : String(editingEmployee.salary))
+            setDividendAmountDisplay(editingEmployee.dividendAmount === undefined ? '' : String(editingEmployee.dividendAmount))
             setShowLinkAccount(!!editingEmployee.linkedUserId)
             setLinkedUserId(editingEmployee.linkedUserId)
         } else if (isDialogOpen === false) {
+            setEmployeeName('')
             setSelectedCategory('')
             setSelectedRole('')
             setHasDividends(false)
             setDividendType('fixed')
-            setDividendCurrency(features.default_currency || 'usd')
-            setSalaryPayday(30)
-            setDividendPayday(30)
+            setSalaryCurrency((features.default_currency || 'usd') as CurrencyCode)
+            setDividendCurrency((features.default_currency || 'usd') as CurrencyCode)
+            setSalaryPayday('30')
+            setDividendPayday('30')
+            setJoiningDate(new Date())
             setSalaryDisplay('')
             setDividendAmountDisplay('')
             setShowLinkAccount(false)
@@ -122,17 +175,50 @@ export default function HR() {
 
     const availablePercentage = Math.max(0, 100 - othersTotalPercentage)
 
+    const isEmployeeFormValid = Boolean(
+        employeeName.trim()
+        && selectedCategory
+        && selectedRole
+        && isValidEmployeeJoiningDate(formatDateInputValue(joiningDate))
+        && salaryDisplay.trim()
+        && Number.isFinite(parseFormattedNumber(salaryDisplay))
+        && isDayOfMonth(salaryPayday)
+        && (!showLinkAccount || linkedUserId)
+        && (!hasDividends || (
+            dividendAmountDisplay.trim()
+            && Number.isFinite(parseFormattedNumber(dividendAmountDisplay))
+            && isDayOfMonth(dividendPayday)
+        ))
+    )
+
+    const handleEmployeeDialogOpenChange = (open: boolean) => {
+        if (!open && isSaving) return
+
+        setIsDialogOpen(open)
+        if (!open) setEditingEmployee(undefined)
+    }
+
     const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault()
         if (!workspaceId || isSaving) return
 
         const formData = new FormData(e.currentTarget)
-        const joiningDate = formData.get('joiningDate') as string
+        const joiningDateValue = formatDateInputValue(joiningDate)
+        const salary = parseFormattedNumber(salaryDisplay)
+        const dividendAmount = parseFormattedNumber(dividendAmountDisplay)
 
-        if (!isValidEmployeeJoiningDate(joiningDate)) {
+        if (!isEmployeeFormValid) {
             toast({
                 variant: 'destructive',
-                description: t('hr.invalidJoiningDate', 'Choose a joining date between 1900 and today.')
+                description: t('hr.form.completeRequiredFields')
+            })
+            return
+        }
+
+        if (!isValidEmployeeJoiningDate(joiningDateValue)) {
+            toast({
+                variant: 'destructive',
+                description: t('hr.invalidJoiningDate')
             })
             return
         }
@@ -142,34 +228,32 @@ export default function HR() {
             if (othersTotalPercentage + newPercentage > 100) {
                 toast({
                     variant: 'destructive',
-                    description: t('hr.dividendExceeds', `Total dividends cannot exceed 100%. Available: ${availablePercentage}%`)
+                    description: t('hr.dividendExceeds', { percentage: availablePercentage })
                 })
                 return
             }
         }
         const data = {
-            name: formData.get('name') as string,
+            name: employeeName.trim(),
             email: formData.get('email') as string,
             phone: formData.get('phone') as string,
             role: `${selectedCategory}:${selectedRole}`,
             gender: formData.get('gender') as 'male' | 'female' | 'other',
             location: formData.get('location') as string,
-            joiningDate,
-            salary: parseFormattedNumber(salaryDisplay),
-            salaryCurrency: (formData.get('salaryCurrency') as any) || baseCurrency || 'usd',
+            joiningDate: joiningDateValue,
+            salary,
+            salaryCurrency,
             hasDividends,
             dividendType: hasDividends ? dividendType : undefined,
-            dividendAmount: hasDividends ? parseFormattedNumber(dividendAmountDisplay) : undefined,
-            dividendCurrency: hasDividends ? (dividendCurrency as any) : undefined,
-            salaryPayday,
-            dividendPayday: hasDividends ? dividendPayday : undefined,
+            dividendAmount: hasDividends ? dividendAmount : undefined,
+            dividendCurrency: hasDividends ? dividendCurrency : undefined,
+            salaryPayday: Number(salaryPayday),
+            dividendPayday: hasDividends ? Number(dividendPayday) : undefined,
             isFired: editingEmployee?.isFired || false,
             linkedUserId: showLinkAccount ? linkedUserId : undefined
         }
 
         setIsSaving(true)
-        // Optimistically close for better UX
-        setIsDialogOpen(false)
 
         try {
             if (editingEmployee) {
@@ -179,11 +263,11 @@ export default function HR() {
                 await createEmployee(workspaceId, data)
                 toast({ description: t('hr.addSuccess', 'Employee added successfully') })
             }
+            setIsDialogOpen(false)
             setEditingEmployee(undefined)
         } catch (error) {
             console.error('Save error:', error)
             toast({ variant: 'destructive', description: t('common.error', 'Something went wrong') })
-            setIsDialogOpen(true) // Re-open on error
         } finally {
             setIsSaving(false)
         }
@@ -401,246 +485,262 @@ export default function HR() {
                 ))}
             </div>
 
-            <Dialog open={isDialogOpen} onOpenChange={(open) => {
-                setIsDialogOpen(open)
-                if (!open) setEditingEmployee(undefined)
-            }}>
-                <DialogContent className="max-w-2xl w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
-                        <DialogTitle>{editingEmployee ? t('hr.editEmployee', 'Edit Employee') : t('hr.addEmployee', 'Add Employee')}</DialogTitle>
-                    </DialogHeader>
-                    <form onSubmit={handleSave} className="space-y-4 pt-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2 col-span-2">
-                                <Label htmlFor="name">{t('hr.form.name', 'Full Name')}</Label>
-                                <Input id="name" name="name" defaultValue={editingEmployee?.name} required />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>{t('hr.form.category', 'Department / Category')}</Label>
-                                <Select
-                                    value={selectedCategory}
-                                    onValueChange={(val) => {
-                                        setSelectedCategory(val)
-                                        setSelectedRole('')
-                                    }}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder={t('hr.form.selectCategory', 'Select Category')} />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {Object.keys(ROLE_HIERARCHY).map(cat => (
-                                            <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>{t('hr.form.role', 'Specific Role')}</Label>
-                                <Select
-                                    value={selectedRole}
-                                    onValueChange={setSelectedRole}
-                                    disabled={!selectedCategory}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder={t('hr.form.selectRole', 'Select Role')} />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {(ROLE_HIERARCHY[selectedCategory] || []).map(role => (
-                                            <SelectItem key={role} value={role}>{role}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="gender">{t('hr.form.gender', 'Gender')}</Label>
-                                <Select name="gender" defaultValue={editingEmployee?.gender || 'male'}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="male">{t('hr.form.male', 'Male')}</SelectItem>
-                                        <SelectItem value="female">{t('hr.form.female', 'Female')}</SelectItem>
-                                        <SelectItem value="other">{t('hr.form.other', 'Other')}</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="email">{t('hr.form.email', 'Email')}</Label>
-                                <Input id="email" name="email" type="email" defaultValue={editingEmployee?.email} />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="phone">{t('hr.form.phone', 'Phone')}</Label>
-                                <Input id="phone" name="phone" defaultValue={editingEmployee?.phone} />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="salary">{t('hr.form.salary', 'Salary')}</Label>
-                                <div className="flex gap-2">
+            <AppDialog open={isDialogOpen} onOpenChange={handleEmployeeDialogOpenChange}>
+                <AppDialogContent className="max-w-3xl" showCloseButton={!isSaving}>
+                    <AppDialogHeader>
+                        <AppDialogTitle className="flex items-center gap-2">
+                            <UserRoundPlus className="h-5 w-5 text-primary" />
+                            {editingEmployee ? t('hr.editEmployee') : t('hr.addEmployee')}
+                        </AppDialogTitle>
+                    </AppDialogHeader>
+                    <AppDialogBody>
+                        <form id="employee-form" onSubmit={handleSave} className="space-y-5">
+                            <div className="grid gap-5 md:grid-cols-2">
+                                <div className="space-y-2 md:col-span-2">
+                                    <Label htmlFor="employee-name">{t('hr.form.name')} *</Label>
                                     <Input
-                                        id="salary"
-                                        name="salary"
-                                        className="flex-1"
-                                        value={salaryDisplay}
-                                        onChange={(e) => setSalaryDisplay(formatNumberWithCommas(e.target.value))}
-                                        placeholder="0"
-                                        required={!hasDividends}
+                                        id="employee-name"
+                                        name="name"
+                                        value={employeeName}
+                                        onChange={(event) => setEmployeeName(event.target.value)}
+                                        disabled={isSaving}
+                                        required
                                     />
-                                    <Select name="salaryCurrency" defaultValue={editingEmployee?.salaryCurrency || baseCurrency || 'usd'}>
-                                        <SelectTrigger className="w-[80px]">
-                                            <SelectValue />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>{t('hr.form.category')} *</Label>
+                                    <Select
+                                        value={selectedCategory}
+                                        onValueChange={(value) => {
+                                            setSelectedCategory(value as EmployeeRoleCategory)
+                                            setSelectedRole('')
+                                            if (value !== 'Management') setHasDividends(false)
+                                        }}
+                                        disabled={isSaving}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder={t('hr.form.selectCategory')} />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="usd">USD</SelectItem>
-                                            <SelectItem value="iqd">IQD</SelectItem>
-                                            <SelectItem value="eur">EUR</SelectItem>
-                                            <SelectItem value="try">TRY</SelectItem>
+                                            {(Object.keys(ROLE_HIERARCHY) as EmployeeRoleCategory[]).map((category) => (
+                                                <SelectItem key={category} value={category}>{t(ROLE_CATEGORY_LABELS[category])}</SelectItem>
+                                            ))}
                                         </SelectContent>
                                     </Select>
                                 </div>
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="salaryPayday">{t('hr.form.salaryPayday', 'Salary Payday (1-31)')}</Label>
-                                <Input
-                                    id="salaryPayday"
-                                    type="number"
-                                    min="1"
-                                    max="31"
-                                    value={salaryPayday}
-                                    onChange={(e) => setSalaryPayday(Number(e.target.value))}
-                                    required
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="joiningDate">{t('hr.form.joiningDate', 'Joining Date')}</Label>
-                                <Input
-                                    id="joiningDate"
-                                    name="joiningDate"
-                                    type="date"
-                                    min={MIN_EMPLOYEE_JOINING_DATE}
-                                    max={new Date().toISOString().slice(0, 10)}
-                                    defaultValue={editingEmployee?.joiningDate ? new Date(editingEmployee.joiningDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]}
-                                    required
-                                />
-                            </div>
-
-                            {/* Link Workspace Account - Requirement: between salary payday/joining date and location */}
-                            <div className="col-span-2 p-4 bg-primary/5 rounded-lg space-y-4 border border-primary/20">
-                                <div className="flex items-center justify-between">
-                                    <div className="space-y-0.5">
-                                        <Label className="text-sm font-bold uppercase tracking-wider text-primary">{t('hr.form.linkAccount', 'Link Workspace Account')}</Label>
-                                        <div className="text-[10px] text-muted-foreground uppercase">{t('hr.form.linkAccountDesc', 'Connect this record to a workspace member account')}</div>
+                                <div className="space-y-2">
+                                    <Label>{t('hr.form.role')} *</Label>
+                                    <Select
+                                        value={selectedRole}
+                                        onValueChange={setSelectedRole}
+                                        disabled={!selectedCategory || isSaving}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder={t('hr.form.selectRole')} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {(ROLE_HIERARCHY[selectedCategory] || []).map((role) => (
+                                                <SelectItem key={role} value={role}>{t(ROLE_LABELS[role])}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="employee-gender">{t('hr.form.gender')}</Label>
+                                    <Select name="gender" defaultValue={editingEmployee?.gender || 'male'} disabled={isSaving}>
+                                        <SelectTrigger id="employee-gender">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="male">{t('hr.form.male')}</SelectItem>
+                                            <SelectItem value="female">{t('hr.form.female')}</SelectItem>
+                                            <SelectItem value="other">{t('hr.form.other')}</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="employee-email">{t('hr.form.email')}</Label>
+                                    <Input id="employee-email" name="email" type="email" defaultValue={editingEmployee?.email} disabled={isSaving} />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="employee-phone">{t('hr.form.phone')}</Label>
+                                    <Input id="employee-phone" name="phone" defaultValue={editingEmployee?.phone} disabled={isSaving} />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="employee-joining-date">{t('hr.form.joiningDate')} *</Label>
+                                    <DateTimePicker
+                                        id="employee-joining-date"
+                                        mode="date"
+                                        date={joiningDate}
+                                        setDate={setJoiningDate}
+                                        disabled={isSaving}
+                                        placeholder={t('hr.form.selectJoiningDate')}
+                                        calendarProps={{
+                                            disabled: {
+                                                before: new Date(1900, 0, 1),
+                                                after: new Date()
+                                            }
+                                        }}
+                                    />
+                                </div>
+                                <div className="space-y-2 md:col-span-2">
+                                    <Label htmlFor="employee-salary">{t('hr.form.salary')} *</Label>
+                                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_11rem]">
+                                        <Input
+                                            id="employee-salary"
+                                            inputMode="decimal"
+                                            value={formatNumericInput(salaryDisplay)}
+                                            onChange={(event) => setSalaryDisplay(sanitizeNumericInput(event.target.value, { allowDecimal: true }))}
+                                            placeholder="0"
+                                            disabled={isSaving}
+                                            required
+                                        />
+                                        <CurrencySelector
+                                            value={salaryCurrency}
+                                            onChange={setSalaryCurrency}
+                                            iqdDisplayPreference={features.iqd_display_preference}
+                                            disabled={isSaving}
+                                        />
                                     </div>
-                                    <Switch checked={showLinkAccount} onCheckedChange={(val) => {
-                                        setShowLinkAccount(val)
-                                        if (!val) setLinkedUserId(undefined)
-                                    }} />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="employee-salary-payday">{t('hr.form.salaryPayday')} *</Label>
+                                    <Input
+                                        id="employee-salary-payday"
+                                        inputMode="numeric"
+                                        value={salaryPayday}
+                                        onChange={(event) => setSalaryPayday(sanitizeNumericInput(event.target.value, { allowDecimal: false }))}
+                                        placeholder="0"
+                                        disabled={isSaving}
+                                        required
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="employee-location">{t('hr.form.location')}</Label>
+                                    <Input id="employee-location" name="location" defaultValue={editingEmployee?.location} disabled={isSaving} />
                                 </div>
 
-                                {showLinkAccount && (
-                                    <div className="animate-in fade-in slide-in-from-top-1 duration-200">
-                                        <Select value={linkedUserId} onValueChange={setLinkedUserId}>
-                                            <SelectTrigger>
-                                                <SelectValue placeholder={t('hr.form.selectMember', 'Select Member')} />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {workspaceUsers.map(user => (
-                                                    <SelectItem key={user.id} value={user.id}>
-                                                        {user.name}{user.email ? ` (${user.email})` : ''}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                )}
-                            </div>
-                            <div className="space-y-2 col-span-2">
-                                <Label htmlFor="location">{t('hr.form.location', 'Location')}</Label>
-                                <Input id="location" name="location" defaultValue={editingEmployee?.location} />
-                            </div>
-
-                            {selectedCategory === 'Management' && (
-                                <div className="col-span-2 p-4 bg-muted/30 rounded-lg space-y-4 border border-border/50">
-                                    <div className="flex items-center justify-between">
+                                <div className="space-y-4 rounded-xl border border-primary/20 bg-primary/5 p-4 md:col-span-2">
+                                    <div className="flex items-center justify-between gap-4">
                                         <div className="space-y-0.5">
-                                            <Label className="text-sm font-bold uppercase tracking-wider">{t('hr.form.dividends', 'Ownership / Dividends')}</Label>
-                                            <div className="text-[10px] text-muted-foreground uppercase">{t('hr.form.dividendDesc', 'Enable profit-sharing for this management member')}</div>
+                                            <Label className="text-sm font-bold uppercase tracking-wider text-primary">{t('hr.form.linkAccount')}</Label>
+                                            <p className="text-xs text-muted-foreground">{t('hr.form.linkAccountDesc')}</p>
                                         </div>
-                                        <Switch checked={hasDividends} onCheckedChange={setHasDividends} />
+                                        <Switch checked={showLinkAccount} onCheckedChange={(value) => {
+                                            setShowLinkAccount(value)
+                                            if (!value) setLinkedUserId(undefined)
+                                        }} disabled={isSaving} />
                                     </div>
 
-                                    {hasDividends && (
-                                        <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-1 duration-200">
-                                            <div className="space-y-2">
-                                                <Label className="text-xs uppercase">{t('hr.form.dividendType', 'Calculation')}</Label>
-                                                <Select value={dividendType} onValueChange={(val: any) => setDividendType(val)}>
-                                                    <SelectTrigger>
-                                                        <SelectValue />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="fixed">{t('hr.form.fixedValue', 'Manual Value')}</SelectItem>
-                                                        <SelectItem value="percentage">{t('hr.form.percentageValue', 'Percentage (%)')}</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-                                            <div className="space-y-2">
-                                                <Label className="text-xs uppercase">{t('hr.form.payday', 'Dividend Payday (1-31)')}</Label>
-                                                <Input
-                                                    type="number"
-                                                    min="1"
-                                                    max="31"
-                                                    value={dividendPayday}
-                                                    onChange={(e) => setDividendPayday(Number(e.target.value))}
-                                                    required
-                                                />
-                                            </div>
-                                            <div className="space-y-2 col-span-2">
-                                                <Label className="text-xs uppercase">{t('hr.form.amount', 'Amount')}</Label>
-                                                <div className="flex gap-1.5">
-                                                    <Input
-                                                        value={dividendAmountDisplay}
-                                                        onChange={(e) => setDividendAmountDisplay(formatNumberWithCommas(e.target.value))}
-                                                        className="flex-1"
-                                                        placeholder="0"
-                                                    />
-                                                    {dividendType === 'percentage' ? (
-                                                        <div className="w-10 h-10 flex items-center justify-center bg-muted rounded-md text-sm font-bold">%</div>
-                                                    ) : (
-                                                        <Select value={dividendCurrency} onValueChange={setDividendCurrency}>
-                                                            <SelectTrigger className="w-[80px]">
-                                                                <SelectValue />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="usd">USD</SelectItem>
-                                                                <SelectItem value="iqd">IQD</SelectItem>
-                                                                <SelectItem value="eur">EUR</SelectItem>
-                                                                <SelectItem value="try">TRY</SelectItem>
-                                                            </SelectContent>
-                                                        </Select>
-                                                    )}
-                                                </div>
-                                                {dividendType === 'percentage' && (
-                                                    <div className={cn(
-                                                        "flex items-center gap-1.5 mt-1.5 text-[11px] font-bold",
-                                                        availablePercentage <= 0 ? 'text-destructive' : 'text-muted-foreground'
-                                                    )}>
-                                                        {availablePercentage <= 0 ? (
-                                                            <><AlertTriangle className="w-3 h-3" /> {t('hr.noPercentageLeft', 'No percentage available (100% allocated)')}</>
-                                                        ) : (
-                                                            <>{t('hr.availablePercentage', `Available: ${availablePercentage}%`)}</>
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </div>
+                                    {showLinkAccount && (
+                                        <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                                            <Label>{t('hr.form.selectMember')} *</Label>
+                                            <Select value={linkedUserId} onValueChange={setLinkedUserId} disabled={isSaving}>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder={t('hr.form.selectMember')} />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {workspaceUsers.map((workspaceUser) => (
+                                                        <SelectItem key={workspaceUser.id} value={workspaceUser.id}>
+                                                            {workspaceUser.name}{workspaceUser.email ? ` (${workspaceUser.email})` : ''}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
                                         </div>
                                     )}
                                 </div>
-                            )}
-                        </div>
-                        <DialogFooter className="pt-4">
-                            <Button type="submit">{editingEmployee ? t('common.update', 'Update') : t('common.save', 'Save')}</Button>
-                        </DialogFooter>
-                    </form>
-                </DialogContent>
-            </Dialog>
+
+                                {selectedCategory === 'Management' && (
+                                    <div className="space-y-4 rounded-xl border border-border/50 bg-muted/30 p-4 md:col-span-2">
+                                        <div className="flex items-center justify-between gap-4">
+                                            <div className="space-y-0.5">
+                                                <Label className="text-sm font-bold uppercase tracking-wider">{t('hr.form.dividends')}</Label>
+                                                <p className="text-xs text-muted-foreground">{t('hr.form.dividendDesc')}</p>
+                                            </div>
+                                            <Switch checked={hasDividends} onCheckedChange={setHasDividends} disabled={isSaving} />
+                                        </div>
+
+                                        {hasDividends && (
+                                            <div className="grid gap-5 animate-in fade-in slide-in-from-top-1 duration-200 md:grid-cols-2">
+                                                <div className="space-y-2">
+                                                    <Label>{t('hr.form.dividendType')}</Label>
+                                                    <Select value={dividendType} onValueChange={(value) => setDividendType(value as 'fixed' | 'percentage')} disabled={isSaving}>
+                                                        <SelectTrigger>
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="fixed">{t('hr.form.fixedValue')}</SelectItem>
+                                                            <SelectItem value="percentage">{t('hr.form.percentageValue')}</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <Label htmlFor="employee-dividend-payday">{t('hr.form.payday')} *</Label>
+                                                    <Input
+                                                        id="employee-dividend-payday"
+                                                        inputMode="numeric"
+                                                        value={dividendPayday}
+                                                        onChange={(event) => setDividendPayday(sanitizeNumericInput(event.target.value, { allowDecimal: false }))}
+                                                        placeholder="0"
+                                                        disabled={isSaving}
+                                                        required
+                                                    />
+                                                </div>
+                                                <div className="space-y-2 md:col-span-2">
+                                                    <Label htmlFor="employee-dividend-amount">{t('hr.form.amount')} *</Label>
+                                                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_11rem]">
+                                                        <Input
+                                                            id="employee-dividend-amount"
+                                                            inputMode={dividendType === 'percentage' ? 'numeric' : 'decimal'}
+                                                            value={formatNumericInput(dividendAmountDisplay)}
+                                                            onChange={(event) => setDividendAmountDisplay(sanitizeNumericInput(event.target.value, { allowDecimal: dividendType !== 'percentage' }))}
+                                                            placeholder="0"
+                                                            disabled={isSaving}
+                                                            required
+                                                        />
+                                                        {dividendType === 'percentage' ? (
+                                                            <div className="flex h-10 items-center justify-center rounded-xl border bg-muted text-sm font-bold">%</div>
+                                                        ) : (
+                                                            <CurrencySelector
+                                                                value={dividendCurrency}
+                                                                onChange={setDividendCurrency}
+                                                                iqdDisplayPreference={features.iqd_display_preference}
+                                                                disabled={isSaving}
+                                                            />
+                                                        )}
+                                                    </div>
+                                                    {dividendType === 'percentage' && (
+                                                        <div className={cn(
+                                                            'mt-1.5 flex items-center gap-1.5 text-xs font-medium',
+                                                            availablePercentage <= 0 ? 'text-destructive' : 'text-muted-foreground'
+                                                        )}>
+                                                            {availablePercentage <= 0 ? (
+                                                                <><AlertTriangle className="h-3.5 w-3.5" /> {t('hr.noPercentageLeft')}</>
+                                                            ) : (
+                                                                t('hr.availablePercentage', { percentage: availablePercentage })
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </form>
+                    </AppDialogBody>
+                    <AppDialogFooter>
+                        <Button type="button" variant="outline" onClick={() => handleEmployeeDialogOpenChange(false)} disabled={isSaving}>
+                            {t('common.cancel')}
+                        </Button>
+                        <Button type="submit" form="employee-form" disabled={isSaving || !isEmployeeFormValid}>
+                            {isSaving && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
+                            {isSaving ? t('common.saving') : editingEmployee ? t('hr.updateEmployee') : t('common.save')}
+                        </Button>
+                    </AppDialogFooter>
+                </AppDialogContent>
+            </AppDialog>
 
             <DeleteConfirmationModal
                 isOpen={isDeleteModalOpen}

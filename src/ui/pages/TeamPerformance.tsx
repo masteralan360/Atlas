@@ -16,6 +16,7 @@ import { useWorkspace } from '@/workspace'
 import { useViewOwnRecordScope } from '@/permissions'
 import { useDateRange } from '@/context/DateRangeContext'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import {
     Card,
     CardContent,
@@ -468,11 +469,7 @@ export function TeamPerformance() {
                                     <Loader2 className="w-4 h-4 animate-spin text-primary/50 ml-1" />
                                 )}
                             </h1>
-                            {getDateDisplay() && (
-                                <div className="px-3 py-1 text-sm font-bold bg-primary text-primary-foreground rounded-lg shadow-sm animate-pop-in">
-                                    {getDateDisplay()}
-                                </div>
-                            )}
+                            <DateRangeBadge>{getDateDisplay()}</DateRangeBadge>
                         </div>
                         <p className="text-muted-foreground">
                             {t('performance.subtitle')} <ModulePageFreshness className="ms-2" />

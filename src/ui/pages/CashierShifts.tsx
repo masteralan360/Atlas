@@ -82,6 +82,7 @@ import {
   Textarea,
   useToast
 } from '@/ui/components'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
 import { useWorkspace } from '@/workspace'
@@ -580,7 +581,10 @@ export function CashierShifts() {
           <WalletCards className="h-3.5 w-3.5" />
           {t('paymentAccounts.title')}
         </div>
-        <h1 className="text-3xl font-bold tracking-tight">{t('paymentAccounts.shiftManagement')}</h1>
+        <h1 className="flex flex-wrap items-center gap-3 text-3xl font-bold tracking-tight">
+          {t('paymentAccounts.shiftManagement')}
+          {activeTab === 'shifts' || activeTab === 'team' ? <DateRangeBadge /> : null}
+        </h1>
         <p className="mt-1 text-sm text-muted-foreground">{t('paymentAccounts.shiftManagementDescription')}</p>
       </div>
 

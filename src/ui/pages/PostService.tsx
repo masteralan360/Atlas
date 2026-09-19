@@ -23,6 +23,7 @@ import { useWorkspacePermissions } from "@/permissions";
 import { useDateRange, type DateRangeType } from "@/context/DateRangeContext";
 import { ModulePageFreshness } from "@/ui/components/ModulePageFreshness";
 import { DateRangeFilters } from "@/ui/components/DateRangeFilters";
+import { DateRangeBadge } from "@/ui/components/DateRangeBadge";
 import { FilterDropdown } from "@/ui/components/FilterDropdown";
 import { AddPartnerButton } from "@/ui/components/crm/AddPartnerButton";
 import { PartnerAutocompleteInput } from "@/ui/components/crm/PartnerAutocompleteInput";
@@ -1734,7 +1735,7 @@ export function PostService() {
 
   if (!workspaceId) return null;
   return <div className="w-full min-w-0 space-y-6 overflow-x-hidden" dir={pageDirection}>
-    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><h1 className="flex items-center gap-2 text-2xl font-bold"><PackageCheck className="h-6 w-6 text-primary" />{t("postService.title")}</h1><p className="text-muted-foreground">{t("postService.subtitle")} <ModulePageFreshness className="ms-2" /></p></div><div className="flex flex-wrap items-center gap-2">{DeveloperTestButton && <Suspense fallback={null}><DeveloperTestButton suiteId="post-service" /></Suspense>}{isAdmin && <div className="flex flex-wrap gap-2"><Button variant="outline" className="gap-2" onClick={() => setMerchantDialogOpen(true)}><Store className="h-4 w-4" />{t("postService.actions.enableMerchant")}</Button><Button className="gap-2" onClick={() => setShipmentDialogOpen(true)}><Plus className="h-4 w-4" />{t("postService.actions.newPost")}</Button></div>}</div></div>
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><h1 className="flex flex-wrap items-center gap-2 text-2xl font-bold"><PackageCheck className="h-6 w-6 text-primary" />{t("postService.title")}{activeTab === "posts" ? <DateRangeBadge /> : null}</h1><p className="text-muted-foreground">{t("postService.subtitle")} <ModulePageFreshness className="ms-2" /></p></div><div className="flex flex-wrap items-center gap-2">{DeveloperTestButton && <Suspense fallback={null}><DeveloperTestButton suiteId="post-service" /></Suspense>}{isAdmin && <div className="flex flex-wrap gap-2"><Button variant="outline" className="gap-2" onClick={() => setMerchantDialogOpen(true)}><Store className="h-4 w-4" />{t("postService.actions.enableMerchant")}</Button><Button className="gap-2" onClick={() => setShipmentDialogOpen(true)}><Plus className="h-4 w-4" />{t("postService.actions.newPost")}</Button></div>}</div></div>
     <div className="space-y-3">
       <div className={cn("grid sm:grid-cols-2", isAdmin ? "gap-3 lg:grid-cols-6" : "gap-4 xl:grid-cols-6")}>{postStatusMetrics.filter(({ status }) => !isAdmin ? status !== "cancelled" : !["returned", "cancelled"].includes(status)).map(({ status, value }) => <StatusMetric key={status} compact={isAdmin} icon={statusFilterIcons[status]} title={status === "returned" ? t("postService.status.returnAwaitingReceipt") : shipmentStatusLabel(t, status)} value={value} active={isStatusMetricActive(status)} selectionTone={status === "returned" ? "amber" : status === "cancelled" ? "rose" : "primary"} onClick={() => handleStatusMetricClick(status)} />)}{isAdmin ? <><StatusMetric compact icon={PackageCheck} title={t("postService.status.completed")} value={completedPostCount} active={completedOnly} onClick={handleCompletedPostMetricClick} /><StatusMetric compact icon={FilePenLine} title={t("postService.status.requestChange")} value={pendingChangeRequestCount} active={pendingChangeRequestFilter} selectionTone="amber" onClick={handlePendingChangeRequestMetricClick} /></> : <><StatusMetric icon={PackageCheck} title={t("postService.status.completed")} value={completedPostCount} active={completedOnly} onClick={handleCompletedPostMetricClick} />{postStatusMetrics.filter(({ status }) => status === "cancelled").map(({ status, value }) => <StatusMetric key={status} icon={statusFilterIcons[status]} title={shipmentStatusLabel(t, status)} value={value} active={isStatusMetricActive(status)} selectionTone="rose" onClick={() => handleStatusMetricClick(status)} />)}</>}</div>
       {isAdmin ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
@@ -1873,7 +1874,10 @@ export function PostService() {
     <AppDialog open={!!partyPostsDialogTarget} onOpenChange={(open) => { if (!open) setPartyPostsDialogTarget(null); }}>
       <AppDialogContent className="max-w-5xl lg:w-[calc(100vw-2rem)] lg:max-w-[1440px]">
         <AppDialogHeader>
-          <AppDialogTitle>{partyPostsDialogTarget && t("postService.dialogs.partyPosts.title", { name: partyPostsDialogTarget.name })}</AppDialogTitle>
+          <AppDialogTitle className="flex flex-wrap items-center gap-3">
+            {partyPostsDialogTarget && t("postService.dialogs.partyPosts.title", { name: partyPostsDialogTarget.name })}
+            <DateRangeBadge dateRange={partyPostsDateRange} customDates={partyPostsCustomDates} />
+          </AppDialogTitle>
           <AppDialogDescription>{partyPostsDialogTarget && t("postService.dialogs.partyPosts.description", { name: partyPostsDialogTarget.name })}</AppDialogDescription>
         </AppDialogHeader>
         <AppDialogBody className="space-y-4">

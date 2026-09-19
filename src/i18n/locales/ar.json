@@ -3986,6 +3986,8 @@
     "title": "إدارة الموارد البشرية",
     "subtitle": "إدارة فريقك وكشوف المرتبات",
     "addEmployee": "إضافة موظف",
+    "editEmployee": "تعديل الموظف",
+    "updateEmployee": "تحديث الموظف",
     "updateSuccess": "تم تحديث الموظف بنجاح",
     "addSuccess": "تمت إضافة الموظف بنجاح",
     "deleteSuccess": "تمت إزالة الموظف بنجاح",
@@ -4003,8 +4005,15 @@
     "onLeave": "في إجازة",
     "monthlyPayroll": "كشوف المرتبات الشهرية",
     "searchPlaceholder": "البحث بالاسم، الدور، أو البريد...",
+    "invalidJoiningDate": "اختر تاريخ انضمام بين 1900 واليوم.",
+    "dividendExceeds": "لا يمكن أن يتجاوز إجمالي الأرباح الموزعة 100%. المتاح: {{percentage}}%",
+    "noPercentageLeft": "لا توجد نسبة متاحة (تم تخصيص 100%)",
+    "availablePercentage": "المتاح: {{percentage}}%",
     "form": {
       "name": "الاسم الكامل",
+      "category": "القسم / الفئة",
+      "selectCategory": "اختر فئة",
+      "selectRole": "اختر دوراً",
       "email": "البريد الإلكتروني",
       "phone": "رقم الهاتف",
       "role": "الدور / المنصب",
@@ -4013,6 +4022,7 @@
       "female": "أنثى",
       "other": "آخر",
       "joiningDate": "تاريخ الانضمام",
+      "selectJoiningDate": "اختر تاريخ الانضمام",
       "location": "الموقع",
       "salary": "الراتب الشهري",
       "salaryPayday": "يوم دفع الراتب (1-31)",
@@ -4022,9 +4032,30 @@
       "fixedValue": "قيمة يدوية",
       "percentageValue": "نسبة مئوية (%)",
       "payday": "يوم دفع الأرباح (1-31)",
+      "amount": "المبلغ",
       "linkAccount": "ربط حساب مساحة العمل",
       "linkAccountDesc": "ربط هذا السجل بحساب عضو في مساحة العمل",
-      "selectMember": "اختر العضو"
+      "selectMember": "اختر العضو",
+      "completeRequiredFields": "أكمل جميع الحقول المطلوبة قبل الحفظ.",
+      "categories": {
+        "management": "الإدارة",
+        "staff": "الموظفون",
+        "technical": "الفنيون"
+      },
+      "roles": {
+        "manager": "مدير",
+        "assistantManager": "مساعد مدير",
+        "supervisor": "مشرف",
+        "salesman": "مندوب مبيعات",
+        "cashier": "أمين صندوق",
+        "accountant": "محاسب",
+        "security": "أمن",
+        "cleaning": "تنظيف",
+        "driver": "سائق",
+        "itSupport": "دعم تقني",
+        "maintenance": "صيانة",
+        "developer": "مطور"
+      }
     }
   },
   "workspaceConfig": {

@@ -3983,6 +3983,8 @@
     "title": "بەڕێوەبردنی سەرچاوە مرۆییەکان",
     "subtitle": "بەڕێوەبردنی تیمەکەت و مووچەکانیان",
     "addEmployee": "زیادکردنی کارمەند",
+    "editEmployee": "دەستکاریکردنی کارمەند",
+    "updateEmployee": "نوێکردنەوەی کارمەند",
     "updateSuccess": "کارمەند بە سەرکەوتوویی نوێکرایەوە",
     "addSuccess": "کارمەند بە سەرکەوتوویی زیادکرا",
     "deleteSuccess": "کارمەند بە سەرکەوتوویی لادرا",
@@ -4000,8 +4002,15 @@
     "onLeave": "لە مۆڵەتدایە",
     "monthlyPayroll": "لیستی مووچەی مانگانە",
     "searchPlaceholder": "گەڕان بە ناو، ڕۆڵ، یان ئیمەیڵ...",
+    "invalidJoiningDate": "بەرواری دەستبەکاربوونێک لە نێوان 1900 و ئەمڕۆ هەڵبژێرە.",
+    "dividendExceeds": "کۆی قازانجە دابەشکراوەکان نابێت لە 100% زیاتر بێت. بەردەست: {{percentage}}%",
+    "noPercentageLeft": "هیچ ڕێژەیەک بەردەست نییە (100% دابەشکراوە)",
+    "availablePercentage": "بەردەست: {{percentage}}%",
     "form": {
       "name": "ناوی تەواو",
+      "category": "بەش / پۆل",
+      "selectCategory": "پۆلێک هەڵبژێرە",
+      "selectRole": "ڕۆڵێک هەڵبژێرە",
       "email": "ئیمەیڵ ئەدرێس",
       "phone": "ژمارەی تەلەفۆن",
       "role": "ڕۆڵ / پۆست",
@@ -4010,6 +4019,7 @@
       "female": "مێ",
       "other": "تر",
       "joiningDate": "بەرواری دەستبەکاربوون",
+      "selectJoiningDate": "بەرواری دەستبەکاربوون هەڵبژێرە",
       "location": "شوێن",
       "salary": "مووچەی مانگانە",
       "salaryPayday": "ڕۆژی پێدانی مووچە (١-٣١)",
@@ -4019,9 +4029,30 @@
       "fixedValue": "بەهای دەستی",
       "percentageValue": "ڕێژەی سەدی (%)",
       "payday": "ڕۆژی پێدانی قازانج (١-٣١)",
+      "amount": "بڕ",
       "linkAccount": "بەستنەوەی هەژماری شوێنی کار",
       "linkAccountDesc": "ئەم تۆمارە بە هەژماری ئەندامێکی شوێنی کار ببەستەوە",
-      "selectMember": "هەڵبژاردنی ئەندام"
+      "selectMember": "هەڵبژاردنی ئەندام",
+      "completeRequiredFields": "پێش پاشەکەوتکردن هەموو خانە پێویستەکان پڕ بکەوە.",
+      "categories": {
+        "management": "بەڕێوەبردن",
+        "staff": "کارمەندان",
+        "technical": "تەکنیکی"
+      },
+      "roles": {
+        "manager": "بەڕێوەبەر",
+        "assistantManager": "یاریدەدەری بەڕێوەبەر",
+        "supervisor": "سەرپەرشتیار",
+        "salesman": "فرۆشیار",
+        "cashier": "سندوقدار",
+        "accountant": "ژمێریار",
+        "security": "ئاسایش",
+        "cleaning": "پاککەرەوە",
+        "driver": "شۆفێر",
+        "itSupport": "پشتیوانی تەکنیکی",
+        "maintenance": "چاکسازی",
+        "developer": "گەشەپێدەر"
+      }
     }
   },
   "workspaceConfig": {

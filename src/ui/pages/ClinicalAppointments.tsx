@@ -25,6 +25,7 @@ import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, Select
 import { Plus, Search, Upload, Trash2, FileText, ArrowLeft, CalendarClock, Edit, Check, ChevronDown, LayoutGrid, List, HandCoins, UserPlus, Phone, X } from 'lucide-react'
 import { generateId, formatCurrency, formatLocalDateValue, formatNumberWithCommas, formatTime, formatNumericInput, parseFormattedNumber, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import { createBusinessPartner, useBusinessPartners, recalculateBusinessPartnerSummary } from '@/local-db'
@@ -367,8 +368,9 @@ function Beauty2AppointmentList({ workspaceId, navigate }: { workspaceId: string
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="flex flex-wrap items-center gap-3 text-2xl font-semibold tracking-tight">
             {t('clinicalAppointments.title', { defaultValue: 'Beauty Center Appointments' })}
+            <DateRangeBadge />
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {t('clinicalAppointments.subtitle', { defaultValue: 'Manage Beauty Center appointment records.' })} <ModulePageFreshness className="ms-2" />
@@ -938,8 +940,9 @@ function AppointmentList({ workspaceId, navigate }: { workspaceId: string; navig
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="flex flex-wrap items-center gap-3 text-2xl font-semibold tracking-tight">
             {t('clinicalAppointments.title', { defaultValue: 'Clinical Appointments Registry' })}
+            <DateRangeBadge />
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             {t('clinicalAppointments.subtitle', { defaultValue: 'Manage patient appointments and scheduling' })}
