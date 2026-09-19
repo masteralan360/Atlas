@@ -245,6 +245,13 @@
     "previous": "ئەنجامی پێشوو",
     "next": "ئەنجامی دواتر"
   },
+  "localDatabaseErrors": {
+    "schemaMismatchDetails": "پێکهاتەی بنکەدراوەی ناوخۆیی ناگونجێت. خشتە ونبووەکان: {{missingStores}}. بنکەدراوە: {{databaseName}}؛ پێکهاتە: {{physicalVersion}} لە {{expectedVersion}}؛ کردار: {{operation}}؛ خشتە داواکراوەکان: {{requestedStores}}؛ خشتە بەردەستەکان: {{availableStoreCount}}؛ پەڕە: {{route}}؛ وەشانی Atlas: {{appVersion}}؛ هەڵەی سەرەکی: {{errorName}}. Atlas نوێ بکەرەوە، پاشان ئەپەکە بە تەواوی دابخە و دووبارە بیکەرەوە.",
+    "unknownStore": "نەزانراو",
+    "unknownVersion": "نەزانراو",
+    "unknownRoute": "نەزانراو",
+    "storeListOverflow": "{{stores}} و {{count}} دانەی تر"
+  },
   "common": {
     "and": "و",
     "loading": "باردەکرێت...",

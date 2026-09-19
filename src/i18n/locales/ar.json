@@ -245,6 +245,13 @@
     "previous": "النتيجة السابقة",
     "next": "النتيجة التالية"
   },
+  "localDatabaseErrors": {
+    "schemaMismatchDetails": "يوجد عدم تطابق في مخطط قاعدة البيانات المحلية. الجداول المفقودة: {{missingStores}}. قاعدة البيانات: {{databaseName}}؛ المخطط: {{physicalVersion}} من {{expectedVersion}}؛ العملية: {{operation}}؛ الجداول المطلوبة: {{requestedStores}}؛ الجداول المتاحة: {{availableStoreCount}}؛ الشاشة: {{route}}؛ إصدار Atlas: {{appVersion}}؛ الخطأ الأصلي: {{errorName}}. حدّث Atlas، ثم أغلق التطبيق بالكامل وافتحه مجدداً.",
+    "unknownStore": "غير معروف",
+    "unknownVersion": "غير معروف",
+    "unknownRoute": "غير معروف",
+    "storeListOverflow": "{{stores}} و{{count}} أخرى"
+  },
   "common": {
     "and": "و",
     "loading": "جاري التحميل...",

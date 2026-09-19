@@ -129,6 +129,7 @@ import type {
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { normalizeProductSku } from './productSku'
 import { getActiveBusinessWorkspaceId } from '@/lib/network'
+import { enrichIndexedDbError, type IndexedDbDiagnosticContext } from './indexedDbDiagnostics'
 import {
   LOCAL_MODE_SQLITE_TABLES,
   commitLocalModeSqliteMutations,
@@ -3454,8 +3455,79 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, storageId, userId, updatedAt, isDeleted, syncStatus, [workspaceId+storageId], [workspaceId+userId], [storageId+userId]'
     })
 
+    this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
+  }
+
+  private registerIndexedDbDiagnostics() {
+    const database = this
+
+    const buildContext = (operation: string, requestedStores: string[]): IndexedDbDiagnosticContext => {
+      let availableStores: string[] | undefined
+      let physicalVersion: number | undefined
+
+      try {
+        const backend = database.backendDB()
+        availableStores = Array.from(backend.objectStoreNames)
+        physicalVersion = backend.version
+      } catch {
+        // Opening the database can fail before IndexedDB exposes its physical schema.
+      }
+
+      return {
+        databaseName: database.name,
+        operation,
+        requestedStores,
+        expectedStores: database.tables.map((table) => table.name),
+        ...(availableStores ? { availableStores } : {}),
+        expectedVersion: database.verno,
+        ...(physicalVersion !== undefined ? { physicalVersion } : {}),
+        route: typeof window === 'undefined'
+          ? 'unknown'
+          : `${window.location.pathname}${window.location.search}${window.location.hash}`,
+      }
+    }
+
+    const withDiagnostics = <T>(operation: string, stores: string[], task: () => Promise<T>): Promise<T> => {
+      try {
+        return task().catch((error) => {
+          throw enrichIndexedDbError(error, buildContext(operation, stores))
+        })
+      } catch (error) {
+        return Dexie.Promise.reject(enrichIndexedDbError(error, buildContext(operation, stores)))
+      }
+    }
+
+    this.use({
+      stack: 'dbcore',
+      name: 'IndexedDbDiagnostics',
+      level: 2,
+      create(down: DBCore) {
+        return {
+          ...down,
+          transaction(stores, mode, options) {
+            try {
+              return down.transaction(stores, mode, options)
+            } catch (error) {
+              throw enrichIndexedDbError(error, buildContext(`transaction:${mode}`, stores))
+            }
+          },
+          table(tableName: string) {
+            const downTable = down.table(tableName)
+            return {
+              ...downTable,
+              mutate: (request) => withDiagnostics('mutate', [tableName], () => downTable.mutate(request)),
+              get: (request) => withDiagnostics('get', [tableName], () => downTable.get(request)),
+              getMany: (request) => withDiagnostics('getMany', [tableName], () => downTable.getMany(request)),
+              query: (request) => withDiagnostics('query', [tableName], () => downTable.query(request)),
+              openCursor: (request) => withDiagnostics('openCursor', [tableName], () => downTable.openCursor(request)),
+              count: (request) => withDiagnostics('count', [tableName], () => downTable.count(request)),
+            }
+          },
+        }
+      },
+    })
   }
 
   private registerLocalModeSqliteAuthority() {

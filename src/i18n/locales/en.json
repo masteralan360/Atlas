@@ -245,6 +245,13 @@
     "previous": "Previous match",
     "next": "Next match"
   },
+  "localDatabaseErrors": {
+    "schemaMismatchDetails": "Local database schema mismatch. Missing table(s): {{missingStores}}. Database: {{databaseName}}; schema: {{physicalVersion}} of {{expectedVersion}}; operation: {{operation}}; requested tables: {{requestedStores}}; available tables: {{availableStoreCount}}; screen: {{route}}; Atlas: {{appVersion}}; original error: {{errorName}}. Update Atlas, then fully close and reopen the app.",
+    "unknownStore": "unknown",
+    "unknownVersion": "unknown",
+    "unknownRoute": "unknown",
+    "storeListOverflow": "{{stores}} and {{count}} more"
+  },
   "common": {
     "and": "and",
     "loading": "Loading...",
