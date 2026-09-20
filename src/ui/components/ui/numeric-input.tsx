@@ -12,29 +12,47 @@ export interface NumericInputProps extends Omit<React.InputHTMLAttributes<HTMLIn
 }
 
 const NumericInput = React.forwardRef<HTMLInputElement, NumericInputProps>(
-  ({ value, onValueChange, allowDecimal = true, maxFractionDigits = 2, className, inputMode, ...props }, ref) => {
-    
-    // The display value is the formatted version of the internal value
-    const displayValue = React.useMemo(() => formatNumericInput(value), [value])
+  ({ value, onValueChange, allowDecimal = true, maxFractionDigits = 2, className, inputMode, dir, onFocus, onBlur, ...props }, ref) => {
+    const [isEditing, setIsEditing] = React.useState(false)
+
+    // Grouping separators are helpful when reviewing a value but make mobile
+    // decimal keyboards and cursor placement unreliable while editing.
+    const displayValue = isEditing ? value : formatNumericInput(value)
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const rawValue = e.target.value
-      // Sanitize the input to get the raw numeric string (no commas, valid decimals)
       const sanitized = sanitizeNumericInput(rawValue, {
         allowDecimal,
         maxFractionDigits,
+        // The edit view never contains grouping commas, so a comma entered by
+        // the keyboard is unambiguously a locale-specific decimal separator.
+        commaAsDecimal: allowDecimal,
       })
       onValueChange(sanitized)
+    }
+
+    const handleFocus = (event: React.FocusEvent<HTMLInputElement>) => {
+      setIsEditing(true)
+      onFocus?.(event)
+    }
+
+    const handleBlur = (event: React.FocusEvent<HTMLInputElement>) => {
+      setIsEditing(false)
+      onBlur?.(event)
     }
 
     return (
       <Input
         {...props}
+        type="text"
         ref={ref}
         value={displayValue}
         onChange={handleChange}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
         inputMode={inputMode ?? (allowDecimal ? "decimal" : "numeric")}
         lang="en"
+        dir={dir ?? "ltr"}
         className={className}
       />
     )

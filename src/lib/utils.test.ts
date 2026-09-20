@@ -30,17 +30,27 @@ describe('Arabic/Persian Numeral Conversion', () => {
         })
 
         it('should handle decimals with Arabic digits', () => {
-            // Note: Arabic decimals sometimes use U+066B (decimal separator) or U+066C (thousands separator)
-            // But usually in inputs they might use standard dot if the keyboard handles it, 
-            // or we might need to handle those too. 
-            // For now, testing basic digit conversion.
             expect(sanitizeNumericInput('١٢.٣٤')).toBe('12.34')
+        })
+
+        it('should preserve Arabic decimal separators and remove Arabic grouping separators', () => {
+            expect(sanitizeNumericInput('١٬٢٣٤٫٥٦')).toBe('1234.56')
+            expect(sanitizeNumericInput('۱۲٫۵')).toBe('12.5')
+        })
+
+        it('should accept a comma decimal separator during unformatted editing', () => {
+            expect(sanitizeNumericInput('12,5', { commaAsDecimal: true })).toBe('12.5')
+            expect(sanitizeNumericInput('1,234.5')).toBe('1234.5')
         })
     })
 
     describe('parseFormattedNumber with Arabic digits', () => {
         it('should parse Arabic numbers with commas', () => {
             expect(parseFormattedNumber('١،٢٣٤.٥٦')).toBe(1234.56)
+        })
+
+        it('should parse Arabic decimal and grouping separators', () => {
+            expect(parseFormattedNumber('١٬٢٣٤٫٥٦')).toBe(1234.56)
         })
     })
 })

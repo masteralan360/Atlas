@@ -80,7 +80,7 @@ import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { isMobile, isTauri } from '@/lib/platform'
 import { roundQuantity } from '@/lib/quantity'
-import { cn, formatCurrency, formatNumericInput, sanitizeNumericInput } from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 import { getInventoryRowsForProduct } from '@/local-db/inventory'
 import { platformService } from '@/services/platformService'
 import { useWorkspace } from '@/workspace'
@@ -124,6 +124,7 @@ import {
     HoverHintVideo,
     Input,
     Label,
+    NumericInput,
     Select,
     SelectContent,
     SelectItem,
@@ -2259,16 +2260,12 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                         {isDynamicUnit(formData.unit) ? (
                                             <div className="flex items-start gap-1.5">
                                                 <div className="relative flex-[2] min-w-0">
-                                                    <Input
+                                                    <NumericInput
                                                         id="product-price"
                                                         data-tour-id="tutorial-product-price"
-                                                        type="text"
-                                                        inputMode="decimal"
-                                                        value={formatNumericInput(formData.price)}
-                                                        onChange={(event) => setFormData((current) => {
-                                                            const raw = sanitizeNumericInput(event.target.value, { maxFractionDigits: 4 })
-                                                            return { ...current, price: raw }
-                                                        })}
+                                                        value={formData.price}
+                                                        onValueChange={(price) => setFormData((current) => ({ ...current, price }))}
+                                                        maxFractionDigits={4}
                                                         placeholder="0"
                                                         readOnly={isReadOnly}
                                                         required
@@ -2300,16 +2297,12 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                             </div>
                                         ) : (
                                             <div className="relative">
-                                                <Input
+                                                <NumericInput
                                                     id="product-price"
                                                     data-tour-id="tutorial-product-price"
-                                                    type="text"
-                                                    inputMode="decimal"
-                                                    value={formatNumericInput(formData.price)}
-                                                    onChange={(event) => setFormData((current) => {
-                                                        const raw = sanitizeNumericInput(event.target.value, { maxFractionDigits: 4 })
-                                                        return { ...current, price: raw }
-                                                    })}
+                                                    value={formData.price}
+                                                    onValueChange={(price) => setFormData((current) => ({ ...current, price }))}
+                                                    maxFractionDigits={4}
                                                     placeholder="0.000"
                                                     readOnly={isReadOnly}
                                                     required
@@ -2337,19 +2330,12 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                 {t('products.form.cost')}
                                             </Label>
                                             <div className="relative">
-                                                <Input
+                                                <NumericInput
                                                     id="product-cost-price"
                                                     data-tour-id="tutorial-product-cost-price"
-                                                    type="text"
-                                                    inputMode="decimal"
-                                                    value={formatNumericInput(formData.costPrice)}
-                                                    onChange={(event) => setFormData((current) => {
-                                                        const raw = sanitizeNumericInput(event.target.value, { maxFractionDigits: 4 })
-                                                        return {
-                                                            ...current,
-                                                            costPrice: raw
-                                                        }
-                                                    })}
+                                                    value={formData.costPrice}
+                                                    onValueChange={(costPrice) => setFormData((current) => ({ ...current, costPrice }))}
+                                                    maxFractionDigits={4}
                                                     placeholder="0.000"
                                                     readOnly={isReadOnly}
                                                     required={!hideCosts}

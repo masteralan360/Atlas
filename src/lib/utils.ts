@@ -293,8 +293,19 @@ export function toCamelCase(obj: Record<string, unknown>): Record<string, unknow
 }
 
 export function parseFormattedNumber(val: string): number {
-    const latinVal = convertArabicIndicToLatin(val)
-    return Number(latinVal.replace(/,/g, ''))
+    return Number(normalizeNumericPunctuation(val))
+}
+
+function normalizeNumericPunctuation(value: string, commaAsDecimal = false): string {
+    const latinValue = convertArabicIndicToLatin(value)
+        // Arabic keyboards use U+066B for decimals and U+066C for grouping.
+        // U+060C is also commonly pasted as an Arabic grouping comma.
+        .replace(/\u066B/g, '.')
+        .replace(/[\u066C\u060C]/g, '')
+
+    return commaAsDecimal
+        ? latinValue.replace(/,/g, '.')
+        : latinValue.replace(/,/g, '')
 }
 
 export function sanitizeNumericInput(
@@ -302,15 +313,16 @@ export function sanitizeNumericInput(
     options?: {
         allowDecimal?: boolean
         maxFractionDigits?: number
+        commaAsDecimal?: boolean
     }
 ): string {
     const {
         allowDecimal = true,
-        maxFractionDigits = 2
+        maxFractionDigits = 2,
+        commaAsDecimal = false
     } = options || {}
 
-    const normalized = convertArabicIndicToLatin(value)
-        .replace(/,/g, '')
+    const normalized = normalizeNumericPunctuation(value, commaAsDecimal)
         .replace(allowDecimal ? /[^\d.]/g : /\D/g, '')
 
     if (!normalized) {

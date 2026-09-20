@@ -600,9 +600,16 @@ export default {
       try {
         const clientRecorded = wasUsageClientRecorded(request);
         const contentLength = parseContentLength(request.headers.get("Content-Length"));
+        if (contentLength === null) {
+          throw new UploadValidationError("Upload Content-Length is required");
+        }
         const workspaceId = getWorkspaceIdFromPath(path);
         const imageMetadata = getCompressedImageMetadata(request, path);
-        const uploadBody = createValidatedUploadStream(request.body, request, path, env);
+        const validatedBody = createValidatedUploadStream(request.body, request, path, env);
+        // TransformStream output no longer carries the request body's known
+        // length. R2 requires a fixed-length stream, so restore that contract
+        // after validation without buffering the upload in Worker memory.
+        const uploadBody = validatedBody.pipeThrough(new FixedLengthStream(contentLength));
 
         const object = await env.MY_BUCKET.put(path, uploadBody, {
           httpMetadata: {

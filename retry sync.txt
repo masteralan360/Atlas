@@ -10,6 +10,8 @@ Price books selector order form and quick order
 
 Jumla-Khaleej App
 
+Fix App has not loaded Page
+
 Revenue Analytics and accounting
 
 Multi-Color Partner

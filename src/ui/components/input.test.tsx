@@ -33,12 +33,13 @@ describe('numeric input digit rendering', () => {
         expect(markup).toContain('inputMode="decimal"')
     })
 
-    it('gives reusable numeric inputs a numeric keyboard and Latin-digit locale by default', () => {
-        const markup = renderToStaticMarkup(<NumericInput value="123.45" onValueChange={() => undefined} />)
+    it('gives reusable numeric inputs a numeric keyboard, Latin-digit locale, and LTR direction', () => {
+        const markup = renderToStaticMarkup(<NumericInput value="1234.45" onValueChange={() => undefined} />)
 
         expect(markup).toContain('inputMode="decimal"')
         expect(markup).toContain('lang="en"')
-        expect(markup).not.toContain('dir="ltr"')
+        expect(markup).toContain('dir="ltr"')
+        expect(markup).toContain('value="1,234.45"')
     })
 
     it('preserves an explicitly provided writing direction', () => {

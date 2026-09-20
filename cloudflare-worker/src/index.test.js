@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import worker from './index.js'
 
 const env = {
@@ -11,11 +11,35 @@ const pngPrefix = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
 const webpPrefix = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0x08, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x20])
 const jpegPrefix = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0])
 
+class TestFixedLengthStream extends TransformStream {
+  static expectedLengths = []
+
+  constructor(expectedLength) {
+    let written = 0
+    super({
+      transform(chunk, controller) {
+        const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk)
+        written += bytes.byteLength
+        if (written > expectedLength) throw new TypeError('FixedLengthStream received too many bytes')
+        controller.enqueue(bytes)
+      },
+      flush() {
+        if (written !== expectedLength) throw new TypeError('FixedLengthStream received the wrong byte length')
+      },
+    })
+    TestFixedLengthStream.expectedLengths.push(expectedLength)
+  }
+}
+
 function createUploadRequest(body, headers = {}) {
   return new Request('https://worker.example/123e4567-e89b-42d3-a456-426614174000/product-images/item.webp', {
     method: 'PUT',
     body,
-    headers: { Authorization: 'Bearer session-token', ...headers },
+    headers: {
+      Authorization: 'Bearer session-token',
+      'Content-Length': String(body.byteLength),
+      ...headers,
+    },
   })
 }
 
@@ -26,6 +50,11 @@ function createUploadEnv(overrides = {}) {
   })
   return { ...env, MY_BUCKET: { put }, ...overrides }
 }
+
+beforeEach(() => {
+  TestFixedLengthStream.expectedLengths = []
+  vi.stubGlobal('FixedLengthStream', TestFixedLengthStream)
+})
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -93,6 +122,7 @@ describe('R2 compressed image enforcement', () => {
     }), uploadEnv)
 
     expect(response.status).toBe(200)
+    expect(TestFixedLengthStream.expectedLengths).toEqual([webpPrefix.byteLength])
     expect(uploadEnv.MY_BUCKET.put).toHaveBeenCalledWith(
       expect.any(String),
       expect.any(ReadableStream),
@@ -107,6 +137,34 @@ describe('R2 compressed image enforcement', () => {
         }),
       }),
     )
+  })
+
+  it('rejects an upload without a known content length before calling R2', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ id: 'user-1' })))
+    const uploadEnv = createUploadEnv()
+    const request = new Request(
+      'https://worker.example/123e4567-e89b-42d3-a456-426614174000/product-images/item.webp',
+      {
+        method: 'PUT',
+        body: webpPrefix,
+        headers: {
+          Authorization: 'Bearer session-token',
+          'Content-Type': 'image/webp',
+          'X-Atlas-Image-Compressed': '1',
+          'X-Atlas-Image-Source': 'product-primary',
+          'X-Atlas-Image-Profile': '1',
+          'X-Atlas-Image-Width': '800',
+          'X-Atlas-Image-Height': '600',
+          'X-Atlas-Image-Original-Bytes': '2400000',
+        },
+      },
+    )
+
+    const response = await worker.fetch(request, uploadEnv)
+
+    expect(response.status).toBe(400)
+    expect(await response.text()).toContain('Content-Length')
+    expect(uploadEnv.MY_BUCKET.put).not.toHaveBeenCalled()
   })
 
   it('rejects unmarked image bytes when strict enforcement is enabled', async () => {
