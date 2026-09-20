@@ -1,6 +1,7 @@
 /**
  * Platform detection and abstraction for Tauri (Desktop) and Capacitor (Mobile/Android)
  */
+import type { ImageUploadSource } from '@/lib/imageUploadProfiles';
 
 export const isTauri = () =>
     typeof window !== 'undefined'
@@ -55,8 +56,9 @@ export interface PlatformAPI {
     relaunch: () => Promise<void>;
 
     // Media
-    pickAndSaveImage: (workspaceId: string, subDir?: string) => Promise<string | null>;
-    saveImageFile: (file: File | Blob, workspaceId: string, subDir?: string) => Promise<string | null>;
-    resizeImage: (filePath: string, maxWidth?: number) => Promise<string>;
+    pickImageFile: () => Promise<File | null>;
+    pickAndSaveImage: (workspaceId: string, subDir: string, source: ImageUploadSource) => Promise<string | null>;
+    saveImageFile: (file: File | Blob, workspaceId: string, subDir: string, source: ImageUploadSource) => Promise<string | null>;
+    persistImageFile: (file: File, workspaceId: string, subDir: string) => Promise<string | null>;
     saveAs: (content: Uint8Array, fileName: string, extensions: { name: string, extensions: string[] }[]) => Promise<string | null>;
 }

@@ -19,7 +19,7 @@ export async function saveInitialProductAdditionalImages(
         const images: Array<{ image_url: string }> = []
 
         for (const file of files) {
-            const imageUrl = await storeProductImageFile(file, workspaceId)
+            const imageUrl = await storeProductImageFile(file, workspaceId, 'product-additional')
             if (!imageUrl) {
                 throw new Error(`Unable to store ${file.name}.`)
             }

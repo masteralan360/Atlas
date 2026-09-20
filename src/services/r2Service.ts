@@ -9,6 +9,7 @@ import {
     getTransferBodySize,
     recordWorkspaceDataTransfer
 } from '@/lib/workspaceUsage';
+import { detectSupportedImageMime, looksLikeUnsupportedImage, type CompressedImageArtifact } from '@/lib/imageCompression';
 
 const WORKSPACE_USAGE_CLIENT_RECORDED_PARAM = 'usage_client_recorded';
 
@@ -226,10 +227,27 @@ class R2Service {
             : this.getClientRecordedUsageUrl(path);
     }
 
-    /**
-     * Upload an object to R2
-     */
-    public async upload(path: string, data: Blob | ArrayBuffer | string, contentType?: string, force?: boolean): Promise<string> {
+    private async assertNotRawImage(data: Blob | ArrayBuffer | string, contentType?: string): Promise<void> {
+        if (typeof data === 'string') {
+            if (/^data:image\//i.test(data) || contentType?.toLowerCase().startsWith('image/')) {
+                throw new Error('Images must use the centralized compressed-image upload pipeline');
+            }
+            return;
+        }
+
+        const blob = data instanceof Blob ? data : new Blob([data]);
+        const bytes = new Uint8Array(await blob.slice(0, 64 * 1024).arrayBuffer());
+        if (detectSupportedImageMime(bytes) || looksLikeUnsupportedImage(bytes, contentType || blob.type)) {
+            throw new Error('Images must use the centralized compressed-image upload pipeline');
+        }
+    }
+
+    private async uploadRequest(
+        path: string,
+        data: Blob | ArrayBuffer | string,
+        headers: Record<string, string>,
+        force?: boolean,
+    ): Promise<string> {
         if (!force) {
             const workspaceId = this.getWorkspaceIdFromPath(path);
             if (workspaceId && isLocalWorkspaceMode(workspaceId)) {
@@ -247,9 +265,7 @@ class R2Service {
 
         const response = await this.fetchPrivileged(requestUrl, {
             method: 'PUT',
-            headers: {
-                'Content-Type': contentType || 'application/octet-stream'
-            },
+            headers,
             body: data
         });
 
@@ -262,6 +278,38 @@ class R2Service {
             await this.recordTransfer(path, uploadBytes, 'r2_upload');
         }
         return url;
+    }
+
+    /** Uploads non-image data. Image signatures are rejected even if mislabeled. */
+    public async uploadObject(path: string, data: Blob | ArrayBuffer | string, contentType?: string, force?: boolean): Promise<string> {
+        await this.assertNotRawImage(data, contentType);
+        return this.uploadRequest(path, data, {
+            'Content-Type': contentType || 'application/octet-stream'
+        }, force);
+    }
+
+    /**
+     * The only app-level route for images. The branded artifact can only be
+     * produced by the centralized validation/compression pipeline.
+     */
+    public async uploadCompressedImage(path: string, artifact: CompressedImageArtifact): Promise<string> {
+        if (artifact.kind !== 'atlas-compressed-image' || artifact.file.type !== 'image/webp') {
+            throw new Error('Invalid compressed image artifact');
+        }
+        return this.uploadRequest(path, artifact.file, {
+            'Content-Type': 'image/webp',
+            'X-Atlas-Image-Compressed': '1',
+            'X-Atlas-Image-Source': artifact.source,
+            'X-Atlas-Image-Profile': String(artifact.profileVersion),
+            'X-Atlas-Image-Width': String(artifact.width),
+            'X-Atlas-Image-Height': String(artifact.height),
+            'X-Atlas-Image-Original-Bytes': String(artifact.originalBytes),
+        });
+    }
+
+    /** @deprecated Use uploadObject; raw images are intentionally rejected. */
+    public async upload(path: string, data: Blob | ArrayBuffer | string, contentType?: string, force?: boolean): Promise<string> {
+        return this.uploadObject(path, data, contentType, force);
     }
 
     /**

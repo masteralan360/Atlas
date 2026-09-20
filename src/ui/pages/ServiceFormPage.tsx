@@ -40,6 +40,7 @@ import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { isTauri } from '@/lib/platform'
 import { cn, formatCurrency, formatNumericInput, sanitizeNumericInput } from '@/lib/utils'
 import { platformService } from '@/services/platformService'
+import { getMediaUploadErrorCode } from '@/services/mediaUploadService'
 import { useWorkspace } from '@/workspace'
 import { useHideCosts } from '@/permissions'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
@@ -340,13 +341,8 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
         if (!canEdit) return
 
         if (isDesktopShell) {
-            const targetPath = await platformService.pickAndSaveImage(workspaceId)
-            if (targetPath) {
-                setFormData((current) => ({ ...current, imageUrl: targetPath }))
-                setImageError(false)
-
-                assetManager.uploadFromPath(targetPath).catch(console.error)
-            }
+            const selectedFile = await platformService.pickImageFile()
+            if (selectedFile) await handleFileSelected(selectedFile)
             return
         }
 
@@ -354,10 +350,19 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
     }
 
     const handleFileSelected = async (file: File) => {
-        const targetPath = await storeProductImageFile(file, workspaceId)
-        if (targetPath) {
-            setFormData((current) => ({ ...current, imageUrl: targetPath }))
-            setImageError(false)
+        try {
+            const targetPath = await storeProductImageFile(file, workspaceId, 'service-image')
+            if (targetPath) {
+                setFormData((current) => ({ ...current, imageUrl: targetPath }))
+                setImageError(false)
+            }
+        } catch (error) {
+            const code = getMediaUploadErrorCode(error) || 'upload_failed'
+            toast({
+                title: t('common.error'),
+                description: t(`mediaUpload.errors.${code}`),
+                variant: 'destructive',
+            })
         }
     }
 

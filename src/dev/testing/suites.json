@@ -181,6 +181,19 @@
         ]
       },
       {
+        "id": "media-uploads",
+        "titleKey": "devTesting.posGroups.mediaUploads",
+        "layer": "contract",
+        "files": [
+          "src/lib/imageCompression.test.ts",
+          "src/services/mediaUploadService.test.ts",
+          "src/services/r2Service.test.ts",
+          "cloudflare-worker/src/index.test.js",
+          "cloudflare-web/src/index.test.js",
+          "scripts/workspace-r2-gateway.test.mjs"
+        ]
+      },
+      {
         "id": "failure-recovery",
         "titleKey": "devTesting.posGroups.recovery",
         "layer": "business",

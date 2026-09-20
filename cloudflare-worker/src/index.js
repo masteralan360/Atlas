@@ -2,7 +2,7 @@ function createCorsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Workspace-Usage-Client-Recorded",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Workspace-Usage-Client-Recorded, X-Atlas-Image-Compressed, X-Atlas-Image-Source, X-Atlas-Image-Profile, X-Atlas-Image-Width, X-Atlas-Image-Height, X-Atlas-Image-Original-Bytes",
     "Access-Control-Max-Age": "86400",
   };
 }
@@ -10,6 +10,26 @@ function createCorsHeaders() {
 const MAX_PRODUCT_IMAGE_IMPORT_BYTES = 10 * 1024 * 1024;
 const MAX_PRODUCT_IMAGE_IMPORT_REQUEST_BYTES = 4096;
 const MAX_PRODUCT_IMAGE_REDIRECTS = 3;
+const ATLAS_IMAGE_SOURCES = new Set([
+  "product-primary", "product-additional", "product-variant", "service-image",
+  "activity-image", "workspace-logo", "profile-image", "print-attachment",
+  "print-watermark", "clinical-attachment", "generic-upload",
+]);
+const ATLAS_IMAGE_FOLDERS = {
+  "product-primary": "product-images",
+  "product-additional": "product-images",
+  "product-variant": "product-images",
+  "service-image": "product-images",
+  "activity-image": "activity-images",
+  "workspace-logo": "workspace-logos",
+  "profile-image": "profile-images",
+  "print-attachment": "attached-images",
+  "print-watermark": "attached-images",
+  "clinical-attachment": "clinic-attachments",
+  "generic-upload": "uploads",
+};
+
+class UploadValidationError extends Error {}
 
 function matchesBytes(bytes, expected, offset = 0) {
   return expected.every((value, index) => bytes[offset + index] === value);
@@ -28,6 +48,100 @@ function detectProductImageMime(bytes) {
     return "image/avif";
   }
   return false;
+}
+
+function readPositiveIntegerHeader(request, name) {
+  const value = request.headers.get(name) || "";
+  return /^\d+$/.test(value) && Number(value) > 0 ? value : null;
+}
+
+function getCompressedImageMetadata(request, path) {
+  const marked = request.headers.get("X-Atlas-Image-Compressed") === "1";
+  if (!marked) return null;
+
+  const source = request.headers.get("X-Atlas-Image-Source") || "";
+  const profile = request.headers.get("X-Atlas-Image-Profile") || "";
+  const width = readPositiveIntegerHeader(request, "X-Atlas-Image-Width");
+  const height = readPositiveIntegerHeader(request, "X-Atlas-Image-Height");
+  const originalBytes = readPositiveIntegerHeader(request, "X-Atlas-Image-Original-Bytes");
+  const contentType = (request.headers.get("Content-Type") || "").split(";", 1)[0].trim().toLowerCase();
+  const folder = path.replace(/^\/+/, "").split("/")[1] || "";
+
+  if (contentType !== "image/webp" || !path.toLowerCase().endsWith(".webp")
+      || !ATLAS_IMAGE_SOURCES.has(source) || profile !== "1"
+      || ATLAS_IMAGE_FOLDERS[source] !== folder || !width || !height || !originalBytes) {
+    throw new UploadValidationError("Invalid compressed image upload metadata");
+  }
+
+  return { source, profile, width, height, originalBytes };
+}
+
+function createValidatedUploadStream(body, request, path, env) {
+  if (!body) throw new UploadValidationError("Upload body is required");
+
+  const metadata = getCompressedImageMetadata(request, path);
+  const strict = String(env.R2_REQUIRE_COMPRESSED_IMAGES || "").toLowerCase() === "true";
+  const declaredType = (request.headers.get("Content-Type") || "application/octet-stream").split(";", 1)[0].trim().toLowerCase();
+  let classified = false;
+  let imageUpload = Boolean(metadata) || declaredType.startsWith("image/");
+  let pending = new Uint8Array(0);
+  let animationTail = [];
+
+  const hasAnimationMarker = (bytes) => {
+    for (const byte of bytes) {
+      animationTail.push(byte);
+      if (animationTail.length > 4) animationTail.shift();
+      if (animationTail.length === 4) {
+        const marker = String.fromCharCode(...animationTail);
+        if (marker === "ANIM" || marker === "ANMF") return true;
+      }
+    }
+    return false;
+  };
+
+  const validatePrefix = (bytes) => {
+    const detected = detectProductImageMime(bytes);
+    imageUpload = imageUpload || Boolean(detected);
+    if (!imageUpload) return;
+
+    if (!metadata) {
+      if (strict) throw new UploadValidationError("Images must use the Atlas compressed-image pipeline");
+      console.warn(JSON.stringify({ event: "r2_legacy_unmarked_image_upload", path, detectedMime: detected || declaredType }));
+      return;
+    }
+    if (detected !== "image/webp") {
+      throw new UploadValidationError("Compressed image body must be a WebP image");
+    }
+  };
+
+  return body.pipeThrough(new TransformStream({
+    transform(chunk, controller) {
+      const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+      if (!classified) {
+        const combined = new Uint8Array(pending.length + bytes.length);
+        combined.set(pending);
+        combined.set(bytes, pending.length);
+        pending = combined;
+        if (pending.length < 12) return;
+        validatePrefix(pending);
+        classified = true;
+        if (metadata && hasAnimationMarker(pending)) throw new UploadValidationError("Animated images are not accepted");
+        controller.enqueue(pending);
+        pending = new Uint8Array(0);
+        return;
+      }
+
+      if (metadata && hasAnimationMarker(bytes)) throw new UploadValidationError("Animated images are not accepted");
+      controller.enqueue(bytes);
+    },
+    flush(controller) {
+      if (!classified) {
+        validatePrefix(pending);
+        if (metadata) throw new UploadValidationError("Compressed image body is invalid");
+        if (pending.length) controller.enqueue(pending);
+      }
+    },
+  }));
 }
 
 function isBlockedIpv4(hostname) {
@@ -487,11 +601,23 @@ export default {
         const clientRecorded = wasUsageClientRecorded(request);
         const contentLength = parseContentLength(request.headers.get("Content-Length"));
         const workspaceId = getWorkspaceIdFromPath(path);
+        const imageMetadata = getCompressedImageMetadata(request, path);
+        const uploadBody = createValidatedUploadStream(request.body, request, path, env);
 
-        const object = await env.MY_BUCKET.put(path, request.body, {
+        const object = await env.MY_BUCKET.put(path, uploadBody, {
           httpMetadata: {
             contentType: request.headers.get("Content-Type") || "application/octet-stream",
           },
+          ...(imageMetadata ? {
+            customMetadata: {
+              atlasImageCompressed: "1",
+              atlasImageSource: imageMetadata.source,
+              atlasImageProfile: imageMetadata.profile,
+              atlasImageWidth: imageMetadata.width,
+              atlasImageHeight: imageMetadata.height,
+              atlasImageOriginalBytes: imageMetadata.originalBytes,
+            },
+          } : {}),
         });
 
         const uploadedBytes = object?.size || contentLength;
@@ -503,7 +629,7 @@ export default {
         return jsonResponse({ success: true, key: path }, { headers: corsHeaders });
       } catch (error) {
         return new Response(error?.message || "Failed to upload object", {
-          status: 500,
+          status: error instanceof UploadValidationError ? 400 : 500,
           headers: corsHeaders,
         });
       }

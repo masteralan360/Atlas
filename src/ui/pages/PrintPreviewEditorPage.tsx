@@ -19,6 +19,7 @@ import {
 } from '@/lib/printPreviewEditorStore'
 import { setPendingPDFPreview } from '@/lib/pdfPreviewStore'
 import { platformService } from '@/services/platformService'
+import { getMediaUploadErrorCode } from '@/services/mediaUploadService'
 import { paginateOrderItemsStatementPages, paginateOrderItemsTables } from '@/lib/orderItemsTablePagination'
 import { centerTablesOnPages } from '@/lib/centeredTablePagination'
 import { EditableField } from '@/ui/components/EditableField'
@@ -1365,36 +1366,42 @@ export function PrintPreviewEditorPage() {
     const handleAddTemplateImage = useCallback(async () => {
         if (!source?.workspaceId) return
         try {
-            const relPath = await platformService.pickAndSaveImage(source.workspaceId, 'attached-images')
+            const relPath = await platformService.pickAndSaveImage(source.workspaceId, 'attached-images', 'print-attachment')
             if (relPath) {
                 addTemplateImage(relPath)
             }
         } catch (error) {
-            error instanceof Error && console.error('Failed to add image:', error.message)
+            console.error('Failed to add image:', error)
+            const code = getMediaUploadErrorCode(error) || 'upload_failed'
+            toast({ title: t('common.error'), description: t(`mediaUpload.errors.${code}`), variant: 'destructive' })
         }
-    }, [addTemplateImage, source?.workspaceId])
+    }, [addTemplateImage, source?.workspaceId, t, toast])
 
     const handlePasteTemplateImage = useCallback(async (image: File) => {
         if (!source?.workspaceId) return
         try {
-            const relPath = await platformService.saveImageFile(image, source.workspaceId, 'attached-images')
+            const relPath = await platformService.saveImageFile(image, source.workspaceId, 'attached-images', 'print-attachment')
             if (relPath) addTemplateImage(relPath)
         } catch (error) {
-            error instanceof Error && console.error('Failed to paste image:', error.message)
+            console.error('Failed to paste image:', error)
+            const code = getMediaUploadErrorCode(error) || 'upload_failed'
+            toast({ title: t('common.error'), description: t(`mediaUpload.errors.${code}`), variant: 'destructive' })
         }
-    }, [addTemplateImage, source?.workspaceId])
+    }, [addTemplateImage, source?.workspaceId, t, toast])
 
     const handleUploadTemplateBackground = useCallback(async () => {
         if (!source?.workspaceId) return
         try {
-            const relPath = await platformService.pickAndSaveImage(source.workspaceId, 'attached-images')
+            const relPath = await platformService.pickAndSaveImage(source.workspaceId, 'attached-images', 'print-watermark')
             if (relPath) {
                 setTemplateBackground({ path: relPath, opacity: 15, size: 100 })
             }
         } catch (error) {
-            error instanceof Error && console.error('Failed to upload background watermark:', error.message)
+            console.error('Failed to upload background watermark:', error)
+            const code = getMediaUploadErrorCode(error) || 'upload_failed'
+            toast({ title: t('common.error'), description: t(`mediaUpload.errors.${code}`), variant: 'destructive' })
         }
-    }, [source?.workspaceId])
+    }, [source?.workspaceId, t, toast])
 
     const handleAddTemplateText = useCallback(() => {
         setTemplateTexts(prev => [...prev, {
@@ -1444,24 +1451,28 @@ export function PrintPreviewEditorPage() {
     const handleAddImage = useCallback(async () => {
         if (!source?.workspaceId) return
         try {
-            const relPath = await platformService.pickAndSaveImage(source.workspaceId, 'attached-images')
+            const relPath = await platformService.pickAndSaveImage(source.workspaceId, 'attached-images', 'print-attachment')
             if (relPath) {
                 addImage(relPath)
             }
         } catch (error) {
-            error instanceof Error && console.error('Failed to add image:', error.message)
+            console.error('Failed to add image:', error)
+            const code = getMediaUploadErrorCode(error) || 'upload_failed'
+            toast({ title: t('common.error'), description: t(`mediaUpload.errors.${code}`), variant: 'destructive' })
         }
-    }, [addImage, source?.workspaceId])
+    }, [addImage, source?.workspaceId, t, toast])
 
     const handlePasteImage = useCallback(async (image: File) => {
         if (!source?.workspaceId) return
         try {
-            const relPath = await platformService.saveImageFile(image, source.workspaceId, 'attached-images')
+            const relPath = await platformService.saveImageFile(image, source.workspaceId, 'attached-images', 'print-attachment')
             if (relPath) addImage(relPath)
         } catch (error) {
-            error instanceof Error && console.error('Failed to paste image:', error.message)
+            console.error('Failed to paste image:', error)
+            const code = getMediaUploadErrorCode(error) || 'upload_failed'
+            toast({ title: t('common.error'), description: t(`mediaUpload.errors.${code}`), variant: 'destructive' })
         }
-    }, [addImage, source?.workspaceId])
+    }, [addImage, source?.workspaceId, t, toast])
 
     const handleRemoveImage = useCallback((path: string) => {
         setEditableData(prev => {

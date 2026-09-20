@@ -378,7 +378,7 @@ export function ProductVariantsSection({
         if (isImageProcessing) return
         setIsImageProcessing(true)
         try {
-            const imageUrl = await storeProductImageFile(image, workspaceId)
+            const imageUrl = await storeProductImageFile(image, workspaceId, 'product-variant')
             if (imageUrl) {
                 discardPendingImportedImage()
                 setDraft((current) => ({ ...current, imageUrl }))
@@ -395,7 +395,7 @@ export function ProductVariantsSection({
         if (isImageProcessing || !externalImageUrl.trim()) return
         setIsImageProcessing(true)
         try {
-            const imageUrl = await importProductImageFromUrl(externalImageUrl, workspaceId)
+            const imageUrl = await importProductImageFromUrl(externalImageUrl, workspaceId, 'product-variant')
             discardPendingImportedImage()
             pendingImportedImagePathRef.current = imageUrl
             setDraft((current) => ({ ...current, imageUrl }))
@@ -419,13 +419,8 @@ export function ProductVariantsSection({
     const handlePrimaryImageUpload = async () => {
         if (isImageProcessing) return
         if (isDesktopShell) {
-            const imageUrl = await platformService.pickAndSaveImage(workspaceId)
-            if (imageUrl) {
-                discardPendingImportedImage()
-                setDraft((current) => ({ ...current, imageUrl }))
-                setImageError(false)
-                assetManager.uploadFromPath(imageUrl).catch(console.error)
-            }
+            const selectedFile = await platformService.pickImageFile()
+            if (selectedFile) await savePrimaryImageFile(selectedFile)
             return
         }
 

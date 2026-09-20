@@ -72,7 +72,7 @@
     },
     "pos": "POS",
     "posSamplesHelp": "1–100 additional paid POS checkout scenarios with varied currencies, methods, fractional quantities and service lines. Fixed regressions run alongside them.",
-    "posCoverageHelp": "Checks regular POS production checkout, cart calculations, inventory, related-unit hierarchy and conversion, independent packaging prices, combined product-unit selection, relationship usage safeguards, persistence, financing, exchange and reversal helpers, Activities and Quick Order routing, with disposable IndexedDB and mocked backend contracts. Related-unit POS sales are covered by Checkout, Cart and Cloud / Hybrid request groups; relationship setup and product conversion are covered by Related Units. Sales return inventory and financing components are covered; the complete Sales return dialog is not automated. SQLite checks use an adapter stub. Real browser checkout, Supabase permissions, native restart and hardware remain unavailable.",
+    "posCoverageHelp": "Checks regular POS production checkout, cart calculations, inventory, related-unit hierarchy and conversion, independent packaging prices, combined product-unit selection, relationship usage safeguards, persistence, financing, exchange and reversal helpers, Activities and Quick Order routing, plus centralized image compression and R2 enforcement, with disposable IndexedDB and mocked backend contracts. Related-unit POS sales are covered by Checkout, Cart and Cloud / Hybrid request groups; relationship setup and product conversion are covered by Related Units. Image profile measurements, signature validation, animation rejection and worker upload metadata are covered by Media uploads. Sales return inventory and financing components are covered; the complete Sales return dialog is not automated. SQLite checks use an adapter stub. Real browser checkout, Supabase permissions, native restart and hardware remain unavailable.",
     "posGroups": {
       "checkout": "Checkout, payments, accounts and ledger",
       "cart": "Cart and held-sale restoration",
@@ -84,6 +84,7 @@
       "returns": "Return inventory, exchanges and linked reversals",
       "routing": "Barcode entry, Activities and Quick Order routing",
       "remote": "Cloud / Hybrid requests, results and retries",
+      "mediaUploads": "Image compression and R2 upload enforcement",
       "recovery": "Validation failures, atomic rollback and recovery"
     },
     "postService": "Post Service",
@@ -1379,7 +1380,9 @@
         "invalid_url": "Enter a valid public image URL.",
         "cloud_required": "Product images need cloud storage in this workspace.",
         "unsupported_image": "Choose a JPEG, PNG, WebP, GIF, or AVIF image.",
-        "image_too_large": "The image must be 10 MB or smaller.",
+        "animated_image": "Animated images are not supported. Choose a still image.",
+        "empty_image": "The selected image is empty.",
+        "image_too_large": "The image is too large to process.",
         "image_decode_failed": "This file could not be decoded as an image.",
         "image_processing_failed": "The image could not be optimized.",
         "upload_failed": "The image could not be uploaded to cloud storage.",
@@ -9860,6 +9863,18 @@
       "paymentReverseFailed": "Unable to reverse the customer payment.",
       "cancelled": "Installment sale cancelled and payments reversed.",
       "cancelFailed": "Unable to cancel the installment sale."
+    }
+  },
+  "mediaUpload": {
+    "errors": {
+      "empty_image": "The selected image is empty.",
+      "image_too_large": "The image is too large to process.",
+      "unsupported_image": "Choose a JPEG, PNG, WebP, static GIF, or AVIF image.",
+      "animated_image": "Animated images are not supported. Choose a still image.",
+      "image_decode_failed": "This file could not be decoded as an image.",
+      "image_processing_failed": "The image could not be compressed.",
+      "cloud_required": "Cloud image storage is not configured for this workspace.",
+      "upload_failed": "The compressed image could not be uploaded. Please try again."
     }
   },
   "workspaceResourceSync": {

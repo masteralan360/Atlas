@@ -19,6 +19,12 @@ const PASS_THROUGH_REQUEST_HEADERS = [
     'prefer',
     'range',
     'x-client-info',
+    'x-atlas-image-compressed',
+    'x-atlas-image-source',
+    'x-atlas-image-profile',
+    'x-atlas-image-width',
+    'x-atlas-image-height',
+    'x-atlas-image-original-bytes',
     'x-metadata',
     'x-upsert'
 ]

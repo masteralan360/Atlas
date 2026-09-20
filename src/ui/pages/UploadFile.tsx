@@ -6,6 +6,8 @@ import { useAuth } from '@/auth'
 import { createInvoice, deleteInvoice, db, type Invoice } from '@/local-db'
 import { generateId, formatDateTime } from '@/lib/utils'
 import { r2Service } from '@/services/r2Service'
+import { compressImage, ImageCompressionError, isImageUploadCandidate, type CompressedImageArtifact } from '@/lib/imageCompression'
+import { mediaUploadService, MediaUploadError } from '@/services/mediaUploadService'
 import { useWorkspace } from '@/workspace'
 import { useViewOwnRecordScope } from '@/permissions'
 import {
@@ -245,9 +247,26 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
             return
         }
 
+        let compressedImage: CompressedImageArtifact | null = null
+        try {
+            if (await isImageUploadCandidate(selectedFile)) {
+                compressedImage = await compressImage(selectedFile, 'generic-upload')
+            }
+        } catch (error) {
+            const code = error instanceof ImageCompressionError ? error.code : 'image_processing_failed'
+            toast({
+                title: t('common.error', { defaultValue: 'Error' }),
+                description: t(`mediaUpload.errors.${code}`, { defaultValue: 'This image could not be processed.' }),
+                variant: 'destructive',
+            })
+            return
+        }
+
+        const fileToStore = compressedImage?.file ?? selectedFile
+
         if (isDemoMode) {
             const invoiceId = generateId()
-            const uploadMimeType = getFileMimeType(selectedFile)
+            const uploadMimeType = getFileMimeType(fileToStore)
 
             await createInvoice(activeWorkspace.id, {
                 invoiceid: trimmedName,
@@ -258,8 +277,8 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                 createdByName: user.name,
                 cashierName: user.name,
                 printFormat: 'a4',
-                pdfBlobA4: selectedFile,
-                fileSize: selectedFile.size,
+                pdfBlobA4: fileToStore,
+                fileSize: fileToStore.size,
                 fileMimeType: uploadMimeType,
             }, invoiceId)
 
@@ -289,7 +308,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
             return
         }
 
-        if (effectiveLimitBytes !== null && displayUsedBytes + selectedFile.size > effectiveLimitBytes) {
+        if (effectiveLimitBytes !== null && displayUsedBytes + fileToStore.size > effectiveLimitBytes) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
                 description: t('uploadFile.limitExceeded', { defaultValue: 'Upload would exceed the workspace storage limit of {{limit}}.', limit: getReadableFileSize(effectiveLimitBytes) }),
@@ -299,16 +318,22 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
         }
 
         const invoiceId = generateId()
-        const uploadExtension = getUploadExtension(selectedFile)
-        const uploadMimeType = getFileMimeType(selectedFile)
-        const storagePath = `${activeWorkspace.id}/uploads/${invoiceId}-${sanitizeStorageSegment(trimmedName)}.${uploadExtension}`
+        const uploadExtension = getUploadExtension(fileToStore)
+        const uploadMimeType = getFileMimeType(fileToStore)
+        let storagePath = `${activeWorkspace.id}/uploads/${invoiceId}-${sanitizeStorageSegment(trimmedName)}.${uploadExtension}`
         let uploaded = false
 
         setIsUploading(true)
         setUploadProgress(15)
 
         try {
-            await r2Service.upload(storagePath, selectedFile, uploadMimeType)
+            if (compressedImage) {
+                const stored = await mediaUploadService.storeCompressedImage(compressedImage, activeWorkspace.id, 'uploads')
+                if (!stored.r2Key) throw new MediaUploadError('upload_failed')
+                storagePath = stored.r2Key
+            } else {
+                await r2Service.uploadObject(storagePath, selectedFile, uploadMimeType)
+            }
             uploaded = true
             setUploadProgress(78)
 
@@ -322,7 +347,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                 cashierName: user.name,
                 printFormat: 'a4',
                 r2PathA4: storagePath,
-                fileSize: selectedFile.size,
+                fileSize: fileToStore.size,
                 fileMimeType: uploadMimeType,
             }, invoiceId)
 
@@ -341,9 +366,14 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
             }
 
             console.error('[UploadFilesTab] Upload failed:', error)
+            const code = error instanceof ImageCompressionError || error instanceof MediaUploadError
+                ? error.code
+                : 'upload_failed'
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: error instanceof Error ? error.message : t('uploadFile.uploadFailed', { defaultValue: 'Failed to upload the PDF file.' }),
+                description: compressedImage
+                    ? t(`mediaUpload.errors.${code}`, { defaultValue: 'The image could not be uploaded.' })
+                    : t('uploadFile.uploadFailed', { defaultValue: 'Failed to upload the file.' }),
                 variant: 'destructive',
             })
         } finally {

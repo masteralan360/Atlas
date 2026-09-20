@@ -255,7 +255,7 @@ export function ProductAdditionalImagesModal({
                     throw new Error('An additional image is missing its file.')
                 }
 
-                const imageUrl = await storeProductImageFile(draft.file, workspaceId)
+                const imageUrl = await storeProductImageFile(draft.file, workspaceId, 'product-additional')
                 if (!imageUrl) {
                     throw new Error(`Unable to store ${draft.file.name}.`)
                 }

@@ -788,7 +788,9 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             invalid_url: 'Enter a valid public image URL.',
             cloud_required: 'Product images need cloud storage in this workspace.',
             unsupported_image: 'Choose a JPEG, PNG, WebP, GIF, or AVIF image.',
-            image_too_large: 'The image must be 10 MB or smaller.',
+            animated_image: 'Animated images are not supported.',
+            empty_image: 'The selected image is empty.',
+            image_too_large: 'The image is too large to process.',
             image_decode_failed: 'This file could not be decoded as an image.',
             image_processing_failed: 'The image could not be optimized.',
             upload_failed: 'The image could not be uploaded to cloud storage.',
@@ -805,11 +807,8 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         if (!canEdit || isImageProcessing) return
 
         if (isDesktopShell) {
-            const targetPath = await platformService.pickAndSaveImage(workspaceId)
-            if (targetPath) {
-                setProductImagePath(targetPath)
-                assetManager.uploadFromPath(targetPath).catch(console.error)
-            }
+            const selectedFile = await platformService.pickImageFile()
+            if (selectedFile) await handleFileSelected(selectedFile)
             return
         }
 
@@ -820,7 +819,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         if (isImageProcessing) return
         setIsImageProcessing(true)
         try {
-            const targetPath = await storeProductImageFile(file, workspaceId)
+            const targetPath = await storeProductImageFile(file, workspaceId, 'product-primary')
             if (targetPath) setProductImagePath(targetPath)
         } catch (error) {
             showProductImageErrorToast(error)
@@ -833,7 +832,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         if (!canEdit || isImageProcessing || !externalImageUrl.trim()) return
         setIsImageProcessing(true)
         try {
-            const targetPath = await importProductImageFromUrl(externalImageUrl, workspaceId)
+            const targetPath = await importProductImageFromUrl(externalImageUrl, workspaceId, 'product-primary')
             setProductImagePath(targetPath, true)
             setExternalImageUrl('')
             toast({

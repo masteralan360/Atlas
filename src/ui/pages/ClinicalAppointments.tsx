@@ -35,6 +35,9 @@ import { platformService } from '@/services/platformService'
 import { useLocation, useRoute } from 'wouter'
 import { useWorkspace } from '@/workspace'
 import { isDemoWorkspaceMode, isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { isImageUploadCandidate } from '@/lib/imageCompression'
+import { mediaUploadService } from '@/services/mediaUploadService'
+import { getMediaUploadErrorCode } from '@/services/mediaUploadService'
 
 const CLINIC_ATTACHMENTS_PREFIX = 'clinic-attachments'
 
@@ -1224,6 +1227,7 @@ function AppointmentList({ workspaceId, navigate }: { workspaceId: string; navig
 
 function CreateAppointmentForm({ workspaceId, appointment, onCancel, onSaved }: { workspaceId: string; appointment?: ClinicalAppointment; onCancel: () => void; onSaved: () => void }) {
   const { t } = useTranslation()
+  const { toast } = useToast()
   const { user } = useAuth()
   const { features } = useWorkspace()
   const registryType = useClinicalRegistryType(workspaceId)
@@ -1422,8 +1426,33 @@ function CreateAppointmentForm({ workspaceId, appointment, onCancel, onSaved }: 
 
       for (const file of attachments) {
         const fileName = `${apptId}/${file.name}`
-        const r2Path = `${CLINIC_ATTACHMENTS_PREFIX}/${workspaceId}/${fileName}`
+        const r2Path = `${workspaceId}/${CLINIC_ATTACHMENTS_PREFIX}/${fileName}`
         const isDemoMode = isDemoWorkspaceMode(workspaceId)
+        const isImage = await isImageUploadCandidate(file)
+
+        if (isImage) {
+          const stored = await mediaUploadService.storeImageFile(
+            file,
+            workspaceId,
+            `${CLINIC_ATTACHMENTS_PREFIX}/${apptId}`,
+            'clinical-attachment',
+          )
+          const { createClinicalAttachment } = await import('@/local-db/clinicalAppointments')
+          await createClinicalAttachment(
+            {
+              appointmentId: apptId,
+              fileName: file.name,
+              fileType: stored.artifact.file.type,
+              fileSize: stored.artifact.outputBytes,
+              r2Path: stored.r2Key,
+              localPath: stored.path,
+              createdBy: user?.id ?? null,
+            } as any,
+            workspaceId,
+          )
+          continue
+        }
+
         const localPath = await platformService.joinPath(
           await platformService.getAppDataDir(),
           CLINIC_ATTACHMENTS_PREFIX,
@@ -1432,7 +1461,7 @@ function CreateAppointmentForm({ workspaceId, appointment, onCancel, onSaved }: 
         )
         if (!isLocalWorkspaceMode(workspaceId) && r2Service.isConfigured()) {
           try {
-            await r2Service.upload(r2Path.replace(/\\/g, '/'), file, file.type)
+            await r2Service.uploadObject(r2Path.replace(/\\/g, '/'), file, file.type)
           } catch (e) {
             console.error('[ClinicalAppointments] R2 upload failed:', e)
           }
@@ -1467,10 +1496,18 @@ function CreateAppointmentForm({ workspaceId, appointment, onCancel, onSaved }: 
       onSaved()
     } catch (e) {
       console.error('[ClinicalAppointments] Failed to save appointment:', e)
+      const mediaCode = getMediaUploadErrorCode(e)
+      if (mediaCode) {
+        toast({
+          title: t('common.error'),
+          description: t(`mediaUpload.errors.${mediaCode}`),
+          variant: 'destructive',
+        })
+      }
     } finally {
       setSaving(false)
     }
-  }, [isEditing, appointment, workspaceId, patientName, patientPhone, selectedPatientId, isNewPatient, appointmentDate, startTime, appointmentType, reasonForVisit, consultationFee, estimatedPrice, currency, status, confirmationMethod, priority, internalNotes, attachments, user, onSaved])
+  }, [isEditing, appointment, workspaceId, patientName, patientPhone, selectedPatientId, isNewPatient, appointmentDate, startTime, appointmentType, reasonForVisit, consultationFee, estimatedPrice, currency, status, confirmationMethod, priority, internalNotes, attachments, user, onSaved, t, toast])
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">

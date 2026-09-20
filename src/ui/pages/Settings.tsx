@@ -22,6 +22,7 @@ import { checkForTauriUpdate } from '@/lib/tauriUpdater'
 import { createUpdateSafetyBackupIfNeeded } from '@/local-db/sqliteBackup'
 import { platformService } from '@/services/platformService'
 import { r2Service } from '@/services/r2Service'
+import { getMediaUploadErrorCode } from '@/services/mediaUploadService'
 import { Image as ImageIcon } from 'lucide-react'
 import { assetManager } from '@/lib/assetManager'
 import { downloadWorkspaceResources } from '@/lib/workspaceResourceSync'
@@ -1704,16 +1705,12 @@ export function Settings() {
 
     const handleLogoUpload = async () => {
         if (!user?.workspaceId) return
-        const targetPath = await platformService.pickAndSaveImage(user.workspaceId, 'workspace-logos')
-        if (targetPath) {
-            await updateSettings({ logo_url: targetPath })
-
-            // Trigger asset sync via R2
-            assetManager.uploadFromPath(targetPath, 'branding').then(success => {
-                if (success) {
-                    console.log('[Settings] Logo synced via R2');
-                }
-            }).catch(console.error);
+        try {
+            const targetPath = await platformService.pickAndSaveImage(user.workspaceId, 'workspace-logos', 'workspace-logo')
+            if (targetPath) await updateSettings({ logo_url: targetPath })
+        } catch (error) {
+            const code = getMediaUploadErrorCode(error) || 'upload_failed'
+            toast({ title: t('common.error'), description: t(`mediaUpload.errors.${code}`), variant: 'destructive' })
         }
     }
 
@@ -1721,21 +1718,8 @@ export function Settings() {
         if (!user?.id || !user?.workspaceId) return
 
         try {
-            // 1. Pick and save image
-            const targetPath = await platformService.pickAndSaveImage(user.workspaceId, 'profile-images')
+            const targetPath = await platformService.pickAndSaveImage(user.workspaceId, 'profile-images', 'profile-image')
             if (!targetPath) return
-
-            // 2. Resize image for optimization (512px max width)
-            const resizedPath = await platformService.resizeImage(targetPath, 512)
-
-            try {
-                const syncSuccess = await assetManager.uploadFromPath(resizedPath, 'profiles')
-                if (syncSuccess) {
-                    console.log('[Settings] Profile picture synced to R2')
-                }
-            } catch (syncError) {
-                console.error('[Settings] R2 upload error (non-blocking):', syncError)
-            }
 
             // 4. Update Supabase profile
             if (isSupabaseConfigured && !isDemoMode && !isLocalMode) {
@@ -1743,7 +1727,7 @@ export function Settings() {
                 const { error: profileError } = await runSupabaseAction('settings.updateProfileImage', () =>
                     supabase
                         .from('profiles')
-                        .update({ profile_url: resizedPath })
+                        .update({ profile_url: targetPath })
                         .eq('id', user.id)
                 )
 
@@ -1755,7 +1739,7 @@ export function Settings() {
                 // Update Auth metadata so it persists across refreshes
                 const { error: authError } = await runSupabaseAction('settings.updateProfileMetadata', () =>
                     supabase.auth.updateUser({
-                        data: { profile_url: resizedPath }
+                        data: { profile_url: targetPath }
                     })
                 )
 
@@ -1772,20 +1756,25 @@ export function Settings() {
                     currentWorkspaceId: user.workspaceId,
                     name: user.name,
                     role: user.role,
-                    profile_url: resizedPath,
+                    profile_url: targetPath,
                 })
             }
 
             // 5. Update local state
-            updateUser({ profileUrl: resizedPath })
+            updateUser({ profileUrl: targetPath })
 
             // 6. Dispatch global event for immediate UI updates
             window.dispatchEvent(new CustomEvent('profile-updated'))
 
-            console.log('[Settings] Profile picture updated successfully:', resizedPath)
+            console.log('[Settings] Profile picture updated successfully:', targetPath)
         } catch (error) {
             console.error('[Settings] Profile picture upload failed:', error)
-            showActionError(error, 'Upload failed.')
+            const code = getMediaUploadErrorCode(error)
+            if (code) {
+                toast({ title: t('common.error'), description: t(`mediaUpload.errors.${code}`), variant: 'destructive' })
+            } else {
+                showActionError(error, t('mediaUpload.errors.upload_failed'))
+            }
         }
     }
 

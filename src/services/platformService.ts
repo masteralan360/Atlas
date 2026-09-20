@@ -1,6 +1,6 @@
 import { isDesktop, isMobile, isTauri, PlatformAPI } from '../lib/platform';
 import { r2Service } from './r2Service';
-import { isDemoWorkspaceMode, isLocalWorkspaceMode } from '@/workspace/workspaceMode';
+import type { ImageUploadSource } from '@/lib/imageUploadProfiles';
 
 /**
  * Service to handle platform-specific operations
@@ -14,18 +14,9 @@ class PlatformService implements PlatformAPI {
         if (normalized === 'png') return 'image/png';
         if (normalized === 'jpg' || normalized === 'jpeg') return 'image/jpeg';
         if (normalized === 'webp') return 'image/webp';
+        if (normalized === 'gif') return 'image/gif';
+        if (normalized === 'avif') return 'image/avif';
         return 'application/octet-stream';
-    }
-
-    private async uploadSavedImageToR2(workspaceId: string, subDir: string, fileName: string, data: Blob | ArrayBuffer, contentType: string): Promise<void> {
-        if (!workspaceId || isLocalWorkspaceMode(workspaceId) || !r2Service.isConfigured()) return;
-
-        const r2Path = `${workspaceId}/${subDir}/${fileName}`.replace(/\\/g, '/');
-        try {
-            await r2Service.upload(r2Path, data, contentType);
-        } catch (error) {
-            console.error('[PlatformService] Image upload to R2 failed:', error);
-        }
     }
 
     private async pickImageFileFromInput(): Promise<File | null> {
@@ -34,7 +25,7 @@ class PlatformService implements PlatformAPI {
         return new Promise((resolve) => {
             const input = document.createElement('input');
             input.type = 'file';
-            input.accept = 'image/png,image/jpeg,image/jpg,image/webp';
+            input.accept = 'image/png,image/jpeg,image/jpg,image/webp,image/gif,image/avif';
             input.style.position = 'fixed';
             input.style.left = '-9999px';
 
@@ -70,79 +61,6 @@ class PlatformService implements PlatformAPI {
             input.addEventListener('change', handleChange);
             document.body.appendChild(input);
             input.click();
-        });
-    }
-
-    private getImageExtension(file: File | Blob): string {
-        if (file instanceof File) {
-            const fileExt = file.name.split('.').pop()?.toLowerCase();
-            if (fileExt) {
-                return fileExt === 'jpeg' ? 'jpg' : fileExt;
-            }
-        }
-
-        const mimeToExt: Record<string, string> = {
-            'image/png': 'png',
-            'image/jpeg': 'jpg',
-            'image/webp': 'webp'
-        };
-
-        return mimeToExt[file.type] || 'jpg';
-    }
-
-    private async blobToDataUrl(blob: Blob): Promise<string> {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.onerror = () => reject(new Error('Failed to read image as data URL'));
-            reader.readAsDataURL(blob);
-        });
-    }
-
-    private async resizeBrowserImage(file: File | Blob, maxWidth: number): Promise<Blob> {
-        if (typeof document === 'undefined' || maxWidth <= 0) {
-            return file;
-        }
-
-        const objectUrl = URL.createObjectURL(file);
-
-        return new Promise((resolve) => {
-            const img = new Image();
-
-            img.onload = () => {
-                URL.revokeObjectURL(objectUrl);
-
-                if (img.width <= maxWidth) {
-                    resolve(file);
-                    return;
-                }
-
-                const width = maxWidth;
-                const height = Math.round((maxWidth / img.width) * img.height);
-                const canvas = document.createElement('canvas');
-                canvas.width = width;
-                canvas.height = height;
-
-                const ctx = canvas.getContext('2d');
-                if (!ctx) {
-                    resolve(file);
-                    return;
-                }
-
-                ctx.drawImage(img, 0, 0, width, height);
-                canvas.toBlob(
-                    (resizedBlob) => resolve(resizedBlob || file),
-                    'image/jpeg',
-                    0.85
-                );
-            };
-
-            img.onerror = () => {
-                URL.revokeObjectURL(objectUrl);
-                resolve(file);
-            };
-
-            img.src = objectUrl;
         });
     }
 
@@ -351,139 +269,51 @@ class PlatformService implements PlatformAPI {
             window.location.reload();
         }
     }
-    async pickAndSaveImage(workspaceId: string, subDir: string = 'product-images'): Promise<string | null> {
-        if (isDemoWorkspaceMode(workspaceId)) {
-            const selectedFile = await this.pickImageFileFromInput();
-            return selectedFile ? this.blobToDataUrl(selectedFile) : null;
-        }
+    async pickImageFile(): Promise<File | null> {
+        if (!isTauri() || isMobile()) return this.pickImageFileFromInput();
 
-        if (isTauri()) {
-            if (isMobile()) {
-                try {
-                    const selectedFile = await this.pickImageFileFromInput();
-                    if (!selectedFile) return null;
-                    return await this.saveImageFile(selectedFile, workspaceId, subDir);
-                } catch (error) {
-                    console.error('[PlatformService] Error picking/saving image on mobile:', error);
-                    return null;
-                }
-            }
+        const { open } = await import('@tauri-apps/plugin-dialog');
+        const { readFile } = await import('@tauri-apps/plugin-fs');
+        const selected = await open({
+            multiple: false,
+            filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif'] }]
+        });
+        if (!selected || typeof selected !== 'string') return null;
 
-            try {
-                const { open } = await import('@tauri-apps/plugin-dialog');
-                const { mkdir, copyFile, readFile, BaseDirectory } = await import('@tauri-apps/plugin-fs');
-
-                const selected = await open({
-                    multiple: false,
-                    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
-                });
-
-                if (selected && typeof selected === 'string') {
-                    const ext = selected.split('.').pop();
-                    const fileName = `${Date.now()}.${ext}`;
-                    const relativeDir = `${subDir}/${workspaceId}`;
-
-                    await mkdir(relativeDir.replace(/\\/g, '/'), { baseDir: BaseDirectory.AppData, recursive: true });
-
-                    const relativeDest = `${relativeDir}/${fileName}`.replace(/\\/g, '/');
-                    await copyFile(selected, relativeDest, { toPathBaseDir: BaseDirectory.AppData });
-                    if (!isLocalWorkspaceMode(workspaceId) && r2Service.isConfigured()) {
-                        const fileData = await readFile(relativeDest, { baseDir: BaseDirectory.AppData });
-                        const arrayBuffer = fileData.buffer.slice(fileData.byteOffset, fileData.byteOffset + fileData.byteLength);
-                        await this.uploadSavedImageToR2(workspaceId, subDir, fileName, arrayBuffer, this.getImageContentType(ext));
-                    }
-
-                    // Return relative path (e.g. product-images/uuid/123.jpg)
-                    return relativeDest;
-                }
-            } catch (error) {
-                console.error('Error picking/saving image in Tauri:', error);
-            }
-        }
-
-        try {
-            const selectedFile = await this.pickImageFileFromInput();
-            if (!selectedFile) return null;
-
-            const fileToPersist = subDir === 'profile-images'
-                ? await this.resizeBrowserImage(selectedFile, 512)
-                : selectedFile;
-
-            const ext = this.getImageExtension(fileToPersist);
-            const fileName = `${Date.now()}.${ext}`;
-            const relativeDest = `${subDir}/${workspaceId}/${fileName}`.replace(/\\/g, '/');
-            const r2Path = `${workspaceId}/${subDir}/${fileName}`.replace(/\\/g, '/');
-
-            if (!isLocalWorkspaceMode(workspaceId) && r2Service.isConfigured()) {
-                try {
-                    await r2Service.upload(r2Path, fileToPersist, fileToPersist.type || this.getImageContentType(ext));
-                    return relativeDest;
-                } catch (error) {
-                    console.error('[PlatformService] Web image upload failed, falling back to data URL:', error);
-                }
-            }
-
-            return await this.blobToDataUrl(fileToPersist);
-        } catch (error) {
-            console.error('[PlatformService] Error picking/saving image on web:', error);
-        }
-
-        return null;
+        const bytes = await readFile(selected);
+        const fileName = selected.split(/[\\/]/).pop() || 'image';
+        const ext = fileName.split('.').pop()?.toLowerCase();
+        return new File([bytes], fileName, { type: this.getImageContentType(ext) });
     }
 
-    /**
-     * Save an image from a File or Blob directly to AppData
-     */
-    async saveImageFile(file: File | Blob, workspaceId: string, subDir: string = 'product-images'): Promise<string | null> {
-        if (isDemoWorkspaceMode(workspaceId)) {
-            return this.blobToDataUrl(file);
-        }
+    async pickAndSaveImage(workspaceId: string, subDir: string, source: ImageUploadSource): Promise<string | null> {
+        const selectedFile = await this.pickImageFile();
+        if (!selectedFile) return null;
+        return this.saveImageFile(selectedFile, workspaceId, subDir, source);
+    }
 
-        if (isTauri()) {
-            try {
-                const { mkdir, writeFile, BaseDirectory } = await import('@tauri-apps/plugin-fs');
+    /** All public image saves are routed through centralized compression. */
+    async saveImageFile(file: File | Blob, workspaceId: string, subDir: string, source: ImageUploadSource): Promise<string | null> {
+        const imageFile = file instanceof File
+            ? file
+            : new File([file], 'image', { type: file.type });
+        const { mediaUploadService } = await import('@/services/mediaUploadService');
+        const stored = await mediaUploadService.storeImageFile(imageFile, workspaceId, subDir, source);
+        return stored.path;
+    }
 
-                const arrayBuffer = await file.arrayBuffer();
-                const uint8Array = new Uint8Array(arrayBuffer);
-
-                // Determine extension
-                let ext = 'jpg';
-                if (file instanceof File) {
-                    ext = file.name.split('.').pop() || 'jpg';
-                } else if (file.type) {
-                    ext = file.type.split('/').pop() || 'jpg';
-                }
-                if (ext === 'jpeg') ext = 'jpg';
-
-                const fileName = `${Date.now()}.${ext}`;
-                const relativeDir = `${subDir}/${workspaceId}`;
-
-                await mkdir(relativeDir.replace(/\\/g, '/'), { baseDir: BaseDirectory.AppData, recursive: true });
-
-                const relativeDest = `${relativeDir}/${fileName}`.replace(/\\/g, '/');
-                await writeFile(relativeDest, uint8Array, { baseDir: BaseDirectory.AppData });
-                await this.uploadSavedImageToR2(workspaceId, subDir, fileName, file, file.type || this.getImageContentType(ext));
-
-                return relativeDest;
-            } catch (error) {
-                console.error('[PlatformService] Error saving image file:', error);
-            }
-        }
-
+    /** Internal persistence hook used only after a compressed artifact exists. */
+    async persistImageFile(file: File, workspaceId: string, subDir: string): Promise<string | null> {
+        if (!isTauri()) return null;
         try {
-            const ext = this.getImageExtension(file);
-            const fileName = `${Date.now()}.${ext}`;
-            const relativeDest = `${subDir}/${workspaceId}/${fileName}`.replace(/\\/g, '/');
-            const r2Path = `${workspaceId}/${subDir}/${fileName}`.replace(/\\/g, '/');
-
-            if (!isLocalWorkspaceMode(workspaceId) && r2Service.isConfigured()) {
-                await r2Service.upload(r2Path, file, file.type || this.getImageContentType(ext));
-                return relativeDest;
-            }
-
-            return await this.blobToDataUrl(file);
+            const { mkdir, writeFile, BaseDirectory } = await import('@tauri-apps/plugin-fs');
+            const relativeDir = `${subDir}/${workspaceId}`.replace(/\\/g, '/');
+            const relativeDest = `${relativeDir}/${file.name}`;
+            await mkdir(relativeDir, { baseDir: BaseDirectory.AppData, recursive: true });
+            await writeFile(relativeDest, new Uint8Array(await file.arrayBuffer()), { baseDir: BaseDirectory.AppData });
+            return relativeDest;
         } catch (error) {
-            console.error('[PlatformService] Error saving image file on web:', error);
+            console.error('[PlatformService] Failed to persist compressed image:', error);
             return null;
         }
     }
@@ -569,74 +399,6 @@ class PlatformService implements PlatformAPI {
             return await exists(cleanPath, { baseDir: BaseDirectory.AppData });
         }
         return false;
-    }
-
-    async resizeImage(filePath: string, maxWidth: number = 512): Promise<string> {
-        if (!isTauri()) return filePath;
-
-        try {
-            const { readFile, writeFile, BaseDirectory } = await import('@tauri-apps/plugin-fs');
-
-            // 1. Read the original file
-            const fileData = await readFile(filePath, { baseDir: BaseDirectory.AppData });
-
-            // 2. Load into a blob and then an Image object
-            const blob = new Blob([fileData]);
-            const url = URL.createObjectURL(blob);
-
-            return new Promise((resolve, reject) => {
-                const img = new Image();
-                img.onload = async () => {
-                    URL.revokeObjectURL(url);
-
-                    // Calculate new dimensions
-                    let width = img.width;
-                    let height = img.height;
-
-                    if (width > maxWidth) {
-                        height = (maxWidth / width) * height;
-                        width = maxWidth;
-                    }
-
-                    // 3. Draw to canvas
-                    const canvas = document.createElement('canvas');
-                    canvas.width = width;
-                    canvas.height = height;
-                    const ctx = canvas.getContext('2d');
-                    if (!ctx) {
-                        reject(new Error('Failed to get canvas context'));
-                        return;
-                    }
-
-                    ctx.drawImage(img, 0, 0, width, height);
-
-                    // 4. Convert back to blob/arraybuffer
-                    canvas.toBlob(async (resizedBlob) => {
-                        if (!resizedBlob) {
-                            reject(new Error('Failed to create blob from canvas'));
-                            return;
-                        }
-
-                        const resizedBuffer = await resizedBlob.arrayBuffer();
-
-                        // 5. Overwrite the file with resized version
-                        // Note: To be safe, we could use a new filename, but for profile pics, overwriting is fine
-                        await writeFile(filePath, new Uint8Array(resizedBuffer), { baseDir: BaseDirectory.AppData });
-
-                        console.log(`[PlatformService] Resized image to ${width}x${height}`);
-                        resolve(filePath);
-                    }, 'image/jpeg', 0.85); // Use JPEG with 85% quality
-                };
-                img.onerror = () => {
-                    URL.revokeObjectURL(url);
-                    reject(new Error('Failed to load image for resizing'));
-                };
-                img.src = url;
-            });
-        } catch (error) {
-            console.error('[PlatformService] Resize error:', error);
-            return filePath; // Return original on error
-        }
     }
 
     async saveAs(content: Uint8Array, fileName: string, extensions: { name: string, extensions: string[] }[]): Promise<string | null> {

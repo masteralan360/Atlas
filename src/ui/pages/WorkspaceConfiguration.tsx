@@ -34,7 +34,7 @@ import {
 } from 'lucide-react'
 import { isTauri as isTauriCheck } from '@/lib/platform'
 import { platformService } from '@/services/platformService'
-import { assetManager } from '@/lib/assetManager'
+import { getMediaUploadErrorCode } from '@/services/mediaUploadService'
 import {
     formatCoordinates,
     isGeolocationSupported,
@@ -78,15 +78,16 @@ export function WorkspaceConfiguration() {
 
     const handleImageUpload = async () => {
         if (!isTauri) return;
-        const targetPath = await platformService.pickAndSaveImage(workspaceId, 'workspace-logos');
-        if (targetPath) {
-            setLogoUrl(targetPath);
-            // Trigger asset sync via R2
-            assetManager.uploadFromPath(targetPath, 'branding').then(success => {
-                if (success) {
-                    console.log('[WorkspaceConfig] Logo synced via R2');
-                }
-            }).catch(console.error);
+        try {
+            const targetPath = await platformService.pickAndSaveImage(workspaceId, 'workspace-logos', 'workspace-logo');
+            if (targetPath) setLogoUrl(targetPath);
+        } catch (error) {
+            const code = getMediaUploadErrorCode(error) || 'upload_failed'
+            toast({
+                title: t('common.error'),
+                description: t(`mediaUpload.errors.${code}`),
+                variant: 'destructive',
+            })
         }
     }
 

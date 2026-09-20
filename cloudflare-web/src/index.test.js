@@ -174,6 +174,44 @@ describe('Atlas Cloudflare web Worker', () => {
         })
     })
 
+    it('preserves compressed-image metadata on Web Live R2 uploads', async () => {
+        const calls = []
+        vi.stubGlobal('fetch', vi.fn(async (input, init) => {
+            const url = String(input)
+            calls.push({ url, init })
+            if (url.includes('get_current_workspace_usage_access')) return workspaceAccess()
+            if (url.includes('record_workspace_data_transfer')) return new Response(null, { status: 204 })
+            return Response.json({ success: true })
+        }))
+
+        const response = await worker.fetch(new Request(
+            `https://app.atlaserp.dev/api-workspace-r2/${workspaceId}/product-images/item.webp`,
+            {
+                method: 'PUT',
+                body: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
+                headers: {
+                    Authorization: 'Bearer user-token',
+                    'Content-Type': 'image/webp',
+                    'X-Atlas-Image-Compressed': '1',
+                    'X-Atlas-Image-Source': 'product-primary',
+                    'X-Atlas-Image-Profile': '1',
+                    'X-Atlas-Image-Width': '800',
+                    'X-Atlas-Image-Height': '600',
+                    'X-Atlas-Image-Original-Bytes': '1000',
+                },
+            },
+        ), createEnv())
+
+        expect(response.status).toBe(200)
+        const forwarded = calls[1].init.headers
+        expect(forwarded.get('X-Atlas-Image-Compressed')).toBe('1')
+        expect(forwarded.get('X-Atlas-Image-Source')).toBe('product-primary')
+        expect(forwarded.get('X-Atlas-Image-Profile')).toBe('1')
+        expect(forwarded.get('X-Atlas-Image-Width')).toBe('800')
+        expect(forwarded.get('X-Atlas-Image-Height')).toBe('600')
+        expect(forwarded.get('X-Atlas-Image-Original-Bytes')).toBe('1000')
+    })
+
     it('serves marketplace.html for extensionless shop routes and preserves static cache policy', async () => {
         const env = createEnv()
 

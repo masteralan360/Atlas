@@ -202,7 +202,7 @@ export async function runR2BackupIfNeeded(workspaceId: string | undefined | null
             const blob = new Blob([fileData], { type: 'application/octet-stream' })
 
             const r2Path = `local-backup/${workspaceId}/${DB_FILENAME}`
-            await r2Service.upload(r2Path, blob, 'application/octet-stream', true)
+            await r2Service.uploadObject(r2Path, blob, 'application/octet-stream', true)
 
             console.log('[R2Backup] Database uploaded to R2:', r2Path)
             markR2BackupDone()
@@ -223,7 +223,7 @@ export async function runR2BackupIfNeeded(workspaceId: string | undefined | null
         const blob = new Blob([data], { type: 'application/octet-stream' })
 
         const r2Path = `local-backup/${workspaceId}/${DB_FILENAME}`
-        await r2Service.upload(r2Path, blob, 'application/octet-stream', true)
+        await r2Service.uploadObject(r2Path, blob, 'application/octet-stream', true)
 
         console.log('[R2Backup] PWA database uploaded to R2:', r2Path)
         markR2BackupDone()

@@ -49,7 +49,7 @@ describe('developer runner boundaries', () => {
       expect(() => validateRunOptions(options)).toThrow()
     }
     expect(validateRunOptions({ suiteId: 'sale-orders' }).groups.length).toBe(suites['sale-orders'].groups.length)
-    expect(validateRunOptions({ suiteId: 'pos' }).groups.length).toBe(11)
+    expect(validateRunOptions({ suiteId: 'pos' }).groups.length).toBe(12)
     expect(validateRunOptions({ suiteId: 'post-service' }).groups.length).toBe(13)
     expect(validateRunOptions({ suiteId: 'post-service', groupIds: ['remote-contract', 'merchants'] }).groups.map((group) => group.id)).toEqual(['merchants', 'remote-contract'])
     expect(validateRunOptions({ suiteId: 'pos', groupIds: ['checkout', 'remote-contract'] }).groups.map((group) => group.id)).toEqual(['checkout', 'remote-contract'])

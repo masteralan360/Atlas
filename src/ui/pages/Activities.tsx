@@ -26,11 +26,9 @@ import type { ActivityCatalogItem, ActivityTransaction, ActivityTransactionLine,
 import { usePaymentTransactions } from '@/local-db'
 import { isDateInDateRange } from '@/lib/dateRangeFilters'
 import { ACTIVITY_PAYMENT_METHODS } from '@/lib/paymentMethods'
-import { assetManager } from '@/lib/assetManager'
 import { isTauri } from '@/lib/platform'
 import { formatCurrency } from '@/lib/utils'
 import { platformService } from '@/services/platformService'
-import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
@@ -473,10 +471,17 @@ export function Activities() {
         if (!workspaceId) return
 
         if (isDesktopShell) {
-            const targetPath = await platformService.pickAndSaveImage(workspaceId, 'activity-images')
-            if (!targetPath) return
-            setCatalogImage(targetPath)
-            void assetManager.uploadFromPath(targetPath).catch(console.error)
+            try {
+                const targetPath = await platformService.pickAndSaveImage(workspaceId, 'activity-images', 'activity-image')
+                if (targetPath) setCatalogImage(targetPath)
+            } catch (error) {
+                console.error('[Activities] Failed to attach activity image:', error)
+                toast({
+                    variant: 'destructive',
+                    title: t('messages.error'),
+                    description: t('activities.messages.imageUploadFailed')
+                })
+            }
             return
         }
 
@@ -488,29 +493,8 @@ export function Activities() {
         if (!file || !workspaceId) return
 
         try {
-            if (isDesktopShell) {
-                const targetPath = await platformService.saveImageFile(file, workspaceId, 'activity-images')
-                if (targetPath) {
-                    setCatalogImage(targetPath)
-                    void assetManager.uploadFromPath(targetPath).catch(console.error)
-                }
-                return
-            }
-
-            const extension = file.name.split('.').pop() || 'jpg'
-            const fileName = `${Date.now()}.${extension}`
-            const targetPath = `activity-images/${workspaceId}/${fileName}`
-            const r2Path = `${workspaceId}/activity-images/${fileName}`
-            const { r2Service } = await import('@/services/r2Service')
-
-            if (!isLocalWorkspaceMode(workspaceId) && r2Service.isConfigured() && await r2Service.upload(r2Path, file)) {
-                setCatalogImage(targetPath)
-                return
-            }
-
-            const reader = new FileReader()
-            reader.onloadend = () => setCatalogImage(String(reader.result || ''))
-            reader.readAsDataURL(file)
+            const targetPath = await platformService.saveImageFile(file, workspaceId, 'activity-images', 'activity-image')
+            if (targetPath) setCatalogImage(targetPath)
         } catch (error) {
             console.error('[Activities] Failed to attach activity image:', error)
             toast({

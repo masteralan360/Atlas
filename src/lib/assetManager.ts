@@ -1,5 +1,6 @@
 import { isTauri } from './platform';
 import { platformService } from '@/services/platformService';
+import { restoreCompressedImageArtifact } from '@/lib/imageCompression';
 import { r2Service } from '@/services/r2Service';
 import { db } from '@/local-db';
 import { supabase } from '@/auth/supabase';
@@ -169,7 +170,7 @@ export class AssetManager extends SimpleEventEmitter {
             const fileName = file.name.replace(/\s+/g, '_');
             const storagePath = `${this.workspaceId}/${folder}/${fileName}`;
 
-            const success = await r2Service.upload(storagePath, file);
+            const success = await r2Service.uploadObject(storagePath, file);
 
             if (success) {
                 this.emitStatus({ status: 'success' });
@@ -203,7 +204,7 @@ export class AssetManager extends SimpleEventEmitter {
 
             this.emitStatus({ status: 'uploading', currentFile: `${invoiceId}.pdf` });
 
-            const url = await r2Service.upload(r2Path, pdfBlob, 'application/pdf');
+            const url = await r2Service.uploadObject(r2Path, pdfBlob, 'application/pdf');
 
             if (url) {
                 this.emitStatus({ status: 'success' });
@@ -252,7 +253,9 @@ export class AssetManager extends SimpleEventEmitter {
             const file = new File([fileData as any], fileNameFull, { type: mimeType });
 
             this.emitStatus({ status: 'uploading', currentFile: fileNameFull });
-            const success = await r2Service.upload(r2Path, file);
+            const success = mimeType.startsWith('image/')
+                ? await r2Service.uploadCompressedImage(r2Path, await restoreCompressedImageArtifact(file))
+                : await r2Service.uploadObject(r2Path, file, mimeType);
             if (success) {
                 this.emitStatus({ status: 'success' });
                 return r2Path;

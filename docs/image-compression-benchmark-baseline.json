@@ -1,0 +1,20 @@
+{
+  "measuredAt": "2026-09-20",
+  "environment": "Windows Chromium (Codex in-app browser), Vite development build",
+  "corpus": "deterministic generated v1 with fine-grain sensor noise",
+  "profilesMeetingSoftTarget": 11,
+  "profileCount": 11,
+  "results": [
+    { "source": "product-primary", "fixture": "product", "inputBytes": 16593003, "outputBytes": 626314, "reductionPercent": 96.2, "width": 2048, "height": 1536, "attempts": 3, "elapsedMs": 1385.3, "targetBytes": 716800, "targetMet": true },
+    { "source": "product-additional", "fixture": "product", "inputBytes": 16593003, "outputBytes": 626314, "reductionPercent": 96.2, "width": 2048, "height": 1536, "attempts": 3, "elapsedMs": 1363.0, "targetBytes": 716800, "targetMet": true },
+    { "source": "product-variant", "fixture": "product", "inputBytes": 16593003, "outputBytes": 626314, "reductionPercent": 96.2, "width": 2048, "height": 1536, "attempts": 3, "elapsedMs": 1343.7, "targetBytes": 716800, "targetMet": true },
+    { "source": "service-image", "fixture": "product", "inputBytes": 16593003, "outputBytes": 626314, "reductionPercent": 96.2, "width": 2048, "height": 1536, "attempts": 3, "elapsedMs": 1359.9, "targetBytes": 716800, "targetMet": true },
+    { "source": "activity-image", "fixture": "activity", "inputBytes": 7969682, "outputBytes": 246896, "reductionPercent": 96.9, "width": 1600, "height": 1067, "attempts": 1, "elapsedMs": 288.9, "targetBytes": 460800, "targetMet": true },
+    { "source": "workspace-logo", "fixture": "logo", "inputBytes": 52070, "outputBytes": 24082, "reductionPercent": 53.8, "width": 512, "height": 256, "attempts": 1, "elapsedMs": 18.2, "targetBytes": 122880, "targetMet": true },
+    { "source": "profile-image", "fixture": "portrait", "inputBytes": 8816966, "outputBytes": 15176, "reductionPercent": 99.8, "width": 384, "height": 512, "attempts": 1, "elapsedMs": 119.6, "targetBytes": 122880, "targetMet": true },
+    { "source": "print-attachment", "fixture": "print", "inputBytes": 13816052, "outputBytes": 445972, "reductionPercent": 96.8, "width": 1920, "height": 2560, "attempts": 1, "elapsedMs": 628.9, "targetBytes": 1572864, "targetMet": true },
+    { "source": "print-watermark", "fixture": "logo", "inputBytes": 52070, "outputBytes": 14846, "reductionPercent": 71.5, "width": 1600, "height": 800, "attempts": 1, "elapsedMs": 109.5, "targetBytes": 1572864, "targetMet": true },
+    { "source": "clinical-attachment", "fixture": "print", "inputBytes": 13816052, "outputBytes": 445972, "reductionPercent": 96.8, "width": 1920, "height": 2560, "attempts": 1, "elapsedMs": 622.2, "targetBytes": 1572864, "targetMet": true },
+    { "source": "generic-upload", "fixture": "print", "inputBytes": 13816052, "outputBytes": 445972, "reductionPercent": 96.8, "width": 1920, "height": 2560, "attempts": 1, "elapsedMs": 633.1, "targetBytes": 1572864, "targetMet": true }
+  ]
+}

@@ -1,17 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const { isTauriMock, saveImageFileMock, fetchExternalProductImageMock, r2UploadMock } = vi.hoisted(() => ({
+const { isTauriMock, fetchExternalProductImageMock, mediaStoreMock } = vi.hoisted(() => ({
     isTauriMock: vi.fn(() => false),
-    saveImageFileMock: vi.fn(),
     fetchExternalProductImageMock: vi.fn(),
-    r2UploadMock: vi.fn()
+    mediaStoreMock: vi.fn()
 }))
 
 vi.mock('@/lib/platform', () => ({ isTauri: isTauriMock }))
 vi.mock('@/services/platformService', () => ({
     platformService: {
         convertFileSrc: (path: string) => `file://${path}`,
-        saveImageFile: saveImageFileMock
     }
 }))
 vi.mock('@/services/r2Service', () => ({
@@ -21,9 +19,14 @@ vi.mock('@/services/r2Service', () => ({
             ? url.slice('https://r2.example/'.length)
             : null,
         isConfigured: () => true,
-        upload: r2UploadMock,
         fetchExternalProductImage: fetchExternalProductImageMock
     }
+}))
+vi.mock('@/services/mediaUploadService', () => ({
+    mediaUploadService: { storeImageFile: mediaStoreMock },
+    MediaUploadError: class MediaUploadError extends Error {
+        constructor(public code: string) { super(code) }
+    },
 }))
 vi.mock('@/workspace/workspaceMode', () => ({ isLocalWorkspaceMode: () => false }))
 
@@ -39,9 +42,8 @@ import {
 describe('product image storage policy', () => {
     afterEach(() => {
         isTauriMock.mockReturnValue(false)
-        saveImageFileMock.mockReset()
         fetchExternalProductImageMock.mockReset()
-        r2UploadMock.mockReset()
+        mediaStoreMock.mockReset()
         vi.unstubAllGlobals()
     })
 
@@ -72,65 +74,26 @@ describe('product image storage policy', () => {
         const sourceUrl = 'https://images.example.com/item.png'
         const localPath = 'product-images/workspace-id/123.webp'
         const sourceBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-        const canvas = {
-            width: 0,
-            height: 0,
-            getContext: vi.fn(() => ({ drawImage: vi.fn() })),
-            toBlob: (callback: BlobCallback) => callback(new Blob([sourceBytes], { type: 'image/webp' }))
-        }
-        class TestImage {
-            decoding = ''
-            naturalWidth = 1
-            naturalHeight = 1
-            onload: (() => void) | null = null
-            onerror: (() => void) | null = null
-
-            set src(_value: string) {
-                queueMicrotask(() => this.onload?.())
-            }
-        }
-        vi.stubGlobal('Image', TestImage)
-        vi.stubGlobal('document', { createElement: vi.fn(() => canvas) })
         fetchExternalProductImageMock.mockResolvedValue(new Blob([sourceBytes], { type: 'image/png' }))
-        saveImageFileMock.mockResolvedValue(localPath)
-        r2UploadMock.mockResolvedValue('https://r2.example/workspace-id/product-images/123.webp')
+        mediaStoreMock.mockResolvedValue({ path: localPath })
 
-        await expect(importProductImageFromUrl(sourceUrl, 'workspace-id')).resolves.toBe(localPath)
+        await expect(importProductImageFromUrl(sourceUrl, 'workspace-id', 'product-primary')).resolves.toBe(localPath)
         expect(fetchExternalProductImageMock).toHaveBeenCalledWith(sourceUrl)
-        expect(saveImageFileMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'image/webp' }), 'workspace-id')
-        expect(r2UploadMock).toHaveBeenCalledWith(
-            'workspace-id/product-images/123.webp',
-            expect.objectContaining({ type: 'image/webp' }),
-            'image/webp'
+        expect(mediaStoreMock).toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'image/png' }),
+            'workspace-id',
+            'product-images',
+            'product-primary',
         )
     })
 
     it('rejects a Tauri URL import when its verified local image cannot be uploaded to R2', async () => {
         isTauriMock.mockReturnValue(true)
         const sourceBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-        const canvas = {
-            width: 0,
-            height: 0,
-            getContext: vi.fn(() => ({ drawImage: vi.fn() })),
-            toBlob: (callback: BlobCallback) => callback(new Blob([sourceBytes], { type: 'image/webp' }))
-        }
-        class TestImage {
-            decoding = ''
-            naturalWidth = 1
-            naturalHeight = 1
-            onload: (() => void) | null = null
-
-            set src(_value: string) {
-                queueMicrotask(() => this.onload?.())
-            }
-        }
-        vi.stubGlobal('Image', TestImage)
-        vi.stubGlobal('document', { createElement: vi.fn(() => canvas) })
         fetchExternalProductImageMock.mockResolvedValue(new Blob([sourceBytes], { type: 'image/png' }))
-        saveImageFileMock.mockResolvedValue('product-images/workspace-id/123.webp')
-        r2UploadMock.mockRejectedValue(new Error('R2 is unavailable'))
+        mediaStoreMock.mockRejectedValue(new Error('R2 is unavailable'))
 
-        await expect(importProductImageFromUrl('https://images.example.com/item.png', 'workspace-id'))
+        await expect(importProductImageFromUrl('https://images.example.com/item.png', 'workspace-id', 'product-primary'))
             .rejects.toMatchObject({ code: 'upload_failed' })
     })
 })
