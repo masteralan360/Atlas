@@ -77,6 +77,16 @@ export type BarcodeScannerKeyTiming = {
     isFast: boolean
 }
 
+export function shouldIgnoreBarcodeScannerKey(options: {
+    hasFocusedEditable: boolean
+    isScannerTargetFocused: boolean
+}): boolean {
+    // A scanner listener must never hijack fast human typing in a different
+    // form control. Its target remains eligible so an enabled scanner can
+    // still receive a hardware scan directly into the selected field.
+    return options.hasFocusedEditable && !options.isScannerTargetFocused
+}
+
 export function classifyBarcodeScannerKeyTiming(
     timestamp: number,
     previousTimestamp: number,

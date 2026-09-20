@@ -10,6 +10,7 @@ import {
     createBarcodeScannerCodeIndex,
     getBarcodeScannerEventKey,
     normalizeBarcodeScannerText,
+    shouldIgnoreBarcodeScannerKey,
     shouldCommitBarcodeScannerValue
 } from './barcodeScanner'
 
@@ -73,6 +74,21 @@ describe('barcode scanner utilities', () => {
             hasBufferedValue: true,
             isActive: true
         }).shouldReset).toBe(true)
+    })
+
+    it('does not let scanner capture hijack typing in another editable field', () => {
+        expect(shouldIgnoreBarcodeScannerKey({
+            hasFocusedEditable: true,
+            isScannerTargetFocused: false
+        })).toBe(true)
+        expect(shouldIgnoreBarcodeScannerKey({
+            hasFocusedEditable: true,
+            isScannerTargetFocused: true
+        })).toBe(false)
+        expect(shouldIgnoreBarcodeScannerKey({
+            hasFocusedEditable: false,
+            isScannerTargetFocused: false
+        })).toBe(false)
     })
 
     it('resets scanner timing after a clock discontinuity', () => {

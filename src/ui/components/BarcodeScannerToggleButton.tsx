@@ -8,7 +8,8 @@ import {
     getBarcodeScannerEventKey,
     isBarcodeScannerIgnoredKey,
     isBarcodeScannerTerminatorKey,
-    normalizeBarcodeScannerText
+    normalizeBarcodeScannerText,
+    shouldIgnoreBarcodeScannerKey
 } from '@/lib/barcodeScanner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/ui/components/button'
@@ -217,6 +218,21 @@ export function BarcodeScannerToggleButton({
 
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.ctrlKey || event.metaKey || event.altKey) return
+
+            const focusedEditableElement = getFocusedEditableElement()
+            const isScannerTargetFocused = Boolean(
+                focusedEditableElement
+                && targetInputRef?.current
+                && focusedEditableElement === targetInputRef.current
+            )
+            if (shouldIgnoreBarcodeScannerKey({
+                hasFocusedEditable: Boolean(focusedEditableElement),
+                isScannerTargetFocused
+            })) {
+                resetScanState()
+                return
+            }
+
             if (isBarcodeScannerIgnoredKey(event.key)) return
 
             if (isBarcodeScannerTerminatorKey(event.key)) {
@@ -244,7 +260,6 @@ export function BarcodeScannerToggleButton({
 
             if (timing.shouldReset) {
                 clearScanTimeout()
-                const focusedEditableElement = getFocusedEditableElement()
                 fastKeyCountRef.current = 0
                 scanBufferRef.current = ''
                 scannerActiveRef.current = false
