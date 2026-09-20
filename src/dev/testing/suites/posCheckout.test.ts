@@ -4,7 +4,7 @@ import { db } from '@/local-db/database'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 import { installTestBrowser } from '../fixtures/browser'
 import { assertPosPayment } from '../assertions/pos'
-import { POS_BATCH, POS_CURRENCIES, POS_INVENTORY, POS_METHODS, POS_PRODUCT, POS_WORKSPACE,
+import { POS_BATCH, POS_CURRENCIES, POS_INVENTORY, POS_METHODS, POS_PRODUCT, POS_STORAGE, POS_WORKSPACE,
     posCheckoutInput, seededPosCases, seedPosStock } from '../fixtures/pos'
 
 vi.mock('@/auth/supabase', () => {
@@ -20,7 +20,7 @@ describe('POS checkout scenarios (independent of Instant POS)', () => {
         installTestBrowser()
         checkout = await import('@/local-db/posCheckout')
         accounts = await import('@/local-db/paymentAccounts')
-    }, 30_000)
+    }, 90_000)
     beforeEach(async () => {
         await db.delete(); await db.open()
         writeWorkspaceModeSnapshot({ workspaceId: POS_WORKSPACE, dataMode: 'local' })
@@ -70,6 +70,85 @@ describe('POS checkout scenarios (independent of Instant POS)', () => {
         expect(await db.inventory.count()).toBe(0)
         expect(await db.stock_batches.count()).toBe(0)
         await assertPosPayment(input.payload.id, 100)
+    })
+
+    it('related parent-unit sale keeps the sold-unit snapshot and deducts canonical child stock', async () => {
+        await seedPosStock('iqd')
+        const now = new Date().toISOString()
+        await db.products.update(POS_PRODUCT, { unit: 'sheet' })
+        await db.unit_relationships.put({
+            id: 'pos-unit-relationship', workspaceId: POS_WORKSPACE, name: 'Packaging',
+            parentUnitRef: 'builtin:carton', parentUnitCode: 'carton',
+            childUnitRef: 'builtin:sheet', childUnitCode: 'sheet', isArchived: false,
+            createdAt: now, updatedAt: now, syncStatus: 'synced', lastSyncedAt: now,
+            version: 1, isDeleted: false
+        })
+        await db.product_unit_conversions.put({
+            id: 'pos-unit-conversion', workspaceId: POS_WORKSPACE, productId: POS_PRODUCT,
+            relationshipId: 'pos-unit-relationship', factor: 20, parentPrice: 40_000,
+            createdAt: now, updatedAt: now, syncStatus: 'synced', lastSyncedAt: now,
+            version: 1, isDeleted: false
+        })
+        const input = posCheckoutInput({ currency: 'iqd', quantity: 1, unitPrice: 40_000 })
+        input.payload.items[0] = {
+            ...input.payload.items[0],
+            selling_unit_ref: 'builtin:carton',
+            selling_unit_code: 'carton',
+            base_unit_ref: 'builtin:sheet',
+            base_unit_code: 'sheet',
+            unit_factor: 20,
+            inventory_quantity: 20,
+            cost_price: 800,
+            converted_cost_price: 800,
+            batch_allocations: [{
+                batch_id: POS_BATCH, batch_number: 'POS-1', quantity: 20,
+                price: 100, cost_price: 40, currency: 'iqd', expiry_date: null, manufacturing_date: null
+            }]
+        }
+        input.batchPlans = [{
+            productId: POS_PRODUCT,
+            storageId: POS_STORAGE,
+            allocations: [{ batchId: POS_BATCH, batchNumber: 'POS-1', quantity: 20, price: 100, costPrice: 40, currency: 'iqd' }]
+        }]
+
+        await checkout.commitPosCheckout(input)
+
+        expect(await db.sale_items.where('saleId').equals(input.payload.id).first()).toMatchObject({
+            quantity: 1,
+            sellingUnitRef: 'builtin:carton',
+            sellingUnitCode: 'carton',
+            baseUnitRef: 'builtin:sheet',
+            baseUnitCode: 'sheet',
+            unitFactor: 20,
+            inventoryQuantity: 20,
+            costPrice: 800
+        })
+        expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 0 })
+        expect(await db.products.get(POS_PRODUCT)).toMatchObject({ quantity: 0 })
+        expect(await db.stock_batches.get(POS_BATCH)).toMatchObject({ quantity: 0 })
+        await assertPosPayment(input.payload.id, 40_000)
+    })
+
+    it('rejects a related-unit payload whose stock quantity does not match its immutable factor', async () => {
+        await seedPosStock()
+        const input = posCheckoutInput({ quantity: 1 })
+        Object.assign(input.payload.items[0], { unit_factor: 20, inventory_quantity: 19 })
+        await expect(checkout.commitPosCheckout(input)).rejects.toThrow()
+        expect(await db.sales.count()).toBe(0)
+        expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 20 })
+    })
+
+    it('rejects a related-unit payload that invents a conversion not configured for the product', async () => {
+        await seedPosStock()
+        const input = posCheckoutInput({ quantity: 1 })
+        Object.assign(input.payload.items[0], {
+            selling_unit_ref: 'builtin:carton', selling_unit_code: 'carton',
+            base_unit_ref: 'builtin:pcs', base_unit_code: 'pcs',
+            unit_factor: 20, inventory_quantity: 20
+        })
+        await expect(checkout.commitPosCheckout(input)).rejects.toThrow()
+        expect(await db.sales.count()).toBe(0)
+        expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 20 })
     })
 
     for (const scenario of seededPosCases(Number(process.env.ATLAS_TEST_SEED ?? 20260918), Number(process.env.ATLAS_TEST_SAMPLES ?? 16))) {

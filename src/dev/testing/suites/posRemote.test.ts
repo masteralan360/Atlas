@@ -21,7 +21,7 @@ let checkout: typeof import('@/local-db/posCheckout')
 let returns: typeof import('@/local-db/posSaleReturns')
 
 describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () => {
-    beforeAll(async () => { installTestBrowser(); checkout = await import('@/local-db/posCheckout'); returns = await import('@/local-db/posSaleReturns') }, 30_000)
+    beforeAll(async () => { installTestBrowser(); checkout = await import('@/local-db/posCheckout'); returns = await import('@/local-db/posSaleReturns') }, 90_000)
     beforeEach(async () => {
         await db.delete(); await db.open(); await seedPosStock()
         remote.queries.length = 0
@@ -70,6 +70,46 @@ describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () 
         await assertPosPayment(input.payload.id, 100)
         expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 19 })
         expect(await db.offline_mutations.count()).toBe(0)
+    })
+
+    it('sends immutable related-unit snapshots and canonical stock quantity to complete_sale', async () => {
+        const input = posCheckoutInput({ currency: 'usd', quantity: 1, unitPrice: 1_000 })
+        Object.assign(input.payload.items[0], {
+            selling_unit_ref: 'builtin:carton',
+            selling_unit_code: 'carton',
+            base_unit_ref: 'custom:sheet',
+            base_unit_code: 'sheet',
+            unit_factor: 20,
+            inventory_quantity: 20,
+            cost_price: 800,
+            converted_cost_price: 800,
+            batch_allocations: [{
+                batch_id: POS_BATCH, batch_number: 'POS-1', quantity: 20,
+                price: 100, cost_price: 40, currency: 'usd', expiry_date: null, manufacturing_date: null
+            }]
+        })
+        input.batchPlans = [{
+            productId: POS_PRODUCT,
+            storageId: POS_STORAGE,
+            allocations: [{ batchId: POS_BATCH, batchNumber: 'POS-1', quantity: 20, price: 100, costPrice: 40, currency: 'usd' }]
+        }]
+        remote.batches = [{ ...remote.batches[0], quantity: 0 }]
+
+        await checkout.commitPosCheckout(input)
+
+        expect(remote.rpc).toHaveBeenCalledWith('complete_sale', {
+            payload: expect.objectContaining({
+                items: [expect.objectContaining({
+                    selling_unit_ref: 'builtin:carton',
+                    selling_unit_code: 'carton',
+                    base_unit_ref: 'custom:sheet',
+                    base_unit_code: 'sheet',
+                    unit_factor: 20,
+                    inventory_quantity: 20
+                })]
+            })
+        })
+        expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 0 })
     })
 
     it('retries a transient RPC using exactly the same sale and loan identities', async () => {

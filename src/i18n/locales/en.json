@@ -72,13 +72,14 @@
     },
     "pos": "POS",
     "posSamplesHelp": "1–100 additional paid POS checkout scenarios with varied currencies, methods, fractional quantities and service lines. Fixed regressions run alongside them.",
-    "posCoverageHelp": "Checks regular POS production checkout, cart calculations, inventory, financing, exchange and reversal helpers, Activities and Quick Order routing, with disposable IndexedDB and mocked backend contracts. Sales return inventory and financing components are covered; the complete Sales return dialog is not automated. SQLite checks use an adapter stub. Real browser checkout, Supabase permissions, native restart and hardware remain unavailable.",
+    "posCoverageHelp": "Checks regular POS production checkout, cart calculations, inventory, related-unit hierarchy and conversion, independent packaging prices, combined product-unit selection, relationship usage safeguards, persistence, financing, exchange and reversal helpers, Activities and Quick Order routing, with disposable IndexedDB and mocked backend contracts. Related-unit POS sales are covered by Checkout, Cart and Cloud / Hybrid request groups; relationship setup and product conversion are covered by Related Units. Sales return inventory and financing components are covered; the complete Sales return dialog is not automated. SQLite checks use an adapter stub. Real browser checkout, Supabase permissions, native restart and hardware remain unavailable.",
     "posGroups": {
       "checkout": "Checkout, payments, accounts and ledger",
       "cart": "Cart and held-sale restoration",
       "pricing": "Pricing, discounts and price books",
       "currency": "Currency conversion and rate snapshots",
       "inventory": "Inventory, batches and storage access",
+      "relatedUnits": "Related units, product selection, safeguards and packaging persistence",
       "financing": "Simple loans and installment financing",
       "returns": "Return inventory, exchanges and linked reversals",
       "routing": "Barcode entry, Activities and Quick Order routing",
@@ -689,6 +690,12 @@
     "openAction": "Open",
     "freshness": {
       "updated": "Updated {{time}}",
+      "relative": {
+        "now": "now",
+        "minutesAgo": "{{count}} min ago",
+        "hoursAgo": "{{count}} hr ago",
+        "daysAgo": "{{count}} day ago"
+      },
       "unavailable": "Update unavailable",
       "checking": "Checking for updates…",
       "upToDate": "Up to date",
@@ -1139,6 +1146,26 @@
     "generatedOn": "Report generated on"
   },
   "products": {
+    "packaging": {
+      "title": "Related selling units",
+      "description": "Sell this product in either unit while inventory remains stored in the smaller unit.",
+      "relationship": "Unit relationship",
+      "combinedUnitLabel": "{{parent}} and {{child}}",
+      "selectRelationship": "Select a unit relationship",
+      "none": "No related selling units",
+      "factor": "Conversion quantity",
+      "factorExample": "1 {{parent}} = {{quantity}} {{child}}",
+      "parentPrice": "{{unit}} selling price",
+      "childPrice": "{{unit}} selling price",
+      "independentPrices": "The two selling prices are independent and are not calculated from each other.",
+      "validation": "Enter a valid conversion quantity and larger-unit price. Static smaller units require a whole-number conversion.",
+      "priceBookValidation": "Enter a valid larger-unit price for every Price Book override.",
+      "unitRequired": "Select a unit or a related-unit combination for this product.",
+      "standaloneReserved": "This unit belongs to an active relationship and cannot be selected by itself.",
+      "unitChangeBlocked": "An existing product's inventory unit cannot be reinterpreted here. Keep its current base unit or use an explicit inventory conversion workflow.",
+      "incompatibleUnit": "This relationship uses a different base unit from the product's current inventory unit.",
+      "switchChildBlocked": "This product can only switch to another relationship with the same smaller inventory unit."
+    },
     "title": "Products",
     "addCategory": "Add Category",
     "subtitle": "Manage your inventory",
@@ -1471,6 +1498,7 @@
     "select": "Select a Price Book",
     "costPrice": "Unit cost",
     "sellingPrice": "Selling price",
+    "sellingPriceForUnit": "{{unit}} selling price",
     "currency": "Currency",
     "noBooksForProduct": "Create a Price Book from the Products page before adding custom prices.",
     "noOverrides": "This product does not have any Price Book overrides.",
@@ -4607,6 +4635,46 @@
     "dynamicHint": "Allows fractional quantities and a quantity adjuster in POS.",
     "confirmDelete": "Delete Unit",
     "deleteHint": "This unit will be permanently deleted. Products using it cannot be deleted this way.",
+    "relationships": {
+      "button": "Unit Relationships",
+      "title": "Unit Relationships",
+      "add": "New Relationship",
+      "addTitle": "New Unit Relationship",
+      "editTitle": "Edit Unit Relationship",
+      "formHint": "Choose the larger unit and the smaller unit it contains. Each product sets its own conversion quantity.",
+      "name": "Label (optional)",
+      "namePlaceholder": "e.g. Pharmaceutical packaging",
+      "parent": "Larger unit",
+      "child": "Smaller unit",
+      "selectUnit": "Select a unit",
+      "unnamed": "Unit relationship",
+      "empty": "No unit relationships yet",
+      "emptyHint": "Create a reusable larger-to-smaller unit hierarchy, such as Carton to Sheet.",
+      "productsUsing": "Used by {{count}} products",
+      "archive": "Archive",
+      "restore": "Restore",
+      "archived": "Archived",
+      "endpointsLocked": "The units cannot be changed, archived, or deleted because active products use this relationship. You can still rename it.",
+      "usedUnitHint": "Units already connected to active products are unavailable for new relationships.",
+      "deleteTitle": "Delete Unit Relationship",
+      "deleteHint": "This unused relationship will be permanently deleted.",
+      "messages": {
+        "saved": "Unit relationship saved.",
+        "archived": "Unit relationship archived.",
+        "restored": "Unit relationship restored.",
+        "deleted": "Unit relationship deleted.",
+        "duplicate": "This unit relationship already exists.",
+        "reverse": "The reverse relationship already exists.",
+        "cycle": "This relationship would create a unit hierarchy cycle.",
+        "sameUnit": "The larger and smaller units must be different.",
+        "inUse": "Products use this relationship, so its units cannot be changed or deleted.",
+        "endpointInUse": "An active product already uses one of these units. Create the relationship before products start using either endpoint.",
+        "archiveInUse": "Active products use this relationship, so it cannot be archived.",
+        "verificationRequired": "Connect to the internet so Atlas can verify product usage before changing unit relationships.",
+        "saveFailed": "Could not save the unit relationship. Please try again.",
+        "deleteFailed": "Could not delete the unit relationship. Please try again."
+      }
+    },
     "messages": {
       "codeRequired": "Unit name is required.",
       "duplicateCode": "A unit with this name already exists.",
@@ -4616,11 +4684,17 @@
       "systemProtected": "System units cannot be edited or deleted.",
       "saveFailed": "Could not save unit. Please try again.",
       "deleted": "Unit deleted.",
-      "inUse": "This unit is used by one or more products and cannot be deleted.",
+      "inUse": "This unit is used by a product or unit relationship and cannot be deleted.",
       "deleteFailed": "Could not delete unit. Please try again."
     }
   },
   "pos": {
+    "unitSelection": {
+      "title": "Choose selling unit",
+      "description": "Sell {{product}} using one of its related units.",
+      "stockEffect": "Deducts {{count}} {{unit}} from stock",
+      "ordersUnsupported": "Products with related selling units cannot be added to Orders yet. Complete this cart as a POS sale instead."
+    },
     "checkoutPendingRecovery": "Sale {{saleId}} is still awaiting confirmation. Retry the same cart and payment details so Atlas can confirm it safely. Review Sales before changing this checkout.",
     "checkoutCommittedRecovery": "Sale {{saleId}} was saved, but its payment or local display could not be completed. Review it in Sales and Payments before making another sale.",
     "quickOrder": {
@@ -5117,6 +5191,7 @@
     "returnSale": "Return Sale",
     "exchange": {
       "title": "Product Exchange",
+      "relatedUnitsUnsupported": "Product exchange is not available for lines sold with related units in this version. Return the line in its sold unit instead.",
       "description": "Return a product from this sale and replace it from a selected storage.",
       "chooseAction": "Choose an action",
       "chooseActionDescription": "Return this sale or exchange one of its products.",

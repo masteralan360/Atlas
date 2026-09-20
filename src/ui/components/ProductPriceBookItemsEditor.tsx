@@ -1,4 +1,4 @@
-import { BookOpen, DollarSign, Plus, Trash2, Wallet } from 'lucide-react'
+import { BookOpen, DollarSign, Package, Plus, Trash2, Wallet } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -21,6 +21,7 @@ export interface ProductPriceBookDraft {
     priceBookId: string
     costPrice: string
     price: string
+    parentPrice?: string
     currency: CurrencyCode
     useParentPriceBookCost?: boolean
 }
@@ -31,6 +32,8 @@ interface ProductPriceBookItemsEditorProps {
     onChange: (rows: ProductPriceBookDraft[]) => void
     defaultCostPrice: string
     defaultPrice: string
+    defaultParentPrice?: string
+    parentUnitLabel?: string
     defaultCurrency: CurrencyCode
     allowedCurrencies: CurrencyCode[]
     iqdDisplayPreference: IQDDisplayPreference
@@ -48,6 +51,8 @@ export function ProductPriceBookItemsEditor({
     onChange,
     defaultCostPrice,
     defaultPrice,
+    defaultParentPrice = '',
+    parentUnitLabel,
     defaultCurrency,
     allowedCurrencies,
     iqdDisplayPreference,
@@ -82,6 +87,7 @@ export function ProductPriceBookItemsEditor({
                 priceBookId: nextAvailableBook.id,
                 costPrice: hideCosts ? '' : defaultCostPrice.trim(),
                 price: defaultPrice.trim() || '0',
+                ...(parentUnitLabel ? { parentPrice: defaultParentPrice.trim() } : {}),
                 currency: defaultCurrency,
                 ...(showParentPriceBookCostToggle ? { useParentPriceBookCost: true } : {})
             }
@@ -153,13 +159,15 @@ export function ProductPriceBookItemsEditor({
 
                         return (
                             <div key={`${row.priceBookId}-${index}`} className="rounded-2xl border border-border/60 bg-muted/10 p-4">
-                                <div className={hideCosts
+                                <div className={parentUnitLabel
+                                    ? 'grid gap-4 md:grid-cols-2 xl:grid-cols-3'
+                                    : hideCosts
                                     ? showParentPriceBookCostToggle
                                         ? 'grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(180px,1.2fr)_minmax(150px,1fr)_minmax(160px,1fr)_minmax(140px,0.8fr)_40px] xl:items-end'
                                         : 'grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(180px,1.2fr)_minmax(150px,1fr)_minmax(140px,0.8fr)_40px] xl:items-end'
                                     : 'grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(180px,1.2fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(140px,0.8fr)_40px] xl:items-end'}>
                                     <div className="space-y-2">
-                                        <Label>{t('priceBooks.titleSingular', { defaultValue: 'Price Book' })}</Label>
+                                        <Label>{t('priceBooks.titleSingular', { defaultValue: 'Price Book' })} *</Label>
                                         <Select
                                             value={row.priceBookId}
                                             onValueChange={(value) => updateRow(index, { priceBookId: value })}
@@ -183,10 +191,33 @@ export function ProductPriceBookItemsEditor({
                                         </Select>
                                     </div>
 
+                                    {parentUnitLabel ? (
+                                        <div className="space-y-2">
+                                            <Label className="flex items-center gap-2">
+                                                <Package className="h-4 w-4 text-primary/60" />
+                                                {t('priceBooks.sellingPriceForUnit', {
+                                                    defaultValue: '{{unit}} selling price',
+                                                    unit: parentUnitLabel
+                                                })} *
+                                            </Label>
+                                            <Input
+                                                type="text"
+                                                inputMode="decimal"
+                                                value={formatNumericInput(row.parentPrice ?? '')}
+                                                onChange={(event) => updateRow(index, {
+                                                    parentPrice: sanitizeNumericInput(event.target.value, { maxFractionDigits: 4 })
+                                                })}
+                                                readOnly={disabled}
+                                                placeholder="0"
+                                                required
+                                            />
+                                        </div>
+                                    ) : null}
+
                                     <div className="space-y-2">
                                         <Label className="flex items-center gap-2">
                                             <DollarSign className="h-4 w-4 text-primary/60" />
-                                            {t('priceBooks.sellingPrice', { defaultValue: 'Selling price' })}
+                                            {t('priceBooks.sellingPrice', { defaultValue: 'Selling price' })} *
                                         </Label>
                                         <Input
                                             type="text"
@@ -205,7 +236,7 @@ export function ProductPriceBookItemsEditor({
                                         <div className="space-y-2">
                                             <Label className="flex items-center gap-2">
                                                 <Wallet className="h-4 w-4 text-primary/60" />
-                                                {t('priceBooks.costPrice', { defaultValue: 'Unit cost' })}
+                                                {t('priceBooks.costPrice', { defaultValue: 'Unit cost' })} *
                                             </Label>
                                             <Input
                                                 type="text"
@@ -240,7 +271,7 @@ export function ProductPriceBookItemsEditor({
                                     )}
 
                                     <CurrencySelector
-                                        label={t('priceBooks.currency', { defaultValue: 'Currency' })}
+                                        label={`${t('priceBooks.currency', { defaultValue: 'Currency' })} *`}
                                         value={row.currency}
                                         onChange={(currency) => updateRow(index, { currency })}
                                         iqdDisplayPreference={iqdDisplayPreference}

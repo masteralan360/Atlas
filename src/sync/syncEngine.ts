@@ -58,6 +58,9 @@ const SYNC_PULL_TABLES = [
   "reorder_transfer_rules",
   "categories",
   "units",
+  "unit_relationships",
+  "product_unit_conversions",
+  "price_book_unit_prices",
   "customers",
   "suppliers",
   "agents",
@@ -303,8 +306,26 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
       parentKeys.push(mutationEntityKey(workspaceId, parentType, parentId));
     }
   };
+  const addCustomUnitParent = (...fieldNames: string[]) => {
+    const unitRef = payloadReference(payload, ...fieldNames);
+    if (unitRef?.startsWith("custom:") && unitRef.length > "custom:".length) {
+      parentKeys.push(mutationEntityKey(workspaceId, "units", unitRef.slice("custom:".length)));
+    }
+  };
 
   switch (entityType) {
+    case "unit_relationships":
+      addCustomUnitParent("parentUnitRef", "parent_unit_ref");
+      addCustomUnitParent("childUnitRef", "child_unit_ref");
+      break;
+    case "product_unit_conversions":
+      addParent("products", "productId", "product_id");
+      addParent("unit_relationships", "relationshipId", "relationship_id");
+      break;
+    case "price_book_unit_prices":
+      addParent("price_books", "priceBookId", "price_book_id");
+      addParent("products", "productId", "product_id");
+      break;
     case "loan_commands": {
       const commandPayload = payload.payload;
       if (!commandPayload || typeof commandPayload !== "object" || Array.isArray(commandPayload)) break;

@@ -634,7 +634,26 @@ export async function updateUnit(id: string, data: Partial<Unit>): Promise<void>
     // the registry (empty dropdown trigger, missing prints).
     if (codeChanged) {
         await migrateProductUnitsToRenamedUnit(existing.workspaceId, oldCode, nextCode as string)
+        await migrateRelationshipUnitsToRenamedUnit(existing.workspaceId, id, nextCode as string)
     }
+}
+
+async function migrateRelationshipUnitsToRenamedUnit(workspaceId: string, unitId: string, newCode: string) {
+    const unitRef = `custom:${unitId}`
+    const relationships = await db.unit_relationships
+        .where('workspaceId')
+        .equals(workspaceId)
+        .and((row) => !row.isDeleted && (row.parentUnitRef === unitRef || row.childUnitRef === unitRef))
+        .toArray()
+    if (relationships.length === 0) return
+    const now = new Date().toISOString()
+    await db.unit_relationships.bulkPut(relationships.map((row) => ({
+        ...row,
+        ...(row.parentUnitRef === unitRef ? { parentUnitCode: newCode } : {}),
+        ...(row.childUnitRef === unitRef ? { childUnitCode: newCode } : {}),
+        updatedAt: now,
+        version: row.version + 1
+    })))
 }
 
 async function migrateProductUnitsToRenamedUnit(workspaceId: string, oldCode: string, newCode: string) {
@@ -658,8 +677,14 @@ export async function deleteUnit(id: string): Promise<void> {
         .equals(existing.workspaceId)
         .and((product) => !product.isDeleted && product.unit === existing.code)
         .count()
+    const unitRef = `custom:${id}`
+    const relationshipCount = await db.unit_relationships
+        .where('workspaceId')
+        .equals(existing.workspaceId)
+        .and((row) => !row.isDeleted && (row.parentUnitRef === unitRef || row.childUnitRef === unitRef))
+        .count()
 
-    if (usedCount > 0) {
+    if (usedCount > 0 || relationshipCount > 0) {
         throw new UnitInUseError()
     }
 
@@ -2481,6 +2506,12 @@ export async function enrichSalesForUiRows(workspaceId: string, sales: Sale[]) {
             product_id: item.productId,
             storage_id: item.storageId,
             quantity: item.quantity,
+            selling_unit_ref: item.sellingUnitRef,
+            selling_unit_code: item.sellingUnitCode,
+            base_unit_ref: item.baseUnitRef,
+            base_unit_code: item.baseUnitCode,
+            unit_factor: item.unitFactor ?? 1,
+            inventory_quantity: item.inventoryQuantity ?? item.quantity,
             unit_price: item.unitPrice,
             total_price: item.totalPrice,
             cost_price: item.costPrice,

@@ -21,11 +21,13 @@ import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogH
 import { formatCurrency, cn } from '@/lib/utils'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { useDemoTutorial } from '@/demo'
+import { useProductQuantityFormatter } from '@/ui/hooks/useProductQuantityFormatter'
 
 export default function Storages() {
     const { t } = useTranslation()
     const { user } = useAuth()
     const { activeWorkspace } = useWorkspace()
+    const formatProductQuantity = useProductQuantityFormatter(activeWorkspace?.id)
     const storages = useStorages(activeWorkspace?.id)
     const { toast } = useToast()
     const demoTutorial = useDemoTutorial()
@@ -794,7 +796,7 @@ const totalStorageValue = useMemo(() => {
                                                         {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
                                                     </div>
                                                     <div className="text-[11px] text-muted-foreground font-medium">
-                                                        {row.quantity} {product.unit}
+                                                        {formatProductQuantity(product.id, row.quantity, product.unit)}
                                                     </div>
                                                 </div>
                                                 <div className="w-8 h-8 rounded-lg bg-primary/5 flex items-center justify-center">

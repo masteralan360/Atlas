@@ -34,6 +34,7 @@ import {
     useBusinessPartners,
     usePriceBookCatalogState,
     useProducts,
+    useProductUnitConversions,
     useWorkspaceProductBarcodes,
     usePurchaseOrder,
     useStorages,
@@ -204,6 +205,11 @@ export function PurchaseOrderFormPage({
 
     const products = useProducts(workspaceId)
     const purchasableProducts = useMemo(() => products.filter(canBePurchased), [products])
+    const productUnitConversions = useProductUnitConversions(workspaceId)
+    const orderSelectableProducts = useMemo(() => {
+        const relatedProductIds = new Set(productUnitConversions.filter((row) => !row.isDeleted).map((row) => row.productId))
+        return purchasableProducts.filter((product) => !relatedProductIds.has(product.id))
+    }, [productUnitConversions, purchasableProducts])
     const productBarcodes = useWorkspaceProductBarcodes(workspaceId, { syncProductCache: false })
     const storages = useStorages(workspaceId)
     const { isDynamicUnit, options: unitOptions } = useUnitRegistry(workspaceId)
@@ -551,7 +557,7 @@ export function PurchaseOrderFormPage({
         products,
         productBarcodes,
         onProductScanned: (product, index) => {
-            if (!purchasableProducts.some((candidate) => candidate.id === product.id)) {
+            if (!orderSelectableProducts.some((candidate) => candidate.id === product.id)) {
                 toast({
                     title: t('products.notFoundTitle', { defaultValue: 'Product not found' }),
                     description: t('products.notFoundDescription', { defaultValue: 'This product could not be found. It may have been deleted or is no longer available.' }),
@@ -1061,7 +1067,7 @@ export function PurchaseOrderFormPage({
                                                                 value={item.productSearch}
                                                                 onChange={(value) => updateItem(index, { productSearch: value, productId: '' })}
                                                                 onSelectProduct={(product) => updateItem(index, { productId: product.id, productSearch: product.name })}
-                                                                products={purchasableProducts}
+                                                                products={orderSelectableProducts}
                                                                 isLoading={products.isLoading}
                                                                 disabled={priceBooksEnabled && (!isPriceBookCatalogReady || !selectedSupplier)}
                                                                 placeholder={priceBooksEnabled && !selectedSupplier
@@ -1530,7 +1536,7 @@ export function PurchaseOrderFormPage({
                 onOpenChange={(open) => {
                     if (!open) setProductsViewItemIndex(null)
                 }}
-                products={purchasableProducts}
+                products={orderSelectableProducts}
                 storages={storages}
                 initialStorageId={productsViewItemIndex === null
                     ? ''

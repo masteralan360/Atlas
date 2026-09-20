@@ -23,6 +23,7 @@ import {
     type WorkspaceDataFetchSnapshot
 } from '@/workspace/workspaceDataFreshness'
 import { cn } from '@/lib/utils'
+import { formatModulePageRelativeTime } from './modulePageFreshnessFormat'
 
 type ModulePageFreshnessLoadingContextValue = {
     setLoading: (id: string, isLoading: boolean) => void
@@ -75,28 +76,6 @@ function useRegisterModulePageFreshnessLoading(isLoading: boolean) {
         setLoading(id, isLoading)
         return () => setLoading(id, false)
     }, [id, isLoading, setLoading])
-}
-
-function formatRelativeTime(timestamp: string, locale: string) {
-    const date = new Date(timestamp)
-    if (Number.isNaN(date.getTime())) return null
-
-    const elapsedMs = Math.max(0, Date.now() - date.getTime())
-    const formatter = new Intl.RelativeTimeFormat(locale || 'en', {
-        numeric: 'auto',
-        style: 'short'
-    })
-
-    if (elapsedMs < 60_000) return formatter.format(0, 'second')
-    if (elapsedMs < 3_600_000) return formatter.format(-Math.floor(elapsedMs / 60_000), 'minute')
-    if (elapsedMs < 86_400_000) return formatter.format(-Math.floor(elapsedMs / 3_600_000), 'hour')
-    if (elapsedMs < 604_800_000) return formatter.format(-Math.floor(elapsedMs / 86_400_000), 'day')
-
-    return new Intl.DateTimeFormat(locale || 'en', {
-        month: 'short',
-        day: 'numeric',
-        year: date.getFullYear() === new Date().getFullYear() ? undefined : 'numeric'
-    }).format(date)
 }
 
 export function ModulePageFreshness({
@@ -175,7 +154,7 @@ export function ModulePageFreshness({
     }, [completionAt, completionIsRecent])
 
     const relativeTime = lastFetchedAt
-        ? formatRelativeTime(lastFetchedAt, i18n.resolvedLanguage || i18n.language)
+        ? formatModulePageRelativeTime(lastFetchedAt, i18n.resolvedLanguage || i18n.language, t)
         : null
     const freshnessLabel = relativeTime
         ? t('launcher.freshness.updated', { time: relativeTime, defaultValue: `Updated ${relativeTime}` })

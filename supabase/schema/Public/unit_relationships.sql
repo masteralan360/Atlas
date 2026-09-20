@@ -1,0 +1,22 @@
+CREATE TABLE public.unit_relationships (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  workspace_id uuid NOT NULL,
+  name text NULL,
+  parent_unit_ref text NOT NULL,
+  parent_unit_code text NOT NULL,
+  child_unit_ref text NOT NULL,
+  child_unit_code text NOT NULL,
+  is_archived boolean NOT NULL DEFAULT false,
+  created_by uuid NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT timezone('utc', now()),
+  updated_at timestamp with time zone NOT NULL DEFAULT timezone('utc', now()),
+  sync_status text NOT NULL DEFAULT 'synced'::text,
+  version bigint NOT NULL DEFAULT 1,
+  is_deleted boolean NOT NULL DEFAULT false,
+  PRIMARY KEY (id),
+  CONSTRAINT unit_relationships_distinct_units CHECK (parent_unit_ref <> child_unit_ref),
+  CONSTRAINT unit_relationships_parent_ref_format CHECK (parent_unit_ref ~ '^(builtin|custom):.+$'),
+  CONSTRAINT unit_relationships_child_ref_format CHECK (child_unit_ref ~ '^(builtin|custom):.+$'),
+  CONSTRAINT unit_relationships_parent_code_not_blank CHECK (char_length(btrim(parent_unit_code)) > 0),
+  CONSTRAINT unit_relationships_child_code_not_blank CHECK (char_length(btrim(child_unit_code)) > 0)
+);

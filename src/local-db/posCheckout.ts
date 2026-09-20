@@ -24,6 +24,12 @@ export interface PosCheckoutItem {
     created_at: string
     updated_at: string
     quantity: number
+    selling_unit_ref?: string | null
+    selling_unit_code?: string | null
+    base_unit_ref?: string | null
+    base_unit_code?: string | null
+    unit_factor?: number
+    inventory_quantity?: number
     unit_price: number
     total_price: number
     cost_price: number
@@ -105,7 +111,12 @@ function validate(input: PosCheckoutInput) {
         throw new Error(i18n.t('messages.checkoutFailed'))
     }
     for (const item of p.items) {
+        const unitFactor = item.unit_factor ?? 1
+        const inventoryQuantity = item.inventory_quantity ?? item.quantity
         if (!item.product_id || !Number.isFinite(item.quantity) || item.quantity <= 0
+            || !Number.isFinite(unitFactor) || unitFactor <= 0
+            || !Number.isFinite(inventoryQuantity) || inventoryQuantity <= 0
+            || Math.abs(inventoryQuantity - item.quantity * unitFactor) > 0.000001
             || !Number.isFinite(item.unit_price) || item.unit_price < 0
             || !Number.isFinite(item.converted_unit_price) || item.converted_unit_price < 0
             || !Number.isFinite(item.total) || !Number.isFinite(item.cost_price) || item.cost_price < 0
@@ -166,6 +177,36 @@ async function saveLocal(input: PosCheckoutInput) {
                 || (isService(product) ? item.storage_id !== null : !item.storage_id)) {
                 throw new Error(i18n.t('pos.stockMismatch'))
             }
+            const unitFactor = item.unit_factor ?? 1
+            const inventoryQuantity = item.inventory_quantity ?? item.quantity
+            if (!item.selling_unit_ref) {
+                if (item.base_unit_ref
+                    || (item.selling_unit_code ?? null) !== (item.base_unit_code ?? null)
+                    || unitFactor !== 1
+                    || Math.abs(inventoryQuantity - item.quantity) > 0.000001) {
+                    throw new Error(i18n.t('pos.stockMismatch'))
+                }
+                continue
+            }
+            const conversion = await db.product_unit_conversions
+                .where('[workspaceId+productId]')
+                .equals([p.workspace_id, item.product_id])
+                .and((row) => !row.isDeleted)
+                .first()
+            const relationship = conversion
+                ? await db.unit_relationships.get(conversion.relationshipId)
+                : undefined
+            if (!conversion || !relationship || relationship.isDeleted
+                || product.unit.trim().toLocaleLowerCase() !== relationship.childUnitCode.trim().toLocaleLowerCase()
+                || item.base_unit_ref !== relationship.childUnitRef
+                || item.base_unit_code !== relationship.childUnitCode
+                || (item.selling_unit_ref === relationship.parentUnitRef
+                    ? item.selling_unit_code !== relationship.parentUnitCode || unitFactor !== conversion.factor
+                    : item.selling_unit_ref === relationship.childUnitRef
+                        ? item.selling_unit_code !== relationship.childUnitCode || unitFactor !== 1
+                        : true)) {
+                throw new Error(i18n.t('pos.stockMismatch'))
+            }
         }
         const verification = verifySale(createVerificationSale(
             p.total_amount, p.settlement_currency, input.primaryRate?.rate ?? null,
@@ -190,6 +231,9 @@ async function saveLocal(input: PosCheckoutInput) {
                 id: generateId(), workspaceId: p.workspace_id, saleId: p.id,
                 createdAt: input.timestamp, updatedAt: input.timestamp,
                 productId: item.product_id, storageId: item.storage_id, quantity: item.quantity,
+                sellingUnitRef: item.selling_unit_ref as never, sellingUnitCode: item.selling_unit_code,
+                baseUnitRef: item.base_unit_ref as never, baseUnitCode: item.base_unit_code,
+                unitFactor: item.unit_factor ?? 1, inventoryQuantity: item.inventory_quantity ?? item.quantity,
                 unitPrice: item.unit_price, totalPrice: item.total_price, costPrice: item.cost_price,
                 convertedCostPrice: item.converted_cost_price, originalCurrency: item.original_currency,
                 originalUnitPrice: item.original_unit_price, convertedUnitPrice: item.converted_unit_price,
@@ -207,7 +251,7 @@ async function saveLocal(input: PosCheckoutInput) {
         })))
         await applyOfflinePosStockEffects({
             workspaceId: p.workspace_id,
-            items: p.items.flatMap(item => item.storage_id ? [{ productId: item.product_id, storageId: item.storage_id, quantity: item.quantity }] : []),
+            items: p.items.flatMap(item => item.storage_id ? [{ productId: item.product_id, storageId: item.storage_id, quantity: item.inventory_quantity ?? item.quantity }] : []),
             batchPlans: input.batchPlans, timestamp: input.timestamp, skipReorderCheck: true
         })
         await postPayment(input, `#${String(sequenceId).padStart(5, '0')}`)
@@ -260,7 +304,7 @@ export async function commitPosCheckout(input: PosCheckoutInput) {
             if (await db.invoices.get(p.id)) return
             for (const item of p.items) if (item.storage_id) await adjustInventoryQuantity({
                 workspaceId: p.workspace_id, productId: item.product_id, storageId: item.storage_id,
-                quantityDelta: -item.quantity, timestamp: input.timestamp, syncSource: 'remote', skipRemoteSync: true
+                quantityDelta: -(item.inventory_quantity ?? item.quantity), timestamp: input.timestamp, syncSource: 'remote', skipRemoteSync: true
             })
             for (const plan of input.batchPlans) await commitStockBatchAllocations(
                 p.workspace_id, plan.productId, plan.storageId, plan.allocations,

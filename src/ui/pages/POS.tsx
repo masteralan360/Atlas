@@ -18,6 +18,9 @@ import {
     updateActivityTransactionNotes,
     useActivityCatalog,
     usePriceBookCatalogState,
+    usePriceBookUnitPrices,
+    useProductUnitConversions,
+    useUnitRelationships,
     usePaymentAccounts,
     useProducts,
     toUISaleFromActivityTransaction,
@@ -35,6 +38,7 @@ import {
 import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { isPosPaymentTypeAllowed, getPosCheckoutRoute, type PosPaymentType } from '@/lib/posPaymentPolicy'
 import { convertPosPrice, getCartBasePrice, getCartEffectivePrice, restorePosCart, snapshotPosCart, applyPosBulkDiscount, hasPosConversionRate } from '@/lib/posCart'
+import { getCartInventoryQuantity, indexProductUnitContexts, inventoryQuantityToSellingAvailability } from '@/lib/unitRelationships'
 import { commitPosCheckout, PosCheckoutError, loadPosCurrencyConversionPolicy } from '@/local-db/posCheckout'
 import { PosCheckoutAttempt, PosCheckoutPendingError } from '@/lib/posCheckoutAttempt'
 import { formatCurrency, generateId, cn } from '@/lib/utils'
@@ -116,7 +120,9 @@ import {
     BadgePercent,
     ClipboardCheck,
     Gift,
-    Receipt
+    Receipt,
+    Package,
+    Boxes
 } from 'lucide-react'
 import { isDesktop, isMobile } from '@/lib/platform'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
@@ -157,6 +163,14 @@ import {
     type CompletedQuickOrder
 } from '@/ui/components/pos/QuickOrderSuccessModal'
 import { useLocation } from 'wouter'
+import {
+    SmallDialog,
+    SmallDialogBody,
+    SmallDialogContent,
+    SmallDialogDescription,
+    SmallDialogHeader,
+    SmallDialogTitle
+} from '@/ui/components/small-dialog'
 
 const DeveloperTestButton = import.meta.env.DEV && __ATLAS_DEV_TESTING__
     ? lazy(() => import('@/dev/testing/DeveloperTestButton')) : null
@@ -201,8 +215,20 @@ function isLoanRegistrationData(value: unknown): value is LoanRegistrationData {
     )
 }
 
-function buildCartItemKey(productId: string, storageId?: string | null) {
-    return `${productId}:${storageId ?? ''}`
+function buildCartItemKey(productId: string, storageId?: string | null, sellingUnitRef?: string | null) {
+    return `${productId}:${storageId ?? ''}:${sellingUnitRef ?? ''}`
+}
+
+type PosUnitSelection = {
+    sellingUnitRef: string
+    sellingUnitCode: string
+    baseUnitRef: string
+    baseUnitCode: string
+    factor: number
+    price: number
+    currency: CurrencyCode
+    priceBookId?: string
+    priceBookName?: string
 }
 
 function addBarcodeLookupCode(map: Map<string, string>, code: string | undefined | null, productId: string, prefer = false) {
@@ -436,6 +462,13 @@ export function POS() {
     const priceBookCatalog = usePriceBookCatalogState(user?.workspaceId, {
         enabled: priceBooksEnabled && !!selectedStorageId && !isActivitiesStorage && !isServicesStorage && !isLocalMode
     })
+    const unitRelationships = useUnitRelationships(user?.workspaceId)
+    const productUnitConversions = useProductUnitConversions(user?.workspaceId)
+    const priceBookUnitPrices = usePriceBookUnitPrices(user?.workspaceId)
+    const unitContextsByProductId = useMemo(
+        () => indexProductUnitContexts(productUnitConversions, unitRelationships),
+        [productUnitConversions, unitRelationships]
+    )
     const [selectedPriceBookId, setSelectedPriceBookId] = useState<string>(() => {
         return localStorage.getItem('pos_selected_price_book') || ''
     })
@@ -494,6 +527,7 @@ export function POS() {
     } | null>(null)
     const [search, setSearch] = useState('')
     const [cart, setCart] = useState<CartItem[]>([])
+    const [unitSelectionProduct, setUnitSelectionProduct] = useState<PosCatalogProduct | null>(null)
     const [dynamicUnitModal, setDynamicUnitModal] = useState<{ type: string; itemKey: string } | null>(null)
     const [dynamicInputBuffer, setDynamicInputBuffer] = useState<Record<string, string>>({})
     const [isSkuModalOpen, setIsSkuModalOpen] = useState(false)
@@ -789,8 +823,8 @@ export function POS() {
         return matches.length === 1 ? matches[0] : undefined
     }, [selectedStorageId, sellableProducts])
 
-    const getCartItemKey = useCallback((item: Pick<CartItem, 'product_id' | 'storageId'>) => {
-        return buildCartItemKey(item.product_id, item.storageId)
+    const getCartItemKey = useCallback((item: Pick<CartItem, 'product_id' | 'storageId' | 'selling_unit_ref'>) => {
+        return buildCartItemKey(item.product_id, item.storageId, item.selling_unit_ref)
     }, [])
 
     const [mobileView, setMobileView] = useState<'grid' | 'cart'>(() => {
@@ -1694,13 +1728,17 @@ export function POS() {
         })
     }, [resolveDiscountForPrice, selectedPriceBookId])
 
-    const addToCart = useCallback((product: PosCatalogProduct) => {
+    const addSelectedUnitToCart = useCallback((product: PosCatalogProduct, unitSelection?: PosUnitSelection) => {
         const isInfiniteActivity = product.isInfiniteActivity === true
         const isNonInventoryService = isService(product)
         const priceBookPricing = isInfiniteActivity ? null : getPriceBookPricing(product)
-        const effectivePrice = priceBookPricing?.price ?? product.price
-        const effectiveCurrency = (priceBookPricing?.currency ?? product.currency) as CurrencyCode
+        const effectivePrice = unitSelection?.price ?? priceBookPricing?.price ?? product.price
+        const effectiveCurrency = (unitSelection?.currency ?? priceBookPricing?.currency ?? product.currency) as CurrencyCode
         const effectiveCostPrice = priceBookPricing?.costPrice ?? product.costPrice
+        const sellingFactor = unitSelection?.factor ?? 1
+        const maxSellingQuantity = (isInfiniteActivity || isNonInventoryService)
+            ? ACTIVITY_POS_QUANTITY_LIMIT
+            : inventoryQuantityToSellingAvailability(product.inventoryQuantity, sellingFactor)
         if (!canSelectProduct(product)) {
             toast({
                 variant: 'destructive',
@@ -1754,18 +1792,20 @@ export function POS() {
         }
 
         setCart((prev) => {
-            const itemKey = buildCartItemKey(product.id, product.storageId)
-            const existing = prev.find((item) => buildCartItemKey(item.product_id, item.storageId) === itemKey)
+            const itemKey = buildCartItemKey(product.id, product.storageId, unitSelection?.sellingUnitRef)
+            const existing = prev.find((item) => getCartItemKey(item) === itemKey)
+            const committedInventoryQuantity = prev
+                .filter((item) => item.product_id === product.id && item.storageId === product.storageId)
+                .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
+            if (!isInfiniteActivity && !isNonInventoryService
+                && committedInventoryQuantity + sellingFactor > product.inventoryQuantity + 0.000001) return prev
             if (existing) {
-                // Check stock limit
-                if (!isInfiniteActivity && !isNonInventoryService && existing.quantity >= product.inventoryQuantity) return prev
-
                 return prev.map((item) =>
-                    buildCartItemKey(item.product_id, item.storageId) === itemKey
+                    getCartItemKey(item) === itemKey
                         ? {
                             ...item,
                             quantity: item.quantity + 1,
-                            max_stock: (isInfiniteActivity || isNonInventoryService) ? ACTIVITY_POS_QUANTITY_LIMIT : product.inventoryQuantity
+                            max_stock: maxSellingQuantity
                         }
                         : item
                 )
@@ -1784,17 +1824,67 @@ export function POS() {
                     discount_source: activeDiscount?.source,
                     discount_ends_at: activeDiscount?.endsAt,
                     quantity: 1,
-                    max_stock: (isInfiniteActivity || isNonInventoryService) ? ACTIVITY_POS_QUANTITY_LIMIT : product.inventoryQuantity,
+                    max_stock: maxSellingQuantity,
                     imageUrl: product.imageUrl,
-                    unit: product.unit,
+                    unit: unitSelection?.sellingUnitCode ?? product.unit,
+                    selling_unit_ref: unitSelection?.sellingUnitRef ?? null,
+                    selling_unit_code: unitSelection?.sellingUnitCode ?? product.unit,
+                    base_unit_ref: unitSelection?.baseUnitRef ?? null,
+                    base_unit_code: unitSelection?.baseUnitCode ?? product.unit,
+                    unit_factor: sellingFactor,
                     is_service: isNonInventoryService,
-                    price_book_id: priceBookPricing?.priceBookId,
-                    price_book_name: priceBookPricing?.priceBookName
+                    price_book_id: unitSelection?.priceBookId ?? priceBookPricing?.priceBookId,
+                    price_book_name: unitSelection?.priceBookName ?? priceBookPricing?.priceBookName
                 }
             ]
         })
         hapticTrigger('selection')
-    }, [canSelectProduct, cartCurrencies, currencyConversionEnabled, features, getActiveDiscountForProduct, getPriceBookPricing, t, toast, hapticTrigger])
+    }, [canSelectProduct, cartCurrencies, currencyConversionEnabled, features, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, t, toast, hapticTrigger])
+
+    const addToCart = useCallback((product: PosCatalogProduct) => {
+        if (!product.isInfiniteActivity && !isService(product) && unitContextsByProductId.has(product.id)) {
+            setUnitSelectionProduct(product)
+            return
+        }
+        addSelectedUnitToCart(product)
+    }, [addSelectedUnitToCart, unitContextsByProductId])
+
+    const chooseProductSellingUnit = useCallback((kind: 'parent' | 'child') => {
+        const product = unitSelectionProduct
+        if (!product) return
+        const context = unitContextsByProductId.get(product.id)
+        if (!context) {
+            setUnitSelectionProduct(null)
+            addSelectedUnitToCart(product)
+            return
+        }
+        const { conversion, relationship } = context
+        const priceBookPricing = getPriceBookPricing(product)
+        const isParent = kind === 'parent'
+        const unitRef = isParent ? relationship.parentUnitRef : relationship.childUnitRef
+        const priceBookUnitPrice = selectedPriceBookId
+            ? priceBookUnitPrices.find((row) => (
+                !row.isDeleted
+                && row.priceBookId === selectedPriceBookId
+                && row.productId === product.id
+                && row.unitRef === unitRef
+            ))
+            : undefined
+        const priceBook = priceBookUnitPrice ? priceBookById.get(priceBookUnitPrice.priceBookId) : undefined
+        const selection: PosUnitSelection = {
+            sellingUnitRef: unitRef,
+            sellingUnitCode: isParent ? relationship.parentUnitCode : relationship.childUnitCode,
+            baseUnitRef: relationship.childUnitRef,
+            baseUnitCode: relationship.childUnitCode,
+            factor: isParent ? conversion.factor : 1,
+            price: priceBookUnitPrice?.price ?? (isParent ? conversion.parentPrice : priceBookPricing?.price ?? product.price),
+            currency: (priceBookUnitPrice?.currency ?? (isParent ? product.currency : priceBookPricing?.currency ?? product.currency)) as CurrencyCode,
+            priceBookId: priceBookUnitPrice?.priceBookId ?? (!isParent ? priceBookPricing?.priceBookId : undefined),
+            priceBookName: priceBook?.name ?? (!isParent ? priceBookPricing?.priceBookName : undefined)
+        }
+        setUnitSelectionProduct(null)
+        addSelectedUnitToCart(product, selection)
+    }, [addSelectedUnitToCart, getPriceBookPricing, priceBookById, priceBookUnitPrices, selectedPriceBookId, unitContextsByProductId, unitSelectionProduct])
 
     const removeFromCart = (itemKey: string) => {
         setCart((prev) => prev.filter((item) => getCartItemKey(item) !== itemKey))
@@ -1808,8 +1898,15 @@ export function POS() {
                     const newQty = item.quantity + delta
                     if (newQty <= 0) return null // Mark for removal
                     const product = findStockProduct(item.product_id, item.storageId)
-                    const maxStock = product?.inventoryQuantity ?? item.max_stock
-                    if (newQty > maxStock) return { ...item, max_stock: maxStock }
+                    const maxStock = product
+                        ? inventoryQuantityToSellingAvailability(product.inventoryQuantity, item.unit_factor ?? 1)
+                        : item.max_stock
+                    const otherInventoryQuantity = prev
+                        .filter((other) => other !== item && other.product_id === item.product_id && other.storageId === item.storageId)
+                        .reduce((sum, other) => sum + getCartInventoryQuantity(other), 0)
+                    if (product && otherInventoryQuantity + newQty * (item.unit_factor ?? 1) > product.inventoryQuantity + 0.000001) {
+                        return { ...item, max_stock: maxStock }
+                    }
                     return { ...item, quantity: newQty, max_stock: maxStock }
                 }
                 return item
@@ -1828,8 +1925,16 @@ export function POS() {
             prev.map((item) => {
                 if (getCartItemKey(item) === itemKey) {
                     const product = findStockProduct(item.product_id, item.storageId)
-                    const maxStock = product?.inventoryQuantity ?? item.max_stock
-                    return { ...item, quantity: Math.min(quantity, maxStock), max_stock: maxStock }
+                    const maxStock = product
+                        ? inventoryQuantityToSellingAvailability(product.inventoryQuantity, item.unit_factor ?? 1)
+                        : item.max_stock
+                    const otherInventoryQuantity = prev
+                        .filter((other) => other !== item && other.product_id === item.product_id && other.storageId === item.storageId)
+                        .reduce((sum, other) => sum + getCartInventoryQuantity(other), 0)
+                    const availableForLine = product
+                        ? Math.max(0, inventoryQuantityToSellingAvailability(product.inventoryQuantity - otherInventoryQuantity, item.unit_factor ?? 1))
+                        : maxStock
+                    return { ...item, quantity: Math.min(quantity, availableForLine), max_stock: maxStock }
                 }
                 return item
             })
@@ -2371,6 +2476,14 @@ export function POS() {
         const checkoutRoute = getPosCheckoutRoute(paymentType, { isActivitiesStorage, isServicesStorage, quickOrderEnabled })
         if (checkoutRoute === 'blocked') { setPaymentType('cash'); return }
         if (checkoutRoute === 'quick-order') {
+            if (cart.some((item) => item.selling_unit_ref && item.base_unit_ref)) {
+                toast({
+                    variant: 'destructive',
+                    title: t('messages.error'),
+                    description: t('pos.unitSelection.ordersUnsupported')
+                })
+                return
+            }
             setQuickOrderProgressStage(null)
             setIsQuickOrderModalOpen(true)
             return
@@ -2465,6 +2578,7 @@ export function POS() {
             return
         }
 
+        const stockRequestedByPosition = new Map<string, number>()
         for (const item of cart) {
             const product = findStockProduct(item.product_id, item.storageId)
             const storageId = item.storageId || selectedStorageId
@@ -2482,7 +2596,10 @@ export function POS() {
                 return
             }
 
-            if (item.quantity > product.inventoryQuantity) {
+            const positionKey = `${item.product_id}:${storageId}`
+            const requested = (stockRequestedByPosition.get(positionKey) ?? 0) + getCartInventoryQuantity(item)
+            stockRequestedByPosition.set(positionKey, requested)
+            if (requested > product.inventoryQuantity + 0.000001) {
                 const storageName = storages.find((storage) => storage.id === storageId)?.name || t('pos.unknownStorage')
                 toast({
                     variant: 'destructive',
@@ -2540,7 +2657,7 @@ export function POS() {
                 return {
                     productId: item.product_id,
                     storageId,
-                    quantity: item.quantity
+                    quantity: getCartInventoryQuantity(item)
                 }
             }))
         } catch (error) {
@@ -2564,22 +2681,23 @@ export function POS() {
             const originalCurrency = getEffectiveProductCurrency(product)
             const priceBookPricing = product ? getPriceBookPricing(product) : null
             const fallbackCostPrice = priceBookPricing?.costPrice ?? product?.costPrice ?? 0
+            const unitFactor = item.unit_factor ?? 1
             const effectivePrice = getCartEffectivePrice(item)
             const convertedUnitPrice = convertPrice(effectivePrice, originalCurrency, settlementCurrency)
             const batchPlan = batchPlanByCartKey.get(getCartItemKey(item))
-            const costPrice = calculateStockBatchUnitCost(
+            const baseCostPrice = calculateStockBatchUnitCost(
                 batchPlan?.allocations ?? [],
                 fallbackCostPrice,
                 originalCurrency,
                 convertPrice,
-                batchPlan?.requestedQuantity ?? item.quantity
+                batchPlan?.requestedQuantity ?? getCartInventoryQuantity(item)
             )
-            const convertedCostPrice = calculateStockBatchUnitCost(
+            const baseConvertedCostPrice = calculateStockBatchUnitCost(
                 batchPlan?.allocations ?? [],
                 convertPrice(fallbackCostPrice, originalCurrency, settlementCurrency),
                 settlementCurrency,
                 convertPrice,
-                batchPlan?.requestedQuantity ?? item.quantity
+                batchPlan?.requestedQuantity ?? getCartInventoryQuantity(item)
             )
 
             return {
@@ -2590,10 +2708,16 @@ export function POS() {
                 created_at: checkoutTimestamp,
                 updated_at: checkoutTimestamp,
                 quantity: item.quantity,
+                selling_unit_ref: item.selling_unit_ref ?? null,
+                selling_unit_code: item.selling_unit_code ?? item.unit ?? product?.unit ?? null,
+                base_unit_ref: item.base_unit_ref ?? null,
+                base_unit_code: item.base_unit_code ?? product?.unit ?? null,
+                unit_factor: unitFactor,
+                inventory_quantity: service ? item.quantity : getCartInventoryQuantity(item),
                 unit_price: effectivePrice, // negotiated or original
                 total_price: effectivePrice * item.quantity,
-                cost_price: costPrice,
-                converted_cost_price: convertedCostPrice,
+                cost_price: baseCostPrice * unitFactor,
+                converted_cost_price: baseConvertedCostPrice * unitFactor,
                 original_currency: originalCurrency,
                 original_unit_price: item.price, // always store original list price
                 converted_unit_price: convertedUnitPrice,
@@ -2737,6 +2861,9 @@ export function POS() {
         try {
         if (cart.length === 0 || !user) {
             throw new Error(t('pos.emptyCart', { defaultValue: 'Your cart is empty.' }))
+        }
+        if (cart.some((item) => item.selling_unit_ref && item.base_unit_ref)) {
+            throw new Error(t('pos.unitSelection.ordersUnsupported'))
         }
 
         const restrictedCartItem = cart.find((item) => {
@@ -3147,8 +3274,8 @@ export function POS() {
                                 }}
                             >
                                 {filteredProducts.map((product, index) => {
-                                    const cartItem = cart.find((item) => getCartItemKey(item) === buildCartItemKey(product.id, product.storageId))
-                                    const inCartQuantity = cartItem?.quantity || 0
+                                    const productCartItems = cart.filter((item) => item.product_id === product.id && item.storageId === product.storageId)
+                                    const inCartQuantity = productCartItems.reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
                                     const isInfiniteActivity = product.isInfiniteActivity === true
                                     const isServiceProduct = isService(product)
                                     const remainingQuantity = (isInfiniteActivity || isServiceProduct) ? ACTIVITY_POS_QUANTITY_LIMIT : product.quantity - inCartQuantity
@@ -4087,6 +4214,69 @@ export function POS() {
                 </DialogContent>
             </Dialog>
 
+            <SmallDialog open={unitSelectionProduct !== null} onOpenChange={(open) => { if (!open) setUnitSelectionProduct(null) }}>
+                <SmallDialogContent>
+                    <SmallDialogHeader>
+                        <SmallDialogTitle className="flex items-center gap-2">
+                            <Package className="h-5 w-5 text-primary" />
+                            {t('pos.unitSelection.title')}
+                        </SmallDialogTitle>
+                        <SmallDialogDescription>
+                            {t('pos.unitSelection.description', { product: unitSelectionProduct?.name ?? '' })}
+                        </SmallDialogDescription>
+                    </SmallDialogHeader>
+                    <SmallDialogBody>
+                        {(() => {
+                            if (!unitSelectionProduct) return null
+                            const context = unitContextsByProductId.get(unitSelectionProduct.id)
+                            if (!context) return null
+                            const { conversion, relationship } = context
+                            const childPricing = getPriceBookPricing(unitSelectionProduct)
+                            const parentOverride = selectedPriceBookId
+                                ? priceBookUnitPrices.find((row) => !row.isDeleted
+                                    && row.priceBookId === selectedPriceBookId
+                                    && row.productId === unitSelectionProduct.id
+                                    && row.unitRef === relationship.parentUnitRef)
+                                : undefined
+                            const parentPrice = parentOverride?.price ?? conversion.parentPrice
+                            const childPrice = childPricing?.price ?? unitSelectionProduct.price
+                            const committedInventoryQuantity = cart
+                                .filter((item) => item.product_id === unitSelectionProduct.id && item.storageId === unitSelectionProduct.storageId)
+                                .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
+                            const remainingInventoryQuantity = Math.max(0, unitSelectionProduct.inventoryQuantity - committedInventoryQuantity)
+                            const canSellParent = remainingInventoryQuantity + 0.000001 >= conversion.factor
+                            const canSellChild = remainingInventoryQuantity > 0
+                            return (
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                    <button
+                                        type="button"
+                                        disabled={!canSellParent}
+                                        onClick={() => chooseProductSellingUnit('parent')}
+                                        className="rounded-2xl border bg-background p-5 text-start transition hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-45"
+                                    >
+                                        <Boxes className="mb-3 h-7 w-7 text-primary" />
+                                        <div className="font-black">{t(`products.units.${relationship.parentUnitCode}`, { defaultValue: relationship.parentUnitCode })}</div>
+                                        <div className="mt-1 text-sm font-bold text-primary">{formatCurrency(parentPrice, (parentOverride?.currency ?? unitSelectionProduct.currency) as CurrencyCode, features.iqd_display_preference)}</div>
+                                        <div className="mt-2 text-xs text-muted-foreground">{t('pos.unitSelection.stockEffect', { count: conversion.factor, unit: t(`products.units.${relationship.childUnitCode}`, { defaultValue: relationship.childUnitCode }) })}</div>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={!canSellChild}
+                                        onClick={() => chooseProductSellingUnit('child')}
+                                        className="rounded-2xl border bg-background p-5 text-start transition hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-45"
+                                    >
+                                        <Package className="mb-3 h-7 w-7 text-primary" />
+                                        <div className="font-black">{t(`products.units.${relationship.childUnitCode}`, { defaultValue: relationship.childUnitCode })}</div>
+                                        <div className="mt-1 text-sm font-bold text-primary">{formatCurrency(childPrice, (childPricing?.currency ?? unitSelectionProduct.currency) as CurrencyCode, features.iqd_display_preference)}</div>
+                                        <div className="mt-2 text-xs text-muted-foreground">{t('pos.unitSelection.stockEffect', { count: 1, unit: t(`products.units.${relationship.childUnitCode}`, { defaultValue: relationship.childUnitCode }) })}</div>
+                                    </button>
+                                </div>
+                            )
+                        })()}
+                    </SmallDialogBody>
+                </SmallDialogContent>
+            </SmallDialog>
+
             {/* SKU Modal */}
             <Dialog open={isSkuModalOpen} onOpenChange={setIsSkuModalOpen}>
                 <DialogContent>
@@ -4993,8 +5183,9 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
             {/* Products Grid */}
             <div className="grid grid-cols-2 gap-4 p-4 pt-0 pb-10">
                 {filteredProducts.map((product) => {
-                    const cartItem = cart.find((item) => buildCartItemKey(item.product_id, item.storageId) === buildCartItemKey(product.id, product.storageId))
-                    const inCartQuantity = cartItem?.quantity || 0
+                    const productCartItems = cart.filter((item) => item.product_id === product.id && item.storageId === product.storageId)
+                    const cartItem = productCartItems.at(-1)
+                    const inCartQuantity = productCartItems.reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
                     const isInfiniteActivity = product.isInfiniteActivity === true
                     const isServiceProduct = isService(product)
                     const remainingQuantity = (isInfiniteActivity || isServiceProduct) ? ACTIVITY_POS_QUANTITY_LIMIT : product.quantity - inCartQuantity
@@ -5119,11 +5310,11 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                                 <MobileCatalogQuantityButton
                                     ariaLabel={t('pos.removeOne')}
                                     disabled={!cartItem}
-                                    onAdjust={() => updateQuantity(buildCartItemKey(product.id, product.storageId), -1)}
+                                    onAdjust={() => { if (cartItem) updateQuantity(buildCartItemKey(cartItem.product_id, cartItem.storageId, cartItem.selling_unit_ref), -1) }}
                                 >
                                     <Minus className="w-3 h-3" />
                                 </MobileCatalogQuantityButton>
-                                <span className="font-bold text-sm min-w-4 text-center">{cartItem?.quantity || 0}</span>
+                                <span className="font-bold text-sm min-w-4 text-center">{inCartQuantity}</span>
                                 <MobileCatalogQuantityButton
                                     ariaLabel={t('pos.addOne')}
                                     className="text-primary"
@@ -5314,7 +5505,7 @@ function MobileCart({
                         const convertedUnitPrice = convertPrice(unitPrice, originalCurrency, settlementCurr)
                         const isExchanged = originalCurrency !== settlementCurr
                         const hasDiscount = hasAutomaticDiscount(item)
-                        const itemKey = buildCartItemKey(item.product_id, item.storageId)
+                        const itemKey = buildCartItemKey(item.product_id, item.storageId, item.selling_unit_ref)
 
                         return (
                             <div

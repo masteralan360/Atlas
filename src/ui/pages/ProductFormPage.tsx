@@ -42,17 +42,23 @@ import {
     getPrimaryStorageFromList,
     replaceProductCommissionRule,
     replaceProductPriceBookItems,
+    replaceProductPriceBookUnitPrices,
+    replaceProductUnitConversion,
     syncProductBarcodeCachesForWorkspace,
     updateProductBarcode,
     updateProduct,
     useCategories,
     usePriceBookCatalogState,
+    usePriceBookUnitPrices,
     useProductCommissionCatalogState,
     useProduct,
     useProductBarcodes,
     useProducts,
     useProductVariants,
     useStorages,
+    useUnits,
+    useUnitRelationships,
+    useProductUnitConversions,
     type Product,
     type ProductBarcode,
     type PriceBookItem
@@ -81,8 +87,14 @@ import { useWorkspace } from '@/workspace'
 import { useHideCosts } from '@/permissions'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { normalizeUnitCode } from '@/local-db/models'
+import { buildProductUnitSelectionOptions } from '@/lib/unitRelationships'
 import { BarcodeScannerToggleButton } from '@/ui/components/BarcodeScannerToggleButton'
 import { ProductUnitIcon } from '@/ui/components/ProductUnitIcon'
+import { ProductUnitPackagingSection } from '@/ui/components/products/ProductUnitPackagingSection'
+import {
+    EMPTY_PRODUCT_UNIT_PACKAGING,
+    type ProductUnitPackagingDraft
+} from '@/ui/components/products/productUnitPackaging'
 import { ProductAdditionalImagesModal } from '@/ui/components/ProductAdditionalImagesModal'
 import { ProductVariantParentNotice, ProductVariantsSection } from '@/ui/components/ProductVariantsSection'
 import { useUnitRegistry } from '@/ui/components/unitRegistry'
@@ -156,13 +168,20 @@ type ProductFormData = {
     storageId: string
 }
 
-function mapPriceBookItemsToDrafts(items: PriceBookItem[]): ProductPriceBookDraft[] {
+function mapPriceBookItemsToDrafts(
+    items: PriceBookItem[],
+    unitPrices: Array<{ priceBookId: string; price: number }> = []
+): ProductPriceBookDraft[] {
+    const parentPriceByBook = new Map(unitPrices.map((row) => [row.priceBookId, row.price]))
     return [...items]
         .sort((left, right) => left.priceBookId.localeCompare(right.priceBookId))
         .map((item) => ({
             priceBookId: item.priceBookId,
             costPrice: item.costPrice == null ? '' : String(item.costPrice),
             price: String(item.price),
+            parentPrice: parentPriceByBook.has(item.priceBookId)
+                ? String(parentPriceByBook.get(item.priceBookId))
+                : '',
             currency: item.currency
         }))
 }
@@ -174,6 +193,7 @@ function serializePriceBookDrafts(rows: ProductPriceBookDraft[]) {
                 priceBookId: row.priceBookId,
                 costPrice: row.costPrice.trim() === '' ? null : Number(row.costPrice),
                 price: row.price.trim() === '' ? null : Number(row.price),
+                parentPrice: row.parentPrice?.trim() === '' ? null : Number(row.parentPrice),
                 currency: row.currency
             }))
             .sort((left, right) => left.priceBookId.localeCompare(right.priceBookId))
@@ -310,6 +330,10 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const isOnline = useNetworkStatus()
     const workspaceId = user?.workspaceId || ''
     const { isDynamicUnit, options: unitOptions } = useUnitRegistry(workspaceId)
+    const customUnits = useUnits(workspaceId)
+    const unitRelationships = useUnitRelationships(workspaceId || undefined)
+    const productUnitConversions = useProductUnitConversions(workspaceId || undefined)
+    const priceBookUnitPrices = usePriceBookUnitPrices(workspaceId || undefined)
     const priceBooksEnabled = hasCapability('priceBooks')
     const productCommissionsEnabled = hasFeature('sales_agent_commissions')
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.managePlans')
@@ -334,6 +358,12 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             ? priceBookItems.filter((item) => item.productId === sourcePriceBookProductId)
             : [],
         [priceBookItems, sourcePriceBookProductId]
+    )
+    const sourcePriceBookUnitPrices = useMemo(
+        () => sourcePriceBookProductId
+            ? priceBookUnitPrices.filter((item) => item.productId === sourcePriceBookProductId)
+            : [],
+        [priceBookUnitPrices, sourcePriceBookProductId]
     )
     const sourceProductCommissionRule = useMemo(() => (product?.id
         ? productCommissionRules
@@ -382,6 +412,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         )
     )
     const [priceBookRows, setPriceBookRows] = useState<ProductPriceBookDraft[]>([])
+    const [unitPackaging, setUnitPackaging] = useState<ProductUnitPackagingDraft>(EMPTY_PRODUCT_UNIT_PACKAGING)
     const [productCommissionDraft, setProductCommissionDraft] = useState<ProductCommissionRuleDraft>(() => emptyProductCommissionRuleDraft(features.default_currency))
     const [isSaving, setIsSaving] = useState(false)
     const [overrideAttention, setOverrideAttention] = useState(false)
@@ -416,6 +447,8 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const initialFormSnapshotRef = useRef<string | null>(null)
     const initializedPriceBookRowsKeyRef = useRef<string | null>(null)
     const initialPriceBookRowsSnapshotRef = useRef<string | null>(null)
+    const initializedUnitPackagingKeyRef = useRef<string | null>(null)
+    const initialUnitPackagingSnapshotRef = useRef<string | null>(null)
     const initializedProductCommissionRuleKeyRef = useRef<string | null>(null)
     const initialProductCommissionSnapshotRef = useRef<string | null>(null)
     const createdProductIdRef = useRef<string | null>(null)
@@ -472,6 +505,10 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         && JSON.stringify(productCommissionDraft) !== initialProductCommissionSnapshotRef.current
     ), [isReadOnly, productCommissionDraft, productCommissionsEnabled])
 
+    const isUnitPackagingDirty = !isReadOnly
+        && initialUnitPackagingSnapshotRef.current !== null
+        && JSON.stringify(unitPackaging) !== initialUnitPackagingSnapshotRef.current
+
     const productCommissionValidationMessage = useMemo(() => {
         if (!productCommissionsEnabled || !productCommissionDraft.enabled) return null
         const amount = Number(productCommissionDraft.amount)
@@ -484,7 +521,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         return null
     }, [productCommissionDraft, productCommissionsEnabled, t])
 
-    const isDirty = isProductDirty || arePriceBookRowsDirty || isProductCommissionDirty
+    const isDirty = isProductDirty || arePriceBookRowsDirty || isProductCommissionDirty || isUnitPackagingDirty
 
     const { showGuard, confirmNavigation, cancelNavigation, requestNavigation } = useUnsavedChangesGuard(isDirty)
 
@@ -596,6 +633,34 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     }, [features.default_currency, hideCosts, mode, product, storages])
 
     useEffect(() => {
+        const sourceKey = mode === 'create' ? 'create' : product ? `${mode}:${product.id}` : null
+        if (!sourceKey) return
+        const source = mode === 'create'
+            ? undefined
+            : productUnitConversions.find((row) => row.productId === product?.id && !row.isDeleted)
+        const next = source ? {
+            relationshipId: source.relationshipId,
+            factor: String(source.factor),
+            parentPrice: String(source.parentPrice)
+        } : EMPTY_PRODUCT_UNIT_PACKAGING
+        if (initializedUnitPackagingKeyRef.current === sourceKey) {
+            const emptySnapshot = JSON.stringify(EMPTY_PRODUCT_UNIT_PACKAGING)
+            if (
+                source
+                && initialUnitPackagingSnapshotRef.current === emptySnapshot
+                && JSON.stringify(unitPackaging) === emptySnapshot
+            ) {
+                setUnitPackaging(next)
+                initialUnitPackagingSnapshotRef.current = JSON.stringify(next)
+            }
+            return
+        }
+        setUnitPackaging(next)
+        initialUnitPackagingSnapshotRef.current = JSON.stringify(next)
+        initializedUnitPackagingKeyRef.current = sourceKey
+    }, [mode, product, productUnitConversions, unitPackaging])
+
+    useEffect(() => {
         if (!priceBooksEnabled || !isPriceBookCatalogReady) {
             return
         }
@@ -612,7 +677,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
 
         const nextRows = mode === 'create'
             ? []
-            : mapPriceBookItemsToDrafts(sourcePriceBookItems)
+            : mapPriceBookItemsToDrafts(sourcePriceBookItems, sourcePriceBookUnitPrices)
         const nextSnapshot = serializePriceBookDrafts(nextRows)
 
         if (initializedPriceBookRowsKeyRef.current !== sourceKey) {
@@ -635,7 +700,8 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         priceBookRows,
         priceBooksEnabled,
         product,
-        sourcePriceBookItems
+        sourcePriceBookItems,
+        sourcePriceBookUnitPrices
     ])
 
     useEffect(() => {
@@ -664,6 +730,20 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             setOverrideAttention(false)
         }
     }, [overrideAttention, priceBookRows.length])
+
+    useEffect(() => {
+        if (mode !== 'create' || unitPackaging.relationshipId) return
+        const pcsIsReserved = unitRelationships.some((relationship) => (
+            !relationship.isDeleted
+            && !relationship.isArchived
+            && [relationship.parentUnitCode, relationship.childUnitCode]
+                .some((code) => normalizeUnitCode(code).toLowerCase() === 'pcs')
+        ))
+        if (!pcsIsReserved) return
+        setFormData((current) => normalizeUnitCode(current.unit).toLowerCase() === 'pcs'
+            ? { ...current, unit: '' }
+            : current)
+    }, [mode, unitPackaging.relationshipId, unitRelationships])
 
     if (!canEdit && mode !== 'edit') {
         return null
@@ -1107,6 +1187,51 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             return false
         }
 
+        if (!normalizeUnitCode(formData.unit)) {
+            toast({
+                variant: 'destructive',
+                title: t('common.error'),
+                description: t('products.packaging.unitRequired')
+            })
+            return false
+        }
+
+        const selectedUnitRelationship = unitRelationships.find((row) => row.id === unitPackaging.relationshipId && !row.isDeleted)
+        const unitFactor = Number(unitPackaging.factor)
+        const parentUnitPrice = Number(unitPackaging.parentPrice)
+        const childUnitOption = selectedUnitRelationship
+            ? unitOptions.find((option) => option.value === selectedUnitRelationship.childUnitCode)
+            : undefined
+        if (selectedUnitRelationship && (
+            !Number.isFinite(unitFactor)
+            || unitFactor <= 0
+            || (!childUnitOption?.isDynamic && !Number.isInteger(unitFactor))
+            || unitPackaging.parentPrice.trim() === ''
+            || !Number.isFinite(parentUnitPrice)
+            || parentUnitPrice < 0
+        )) {
+            toast({
+                variant: 'destructive',
+                title: t('common.error'),
+                description: t('products.packaging.validation')
+            })
+            return false
+        }
+
+        if (selectedUnitRelationship && priceBookRows.some((row) => (
+            row.parentPrice == null
+            || row.parentPrice.trim() === ''
+            || !Number.isFinite(Number(row.parentPrice))
+            || Number(row.parentPrice) < 0
+        ))) {
+            toast({
+                variant: 'destructive',
+                title: t('common.error'),
+                description: t('products.packaging.priceBookValidation')
+            })
+            return false
+        }
+
         setIsSaving(true)
 
         try {
@@ -1175,6 +1300,18 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             // optional price-book/commission save needs to be retried.
             pendingImportedImagePathRef.current = null
 
+            await replaceProductUnitConversion(
+                workspaceId,
+                savedProductId,
+                selectedUnitRelationship ? {
+                    relationshipId: selectedUnitRelationship.id,
+                    factor: unitFactor,
+                    parentPrice: parentUnitPrice,
+                    childIsDynamic: childUnitOption?.isDynamic === true
+                } : null
+            )
+            initialUnitPackagingSnapshotRef.current = JSON.stringify(unitPackaging)
+
             if (priceBooksEnabled) {
                 const savedItems = await replaceProductPriceBookItems(
                     workspaceId,
@@ -1187,9 +1324,21 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                     })),
                     user?.id || null
                 )
-                const savedRows = mapPriceBookItemsToDrafts(savedItems)
-                setPriceBookRows(savedRows)
-                initialPriceBookRowsSnapshotRef.current = serializePriceBookDrafts(savedRows)
+                const savedUnitPrices = await replaceProductPriceBookUnitPrices(
+                    workspaceId,
+                    savedProductId,
+                    selectedUnitRelationship
+                        ? priceBookRows.map((row) => ({
+                            priceBookId: row.priceBookId,
+                            unitRef: selectedUnitRelationship.parentUnitRef,
+                            price: Number(row.parentPrice),
+                            currency: row.currency
+                        }))
+                        : []
+                )
+                const completeSavedRows = mapPriceBookItemsToDrafts(savedItems, savedUnitPrices)
+                setPriceBookRows(completeSavedRows)
+                initialPriceBookRowsSnapshotRef.current = serializePriceBookDrafts(completeSavedRows)
             }
 
             if (productCommissionsEnabled && isProductCommissionDirty) {
@@ -1290,9 +1439,100 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const formUnit = normalizeUnitCode(formData.unit)
     const productUnit = isEditing && product?.id ? normalizeUnitCode(product.unit) : ''
     const notYetPatched = mode !== 'create' && initialFormSnapshotRef.current === null
-    const normalizedUnit = normalizeUnitCode(notYetPatched && product ? product.unit : formUnit) || productUnit || 'pcs'
-    const selectedUnitOption = unitOptions.find((option) => option.value === normalizedUnit)
-    const unitLabel = t(`products.units.${normalizedUnit}`, normalizedUnit)
+    const normalizedUnit = normalizeUnitCode(notYetPatched && product ? product.unit : formUnit)
+        || productUnit
+        || (mode === 'create' ? '' : 'pcs')
+    const unitLabel = normalizedUnit
+        ? t(`products.units.${normalizedUnit}`, { defaultValue: normalizedUnit })
+        : t('units.selectPlaceholder', { defaultValue: 'Select unit' })
+    const sourceUnitConversion = product?.id
+        ? productUnitConversions.find((row) => row.productId === product.id && !row.isDeleted)
+        : undefined
+    const sourceUnitRelationship = sourceUnitConversion
+        ? unitRelationships.find((row) => row.id === sourceUnitConversion.relationshipId)
+        : undefined
+    const selectedUnitRelationshipForDisplay = unitRelationships.find((row) => row.id === unitPackaging.relationshipId)
+    const unitSelectionOptions = buildProductUnitSelectionOptions(
+        unitOptions,
+        unitRelationships,
+        unitPackaging.relationshipId
+    )
+    const unitSelectionValue = unitPackaging.relationshipId
+        ? `relationship:${unitPackaging.relationshipId}`
+        : normalizedUnit ? `unit:${normalizedUnit}` : undefined
+    const selectedUnitSelectionOption = unitSelectionOptions.find((option) => option.value === unitSelectionValue)
+    const selectedChildUnitForDisplay = selectedUnitRelationshipForDisplay
+        ? unitOptions.find((option) => option.value === selectedUnitRelationshipForDisplay.childUnitCode)
+        : undefined
+    const displayedUnitFactor = Number(unitPackaging.factor)
+    const displayedParentPrice = Number(unitPackaging.parentPrice)
+    const isUnitPackagingInvalid = !normalizedUnit
+        || Boolean(unitPackaging.relationshipId && !selectedUnitRelationshipForDisplay)
+        || Boolean(selectedUnitRelationshipForDisplay && (
+            unitPackaging.factor.trim() === ''
+            || !Number.isFinite(displayedUnitFactor)
+            || displayedUnitFactor <= 0
+            || (!selectedChildUnitForDisplay?.isDynamic && !Number.isInteger(displayedUnitFactor))
+            || unitPackaging.parentPrice.trim() === ''
+            || !Number.isFinite(displayedParentPrice)
+            || displayedParentPrice < 0
+            || priceBookRows.some((row) => row.parentPrice == null || row.parentPrice.trim() === '' || Number(row.parentPrice) < 0)
+        ))
+
+    const handleUnitRelationshipChange = (relationshipId: string) => {
+        if (!relationshipId) {
+            setUnitPackaging(EMPTY_PRODUCT_UNIT_PACKAGING)
+            return
+        }
+        const relationship = unitRelationships.find((row) => row.id === relationshipId && !row.isDeleted)
+        if (!relationship) return
+        if (isEditing && sourceUnitRelationship && sourceUnitRelationship.childUnitRef !== relationship.childUnitRef) {
+            toast({ variant: 'destructive', title: t('common.error'), description: t('products.packaging.switchChildBlocked') })
+            return
+        }
+        const currentUnit = normalizeUnitCode(product?.unit || formData.unit)
+        if (isEditing && product && !sourceUnitConversion
+            && currentUnit !== normalizeUnitCode(relationship.childUnitCode)) {
+            toast({ variant: 'destructive', title: t('common.error'), description: t('products.packaging.incompatibleUnit') })
+            return
+        }
+        setUnitPackaging({
+            relationshipId,
+            factor: unitPackaging.relationshipId === relationshipId ? unitPackaging.factor : '',
+            parentPrice: unitPackaging.relationshipId === relationshipId
+                ? unitPackaging.parentPrice
+                : ''
+        })
+        setFormData((current) => ({
+            ...current,
+            unit: relationship.childUnitCode
+        }))
+    }
+
+    const handleUnitSelectionChange = (value: string) => {
+        if (value.startsWith('relationship:')) {
+            handleUnitRelationshipChange(value.slice('relationship:'.length))
+            return
+        }
+        if (!value.startsWith('unit:')) return
+        const unit = normalizeUnitCode(value.slice('unit:'.length))
+        const reserved = unitRelationships.some((relationship) => (
+            !relationship.isDeleted
+            && !relationship.isArchived
+            && [relationship.parentUnitCode, relationship.childUnitCode]
+                .some((code) => normalizeUnitCode(code).toLowerCase() === unit.toLowerCase())
+        ))
+        if (reserved) {
+            toast({ variant: 'destructive', title: t('common.error'), description: t('products.packaging.standaloneReserved') })
+            return
+        }
+        if (isEditing && product && normalizeUnitCode(product.unit).toLowerCase() !== unit.toLowerCase()) {
+            toast({ variant: 'destructive', title: t('common.error'), description: t('products.packaging.unitChangeBlocked') })
+            return
+        }
+        setUnitPackaging(EMPTY_PRODUCT_UNIT_PACKAGING)
+        setFormData((current) => ({ ...current, unit }))
+    }
     const quantityValue = Number(formData.quantity) || 0
     const minStockValue = Number(formData.minStockLevel) || 0
     const lowStock = quantityValue <= minStockValue
@@ -1410,7 +1650,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                         <Button
                             type="submit"
                             form="product-form-page"
-                            disabled={isSaving || isImageProcessing || (priceBooksEnabled && !isPriceBookCatalogReady) || Boolean(productCommissionValidationMessage)}
+                            disabled={isSaving || isImageProcessing || isUnitPackagingInvalid || (priceBooksEnabled && !isPriceBookCatalogReady) || Boolean(productCommissionValidationMessage)}
                             className="h-10 gap-2 px-4 font-bold"
                             data-tour-id="tutorial-product-save"
                         >
@@ -1662,38 +1902,56 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                     <div className="order-3 space-y-2 md:order-none md:col-start-1 md:row-start-2">
                                         <Label htmlFor="product-unit" className="flex items-center gap-2 font-bold">
                                             <Ruler className="h-4 w-4 text-primary/60" />
-                                            {t('products.form.unit')}
+                                            {t('products.form.unit')} *
                                         </Label>
                                         <Select
-                                            value={normalizedUnit}
-                                            onValueChange={(value) => setFormData((current) => ({ ...current, unit: value }))}
+                                            value={unitSelectionValue}
+                                            onValueChange={handleUnitSelectionChange}
                                             disabled={isReadOnly}
                                         >
                                             <SelectTrigger id="product-unit" data-tour-id="tutorial-product-unit" className="h-12 rounded-xl border-border/80 bg-background/80 shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50" allowViewer={true}>
                                                 <SelectValue placeholder={t('units.selectPlaceholder', { defaultValue: 'Select unit' })}>
-                                                    <span className="flex items-center gap-2">
-                                                        <ProductUnitIcon unit={normalizedUnit} iconName={selectedUnitOption?.icon} />
-                                                        {unitLabel}
-                                                    </span>
+                                                    {selectedUnitSelectionOption ? (
+                                                        <span className="flex items-center gap-2">
+                                                            {selectedUnitSelectionOption.kind === 'relationship' ? (
+                                                                <>
+                                                                    <Boxes className="h-4 w-4 text-primary" />
+                                                                    {t('products.packaging.combinedUnitLabel', {
+                                                                        parent: t(`products.units.${selectedUnitSelectionOption.parentUnitCode}`, { defaultValue: selectedUnitSelectionOption.parentUnitCode }),
+                                                                        child: t(`products.units.${selectedUnitSelectionOption.childUnitCode}`, { defaultValue: selectedUnitSelectionOption.childUnitCode })
+                                                                    })}
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <ProductUnitIcon unit={selectedUnitSelectionOption.unitCode} iconName={selectedUnitSelectionOption.icon} />
+                                                                    {t(`products.units.${selectedUnitSelectionOption.unitCode}`, { defaultValue: selectedUnitSelectionOption.unitCode })}
+                                                                </>
+                                                            )}
+                                                        </span>
+                                                    ) : null}
                                                 </SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
-                                                {unitOptions.map((option) => (
+                                                {unitSelectionOptions.map((option) => (
                                                     <SelectItem key={option.value} value={option.value}>
                                                         <span className="flex items-center gap-2">
-                                                            <ProductUnitIcon unit={option.value} iconName={option.icon} />
-                                                            {t(`products.units.${option.value}`, option.value)}
+                                                            {option.kind === 'relationship' ? (
+                                                                <>
+                                                                    <Boxes className="h-4 w-4 text-primary" />
+                                                                    {t('products.packaging.combinedUnitLabel', {
+                                                                        parent: t(`products.units.${option.parentUnitCode}`, { defaultValue: option.parentUnitCode }),
+                                                                        child: t(`products.units.${option.childUnitCode}`, { defaultValue: option.childUnitCode })
+                                                                    })}
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <ProductUnitIcon unit={option.unitCode} iconName={option.icon} />
+                                                                    {t(`products.units.${option.unitCode}`, { defaultValue: option.unitCode })}
+                                                                </>
+                                                            )}
                                                         </span>
                                                     </SelectItem>
                                                 ))}
-                                                {normalizedUnit && !unitOptions.some((option) => option.value === normalizedUnit) ? (
-                                                    <SelectItem value={normalizedUnit}>
-                                                        <span className="flex items-center gap-2">
-                                                            <ProductUnitIcon unit={normalizedUnit} />
-                                                            {unitLabel}
-                                                        </span>
-                                                    </SelectItem>
-                                                ) : null}
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -1990,7 +2248,14 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                     <div className="space-y-2">
                                         <Label htmlFor="product-price" className="flex items-center gap-2 font-bold">
                                             <DollarSign className="h-4 w-4 text-primary/60" />
-                                            {t('products.form.price')}
+                                            {selectedUnitRelationshipForDisplay
+                                                ? t('products.packaging.childPrice', {
+                                                    unit: t(
+                                                        `products.units.${selectedUnitRelationshipForDisplay.childUnitCode}`,
+                                                        { defaultValue: selectedUnitRelationshipForDisplay.childUnitCode }
+                                                    )
+                                                })
+                                                : t('products.form.price')} *
                                         </Label>
                                         {isDynamicUnit(formData.unit) ? (
                                             <div className="flex items-start gap-1.5">
@@ -2128,7 +2393,20 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                     )}
                                 </div>
                             </div>
-{priceBooksEnabled ? (
+                            {selectedUnitRelationshipForDisplay ? (
+                                <ProductUnitPackagingSection
+                                    relationship={selectedUnitRelationshipForDisplay}
+                                    units={customUnits}
+                                    draft={unitPackaging}
+                                    childPrice={formData.price}
+                                    currency={formData.currency}
+                                    iqdDisplayPreference={features.iqd_display_preference}
+                                    disabled={isReadOnly || isSaving}
+                                    onChange={setUnitPackaging}
+                                />
+                            ) : null}
+
+                            {priceBooksEnabled ? (
                                 isPriceBookCatalogReady ? (
                                     <div ref={overrideSectionRef}>
                                         <ProductPriceBookItemsEditor
@@ -2137,6 +2415,13 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                             onChange={setPriceBookRows}
                                             defaultCostPrice={effectiveCost == null ? '' : String(effectiveCost)}
                                             defaultPrice={String(effectivePrice)}
+                                            defaultParentPrice={unitPackaging.parentPrice}
+                                            parentUnitLabel={unitPackaging.relationshipId
+                                                ? t(
+                                                    `products.units.${selectedUnitRelationshipForDisplay?.parentUnitCode}`,
+                                                    { defaultValue: selectedUnitRelationshipForDisplay?.parentUnitCode || '' }
+                                                )
+                                                : undefined}
                                             defaultCurrency={formData.currency}
                                             allowedCurrencies={features.allowed_currencies}
                                             iqdDisplayPreference={features.iqd_display_preference}

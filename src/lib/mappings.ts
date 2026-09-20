@@ -22,7 +22,7 @@ function getBaseItem(item: SaleItem): UniversalInvoiceItem {
         product_id: item.product_id,
         product_name: item.product_name || 'Unknown Product',
         product_sku: item.product_sku,
-        unit: item.product?.unit || (item as any).product_unit || '',
+        unit: item.selling_unit_code || item.product?.unit || (item as any).product_unit || '',
         quantity,
         unit_price: unitPrice,
         // Keep total_price in settlement currency.

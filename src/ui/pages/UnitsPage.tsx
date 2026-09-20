@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Edit, Package, Plus, Search, Sparkles, Trash2 } from 'lucide-react'
+import { Edit, GitBranch, Package, Plus, Search, Sparkles, Trash2 } from 'lucide-react'
 
 import { useAuth } from '@/auth'
 import { useWorkspace } from '@/workspace'
@@ -18,6 +18,7 @@ import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/ui/components/dialog'
 import { useToast } from '@/ui/components/use-toast'
 import { cn } from '@/lib/utils'
+import { UnitRelationshipsDialog } from '@/ui/components/units/UnitRelationshipsDialog'
 
 type UnitDraft = {
     code: string
@@ -40,6 +41,8 @@ export default function UnitsPage() {
     const [draft, setDraft] = useState<UnitDraft>(emptyDraft)
     const [deletingUnit, setDeletingUnit] = useState<Unit | undefined>(undefined)
     const [isSaving, setIsSaving] = useState(false)
+    const [isDeleting, setIsDeleting] = useState(false)
+    const [relationshipsOpen, setRelationshipsOpen] = useState(false)
 
     const canEdit = user?.role === 'admin' || user?.role === 'staff'
 
@@ -108,7 +111,8 @@ export default function UnitsPage() {
     }
 
     const handleDelete = async () => {
-        if (!deletingUnit) return
+        if (!deletingUnit || isDeleting) return
+        setIsDeleting(true)
         try {
             await deleteUnit(deletingUnit.id)
             toast({ description: t('units.messages.deleted', { defaultValue: 'Unit deleted.' }) })
@@ -116,10 +120,12 @@ export default function UnitsPage() {
         } catch (error) {
             setDeletingUnit(undefined)
             if (error instanceof UnitInUseError) {
-                toast({ variant: 'destructive', description: t('units.messages.inUse', { defaultValue: 'This unit is used by one or more products and cannot be deleted.' }) })
+                toast({ variant: 'destructive', description: t('units.messages.inUse', { defaultValue: 'This unit is used by a product or unit relationship and cannot be deleted.' }) })
             } else {
                 toast({ variant: 'destructive', description: t('units.messages.deleteFailed', { defaultValue: 'Could not delete unit. Please try again.' }) })
             }
+        } finally {
+            setIsDeleting(false)
         }
     }
 
@@ -135,11 +141,16 @@ export default function UnitsPage() {
                         {t('units.subtitle', 'Manage the units used by your products.')} <ModulePageFreshness className="ms-2" />
                     </p>
                 </div>
-                {canEdit && (
-                    <Button onClick={openCreateDialog} className="rounded-xl shadow-lg transition-all active:scale-95" data-tour-id="tutorial-units-new-button">
-                        <Plus className="mr-2 h-4 w-4" /> {t('units.addUnit', 'New Unit')}
+                <div className="flex flex-wrap items-center gap-2">
+                    <Button variant="outline" onClick={() => setRelationshipsOpen(true)} className="rounded-xl">
+                        <GitBranch className="mr-2 h-4 w-4" /> {t('units.relationships.button')}
                     </Button>
-                )}
+                    {canEdit && (
+                        <Button onClick={openCreateDialog} className="rounded-xl shadow-lg transition-all active:scale-95" data-tour-id="tutorial-units-new-button">
+                            <Plus className="mr-2 h-4 w-4" /> {t('units.addUnit', 'New Unit')}
+                        </Button>
+                    )}
+                </div>
             </div>
 
             <div className="flex items-center justify-between gap-4">
@@ -233,8 +244,8 @@ export default function UnitsPage() {
                 </CardContent>
             </Card>
 
-            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                <DialogContent className="max-w-md">
+            <Dialog open={isDialogOpen} onOpenChange={(open) => { if (!isSaving) setIsDialogOpen(open) }}>
+                <DialogContent className="max-w-md" showCloseButton={!isSaving}>
                     <DialogHeader>
                         <DialogTitle>
                             {editingUnit
@@ -246,7 +257,7 @@ export default function UnitsPage() {
                     <div className="space-y-5 py-2">
                         <div className="space-y-2">
                             <Label htmlFor="unit-code" className="font-bold">
-                                {t('units.code', 'Unit name')}
+                                {t('units.code', 'Unit name')} *
                             </Label>
                             <Input
                                 id="unit-code"
@@ -254,6 +265,8 @@ export default function UnitsPage() {
                                 onChange={(event) => setDraft((current) => ({ ...current, code: event.target.value }))}
                                 placeholder={t('units.codePlaceholder', 'e.g. kg, bottle, box')}
                                 allowViewer={true}
+                                disabled={isSaving}
+                                required
                                 className="h-11 rounded-lg border-border/40 bg-muted/10"
                             />
                         </div>
@@ -265,6 +278,7 @@ export default function UnitsPage() {
                                     <button
                                         key={iconName}
                                         type="button"
+                                        disabled={isSaving}
                                         onClick={() => setDraft((current) => ({ ...current, icon: iconName }))}
                                         className={cn(
                                             'flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-primary/10',
@@ -290,16 +304,17 @@ export default function UnitsPage() {
                             </div>
                             <Switch
                                 checked={draft.isDynamic}
+                                disabled={isSaving}
                                 onCheckedChange={(checked) => setDraft((current) => ({ ...current, isDynamic: checked }))}
                             />
                         </div>
                     </div>
 
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+                        <Button variant="outline" disabled={isSaving} onClick={() => setIsDialogOpen(false)}>
                             {t('common.cancel', 'Cancel')}
                         </Button>
-                        <Button onClick={handleSave} disabled={isSaving}>
+                        <Button onClick={handleSave} disabled={isSaving || !draft.code.trim()}>
                             {isSaving
                                 ? t('common.saving', 'Saving...')
                                 : t('common.save', 'Save')}
@@ -314,6 +329,15 @@ export default function UnitsPage() {
                 onConfirm={handleDelete}
                 title={t('units.confirmDelete', 'Delete Unit')}
                 description={t('units.deleteHint', 'This unit will be permanently deleted. Products using it cannot be deleted this way.')}
+                isLoading={isDeleting}
+            />
+
+            <UnitRelationshipsDialog
+                open={relationshipsOpen}
+                onOpenChange={setRelationshipsOpen}
+                workspaceId={activeWorkspace?.id}
+                units={units}
+                canEdit={canEdit}
             />
         </div>
     )

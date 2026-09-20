@@ -435,6 +435,7 @@ export function Sales() {
 
         const isFlaggedSale = saleForProductExchange.system_review_status === 'flagged'
         return (saleForProductExchange.items || []).flatMap((item) => {
+            if ((item.unit_factor ?? 1) !== 1 || item.selling_unit_ref) return []
             const returnableQuantity = Math.max(
                 0,
                 Number(item.quantity || 0) - Math.max(0, Number(item.returned_quantity || 0)),
@@ -452,7 +453,7 @@ export function Sales() {
                 productId: item.product_id,
                 name: item.product?.name || item.product_name || t('common.unknownProduct', { defaultValue: 'Unknown product' }),
                 sku: item.product?.sku || item.product_sku || null,
-                unit: item.product?.unit || null,
+                unit: item.selling_unit_code || item.product?.unit || null,
                 returnableQuantity,
                 unitPrice: Number(item.converted_unit_price ?? item.unit_price ?? 0),
                 priceBookId: item.price_book_id ?? null,
@@ -1401,6 +1402,10 @@ export function Sales() {
         if (!selectedSale || selectedSale.origin !== 'pos') {
             return
         }
+        if ((item.unit_factor ?? 1) !== 1 || item.selling_unit_ref) {
+            toast({ variant: 'destructive', title: t('common.error'), description: t('sales.exchange.relatedUnitsUnsupported') })
+            return
+        }
 
         setLockedProductExchangeSaleItemId(item.id)
         setSaleForProductExchange(selectedSale)
@@ -1451,7 +1456,9 @@ export function Sales() {
         syncSource: 'local' | 'remote'
     }) => {
         const plans = await Promise.all(input.items.map(async (item, index) => {
-            const quantityToRestore = Math.max(0, input.quantities[index] || 0)
+            const soldQuantityToRestore = Math.max(0, input.quantities[index] || 0)
+            const storedFactor = Number(item.unit_factor ?? 1)
+            const quantityToRestore = soldQuantityToRestore * (Number.isFinite(storedFactor) && storedFactor > 0 ? storedFactor : 1)
             const storageId = quantityToRestore > 0
                 ? await resolveReturnStorageId({
                     workspaceId: input.workspaceId,

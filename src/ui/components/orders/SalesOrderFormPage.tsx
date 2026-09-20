@@ -45,6 +45,7 @@ import {
     useProductCommissionCatalogState,
     usePriceBookCatalogState,
     useProducts,
+    useProductUnitConversions,
     useWorkspaceProductBarcodes,
     useSalesOrderAgentAssignments,
     useSalesOrder,
@@ -253,6 +254,11 @@ export function SalesOrderFormPage({
     const agentSalesAccountsEnabled = hasFeature('agent_sales_accounts')
 
     const products = useProducts(workspaceId)
+    const productUnitConversions = useProductUnitConversions(workspaceId)
+    const relatedUnitProductIds = useMemo(
+        () => new Set(productUnitConversions.filter((row) => !row.isDeleted).map((row) => row.productId)),
+        [productUnitConversions]
+    )
     const productBarcodes = useWorkspaceProductBarcodes(workspaceId, { syncProductCache: false })
     const inventory = useInventory(workspaceId)
     const resolveDiscountForPrice = useDiscountPriceResolver(workspaceId, { inventoryRows: inventory })
@@ -682,6 +688,7 @@ export function SalesOrderFormPage({
             return (product.id === selectedProductId
                 || availableIds.has(product.id)
                 || serviceInServicesSource)
+                && (product.id === selectedProductId || !relatedUnitProductIds.has(product.id))
                 && (serviceInServicesSource || hasValidProductCost(product.costPrice))
                 && (serviceInServicesSource || !hasMissingPartnerPriceBookCost(selectedCustomer, product.id))
         })

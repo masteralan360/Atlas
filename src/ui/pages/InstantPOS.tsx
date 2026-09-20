@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useLocation, useRoute } from 'wouter'
 import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
-import { addToOfflineMutations, adjustInventoryQuantity, calculateStockBatchUnitCost, commitStockBatchAllocations, generateLocalSaleSequenceId, getPrimaryStorageFromList, getStockBatchSalePlans, refreshStockBatchesFromSupabase, useActiveDiscountMap, useBatchAwareInventoryProducts, useCategories, useProductSelectionAccess, useProducts, useStorages } from '@/local-db'
+import { addToOfflineMutations, adjustInventoryQuantity, calculateStockBatchUnitCost, commitStockBatchAllocations, generateLocalSaleSequenceId, getPrimaryStorageFromList, getStockBatchSalePlans, refreshStockBatchesFromSupabase, useActiveDiscountMap, useBatchAwareInventoryProducts, useCategories, useProductSelectionAccess, useProducts, useProductUnitConversions, useStorages } from '@/local-db'
 import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { db } from '@/local-db/database'
 import type { CurrencyCode } from '@/local-db/models'
@@ -870,6 +870,11 @@ export function InstantPOS() {
         storageId: isServicesStorage ? undefined : selectedStorageId || undefined
     })
     const catalogProducts = useProducts(user?.workspaceId, { syncBarcodeCache: false })
+    const productUnitConversions = useProductUnitConversions(user?.workspaceId)
+    const relatedUnitProductIds = useMemo(
+        () => new Set(productUnitConversions.filter((row) => !row.isDeleted).map((row) => row.productId)),
+        [productUnitConversions]
+    )
     const { canSelectProduct, filterProducts: filterSelectableProducts } = useProductSelectionAccess(user?.workspaceId, user?.id)
     const serviceProducts = useMemo(() => {
         if (!hasFeature('services')) return []
@@ -882,8 +887,8 @@ export function InstantPOS() {
         }))
     }, [catalogProducts, filterSelectableProducts, hasFeature])
     const inventoryProducts = useMemo(
-        () => filterSelectableProducts(products),
-        [filterSelectableProducts, products]
+        () => filterSelectableProducts(products.filter((product) => !relatedUnitProductIds.has(product.id))),
+        [filterSelectableProducts, products, relatedUnitProductIds]
     )
     const selectableProducts = useMemo(
         () => isServicesStorage ? serviceProducts : inventoryProducts,

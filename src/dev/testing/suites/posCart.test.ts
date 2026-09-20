@@ -27,5 +27,9 @@ describe('POS held-cart snapshots and restoration', () => {
     it('preserves a missing product so checkout can reject it rather than silently dropping the sale line', () => {
         expect(restorePosCart([item], 's', () => undefined)).toEqual([item])
     })
+    it('restores parent-unit stock bounds from canonical child inventory', () => {
+        const parent = { ...item, unit_factor: 20, max_stock: 1 }
+        expect(restorePosCart([parent], 's', () => ({ inventoryQuantity: 123 }))[0].max_stock).toBe(6.15)
+    })
     it('an empty held cart remains empty', () => { expect(restorePosCart([], 's', () => undefined)).toEqual([]) })
 })

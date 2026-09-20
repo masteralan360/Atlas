@@ -1,5 +1,6 @@
 import type { CurrencyCode } from '@/local-db/models'
 import type { CartItem } from '@/types'
+import { inventoryQuantityToSellingAvailability } from '@/lib/unitRelationships'
 
 export interface PosRates {
     usdIqd: { rate: number } | null
@@ -50,7 +51,14 @@ export function restorePosCart(items: CartItem[], fallbackStorageId: string,
     findProduct: (id: string, storageId?: string) => { inventoryQuantity: number } | undefined) {
     return items.map(item => {
         const storageId = item.storageId || fallbackStorageId
-        return { ...item, storageId, max_stock: findProduct(item.product_id, storageId)?.inventoryQuantity ?? item.max_stock }
+        const inventoryQuantity = findProduct(item.product_id, storageId)?.inventoryQuantity
+        return {
+            ...item,
+            storageId,
+            max_stock: inventoryQuantity === undefined
+                ? item.max_stock
+                : inventoryQuantityToSellingAvailability(inventoryQuantity, item.unit_factor ?? 1)
+        }
     })
 }
 

@@ -4,6 +4,12 @@ CREATE TABLE public.sale_items (
   product_id uuid NOT NULL,
   storage_id uuid NULL,
   quantity numeric NOT NULL,
+  selling_unit_ref text NULL,
+  selling_unit_code text NULL,
+  base_unit_ref text NULL,
+  base_unit_code text NULL,
+  unit_factor numeric NOT NULL DEFAULT 1,
+  inventory_quantity numeric NOT NULL,
   unit_price numeric NOT NULL,
   total_price numeric NOT NULL,
   original_currency text NOT NULL DEFAULT 'usd'::text,
@@ -22,5 +28,8 @@ CREATE TABLE public.sale_items (
   batch_allocations jsonb NULL,
   original_batch_allocations jsonb NULL,
   price_book_id uuid NULL,
-  PRIMARY KEY (id)
+  PRIMARY KEY (id),
+  CONSTRAINT sale_items_unit_factor_positive CHECK (unit_factor > 0 AND unit_factor::text NOT IN ('NaN', 'Infinity', '-Infinity')),
+  CONSTRAINT sale_items_inventory_quantity_positive CHECK (inventory_quantity > 0 AND inventory_quantity::text NOT IN ('NaN', 'Infinity', '-Infinity')),
+  CONSTRAINT sale_items_inventory_quantity_matches_factor CHECK (abs(inventory_quantity - (quantity * unit_factor)) <= 0.000001)
 );

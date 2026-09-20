@@ -13,6 +13,9 @@ import type {
   PriceBookItem,
   Category,
   Unit,
+  UnitRelationship,
+  ProductUnitConversion,
+  PriceBookUnitPrice,
   Invoice,
   InvoiceVersion,
   User,
@@ -406,6 +409,9 @@ export class AtlasDatabase extends Dexie {
   price_book_items!: EntityTable<PriceBookItem, 'id'>
   categories!: EntityTable<Category, 'id'>
   units!: EntityTable<Unit, 'id'>
+  unit_relationships!: EntityTable<UnitRelationship, 'id'>
+  product_unit_conversions!: EntityTable<ProductUnitConversion, 'id'>
+  price_book_unit_prices!: EntityTable<PriceBookUnitPrice, 'id'>
   invoices!: EntityTable<Invoice, 'id'>
   invoice_versions!: EntityTable<InvoiceVersion, 'id'>
   users!: EntityTable<User, 'id'>
@@ -3453,6 +3459,15 @@ export class AtlasDatabase extends Dexie {
     this.version(129).stores({
       storage_member_exclusions:
         'id, workspaceId, storageId, userId, updatedAt, isDeleted, syncStatus, [workspaceId+storageId], [workspaceId+userId], [storageId+userId]'
+    })
+
+    this.version(130).stores({
+      unit_relationships:
+        'id, workspaceId, parentUnitRef, childUnitRef, isArchived, updatedAt, isDeleted, syncStatus, [workspaceId+parentUnitRef+childUnitRef], [workspaceId+updatedAt]',
+      product_unit_conversions:
+        'id, workspaceId, productId, relationshipId, updatedAt, isDeleted, syncStatus, [workspaceId+productId], [workspaceId+relationshipId], [workspaceId+updatedAt]',
+      price_book_unit_prices:
+        'id, workspaceId, priceBookId, productId, unitRef, updatedAt, isDeleted, syncStatus, [workspaceId+productId], [priceBookId+productId+unitRef], [workspaceId+updatedAt]'
     })
 
     this.registerIndexedDbDiagnostics()

@@ -126,6 +126,17 @@
         ]
       },
       {
+        "id": "related-units",
+        "titleKey": "devTesting.posGroups.relatedUnits",
+        "layer": "business",
+        "files": [
+          "src/lib/unitRelationships.test.ts",
+          "src/lib/hierarchicalPackagingMigration.test.ts",
+          "src/local-db/unitRelationships.test.ts",
+          "src/local-db/units.test.ts"
+        ]
+      },
+      {
         "id": "financing",
         "titleKey": "devTesting.posGroups.financing",
         "layer": "business",

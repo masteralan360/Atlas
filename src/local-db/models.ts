@@ -189,6 +189,44 @@ export interface Unit extends BaseEntity {
 }
 
 /**
+ * Stable unit identifiers used by packaging relationships. Built-in units use
+ * `builtin:<normalized-code>` while workspace-created units use
+ * `custom:<unit-id>`. Keeping custom-unit IDs here makes renaming a custom
+ * unit safe for products and historical configuration.
+ */
+export type UnitRef = `builtin:${string}` | `custom:${string}`
+
+/** Defines only the hierarchy shape. The product owns its conversion factor. */
+export interface UnitRelationship extends BaseEntity {
+  name?: string | null
+  parentUnitRef: UnitRef
+  parentUnitCode: string
+  childUnitRef: UnitRef
+  childUnitCode: string
+  isArchived: boolean
+  createdBy?: string | null
+}
+
+/** Product-specific factor and independent price for the larger selling unit. */
+export interface ProductUnitConversion extends BaseEntity {
+  productId: string
+  relationshipId: string
+  factor: number
+  parentPrice: number
+  createdBy?: string | null
+}
+
+/** Optional Price Book override for either side of a product unit hierarchy. */
+export interface PriceBookUnitPrice extends BaseEntity {
+  priceBookId: string
+  productId: string
+  unitRef: UnitRef
+  price: number
+  currency: CurrencyCode
+  createdBy?: string | null
+}
+
+/**
  * Built-in units, hardcoded in the app and shared by every workspace.
  * They are NOT stored in the `units` table — that table only holds
  * workspace-created custom units. Codes here are reserved: the data layer
@@ -1876,6 +1914,15 @@ export interface SaleItem {
   productId: string
   storageId?: string | null
   quantity: number
+  /** Unit selected by the cashier. Legacy rows default to the product unit. */
+  sellingUnitRef?: UnitRef | null
+  sellingUnitCode?: string | null
+  /** Canonical inventory unit and immutable conversion snapshot. */
+  baseUnitRef?: UnitRef | null
+  baseUnitCode?: string | null
+  unitFactor?: number
+  /** Canonical stock quantity deducted/restored for this sold quantity. */
+  inventoryQuantity?: number
   unitPrice: number
   totalPrice: number
   costPrice: number
@@ -2537,6 +2584,9 @@ export interface SyncQueueItem {
     | 'order_return_items'
     | 'categories'
     | 'units'
+    | 'unit_relationships'
+    | 'product_unit_conversions'
+    | 'price_book_unit_prices'
     | 'product_discounts'
     | 'category_discounts'
     | 'storages'
@@ -2768,6 +2818,9 @@ export interface OfflineMutation {
     | 'order_return_items'
     | 'categories'
     | 'units'
+    | 'unit_relationships'
+    | 'product_unit_conversions'
+    | 'price_book_unit_prices'
     | 'product_discounts'
     | 'category_discounts'
     | 'workspaces'

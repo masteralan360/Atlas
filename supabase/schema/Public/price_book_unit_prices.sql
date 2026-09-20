@@ -1,0 +1,20 @@
+CREATE TABLE public.price_book_unit_prices (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  workspace_id uuid NOT NULL,
+  price_book_id uuid NOT NULL,
+  product_id uuid NOT NULL,
+  unit_ref text NOT NULL,
+  price numeric NOT NULL,
+  currency text NOT NULL,
+  created_by uuid NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT timezone('utc', now()),
+  updated_at timestamp with time zone NOT NULL DEFAULT timezone('utc', now()),
+  sync_status text NOT NULL DEFAULT 'synced'::text,
+  version bigint NOT NULL DEFAULT 1,
+  is_deleted boolean NOT NULL DEFAULT false,
+  PRIMARY KEY (id),
+  CONSTRAINT price_book_unit_prices_unique UNIQUE (price_book_id, product_id, unit_ref),
+  CONSTRAINT price_book_unit_prices_ref_format CHECK (unit_ref ~ '^(builtin|custom):.+$'),
+  CONSTRAINT price_book_unit_prices_price_nonnegative CHECK (price >= 0 AND price::text NOT IN ('NaN', 'Infinity', '-Infinity')),
+  CONSTRAINT price_book_unit_prices_currency_check CHECK (currency IN ('usd', 'eur', 'iqd', 'try'))
+);

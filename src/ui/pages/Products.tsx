@@ -47,6 +47,7 @@ import { BarcodeLabelTemplate } from '@/ui/components/BarcodeLabelTemplate'
 import { PriceBookManagementDialog } from '@/ui/components/PriceBookManagementDialog'
 import { ProductImportPreviewModal } from '@/ui/components/ProductImportPreviewModal'
 import { ProductCategoryManagerDialog } from '@/ui/components/products/ProductCategoryManagerDialog'
+import { useProductQuantityFormatter } from '@/ui/hooks/useProductQuantityFormatter'
 import {
     Button,
     Card,
@@ -171,6 +172,7 @@ export function Products() {
     const categories = useCategories(user?.workspaceId)
     const storages = useStorages(user?.workspaceId)
     const workspaceId = user?.workspaceId || ''
+    const formatProductQuantity = useProductQuantityFormatter(workspaceId || undefined)
     const priceBooksEnabled = hasCapability('priceBooks')
     const { priceBooks, priceBookItems } = usePriceBookCatalogState(
         priceBooksEnabled ? workspaceId || undefined : undefined,
@@ -466,7 +468,9 @@ export function Products() {
                         {sorted.map((entry) => (
                             <div key={entry.name} className="flex items-center justify-between gap-4 text-sm">
                                 <span>{entry.name}</span>
-                                <span className="font-mono tabular-nums text-muted-foreground">{entry.quantity}</span>
+                                <span className="font-mono tabular-nums text-muted-foreground">
+                                    {formatProductQuantity(productId, entry.quantity, productById.get(productId)?.unit || 'pcs')}
+                                </span>
                             </div>
                         ))}
                     </TooltipContent>
@@ -1483,7 +1487,7 @@ export function Products() {
                                                                                     isLinkedVariant && 'text-[10px]',
                                                                                     product.quantity <= product.minStockLevel ? 'text-amber-500' : 'text-muted-foreground/60'
                                                                                 )}>
-                                                                                    {isService(product) ? t('services.noInventory', { defaultValue: 'No inventory' }) : `${product.quantity} ${t(`products.units.${product.unit}`, product.unit)}`}
+                                                                                    {isService(product) ? t('services.noInventory', { defaultValue: 'No inventory' }) : formatProductQuantity(product.id, product.quantity, product.unit)}
                                                                                 </div>
                                                                             </div>
                                                                         </div>
@@ -1620,7 +1624,7 @@ export function Products() {
                                                                         {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
                                                                     </div>
                                                                     <div className="text-[11px] font-medium text-muted-foreground">
-                                                                        {isService(product) ? t('services.noInventory', { defaultValue: 'No inventory' }) : `${product.quantity} ${t(`products.units.${product.unit}`, product.unit)}`}
+                                                                        {isService(product) ? t('services.noInventory', { defaultValue: 'No inventory' }) : formatProductQuantity(product.id, product.quantity, product.unit)}
                                                                     </div>
                                                                 </div>
 
@@ -1821,7 +1825,7 @@ export function Products() {
                                                                 </TableCell>
                                                                 <TableCell className="text-right">
                                                                     <span className={product.quantity <= product.minStockLevel ? 'font-medium text-amber-500' : ''}>
-                                                                        {isService(product) ? '—' : `${product.quantity} ${t(`products.units.${product.unit}`, product.unit)}`}
+                                                                        {isService(product) ? '—' : formatProductQuantity(product.id, product.quantity, product.unit)}
                                                                     </span>
                                                                 </TableCell>
                                                                 {(canEdit || canDelete || user?.role === 'viewer') && (

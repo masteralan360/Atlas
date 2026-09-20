@@ -34,7 +34,12 @@ Object.defineProperty(globalThis, "document", {
     visibilityState: "visible",
     dir: "ltr",
     documentElement: { lang: "en", dir: "ltr" },
-    createElement: () => ({ getContext: () => null }),
+    createElement: () => ({
+      getContext: () => null,
+      setAttribute: () => undefined,
+      removeAttribute: () => undefined,
+      style: {},
+    }),
   },
 });
 if (!("window" in globalThis)) {
@@ -119,6 +124,8 @@ describe("units normalization + rename migration", () => {
   });
 
   it("renaming a unit migrates products that reference the old code", async () => {
+    const { installTestBrowser } = await import("@/dev/testing/fixtures/browser");
+    installTestBrowser();
     const { createUnit, updateUnit } = await import("@/local-db/hooks");
     const { db } = await import("@/local-db/database");
     const { writeWorkspaceModeSnapshot } = await import(
@@ -158,6 +165,22 @@ describe("units normalization + rename migration", () => {
       version: 1,
       isDeleted: false,
     } as never);
+    await db.unit_relationships.put({
+      id: "relationship-a",
+      workspaceId: WORKSPACE_ID,
+      name: null,
+      parentUnitRef: `custom:${created.id}`,
+      parentUnitCode: "وحدة",
+      childUnitRef: "builtin:pcs",
+      childUnitCode: "pcs",
+      isArchived: false,
+      createdAt: now,
+      updatedAt: now,
+      syncStatus: "synced",
+      lastSyncedAt: now,
+      version: 1,
+      isDeleted: false,
+    } as never);
 
     await updateUnit(created.id, { code: "وحدة معدلة" });
 
@@ -165,5 +188,12 @@ describe("units normalization + rename migration", () => {
     expect(product?.unit).toBe("وحدة معدلة");
     const unit = await db.units.get(created.id);
     expect(unit?.code).toBe("وحدة معدلة");
-  });
+    expect(await db.unit_relationships.get("relationship-a")).toMatchObject({
+      parentUnitCode: "وحدة معدلة",
+    });
+  }, 90_000);
 });
+class TestElement {}
+Object.defineProperty(globalThis, "Element", { configurable: true, value: TestElement });
+Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: TestElement });
+Object.defineProperty(globalThis, "SVGElement", { configurable: true, value: TestElement });

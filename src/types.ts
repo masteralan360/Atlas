@@ -11,6 +11,12 @@ export interface SaleItem {
     product_id: string
     storage_id?: string | null
     quantity: number
+    selling_unit_ref?: string | null
+    selling_unit_code?: string | null
+    base_unit_ref?: string | null
+    base_unit_code?: string | null
+    unit_factor?: number
+    inventory_quantity?: number
     unit_price: number
     total_price: number
     cost_price?: number
@@ -174,6 +180,12 @@ export interface CartItem {
     negotiated_price?: number
     imageUrl?: string
     unit?: string
+    /** Immutable selling/base unit selection used by checkout and held carts. */
+    selling_unit_ref?: string | null
+    selling_unit_code?: string | null
+    base_unit_ref?: string | null
+    base_unit_code?: string | null
+    unit_factor?: number
     /** Service lines use the UI-only Services virtual location and never affect stock. */
     is_service?: boolean
     price_book_id?: string
