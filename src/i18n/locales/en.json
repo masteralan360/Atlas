@@ -937,6 +937,23 @@
     "cancelReason": "Cancellation reason",
     "customerNote": "Note",
     "transitionSuccess": "Marketplace order updated successfully.",
+    "transitionFailed": "Failed to update marketplace order.",
+    "transitionRefreshFailed": "The order advanced, but its updated status could not be loaded. Automatic advancement stopped.",
+    "advanceSequenceSuccess": "Order advanced to {{status}}.",
+    "autoAdvance": {
+      "title": "Advancing order",
+      "description": "The order is moving through every required workflow step.",
+      "order": "Order",
+      "target": "Target status",
+      "currentStep": "Now advancing to {{status}}",
+      "progress": "{{completed}} of {{total}} steps completed",
+      "progressLabel": "Order advancement progress",
+      "stepsLabel": "Order advancement steps",
+      "completed": "Completed",
+      "inProgress": "In progress",
+      "pending": "Waiting",
+      "blockingHint": "Keep this page open. Controls unlock when the target status is reached or if a step fails."
+    },
     "status": {
       "pending": "Pending",
       "confirmed": "Confirmed",
@@ -947,6 +964,7 @@
       "cancelled": "Cancelled"
     },
     "actions": {
+      "advanceToStatus": "Advance to status",
       "confirm": "Confirm Order",
       "process": "Start Processing",
       "ship": "Mark as Shipped",
@@ -4697,11 +4715,23 @@
     },
     "checkoutPendingRecovery": "Sale {{saleId}} is still awaiting confirmation. Retry the same cart and payment details so Atlas can confirm it safely. Review Sales before changing this checkout.",
     "checkoutCommittedRecovery": "Sale {{saleId}} was saved, but its payment or local display could not be completed. Review it in Sales and Payments before making another sale.",
+    "freeBonusOrderOnly": "Free quantities can be saved only as an Order.",
+    "paidQuantityRequiresFreeBonus": "Add at least one Free quantity before reducing the paid quantity to zero.",
+    "freeBonusPermissionRequired": "You no longer have permission to save free quantities in a Quick Order.",
+    "invalidCartQuantity": "Each cart line must have a paid or free quantity.",
+    "freeOnlyOrder": {
+      "title": "Add Free Product",
+      "description": "This product will be added to a Quick Order using its standard unit.",
+      "line": "Paid 0 / Free 1",
+      "add": "Add as Free"
+    },
     "quickOrder": {
       "title": "Quick Order",
       "description": "Select the customer, order status, and payment details for this sales order.",
       "orderStatusOnSave": "Order status upon save",
       "paymentStatusOnSave": "Payment status upon save",
+      "freeOnlySettledTitle": "Free-only order — no payment to collect",
+      "freeOnlySettledDescription": "This zero-total Quick Order is settled automatically. No payment transaction or payment account will be created.",
       "paidFinanceMethodsUnavailable": "Loans and installments are unavailable when the order is paid on save.",
       "installmentHint": "This uses the normal monthly installment schedule.",
       "summary": "Order Summary",
@@ -6020,6 +6050,7 @@
   "inventory": {
     "errors": {
       "onlineRequired": "Connect to the internet before changing stock in a Cloud or Hybrid workspace.",
+      "insufficientInventory": "{{product}} does not have enough inventory in {{storage}}.",
       "negativeQuantity": "Stock quantity cannot be negative.",
       "invalidQuantity": "Enter a valid finite stock quantity.",
       "authoritativeResultMissing": "The server did not return the updated stock. Refresh and try again.",

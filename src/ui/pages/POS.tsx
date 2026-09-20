@@ -37,7 +37,20 @@ import {
 } from '@/local-db'
 import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { isPosPaymentTypeAllowed, getPosCheckoutRoute, type PosPaymentType } from '@/lib/posPaymentPolicy'
-import { convertPosPrice, getCartBasePrice, getCartEffectivePrice, restorePosCart, snapshotPosCart, applyPosBulkDiscount, hasPosConversionRate } from '@/lib/posCart'
+import {
+    canOfferMobileFreeOnlyOrderHold,
+    canSetPosPaidQuantity,
+    convertPosPrice,
+    getCartBasePrice,
+    getCartEffectivePrice,
+    hasPosOrderFreeBonus,
+    isFreeOnlyPosQuickOrder,
+    restorePosCart,
+    shouldRemovePosCartItem,
+    snapshotPosCart,
+    applyPosBulkDiscount,
+    hasPosConversionRate
+} from '@/lib/posCart'
 import { getCartInventoryQuantity, indexProductUnitContexts, inventoryQuantityToSellingAvailability } from '@/lib/unitRelationships'
 import { commitPosCheckout, PosCheckoutError, loadPosCurrencyConversionPolicy } from '@/local-db/posCheckout'
 import { PosCheckoutAttempt, PosCheckoutPendingError } from '@/lib/posCheckoutAttempt'
@@ -75,6 +88,12 @@ import { exchangeSnapshotsToPayloads } from '@/lib/salesExchange'
 import type { ResolvedActiveDiscount } from '@/lib/discounts'
 import {
     Button,
+    AppDialog,
+    AppDialogBody,
+    AppDialogContent,
+    AppDialogFooter,
+    AppDialogHeader,
+    AppDialogTitle,
     Input,
     Dialog,
     DialogContent,
@@ -937,10 +956,13 @@ export function POS() {
 
     const [paymentType, setPaymentType] = useState<PosPaymentType>(() => quickOrderEnabled ? 'order' : 'cash')
     const canUseOrderFreeBonus = hasCapability('orderFreeBonus')
+    const hasFreeOrderBonus = hasPosOrderFreeBonus(cart)
     const showOrderFreeBonus = canUseOrderFreeBonus && paymentType === 'order'
     const [freeBonusEditorItemKey, setFreeBonusEditorItemKey] = useState<string | null>(null)
     const [freeBonusQuantityInput, setFreeBonusQuantityInput] = useState('')
     const [freeBonusUnitInput, setFreeBonusUnitInput] = useState('')
+    const [mobileFreeOnlyProduct, setMobileFreeOnlyProduct] = useState<PosCatalogProduct | null>(null)
+    const [isAddingMobileFreeOnlyProduct, setIsAddingMobileFreeOnlyProduct] = useState(false)
     const isTutorialPosTask = demoTutorial.isCurrentTask('pos-sale')
     const [digitalProvider, setDigitalProvider] = useState<'fib' | 'qicard' | 'zaincash' | 'fastpay'>('fib')
     const [paymentAccount, setPaymentAccount] = useState<PaymentAccount | null>(null)
@@ -1002,6 +1024,12 @@ export function POS() {
             setFreeBonusEditorItemKey(null)
         }
     }, [showOrderFreeBonus])
+
+    useEffect(() => {
+        if (!hasFreeOrderBonus || !quickOrderEnabled || isActivitiesStorage || paymentType === 'order') return
+        setPaymentType('order')
+        setPaymentAccount(null)
+    }, [hasFreeOrderBonus, isActivitiesStorage, paymentType, quickOrderEnabled])
 
     const resetCheckoutPaymentType = useCallback(() => {
         setPaymentType(quickOrderEnabled ? 'order' : 'cash')
@@ -1335,12 +1363,16 @@ export function POS() {
         const converted = convertPrice(basePrice, itemCurrency, settlementCurrency)
         return sum + (converted * item.quantity)
     }, 0)
+    const isFreeOnlyQuickOrder = isFreeOnlyPosQuickOrder(cart, totalAmount)
     const originalSubtotal = cart.reduce((sum, item) => {
         const itemCurrency = findStockProduct(item.product_id, item.storageId)?.currency || 'usd'
         const converted = convertPrice(getCartBasePrice(item), itemCurrency, settlementCurrency)
         return sum + (converted * item.quantity)
     }, 0)
-    const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0)
+    const totalItems = cart.reduce(
+        (sum, item) => sum + item.quantity + getOrderLineFreeBonusQuantity(item),
+        0
+    )
 
     // Check if any cart item requires a missing exchange rate
     // hasTrulyMissingRates: no rate at all (red alert, blocks checkout)
@@ -1841,13 +1873,122 @@ export function POS() {
         hapticTrigger('selection')
     }, [canSelectProduct, cartCurrencies, currencyConversionEnabled, features, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, t, toast, hapticTrigger])
 
+    const addFreeOnlyProductToCart = useCallback((product: PosCatalogProduct) => {
+        if (!canUseOrderFreeBonus || !quickOrderEnabled || isActivitiesStorage || product.isInfiniteActivity) return false
+        const isNonInventoryService = isService(product)
+        const priceBookPricing = getPriceBookPricing(product)
+        const effectivePrice = priceBookPricing?.price ?? product.price
+        const effectiveCurrency = (priceBookPricing?.currency ?? product.currency) as CurrencyCode
+        const effectiveCostPrice = priceBookPricing?.costPrice ?? product.costPrice
+        const itemKey = buildCartItemKey(product.id, product.storageId)
+
+        if (!canSelectProduct(product)) {
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: t('businessPartners.agent.productCategoryExcluded', { defaultValue: 'This product category is not available to this user.' })
+            })
+            hapticTrigger('error')
+            return false
+        }
+        if (!isNonInventoryService && !hasValidProductCost(effectiveCostPrice)) {
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: getMissingProductCostMessage(product.name)
+            })
+            hapticTrigger('error')
+            return false
+        }
+        if (!isNonInventoryService && product.inventoryQuantity <= 0) return false
+        if (cart.some((item) => getCartItemKey(item) === itemKey)) return false
+        const activeDiscount = getActiveDiscountForProduct(product, effectivePrice, effectiveCurrency)
+
+        setCart((previous) => {
+            if (previous.some((item) => getCartItemKey(item) === itemKey)) return previous
+            const committedInventoryQuantity = previous
+                .filter((item) => item.product_id === product.id && item.storageId === product.storageId)
+                .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
+            if (!isNonInventoryService && committedInventoryQuantity + 1 > product.inventoryQuantity + 0.000001) {
+                return previous
+            }
+
+            return [
+                ...previous,
+                {
+                    product_id: product.id,
+                    storageId: product.storageId,
+                    sku: product.sku,
+                    name: product.name,
+                    price: effectivePrice,
+                    discounted_price: activeDiscount?.discountPrice,
+                    discount_type: activeDiscount?.discountType,
+                    discount_value: activeDiscount?.discountValue,
+                    discount_source: activeDiscount?.source,
+                    discount_ends_at: activeDiscount?.endsAt,
+                    quantity: 0,
+                    freeBonusQuantity: 1,
+                    max_stock: isNonInventoryService
+                        ? ACTIVITY_POS_QUANTITY_LIMIT
+                        : inventoryQuantityToSellingAvailability(product.inventoryQuantity, 1),
+                    imageUrl: product.imageUrl,
+                    unit: product.unit,
+                    selling_unit_ref: null,
+                    selling_unit_code: product.unit,
+                    base_unit_ref: null,
+                    base_unit_code: product.unit,
+                    unit_factor: 1,
+                    is_service: isNonInventoryService,
+                    price_book_id: priceBookPricing?.priceBookId,
+                    price_book_name: priceBookPricing?.priceBookName
+                }
+            ]
+        })
+        setPaymentType('order')
+        setPaymentAccount(null)
+        hapticTrigger('success')
+        return true
+    }, [canSelectProduct, canUseOrderFreeBonus, cart, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, hapticTrigger, isActivitiesStorage, quickOrderEnabled, t, toast])
+
     const addToCart = useCallback((product: PosCatalogProduct) => {
-        if (!product.isInfiniteActivity && !isService(product) && unitContextsByProductId.has(product.id)) {
+        // Quick Orders deliberately use the product's ordinary/base unit.
+        if (paymentType !== 'order' && !product.isInfiniteActivity && !isService(product) && unitContextsByProductId.has(product.id)) {
             setUnitSelectionProduct(product)
             return
         }
         addSelectedUnitToCart(product)
-    }, [addSelectedUnitToCart, unitContextsByProductId])
+    }, [addSelectedUnitToCart, paymentType, unitContextsByProductId])
+
+    const openMobileFreeOnlyProduct = useCallback((product: PosCatalogProduct) => {
+        const alreadyInCart = cart.some((item) => (
+            item.product_id === product.id && item.storageId === product.storageId
+        ))
+        if (!canOfferMobileFreeOnlyOrderHold({
+            canUseOrderFreeBonus,
+            quickOrderEnabled,
+            alreadyInCart,
+            inventoryQuantity: product.inventoryQuantity,
+            isInfiniteActivity: product.isInfiniteActivity === true
+        })) return
+
+        setMobileFreeOnlyProduct(product)
+    }, [canUseOrderFreeBonus, cart, quickOrderEnabled])
+
+    const confirmMobileFreeOnlyProduct = useCallback(async () => {
+        if (!mobileFreeOnlyProduct || isAddingMobileFreeOnlyProduct) return
+        setIsAddingMobileFreeOnlyProduct(true)
+        try {
+            if (addFreeOnlyProductToCart(mobileFreeOnlyProduct)) {
+                setMobileFreeOnlyProduct(null)
+            }
+        } finally {
+            setIsAddingMobileFreeOnlyProduct(false)
+        }
+    }, [addFreeOnlyProductToCart, isAddingMobileFreeOnlyProduct, mobileFreeOnlyProduct])
+
+    useEffect(() => {
+        if (!isLayoutMobile) setMobileFreeOnlyProduct(null)
+    }, [isLayoutMobile])
 
     const chooseProductSellingUnit = useCallback((kind: 'parent' | 'child') => {
         const product = unitSelectionProduct
@@ -1891,12 +2032,26 @@ export function POS() {
         hapticTrigger('warning')
     }
 
+    const showPaidQuantityRequiresFreeBonus = () => {
+        toast({
+            variant: 'destructive',
+            title: t('messages.error', { defaultValue: 'Error' }),
+            description: t('pos.paidQuantityRequiresFreeBonus')
+        })
+        hapticTrigger('error')
+    }
+
     const updateQuantity = (itemKey: string, delta: number) => {
+        const currentItem = cart.find((item) => getCartItemKey(item) === itemKey)
+        if (currentItem && delta < 0 && !canSetPosPaidQuantity(currentItem, currentItem.quantity + delta)) {
+            showPaidQuantityRequiresFreeBonus()
+            return
+        }
         setCart((prev) => {
             const updatedCart = prev.map((item) => {
                 if (getCartItemKey(item) === itemKey) {
-                    const newQty = item.quantity + delta
-                    if (newQty <= 0) return null // Mark for removal
+                    const newQty = Math.max(0, item.quantity + delta)
+                    if (!canSetPosPaidQuantity(item, newQty)) return item
                     const product = findStockProduct(item.product_id, item.storageId)
                     const maxStock = product
                         ? inventoryQuantityToSellingAvailability(product.inventoryQuantity, item.unit_factor ?? 1)
@@ -1904,10 +2059,11 @@ export function POS() {
                     const otherInventoryQuantity = prev
                         .filter((other) => other !== item && other.product_id === item.product_id && other.storageId === item.storageId)
                         .reduce((sum, other) => sum + getCartInventoryQuantity(other), 0)
-                    if (product && otherInventoryQuantity + newQty * (item.unit_factor ?? 1) > product.inventoryQuantity + 0.000001) {
+                    const nextItem = { ...item, quantity: newQty, max_stock: maxStock }
+                    if (product && otherInventoryQuantity + getCartInventoryQuantity(nextItem) > product.inventoryQuantity + 0.000001) {
                         return { ...item, max_stock: maxStock }
                     }
-                    return { ...item, quantity: newQty, max_stock: maxStock }
+                    return shouldRemovePosCartItem(nextItem) ? null : nextItem
                 }
                 return item
             }).filter((item): item is CartItem => item !== null) // Filter out nulls (removed items)
@@ -1917,8 +2073,9 @@ export function POS() {
     }
 
     const setExactQuantity = (itemKey: string, quantity: number) => {
-        if (quantity <= 0) {
-            removeFromCart(itemKey)
+        const currentItem = cart.find((item) => getCartItemKey(item) === itemKey)
+        if (currentItem && !canSetPosPaidQuantity(currentItem, quantity)) {
+            showPaidQuantityRequiresFreeBonus()
             return
         }
         setCart((prev) =>
@@ -1932,12 +2089,17 @@ export function POS() {
                         .filter((other) => other !== item && other.product_id === item.product_id && other.storageId === item.storageId)
                         .reduce((sum, other) => sum + getCartInventoryQuantity(other), 0)
                     const availableForLine = product
-                        ? Math.max(0, inventoryQuantityToSellingAvailability(product.inventoryQuantity - otherInventoryQuantity, item.unit_factor ?? 1))
-                        : maxStock
-                    return { ...item, quantity: Math.min(quantity, availableForLine), max_stock: maxStock }
+                        ? Math.max(
+                            0,
+                            inventoryQuantityToSellingAvailability(product.inventoryQuantity - otherInventoryQuantity, item.unit_factor ?? 1)
+                                - getOrderLineFreeBonusQuantity(item)
+                        )
+                        : Math.max(0, maxStock - getOrderLineFreeBonusQuantity(item))
+                    const nextItem = { ...item, quantity: Math.max(0, Math.min(quantity, availableForLine)), max_stock: maxStock }
+                    return shouldRemovePosCartItem(nextItem) ? null : nextItem
                 }
                 return item
-            })
+            }).filter((item): item is CartItem => item !== null)
         )
     }
 
@@ -1969,8 +2131,14 @@ export function POS() {
         }
 
         const product = findStockProduct(cartItem.product_id, cartItem.storageId)
+        const nextItem = { ...cartItem, freeBonusQuantity }
+        const otherInventoryQuantity = cart
+            .filter((item) => getCartItemKey(item) !== freeBonusEditorItemKey
+                && item.product_id === cartItem.product_id
+                && item.storageId === cartItem.storageId)
+            .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
         const availableQuantity = product?.inventoryQuantity ?? cartItem.max_stock
-        if (cartItem.quantity + freeBonusQuantity > availableQuantity) {
+        if (otherInventoryQuantity + getCartInventoryQuantity(nextItem) > availableQuantity + 0.000001) {
             toast({
                 variant: 'destructive',
                 title: t('messages.error', { defaultValue: 'Error' }),
@@ -1986,14 +2154,15 @@ export function POS() {
         setCart((current) => current.map((item) => {
             if (getCartItemKey(item) !== freeBonusEditorItemKey) return item
 
-            return {
+            const updatedItem = {
                 ...item,
                 freeBonusQuantity: freeBonusQuantity || undefined,
                 freeBonusUnit: freeBonusQuantity > 0 && selectedDisplayUnit && selectedDisplayUnit !== productUnit
                     ? selectedDisplayUnit
                     : undefined
             }
-        }))
+            return shouldRemovePosCartItem(updatedItem) ? null : updatedItem
+        }).filter((item): item is CartItem => item !== null))
         setFreeBonusEditorItemKey(null)
         hapticTrigger('success')
     }
@@ -2865,6 +3034,12 @@ export function POS() {
         if (cart.some((item) => item.selling_unit_ref && item.base_unit_ref)) {
             throw new Error(t('pos.unitSelection.ordersUnsupported'))
         }
+        if (cart.some(shouldRemovePosCartItem)) {
+            throw new Error(t('pos.invalidCartQuantity'))
+        }
+        if (hasFreeOrderBonus && !canUseOrderFreeBonus) {
+            throw new Error(t('pos.freeBonusPermissionRequired'))
+        }
 
         const restrictedCartItem = cart.find((item) => {
             const product = products.find((candidate) => candidate.id === item.product_id && candidate.storageId === item.storageId)
@@ -2918,9 +3093,7 @@ export function POS() {
                 const effectivePrice = getCartEffectivePrice(item)
                 const convertedUnitPrice = roundOrderValue(convertPrice(effectivePrice, originalCurrency, settlementCurrency))
                 const sourceCostPrice = Number(priceBookItem?.costPrice ?? product.costPrice ?? 0)
-                const freeBonusQuantity = canUseOrderFreeBonus
-                    ? getOrderLineFreeBonusQuantity(item)
-                    : 0
+                const freeBonusQuantity = getOrderLineFreeBonusQuantity(item)
 
                 return {
                     id: generateId(),
@@ -3105,6 +3278,9 @@ export function POS() {
                                 filteredProducts={filteredProducts}
                                 cart={cart}
                                 addToCart={addToCart}
+                                onHoldForFreeOnlyOrder={openMobileFreeOnlyProduct}
+                                canUseOrderFreeBonus={canUseOrderFreeBonus}
+                                quickOrderEnabled={quickOrderEnabled && !isActivitiesStorage}
                                 updateQuantity={updateQuantity}
                                 features={features}
                                 getDisplayImageUrl={getDisplayImageUrl}
@@ -3127,6 +3303,7 @@ export function POS() {
                                 settlementCurrency={settlementCurrency}
                                 paymentType={paymentType}
                                 setPaymentType={setPaymentType}
+                                isOrderPaymentLocked={hasFreeOrderBonus}
                                 workspaceId={user?.workspaceId}
                                 paymentAccount={paymentAccount}
                                 setPaymentAccount={setPaymentAccount}
@@ -3617,9 +3794,9 @@ export function POS() {
                                                                         onBlur={() => {
                                                                             const raw = dynamicInputBuffer[itemKey]
                                                                             if (raw !== undefined) {
-                                                                                const parsed = parseFloat(raw)
-                                                                                if (!isNaN(parsed) && parsed === 0) {
-                                                                                    removeFromCart(itemKey)
+                                                                            const parsed = parseFloat(raw)
+                                                                            if (!isNaN(parsed) && parsed === 0) {
+                                                                                setExactQuantity(itemKey, 0)
                                                                                 }
                                                                             }
                                                                             setDynamicInputBuffer((prev) => {
@@ -3816,8 +3993,11 @@ export function POS() {
                                                 setPaymentType('cash')
                                                 setPaymentAccount((current) => current?.accountType === 'cash_drawer' ? current : null)
                                             }}
+                                            disabled={hasFreeOrderBonus}
+                                            title={hasFreeOrderBonus ? t('pos.freeBonusOrderOnly') : undefined}
                                             className={cn(
                                                 "px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 border transition-all",
+                                                hasFreeOrderBonus && "cursor-not-allowed opacity-45",
                                                 paymentType === 'cash'
                                                     ? "bg-emerald-100 text-emerald-900 shadow-sm border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-800"
                                                     : "bg-emerald-50/30 text-emerald-700 border-emerald-100/30 hover:bg-emerald-100/50 dark:bg-emerald-500/5 dark:text-emerald-400 dark:border-emerald-500/10 dark:hover:bg-emerald-500/10"
@@ -3844,8 +4024,11 @@ export function POS() {
                                                 setPaymentType('digital')
                                                 selectDigitalProvider(digitalProvider)
                                             }}
+                                            disabled={hasFreeOrderBonus}
+                                            title={hasFreeOrderBonus ? t('pos.freeBonusOrderOnly') : undefined}
                                             className={cn(
                                                 "px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 border transition-all",
+                                                hasFreeOrderBonus && "cursor-not-allowed opacity-45",
                                                 paymentType === 'digital'
                                                     ? "bg-blue-100 text-blue-900 shadow-sm border-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800"
                                                     : "bg-blue-50/30 text-blue-700 border-blue-100/30 hover:bg-blue-100/50 dark:bg-blue-500/5 dark:text-blue-400 dark:border-blue-500/10 dark:hover:bg-blue-500/10"
@@ -3857,12 +4040,13 @@ export function POS() {
                                         {!isActivitiesStorage && <button
                                             data-tour-id="tutorial-pos-payment-loan"
                                             onClick={() => {
-                                                if (!isTutorialPosTask) setPaymentType('loan')
+                                                if (!isTutorialPosTask && !hasFreeOrderBonus) setPaymentType('loan')
                                             }}
-                                            disabled={isTutorialPosTask}
+                                            disabled={isTutorialPosTask || hasFreeOrderBonus}
+                                            title={hasFreeOrderBonus ? t('pos.freeBonusOrderOnly') : undefined}
                                             className={cn(
                                                 "px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 border transition-all",
-                                                isTutorialPosTask
+                                                isTutorialPosTask || hasFreeOrderBonus
                                                     ? "cursor-not-allowed border-border bg-muted text-muted-foreground opacity-80"
                                                     : paymentType === 'loan'
                                                     ? "bg-rose-100 text-rose-900 shadow-sm border-rose-200 dark:bg-rose-900/40 dark:text-rose-300 dark:border-rose-800"
@@ -3977,7 +4161,7 @@ export function POS() {
                                     data-tour-id="tutorial-pos-checkout"
                                     className="flex-[3] h-14 text-xl shadow-lg shadow-primary/20 rounded-2xl"
                                     onClick={() => handleCheckout()}
-                                    disabled={cart.length === 0 || cart.some((item) => item.quantity <= 0) || isLoading || hasTrulyMissingRates}
+                                    disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates}
                                 >
                                     {isLoading ? (
                                         <Loader2 className="w-6 h-6 animate-spin mr-2" />
@@ -4485,7 +4669,7 @@ export function POS() {
                                                 if (raw !== undefined) {
                                                     const parsed = parseFloat(raw)
                                                     if (!isNaN(parsed) && parsed === 0) {
-                                                        removeFromCart(dynamicUnitModal.itemKey)
+                                                        setExactQuantity(dynamicUnitModal.itemKey, 0)
                                                         setDynamicUnitModal(null)
                                                     }
                                                 }
@@ -4524,6 +4708,56 @@ export function POS() {
                 onSubmit={(data) => handleCheckout(data)}
             />
 
+            {isLayoutMobile ? (
+                <AppDialog
+                    open={mobileFreeOnlyProduct !== null}
+                    onOpenChange={(open) => {
+                        if (!open && !isAddingMobileFreeOnlyProduct) setMobileFreeOnlyProduct(null)
+                    }}
+                >
+                    <AppDialogContent className="max-w-md">
+                        <AppDialogHeader>
+                            <AppDialogTitle className="flex items-center gap-2">
+                                <span className="rounded-xl bg-emerald-500/10 p-2 text-emerald-600 dark:text-emerald-400">
+                                    <Gift className="h-5 w-5" />
+                                </span>
+                                {t('pos.freeOnlyOrder.title')}
+                            </AppDialogTitle>
+                        </AppDialogHeader>
+                        <AppDialogBody className="space-y-4">
+                            <div className="rounded-2xl border bg-muted/30 p-4">
+                                <p className="font-semibold">{mobileFreeOnlyProduct?.name}</p>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                    {t('pos.freeOnlyOrder.description')}
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.06] p-4 text-emerald-900 dark:text-emerald-100">
+                                <Gift className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                                <span className="font-black">{t('pos.freeOnlyOrder.line')}</span>
+                            </div>
+                        </AppDialogBody>
+                        <AppDialogFooter>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                disabled={isAddingMobileFreeOnlyProduct}
+                                onClick={() => setMobileFreeOnlyProduct(null)}
+                            >
+                                {t('common.cancel')}
+                            </Button>
+                            <Button
+                                type="button"
+                                disabled={isAddingMobileFreeOnlyProduct || mobileFreeOnlyProduct === null}
+                                onClick={() => void confirmMobileFreeOnlyProduct()}
+                            >
+                                {isAddingMobileFreeOnlyProduct ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Gift className="mr-2 h-4 w-4" />}
+                                {t('pos.freeOnlyOrder.add')}
+                            </Button>
+                        </AppDialogFooter>
+                    </AppDialogContent>
+                </AppDialog>
+            ) : null}
+
             <QuickOrderModal
                 isOpen={isQuickOrderModalOpen && quickOrderEnabled}
                 onOpenChange={(open) => {
@@ -4546,6 +4780,7 @@ export function POS() {
                 commissionExchangeRates={quickOrderCommissionExchangeRates}
                 commissionCurrencies={Array.from(new Set([features.default_currency, ...features.allowed_currencies])) as CurrencyCode[]}
                 commissionAssignedBy={user?.id}
+                isFreeOnlyOrder={isFreeOnlyQuickOrder}
                 isSubmitting={isLoading}
                 progressStage={quickOrderProgressStage}
                 onSubmit={handleQuickOrderSubmit}
@@ -5096,6 +5331,9 @@ interface MobileGridProps {
     filteredProducts: PosCatalogProduct[]
     cart: CartItem[]
     addToCart: (p: PosCatalogProduct) => void
+    onHoldForFreeOnlyOrder: (p: PosCatalogProduct) => void
+    canUseOrderFreeBonus: boolean
+    quickOrderEnabled: boolean
     updateQuantity: (itemKey: string, d: number) => void
     features: WorkspaceFeatures
     getDisplayImageUrl: (url?: string) => string
@@ -5115,7 +5353,21 @@ interface MobileGridProps {
     tutorialProductId?: string
 }
 
-function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModalOpen, isDeviceScannerAutoEnabled, filteredProducts, cart, addToCart, updateQuantity, features, getDisplayImageUrl, categories, selectedCategory, setSelectedCategory, getActiveDiscount, getPriceBookPricing, showQuantityIndicator, showCategories, tutorialProductId }: MobileGridProps) {
+function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModalOpen, isDeviceScannerAutoEnabled, filteredProducts, cart, addToCart, onHoldForFreeOnlyOrder, canUseOrderFreeBonus, quickOrderEnabled, updateQuantity, features, getDisplayImageUrl, categories, selectedCategory, setSelectedCategory, getActiveDiscount, getPriceBookPricing, showQuantityIndicator, showCategories, tutorialProductId }: MobileGridProps) {
+    const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const suppressCatalogClickRef = useRef(false)
+
+    const clearCatalogHold = () => {
+        if (holdTimerRef.current !== null) {
+            clearTimeout(holdTimerRef.current)
+            holdTimerRef.current = null
+        }
+    }
+
+    useEffect(() => () => {
+        if (holdTimerRef.current !== null) clearTimeout(holdTimerRef.current)
+    }, [])
+
     return (
         <div className="flex flex-col gap-4 animate-in fade-in slide-in-from-right-4 duration-300">
             {/* Search & Tool Bar */}
@@ -5197,6 +5449,13 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                     const priceCurrency = (priceBookPricing?.currency ?? product.currency) as CurrencyCode
                     const activeDiscount = getActiveDiscount(product, basePrice, priceCurrency)
                     const displayPrice = activeDiscount?.discountPrice ?? basePrice
+                    const canHoldForFreeOnlyOrder = canOfferMobileFreeOnlyOrderHold({
+                        canUseOrderFreeBonus,
+                        quickOrderEnabled,
+                        alreadyInCart: productCartItems.length > 0,
+                        inventoryQuantity: product.inventoryQuantity,
+                        isInfiniteActivity
+                    })
 
                     return (
                         <div
@@ -5208,7 +5467,30 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                             )}
                             onClick={(e) => {
                                 if ((e.target as HTMLElement).closest('button')) return;
+                                if (suppressCatalogClickRef.current) {
+                                    suppressCatalogClickRef.current = false
+                                    e.preventDefault()
+                                    return
+                                }
                                 if (isInfiniteActivity || isServiceProduct || remainingQuantity > 0) addToCart(product);
+                            }}
+                            onPointerDown={(event) => {
+                                if (event.pointerType !== 'touch'
+                                    || !canHoldForFreeOnlyOrder
+                                    || (event.target as HTMLElement).closest('button')) return
+                                clearCatalogHold()
+                                holdTimerRef.current = setTimeout(() => {
+                                    holdTimerRef.current = null
+                                    suppressCatalogClickRef.current = true
+                                    onHoldForFreeOnlyOrder(product)
+                                }, 600)
+                            }}
+                            onPointerMove={clearCatalogHold}
+                            onPointerUp={clearCatalogHold}
+                            onPointerCancel={clearCatalogHold}
+                            onPointerLeave={clearCatalogHold}
+                            onContextMenu={(event) => {
+                                if (canHoldForFreeOnlyOrder) event.preventDefault()
                             }}
                         >
                             <div className="aspect-square bg-muted/30 rounded-[1.5rem] overflow-hidden relative">
@@ -5341,6 +5623,7 @@ interface MobileCartProps {
     settlementCurrency: string
     paymentType: PosPaymentType
     setPaymentType: (t: PosPaymentType) => void
+    isOrderPaymentLocked: boolean
     workspaceId?: string
     paymentAccount: PaymentAccount | null
     setPaymentAccount: (account: PaymentAccount | null) => void
@@ -5379,7 +5662,7 @@ interface MobileCartProps {
 
 function MobileCart({
     cart, removeFromCart, updateQuantity, features, totalAmount,
-    settlementCurrency, paymentType, setPaymentType, isTutorialPosTask, tutorialProductId, digitalProvider,
+    settlementCurrency, paymentType, setPaymentType, isOrderPaymentLocked, isTutorialPosTask, tutorialProductId, digitalProvider,
     setDigitalProvider, workspaceId, paymentAccount, setPaymentAccount, quickOrderEnabled, handleCheckout, handleHoldSale, isLoading,
     canPreprintReceipt, handlePreprintReceipt, isPreprinting, isLoadingPreprintTemplate,
     getDisplayImageUrl, products, convertPrice, openPriceEdit,
@@ -5615,7 +5898,7 @@ function MobileCart({
                                                         if (raw !== undefined) {
                                                             const parsed = parseFloat(raw)
                                                             if (!isNaN(parsed) && parsed === 0) {
-                                                                removeFromCart(itemKey)
+                                                                setExactQuantity(itemKey, 0)
                                                             }
                                                         }
                                                         setMobileInputBuffer((prev) => {
@@ -5731,7 +6014,7 @@ function MobileCart({
                                     e.stopPropagation();
                                     handleCheckout();
                                 }}
-                                disabled={cart.length === 0 || cart.some((item) => item.quantity <= 0) || isLoading || hasTrulyMissingRates}
+                                disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates}
                             >
                                 {isLoading ? <Loader2 className="animate-spin w-5 h-5" /> : (
                                     <div className="flex items-center gap-2">
@@ -5781,8 +6064,11 @@ function MobileCart({
                                     setPaymentType('cash')
                                     setPaymentAccount(paymentAccount?.accountType === 'cash_drawer' ? paymentAccount : null)
                                 }}
+                                disabled={isOrderPaymentLocked}
+                                title={isOrderPaymentLocked ? t('pos.freeBonusOrderOnly') : undefined}
                                 className={cn(
                                     "flex-1 py-3.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all border",
+                                    isOrderPaymentLocked && "cursor-not-allowed opacity-45",
                                     paymentType === 'cash'
                                         ? "bg-emerald-100 text-emerald-900 shadow-lg border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-800"
                                         : "bg-emerald-50/30 text-emerald-700 border-emerald-100/30 dark:bg-emerald-500/5 dark:text-emerald-400 dark:border-emerald-500/10"
@@ -5807,8 +6093,11 @@ function MobileCart({
                                     setPaymentType('digital')
                                     setDigitalProvider(digitalProvider)
                                 }}
+                                disabled={isOrderPaymentLocked}
+                                title={isOrderPaymentLocked ? t('pos.freeBonusOrderOnly') : undefined}
                                 className={cn(
                                     "flex-1 py-3.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all border",
+                                    isOrderPaymentLocked && "cursor-not-allowed opacity-45",
                                     paymentType === 'digital'
                                         ? "bg-blue-100 text-blue-900 shadow-lg border-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800"
                                         : "bg-blue-50/30 text-blue-700 border-blue-100/30 dark:bg-blue-500/5 dark:text-blue-400 dark:border-blue-500/10"
@@ -5819,12 +6108,13 @@ function MobileCart({
                             {!isActivitiesStorage && <button
                                 data-tour-id="tutorial-pos-payment-loan"
                                 onClick={() => {
-                                    if (!isTutorialPosTask) setPaymentType('loan')
+                                    if (!isTutorialPosTask && !isOrderPaymentLocked) setPaymentType('loan')
                                 }}
-                                disabled={isTutorialPosTask}
+                                disabled={isTutorialPosTask || isOrderPaymentLocked}
+                                title={isOrderPaymentLocked ? t('pos.freeBonusOrderOnly') : undefined}
                                 className={cn(
                                     "flex-1 py-3.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all border",
-                                    isTutorialPosTask
+                                    isTutorialPosTask || isOrderPaymentLocked
                                         ? "cursor-not-allowed border-border bg-muted text-muted-foreground opacity-80"
                                         : paymentType === 'loan'
                                         ? "bg-rose-100 text-rose-900 shadow-lg border-rose-200 dark:bg-rose-900/40 dark:text-rose-300 dark:border-rose-800"
@@ -5938,7 +6228,7 @@ function MobileCart({
                                     data-tour-id="tutorial-pos-checkout"
                                     className="flex-[4] h-14 rounded-2xl text-lg font-black shadow-xl shadow-primary/20 active:scale-95 transition-all text-primary-foreground"
                                     onClick={() => handleCheckout()}
-                                    disabled={cart.length === 0 || cart.some((item) => item.quantity <= 0) || isLoading || hasTrulyMissingRates}
+                                disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates}
                                 >
                                     {isLoading ? <Loader2 className="animate-spin w-6 h-6" /> : (
                                         <div className="flex items-center gap-2">

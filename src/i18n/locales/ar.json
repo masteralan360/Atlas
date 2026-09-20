@@ -925,6 +925,23 @@
     "cancelReason": "سبب الإلغاء",
     "customerNote": "ملاحظة",
     "transitionSuccess": "تم تحديث طلب السوق بنجاح.",
+    "transitionFailed": "فشل تحديث طلب السوق.",
+    "transitionRefreshFailed": "تم تقديم الطلب، لكن تعذر تحميل حالته المحدّثة. توقف التقديم التلقائي.",
+    "advanceSequenceSuccess": "تم تقديم الطلب إلى حالة {{status}}.",
+    "autoAdvance": {
+      "title": "تقديم الطلب",
+      "description": "ينتقل الطلب عبر كل خطوة مطلوبة في سير العمل.",
+      "order": "الطلب",
+      "target": "الحالة المستهدفة",
+      "currentStep": "يتم التقديم الآن إلى {{status}}",
+      "progress": "اكتملت {{completed}} من {{total}} خطوات",
+      "progressLabel": "تقدم تقديم الطلب",
+      "stepsLabel": "خطوات تقديم الطلب",
+      "completed": "مكتملة",
+      "inProgress": "قيد التنفيذ",
+      "pending": "بانتظار التنفيذ",
+      "blockingHint": "أبقِ هذه الصفحة مفتوحة. ستُفتح عناصر التحكم عند الوصول إلى الحالة المستهدفة أو إذا فشلت إحدى الخطوات."
+    },
     "status": {
       "pending": "قيد الانتظار",
       "confirmed": "مؤكد",
@@ -935,6 +952,7 @@
       "cancelled": "ملغي"
     },
     "actions": {
+      "advanceToStatus": "التقديم إلى حالة",
       "confirm": "تأكيد الطلب",
       "process": "بدء المعالجة",
       "ship": "تحديده كمشحون",
@@ -3000,11 +3018,23 @@
     },
     "checkoutPendingRecovery": "البيع {{saleId}} ما زال بانتظار التأكيد. أعد محاولة السلة وتفاصيل الدفع نفسها لتأكيده بأمان. راجع المبيعات قبل تغيير هذه العملية.",
     "checkoutCommittedRecovery": "تم حفظ البيع {{saleId}}، لكن تعذر إكمال الدفع أو العرض المحلي. راجعه في المبيعات والمدفوعات قبل إجراء بيع آخر.",
+    "freeBonusOrderOnly": "لا يمكن حفظ كميات البونص المجاني إلا كطلب.",
+    "paidQuantityRequiresFreeBonus": "أضف كمية بونص مجاني واحدة على الأقل قبل خفض الكمية المدفوعة إلى صفر.",
+    "freeBonusPermissionRequired": "لم تعد لديك صلاحية حفظ كميات البونص المجاني في طلب سريع.",
+    "invalidCartQuantity": "يجب أن يحتوي كل بند في السلة على كمية مدفوعة أو بونص مجاني.",
+    "freeOnlyOrder": {
+      "title": "إضافة منتج مجاني",
+      "description": "سيُضاف هذا المنتج إلى طلب سريع بوحدته القياسية.",
+      "line": "مدفوع 0 / مجاني 1",
+      "add": "إضافة كمجاني"
+    },
     "quickOrder": {
       "title": "طلب سريع",
       "description": "اختر العميل وحالة الطلب وتفاصيل الدفع لطلب المبيعات هذا.",
       "orderStatusOnSave": "حالة الطلب عند الحفظ",
       "paymentStatusOnSave": "حالة الدفع عند الحفظ",
+      "freeOnlySettledTitle": "طلب مجاني فقط — لا يوجد دفع لتحصيله",
+      "freeOnlySettledDescription": "يُسوّى هذا الطلب السريع ذو الإجمالي الصفري تلقائياً. لن يتم إنشاء معاملة دفع أو حساب دفع.",
       "paidFinanceMethodsUnavailable": "القروض والأقساط غير متاحة عند تحديد الطلب كمدفوع عند الحفظ.",
       "installmentHint": "يستخدم هذا جدول الأقساط الشهرية المعتاد.",
       "summary": "ملخص الطلب",
@@ -4294,6 +4324,7 @@
   "inventory": {
     "errors": {
       "onlineRequired": "اتصل بالإنترنت قبل تغيير المخزون في مساحة عمل سحابية أو هجينة.",
+      "insufficientInventory": "لا يتوفر مخزون كافٍ من {{product}} في {{storage}}.",
       "negativeQuantity": "لا يمكن أن تكون كمية المخزون سالبة.",
       "invalidQuantity": "أدخل كمية مخزون رقمية صحيحة ومحدودة.",
       "authoritativeResultMissing": "لم يُرجع الخادم المخزون المحدّث. حدّث البيانات وحاول مرة أخرى.",

@@ -45,6 +45,10 @@ import {
     MarketplaceDeliveryFeeBadge
 } from './MarketplaceOrderPresentation'
 import { getMarketplaceDisplayItems } from './MarketplaceOrderDisplayItems'
+import {
+    getLaterMarketplaceOrderStatuses,
+    getNextMarketplaceOrderStatus
+} from './MarketplaceOrderWorkflow'
 import type { MarketplaceOrderRecord, MarketplaceOrderStatus } from './MarketplaceOrderTypes'
 import {
     Button,
@@ -52,6 +56,12 @@ import {
     CardContent,
     CardHeader,
     CardTitle,
+    ContextMenu,
+    ContextMenuContent,
+    ContextMenuItem,
+    ContextMenuLabel,
+    ContextMenuSeparator,
+    ContextMenuTrigger,
     Dialog,
     DialogContent,
     DialogFooter,
@@ -65,14 +75,6 @@ import {
     TableRow,
     Textarea
 } from '@/ui/components'
-
-function nextActionForStatus(status: MarketplaceOrderStatus) {
-    if (status === 'pending') return 'confirmed'
-    if (status === 'confirmed') return 'processing'
-    if (status === 'processing') return 'shipped'
-    if (status === 'shipped') return 'delivered'
-    return null
-}
 
 function transitionActionLabel(t: (key: string, options?: Record<string, unknown>) => string, nextStatus: MarketplaceOrderStatus | null) {
     if (nextStatus === 'confirmed') return t('ecommerce.actions.confirm', { defaultValue: 'Confirm Order' })
@@ -225,7 +227,7 @@ export function EcommerceDetailView({
     productImageUrls: MarketplaceProductImageUrls
     isSaving: boolean
     isOpeningCollection: boolean
-    onAdvance: (nextStatus: MarketplaceOrderStatus) => Promise<void>
+    onAdvance: (nextStatus: MarketplaceOrderStatus, mode?: 'manual' | 'automatic') => Promise<void>
     onCancel: (reason: string) => Promise<void>
     onRecordCollection: (salesOrderId: string) => Promise<void>
     onSaveItems: (orderId: string, items: EditableMarketplaceOrderItem[]) => Promise<void>
@@ -239,7 +241,8 @@ export function EcommerceDetailView({
     const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => (
         localStorage.getItem('ecommerce_details_view_mode') === 'grid' ? 'grid' : 'table'
     ))
-    const nextStatus = nextActionForStatus(order.status)
+    const nextStatus = getNextMarketplaceOrderStatus(order.status)
+    const laterStatuses = getLaterMarketplaceOrderStatuses(order.status)
     const displayItems = getMarketplaceDisplayItems(order.items)
     const canEditItems = order.status !== 'delivered' && order.status !== 'cancelled'
     const AdvanceActionIcon = nextStatus ? transitionActionIcon(nextStatus) : null
@@ -397,16 +400,42 @@ export function EcommerceDetailView({
                         </Button>
                     )}
                     {nextStatus && AdvanceActionIcon ? (
-                        <PressAndHoldButton
-                            icon={<AdvanceActionIcon className="mr-2 h-4 w-4" aria-hidden="true" />}
-                            disabled={isSaving}
-                            onComplete={() => onAdvance(nextStatus)}
-                            idleLabel={transitionActionLabel(t as any, nextStatus)}
-                            holdingLabel={t('orders.actions.keepHolding', { defaultValue: 'Keep holding…' })}
-                            loadingLabel={transitionActionLabel(t as any, nextStatus)}
-                            isLoading={isSaving}
-                            durationMs={ORDER_STATUS_ADVANCE_HOLD_DURATION_MS}
-                        />
+                        <ContextMenu>
+                            <ContextMenuTrigger asChild disabled={isSaving}>
+                                <span className="inline-flex">
+                                    <PressAndHoldButton
+                                        icon={<AdvanceActionIcon className="mr-2 h-4 w-4" aria-hidden="true" />}
+                                        disabled={isSaving}
+                                        onComplete={() => onAdvance(nextStatus, 'manual')}
+                                        idleLabel={transitionActionLabel(t as any, nextStatus)}
+                                        holdingLabel={t('orders.actions.keepHolding', { defaultValue: 'Keep holding…' })}
+                                        loadingLabel={transitionActionLabel(t as any, nextStatus)}
+                                        isLoading={isSaving}
+                                        durationMs={ORDER_STATUS_ADVANCE_HOLD_DURATION_MS}
+                                    />
+                                </span>
+                            </ContextMenuTrigger>
+                            <ContextMenuContent className="w-56">
+                                <ContextMenuLabel>
+                                    {t('ecommerce.actions.advanceToStatus', { defaultValue: 'Advance to status' })}
+                                </ContextMenuLabel>
+                                <ContextMenuSeparator />
+                                {laterStatuses.map((status) => {
+                                    const StatusIcon = transitionActionIcon(status)
+                                    return (
+                                        <ContextMenuItem
+                                            key={status}
+                                            className="gap-2"
+                                            disabled={isSaving}
+                                            onSelect={() => void onAdvance(status, 'automatic')}
+                                        >
+                                            <StatusIcon className="h-4 w-4" aria-hidden="true" />
+                                            {t(`ecommerce.status.${status}`, { defaultValue: status })}
+                                        </ContextMenuItem>
+                                    )
+                                })}
+                            </ContextMenuContent>
+                        </ContextMenu>
                     ) : null}
                     {(order.status === 'pending' || order.status === 'confirmed' || order.status === 'processing') && (
                         <Button

@@ -6,6 +6,7 @@ import type {
   UnitRelationship,
 } from '@/local-db/models'
 import { DEFAULT_UNITS, normalizeUnitCode } from '@/local-db/models'
+import { getOrderLineInventoryQuantity } from '@/lib/orderLineItems'
 import { roundQuantity } from '@/lib/quantity'
 
 export interface UnitDescriptor {
@@ -208,8 +209,21 @@ export function inventoryQuantityToSellingAvailability(quantity: number, factor 
   return roundQuantity(quantity / factor)
 }
 
-export function getCartInventoryQuantity(item: { quantity: number; unit_factor?: number | null }): number {
-  return soldQuantityToInventoryQuantity(item.quantity, item.unit_factor ?? 1)
+/**
+ * POS Order lines can contain paid and free quantities. Both consume the
+ * selected product's inventory, while only the paid quantity contributes to
+ * the line price. Keep the conversion here so every POS stock check, badge,
+ * and batch allocation uses the same quantity.
+ */
+export function getCartInventoryQuantity(item: {
+  quantity: number
+  freeBonusQuantity?: number | null
+  unit_factor?: number | null
+}): number {
+  return soldQuantityToInventoryQuantity(
+    getOrderLineInventoryQuantity(item),
+    item.unit_factor ?? 1,
+  )
 }
 
 export interface HierarchicalQuantityParts {

@@ -2997,6 +2997,10 @@ export async function createQuickSalesOrder(
         && shouldUseCloudBusinessData(workspaceId)
         && isOnline(workspaceId)
         && !isOrderFinancingMethod(data.paymentMethod)
+        // A free-only Quick Order is settled without collecting money. Keep it
+        // on the regular order path so no zero-value payment payload reaches
+        // the atomic checkout RPC.
+        && Number(data.total ?? 0) > ORDER_AMOUNT_EPSILON
         && data.isPaid === true
         && Math.abs(Number(data.paidAmount ?? 0) - Number(data.total ?? 0)) <= ORDER_AMOUNT_EPSILON
         && Number(data.balanceAmount ?? 0) <= ORDER_AMOUNT_EPSILON

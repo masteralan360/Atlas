@@ -72,6 +72,22 @@ function localizePaymentAccountInsufficientFundsError(error: unknown): Error | n
     return null
 }
 
+function localizeInsufficientInventoryError(error: unknown): Error | null {
+    const message = getErrorMessage(error)
+    const inventoryMatch = message.match(/^Insufficient inventory for (.+) in storage (.+?)(?:\.)?$/)
+    if (!inventoryMatch) return null
+
+    const storage = inventoryMatch[2] === 'Unknown storage'
+        ? i18n.t('inventoryTransfer.unknownStorage', { defaultValue: 'Unknown storage' })
+        : inventoryMatch[2]
+
+    return new Error(i18n.t('inventory.errors.insufficientInventory', {
+        product: inventoryMatch[1],
+        storage,
+        defaultValue: '{{product}} does not have enough inventory in {{storage}}.'
+    }))
+}
+
 function isNetworkLikeError(error: unknown): boolean {
     const message = getErrorMessage(error).toLowerCase()
     const status = getErrorStatus(error)
@@ -99,6 +115,11 @@ export function normalizeSupabaseActionError(error: unknown): Error {
     const localizedPaymentAccountError = localizePaymentAccountInsufficientFundsError(error)
     if (localizedPaymentAccountError) {
         return localizedPaymentAccountError
+    }
+
+    const localizedInventoryError = localizeInsufficientInventoryError(error)
+    if (localizedInventoryError) {
+        return localizedInventoryError
     }
 
     if (error instanceof Error) {

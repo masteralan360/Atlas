@@ -1,5 +1,6 @@
 import type { CurrencyCode } from '@/local-db/models'
 import type { CartItem } from '@/types'
+import { getOrderLineFreeBonusQuantity, getOrderLinePaidQuantity } from '@/lib/orderLineItems'
 import { inventoryQuantityToSellingAvailability } from '@/lib/unitRelationships'
 
 export interface PosRates {
@@ -45,6 +46,55 @@ export function convertPosPrice(amount: number, from: CurrencyCode, to: Currency
 export function getCartBasePrice(item: CartItem) { return item.discounted_price ?? item.price }
 export function getCartEffectivePrice(item: CartItem) { return item.negotiated_price ?? getCartBasePrice(item) }
 export function snapshotPosCart(items: CartItem[]) { return items.map(item => ({ ...item })) }
+
+/** A free quantity forces the cart through the Sales Order checkout route. */
+export function hasPosOrderFreeBonus(items: readonly CartItem[]) {
+    return items.some((item) => getOrderLineFreeBonusQuantity(item) > 0)
+}
+
+/** Paid quantity may reach zero only after the line includes a free quantity. */
+export function canSetPosPaidQuantity(item: CartItem, quantity: number) {
+    return getOrderLinePaidQuantity({ quantity }) > 0
+        || getOrderLineFreeBonusQuantity(item) > 0
+}
+
+/** Remove a cart line only when it has neither a paid nor a free quantity. */
+export function shouldRemovePosCartItem(item: CartItem) {
+    return getOrderLinePaidQuantity(item) <= 0
+        && getOrderLineFreeBonusQuantity(item) <= 0
+}
+
+/**
+ * The Quick Order dialog suppresses payment collection only for a genuine
+ * free-only cart, never for an unrelated discounted zero-total sale.
+ */
+export function isFreeOnlyPosQuickOrder(items: readonly CartItem[], totalAmount: number) {
+    return Number.isFinite(totalAmount)
+        && totalAmount <= 0
+        && hasPosOrderFreeBonus(items)
+        && items.every((item) => getOrderLinePaidQuantity(item) <= 0)
+}
+
+/** Mobile hold-to-add is available only for an uncatalogued in-stock Quick Order product. */
+export function canOfferMobileFreeOnlyOrderHold({
+    canUseOrderFreeBonus,
+    quickOrderEnabled,
+    alreadyInCart,
+    inventoryQuantity,
+    isInfiniteActivity
+}: {
+    canUseOrderFreeBonus: boolean
+    quickOrderEnabled: boolean
+    alreadyInCart: boolean
+    inventoryQuantity: number
+    isInfiniteActivity: boolean
+}) {
+    return canUseOrderFreeBonus
+        && quickOrderEnabled
+        && !alreadyInCart
+        && !isInfiniteActivity
+        && inventoryQuantity > 0
+}
 
 /** Refresh stock limits when restoring; checkout revalidates availability. */
 export function restorePosCart(items: CartItem[], fallbackStorageId: string,

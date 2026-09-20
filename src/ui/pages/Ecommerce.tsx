@@ -68,10 +68,24 @@ import {
 } from '@/workspace/workspaceDataFreshness'
 import { EcommerceDetailView } from '@/ui/components/ecommerce/EcommerceDetailView'
 import {
+    MarketplaceOrderAdvancementDialog,
+    type MarketplaceOrderAdvancementProgress
+} from '@/ui/components/ecommerce/MarketplaceOrderAdvancementDialog'
+import {
     EcommerceStatusBadge,
     MarketplaceDeliveryFeeBadge
 } from '@/ui/components/ecommerce/MarketplaceOrderPresentation'
 import { getMarketplaceDisplayItems } from '@/ui/components/ecommerce/MarketplaceOrderDisplayItems'
+import {
+    getMarketplaceOrderAdvancementPath,
+    getMarketplaceOrderRefreshDisposition,
+    runMarketplaceOrderAdvancement
+} from '@/ui/components/ecommerce/MarketplaceOrderWorkflow'
+import {
+    executeMarketplaceOrderTransition,
+    type MarketplaceOrderTransitionArguments,
+    type MarketplaceTransitionResponse
+} from '@/ui/components/ecommerce/MarketplaceOrderTransition'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import type {
     MarketplaceOrderItemRecord,
@@ -105,13 +119,6 @@ type MarketplaceOrderFilter = 'all' | MarketplaceOrderStatus
 
 const JUMLA_KHALEEJ_STOREFRONT_KEY = 'jumla-khaleej'
 const JUMLA_KHALEEJ_DELIVERY_METADATA_TYPE = 'jumla_khaleej_delivery_fee'
-
-type MarketplaceTransitionResponse = {
-    warning?: string | null
-    sales_order_id?: string | null
-    customer_id?: string | null
-    business_partner_id?: string | null
-}
 
 type MarketplaceOrderDatabaseRecord = Omit<MarketplaceOrderRecord, 'delivery_fee' | 'sales_order_return_status' | 'sales_order_returned_at'> & {
     website_storefront_key: string | null
@@ -844,15 +851,24 @@ export function Ecommerce() {
     )
     const [isLoading, setIsLoading] = useState(true)
     const [isSaving, setIsSaving] = useState(false)
+    const [advancementProgress, setAdvancementProgress] = useState<MarketplaceOrderAdvancementProgress | null>(null)
     const [settlementTarget, setSettlementTarget] = useState<PaymentObligation | null>(null)
     const [isSubmittingSettlement, setIsSubmittingSettlement] = useState(false)
     const [isOpeningCollection, setIsOpeningCollection] = useState(false)
     const isOpeningCollectionRef = useRef(false)
+    const isSavingRef = useRef(false)
+    const deferredOrderRefreshRef = useRef(false)
     const loadRequestRef = useRef(0)
 
-    const loadOrders = useCallback(async ({ background = false }: { background?: boolean } = {}) => {
+    const loadOrders = useCallback(async ({
+        background = false,
+        showError = true
+    }: {
+        background?: boolean
+        showError?: boolean
+    } = {}): Promise<boolean> => {
         if (!user?.workspaceId) {
-            return
+            return false
         }
 
         const workspaceId = user.workspaceId
@@ -917,7 +933,7 @@ export function Ecommerce() {
             salesOrdersHydrated = true
 
             if (!isCurrentRequest()) {
-                return
+                return false
             }
 
             setOrders(marketplaceOrders.map((order) => {
@@ -933,16 +949,20 @@ export function Ecommerce() {
                     sales_order_returned_at: salesOrderReturn?.returned_at ?? null
                 }
             }))
+            return true
         } catch (error) {
             if (!isCurrentRequest()) {
-                return
+                return false
             }
 
-            toast({
-                title: t('common.error', { defaultValue: 'Error' }),
-                description: error instanceof Error ? error.message : 'Failed to load marketplace orders',
-                variant: 'destructive'
-            })
+            if (showError) {
+                toast({
+                    title: t('common.error', { defaultValue: 'Error' }),
+                    description: error instanceof Error ? error.message : 'Failed to load marketplace orders',
+                    variant: 'destructive'
+                })
+            }
+            return false
         } finally {
             if (!marketplaceOrdersHydrated) {
                 if (isCurrentRequest()) {
@@ -977,7 +997,17 @@ export function Ecommerce() {
     useEffect(() => {
         const handleMarketplaceOrderChange = (event: Event) => {
             const detail = (event as CustomEvent<MarketplaceOrderRefreshDetail>).detail
-            if (detail?.workspaceId !== user?.workspaceId || detail.source === 'local') return
+            const disposition = getMarketplaceOrderRefreshDisposition({
+                eventWorkspaceId: detail?.workspaceId,
+                activeWorkspaceId: user?.workspaceId,
+                source: detail?.source,
+                isTransitioning: isSavingRef.current
+            })
+            if (disposition === 'ignore') return
+            if (disposition === 'defer') {
+                deferredOrderRefreshRef.current = true
+                return
+            }
             void loadOrders({ background: true })
         }
 
@@ -1077,45 +1107,71 @@ export function Ecommerce() {
         }
     }
 
-    const transitionOrder = async (orderId: string, nextStatus: MarketplaceOrderStatus, cancelReason?: string) => {
+    const callMarketplaceOrderTransition = async (
+        orderId: string,
+        nextStatus: MarketplaceOrderStatus,
+        cancelReason?: string
+    ): Promise<MarketplaceTransitionResponse | null> => {
+        const result = await runSupabaseAction('ecommerce.transitionOrder', () => executeMarketplaceOrderTransition({
+            rpc: (functionName, arguments_) => supabase.rpc(
+                functionName,
+                arguments_ as MarketplaceOrderTransitionArguments
+            ) as unknown as PromiseLike<{
+                data: MarketplaceTransitionResponse | null
+                error: unknown | null
+            }>,
+            orderId,
+            nextStatus,
+            cancelReason
+        }))
+
+        // The RPC has already committed at this point. Reflect that status
+        // immediately, then replace it with the fully refreshed record below.
+        setOrders((currentOrders) => currentOrders.map((order) => order.id === orderId
+            ? { ...order, status: result?.status ?? nextStatus }
+            : order))
+
+        return result
+    }
+
+    const refreshAfterOrderTransition = async () => {
+        const refreshed = await loadOrders({ background: true, showError: false })
+        if (!refreshed) {
+            throw new Error(t('ecommerce.transitionRefreshFailed', {
+                defaultValue: 'The order advanced, but its updated status could not be loaded. Automatic advancement stopped.'
+            }))
+        }
+
+        if (user?.workspaceId) {
+            notifyMarketplaceOrdersChanged({
+                workspaceId: user.workspaceId,
+                source: 'local'
+            })
+        }
+    }
+
+    const beginOrderTransition = () => {
+        if (isSavingRef.current) return false
+        isSavingRef.current = true
         setIsSaving(true)
+        return true
+    }
+
+    const finishOrderTransition = () => {
+        isSavingRef.current = false
+        setIsSaving(false)
+        if (deferredOrderRefreshRef.current) {
+            deferredOrderRefreshRef.current = false
+            void loadOrders({ background: true })
+        }
+    }
+
+    const transitionOrder = async (orderId: string, nextStatus: MarketplaceOrderStatus, cancelReason?: string) => {
+        if (!beginOrderTransition()) return
+
         try {
-            const { data, error } = await runSupabaseAction('ecommerce.transitionOrder', () =>
-                supabase.rpc('transition_marketplace_order', {
-                    order_id: orderId,
-                    next_status: nextStatus,
-                    cancel_reason: cancelReason || null
-                })
-            ) as { data: MarketplaceTransitionResponse | null; error: unknown | null }
-
-            if (error) {
-                // Supabase RPC errors are plain PostgREST objects rather than
-                // native Error instances. Normalize them before the toast so
-                // database validation messages (including the exact product)
-                // are never replaced by the generic fallback below.
-                throw normalizeSupabaseActionError(error)
-            }
-
-            await loadOrders()
-            if (user?.workspaceId) {
-                notifyMarketplaceOrdersChanged({
-                    workspaceId: user.workspaceId,
-                    source: 'local'
-                })
-            }
-
-            if (nextStatus === 'delivered' && data?.sales_order_id) {
-                if (data.warning) {
-                    toast({
-                        title: t('common.success', { defaultValue: 'Success' }),
-                        description: data.warning
-                    })
-                }
-
-                await openRecordCollection(data.sales_order_id)
-                return
-            }
-
+            const data = await callMarketplaceOrderTransition(orderId, nextStatus, cancelReason)
+            await refreshAfterOrderTransition()
             toast({
                 title: t('common.success', { defaultValue: 'Success' }),
                 description: data?.warning
@@ -1124,11 +1180,80 @@ export function Ecommerce() {
         } catch (error) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: normalizeSupabaseActionError(error).message || 'Failed to update marketplace order',
+                description: normalizeSupabaseActionError(error).message
+                    || t('ecommerce.transitionFailed', { defaultValue: 'Failed to update marketplace order.' }),
                 variant: 'destructive'
             })
         } finally {
-            setIsSaving(false)
+            finishOrderTransition()
+        }
+    }
+
+    const advanceOrderToStatus = async (
+        order: MarketplaceOrderRecord,
+        targetStatus: MarketplaceOrderStatus,
+        showProgress = false
+    ) => {
+        const path = getMarketplaceOrderAdvancementPath(order.status, targetStatus)
+        if (!path || !beginOrderTransition()) return
+
+        if (showProgress) {
+            setAdvancementProgress({
+                orderId: order.id,
+                orderNumber: order.order_number,
+                targetStatus,
+                path,
+                completedCount: 0
+            })
+        }
+
+        try {
+            const results = await runMarketplaceOrderAdvancement({
+                currentStatus: order.status,
+                targetStatus,
+                advanceStep: (nextStatus) => callMarketplaceOrderTransition(order.id, nextStatus),
+                afterStep: async () => {
+                    await refreshAfterOrderTransition()
+                    if (showProgress) {
+                        setAdvancementProgress((current) => current?.orderId === order.id
+                            ? {
+                                ...current,
+                                completedCount: Math.min(current.completedCount + 1, current.path.length)
+                            }
+                            : current)
+                    }
+                }
+            })
+            if (!results) {
+                throw new Error(t('ecommerce.transitionFailed', {
+                    defaultValue: 'Failed to update marketplace order.'
+                }))
+            }
+
+            const finalResult = results[results.length - 1]
+            if (showProgress) setAdvancementProgress(null)
+            toast({
+                title: t('common.success', { defaultValue: 'Success' }),
+                description: finalResult?.warning || t('ecommerce.advanceSequenceSuccess', {
+                    defaultValue: 'Order advanced to {{status}}.',
+                    status: t(`ecommerce.status.${targetStatus}`, { defaultValue: targetStatus })
+                })
+            })
+
+            if (targetStatus === 'delivered' && finalResult?.sales_order_id) {
+                await openRecordCollection(finalResult.sales_order_id)
+            }
+        } catch (error) {
+            if (showProgress) setAdvancementProgress(null)
+            toast({
+                title: t('common.error', { defaultValue: 'Error' }),
+                description: normalizeSupabaseActionError(error).message
+                    || t('ecommerce.transitionFailed', { defaultValue: 'Failed to update marketplace order.' }),
+                variant: 'destructive'
+            })
+        } finally {
+            if (showProgress) setAdvancementProgress(null)
+            finishOrderTransition()
         }
     }
 
@@ -1182,11 +1307,17 @@ const editMarketplaceOrderItems = async (orderId: string, items: MarketplaceOrde
                     productImageUrls={productImageUrls}
                     isSaving={isSaving}
                     isOpeningCollection={isOpeningCollection}
-                    onAdvance={(nextStatus) => transitionOrder(activeOrder.id, nextStatus)}
+                    onAdvance={(targetStatus, mode = 'manual') => advanceOrderToStatus(
+                        activeOrder,
+                        targetStatus,
+                        mode === 'automatic'
+                    )}
                     onCancel={(reason) => transitionOrder(activeOrder.id, 'cancelled', reason)}
                     onRecordCollection={openRecordCollection}
                     onSaveItems={editMarketplaceOrderItems}
                 />
+
+                <MarketplaceOrderAdvancementDialog progress={advancementProgress} />
 
                 <SettlementDialog
                     open={!!settlementTarget}
@@ -1209,8 +1340,12 @@ const editMarketplaceOrderItems = async (orderId: string, items: MarketplaceOrde
                 orders={orders}
                 productImageUrls={productImageUrls}
                 isLoading={isLoading}
-                onRefresh={loadOrders}
+                onRefresh={async () => {
+                    await loadOrders()
+                }}
             />
+
+            <MarketplaceOrderAdvancementDialog progress={advancementProgress} />
 
             <SettlementDialog
                 open={!!settlementTarget}

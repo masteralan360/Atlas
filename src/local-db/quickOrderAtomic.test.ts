@@ -93,8 +93,22 @@ const supabaseMock = vi.hoisted(() => {
         }
     })
     const insert = vi.fn(async () => ({ data: [], error: null }))
-    const from = vi.fn(() => ({ upsert, insert }))
-    return { rpc, upsert, insert, from }
+    const createSelectQuery = (data: unknown[] = []) => {
+        const response = { data, error: null }
+        const query = {
+            eq: () => query,
+            order: () => query,
+            range: () => query,
+            then: <TResult1 = typeof response, TResult2 = never>(
+                onfulfilled?: ((value: typeof response) => TResult1 | PromiseLike<TResult1>) | null,
+                onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+            ) => Promise.resolve(response).then(onfulfilled, onrejected)
+        }
+        return query
+    }
+    const select = vi.fn(() => createSelectQuery())
+    const from = vi.fn(() => ({ upsert, insert, select }))
+    return { rpc, upsert, insert, createSelectQuery, select, from }
 })
 
 vi.mock('@/auth/supabase', () => ({
@@ -239,6 +253,28 @@ function serviceQuickOrderInput(): SalesOrderCreateInput {
             costPrice: 0,
             convertedCostPrice: 0
         }]
+    }
+}
+
+function freeOnlyQuickOrderInput(freeBonusQuantity = 1): SalesOrderCreateInput {
+    const input = quickOrderInput(0)
+    return {
+        ...input,
+        status: 'completed',
+        items: [{
+            ...input.items[0],
+            id: crypto.randomUUID(),
+            quantity: 0,
+            freeBonusQuantity,
+            lineTotal: 0
+        }],
+        subtotal: 0,
+        total: 0,
+        isPaid: true,
+        paymentStatus: 'paid',
+        paidAmount: 0,
+        balanceAmount: 0,
+        paidAt: '2026-08-31T09:00:00.000Z'
     }
 }
 
@@ -671,6 +707,101 @@ describe('atomic POS Quick Order completion', () => {
         expect(completed.status).toBe('completed')
         expect(await db.payment_transactions.where('sourceRecordId').equals(completed.id).count()).toBe(1)
         expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(4)
+    })
+
+    it('completes a free-only Quick Order without a payment transaction while deducting its free stock', async () => {
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'local' })
+
+        const completed = await createQuickSalesOrder(
+            WORKSPACE_ID,
+            freeOnlyQuickOrderInput(),
+            USER_ID
+        )
+
+        expect(completed).toMatchObject({
+            status: 'completed',
+            paymentStatus: 'paid',
+            paidAmount: 0,
+            balanceAmount: 0,
+            items: [expect.objectContaining({ quantity: 0, freeBonusQuantity: 1, fulfilledQuantity: 1 })]
+        })
+        expect(await db.payment_transactions.where('sourceRecordId').equals(completed.id).count()).toBe(0)
+        expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(4)
+        expect((await db.products.get(PRODUCT_ID))?.quantity).toBe(4)
+        expect((await db.business_partners.get(PARTNER_ID))?.receivableBalance).toBe(0)
+    })
+
+    it('keeps a cloud free-only Quick Order off the atomic payment RPC', async () => {
+        supabaseMock.rpc.mockImplementationOnce(async (name: string) => {
+            if (name !== 'apply_inventory_snapshot_changes') {
+                return { data: null, error: new Error(`Unexpected RPC: ${name}`) }
+            }
+            return {
+                data: {
+                    inventory: [{
+                        id: INVENTORY_ID,
+                        workspace_id: WORKSPACE_ID,
+                        product_id: PRODUCT_ID,
+                        storage_id: STORAGE_ID,
+                        quantity: 4,
+                        created_at: '2026-08-31T08:00:00.000Z',
+                        updated_at: '2026-08-31T09:00:00.000Z',
+                        version: 2,
+                        is_deleted: false
+                    }],
+                    conflict: false
+                },
+                error: null
+            }
+        })
+        supabaseMock.select
+            .mockImplementationOnce(() => supabaseMock.createSelectQuery())
+            .mockImplementationOnce(() => supabaseMock.createSelectQuery([{
+                id: INVENTORY_ID,
+                workspace_id: WORKSPACE_ID,
+                product_id: PRODUCT_ID,
+                storage_id: STORAGE_ID,
+                quantity: 5,
+                created_at: '2026-08-31T08:00:00.000Z',
+                updated_at: '2026-08-31T08:00:00.000Z',
+                version: 1,
+                is_deleted: false
+            }]))
+
+        const completed = await createQuickSalesOrder(
+            WORKSPACE_ID,
+            freeOnlyQuickOrderInput(),
+            USER_ID
+        )
+
+        expect(completed).toMatchObject({ status: 'completed', paidAmount: 0, balanceAmount: 0 })
+        expect(supabaseMock.rpc).not.toHaveBeenCalledWith(
+            'complete_quick_sales_order',
+            expect.anything()
+        )
+        expect(supabaseMock.rpc).toHaveBeenCalledWith(
+            'apply_inventory_snapshot_changes',
+            expect.objectContaining({ p_workspace_id: WORKSPACE_ID })
+        )
+        expect(supabaseMock.upsert).toHaveBeenCalled()
+        expect(await db.payment_transactions.where('sourceRecordId').equals(completed.id).count()).toBe(0)
+        expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(4)
+    })
+
+    it('rejects a free-only Quick Order whose free quantity exceeds stock without changing records', async () => {
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'local' })
+
+        await expect(createQuickSalesOrder(
+            WORKSPACE_ID,
+            freeOnlyQuickOrderInput(6),
+            USER_ID
+        )).rejects.toThrow('Not enough stock')
+
+        expect(await db.sales_orders.toArray()).toMatchObject([
+            { status: 'draft', paidAmount: 0, balanceAmount: 0 }
+        ])
+        expect(await db.payment_transactions.count()).toBe(0)
+        expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(5)
     })
 
     it('saves unpaid Quick Orders at each selected lifecycle status without recording a payment', async () => {

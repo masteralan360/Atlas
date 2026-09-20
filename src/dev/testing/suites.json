@@ -80,6 +80,7 @@
         "layer": "business",
         "files": [
           "src/dev/testing/suites/posCheckout.test.ts",
+          "src/local-db/quickOrderAtomic.test.ts",
           "src/local-db/payments.test.ts",
           "src/local-db/paymentAccounts.test.ts",
           "src/lib/ledgerPaymentTransactions.test.ts",

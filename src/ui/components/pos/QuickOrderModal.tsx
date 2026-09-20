@@ -19,6 +19,7 @@ import {
     type SalesOrder
 } from '@/local-db'
 import { formatCurrency } from '@/lib/utils'
+import { getOrderLineFreeBonusQuantity } from '@/lib/orderLineItems'
 import {
     ORDER_FINANCING_PAYMENT_METHODS,
     STANDARD_PAYMENT_METHODS,
@@ -193,6 +194,8 @@ interface QuickOrderModalProps {
     commissionExchangeRates: ExchangeRateSnapshot[]
     commissionCurrencies: CurrencyCode[]
     commissionAssignedBy?: string | null
+    /** A zero-total cart made exclusively of free quantities never collects a payment. */
+    isFreeOnlyOrder: boolean
     isSubmitting: boolean
     progressStage: QuickOrderProgressStage
     onSubmit: (data: QuickOrderCheckoutData, options?: QuickOrderSubmissionOptions) => Promise<void>
@@ -217,6 +220,7 @@ export function QuickOrderModal({
     commissionExchangeRates,
     commissionCurrencies,
     commissionAssignedBy,
+    isFreeOnlyOrder,
     isSubmitting,
     progressStage,
     onSubmit
@@ -335,7 +339,7 @@ export function QuickOrderModal({
     ], [installmentsEnabled, loansEnabled])
     const isInstallmentBased = paymentMethod === 'installments'
     const isFinanced = paymentMethod === 'loan' || paymentMethod === 'installments'
-    const isPaidOnSave = paymentStatus === 'paid'
+    const isPaidOnSave = isFreeOnlyOrder || paymentStatus === 'paid'
     const orderCounterparty = selectedSalesAccount?.partner ?? customer
     const isQuickOrderValid = Boolean(
         orderCounterparty
@@ -362,14 +366,14 @@ export function QuickOrderModal({
         setCustomer(null)
         setSalesAccountAgentId('')
         setOrderStatus('completed')
-        setPaymentStatus('unpaid')
+        setPaymentStatus(isFreeOnlyOrder ? 'paid' : 'unpaid')
         setPaymentMethod('cash')
         setPaymentAccount(null)
         setFirstDueDate('')
         setIsCommissionPanelOpen(false)
         setSubmitError(null)
         setCommissionSummaries([])
-    }, [isOpen])
+    }, [isFreeOnlyOrder, isOpen])
 
     const validateQuickOrder = () => {
         if (!orderCounterparty) {
@@ -468,13 +472,13 @@ export function QuickOrderModal({
                 // product commission creates an order commission snapshot.
                 commissionEnabled: shouldCreditCommission,
                 orderStatus,
-                paymentStatus,
-                paymentMethod,
+                paymentStatus: isFreeOnlyOrder ? 'paid' : paymentStatus,
+                paymentMethod: isFreeOnlyOrder ? 'cash' : paymentMethod,
                 installmentCount: 3,
                 installmentFrequency: 'monthly',
                 firstDueDate: isInstallmentBased ? firstDueDate : null,
-                paymentAccountId: paymentAccount?.id ?? null,
-                paymentAccountNameSnapshot: paymentAccount?.name ?? null,
+                paymentAccountId: isFreeOnlyOrder ? null : paymentAccount?.id ?? null,
+                paymentAccountNameSnapshot: isFreeOnlyOrder ? null : paymentAccount?.name ?? null,
             }, shouldSaveCommissionAssignments ? {
                 onOrderCreated: async (order) => {
                     await commissionAssignmentRef.current?.save(order)
@@ -657,7 +661,7 @@ export function QuickOrderModal({
                             {t('pos.quickOrder.paymentStatusOnSave')} <span className="text-destructive">*</span>
                         </Label>
                         <Select
-                            value={paymentStatus}
+                            value={isFreeOnlyOrder ? 'paid' : paymentStatus}
                             onValueChange={(value) => {
                                 const nextPaymentStatus = value as QuickOrderCheckoutData['paymentStatus']
                                 setPaymentStatus(nextPaymentStatus)
@@ -667,7 +671,7 @@ export function QuickOrderModal({
                                 }
                                 setIsCommissionPanelOpen(false)
                             }}
-                            disabled={isSubmitting || isCommissionPanelOpen}
+                            disabled={isSubmitting || isCommissionPanelOpen || isFreeOnlyOrder}
                         >
                             <SelectTrigger id="quick-order-payment-status"><SelectValue /></SelectTrigger>
                             <SelectContent>
@@ -678,38 +682,52 @@ export function QuickOrderModal({
                     </div>
                 </div>
 
-                <div className="grid gap-2">
-                    <Label htmlFor="quick-order-payment">
-                        {t('pos.paymentMethod')} <span className="text-destructive">*</span>
-                    </Label>
-                    <PaymentMethodSelect
-                        id="quick-order-payment"
-                        value={paymentMethod}
-                        onValueChange={(value) => {
-                            setPaymentMethod(value)
-                            setIsCommissionPanelOpen(false)
-                        }}
-                        onLinkedPaymentAccountSelect={setPaymentAccount}
-                        workspaceId={workspaceId}
-                        methods={paymentMethods}
-                        disabledMethods={isPaidOnSave ? ORDER_FINANCING_PAYMENT_METHODS : []}
-                        disabled={isSubmitting || isCommissionPanelOpen}
-                    />
-                </div>
+                {isFreeOnlyOrder ? (
+                    <div className="flex items-start gap-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.06] p-4 text-emerald-950 dark:text-emerald-100">
+                        <CircleDollarSign className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                        <div>
+                            <p className="font-semibold">{t('pos.quickOrder.freeOnlySettledTitle')}</p>
+                            <p className="mt-1 text-sm text-emerald-900/75 dark:text-emerald-100/75">
+                                {t('pos.quickOrder.freeOnlySettledDescription')}
+                            </p>
+                        </div>
+                    </div>
+                ) : (
+                    <>
+                        <div className="grid gap-2">
+                            <Label htmlFor="quick-order-payment">
+                                {t('pos.paymentMethod')} <span className="text-destructive">*</span>
+                            </Label>
+                            <PaymentMethodSelect
+                                id="quick-order-payment"
+                                value={paymentMethod}
+                                onValueChange={(value) => {
+                                    setPaymentMethod(value)
+                                    setIsCommissionPanelOpen(false)
+                                }}
+                                onLinkedPaymentAccountSelect={setPaymentAccount}
+                                workspaceId={workspaceId}
+                                methods={paymentMethods}
+                                disabledMethods={isPaidOnSave ? ORDER_FINANCING_PAYMENT_METHODS : []}
+                                disabled={isSubmitting || isCommissionPanelOpen}
+                            />
+                        </div>
 
-                {isPaidOnSave ? (
-                    <PaymentAccountSelector
-                        workspaceId={workspaceId}
-                        value={paymentAccount?.id ?? null}
-                        onValueChange={setPaymentAccount}
-                        disabled={isSubmitting || isCommissionPanelOpen}
-                        cashDrawerOnly={paymentMethod === 'cash'}
-                    />
-                ) : null}
+                        {isPaidOnSave ? (
+                            <PaymentAccountSelector
+                                workspaceId={workspaceId}
+                                value={paymentAccount?.id ?? null}
+                                onValueChange={setPaymentAccount}
+                                disabled={isSubmitting || isCommissionPanelOpen}
+                                cashDrawerOnly={paymentMethod === 'cash'}
+                            />
+                        ) : null}
 
-                {isPaidOnSave ? (
-                    <p className="text-xs text-muted-foreground">{t('pos.quickOrder.paidFinanceMethodsUnavailable')}</p>
-                ) : null}
+                        {isPaidOnSave ? (
+                            <p className="text-xs text-muted-foreground">{t('pos.quickOrder.paidFinanceMethodsUnavailable')}</p>
+                        ) : null}
+                    </>
+                )}
 
                 {showCustomerCommissionAssignments ? (
                     <div className="space-y-3">
@@ -814,12 +832,17 @@ export function QuickOrderModal({
                         </div>
                     </div>
                     <div className="max-h-32 space-y-2 overflow-y-auto pe-1">
-                        {cart.map((item) => (
-                            <div key={`${item.product_id}:${item.storageId || ''}`} className="flex justify-between gap-3 text-sm">
-                                <span className="min-w-0 truncate">{item.name}</span>
-                                <span className="shrink-0 text-muted-foreground">× {item.quantity}</span>
-                            </div>
-                        ))}
+                        {cart.map((item) => {
+                            const freeBonusQuantity = getOrderLineFreeBonusQuantity(item)
+                            return (
+                                <div key={`${item.product_id}:${item.storageId || ''}`} className="flex justify-between gap-3 text-sm">
+                                    <span className="min-w-0 truncate">{item.name}</span>
+                                    <span className="shrink-0 text-muted-foreground">
+                                        × {item.quantity}{freeBonusQuantity > 0 ? ` · ${t('orders.form.freeBonus')}: ${freeBonusQuantity}` : ''}
+                                    </span>
+                                </div>
+                            )
+                        })}
                     </div>
                 </div>
 
