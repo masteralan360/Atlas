@@ -24,6 +24,7 @@ import { isBeautyClinicalRegistryType } from '@/local-db/clinicalRegistryPreset'
 import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Textarea, Label, Card, CardContent, CardHeader, CardTitle, DateTimePicker, SettlementDialog, useToast, DeleteConfirmationModal, Dialog, DialogContent } from '@/ui/components'
 import { Plus, Search, Upload, Trash2, FileText, ArrowLeft, CalendarClock, Edit, Check, ChevronDown, LayoutGrid, List, HandCoins, UserPlus, Phone, X } from 'lucide-react'
 import { generateId, formatCurrency, formatLocalDateValue, formatNumberWithCommas, formatTime, formatNumericInput, parseFormattedNumber, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
+import { filterBeautyCenterAppointments } from '@/lib/clinicalAppointmentFilters'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
@@ -290,40 +291,14 @@ function Beauty2AppointmentList({ workspaceId, navigate }: { workspaceId: string
   const [isDeleting, setIsDeleting] = useState(false)
 
   const filtered = useMemo(() => {
-    const now = new Date()
-    const todayValue = formatLocalDateValue(now)
-    const query = searchQuery.trim().toLowerCase()
-    return (appointments || []).filter((appointment) => {
-      const issueDate = appointment.issueDate || appointment.appointmentDate
-      if (query && ![
-        appointment.appointmentNumber,
-        appointment.receivedFromName,
-        appointment.patientName,
-        appointment.patientPhone,
-        appointment.internalNotes,
-      ].some((value) => value?.toLowerCase().includes(query))) {
-        return false
-      }
-      if (dateRange === 'today') {
-        return issueDate === todayValue
-      }
-      if (dateRange === 'month') {
-        const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-        return issueDate >= monthStart
-      }
-      if (dateRange === 'lastMonth') {
-        const startOfLastMonth = formatLocalDateValue(new Date(now.getFullYear(), now.getMonth() - 1, 1))
-        const startOfMonth = formatLocalDateValue(new Date(now.getFullYear(), now.getMonth(), 1))
-        return issueDate >= startOfLastMonth && issueDate < startOfMonth
-      }
-      if (dateRange === 'custom') {
-        if (customDates.start && issueDate < customDates.start) return false
-        if (customDates.end && issueDate > customDates.end) return false
-      }
-      if (nextVisitDateFilter && appointment.nextVisitDate !== nextVisitDateFilter) {
-        return false
-      }
-      return true
+    return filterBeautyCenterAppointments(appointments, {
+      dateRange,
+      customDates: {
+        start: customDates.start,
+        end: customDates.end,
+      },
+      nextVisitDate: nextVisitDateFilter,
+      searchQuery,
     })
   }, [
     appointments,
