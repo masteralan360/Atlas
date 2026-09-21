@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const recoveryState = vi.hoisted(() => {
     const mutations: Array<Record<string, any>> = []
     const products: Array<Record<string, any>> = []
+    const businessPartners: Array<Record<string, any>> = []
     let remoteRow: Record<string, unknown> | null = null
     let remoteError: unknown = null
     let cloudAuthority = true
@@ -39,6 +40,20 @@ const recoveryState = vi.hoisted(() => {
         })
     }
 
+    const businessPartnersTable = {
+        get: vi.fn(async (id: string) => businessPartners.find((row) => row.id === id)),
+        put: vi.fn(async (row: Record<string, unknown>) => {
+            const index = businessPartners.findIndex((candidate) => candidate.id === row.id)
+            if (index >= 0) businessPartners[index] = { ...row }
+            else businessPartners.push({ ...row })
+            return row.id
+        }),
+        delete: vi.fn(async (id: string) => {
+            const index = businessPartners.findIndex((row) => row.id === id)
+            if (index >= 0) businessPartners.splice(index, 1)
+        })
+    }
+
     const query = {
         eq: vi.fn(() => query),
         maybeSingle: vi.fn(async () => ({ data: remoteRow, error: remoteError }))
@@ -53,8 +68,10 @@ const recoveryState = vi.hoisted(() => {
     return {
         mutations,
         products,
+        businessPartners,
         mutationTable,
         productsTable,
+        businessPartnersTable,
         query,
         client,
         setRemoteRow(row: Record<string, unknown> | null) {
@@ -72,6 +89,7 @@ const recoveryState = vi.hoisted(() => {
         reset() {
             mutations.splice(0)
             products.splice(0)
+            businessPartners.splice(0)
             remoteRow = null
             remoteError = null
             cloudAuthority = true
@@ -81,6 +99,9 @@ const recoveryState = vi.hoisted(() => {
             productsTable.get.mockClear()
             productsTable.put.mockClear()
             productsTable.delete.mockClear()
+            businessPartnersTable.get.mockClear()
+            businessPartnersTable.put.mockClear()
+            businessPartnersTable.delete.mockClear()
             query.eq.mockClear()
             query.maybeSingle.mockClear()
             client.from.mockClear()
@@ -93,6 +114,7 @@ vi.mock('./database', () => ({
     db: {
         offline_mutations: recoveryState.mutationTable,
         products: recoveryState.productsTable,
+        business_partners: recoveryState.businessPartnersTable,
         transaction: async (_mode: string, ...args: unknown[]) => {
             const scope = args.at(-1)
             if (typeof scope !== 'function') throw new Error('Expected a transaction scope')
@@ -250,6 +272,36 @@ describe('discardAndRestoreOfflineMutation', () => {
 
         expect(recoveryState.client.from).not.toHaveBeenCalled()
         expect(recoveryState.mutations[0]).toMatchObject({ status: 'failed' })
+    })
+
+    it('removes an inaccessible business partner locally without attempting to read a row the user can no longer access', async () => {
+        recoveryState.mutations.push({
+            id: 'partner-access-mutation',
+            workspaceId: 'workspace-1',
+            entityType: 'business_partners',
+            entityId: 'partner-1',
+            operation: 'update',
+            payload: { id: 'partner-1', partnerName: 'Private partner' },
+            createdAt: '2026-09-21T14:45:00.000Z',
+            status: 'failed',
+            error: 'Business partner access changed: access was revoked before sync'
+        })
+        recoveryState.businessPartners.push({
+            id: 'partner-1', workspaceId: 'workspace-1', partnerName: 'Private partner', syncStatus: 'conflict'
+        })
+        recoveryState.setCloudAuthority(false)
+
+        const result = await discardAndRestoreOfflineMutation('workspace-1', 'partner-access-mutation', 'user-1')
+
+        expect(result).toMatchObject({ status: 'discarded', action: 'removed_access_revoked' })
+        expect(recoveryState.businessPartners).toEqual([])
+        expect(recoveryState.client.from).not.toHaveBeenCalled()
+        expect(recoveryState.client.rpc).not.toHaveBeenCalled()
+        expect(recoveryState.mutations[0]).toMatchObject({
+            status: 'discarded',
+            discardedBy: 'user-1',
+            error: undefined
+        })
     })
 
     it('never enables generic recovery for payment transactions', () => {

@@ -11,7 +11,11 @@ import { retrySyncIntegrityMutations } from '@/local-db/offlineMutations'
 import type { OfflineMutation } from '@/local-db/models'
 import { LAST_SYNC_KEY } from '@/sync/constants'
 import { runManagedFullSync } from '@/sync/syncCoordinator'
-import { getCapitalPoolConflictFromSyncError, isSyncIntegrityError } from '@/sync/syncErrors'
+import {
+    getCapitalPoolConflictFromSyncError,
+    isBusinessPartnerAccessChangedError,
+    isSyncIntegrityError
+} from '@/sync/syncErrors'
 import { useWorkspace } from '@/workspace'
 import { Button } from '@/ui/components/button'
 
@@ -63,6 +67,7 @@ export function SyncIntegrityOverlay() {
     const shouldBlock = isAuthenticated && !isLocalMode && Boolean(user && firstIssue)
     const canRepairVehicleYear = firstIssue?.entityType === 'rental_vehicles'
         && isRentalVehicleYearConstraintError(firstIssue.error)
+    const isPartnerAccessChanged = isBusinessPartnerAccessChangedError(firstIssue?.error)
 
     async function handleRetry() {
         if (!user || !workspaceId || !isOnline || isRetrying) return
@@ -81,10 +86,10 @@ export function SyncIntegrityOverlay() {
             if (result.success) {
                 localStorage.setItem(LAST_SYNC_KEY, new Date().toISOString())
             } else {
-                setRetryError(result.errors[0] ?? 'Supabase still rejected the queued change.')
+                setRetryError(result.errors[0] ?? t('sync.integrity.retryStillRejected'))
             }
         } catch (error: unknown) {
-            setRetryError(error instanceof Error ? error.message : 'The retry could not be completed.')
+            setRetryError(error instanceof Error ? error.message : t('sync.integrity.retryCouldNotComplete'))
         } finally {
             setIsRetrying(false)
         }
@@ -111,10 +116,14 @@ export function SyncIntegrityOverlay() {
                             </div>
                             <div className="min-w-0 space-y-2">
                                 <h2 id="sync-integrity-title" className="text-xl font-bold tracking-tight text-foreground">
-                                    Sync issue needs to be resolved
+                                    {isPartnerAccessChanged
+                                        ? t('sync.accessChanged.title')
+                                        : t('sync.integrity.title')}
                                 </h2>
                                 <p id="sync-integrity-description" className="text-sm leading-6 text-muted-foreground">
-                                    Supabase rejected a queued change. To protect order, inventory, and product data, actions are paused until the issue is resolved. Nothing has been discarded.
+                                    {isPartnerAccessChanged
+                                        ? t('sync.accessChanged.description')
+                                        : t('sync.integrity.description')}
                                 </p>
                             </div>
                         </div>
@@ -143,7 +152,7 @@ export function SyncIntegrityOverlay() {
 
                         {!isOnline && (
                             <p className="mt-4 text-sm text-muted-foreground">
-                                Reconnect to the internet before retrying this sync issue.
+                                {t('sync.integrity.reconnect')}
                             </p>
                         )}
 
@@ -156,7 +165,9 @@ export function SyncIntegrityOverlay() {
                                 autoFocus
                             >
                                 <ListTodo className="h-4 w-4" />
-                                Review sync queue
+                                {isPartnerAccessChanged
+                                    ? t('sync.accessChanged.reviewAction')
+                                    : t('sync.integrity.reviewAction')}
                             </Button>
                             {canRepairVehicleYear && (
                                 <Button
@@ -168,14 +179,16 @@ export function SyncIntegrityOverlay() {
                                     {t('carRental.syncRecovery.fixVehicleYear')}
                                 </Button>
                             )}
-                            <Button
-                                type="button"
-                                onClick={handleRetry}
-                                disabled={!isOnline || isRetrying}
-                            >
-                                {isRetrying ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                                {isRetrying ? 'Retrying sync...' : 'Retry sync'}
-                            </Button>
+                            {!isPartnerAccessChanged && (
+                                <Button
+                                    type="button"
+                                    onClick={handleRetry}
+                                    disabled={!isOnline || isRetrying}
+                                >
+                                    {isRetrying ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                                    {isRetrying ? t('sync.integrity.retryingAction') : t('sync.integrity.retryAction')}
+                                </Button>
+                            )}
                         </div>
                     </div>
                 </div>

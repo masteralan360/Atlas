@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
     getCapitalPoolConflictFromSyncError,
     getSyncIntegrityError,
+    isBusinessPartnerAccessChangedError,
     isSyncIntegrityError,
 } from './syncErrors'
 
@@ -28,6 +29,19 @@ describe('sync integrity errors', () => {
             "Sync integrity issue: The loan's principal, repayments, balance, and status do not agree. The change was kept locally; refresh the loan and retry the return or repayment."
         )
         expect(storedError).not.toContain('loans_v1_amounts_check')
+    })
+
+    it('turns a revoked business-partner write permission into a discardable access-change issue', () => {
+        const storedError = getSyncIntegrityError('business_partners', Object.assign(
+            new Error('Business partner access denied'),
+            { code: '42501' }
+        ))
+
+        expect(storedError).toMatch(/^Business partner access changed:/)
+        expect(storedError).toContain('Ask an administrator to restore access')
+        expect(storedError).not.toContain('Original error:')
+        expect(isBusinessPartnerAccessChangedError(storedError ?? undefined)).toBe(true)
+        expect(isSyncIntegrityError(storedError ?? undefined)).toBe(true)
     })
 
     it('does not block the app for ordinary connectivity failures', () => {

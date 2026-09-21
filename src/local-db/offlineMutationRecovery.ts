@@ -2,6 +2,7 @@ import { getSupabaseClientForTable, getSupabaseRemoteTableName, getVisibilitySco
 import { runSupabaseAction } from '@/lib/supabaseRequest'
 import { toCamelCase } from '@/lib/utils'
 import { canReconcileCloudWorkspaceData } from '@/local-db/cloudReconciliation'
+import { isBusinessPartnerAccessChangedError } from '@/sync/syncErrors'
 
 import { db } from './database'
 import type { OfflineMutation } from './models'
@@ -24,7 +25,7 @@ export type OfflineMutationRecoveryFailure =
 export type OfflineMutationRecoveryResult =
     | {
         status: 'discarded'
-        action: 'restored' | 'removed'
+        action: 'restored' | 'removed' | 'removed_access_revoked'
         mutationId: string
         entityType: OfflineMutation['entityType']
         entityId: string
@@ -116,6 +117,11 @@ async function hasDependentQueuedChanges(mutation: OfflineMutation): Promise<boo
         ))
 }
 
+function isAccessRevokedBusinessPartnerMutation(mutation: OfflineMutation): boolean {
+    return mutation.entityType === 'business_partners'
+        && isBusinessPartnerAccessChangedError(mutation.error)
+}
+
 async function fetchAuthoritativeRow(
     mutation: OfflineMutation
 ): Promise<Record<string, unknown> | null> {
@@ -161,12 +167,61 @@ export async function discardAndRestoreOfflineMutation(
         return { status: 'not_discarded', reason: 'not_recoverable' }
     }
 
-    if (!await canReconcileCloudWorkspaceData(workspaceId)) {
-        return { status: 'not_discarded', reason: 'cloud_authority_unavailable' }
-    }
-
     if (await hasDependentQueuedChanges(mutation)) {
         return { status: 'not_discarded', reason: 'dependent_changes' }
+    }
+
+    const table = getEntityTable(mutation.entityType)
+    if (!table) {
+        return { status: 'not_discarded', reason: 'not_recoverable' }
+    }
+
+    const recoveredAt = new Date().toISOString()
+
+    // An access-revoked partner cannot be fetched through the normal
+    // visibility-scoped RPC. Retire only that mutation and local row so a
+    // private record is not retained or retried after access was removed.
+    if (isAccessRevokedBusinessPartnerMutation(mutation)) {
+        try {
+            await db.transaction('rw', db.offline_mutations, table as any, async () => {
+                const currentMutation = await db.offline_mutations.get(mutationId)
+                if (
+                    !currentMutation
+                    || currentMutation.workspaceId !== workspaceId
+                    || currentMutation.status !== mutation.status
+                    || currentMutation.createdAt !== mutation.createdAt
+                ) {
+                    throw new Error('mutation_changed_during_recovery')
+                }
+
+                await table.delete(mutation.entityId)
+                await db.offline_mutations.update(mutationId, {
+                    status: 'discarded',
+                    error: undefined,
+                    discardedAt: recoveredAt,
+                    discardedBy: userId
+                })
+            })
+        } catch (error) {
+            if (error instanceof Error && error.message === 'mutation_changed_during_recovery') {
+                return { status: 'not_discarded', reason: 'changed_during_recovery' }
+            }
+
+            console.warn('[SyncRecovery] Failed to remove inaccessible local partner:', error)
+            return { status: 'not_discarded', reason: 'remote_request_failed' }
+        }
+
+        return {
+            status: 'discarded',
+            action: 'removed_access_revoked',
+            mutationId,
+            entityType: mutation.entityType,
+            entityId: mutation.entityId
+        }
+    }
+
+    if (!await canReconcileCloudWorkspaceData(workspaceId)) {
+        return { status: 'not_discarded', reason: 'cloud_authority_unavailable' }
     }
 
     let remoteRow: Record<string, unknown> | null
@@ -181,12 +236,6 @@ export async function discardAndRestoreOfflineMutation(
         return { status: 'not_discarded', reason: 'remote_missing' }
     }
 
-    const table = getEntityTable(mutation.entityType)
-    if (!table) {
-        return { status: 'not_discarded', reason: 'not_recoverable' }
-    }
-
-    const recoveredAt = new Date().toISOString()
     const action = remoteRow ? 'restored' as const : 'removed' as const
 
     try {

@@ -7,9 +7,12 @@ Transaction Reconciliation & Integrity Audit, Expandable, Plain English Explanat
 Price books selector order form and quick order
 ##
 
+Retry Sync Test The wind
+
 Jumla-Khaleej App
 
 Fix App has not loaded Page
+PWA updater
 
 Revenue Analytics and accounting
 

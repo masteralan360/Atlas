@@ -2,6 +2,7 @@
   "devTesting": {
     "button": "Developer tests",
     "saleOrders": "Sale Orders",
+    "businessPartners": "Business Partners",
     "title": "Test {{module}}",
     "description": "Run reproducible business scenarios and regression checks in an isolated test process.",
     "isolation": "Disposable test data only. Your current workspace, payments, stock, and backend are never used by these tests.",
@@ -70,6 +71,11 @@
       "invalid_groups": "Select at least one available test group.",
       "invalid_suite": "This module has no registered test suite.",
       "run_not_found": "This run is no longer available. Reconnect and start a new run."
+    },
+    "businessPartnersSamplesHelp": "Runs fixed privacy, visibility, offline-sync, and safe-discard recovery scenarios.",
+    "businessPartnersCoverageHelp": "Checks the local business-partner privacy rules, Cloud / Hybrid write-RPC routing, revoked-access error classification, and safe removal of an inaccessible cached partner. It uses disposable IndexedDB and mocked remote contracts; a real Supabase permission test remains unavailable in this developer suite.",
+    "businessPartnersGroups": {
+      "privacyAndSync": "Privacy, sync contract, and access-revocation recovery"
     },
     "pos": "POS",
     "posSamplesHelp": "1–100 additional paid POS checkout scenarios with varied currencies, methods, fractional quantities and service lines. Fixed regressions run alongside them.",
@@ -4091,7 +4097,25 @@
     "toastSyncError": "Sync Error",
     "discardError": "Failed to discard changes.",
     "errors": {
-      "loanAmountIntegrity": "The loan's principal, repayments, balance, and status do not agree. The change was kept locally; refresh the loan and retry the return or repayment."
+      "loanAmountIntegrity": "The loan's principal, repayments, balance, and status do not agree. The change was kept locally; refresh the loan and retry the return or repayment.",
+      "businessPartnerAccessChanged": "Your access to this business partner changed before this offline edit could be synced. Ask an administrator to restore access if the edit is still needed, or discard the queued change to remove the stale local copy."
+    },
+    "accessChanged": {
+      "title": "Business partner access changed",
+      "description": "Your access to a business partner changed before a local edit was synced. Ask an administrator to restore access if the edit is still needed. Otherwise, review and discard the queued change.",
+      "detail": "This change cannot be retried until an administrator restores your access. To remove the stale local copy, discard it.",
+      "reviewAction": "Review and discard change",
+      "discardAction": "Discard inaccessible change"
+    },
+    "integrity": {
+      "title": "Sync issue needs to be resolved",
+      "description": "Supabase rejected a queued change. To protect order, inventory, and product data, actions are paused until the issue is resolved. Nothing has been discarded.",
+      "reconnect": "Reconnect to the internet before retrying this sync issue.",
+      "reviewAction": "Review sync queue",
+      "retryAction": "Retry sync",
+      "retryingAction": "Retrying sync...",
+      "retryStillRejected": "Supabase still rejected the queued change.",
+      "retryCouldNotComplete": "The retry could not be completed."
     },
     "recovery": {
       "action": "Discard and restore",
@@ -4100,7 +4124,8 @@
       "successTitle": "Queued change discarded",
       "successDescription": {
         "restored": "The local record now matches the current cloud data.",
-        "removed": "The local-only record was removed because it does not exist in cloud data."
+        "removed": "The local-only record was removed because it does not exist in cloud data.",
+        "removed_access_revoked": "The inaccessible local business partner and its queued change were removed."
       },
       "failureTitle": "Could not discard queued change",
       "unavailable": "This selected change affects linked records and needs a targeted recovery. Retry it or resolve the original issue.",

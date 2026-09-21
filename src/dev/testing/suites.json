@@ -79,6 +79,30 @@
     "samplesHelpKey": "devTesting.samplesHelp",
     "coverageHelpKey": "devTesting.coverageHelp"
   },
+  "business-partners": {
+    "titleKey": "devTesting.businessPartners",
+    "samplesHelpKey": "devTesting.businessPartnersSamplesHelp",
+    "coverageHelpKey": "devTesting.businessPartnersCoverageHelp",
+    "groups": [
+      {
+        "id": "privacy-and-sync",
+        "titleKey": "devTesting.businessPartnersGroups.privacyAndSync",
+        "layer": "contract",
+        "files": [
+          "src/local-db/businessPartners.test.ts",
+          "src/local-db/offlineMutationRecovery.test.ts",
+          "src/sync/syncEngine.test.ts",
+          "src/sync/syncErrors.test.ts"
+        ]
+      }
+    ],
+    "unavailable": [
+      "browser-workflow",
+      "cloud-database",
+      "hybrid-native",
+      "local-native"
+    ]
+  },
   "pos": {
     "titleKey": "devTesting.pos",
     "samplesHelpKey": "devTesting.posSamplesHelp",

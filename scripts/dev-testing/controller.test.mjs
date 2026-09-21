@@ -49,6 +49,16 @@ describe('developer runner boundaries', () => {
       expect(() => validateRunOptions(options)).toThrow()
     }
     expect(validateRunOptions({ suiteId: 'sale-orders' }).groups.length).toBe(suites['sale-orders'].groups.length)
+    expect(validateRunOptions({ suiteId: 'business-partners' }).groups).toEqual([
+      expect.objectContaining({
+        id: 'privacy-and-sync',
+        titleKey: 'devTesting.businessPartnersGroups.privacyAndSync',
+        files: expect.arrayContaining([
+          'src/local-db/offlineMutationRecovery.test.ts',
+          'src/sync/syncErrors.test.ts'
+        ])
+      })
+    ])
     expect(validateRunOptions({ suiteId: 'pos' }).groups.length).toBe(12)
     expect(validateRunOptions({ suiteId: 'post-service' }).groups.length).toBe(13)
     expect(validateRunOptions({ suiteId: 'post-service', groupIds: ['remote-contract', 'merchants'] }).groups.map((group) => group.id)).toEqual(['merchants', 'remote-contract'])

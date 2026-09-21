@@ -22,7 +22,11 @@ import { usePendingSyncMutations } from '@/local-db/hooks'
 import { retrySyncIntegrityMutations } from '@/local-db/offlineMutations'
 import { canRecoverOfflineMutation, discardAndRestoreOfflineMutation, type OfflineMutationRecoveryFailure } from '@/local-db/offlineMutationRecovery'
 import type { OfflineMutation } from '@/local-db/models'
-import { getCapitalPoolConflictFromSyncError, isSyncIntegrityError } from '@/sync/syncErrors'
+import {
+    getCapitalPoolConflictFromSyncError,
+    isBusinessPartnerAccessChangedError,
+    isSyncIntegrityError
+} from '@/sync/syncErrors'
 import { inspectRemoteMutationPayload, type RemoteMutationFieldInspection } from '@/sync/syncPayloadContract'
 import { useTranslation } from 'react-i18next'
 import { runManagedFullSync } from '@/sync/syncCoordinator'
@@ -131,6 +135,10 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
         ? inspectRemoteMutationPayload(selectedMutation.entityType, selectedMutation.payload, selectedMutation.error)
         : []
     const selectedCapitalPoolConflict = getCapitalPoolConflictFromSyncError(selectedMutation?.error)
+    const selectedPartnerAccessChanged = isBusinessPartnerAccessChangedError(selectedMutation?.error)
+    const firstPartnerAccessChangedMutation = pendingMutations.find((mutation) => (
+        isBusinessPartnerAccessChangedError(mutation.error)
+    ))
     const selectedMutationError = selectedCapitalPoolConflict
         ? t('paymentAccounts.capitalPools.errors.accountConflict', {
             account: selectedCapitalPoolConflict.accountName,
@@ -372,14 +380,23 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                                 {status === 'success' ? t('common.close', 'Close') : t('common.cancel', 'Cancel')}
                             </Button>
                         </div>
-                        {status !== 'success' && (
+                        {status !== 'success' && (firstPartnerAccessChangedMutation ? (
+                            <Button
+                                variant="outline"
+                                onClick={() => setSelectedMutation(firstPartnerAccessChangedMutation)}
+                                disabled={isSyncing || isDiscarding}
+                            >
+                                <ListTodo className="h-4 w-4" />
+                                {t('sync.accessChanged.reviewAction')}
+                            </Button>
+                        ) : (
                             <Button
                                 onClick={handleSync}
                                 disabled={isSyncing || isDiscarding || !isOnline}
                             >
                                 {isSyncing ? t('sync.syncingBtn') : t('sync.syncNow')}
                             </Button>
-                        )}
+                        ))}
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
@@ -430,6 +447,12 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                             </div>
                         )}
 
+                        {selectedPartnerAccessChanged && (
+                            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                                {t('sync.accessChanged.detail')}
+                            </p>
+                        )}
+
                             <Table>
                                 <TableHeader>
                                     <TableRow>
@@ -474,7 +497,9 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                                 disabled={isDiscarding}
                             >
                                 {isDiscarding ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
-                                {t('sync.recovery.action')}
+                                {selectedPartnerAccessChanged
+                                    ? t('sync.accessChanged.discardAction')
+                                    : t('sync.recovery.action')}
                             </Button>
                         ) : (
                             <p className="text-xs text-muted-foreground">

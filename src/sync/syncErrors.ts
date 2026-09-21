@@ -2,6 +2,7 @@ import i18n from '@/i18n/config';
 
 export const SCHEMA_MISMATCH_ERROR_PREFIX = "Schema mismatch:";
 export const SYNC_INTEGRITY_ERROR_PREFIX = "Sync integrity issue:";
+export const BUSINESS_PARTNER_ACCESS_CHANGED_ERROR_PREFIX = "Business partner access changed:";
 const CAPITAL_POOL_CONFLICT_MARKER = "CAPITAL_POOL_ACCOUNT_CONFLICT:";
 
 export interface CapitalPoolSyncConflict {
@@ -106,6 +107,14 @@ export function isSchemaMismatchError(error?: string): boolean {
   return typeof error === "string" && error.startsWith(SCHEMA_MISMATCH_ERROR_PREFIX);
 }
 
+export function isBusinessPartnerAccessChangedError(error?: string): boolean {
+  return typeof error === "string" && error.startsWith(BUSINESS_PARTNER_ACCESS_CHANGED_ERROR_PREFIX);
+}
+
+function isBusinessPartnerAccessDeniedError(error: unknown): boolean {
+  return getErrorCode(error) === "42501" && /business partner access denied/i.test(getErrorMessage(error));
+}
+
 function getSyncIntegrityIssueKind(error: unknown): SyncIntegrityIssueKind | null {
   const message = getErrorMessage(error);
   const code = getErrorCode(error);
@@ -148,6 +157,12 @@ export function getSyncIntegrityError(
   error: unknown,
 ): string | null {
   const message = getErrorMessage(error);
+  if (tableName === "business_partners" && isBusinessPartnerAccessDeniedError(error)) {
+    return `${BUSINESS_PARTNER_ACCESS_CHANGED_ERROR_PREFIX} ${i18n.t("sync.errors.businessPartnerAccessChanged", {
+      defaultValue: "Your access to this business partner changed before this offline edit could be synced. Ask an administrator to restore access if the edit is still needed, or discard the queued change to remove the stale local copy.",
+    })}`;
+  }
+
   if (
     tableName === "loans" &&
     /loans_v1_amounts_check|loan principal must equal paid amount plus balance/i.test(message)
@@ -182,6 +197,7 @@ export function getSyncIntegrityError(
  */
 export function isSyncIntegrityError(error?: string): boolean {
   if (typeof error !== "string") return false;
-  return error.startsWith(SYNC_INTEGRITY_ERROR_PREFIX) ||
+  return isBusinessPartnerAccessChangedError(error) ||
+    error.startsWith(SYNC_INTEGRITY_ERROR_PREFIX) ||
     getSyncIntegrityIssueKind(error) !== null;
 }

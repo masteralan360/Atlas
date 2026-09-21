@@ -4432,53 +4432,60 @@ export function POS() {
                         </SmallDialogDescription>
                     </SmallDialogHeader>
                     <SmallDialogBody>
-                        {(() => {
-                            if (!unitSelectionProduct) return null
-                            const context = unitContextsByProductId.get(unitSelectionProduct.id)
-                            if (!context) return null
-                            const { conversion, relationship } = context
-                            const childPricing = getPriceBookPricing(unitSelectionProduct)
-                            const parentOverride = selectedPriceBookId
-                                ? priceBookUnitPrices.find((row) => !row.isDeleted
-                                    && row.priceBookId === selectedPriceBookId
-                                    && row.productId === unitSelectionProduct.id
-                                    && row.unitRef === relationship.parentUnitRef)
-                                : undefined
-                            const parentPrice = parentOverride?.price ?? conversion.parentPrice
-                            const childPrice = childPricing?.price ?? unitSelectionProduct.price
-                            const committedInventoryQuantity = cart
-                                .filter((item) => item.product_id === unitSelectionProduct.id && item.storageId === unitSelectionProduct.storageId)
-                                .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
-                            const remainingInventoryQuantity = Math.max(0, unitSelectionProduct.inventoryQuantity - committedInventoryQuantity)
-                            const canSellParent = remainingInventoryQuantity + 0.000001 >= conversion.factor
-                            const canSellChild = remainingInventoryQuantity > 0
-                            return (
-                                <div className="grid gap-3 sm:grid-cols-2">
-                                    <button
-                                        type="button"
-                                        disabled={!canSellParent}
-                                        onClick={() => chooseProductSellingUnit('parent')}
-                                        className="rounded-2xl border bg-background p-5 text-start transition hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-45"
-                                    >
-                                        <Boxes className="mb-3 h-7 w-7 text-primary" />
-                                        <div className="font-black">{t(`products.units.${relationship.parentUnitCode}`, { defaultValue: relationship.parentUnitCode })}</div>
-                                        <div className="mt-1 text-sm font-bold text-primary">{formatCurrency(parentPrice, (parentOverride?.currency ?? unitSelectionProduct.currency) as CurrencyCode, features.iqd_display_preference)}</div>
-                                        <div className="mt-2 text-xs text-muted-foreground">{t('pos.unitSelection.stockEffect', { count: conversion.factor, unit: t(`products.units.${relationship.childUnitCode}`, { defaultValue: relationship.childUnitCode }) })}</div>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        disabled={!canSellChild}
-                                        onClick={() => chooseProductSellingUnit('child')}
-                                        className="rounded-2xl border bg-background p-5 text-start transition hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-45"
-                                    >
-                                        <Package className="mb-3 h-7 w-7 text-primary" />
-                                        <div className="font-black">{t(`products.units.${relationship.childUnitCode}`, { defaultValue: relationship.childUnitCode })}</div>
-                                        <div className="mt-1 text-sm font-bold text-primary">{formatCurrency(childPrice, (childPricing?.currency ?? unitSelectionProduct.currency) as CurrencyCode, features.iqd_display_preference)}</div>
-                                        <div className="mt-2 text-xs text-muted-foreground">{t('pos.unitSelection.stockEffect', { count: 1, unit: t(`products.units.${relationship.childUnitCode}`, { defaultValue: relationship.childUnitCode }) })}</div>
-                                    </button>
-                                </div>
-                            )
-                        })()}
+                        <div onKeyDownCapture={(event) => {
+                            if (event.key === 'Enter') {
+                                event.preventDefault()
+                                event.stopPropagation()
+                            }
+                        }}>
+                            {(() => {
+                                if (!unitSelectionProduct) return null
+                                const context = unitContextsByProductId.get(unitSelectionProduct.id)
+                                if (!context) return null
+                                const { conversion, relationship } = context
+                                const childPricing = getPriceBookPricing(unitSelectionProduct)
+                                const parentOverride = selectedPriceBookId
+                                    ? priceBookUnitPrices.find((row) => !row.isDeleted
+                                        && row.priceBookId === selectedPriceBookId
+                                        && row.productId === unitSelectionProduct.id
+                                        && row.unitRef === relationship.parentUnitRef)
+                                    : undefined
+                                const parentPrice = parentOverride?.price ?? conversion.parentPrice
+                                const childPrice = childPricing?.price ?? unitSelectionProduct.price
+                                const committedInventoryQuantity = cart
+                                    .filter((item) => item.product_id === unitSelectionProduct.id && item.storageId === unitSelectionProduct.storageId)
+                                    .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
+                                const remainingInventoryQuantity = Math.max(0, unitSelectionProduct.inventoryQuantity - committedInventoryQuantity)
+                                const canSellParent = remainingInventoryQuantity + 0.000001 >= conversion.factor
+                                const canSellChild = remainingInventoryQuantity > 0
+                                return (
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                        <button
+                                            type="button"
+                                            disabled={!canSellParent}
+                                            onClick={() => chooseProductSellingUnit('parent')}
+                                            className="rounded-2xl border bg-background p-5 text-start transition hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-45"
+                                        >
+                                            <Boxes className="mb-3 h-7 w-7 text-primary" />
+                                            <div className="font-black">{t(`products.units.${relationship.parentUnitCode}`, { defaultValue: relationship.parentUnitCode })}</div>
+                                            <div className="mt-1 text-sm font-bold text-primary">{formatCurrency(parentPrice, (parentOverride?.currency ?? unitSelectionProduct.currency) as CurrencyCode, features.iqd_display_preference)}</div>
+                                            <div className="mt-2 text-xs text-muted-foreground">{t('pos.unitSelection.stockEffect', { count: conversion.factor, unit: t(`products.units.${relationship.childUnitCode}`, { defaultValue: relationship.childUnitCode }) })}</div>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={!canSellChild}
+                                            onClick={() => chooseProductSellingUnit('child')}
+                                            className="rounded-2xl border bg-background p-5 text-start transition hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-45"
+                                        >
+                                            <Package className="mb-3 h-7 w-7 text-primary" />
+                                            <div className="font-black">{t(`products.units.${relationship.childUnitCode}`, { defaultValue: relationship.childUnitCode })}</div>
+                                            <div className="mt-1 text-sm font-bold text-primary">{formatCurrency(childPrice, (childPricing?.currency ?? unitSelectionProduct.currency) as CurrencyCode, features.iqd_display_preference)}</div>
+                                            <div className="mt-2 text-xs text-muted-foreground">{t('pos.unitSelection.stockEffect', { count: 1, unit: t(`products.units.${relationship.childUnitCode}`, { defaultValue: relationship.childUnitCode }) })}</div>
+                                        </button>
+                                    </div>
+                                )
+                            })()}
+                        </div>
                     </SmallDialogBody>
                 </SmallDialogContent>
             </SmallDialog>

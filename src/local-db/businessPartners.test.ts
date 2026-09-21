@@ -105,6 +105,13 @@ function installBrowserStorage() {
             removeEventListener: () => undefined
         }
     })
+    // The partner module imports the shared application shell, which imports
+    // drag-and-drop support. The test never renders it, but its module setup
+    // performs an Element feature check.
+    Object.defineProperty(globalThis, 'Element', {
+        configurable: true,
+        value: class Element {}
+    })
     Object.defineProperty(globalThis, 'navigator', {
         configurable: true,
         value: { onLine: false }
