@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { BadgeDollarSign, BadgePercent, CircleDollarSign, ClipboardList, Link2, Loader2, ShoppingCart, UserRound, X } from 'lucide-react'
 
+import { useAuth } from '@/auth'
 import type { CartItem } from '@/types'
 import {
     createBusinessPartner,
@@ -63,6 +64,7 @@ import {
 } from '@/ui/components/commissions/ProductCommissionPreview'
 import { findLinkedProductCommissionAgent } from '@/ui/components/commissions/productCommissionAgent'
 import { hasConfiguredSalesOrderCommission } from '@/ui/components/commissions/salesOrderCommissionSummary'
+import { isSalesAccountSelectionVisible } from '@/ui/components/commissions/oldSalesAgentConfiguration'
 
 export type QuickOrderCheckoutData = {
     customer: BusinessPartner
@@ -226,6 +228,11 @@ export function QuickOrderModal({
     onSubmit
 }: QuickOrderModalProps) {
     const { t } = useTranslation()
+    const { user } = useAuth()
+    const showSalesAccountSelection = isSalesAccountSelectionVisible({
+        agentSalesAccountsEnabled,
+        userRole: user?.role
+    })
     const areCustomersLoading = useBusinessPartnersLoading(workspaceId, { roles: ['customer'] })
     const { toast } = useToast()
     const commissionTriggerRef = useRef<HTMLButtonElement>(null)
@@ -528,7 +535,7 @@ export function QuickOrderModal({
                     </div>
                 ) : null}
 
-                {agentSalesAccountsEnabled ? (
+                {showSalesAccountSelection ? (
                     <div className="grid gap-2">
                         <Label htmlFor="quick-order-sales-account" className="flex items-center gap-2">
                             <UserRound className="h-4 w-4 text-muted-foreground" />

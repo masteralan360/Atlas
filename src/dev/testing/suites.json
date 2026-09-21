@@ -68,6 +68,14 @@
           "src/lib/ledgerSettlement.test.ts",
           "src/lib/ledgerCashMovementEntries.test.ts"
         ]
+      },
+      {
+        "id": "ui-access",
+        "titleKey": "devTesting.groups.uiAccess",
+        "layer": "calculation",
+        "files": [
+          "src/ui/components/commissions/oldSalesAgentConfiguration.test.ts"
+        ]
       }
     ],
     "unavailable": [
@@ -236,6 +244,14 @@
           "src/dev/testing/suites/posAttempt.test.ts",
           "src/local-db/offlineMutations.test.ts",
           "src/local-db/localModeSqliteAuthority.test.ts"
+        ]
+      },
+      {
+        "id": "ui-access",
+        "titleKey": "devTesting.groups.uiAccess",
+        "layer": "calculation",
+        "files": [
+          "src/ui/components/commissions/oldSalesAgentConfiguration.test.ts"
         ]
       }
     ],

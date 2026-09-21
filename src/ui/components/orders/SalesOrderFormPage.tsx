@@ -125,7 +125,10 @@ import {
 import { findLinkedProductCommissionAgent } from '@/ui/components/commissions/productCommissionAgent'
 import { hasConfiguredSalesOrderCommission } from '@/ui/components/commissions/salesOrderCommissionSummary'
 import { useCommissionAgentDirectory } from '@/ui/components/commissions/useCommissionAgentDirectory'
-import { OLD_SALES_AGENT_CONFIGURATION } from '@/ui/components/commissions/oldSalesAgentConfiguration'
+import {
+    isSalesAccountSelectionVisible,
+    OLD_SALES_AGENT_CONFIGURATION
+} from '@/ui/components/commissions/oldSalesAgentConfiguration'
 import { OrderEditorLoadingSection, OrderEditorReadOnlyScope } from './OrderEditorLoadingOverlay'
 import { ProgressToast } from '@/ui/components/ProgressToast'
 import { ToastAction } from '@/ui/components/toast'
@@ -252,6 +255,10 @@ export function SalesOrderFormPage({
     const demoTutorial = useDemoTutorial()
     const salesAgentCommissionsEnabled = hasFeature('sales_agent_commissions')
     const agentSalesAccountsEnabled = hasFeature('agent_sales_accounts')
+    const showSalesAccountSelection = isSalesAccountSelectionVisible({
+        agentSalesAccountsEnabled,
+        userRole: user?.role
+    })
 
     const products = useProducts(workspaceId)
     const productUnitConversions = useProductUnitConversions(workspaceId)
@@ -1425,7 +1432,7 @@ export function SalesOrderFormPage({
                             </CardHeader>
                             <CardContent>
                                 <div className="grid gap-4">
-                                    {agentSalesAccountsEnabled ? (
+                                    {showSalesAccountSelection ? (
                                         <div className="grid gap-2">
                                             <Label htmlFor="sales-order-sales-account" className="flex items-center gap-2">
                                                 <Users className="h-4 w-4 text-muted-foreground" />

@@ -15,7 +15,7 @@
     "samplesHelp": "1–100 additional checkout and return scenarios, alongside the fixed payment-method matrix.",
     "coverageLimit": "Full environment coverage is incomplete",
     "blocked": "Blocked · adapter unavailable",
-    "coverageHelp": "V1 checks production business functions with disposable IndexedDB and mocked remote contracts, including financing-return and loan-integrity sync contracts. It also covers saved custom Atlas Standard order layouts, including fixed Invoice values for sales and purchase prints. It does not yet automate the order form or execute the real Supabase or native SQLite stacks. A passing run applies only to the selected checks.",
+    "coverageHelp": "V1 checks production business functions with disposable IndexedDB and mocked remote contracts, including financing-return and loan-integrity sync contracts. It also covers saved custom Atlas Standard order layouts, including fixed Invoice values for sales and purchase prints, and the shared role-based sales-account selector visibility used by Orders and POS Quick Order. It does not yet automate the order form or execute the real Supabase or native SQLite stacks. A passing run applies only to the selected checks.",
     "results": "Test results",
     "progress": "{{done}} / {{total}} collected checks finished",
     "runSeed": "Seed: {{seed}}",
@@ -33,7 +33,8 @@
       "lifecycle": "Financing, returns, and order lifecycle",
       "remoteContract": "Cloud / Hybrid request contracts and retries",
       "pricing": "Pricing, currency, rounding, and line storage",
-      "payments": "Payments, accounts, reversals, and ledger"
+      "payments": "Payments, accounts, reversals, and ledger",
+      "uiAccess": "Role-based UI access"
     },
     "layers": {
       "business": "Production functions · isolated IndexedDB",
@@ -79,7 +80,7 @@
     },
     "pos": "POS",
     "posSamplesHelp": "1–100 additional paid POS checkout scenarios with varied currencies, methods, fractional quantities and service lines. Fixed regressions run alongside them.",
-    "posCoverageHelp": "Checks regular POS production checkout, cart calculations, inventory, related-unit hierarchy and conversion, independent packaging prices, combined product-unit selection, and the Order-cart restriction for related-unit products, alongside relationship usage safeguards, persistence, financing, exchange and reversal helpers, Activities and Quick Order routing, plus centralized image compression and R2 enforcement, with disposable IndexedDB and mocked backend contracts. Related-unit POS sales are covered by Checkout, Cart and Cloud / Hybrid request groups; relationship setup and product conversion are covered by Related Units. Image profile measurements, signature validation, animation rejection and worker upload metadata are covered by Media uploads. Sales return inventory and financing components are covered; the complete Sales return dialog is not automated. SQLite checks use an adapter stub. Real browser checkout, Supabase permissions, native restart and hardware remain unavailable.",
+    "posCoverageHelp": "Checks regular POS production checkout, cart calculations, inventory, related-unit hierarchy and conversion, independent packaging prices, combined product-unit selection, and the Order-cart restriction for related-unit products, alongside relationship usage safeguards, persistence, financing, exchange and reversal helpers, Activities and Quick Order routing, role-based sales-account selector visibility, plus centralized image compression and R2 enforcement, with disposable IndexedDB and mocked backend contracts. Related-unit POS sales are covered by Checkout, Cart and Cloud / Hybrid request groups; relationship setup and product conversion are covered by Related Units. Image profile measurements, signature validation, animation rejection and worker upload metadata are covered by Media uploads. Sales return inventory and financing components are covered; the complete Sales return dialog is not automated. SQLite checks use an adapter stub. Real browser checkout, Supabase permissions, native restart and hardware remain unavailable.",
     "posGroups": {
       "checkout": "Checkout, payments, accounts and ledger",
       "cart": "Cart and held-sale restoration",
