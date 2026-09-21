@@ -1,5 +1,6 @@
 import type { CurrencyCode } from '@/local-db/models'
 import type { CartItem } from '@/types'
+import type { PosPaymentType } from '@/lib/posPaymentPolicy'
 import { getOrderLineFreeBonusQuantity, getOrderLinePaidQuantity } from '@/lib/orderLineItems'
 import { inventoryQuantityToSellingAvailability } from '@/lib/unitRelationships'
 
@@ -46,6 +47,18 @@ export function convertPosPrice(amount: number, from: CurrencyCode, to: Currency
 export function getCartBasePrice(item: CartItem) { return item.discounted_price ?? item.price }
 export function getCartEffectivePrice(item: CartItem) { return item.negotiated_price ?? getCartBasePrice(item) }
 export function snapshotPosCart(items: CartItem[]) { return items.map(item => ({ ...item })) }
+
+/**
+ * Quick Orders cannot persist the selling-unit conversion snapshot required by
+ * products with related selling units. Keep those products out of an Order
+ * cart instead of silently adding them in their base unit.
+ */
+export function canAddProductToPosCart(
+    paymentType: PosPaymentType,
+    hasRelatedSellingUnit: boolean
+) {
+    return paymentType !== 'order' || !hasRelatedSellingUnit
+}
 
 /** A free quantity forces the cart through the Sales Order checkout route. */
 export function hasPosOrderFreeBonus(items: readonly CartItem[]) {

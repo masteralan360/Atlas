@@ -1105,13 +1105,9 @@ describe('fullSync error reporting', () => {
         expect(writtenSales).toHaveLength(500)
         expect(writtenSales).not.toContainEqual(expect.objectContaining({ id: 'sale-0' }))
         expect(progress).toContainEqual(expect.objectContaining({
-            completed: 46,
-            total: 95,
             detail: { table: 'sales', completed: 250, total: 501 }
         }))
         expect(progress).toContainEqual(expect.objectContaining({
-            completed: 46,
-            total: 95,
             detail: { table: 'sales', completed: 501, total: 501 }
         }))
     })

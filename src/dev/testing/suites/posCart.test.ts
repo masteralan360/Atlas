@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CartItem } from '@/types'
 import {
+    canAddProductToPosCart,
     canOfferMobileFreeOnlyOrderHold,
     canSetPosPaidQuantity,
     hasPosOrderFreeBonus,
@@ -15,6 +16,14 @@ const item: CartItem = { product_id: 'p', storageId: 's', sku: 'SKU', name: 'Ite
     quantity: 2.25, max_stock: 20, negotiated_price: 90, price_book_id: 'book' }
 
 describe('POS held-cart snapshots and restoration', () => {
+    it('blocks related-unit products from an Order cart without restricting other payment methods', () => {
+        expect(canAddProductToPosCart('order', true)).toBe(false)
+        expect(canAddProductToPosCart('order', false)).toBe(true)
+        expect(canAddProductToPosCart('cash', true)).toBe(true)
+        expect(canAddProductToPosCart('digital', true)).toBe(true)
+        expect(canAddProductToPosCart('loan', true)).toBe(true)
+    })
+
     it('holds a separate snapshot with fractional quantity, price book and negotiated price', () => {
         const cart = [{ ...item }]
         const held = snapshotPosCart(cart)

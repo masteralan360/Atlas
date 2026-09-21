@@ -44,10 +44,11 @@ import {
     getStoredCustomTemplatePrintLanguage,
     ORDER_ATLAS_STANDARD_RETURN_TEMPLATE_KEY,
     ORDER_ATLAS_STANDARD_TEMPLATE_KEY,
+    readCustomTemplateLayout,
     resolveCustomTemplatePrintLanguage,
     stampCustomTemplatePrintLanguage
 } from '@/lib/customTemplates'
-import { setPrintPreviewEditorSource, type CustomTemplateBackground, type CustomTemplateLayout } from '@/lib/printPreviewEditorStore'
+import { setPrintPreviewEditorSource, type CustomTemplateLayout } from '@/lib/printPreviewEditorStore'
 import { formatDateTime } from '@/lib/utils'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { useWorkspace } from '@/workspace'
@@ -64,78 +65,8 @@ import {
 } from '@/local-db'
 import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
 
-function sanitizeBackground(value: unknown): CustomTemplateBackground | undefined {
-    if (!value || typeof value !== 'object') return undefined
-    const candidate = value as Partial<CustomTemplateBackground>
-    const path = typeof candidate.path === 'string' ? candidate.path.trim() : ''
-    if (!path) return undefined
-    const opacity = Number(candidate.opacity)
-    const size = Number(candidate.size)
-    return {
-        path,
-        opacity: Number.isFinite(opacity) ? Math.min(100, Math.max(1, Math.round(opacity))) : 15,
-        size: Number.isFinite(size) ? Math.min(100, Math.max(10, Math.round(size))) : 100
-    }
-}
-
 function readStoredLayout(row?: CustomTemplateRow | null): CustomTemplateLayout | null {
-    if (!row || !row.layout_json || typeof row.layout_json !== 'object') return null
-
-    const layout = row.layout_json as Partial<CustomTemplateLayout>
-    const targetPage = getCustomTemplateTarget(row.module_type_key)?.page
-    const hiddenFields = layout.hiddenFields && typeof layout.hiddenFields === 'object'
-        ? Object.fromEntries(
-            Object.entries(layout.hiddenFields).filter(([, value]) => typeof value === 'boolean')
-        )
-        : {}
-    const fieldOrders = layout.fieldOrders && typeof layout.fieldOrders === 'object'
-        ? Object.fromEntries(
-            Object.entries(layout.fieldOrders)
-                .filter(([, value]) => Array.isArray(value))
-                .map(([key, value]) => [key, value.filter((fieldKey): fieldKey is string => typeof fieldKey === 'string')])
-        )
-        : {}
-    const fieldLabelOverrides = layout.fieldLabelOverrides && typeof layout.fieldLabelOverrides === 'object'
-        ? Object.fromEntries(
-            Object.entries(layout.fieldLabelOverrides)
-                .filter(([, value]) => typeof value === 'string' && Boolean(value.trim()))
-                .map(([key, value]) => [key, (value as string).trim()])
-        )
-        : {}
-    const fieldDisplayModes = layout.fieldDisplayModes && typeof layout.fieldDisplayModes === 'object'
-        ? Object.fromEntries(
-            Object.entries(layout.fieldDisplayModes)
-                .filter(([, value]) => typeof value === 'string' && Boolean(value.trim()))
-                .map(([key, value]) => [key, (value as string).trim()])
-        )
-        : {}
-    const background = sanitizeBackground(layout.background)
-
-    return {
-        version: 1,
-        label: row.label?.trim() || (typeof layout.label === 'string' ? layout.label : undefined),
-        moduleTypeKey: typeof layout.moduleTypeKey === 'string' ? layout.moduleTypeKey : row.module_type_key,
-        nativeTemplateKey: typeof layout.nativeTemplateKey === 'string' ? layout.nativeTemplateKey : undefined,
-        printLanguage: layout.printLanguage === 'ar' || layout.printLanguage === 'ku' || layout.printLanguage === 'en'
-            ? layout.printLanguage
-            : undefined,
-        page: {
-            widthMm: targetPage?.widthMm || layout.page?.widthMm || 210,
-            heightMm: targetPage?.heightMm || layout.page?.heightMm || 297
-        },
-        fields: layout.fields || {},
-        hiddenFields,
-        fieldOrders,
-        fieldLabelOverrides,
-        fieldDisplayModes,
-        background,
-        componentPositions: layout.componentPositions || {},
-        annotations: layout.annotations || [],
-        texts: layout.texts || [],
-        images: layout.images || [],
-        shapes: layout.shapes || [],
-        updatedAt: typeof layout.updatedAt === 'string' ? layout.updatedAt : row.updated_at
-    }
+    return readCustomTemplateLayout(row)
 }
 
 function countLayoutItems(row: CustomTemplateRow) {
@@ -149,6 +80,7 @@ function countLayoutItems(row: CustomTemplateRow) {
         + Object.keys(layout.hiddenFields || {}).length
         + Object.values(layout.fieldOrders || {}).reduce((count, fieldOrder) => count + fieldOrder.length, 0)
         + Object.keys(layout.fieldLabelOverrides || {}).length
+        + Object.keys(layout.fieldValueOverrides || {}).length
         + Object.keys(layout.fieldDisplayModes || {}).length
         + Object.keys(layout.componentPositions || {}).length
 }

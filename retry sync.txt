@@ -2,7 +2,6 @@ Post Service Archiver
 icon
 remove R2 Print only
 account switch
-Fix SQLITE loading
 Transaction Reconciliation & Integrity Audit, Expandable, Plain English Explanation, AGENTS.md guide
 
 Price books selector order form and quick order
@@ -22,7 +21,4 @@ Accumilated account statement rows by types and for one day
 
 ##
 
-Centralized Photo Compression
-Simplify E-commerce
 Restrict Phone number in khaleej cosmetic
-##

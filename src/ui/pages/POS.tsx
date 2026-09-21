@@ -39,6 +39,7 @@ import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { isPosPaymentTypeAllowed, getPosCheckoutRoute, type PosPaymentType } from '@/lib/posPaymentPolicy'
 import {
     canOfferMobileFreeOnlyOrderHold,
+    canAddProductToPosCart,
     canSetPosPaidQuantity,
     convertPosPrice,
     getCartBasePrice,
@@ -1876,6 +1877,16 @@ export function POS() {
     const addFreeOnlyProductToCart = useCallback((product: PosCatalogProduct) => {
         if (!canUseOrderFreeBonus || !quickOrderEnabled || isActivitiesStorage || product.isInfiniteActivity) return false
         const isNonInventoryService = isService(product)
+        const hasRelatedSellingUnit = !isNonInventoryService && unitContextsByProductId.has(product.id)
+        if (!canAddProductToPosCart('order', hasRelatedSellingUnit)) {
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: t('pos.unitSelection.ordersUnsupported')
+            })
+            hapticTrigger('error')
+            return false
+        }
         const priceBookPricing = getPriceBookPricing(product)
         const effectivePrice = priceBookPricing?.price ?? product.price
         const effectiveCurrency = (priceBookPricing?.currency ?? product.currency) as CurrencyCode
@@ -1948,16 +1959,27 @@ export function POS() {
         setPaymentAccount(null)
         hapticTrigger('success')
         return true
-    }, [canSelectProduct, canUseOrderFreeBonus, cart, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, hapticTrigger, isActivitiesStorage, quickOrderEnabled, t, toast])
+    }, [canSelectProduct, canUseOrderFreeBonus, cart, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, hapticTrigger, isActivitiesStorage, quickOrderEnabled, t, toast, unitContextsByProductId])
 
     const addToCart = useCallback((product: PosCatalogProduct) => {
-        // Quick Orders deliberately use the product's ordinary/base unit.
-        if (paymentType !== 'order' && !product.isInfiniteActivity && !isService(product) && unitContextsByProductId.has(product.id)) {
+        const hasRelatedSellingUnit = !product.isInfiniteActivity
+            && !isService(product)
+            && unitContextsByProductId.has(product.id)
+        if (!canAddProductToPosCart(paymentType, hasRelatedSellingUnit)) {
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: t('pos.unitSelection.ordersUnsupported')
+            })
+            hapticTrigger('error')
+            return
+        }
+        if (hasRelatedSellingUnit) {
             setUnitSelectionProduct(product)
             return
         }
         addSelectedUnitToCart(product)
-    }, [addSelectedUnitToCart, paymentType, unitContextsByProductId])
+    }, [addSelectedUnitToCart, hapticTrigger, paymentType, t, toast, unitContextsByProductId])
 
     const openMobileFreeOnlyProduct = useCallback((product: PosCatalogProduct) => {
         const alreadyInCart = cart.some((item) => (
