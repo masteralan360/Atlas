@@ -38,6 +38,8 @@ export type TemplatePreviewRenderOptions = {
     hiddenFields?: Record<string, boolean>
     fieldOrders?: Record<string, string[]>
     fieldLabelOverrides?: Record<string, string>
+    /** Fixed field values saved with a custom print layout. */
+    fieldValueOverrides?: Record<string, string>
     fieldDisplayModes?: Record<string, string>
     /** Background watermark rendered behind every template component. */
     background?: CustomTemplateBackground
@@ -46,6 +48,7 @@ export type TemplatePreviewRenderOptions = {
     onHiddenFieldChange?: (key: string, hidden: boolean) => void
     onFieldOrderChange?: (sectionKey: string, fieldKeys: string[]) => void
     onFieldLabelChange?: (fieldKey: string, label: string) => void
+    onFieldValueChange?: (fieldKey: string, value: string) => void
     onFieldDisplayModeChange?: (fieldKey: string, mode: string) => void
     workspaceFooterContacts?: Record<string, { primary?: string; nonPrimary?: string }>
     /** Current source completion for a live partner-balance refresh. */
@@ -167,6 +170,8 @@ export type CustomTemplateLayout = {
     hiddenFields?: Record<string, boolean>
     fieldOrders?: Record<string, string[]>
     fieldLabelOverrides?: Record<string, string>
+    /** Fixed field values saved with a custom print layout. */
+    fieldValueOverrides?: Record<string, string>
     fieldDisplayModes?: Record<string, string>
     /** Background watermark that renders behind every component of this preview. */
     background?: CustomTemplateBackground

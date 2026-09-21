@@ -4,6 +4,23 @@ import { renderToStaticMarkup } from 'react-dom/server'
 vi.mock('@/services/pdfGenerator', () => ({
     generateTemplatePdf: vi.fn()
 }))
+vi.mock('@/services/pdfRasterizer', () => ({
+    rasterizePdfPage: vi.fn()
+}))
+vi.mock('@/lib/productImageStorage', () => ({
+    getProductImageDisplayUrl: (value?: string | null) => value || ''
+}))
+vi.mock('@hello-pangea/dnd', () => ({
+    DragDropContext: () => null,
+    Droppable: () => null,
+    Draggable: () => null
+}))
+vi.mock('react-spreadsheet', () => ({
+    default: () => null,
+    EntireColumnsSelection: class {},
+    EntireRowsSelection: class {}
+}))
+vi.mock('maplibre-gl', () => ({}))
 vi.mock('@/services/platformService', () => ({
     platformService: {
         convertFileSrc: (path: string) => path
@@ -87,12 +104,14 @@ beforeAll(async () => {
     })
     vi.stubGlobal('document', {
         dir: '',
+        visibilityState: 'visible',
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
         documentElement: {
             lang: '',
             dir: ''
         }
     })
-
     customTemplates = await import('@/lib/customTemplates')
     ;({ ProfessionalA4InvoiceTemplate } = await import('@/ui/components/ProfessionalA4InvoiceTemplate'))
     ;({ PartnerDetailsPrintTemplate } = await import('@/ui/components/crm/PartnerDetailsPrintTemplate'))
@@ -680,7 +699,7 @@ describe('Order Details custom print template', () => {
         expect(hiddenHtml).not.toContain('data-order-print-row-type="adjustment"')
     })
 
-    it('preserves movable component positions, hidden fields, field orders, and field titles when reading a saved layout', () => {
+    it('preserves movable component positions, hidden fields, field orders, titles, and valid fixed values when reading a saved layout', () => {
         const componentPositions = {
             customer: { x: 10, y: 5 },
             commercials: { x: -6, y: 8 }
@@ -694,6 +713,11 @@ describe('Order Details custom print template', () => {
         const fieldLabelOverrides = {
             'orders.commercials.paidAmount': 'Received'
         }
+        const fieldValueOverrides = {
+            'atlasStandard.invoiceDetails.invoice': ' Order ',
+            blank: '   ',
+            invalid: 12
+        }
         const layout = customTemplates.readCustomTemplateLayout({
             id: 'movable-order-template',
             module_type_key: customTemplates.ORDER_DETAILS_TEMPLATE_KEY,
@@ -706,6 +730,7 @@ describe('Order Details custom print template', () => {
                 hiddenFields,
                 fieldOrders,
                 fieldLabelOverrides,
+                fieldValueOverrides,
                 annotations: [],
                 texts: [],
                 images: [],
@@ -718,6 +743,7 @@ describe('Order Details custom print template', () => {
         expect(layout?.hiddenFields).toEqual(hiddenFields)
         expect(layout?.fieldOrders).toEqual(fieldOrders)
         expect(layout?.fieldLabelOverrides).toEqual(fieldLabelOverrides)
+        expect(layout?.fieldValueOverrides).toEqual({ 'atlasStandard.invoiceDetails.invoice': 'Order' })
     })
 
     it('applies saved component positions to the printable custom layout without editor controls', () => {
@@ -850,7 +876,6 @@ describe('Atlas Standard order invoice custom print template', () => {
             fieldDisplayModes,
             onFieldDisplayModeChange
         })
-
         expect(preview.fields).toEqual([
             expect.objectContaining({
                 key: 'showOrderAdjustments',
@@ -958,6 +983,70 @@ describe('Atlas Standard order invoice custom print template', () => {
         }))
         expect(hiddenImageHtml).not.toContain('>Image</th>')
         expect(hiddenImageHtml).not.toContain('https://example.test/products/sample.png')
+    })
+
+    it('uses a saved fixed Invoice value outside the editor render path', () => {
+        const target = customTemplates.getCustomTemplateTarget(customTemplates.ORDER_ATLAS_STANDARD_TEMPLATE_KEY)
+        expect(target).toBeDefined()
+
+        const layout = customTemplates.readCustomTemplateLayout({
+            id: 'saved-order-template',
+            module_type_key: customTemplates.ORDER_ATLAS_STANDARD_TEMPLATE_KEY,
+            layout_json: {
+                version: 1,
+                moduleTypeKey: customTemplates.ORDER_ATLAS_STANDARD_TEMPLATE_KEY,
+                page: { widthMm: 210, heightMm: 297 },
+                fields: {},
+                fieldValueOverrides: { 'atlasStandard.invoiceDetails.invoice': 'Order' },
+                annotations: [],
+                texts: [],
+                images: [],
+                shapes: [],
+                updatedAt: '2026-09-21T00:00:00.000Z'
+            }
+        })
+        expect(layout?.fieldValueOverrides).toEqual({ 'atlasStandard.invoiceDetails.invoice': 'Order' })
+
+        const html = renderToStaticMarkup(customTemplates.renderCustomTemplateLayoutElement({
+            target: target!,
+            layout: layout!,
+            values: {},
+            options: { printLang: 'en' }
+        }))
+        expect(html).toContain('Invoice : </strong><span class="text-green-600">Order</span>')
+    })
+
+    it('uses one fixed Invoice value for sales and purchase prints, then restores dynamic wording when reset', () => {
+        const target = customTemplates.getCustomTemplateTarget(customTemplates.ORDER_ATLAS_STANDARD_TEMPLATE_KEY)
+        expect(target).toBeDefined()
+
+        const fixedInvoiceValue = { 'atlasStandard.invoiceDetails.invoice': 'Order' }
+        const onFieldValueChange = vi.fn()
+        const salesPreview = customTemplates.createCustomTemplatePreview(target!, { printLang: 'en' })
+        const purchasePreview = customTemplates.createCustomTemplatePreview(target!, {
+            printLang: 'en',
+            orderKind: 'purchase'
+        })
+        const editorElement = salesPreview.createElement({}, undefined, undefined, {
+            fieldValueOverrides: fixedInvoiceValue,
+            onFieldValueChange
+        })
+        expect(editorElement.props.fieldValueOverrides).toBe(fixedInvoiceValue)
+        expect(editorElement.props.onFieldValueChange).toBe(onFieldValueChange)
+
+        const fixedSalesHtml = renderToStaticMarkup(salesPreview.createElement({}, undefined, undefined, {
+            fieldValueOverrides: fixedInvoiceValue
+        }))
+        const fixedPurchaseHtml = renderToStaticMarkup(purchasePreview.createElement({}, undefined, undefined, {
+            fieldValueOverrides: fixedInvoiceValue
+        }))
+        const resetSalesHtml = renderToStaticMarkup(salesPreview.createElement({}, undefined, undefined, {
+            fieldValueOverrides: {}
+        }))
+
+        expect(fixedSalesHtml).toContain('Invoice : </strong><span class="text-green-600">Order</span>')
+        expect(fixedPurchaseHtml).toContain('Invoice : </strong><span class="text-red-600">Order</span>')
+        expect(resetSalesHtml).toContain('Invoice : </strong><span class="text-green-600">Sales Order</span>')
     })
 
     it('writes the amount in words using the selected print language', () => {
@@ -1318,6 +1407,7 @@ describe('Atlas Standard return custom print template', () => {
                 hiddenFields: { 'atlasStandard.table.note': true },
                 fieldOrders: { 'atlasStandard.invoiceDetails': ['atlasStandard.invoiceDetails.partner'] },
                 fieldLabelOverrides: { 'atlasStandard.table.quantity': 'Sold Qty' },
+                fieldValueOverrides: { 'atlasStandard.invoiceDetails.invoice': 'Order' },
                 fieldDisplayModes: {
                     'atlasStandard.table.productImage.width': '12',
                     'atlasStandard.invoiceDetails.salesPerson': 'invoiceOrganizer'
@@ -1335,6 +1425,7 @@ describe('Atlas Standard return custom print template', () => {
             nativeTemplateKey: customTemplates.ORDER_ATLAS_STANDARD_RETURN_TEMPLATE_KEY,
             fields: {},
             fieldLabelOverrides: {},
+            fieldValueOverrides: {},
             fieldDisplayModes: { 'atlasStandard.table.productImage.width': '12' },
             hiddenFields: { 'atlasStandard.table.note': true },
             texts: [{ text: 'Thank you' }]

@@ -472,6 +472,13 @@ export function readCustomTemplateLayout(row?: StoredCustomTemplateRow | null): 
                 .map(([key, value]) => [key, (value as string).trim()])
         )
         : {}
+    const fieldValueOverrides = layout.fieldValueOverrides && typeof layout.fieldValueOverrides === 'object'
+        ? Object.fromEntries(
+            Object.entries(layout.fieldValueOverrides)
+                .filter(([, value]) => typeof value === 'string' && Boolean(value.trim()))
+                .map(([key, value]) => [key, (value as string).trim()])
+        )
+        : {}
     const fieldDisplayModes = layout.fieldDisplayModes && typeof layout.fieldDisplayModes === 'object'
         ? Object.fromEntries(
             Object.entries(layout.fieldDisplayModes)
@@ -497,6 +504,7 @@ export function readCustomTemplateLayout(row?: StoredCustomTemplateRow | null): 
         hiddenFields,
         fieldOrders,
         fieldLabelOverrides,
+        fieldValueOverrides,
         fieldDisplayModes,
         background,
         componentPositions: layout.componentPositions || {},
@@ -539,6 +547,7 @@ export function cloneAtlasStandardOrderLayoutForReturn(
         hiddenFields: clone(layout.hiddenFields || {}),
         fieldOrders: clone(layout.fieldOrders || {}),
         fieldLabelOverrides: {},
+        fieldValueOverrides: {},
         fieldDisplayModes: copiedTableSettings,
         background: layout.background ? clone(layout.background) : undefined,
         componentPositions: clone(layout.componentPositions || {}),
@@ -2022,6 +2031,8 @@ function createAtlasStandardOrderInvoicePreview(
                 onFieldOrderChange={renderOptions?.onFieldOrderChange}
                 fieldLabelOverrides={renderOptions?.fieldLabelOverrides}
                 onFieldLabelChange={renderOptions?.onFieldLabelChange}
+                fieldValueOverrides={renderOptions?.fieldValueOverrides}
+                onFieldValueChange={renderOptions?.onFieldValueChange}
                 fieldDisplayModes={renderOptions?.fieldDisplayModes}
                 onFieldDisplayModeChange={renderOptions?.onFieldDisplayModeChange}
                 background={renderOptions?.background}
@@ -2369,6 +2380,7 @@ export function renderCustomTemplateLayoutElement({
                     hiddenFields: layout.hiddenFields,
                     fieldOrders: layout.fieldOrders,
                     fieldLabelOverrides: layout.fieldLabelOverrides,
+                    fieldValueOverrides: layout.fieldValueOverrides,
                     fieldDisplayModes: layout.fieldDisplayModes,
                     background: layout.background
                 })}

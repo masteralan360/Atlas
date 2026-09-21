@@ -14,7 +14,7 @@
     "samplesHelp": "1–100 additional checkout and return scenarios, alongside the fixed payment-method matrix.",
     "coverageLimit": "Full environment coverage is incomplete",
     "blocked": "Blocked · adapter unavailable",
-    "coverageHelp": "V1 checks production business functions with disposable IndexedDB and mocked remote contracts, including financing-return and loan-integrity sync contracts. It does not yet automate the order form or execute the real Supabase or native SQLite stacks. A passing run applies only to the selected checks.",
+    "coverageHelp": "V1 checks production business functions with disposable IndexedDB and mocked remote contracts, including financing-return and loan-integrity sync contracts. It also covers saved custom Atlas Standard order layouts, including fixed Invoice values for sales and purchase prints. It does not yet automate the order form or execute the real Supabase or native SQLite stacks. A passing run applies only to the selected checks.",
     "results": "Test results",
     "progress": "{{done}} / {{total}} collected checks finished",
     "runSeed": "Seed: {{seed}}",
@@ -28,6 +28,7 @@
     "running": "Running checks…",
     "groups": {
       "matrix": "Payment methods and generated orders",
+      "printing": "Custom Atlas Standard print layouts",
       "lifecycle": "Financing, returns, and order lifecycle",
       "remoteContract": "Cloud / Hybrid request contracts and retries",
       "pricing": "Pricing, currency, rounding, and line storage",
@@ -5001,7 +5002,11 @@
     "pageOf": "{{page}} / {{total}}",
     "zoomOut": "Zoom out",
     "zoomIn": "Zoom in",
-    "resetZoom": "Reset zoom"
+    "resetZoom": "Reset zoom",
+    "editInvoiceValue": "Edit value",
+    "resetInvoiceValue": "Reset value",
+    "editInvoiceValueDescription": "Set a fixed value for this custom template. It will be used for future sales and purchase order prints.",
+    "invoiceValueRequired": "Value *"
   },
   "pdfPreview": {
     "title": "PDF Preview",

@@ -713,6 +713,7 @@ export function PrintPreviewEditorPage() {
     }))
     const [templateFieldOrders, setTemplateFieldOrders] = useState<Record<string, string[]>>(() => initialTemplateLayout?.fieldOrders || {})
     const [templateFieldLabelOverrides, setTemplateFieldLabelOverrides] = useState<Record<string, string>>(() => initialTemplateLayout?.fieldLabelOverrides || {})
+    const [templateFieldValueOverrides, setTemplateFieldValueOverrides] = useState<Record<string, string>>(() => initialTemplateLayout?.fieldValueOverrides || {})
     const [templateFieldDisplayModes, setTemplateFieldDisplayModes] = useState<Record<string, string>>(() => initialTemplateLayout?.fieldDisplayModes || {})
     const [templateBackground, setTemplateBackground] = useState<CustomTemplateBackground | null>(() => initialTemplateLayout?.background || null)
     useEffect(() => {
@@ -958,6 +959,7 @@ export function PrintPreviewEditorPage() {
         templateHiddenFields,
         templateFieldOrders,
         templateFieldLabelOverrides,
+        templateFieldValueOverrides,
         templateFieldDisplayModes,
         sourceWorkspaceFooterContacts,
         templateImages,
@@ -1142,6 +1144,7 @@ export function PrintPreviewEditorPage() {
             hiddenFields: templateHiddenFields,
             fieldOrders: templateFieldOrders,
             fieldLabelOverrides: templateFieldLabelOverrides,
+            fieldValueOverrides: templateFieldValueOverrides,
             fieldDisplayModes: templateFieldDisplayModes,
             background: templateBackground ?? undefined,
             annotations: templateAnnotations,
@@ -1150,7 +1153,7 @@ export function PrintPreviewEditorPage() {
             shapes: templateShapes,
             updatedAt: new Date().toISOString()
         }
-    }, [source, templatePreview, fieldValues, initialTemplateLayout?.label, templateAnnotations, templateComponentPositions, templateHiddenFields, templateFieldOrders, templateFieldLabelOverrides, templateFieldDisplayModes, templateBackground, templateTexts, templateImages, templateShapes, templatePageHeight, templatePageWidth])
+    }, [source, templatePreview, fieldValues, initialTemplateLayout?.label, templateAnnotations, templateComponentPositions, templateHiddenFields, templateFieldOrders, templateFieldLabelOverrides, templateFieldValueOverrides, templateFieldDisplayModes, templateBackground, templateTexts, templateImages, templateShapes, templatePageHeight, templatePageWidth])
 
     const saveTemplatePreview = useCallback(async (layout?: CustomTemplateLayout, label?: string) => {
         if (!source || !templatePreview || !fieldValues || isSaving || !isTemplatePrintReady) return
@@ -1178,6 +1181,7 @@ export function PrintPreviewEditorPage() {
                             hiddenFields: templateHiddenFields,
                             fieldOrders: templateFieldOrders,
                             fieldLabelOverrides: templateFieldLabelOverrides,
+                            fieldValueOverrides: templateFieldValueOverrides,
                             fieldDisplayModes: templateFieldDisplayModes,
                             background: templateBackground ?? undefined,
                             partnerBalanceProgress: requiresFreshPartnerBalance && nextFreshPartnerBalanceState === 'loading'
@@ -1225,7 +1229,7 @@ export function PrintPreviewEditorPage() {
                 window.history.back()
             }
         }
-    }, [source, templatePreview, fieldValues, isSaving, isTemplatePrintReady, fixedTemplatePrintLang, tempPrintLang, buildTemplateLayout, sourceWorkspaceFooterContacts, templateHiddenFields, templateFieldOrders, templateFieldLabelOverrides, templateFieldDisplayModes, templateBackground, requiresFreshPartnerBalance, nextFreshPartnerBalanceState, freshPartnerBalanceProgress, beginProgressToast, finishProgressToast, title, t])
+    }, [source, templatePreview, fieldValues, isSaving, isTemplatePrintReady, fixedTemplatePrintLang, tempPrintLang, buildTemplateLayout, sourceWorkspaceFooterContacts, templateHiddenFields, templateFieldOrders, templateFieldLabelOverrides, templateFieldValueOverrides, templateFieldDisplayModes, templateBackground, requiresFreshPartnerBalance, nextFreshPartnerBalanceState, freshPartnerBalanceProgress, beginProgressToast, finishProgressToast, title, t])
 
     const handleTemplatePreviewSave = useCallback(async () => {
         if (!source || !templatePreview || !fieldValues || isSaving || !isTemplatePrintReady) return
@@ -1319,6 +1323,19 @@ export function PrintPreviewEditorPage() {
             const title = label.trim()
             if (title) {
                 next[fieldKey] = title
+            } else {
+                delete next[fieldKey]
+            }
+            return next
+        })
+    }, [])
+
+    const handleTemplateFieldValueChange = useCallback((fieldKey: string, value: string) => {
+        setTemplateFieldValueOverrides((current) => {
+            const next = { ...current }
+            const fixedValue = value.trim()
+            if (fixedValue) {
+                next[fieldKey] = fixedValue
             } else {
                 delete next[fieldKey]
             }
@@ -2248,6 +2265,7 @@ export function PrintPreviewEditorPage() {
                                             hiddenFields: templateHiddenFields,
                                             fieldOrders: templateFieldOrders,
                                             fieldLabelOverrides: templateFieldLabelOverrides,
+                                            fieldValueOverrides: templateFieldValueOverrides,
                                             fieldDisplayModes: templateFieldDisplayModes,
                                             background: templateBackground ?? undefined,
                                             partnerBalanceProgress: requiresFreshPartnerBalance && nextFreshPartnerBalanceState === 'loading'
@@ -2258,6 +2276,9 @@ export function PrintPreviewEditorPage() {
                                             onHiddenFieldChange: drawingMode === 'none' ? handleTemplateHiddenFieldChange : undefined,
                                             onFieldOrderChange: drawingMode === 'none' ? handleTemplateFieldOrderChange : undefined,
                                             onFieldLabelChange: drawingMode === 'none' ? handleTemplateFieldLabelChange : undefined,
+                                            onFieldValueChange: source.onSaveTemplateLayout && drawingMode === 'none'
+                                                ? handleTemplateFieldValueChange
+                                                : undefined,
                                             onFieldDisplayModeChange: drawingMode === 'none' ? handleTemplateFieldDisplayModeChange : undefined,
                                             workspaceFooterContacts: sourceWorkspaceFooterContacts
                                         }

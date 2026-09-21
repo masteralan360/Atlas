@@ -55,6 +55,12 @@ import { cn, formatCurrency, formatDate } from '@/lib/utils'
 import { normalizeUnitCode } from '@/local-db/models'
 import { platformService } from '@/services/platformService'
 import {
+    AppDialog,
+    AppDialogBody,
+    AppDialogContent,
+    AppDialogFooter,
+    AppDialogHeader,
+    AppDialogTitle,
     Dialog,
     DialogContent,
     DialogDescription,
@@ -116,6 +122,8 @@ export interface AtlasStandardOrderInvoiceTemplateProps {
     onFieldOrderChange?: (sectionKey: string, fieldKeys: string[]) => void
     fieldLabelOverrides?: Record<string, string>
     onFieldLabelChange?: (fieldKey: string, label: string) => void
+    fieldValueOverrides?: Record<string, string>
+    onFieldValueChange?: (fieldKey: string, value: string) => void
     fieldDisplayModes?: Record<string, string>
     onFieldDisplayModeChange?: (fieldKey: string, mode: string) => void
     productImageUrls?: ProductPrintImageUrls
@@ -307,6 +315,19 @@ type HideablePrintField = {
         activateLabel: string
         deactivateLabel: string
         onChange: (active: boolean) => void
+    }
+    valueEditor?: {
+        value: string
+        hasOverride: boolean
+        editLabel: string
+        resetLabel: string
+        dialogTitle: string
+        dialogDescription: string
+        valueFieldLabel: string
+        saveLabel: string
+        cancelLabel: string
+        onChange: (value: string) => void
+        onReset: () => void
     }
 }
 
@@ -746,7 +767,9 @@ function HideableSection({
     const [open, setOpen] = useState(false)
     const [renamedField, setRenamedField] = useState<HideablePrintField | null>(null)
     const [titleDraft, setTitleDraft] = useState('')
-    const canConfigure = Boolean(onHiddenFieldChange || onFieldOrderChange || onFieldLabelChange)
+    const [valueEditField, setValueEditField] = useState<HideablePrintField | null>(null)
+    const [valueDraft, setValueDraft] = useState('')
+    const canConfigure = Boolean(onHiddenFieldChange || onFieldOrderChange || onFieldLabelChange || fields.some((field) => field.valueEditor))
     const titledFields = fields.map((field) => {
         const defaultLabel = field.defaultLabel || (typeof field.label === 'string' ? field.label : undefined)
         const labelOverride = field.suppressLabelOverride ? '' : fieldLabelOverrides[field.key]?.trim()
@@ -800,6 +823,20 @@ function HideableSection({
         setRenamedField(null)
         setTitleDraft('')
     }
+    const openValueEditor = (field: HideablePrintField) => {
+        if (!field.valueEditor) return
+        setValueEditField(field)
+        setValueDraft(field.valueEditor.value)
+    }
+    const closeValueEditor = () => {
+        setValueEditField(null)
+        setValueDraft('')
+    }
+    const saveValue = () => {
+        if (!valueEditField?.valueEditor || !valueDraft.trim()) return
+        valueEditField.valueEditor.onChange(valueDraft.trim())
+        closeValueEditor()
+    }
     const renderFieldContent = (field: HideablePrintField) => {
         if (typeof field.render === 'function') return field.render(field.label)
         if (field.render) return field.render
@@ -835,7 +872,7 @@ function HideableSection({
                 {field.value !== undefined ? <span className={cn('text-end', dialogFieldClassName && 'w-full text-start text-xs')}>{field.value}</span> : null}
             </button>
         )
-        if (!onFieldLabelChange && !field.contextMenuMode) return card
+        if (!onFieldLabelChange && !field.contextMenuMode && !field.valueEditor) return card
 
         return (
             <ContextMenu>
@@ -846,6 +883,16 @@ function HideableSection({
                             {field.contextMenuMode.active
                                 ? field.contextMenuMode.deactivateLabel
                                 : field.contextMenuMode.activateLabel}
+                        </ContextMenuItem>
+                    ) : null}
+                    {field.valueEditor ? (
+                        <ContextMenuItem onSelect={() => openValueEditor(field)}>
+                            {field.valueEditor.editLabel}
+                        </ContextMenuItem>
+                    ) : null}
+                    {field.valueEditor?.hasOverride ? (
+                        <ContextMenuItem onSelect={field.valueEditor.onReset}>
+                            {field.valueEditor.resetLabel}
                         </ContextMenuItem>
                     ) : null}
                     {onFieldLabelChange ? (
@@ -978,6 +1025,44 @@ function HideableSection({
                     </form>
                 </DialogContent>
             </Dialog>
+            {valueEditField?.valueEditor ? (
+                <AppDialog open={Boolean(valueEditField)} onOpenChange={(nextOpen) => {
+                    if (!nextOpen) closeValueEditor()
+                }}>
+                    <AppDialogContent className="z-[80] max-w-sm" onPointerDown={(event) => event.stopPropagation()}>
+                        <AppDialogHeader>
+                            <AppDialogTitle>{valueEditField.valueEditor.dialogTitle}</AppDialogTitle>
+                        </AppDialogHeader>
+                        <form onSubmit={(event) => {
+                            event.preventDefault()
+                            saveValue()
+                        }} className="flex min-h-0 flex-1 flex-col">
+                            <AppDialogBody className="space-y-2">
+                                <p className="text-sm text-muted-foreground">{valueEditField.valueEditor.dialogDescription}</p>
+                                <label className="text-sm font-medium" htmlFor="atlas-standard-field-value">
+                                    {valueEditField.valueEditor.valueFieldLabel}
+                                </label>
+                                <input
+                                    id="atlas-standard-field-value"
+                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                                    value={valueDraft}
+                                    onChange={(event) => setValueDraft(event.target.value)}
+                                    autoFocus
+                                    required
+                                />
+                            </AppDialogBody>
+                            <AppDialogFooter>
+                                <button type="button" className="inline-flex h-10 items-center justify-center rounded-md border border-input px-4 text-sm font-medium hover:bg-accent" onClick={closeValueEditor}>
+                                    {valueEditField.valueEditor.cancelLabel}
+                                </button>
+                                <button type="submit" disabled={!valueDraft.trim()} className="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50">
+                                    {valueEditField.valueEditor.saveLabel}
+                                </button>
+                            </AppDialogFooter>
+                        </form>
+                    </AppDialogContent>
+                </AppDialog>
+            ) : null}
         </Dialog>
     )
 }
@@ -1176,6 +1261,8 @@ export function AtlasStandardOrderInvoiceTemplate({
     onFieldOrderChange,
     fieldLabelOverrides = {},
     onFieldLabelChange,
+    fieldValueOverrides = {},
+    onFieldValueChange,
     fieldDisplayModes = {},
     onFieldDisplayModeChange,
     productImageUrls,
@@ -1223,6 +1310,10 @@ export function AtlasStandardOrderInvoiceTemplate({
     const fieldOrderKeys = ATLAS_STANDARD_ORDER_FIELD_ORDER_KEYS
     const tableSettingKeys = ATLAS_STANDARD_ORDER_TABLE_SETTING_KEYS
     const isInvoiceOrganizer = fieldDisplayModes[detailsKeys.salesPerson] === 'invoiceOrganizer'
+    const invoiceValueOverride = fieldValueOverrides[detailsKeys.invoice]?.trim()
+    const invoiceValue = isReturnPrint
+        ? returnLabels.returnInvoice
+        : invoiceValueOverride || (isSales ? labels.salesOrder : labels.purchaseOrder)
     const {
         productImageColumnWidth,
         productImageSizeMm,
@@ -1654,11 +1745,24 @@ export function AtlasStandardOrderInvoiceTemplate({
         {
             key: detailsKeys.invoice,
             label: isReturnPrint ? returnLabels.invoice : labels.invoice,
-            value: isReturnPrint ? returnLabels.returnInvoice : isSales ? labels.salesOrder : labels.purchaseOrder,
+            value: invoiceValue,
+            valueEditor: !isReturnPrint && onFieldValueChange ? {
+                value: invoiceValue,
+                hasOverride: Boolean(invoiceValueOverride),
+                editLabel: t('printPreviewEditor.editInvoiceValue'),
+                resetLabel: t('printPreviewEditor.resetInvoiceValue'),
+                dialogTitle: t('printPreviewEditor.editInvoiceValue'),
+                dialogDescription: t('printPreviewEditor.editInvoiceValueDescription'),
+                valueFieldLabel: t('printPreviewEditor.invoiceValueRequired'),
+                saveLabel: t('common.save'),
+                cancelLabel: t('common.cancel'),
+                onChange: (value) => onFieldValueChange(detailsKeys.invoice, value),
+                onReset: () => onFieldValueChange(detailsKeys.invoice, '')
+            } : undefined,
             className: 'border-l border-t border-[#1f2937]',
             render: (label) => <div className="min-h-[6.5mm] px-2 py-1.5 text-xs truncate"><strong>{label} : </strong>{isReturnPrint
                 ? returnLabels.returnInvoice
-                : <span className={isSales ? 'text-green-600' : 'text-red-600'}>{isSales ? labels.salesOrder : labels.purchaseOrder}</span>
+                : <span className={isSales ? 'text-green-600' : 'text-red-600'}>{invoiceValue}</span>
             }</div>
         },
         {
