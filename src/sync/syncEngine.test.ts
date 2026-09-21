@@ -526,6 +526,64 @@ describe('loan command ordering', () => {
     })
 })
 
+describe('direct loan record ordering', () => {
+    it('writes the loan-payment reversal before the cancelled payment that references it', () => {
+        const ordered = orderMutationsForSync([
+            {
+                id: 'a-loan-payment-update',
+                workspaceId: 'workspace-1',
+                entityType: 'loan_payments',
+                entityId: 'loan-payment-1',
+                operation: 'update',
+                payload: {
+                    id: 'loan-payment-1',
+                    loanId: 'loan-1',
+                    paymentTransactionId: 'original-payment-1',
+                    reversalTransactionId: 'return-payment-1'
+                },
+                createdAt: '2026-09-21T08:00:00.000Z'
+            },
+            {
+                id: 'b-return-payment',
+                workspaceId: 'workspace-1',
+                entityType: 'payment_transactions',
+                entityId: 'return-payment-1',
+                operation: 'create',
+                payload: {
+                    id: 'return-payment-1',
+                    reversalOfTransactionId: 'original-payment-1'
+                },
+                createdAt: '2026-09-21T08:00:01.000Z'
+            },
+            {
+                id: 'c-original-payment',
+                workspaceId: 'workspace-1',
+                entityType: 'payment_transactions',
+                entityId: 'original-payment-1',
+                operation: 'create',
+                payload: { id: 'original-payment-1' },
+                createdAt: '2026-09-21T08:00:02.000Z'
+            },
+            {
+                id: 'd-loan-update',
+                workspaceId: 'workspace-1',
+                entityType: 'loans',
+                entityId: 'loan-1',
+                operation: 'update',
+                payload: { id: 'loan-1' },
+                createdAt: '2026-09-21T08:00:03.000Z'
+            }
+        ])
+
+        expect(ordered.map((mutation) => mutation.id)).toEqual([
+            'c-original-payment',
+            'b-return-payment',
+            'd-loan-update',
+            'a-loan-payment-update'
+        ])
+    })
+})
+
 describe('tracked commission snapshot ordering', () => {
     it('syncs an offline workspace mode change before its new sales order', () => {
         const ordered = orderMutationsForSync([
@@ -835,6 +893,44 @@ describe('fullSync error reporting', () => {
         expect(dbMock.rows[0].error).toEqual(expect.any(String))
         expect(supabaseMock.from).not.toHaveBeenCalled()
         expect(supabaseMock.rpc).not.toHaveBeenCalled()
+    })
+
+    it('uploads a cancelled full-return loan with a preserved principal that satisfies the v1 amount contract', async () => {
+        supabaseMock.upsert.mockResolvedValueOnce({ data: null, error: null })
+        dbMock.rows.push({
+            id: 'cancelled-loan-return',
+            workspaceId: 'workspace-1',
+            entityType: 'loans',
+            entityId: 'loan-1',
+            operation: 'update',
+            createdAt: '2026-09-21T08:57:35.000Z',
+            status: 'pending',
+            payload: {
+                id: 'loan-1',
+                workspaceId: 'workspace-1',
+                source: 'order',
+                principalAmount: 100,
+                totalPaidAmount: 0,
+                balanceAmount: 0,
+                status: 'cancelled',
+                integrityVersion: 1,
+            },
+        })
+
+        const result = await processMutationQueue('user-1')
+
+        expect(result).toMatchObject({ success: 1, failed: 0, errors: [] })
+        expect(supabaseMock.from).toHaveBeenCalledWith('loans')
+        expect(supabaseMock.upsert).toHaveBeenCalledWith(expect.objectContaining({
+            id: 'loan-1',
+            workspace_id: 'workspace-1',
+            principal_amount: 100,
+            total_paid_amount: 0,
+            balance_amount: 0,
+            status: 'cancelled',
+            integrity_version: 1,
+        }))
+        expect(dbMock.rows[0]).toMatchObject({ status: 'synced', error: undefined })
     })
 
     it('replays a stock adjustment through the atomic RPC and stores server quantities', async () => {

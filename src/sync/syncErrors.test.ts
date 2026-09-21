@@ -18,6 +18,18 @@ describe('sync integrity errors', () => {
         expect(isSyncIntegrityError(storedError ?? undefined)).toBe(true)
     })
 
+    it('explains a rejected versioned-loan amount payload without exposing the database constraint name', () => {
+        const storedError = getSyncIntegrityError('loans', Object.assign(
+            new Error('new row for relation "loans" violates check constraint "loans_v1_amounts_check"'),
+            { code: '23514' }
+        ))
+
+        expect(storedError).toBe(
+            "Sync integrity issue: The loan's principal, repayments, balance, and status do not agree. The change was kept locally; refresh the loan and retry the return or repayment."
+        )
+        expect(storedError).not.toContain('loans_v1_amounts_check')
+    })
+
     it('does not block the app for ordinary connectivity failures', () => {
         expect(getSyncIntegrityError('products', new Error('network timeout'))).toBeNull()
         expect(isSyncIntegrityError('network timeout')).toBe(false)

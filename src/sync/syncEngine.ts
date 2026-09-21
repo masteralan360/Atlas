@@ -438,6 +438,15 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
       break;
     case "payment_transactions":
       addParent("payment_accounts", "accountId", "account_id");
+      addParent("payment_transactions", "reversalOfTransactionId", "reversal_of_transaction_id");
+      break;
+    case "loan_installments":
+      addParent("loans", "loanId", "loan_id");
+      break;
+    case "loan_payments":
+      addParent("loans", "loanId", "loan_id");
+      addParent("payment_transactions", "paymentTransactionId", "payment_transaction_id");
+      addParent("payment_transactions", "reversalTransactionId", "reversal_transaction_id");
       break;
     case "capital_pools": {
       const rawAccountIds = payload.accountIds ?? payload.account_ids;

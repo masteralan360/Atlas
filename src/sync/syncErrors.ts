@@ -1,3 +1,5 @@
+import i18n from '@/i18n/config';
+
 export const SCHEMA_MISMATCH_ERROR_PREFIX = "Schema mismatch:";
 export const SYNC_INTEGRITY_ERROR_PREFIX = "Sync integrity issue:";
 const CAPITAL_POOL_CONFLICT_MARKER = "CAPITAL_POOL_ACCOUNT_CONFLICT:";
@@ -145,6 +147,16 @@ export function getSyncIntegrityError(
   tableName: string,
   error: unknown,
 ): string | null {
+  const message = getErrorMessage(error);
+  if (
+    tableName === "loans" &&
+    /loans_v1_amounts_check|loan principal must equal paid amount plus balance/i.test(message)
+  ) {
+    return `${SYNC_INTEGRITY_ERROR_PREFIX} ${i18n.t("sync.errors.loanAmountIntegrity", {
+      defaultValue: "The loan's principal, repayments, balance, and status do not agree. The change was kept locally; refresh the loan and retry the return or repayment.",
+    })}`;
+  }
+
   if (tableName === "capital_pools") {
     const conflict = getCapitalPoolConflictFromRemoteError(error);
     if (conflict) {
@@ -155,7 +167,6 @@ export function getSyncIntegrityError(
   const kind = getSyncIntegrityIssueKind(error);
   if (!kind) return null;
 
-  const message = getErrorMessage(error);
   const reason = kind === "schema"
     ? "the remote schema does not match the app"
     : kind === "permission"

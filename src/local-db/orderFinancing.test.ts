@@ -1369,6 +1369,76 @@ describe('order-linked financing', () => {
         })
     })
 
+    it('cancels a fully returned order loan without sending a zero-principal completed loan to sync', async () => {
+        const customer = await createCustomer()
+        const { storage, product } = await createStockedSalesProduct(100)
+        const draft = await createSalesOrder(
+            WORKSPACE_ID,
+            salesOrderInput(customer.id, product, storage.id, {
+                method: 'loan',
+                total: 100,
+                initialPayment: 20
+            })
+        )
+        const pending = await updateSalesOrderStatus(draft.id, 'pending')
+        const completed = await updateSalesOrderStatus(pending.id, 'completed')
+        const beforeReturn = await db.loans.get(completed.linkedLoanId!)
+        expect(beforeReturn).toMatchObject({
+            principalAmount: 100,
+            totalPaidAmount: 20,
+            balanceAmount: 80,
+            integrityVersion: 1
+        })
+
+        await returnSalesOrder({
+            orderId: completed.id,
+            items: [{ orderItemId: completed.items[0].id, quantity: 1 }],
+            reason: 'customer_returned',
+            actorRole: 'admin'
+        })
+
+        const cancelledLoan = await db.loans.get(completed.linkedLoanId!)
+        expect(cancelledLoan).toMatchObject({
+            principalAmount: 100,
+            totalPaidAmount: 0,
+            balanceAmount: 0,
+            status: 'cancelled',
+            integrityVersion: 1
+        })
+        expect(Math.abs(
+            Number(cancelledLoan!.principalAmount)
+            - Number(cancelledLoan!.totalPaidAmount)
+            - Number(cancelledLoan!.balanceAmount)
+        )).toBe(100)
+        expect(await db.sales_orders.get(completed.id)).toMatchObject({
+            total: 0,
+            initialPaymentAmount: 0,
+            paidAmount: 0,
+            balanceAmount: 0
+        })
+        const loanPayments = await db.loan_payments.where('loanId').equals(cancelledLoan!.id).toArray()
+        expect(loanPayments).toHaveLength(1)
+        expect(loanPayments[0]).toMatchObject({
+            amount: 20,
+            paymentTransactionId: expect.any(String),
+            reversedAmount: 20,
+            reversalTransactionId: expect.any(String),
+            reversedAt: expect.any(String),
+            isDeleted: true,
+            integrityVersion: 1
+        })
+        const installments = await db.loan_installments.where('loanId').equals(cancelledLoan!.id).toArray()
+        expect(installments).toEqual([
+            expect.objectContaining({ plannedAmount: 100, paidAmount: 0, balanceAmount: 0, status: 'cancelled' })
+        ])
+        const ledger = await db.payment_transactions.where('sourceRecordId').equals(cancelledLoan!.id).toArray()
+        expect(ledger.map((transaction) => transaction.amount).sort((left, right) => left - right)).toEqual([-20, 20])
+        expect(ledger.find((transaction) => transaction.reversalOfTransactionId === loanPayments[0].paymentTransactionId)).toMatchObject({
+            id: loanPayments[0].reversalTransactionId,
+            amount: -20
+        })
+    })
+
     it('records an unmapped sales-order loan refund as a positive outgoing cash transaction', async () => {
         const customer = await createCustomer()
         const { storage, product } = await createStockedSalesProduct(100)

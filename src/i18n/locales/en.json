@@ -14,7 +14,7 @@
     "samplesHelp": "1–100 additional checkout and return scenarios, alongside the fixed payment-method matrix.",
     "coverageLimit": "Full environment coverage is incomplete",
     "blocked": "Blocked · adapter unavailable",
-    "coverageHelp": "V1 checks production business functions with disposable IndexedDB and mocked remote contracts. It does not yet automate the order form or execute the real Supabase or native SQLite stacks. A passing run applies only to the selected checks.",
+    "coverageHelp": "V1 checks production business functions with disposable IndexedDB and mocked remote contracts, including financing-return and loan-integrity sync contracts. It does not yet automate the order form or execute the real Supabase or native SQLite stacks. A passing run applies only to the selected checks.",
     "results": "Test results",
     "progress": "{{done}} / {{total}} collected checks finished",
     "runSeed": "Seed: {{seed}}",
@@ -3249,7 +3249,8 @@
         "batchNotAvailable": "The selected batch for {{productName}} is no longer available.",
         "batchQuantityExceeded": "The selected source does not have enough stock for {{productName}}.",
         "non_financed_order_must_be_paid": "This order must be paid in full before it can be reserved. To reserve it with an outstanding balance, select Loans or Installments as the payment method.",
-        "firstInstallmentDueDateRequired": "Select the first installment due date."
+        "firstInstallmentDueDateRequired": "Select the first installment due date.",
+        "loanRepaymentTransactionUnavailable": "The original transaction for this loan repayment is unavailable."
       }
     },
     "adjustments": {
@@ -4088,6 +4089,9 @@
     "toastSyncFailedDesc": "There were errors during synchronization.",
     "toastSyncError": "Sync Error",
     "discardError": "Failed to discard changes.",
+    "errors": {
+      "loanAmountIntegrity": "The loan's principal, repayments, balance, and status do not agree. The change was kept locally; refresh the loan and retry the return or repayment."
+    },
     "recovery": {
       "action": "Discard and restore",
       "confirmTitle": "Discard queued change?",

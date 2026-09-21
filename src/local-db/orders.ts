@@ -3758,10 +3758,12 @@ function getPaymentTransactionRemainingAmount(transaction: PaymentTransaction, r
 }
 
 async function appendOrderReturnPaymentReversal(input: {
+    id?: string
     transaction: PaymentTransaction
     amount: number
     returnId: string
     reason: string
+    paidAt?: string
     returnedBy?: string | null
     accountId?: string | null
     accountNameSnapshot?: string | null
@@ -3769,6 +3771,8 @@ async function appendOrderReturnPaymentReversal(input: {
     if (input.amount <= ORDER_AMOUNT_EPSILON) return null
 
     return appendPaymentTransaction(input.transaction.workspaceId, {
+        id: input.id,
+        idempotent: !!input.id,
         sourceModule: input.transaction.sourceModule,
         sourceType: input.transaction.sourceType,
         sourceRecordId: input.transaction.sourceRecordId,
@@ -3777,7 +3781,7 @@ async function appendOrderReturnPaymentReversal(input: {
         amount: -Math.abs(input.amount),
         currency: input.transaction.currency,
         paymentMethod: input.transaction.paymentMethod,
-        paidAt: new Date().toISOString(),
+        paidAt: input.paidAt || new Date().toISOString(),
         counterpartyName: input.transaction.counterpartyName || null,
         referenceLabel: input.transaction.referenceLabel || null,
         note: `Order return ${input.returnId}: ${input.reason}`,
@@ -3885,6 +3889,7 @@ async function applySalesOrderReturnToFinancing(input: {
     order: SalesOrder
     returnId: string
     returnAmount: number
+    isFullReturn: boolean
     reason: string
     returnedBy?: string | null
     accountId?: string | null
@@ -3908,8 +3913,13 @@ async function applySalesOrderReturnToFinancing(input: {
     const originalLoanBalance = roundAmount(Math.max(0, Number(loan.balanceAmount || 0)), loan.settlementCurrency)
     let remainingRefund = roundAmount(Math.max(0, input.returnAmount - originalLoanBalance), loan.settlementCurrency)
     const updatedLoanPayments: Array<typeof loanPayments[number]> = []
-    const loanPaymentRefunds: Array<{ transaction: PaymentTransaction; amount: number }> = []
+    const loanPaymentRefunds: Array<{
+        transaction: PaymentTransaction
+        amount: number
+        reversalTransactionId?: string
+    }> = []
     let unmappedLoanPaymentRefund = 0
+    let refundedLoanInitialPayment = 0
     const paymentsByNewestFirst = loanPayments
         .slice()
         .sort((left, right) => right.paidAt.localeCompare(left.paidAt) || right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id))
@@ -3920,10 +3930,31 @@ async function applySalesOrderReturnToFinancing(input: {
         if (applied <= ORDER_AMOUNT_EPSILON) continue
 
         const nextAmount = roundAmount(Math.max(0, payment.amount - applied), loan.settlementCurrency)
+        const sourceTransaction = paymentTransactions
+            .filter((transaction) => !transaction.isDeleted && !transaction.reversalOfTransactionId)
+            .find((transaction) => transaction.metadata?.loanPaymentId === payment.id
+                || (transaction.sourceSubrecordId === payment.id && transaction.sourceType !== 'loan_installment'))
+        const isFullyReversed = nextAmount <= ORDER_AMOUNT_EPSILON
+        const reversalTransactionId = isFullyReversed && sourceTransaction
+            ? payment.reversalTransactionId || generateId()
+            : null
+
+        // v1 loan payments are immutable money movements. A full refund keeps
+        // the original amount and records the matching reversal row instead of
+        // rewriting the payment to zero. The latter is rejected by
+        // loan_payments_v1_integrity_check and obscures the ledger audit trail.
+        if (isFullyReversed && (payment.integrityVersion || 0) > 0 && !sourceTransaction) {
+            throw new Error(i18n.t('orders.form.errors.loanRepaymentTransactionUnavailable'))
+        }
         const updatedPayment = {
             ...payment,
-            amount: nextAmount,
-            isDeleted: nextAmount <= ORDER_AMOUNT_EPSILON,
+            amount: isFullyReversed ? payment.amount : nextAmount,
+            paymentTransactionId: payment.paymentTransactionId || sourceTransaction?.id || null,
+            reversedAmount: isFullyReversed ? payment.amount : payment.reversedAmount ?? 0,
+            reversalTransactionId: isFullyReversed ? reversalTransactionId : payment.reversalTransactionId ?? null,
+            reversedAt: isFullyReversed ? input.timestamp : payment.reversedAt ?? null,
+            reversedBy: isFullyReversed ? input.returnedBy || null : payment.reversedBy ?? null,
+            isDeleted: isFullyReversed,
             updatedAt: input.timestamp,
             version: payment.version + 1,
             ...getSyncMetadata(input.order.workspaceId, input.timestamp)
@@ -3931,12 +3962,18 @@ async function applySalesOrderReturnToFinancing(input: {
         updatedLoanPayments.push(updatedPayment)
         remainingRefund = roundAmount(Math.max(0, remainingRefund - applied), loan.settlementCurrency)
 
-        const sourceTransaction = paymentTransactions
-            .filter((transaction) => !transaction.isDeleted && !transaction.reversalOfTransactionId)
-            .find((transaction) => transaction.metadata?.loanPaymentId === payment.id
-                || (transaction.sourceSubrecordId === payment.id && transaction.sourceType !== 'loan_installment'))
         if (sourceTransaction) {
-            loanPaymentRefunds.push({ transaction: sourceTransaction, amount: applied })
+            loanPaymentRefunds.push({
+                transaction: sourceTransaction,
+                amount: applied,
+                reversalTransactionId: reversalTransactionId || undefined
+            })
+            if (isOrderLoanInitialRepaymentTransaction(sourceTransaction)) {
+                refundedLoanInitialPayment = roundAmount(
+                    refundedLoanInitialPayment + applied,
+                    input.order.currency
+                )
+            }
         } else {
             unmappedLoanPaymentRefund = roundAmount(unmappedLoanPaymentRefund + applied, input.order.currency)
         }
@@ -3951,18 +3988,34 @@ async function applySalesOrderReturnToFinancing(input: {
             .reduce((sum, payment) => sum + Math.max(0, Number(payment.amount || 0)), 0),
         loan.settlementCurrency
     )
-    const initialPaymentRefund = initialPaymentIsLoanRepayment
+    const standardInitialPaymentRefund = initialPaymentIsLoanRepayment
         ? 0
         : roundAmount(Math.max(0, remainingRefund), input.order.currency)
+    const initialPaymentRefund = initialPaymentIsLoanRepayment
+        ? roundAmount(
+            Math.min(Math.max(0, Number(input.order.initialPaymentAmount || 0)), refundedLoanInitialPayment),
+            input.order.currency
+        )
+        : standardInitialPaymentRefund
     const nextInitialPayment = roundAmount(
         Math.max(0, Number(input.order.initialPaymentAmount || 0) - initialPaymentRefund),
         input.order.currency
     )
-    const nextPrincipal = roundAmount(
-        Math.max(0, Number(loan.principalAmount || 0) - input.returnAmount),
-        loan.settlementCurrency
-    )
-    const nextBalance = roundAmount(Math.max(0, nextPrincipal - newLoanPaidAmount), loan.settlementCurrency)
+    // A full order return cancels its loan; it is not a zero-value completed
+    // loan. Keep the originated principal for the audit trail while the
+    // refunded payments and written-off balance both become zero. Apart from
+    // preserving the financial history, this is required by the v1 loan
+    // contract, which deliberately rejects a zero-principal active/completed
+    // loan.
+    const nextPrincipal = input.isFullReturn
+        ? roundAmount(Math.max(0, Number(loan.principalAmount || 0)), loan.settlementCurrency)
+        : roundAmount(
+            Math.max(0, Number(loan.principalAmount || 0) - input.returnAmount),
+            loan.settlementCurrency
+        )
+    const nextBalance = input.isFullReturn
+        ? 0
+        : roundAmount(Math.max(0, nextPrincipal - newLoanPaidAmount), loan.settlementCurrency)
 
     const paidByInstallment = new Map<string, number>()
     let paymentToAllocate = newLoanPaidAmount
@@ -3979,6 +4032,19 @@ async function applySalesOrderReturnToFinancing(input: {
     let remainingBalanceToAllocate = nextBalance
     const today = input.timestamp.slice(0, 10)
     const updatedInstallments = installments.map((installment, index) => {
+        if (input.isFullReturn) {
+            return {
+                ...installment,
+                paidAmount: 0,
+                balanceAmount: 0,
+                status: 'cancelled' as const,
+                paidAt: null,
+                updatedAt: input.timestamp,
+                version: installment.version + 1,
+                ...getSyncMetadata(input.order.workspaceId, input.timestamp)
+            }
+        }
+
         const paidAmount = paidByInstallment.get(installment.id) || 0
         const existingRemaining = Math.max(0, Number(installment.plannedAmount || 0) - paidAmount)
         const isLast = index === installments.length - 1
@@ -4011,7 +4077,9 @@ async function applySalesOrderReturnToFinancing(input: {
         totalPaidAmount: newLoanPaidAmount,
         balanceAmount: nextBalance,
         nextDueDate,
-        status: getLoanReturnStatus(nextDueDate, nextBalance, today),
+        status: input.isFullReturn
+            ? 'cancelled' as const
+            : getLoanReturnStatus(nextDueDate, nextBalance, today),
         updatedAt: input.timestamp,
         version: loan.version + 1,
         ...getSyncMetadata(input.order.workspaceId, input.timestamp)
@@ -4023,12 +4091,14 @@ async function applySalesOrderReturnToFinancing(input: {
         if (updatedLoanPayments.length > 0) await db.loan_payments.bulkPut(updatedLoanPayments)
     })
 
-    await Promise.all(loanPaymentRefunds.map(({ transaction, amount }) =>
+    await Promise.all(loanPaymentRefunds.map(({ transaction, amount, reversalTransactionId }) =>
         appendOrderReturnPaymentReversal({
+            id: reversalTransactionId,
             transaction,
             amount,
             returnId: input.returnId,
             reason: input.reason,
+            paidAt: input.timestamp,
             returnedBy: input.returnedBy,
             accountId: input.accountId,
             accountNameSnapshot: input.accountNameSnapshot
@@ -4057,7 +4127,7 @@ async function applySalesOrderReturnToFinancing(input: {
             }
         })
     }
-    if (initialPaymentRefund > ORDER_AMOUNT_EPSILON) {
+    if (standardInitialPaymentRefund > ORDER_AMOUNT_EPSILON) {
         const initialPayments = paymentTransactions
             .filter((transaction) => !transaction.isDeleted
                 && transaction.sourceType === 'sales_order'
@@ -4065,7 +4135,7 @@ async function applySalesOrderReturnToFinancing(input: {
                 && transaction.metadata?.isFinancingInitialPayment === true
             )
             .sort((left, right) => right.paidAt.localeCompare(left.paidAt) || right.createdAt.localeCompare(left.createdAt))
-        let remainingInitialRefund = initialPaymentRefund
+        let remainingInitialRefund = standardInitialPaymentRefund
         for (const transaction of initialPayments) {
             if (remainingInitialRefund <= ORDER_AMOUNT_EPSILON) break
             const available = getPaymentTransactionRemainingAmount(transaction, paymentTransactions)
@@ -4407,6 +4477,7 @@ export async function returnSalesOrder(input: ReturnSalesOrderInput) {
             order,
             returnId,
             returnAmount,
+            isFullReturn: willBeFullyReturned,
             reason,
             returnedBy: input.returnedBy,
             accountId: input.accountId,
