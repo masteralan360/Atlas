@@ -15,6 +15,19 @@ import {
 } from '@/lib/pwaUpdateControl'
 import { areApplicationUpdatesDisabled } from '@/lib/updatePreference'
 
+type ShellStartupController = {
+    update: (message: string, progress?: number, supportingText?: string) => void
+    dismiss: () => void
+}
+
+const getShellStartupController = (): ShellStartupController | undefined => (
+    window as typeof window & { __atlasShellStartup?: ShellStartupController }
+).__atlasShellStartup
+
+const updateShellStartup = (message: string, progress?: number, supportingText?: string) => {
+    getShellStartupController()?.update(message, progress, supportingText)
+}
+
 const isMarketplaceHost =
     typeof window !== 'undefined'
     && window.location.hostname === 'shop.atlaserp.dev'
@@ -156,14 +169,10 @@ if (!rootElement) {
 
 const root = createRoot(rootElement)
 
-const dismissShellRecovery = () => {
-    const recovery = document.getElementById('atlas-shell-recovery')
-    if (!recovery) return
-    recovery.dataset.dismissed = 'true'
-    recovery.setAttribute('hidden', '')
-}
+const dismissShellRecovery = () => getShellStartupController()?.dismiss()
 
 const renderRoot = (content: ReactNode) => {
+    updateShellStartup('Opening your workspace', 100)
     dismissShellRecovery()
     root.render(
         <StrictMode>
@@ -230,6 +239,7 @@ const renderStartupFailure = (error: unknown) => {
 
 
 const renderMarketplace = async () => {
+    updateShellStartup('Loading the marketplace', 25)
     const [, { Toaster }, { MarketplaceApp }, { MarketplaceThemeRoot }] = await Promise.all([
         import('./index.css'),
         import('@/ui/components'),
@@ -247,6 +257,7 @@ const renderMarketplace = async () => {
 }
 
 const bootApp = async (splash: boolean) => {
+    updateShellStartup('Loading the Atlas interface', 35)
     const preloads: Promise<unknown>[] = []
     if (splash) {
         preloads.push(import('@/ui/pages/Dashboard'), import('@/ui/pages/Login'))
@@ -268,18 +279,22 @@ const bootApp = async (splash: boolean) => {
         ...preloads,
     ])
 
+    updateShellStartup('Preparing your workspace', 65)
     connectionManager.init()
 
     try {
+        updateShellStartup('Starting device services', 78)
         await platformService.initialize()
     } catch (error) {
         console.error('Failed to initialize platform service:', error)
     }
 
+    updateShellStartup('Finalizing Atlas startup', 90)
     return { ThemeProvider, App } as const
 }
 
 const init = async () => {
+    updateShellStartup('Application code loaded', 20)
     if (isMarketplaceHost && window.location.hash) {
         window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
     }
@@ -308,6 +323,7 @@ const init = async () => {
                 <div id="atlas-app" style={{ display: 'none' }} />
             </StrictMode>,
         )
+        dismissShellRecovery()
 
         // Modules load in background while splash plays
         const { ThemeProvider, App } = await bootPromise

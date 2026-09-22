@@ -13,7 +13,6 @@ Retry Sync Test The wind
 
 Jumla-Khaleej App
 
-Fix App has not loaded Page
 PWA updater
 
 Revenue Analytics and accounting

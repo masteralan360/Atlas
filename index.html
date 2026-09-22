@@ -25,14 +25,28 @@
 
 <body>
   <div id="root"></div>
-  <div id="atlas-shell-recovery" hidden role="alert" aria-live="assertive">
-    <div>
-      <p>Atlas has not loaded yet.</p>
-      <button id="atlas-shell-retry" type="button">Retry</button>
+  <div id="atlas-shell-startup" role="status" aria-live="polite" aria-label="Atlas is starting">
+    <div class="atlas-shell-startup-card">
+      <img class="atlas-shell-startup-logo" src="/AtlasClear.png" alt="Atlas" />
+      <p class="atlas-shell-startup-title">Starting Atlas</p>
+      <p id="atlas-shell-startup-status" class="atlas-shell-startup-status">Loading the application shell</p>
+      <div
+        id="atlas-shell-startup-progress"
+        class="atlas-shell-startup-progress"
+        role="progressbar"
+        aria-label="Atlas startup progress"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="8"
+      >
+        <span id="atlas-shell-startup-progress-indicator"></span>
+      </div>
+      <p id="atlas-shell-startup-detail" class="atlas-shell-startup-detail">This may take a few moments.</p>
+      <button id="atlas-shell-retry" type="button" hidden>Retry Atlas</button>
     </div>
   </div>
   <style>
-    #atlas-shell-recovery {
+    #atlas-shell-startup {
       position: fixed;
       inset: 0;
       z-index: 2147483647;
@@ -44,9 +58,31 @@
       font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       text-align: center;
     }
-    #atlas-shell-recovery[hidden] { display: none; }
-    #atlas-shell-recovery p { margin: 0 0 16px; }
+    #atlas-shell-startup[hidden] { display: none; }
+    .atlas-shell-startup-card { width: min(100%, 360px); }
+    .atlas-shell-startup-logo { display: block; width: 64px; height: 64px; object-fit: contain; margin: 0 auto 20px; }
+    .atlas-shell-startup-title { margin: 0 0 8px; color: #0f172a; font-size: 20px; font-weight: 700; }
+    .atlas-shell-startup-status { min-height: 24px; margin: 0 0 18px; color: #334155; }
+    .atlas-shell-startup-progress { height: 8px; overflow: hidden; border-radius: 999px; background: #dbe4ee; }
+    .atlas-shell-startup-progress span {
+      display: block;
+      width: 8%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #0cb7ae, #14b8a6, #5eead4, #0cb7ae);
+      background-size: 200% 100%;
+      animation: atlas-shell-startup-indicator 1.4s linear infinite;
+      transition: width 360ms ease;
+    }
+    .atlas-shell-startup-detail { min-height: 24px; margin: 14px 0 0; color: #64748b; font-size: 14px; }
+    @keyframes atlas-shell-startup-indicator {
+      to { background-position: -200% 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .atlas-shell-startup-progress span { animation: none; }
+    }
     #atlas-shell-retry {
+      margin-top: 8px;
       border: 0;
       border-radius: 8px;
       padding: 12px 20px;
@@ -58,12 +94,47 @@
   </style>
   <script>
     (function () {
-      var recovery = document.getElementById('atlas-shell-recovery');
+      var startup = document.getElementById('atlas-shell-startup');
       var retry = document.getElementById('atlas-shell-retry');
+      var status = document.getElementById('atlas-shell-startup-status');
+      var detail = document.getElementById('atlas-shell-startup-detail');
+      var progress = document.getElementById('atlas-shell-startup-progress');
+      var indicator = document.getElementById('atlas-shell-startup-progress-indicator');
+      var delayedMessageTimer;
+
       if (retry) retry.addEventListener('click', function () { window.location.reload(); });
-      window.setTimeout(function () {
-        if (recovery && recovery.dataset.dismissed !== 'true') recovery.hidden = false;
-      }, 5000);
+
+      function update(message, value, supportingText) {
+        if (!startup || startup.dataset.dismissed === 'true') return;
+        if (status && message) status.textContent = message;
+        if (detail && supportingText) detail.textContent = supportingText;
+        if (typeof value === 'number') {
+          var clampedValue = Math.max(0, Math.min(100, value));
+          if (indicator) indicator.style.width = clampedValue + '%';
+          if (progress) {
+            progress.setAttribute('aria-valuenow', String(clampedValue));
+            progress.setAttribute('aria-valuetext', message || 'Atlas is starting');
+          }
+        }
+      }
+
+      function dismiss() {
+        if (!startup) return;
+        startup.dataset.dismissed = 'true';
+        startup.setAttribute('hidden', '');
+        if (delayedMessageTimer) window.clearTimeout(delayedMessageTimer);
+      }
+
+      window.__atlasShellStartup = { update: update, dismiss: dismiss };
+      delayedMessageTimer = window.setTimeout(function () {
+        if (!startup || startup.dataset.dismissed === 'true') return;
+        update(
+          'Still preparing Atlas',
+          85,
+          'This is taking longer than usual. Atlas is still working.'
+        );
+        if (retry) retry.hidden = false;
+      }, 7000);
     }());
   </script>
   <script type="module" src="/src/main.tsx"></script>
