@@ -61,6 +61,15 @@ describe('developer runner boundaries', () => {
     ])
     expect(validateRunOptions({ suiteId: 'pos' }).groups.length).toBe(12)
     expect(validateRunOptions({ suiteId: 'post-service' }).groups.length).toBe(13)
+    expect(validateRunOptions({ suiteId: 'platform' }).groups).toEqual([
+      expect.objectContaining({
+        id: 'pwa-updates',
+        files: expect.arrayContaining([
+          'src/lib/pwaUpdateControl.test.ts',
+          'scripts/pwa-service-worker.test.mjs'
+        ])
+      })
+    ])
     expect(validateRunOptions({ suiteId: 'post-service', groupIds: ['remote-contract', 'merchants'] }).groups.map((group) => group.id)).toEqual(['merchants', 'remote-contract'])
     expect(validateRunOptions({ suiteId: 'pos', groupIds: ['checkout', 'remote-contract'] }).groups.map((group) => group.id)).toEqual(['checkout', 'remote-contract'])
     expect(validateRunOptions({ suiteId: 'pos', groupIds: ['related-units'] }).groups).toEqual([

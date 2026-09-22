@@ -6,6 +6,9 @@ import {
 type PwaWorkerMessage =
     | { type: 'CACHE_CURRENT_VERSION'; urls: string[] }
     | { type: 'SET_UPDATE_POLICY'; disabled: boolean }
+    | { type: 'GET_UPDATE_CAPABILITIES' }
+    | { type: 'GET_ACTIVE_RELEASE' }
+    | { type: 'PREPARE_RELEASE' }
     | { type: 'CHECK_FOR_UPDATE' }
     | { type: 'REFRESH_TO_LATEST' }
     | { type: 'PREPARE_OFFLINE'; allowUpdate: boolean }
@@ -13,6 +16,33 @@ type PwaWorkerMessage =
     | { type: 'APPLY_UPDATE' }
 
 type PwaRefreshResult = 'updated' | 'current' | 'failed' | 'unavailable'
+
+export type PwaStartupUpdateStatus =
+    | 'current'
+    | 'updated'
+    | 'disabled'
+    | 'unavailable'
+    | 'failed'
+
+export interface PwaStartupUpdateProgress {
+    phase: 'checking' | 'downloading' | 'verifying' | 'applying'
+    completed?: number
+    total?: number
+    completedBytes?: number
+    totalBytes?: number
+}
+
+export interface PwaStartupUpdateResult {
+    status: PwaStartupUpdateStatus
+    buildId?: string
+    version?: string
+    cachedAssets?: number
+}
+
+export interface PendingPwaUpdate {
+    buildId?: string
+    version?: string
+}
 
 export type PwaOfflinePreparationStatus =
     | 'ready'
@@ -36,6 +66,41 @@ export interface PwaOfflinePreparationProgress {
 }
 
 let messagingInitialized = false
+let registrationPromise: Promise<ServiceWorkerRegistration> | null = null
+let lastBackgroundCheckAt = Date.now()
+
+export const PWA_UPDATE_READY_EVENT = 'atlas-pwa-update-ready'
+const PENDING_PWA_UPDATE_STORAGE_KEY = 'atlas.pwa.pending-update'
+const BACKGROUND_UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
+const BACKGROUND_UPDATE_CHECK_THROTTLE_MS = 60 * 1000
+
+function clearPendingPwaUpdate(): void {
+    try {
+        window.localStorage.removeItem(PENDING_PWA_UPDATE_STORAGE_KEY)
+    } catch {
+        // Storage may be unavailable in restricted browser contexts.
+    }
+}
+
+function rememberPendingPwaUpdate(update: PendingPwaUpdate): void {
+    try {
+        window.localStorage.setItem(PENDING_PWA_UPDATE_STORAGE_KEY, JSON.stringify(update))
+    } catch {
+        // The live event still reaches the mounted application.
+    }
+}
+
+export function getPendingPwaUpdate(): PendingPwaUpdate | null {
+    if (typeof window === 'undefined') return null
+    try {
+        const raw = window.localStorage.getItem(PENDING_PWA_UPDATE_STORAGE_KEY)
+        if (!raw) return null
+        const parsed = JSON.parse(raw) as PendingPwaUpdate
+        return parsed && typeof parsed === 'object' ? parsed : null
+    } catch {
+        return null
+    }
+}
 
 function canUseServiceWorkers() {
     return typeof navigator !== 'undefined' && 'serviceWorker' in navigator
@@ -56,6 +121,57 @@ async function getActiveWorker(): Promise<ServiceWorker | null> {
     }
 }
 
+function waitForWorkerActivation(
+    registration: ServiceWorkerRegistration,
+    timeoutMs = 10_000,
+): Promise<ServiceWorker | null> {
+    const candidate = registration.installing ?? registration.waiting
+    if (!candidate || candidate.state === 'activated') {
+        return Promise.resolve(registration.active ?? candidate ?? null)
+    }
+
+    return new Promise((resolve) => {
+        let settled = false
+        const finish = () => {
+            if (settled) return
+            settled = true
+            window.clearTimeout(timeout)
+            candidate.removeEventListener('statechange', handleStateChange)
+            resolve(registration.active ?? (candidate.state === 'activated' ? candidate : null))
+        }
+        const handleStateChange = () => {
+            if (candidate.state === 'activated' || candidate.state === 'redundant') finish()
+        }
+        const timeout = window.setTimeout(finish, timeoutMs)
+        candidate.addEventListener('statechange', handleStateChange)
+        handleStateChange()
+    })
+}
+
+export function registerPwaServiceWorker(): Promise<ServiceWorkerRegistration> {
+    if (!canUseServiceWorkers()) return Promise.reject(new Error('Service workers are unavailable'))
+    if (registrationPromise) return registrationPromise
+
+    initializePwaUpdateControl()
+    registrationPromise = navigator.serviceWorker.register('/sw.js', {
+        scope: '/',
+        updateViaCache: 'none'
+    }).then(async (registration) => {
+        try {
+            await registration.update()
+            await waitForWorkerActivation(registration)
+        } catch (error) {
+            console.warn('Failed to re-check the Atlas service worker:', error)
+        }
+        await navigator.serviceWorker.ready
+        return registration
+    }).catch((error) => {
+        registrationPromise = null
+        throw error
+    })
+    return registrationPromise
+}
+
 async function updateStableWorker(): Promise<void> {
     if (!canUseServiceWorkers()) return
     try {
@@ -64,6 +180,31 @@ async function updateStableWorker(): Promise<void> {
     } catch (error) {
         console.warn('Unable to update the Atlas service worker:', error)
     }
+}
+
+async function getUpdateProtocol(worker: ServiceWorker): Promise<number> {
+    if (typeof MessageChannel === 'undefined') return 0
+    return new Promise((resolve) => {
+        const channel = new MessageChannel()
+        let settled = false
+        const finish = (value: number) => {
+            if (settled) return
+            settled = true
+            window.clearTimeout(timeout)
+            channel.port1.close()
+            resolve(value)
+        }
+        const timeout = window.setTimeout(() => finish(0), 2_500)
+        channel.port1.onmessage = (event: MessageEvent<{ type?: string; protocolVersion?: number }>) => {
+            if (event.data?.type !== 'UPDATE_CAPABILITIES') return
+            finish(Number.isInteger(event.data.protocolVersion) ? event.data.protocolVersion! : 0)
+        }
+        try {
+            worker.postMessage({ type: 'GET_UPDATE_CAPABILITIES' } satisfies PwaWorkerMessage, [channel.port2])
+        } catch {
+            finish(0)
+        }
+    })
 }
 
 function postToWorker(message: PwaWorkerMessage): void {
@@ -159,6 +300,125 @@ export async function refreshPwaDeployment(): Promise<PwaRefreshResult> {
         } catch (error) {
             console.warn('Unable to request an Atlas deployment refresh:', error)
             settle('unavailable')
+        }
+    })
+}
+
+/**
+ * Blocks an installed PWA's interactive boot until the active release is
+ * confirmed or a complete newer release has been atomically activated. An
+ * unavailable network never destroys or replaces the installed release.
+ */
+export async function preparePwaReleaseForStartup(
+    onProgress?: (progress: PwaStartupUpdateProgress) => void,
+): Promise<PwaStartupUpdateResult> {
+    if (areApplicationUpdatesDisabled()) return { status: 'disabled' }
+    if (!canUseServiceWorkers() || typeof MessageChannel === 'undefined') {
+        return { status: 'unavailable' }
+    }
+
+    onProgress?.({ phase: 'checking' })
+    try {
+        await registerPwaServiceWorker()
+    } catch (error) {
+        console.warn('Unable to initialize the Atlas PWA updater:', error)
+        return { status: 'unavailable' }
+    }
+
+    setPwaUpdatePolicy(false)
+    cacheCurrentPwaVersion()
+    const worker = await getActiveWorker()
+    if (!worker) return { status: 'unavailable' }
+
+    const protocolVersion = await getUpdateProtocol(worker)
+    if (protocolVersion < 2) {
+        // A deployment-stable worker released before the startup protocol can
+        // still stage the current deployment through its compatibility path.
+        const legacyResult = await refreshPwaDeployment()
+        if (legacyResult === 'current' || legacyResult === 'updated') clearPendingPwaUpdate()
+        return { status: legacyResult }
+    }
+
+    return new Promise((resolve) => {
+        const channel = new MessageChannel()
+        let settled = false
+        const settle = (result: PwaStartupUpdateResult) => {
+            if (settled) return
+            settled = true
+            window.clearTimeout(timeout)
+            channel.port1.close()
+            if (result.status === 'current' || result.status === 'updated') clearPendingPwaUpdate()
+            resolve(result)
+        }
+        const timeout = window.setTimeout(() => settle({ status: 'failed' }), 120_000)
+
+        channel.port1.onmessage = (event: MessageEvent<{
+            type?: string
+            status?: PwaStartupUpdateStatus
+            buildId?: string
+            version?: string
+            cachedAssets?: number
+            completed?: number
+            total?: number
+            completedBytes?: number
+            totalBytes?: number
+        }>) => {
+            if (event.data?.type === 'PREPARE_RELEASE_PROGRESS') {
+                onProgress?.({
+                    phase: 'downloading',
+                    completed: event.data.completed,
+                    total: event.data.total,
+                    completedBytes: event.data.completedBytes,
+                    totalBytes: event.data.totalBytes,
+                })
+                return
+            }
+            if (event.data?.type !== 'PREPARE_RELEASE_COMPLETE') return
+            const status = event.data.status
+            settle({
+                status: status === 'current' || status === 'updated' || status === 'disabled'
+                    || status === 'unavailable' ? status : 'failed',
+                buildId: event.data.buildId,
+                version: event.data.version,
+                cachedAssets: event.data.cachedAssets,
+            })
+        }
+
+        try {
+            worker.postMessage({ type: 'PREPARE_RELEASE' } satisfies PwaWorkerMessage, [channel.port2])
+        } catch (error) {
+            console.warn('Unable to prepare the latest Atlas PWA release:', error)
+            settle({ status: 'unavailable' })
+        }
+    })
+}
+
+/** Activates a fully staged background release and reloads after confirmation. */
+export async function applyPreparedPwaUpdate(): Promise<boolean> {
+    if (areApplicationUpdatesDisabled() || !canUseServiceWorkers() || typeof MessageChannel === 'undefined') {
+        return false
+    }
+    const worker = await getActiveWorker()
+    if (!worker) return false
+
+    return new Promise((resolve) => {
+        const channel = new MessageChannel()
+        let settled = false
+        const settle = (applied: boolean) => {
+            if (settled) return
+            settled = true
+            window.clearTimeout(timeout)
+            channel.port1.close()
+            resolve(applied)
+        }
+        const timeout = window.setTimeout(() => settle(false), 15_000)
+        channel.port1.onmessage = (event: MessageEvent<{ type?: string; applied?: boolean }>) => {
+            if (event.data?.type === 'APPLY_UPDATE_COMPLETE') settle(event.data.applied === true)
+        }
+        try {
+            worker.postMessage({ type: 'APPLY_UPDATE' } satisfies PwaWorkerMessage, [channel.port2])
+        } catch {
+            settle(false)
         }
     })
 }
@@ -287,24 +547,45 @@ export function initializePwaUpdateControl(): void {
     if (!canUseServiceWorkers() || messagingInitialized) return
     messagingInitialized = true
 
-    navigator.serviceWorker.addEventListener('message', (event: MessageEvent<{ type?: string }>) => {
+    navigator.serviceWorker.addEventListener('message', (event: MessageEvent<{
+        type?: string
+        buildId?: string
+        version?: string
+    }>) => {
         if (event.data?.type === 'UPDATE_READY') {
             if (!areApplicationUpdatesDisabled()) {
-                postToWorker({ type: 'APPLY_UPDATE' })
+                const update = { buildId: event.data.buildId, version: event.data.version }
+                rememberPendingPwaUpdate(update)
+                window.dispatchEvent(new CustomEvent(PWA_UPDATE_READY_EVENT, { detail: update }))
             }
             return
         }
 
         if (event.data?.type === 'UPDATE_APPLIED' && !areApplicationUpdatesDisabled()) {
+            clearPendingPwaUpdate()
             window.location.reload()
         }
     })
 
+    const checkForBackgroundUpdate = (force = false) => {
+        if (areApplicationUpdatesDisabled() || document.visibilityState === 'hidden') return
+        const now = Date.now()
+        if (!force && now - lastBackgroundCheckAt < BACKGROUND_UPDATE_CHECK_THROTTLE_MS) return
+        lastBackgroundCheckAt = now
+        requestPwaDeploymentUpdate()
+    }
+
+    window.addEventListener('focus', () => checkForBackgroundUpdate())
+    window.addEventListener('online', () => checkForBackgroundUpdate(true))
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') checkForBackgroundUpdate()
+    })
+    window.setInterval(() => checkForBackgroundUpdate(true), BACKGROUND_UPDATE_CHECK_INTERVAL_MS)
+
     window.addEventListener(UPDATE_PREFERENCE_CHANGED_EVENT, (event: Event) => {
         const disabled = (event as CustomEvent<{ disabled?: boolean }>).detail?.disabled === true
         setPwaUpdatePolicy(disabled)
-        if (!disabled) {
-            requestPwaDeploymentUpdate()
-        }
+        if (disabled) clearPendingPwaUpdate()
+        else checkForBackgroundUpdate(true)
     })
 }

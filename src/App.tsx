@@ -36,6 +36,7 @@ import { useFavicon } from "@/hooks/useFavicon";
 import { whatsappManager } from "@/lib/whatsappWebviewManager";
 import { useKdsStream } from "@/hooks/useKdsStream";
 import { UsbBackupWarningModal } from "@/ui/components/UsbBackupWarningModal";
+import { PwaUpdateReadyBanner } from "@/ui/components/PwaUpdateReadyBanner";
 import { WorkspaceLocationPrompt } from "@/ui/components/WorkspaceLocationPrompt";
 import { validateUsbBackupOnStartup, pickUsbBackupDestination, copyDbToUsb } from "@/local-db/usbBackup";
 import { clearUsbBackupSettings } from "@/local-db/usbBackupSettings";
@@ -1425,6 +1426,7 @@ function App() {
               <AutoSyncOverlay />
               <OfflineEntryOverlay />
               <SyncIntegrityOverlay />
+              <PwaUpdateReadyBanner />
               {!isMobile() && <TitleBar />}
               {isTauri &&
               isBackendConfigurationRequired &&

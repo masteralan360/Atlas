@@ -420,7 +420,7 @@ export async function refreshStorageMemberExclusionsFromSupabase(workspaceId: st
 
   exclusionRefreshesInFlight.set(workspaceId, refresh)
   try {
-    await refresh
+    return await refresh
   } finally {
     exclusionRefreshesInFlight.delete(workspaceId)
   }

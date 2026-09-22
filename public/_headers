@@ -10,6 +10,12 @@
 /sw.js
   Cache-Control: public, max-age=0, must-revalidate
 
+/pwa-release.json
+  Cache-Control: no-store, max-age=0
+
+/atlas-assets.json
+  Cache-Control: no-store, max-age=0
+
 /firebase-messaging-sw.js
   Cache-Control: public, max-age=0, must-revalidate
 

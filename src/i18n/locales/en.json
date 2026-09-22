@@ -3,6 +3,12 @@
     "button": "Developer tests",
     "saleOrders": "Sale Orders",
     "businessPartners": "Business Partners",
+    "platform": "Application Platform",
+    "platformSamplesHelp": "Runs fixed PWA release, service-worker, offline fallback, and atomic cache activation scenarios.",
+    "platformCoverageHelp": "Checks release generation, the installed-PWA request contract, verified atomic cache activation, corrupt-release rejection, offline readiness, and refresh-loop protection. Real browser installation, storage-pressure eviction, and native restart remain in the browser acceptance matrix.",
+    "platformGroups": {
+      "pwaUpdates": "Installed PWA updates and offline recovery"
+    },
     "title": "Test {{module}}",
     "description": "Run reproducible business scenarios and regression checks in an isolated test process.",
     "isolation": "Disposable test data only. Your current workspace, payments, stock, and backend are never used by these tests.",
@@ -6644,6 +6650,21 @@
       "Taxes": "Taxes",
       "Miscellaneous": "Miscellaneous"
     }
+  },
+  "pwaUpdater": {
+    "checking": "Checking for Atlas updates",
+    "checkingDescription": "Confirming that this installed app is ready to open.",
+    "downloading": "Updating Atlas",
+    "downloadingDescription": "Preparing application files ({{completed}} of {{total}}).",
+    "restarting": "Restarting Atlas",
+    "restartingDescription": "The update is ready. Atlas will reopen automatically.",
+    "openingInstalled": "Opening the installed version",
+    "openingInstalledDescription": "The update service is unavailable, so Atlas will use the verified version already on this device.",
+    "readyTitle": "Atlas is ready to update",
+    "readyDescription": "A verified update has been downloaded. Restart when you are ready.",
+    "readyVersion": "Version {{version}}",
+    "restartNow": "Restart and update",
+    "restartFailed": "The update could not be applied. Your current version is still safe; please try again."
   },
   "updater": {
     "available": "Update Available",

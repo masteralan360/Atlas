@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
+import { writePwaRelease } from './generate-pwa-release.mjs'
 
 const require = createRequire(import.meta.url)
 const npmCli = process.env.npm_execpath
@@ -62,6 +63,11 @@ if (target === 'android') {
     run(process.execPath, [require.resolve('typescript/bin/tsc'), '-b'])
     const viteCli = path.join(path.dirname(require.resolve('vite/package.json')), 'bin', 'vite.js')
     run(process.execPath, [viteCli, 'build', ...process.argv.slice(2)])
+
+    writePwaRelease({
+        workspaceRoot: process.cwd(),
+        outputDirectory: path.resolve(process.cwd(), 'dist'),
+    })
 
     // Vite intentionally omits underscore-prefixed public files. Cloudflare
     // parses this static-assets control file during deployment, so preserve it

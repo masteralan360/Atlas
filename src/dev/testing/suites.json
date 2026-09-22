@@ -401,5 +401,30 @@
       "local-native",
       "voice-storage-hardware"
     ]
+  },
+  "platform": {
+    "titleKey": "devTesting.platform",
+    "samplesHelpKey": "devTesting.platformSamplesHelp",
+    "coverageHelpKey": "devTesting.platformCoverageHelp",
+    "groups": [
+      {
+        "id": "pwa-updates",
+        "titleKey": "devTesting.platformGroups.pwaUpdates",
+        "layer": "contract",
+        "files": [
+          "src/lib/pwaUpdateControl.test.ts",
+          "src/lib/deploymentRefresh.test.ts",
+          "src/lib/offlinePreparation.test.ts",
+          "scripts/generate-pwa-release.test.mjs",
+          "scripts/pwa-service-worker.test.mjs",
+          "scripts/verify-cloudflare-deployment.test.mjs",
+          "cloudflare-web/src/index.test.js"
+        ]
+      }
+    ],
+    "unavailable": [
+      "browser-workflow",
+      "local-native"
+    ]
   }
 }

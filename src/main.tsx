@@ -1,17 +1,15 @@
 import '@/lib/consoleErrorCapture'
 import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
+import i18n from '@/i18n/config'
 import { requestPersistentStorage } from '@/local-db/storagePersist'
 import { isOpfsSupported } from '@/local-db/pwaSqlite'
 import { AtlasSplashScreen } from '@/ui/components/AtlasSplashScreen'
 import { initDesktopZoomPersistence } from '@/lib/tauriZoomPersistence'
 import { removeDeploymentRefreshParam } from '@/lib/deploymentRefresh'
 import {
-    cacheCurrentPwaVersion,
-    initializePwaUpdateControl,
+    preparePwaReleaseForStartup,
     refreshPwaDeployment,
-    requestPwaDeploymentUpdate,
-    setPwaUpdatePolicy
 } from '@/lib/pwaUpdateControl'
 import { areApplicationUpdatesDisabled } from '@/lib/updatePreference'
 
@@ -67,61 +65,22 @@ const initPwaLocalMode = async () => {
     }
 }
 
-const registerAppServiceWorker = () => {
-    initializePwaUpdateControl()
-
-    void navigator.serviceWorker.register('/sw.js', {
-        scope: '/',
-        // The worker is a stable update gate. It must not be replaced by a
-        // deployment-specific Workbox worker on every web deployment.
-        updateViaCache: 'none'
-    }).then(async (registration) => {
-        // Ask the browser to re-check the stable gate on every launch. This
-        // lets an already-installed PWA receive a worker recovery fix without
-        // clearing its offline cache or reinstalling the app.
-        try {
-            await registration.update()
-        } catch (error) {
-            console.warn('Failed to re-check the Atlas service worker:', error)
-        }
-        return navigator.serviceWorker.ready
-    })
-        .then(() => {
-            const updatesDisabled = areApplicationUpdatesDisabled()
-            setPwaUpdatePolicy(updatesDisabled)
-            if (!updatesDisabled) {
-                cacheCurrentPwaVersion()
-                requestPwaDeploymentUpdate()
-            }
-        })
-        .catch((error) => {
-            console.error('Failed to register service worker:', error)
-        })
-}
-
 if (
     import.meta.env.PROD
     && typeof window !== 'undefined'
     && !('__TAURI_INTERNALS__' in window)
     && 'serviceWorker' in navigator
+    && isMarketplaceHost
 ) {
     window.addEventListener('load', () => {
-        if (isMarketplaceHost) {
-            navigator.serviceWorker.getRegistrations()
-                .then(async (registrations) => {
-                    const results = await Promise.all(registrations.map((registration) => registration.unregister()))
-                    if (results.some(Boolean)) {
-                        window.location.reload()
-                    }
-                })
-                .catch((error) => {
-                    console.error('Failed to unregister marketplace service workers:', error)
-                })
-
-            return
-        }
-
-        registerAppServiceWorker()
+        navigator.serviceWorker.getRegistrations()
+            .then(async (registrations) => {
+                const results = await Promise.all(registrations.map((registration) => registration.unregister()))
+                if (results.some(Boolean)) window.location.reload()
+            })
+            .catch((error) => {
+                console.error('Failed to unregister marketplace service workers:', error)
+            })
     })
 }
 
@@ -245,7 +204,6 @@ const renderMarketplace = async () => {
         import('@/ui/components'),
         import('./marketplace/MarketplaceApp'),
         import('./marketplace/MarketplaceThemeRoot'),
-        import('./i18n/config')
     ])
 
     renderRoot(
@@ -275,7 +233,6 @@ const bootApp = async (splash: boolean) => {
         import('@/services/platformService'),
         import('@/lib/connectionManager'),
         import('./App.tsx'),
-        import('./i18n/config'),
         ...preloads,
     ])
 
@@ -377,4 +334,65 @@ const init = async () => {
     )
 }
 
-void init().catch(renderStartupFailure)
+const PWA_RELOAD_GUARD_KEY = 'atlas_pwa_startup_reload_build'
+
+const runStartup = async () => {
+    const shouldCheckPwaRelease = import.meta.env.PROD
+        && !isMarketplaceHost
+        && !isTauriRuntime
+        && 'serviceWorker' in navigator
+
+    if (shouldCheckPwaRelease) {
+        const result = await preparePwaReleaseForStartup((progress) => {
+            if (progress.phase === 'checking') {
+                updateShellStartup(
+                    i18n.t('pwaUpdater.checking'),
+                    12,
+                    i18n.t('pwaUpdater.checkingDescription'),
+                )
+                return
+            }
+
+            const completedBytes = progress.completedBytes ?? 0
+            const totalBytes = progress.totalBytes ?? 0
+            const completed = progress.completed ?? 0
+            const total = progress.total ?? 0
+            const ratio = totalBytes > 0
+                ? completedBytes / totalBytes
+                : total > 0 ? completed / total : 0
+            updateShellStartup(
+                i18n.t('pwaUpdater.downloading'),
+                18 + Math.round(Math.max(0, Math.min(1, ratio)) * 70),
+                i18n.t('pwaUpdater.downloadingDescription', { completed, total }),
+            )
+        })
+
+        if (result.status === 'updated') {
+            const reloadBuild = result.buildId ?? 'legacy-protocol-update'
+            const previousReloadBuild = sessionStorage.getItem(PWA_RELOAD_GUARD_KEY)
+            if (previousReloadBuild !== reloadBuild) {
+                sessionStorage.setItem(PWA_RELOAD_GUARD_KEY, reloadBuild)
+                updateShellStartup(
+                    i18n.t('pwaUpdater.restarting'),
+                    100,
+                    i18n.t('pwaUpdater.restartingDescription'),
+                )
+                window.location.reload()
+                return
+            }
+            console.error('[Atlas PWA] Prevented a repeated startup reload for build:', reloadBuild)
+        } else if (result.status === 'current') {
+            sessionStorage.removeItem(PWA_RELOAD_GUARD_KEY)
+        } else if (result.status === 'failed' || result.status === 'unavailable') {
+            updateShellStartup(
+                i18n.t('pwaUpdater.openingInstalled'),
+                18,
+                i18n.t('pwaUpdater.openingInstalledDescription'),
+            )
+        }
+    }
+
+    await init()
+}
+
+void runStartup().catch(renderStartupFailure)

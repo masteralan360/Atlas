@@ -13,7 +13,7 @@ import { Settings as SettingsIcon, Database, Cloud, Trash2, RefreshCw, User, Cop
 import { formatDate, formatDateTime, formatTime, cn, generateId, getHourDisplayPreference, setHourDisplayPreference, type HourDisplayPreference } from '@/lib/utils'
 import { useTheme } from '@/ui/components/theme-provider'
 import { Moon, Sun, Monitor, Unlock, Server, MessageSquare, Bell, MonitorPlay, Wifi } from 'lucide-react'
-import { useState, useEffect, useRef, type ChangeEvent } from 'react'
+import { lazy, Suspense, useState, useEffect, useRef, type ChangeEvent } from 'react'
 import { isAndroidPwa, isMobile, isDesktop, isTauri, isTauriAndroid } from '@/lib/platform'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { getAppSettingSync, setAppSetting } from '@/local-db/settings'
@@ -58,6 +58,10 @@ import { enrollLocalAccountCredential } from '@/auth/localAccountAuth'
 import { ModuleLockerSettingsCard } from '@/ui/components/module-locker/ModuleLockerSettingsCard'
 import { canChangeRestaurantTableConfiguration, normalizeRestaurantTableCount, normalizeVipTableNumbers } from '@/lib/restaurantTableView'
 import { OfflineReadinessCard } from '@/ui/components/settings/OfflineReadinessCard'
+
+const DeveloperTestButton = import.meta.env.DEV && __ATLAS_DEV_TESTING__
+    ? lazy(() => import('@/dev/testing/DeveloperTestButton'))
+    : null
 
 function getDateFilterDayBoundaryDate(value: string) {
     const [hours, minutes] = value.split(':').map(Number)
@@ -2372,6 +2376,13 @@ export function Settings() {
                         </Card>
                     )}
 
+                    {DeveloperTestButton && (
+                        <div className="flex justify-end">
+                            <Suspense fallback={null}>
+                                <DeveloperTestButton suiteId="platform" />
+                            </Suspense>
+                        </div>
+                    )}
                     <OfflineReadinessCard />
 
                     {/* Biometric Authentication (Mobile Only) */}

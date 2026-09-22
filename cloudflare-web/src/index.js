@@ -504,6 +504,7 @@ function hasFileExtension(pathname) {
 
 function staticCacheControl(pathname) {
     if (pathname.startsWith('/assets/')) return 'public, max-age=31536000, immutable'
+    if (pathname === '/pwa-release.json' || pathname === '/atlas-assets.json') return 'no-store, max-age=0'
     if (pathname === '/' || pathname === '/index.html' || pathname === '/marketplace.html' || pathname === '/sw.js' || pathname === '/firebase-messaging-sw.js' || pathname === '/manifest.webmanifest') {
         return 'public, max-age=0, must-revalidate'
     }

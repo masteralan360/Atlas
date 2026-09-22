@@ -241,4 +241,14 @@ describe('Atlas Cloudflare web Worker', () => {
         expect(await response.text()).toBe('/assets/app-abc123.js')
         expect(response.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable')
     })
+
+    it('never caches the PWA release descriptor or generated asset manifest', async () => {
+        const env = createEnv()
+
+        const release = await worker.fetch(new Request('https://app.atlaserp.dev/pwa-release.json'), env)
+        const manifest = await worker.fetch(new Request('https://app.atlaserp.dev/atlas-assets.json'), env)
+
+        expect(release.headers.get('Cache-Control')).toBe('no-store, max-age=0')
+        expect(manifest.headers.get('Cache-Control')).toBe('no-store, max-age=0')
+    })
 })

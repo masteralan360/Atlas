@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { isStaticFallback, waitForApiGateway } from './verify-cloudflare-deployment.mjs'
+import { isStaticFallback, validatePwaRelease, verifyPwaRelease, waitForApiGateway } from './verify-cloudflare-deployment.mjs'
 
 const staticFallback = {
     status: 200,
@@ -50,5 +50,43 @@ describe('Cloudflare deployment verification', () => {
 
         expect(requestApi).toHaveBeenCalledTimes(3)
         expect(sleep).toHaveBeenCalledTimes(2)
+    })
+
+    it('verifies the deployed build ID and every declared PWA asset', async () => {
+        const release = {
+            schemaVersion: 1,
+            buildId: `sha256-${'a'.repeat(64)}`,
+            assets: [
+                { url: '/', bytes: 10, sha256: 'b'.repeat(64) },
+                { url: '/assets/app.js', bytes: 20, sha256: 'c'.repeat(64) },
+            ],
+        }
+        const fetchImpl = vi.fn(async (input, init = {}) => {
+            const url = new URL(input)
+            if (url.pathname === '/pwa-release.json') {
+                return Response.json(release, { headers: { 'Cache-Control': 'no-store, max-age=0' } })
+            }
+            expect(init.method).toBe('HEAD')
+            return new Response(null, { status: 200 })
+        })
+
+        expect(validatePwaRelease(release)).toBe(true)
+        await expect(verifyPwaRelease(fetchImpl, 'https://atlas.example', release)).resolves.toEqual(release)
+        expect(fetchImpl).toHaveBeenCalledTimes(3)
+    })
+
+    it('rejects a release descriptor that points to a different deployment', async () => {
+        const deployed = {
+            schemaVersion: 1,
+            buildId: `sha256-${'a'.repeat(64)}`,
+            assets: [{ url: '/', bytes: 10, sha256: 'b'.repeat(64) }],
+        }
+        const fetchImpl = vi.fn(async () => Response.json(deployed, {
+            headers: { 'Cache-Control': 'no-store' },
+        }))
+
+        await expect(verifyPwaRelease(fetchImpl, 'https://atlas.example', {
+            buildId: `sha256-${'c'.repeat(64)}`,
+        })).rejects.toThrow('build mismatch')
     })
 })

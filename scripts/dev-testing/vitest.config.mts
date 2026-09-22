@@ -14,7 +14,11 @@ export default defineConfig({
     },
     test: {
         environment: 'node',
-        include: ['src/**/*.test.{ts,tsx}'],
+        include: [
+            'src/**/*.test.{ts,tsx}',
+            'scripts/**/*.test.mjs',
+            'cloudflare-web/src/**/*.test.js'
+        ],
         setupFiles: [path.join(root, 'scripts/dev-testing/networkGuard.ts')],
         testTimeout: 30_000,
         hookTimeout: 30_000,
