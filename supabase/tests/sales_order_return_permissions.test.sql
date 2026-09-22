@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(9);
+SELECT plan(12);
 
 SELECT ok(
   to_regprocedure('public.current_user_can_return_sales_order(uuid,uuid)') IS NOT NULL,
@@ -52,10 +52,22 @@ SELECT like(
   'the helper denies staff with required sales-order requests'
 );
 
-SELECT like(
+SELECT unlike(
   pg_get_functiondef('public.current_user_can_return_sales_order(uuid,uuid)'::regprocedure),
-  '%orders.view_own%',
-  'the helper applies the View Own scope'
+  '%crm.sales_orders%',
+  'the helper does not read sales orders from a sales-order RLS policy'
+);
+
+SELECT like(
+  (SELECT with_check FROM pg_policies WHERE schemaname = 'public' AND tablename = 'order_returns' AND policyname = 'order_returns_insert'),
+  '%status%completed%',
+  'return headers require a completed sales order'
+);
+
+SELECT like(
+  (SELECT with_check FROM pg_policies WHERE schemaname = 'public' AND tablename = 'order_returns' AND policyname = 'order_returns_insert'),
+  '%view_own%',
+  'return headers apply the View Own scope'
 );
 
 SELECT like(
@@ -64,10 +76,16 @@ SELECT like(
   'staff return headers are bound to the authenticated user'
 );
 
+SELECT unlike(
+  (SELECT with_check FROM pg_policies WHERE schemaname = 'crm' AND tablename = 'sales_orders' AND policyname = 'crm_sales_orders_return_update_guard'),
+  '%order_returns%',
+  'the aggregate guard does not create an RLS dependency cycle through return records'
+);
+
 SELECT like(
   (SELECT with_check FROM pg_policies WHERE schemaname = 'crm' AND tablename = 'sales_orders' AND policyname = 'crm_sales_orders_return_update_guard'),
-  '%authorized_return%',
-  'a staff aggregate update requires an authorized return record'
+  '%return_status%partial%',
+  'staff aggregate updates remain limited to return states'
 );
 
 SELECT * FROM finish();

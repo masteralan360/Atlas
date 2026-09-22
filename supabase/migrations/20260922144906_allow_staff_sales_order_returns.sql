@@ -1,6 +1,8 @@
--- Staff members with Sales Order Access may return completed sales orders.
--- The request permission deliberately blocks returns: returns have no
--- approval-request workflow and must not be submitted for review.
+-- This helper is intentionally limited to actor/workspace authorization. Do
+-- not read crm.sales_orders here: it is also called by a policy on that table,
+-- and a self-read from an RLS policy produces PostgreSQL error 42P17.
+-- Order state and View Own checks belong in policies on the return tables,
+-- where crm.sales_orders is not the protected relation.
 CREATE OR REPLACE FUNCTION public.current_user_can_return_sales_order(
   p_workspace_id uuid,
   p_order_id uuid
@@ -13,18 +15,7 @@ SET search_path = public, crm
 AS $function$
   SELECT
     p_workspace_id = public.current_workspace_id()
-    AND EXISTS (
-      SELECT 1
-      FROM crm.sales_orders AS sales_order
-      WHERE sales_order.id = p_order_id
-        AND sales_order.workspace_id = p_workspace_id
-        AND sales_order.status = 'completed'
-        AND sales_order.return_status <> 'full'
-        AND (
-          NOT (SELECT public.current_user_has_view_own_permission('orders.view_own'))
-          OR sales_order.created_by = (SELECT auth.uid())
-        )
-    )
+    AND p_order_id IS NOT NULL
     AND (
       public.current_user_role() = 'admin'
       OR (
@@ -58,6 +49,18 @@ CREATE POLICY order_returns_insert
   WITH CHECK (
     workspace_id = public.current_workspace_id()
     AND public.current_user_can_return_sales_order(workspace_id, order_id)
+    AND EXISTS (
+      SELECT 1
+      FROM crm.sales_orders AS sales_order
+      WHERE sales_order.id = order_returns.order_id
+        AND sales_order.workspace_id = order_returns.workspace_id
+        AND sales_order.status = 'completed'
+        AND sales_order.return_status <> 'full'
+        AND (
+          NOT (SELECT public.current_user_has_view_own_permission('orders.view_own'))
+          OR sales_order.created_by = (SELECT auth.uid())
+        )
+    )
     AND (
       public.current_user_role() = 'admin'
       OR returned_by = (SELECT auth.uid())
@@ -72,6 +75,18 @@ CREATE POLICY order_returns_update
   USING (
     workspace_id = public.current_workspace_id()
     AND public.current_user_can_return_sales_order(workspace_id, order_id)
+    AND EXISTS (
+      SELECT 1
+      FROM crm.sales_orders AS sales_order
+      WHERE sales_order.id = order_returns.order_id
+        AND sales_order.workspace_id = order_returns.workspace_id
+        AND sales_order.status = 'completed'
+        AND sales_order.return_status <> 'full'
+        AND (
+          NOT (SELECT public.current_user_has_view_own_permission('orders.view_own'))
+          OR sales_order.created_by = (SELECT auth.uid())
+        )
+    )
     AND (
       public.current_user_role() = 'admin'
       OR returned_by = (SELECT auth.uid())
@@ -80,6 +95,18 @@ CREATE POLICY order_returns_update
   WITH CHECK (
     workspace_id = public.current_workspace_id()
     AND public.current_user_can_return_sales_order(workspace_id, order_id)
+    AND EXISTS (
+      SELECT 1
+      FROM crm.sales_orders AS sales_order
+      WHERE sales_order.id = order_returns.order_id
+        AND sales_order.workspace_id = order_returns.workspace_id
+        AND sales_order.status = 'completed'
+        AND sales_order.return_status <> 'full'
+        AND (
+          NOT (SELECT public.current_user_has_view_own_permission('orders.view_own'))
+          OR sales_order.created_by = (SELECT auth.uid())
+        )
+    )
     AND (
       public.current_user_role() = 'admin'
       OR returned_by = (SELECT auth.uid())
@@ -102,6 +129,18 @@ CREATE POLICY order_return_items_insert
         AND public.current_user_can_return_sales_order(
           order_return_items.workspace_id,
           order_return_items.order_id
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM crm.sales_orders AS sales_order
+          WHERE sales_order.id = order_return_items.order_id
+            AND sales_order.workspace_id = order_return_items.workspace_id
+            AND sales_order.status = 'completed'
+            AND sales_order.return_status <> 'full'
+            AND (
+              NOT (SELECT public.current_user_has_view_own_permission('orders.view_own'))
+              OR sales_order.created_by = (SELECT auth.uid())
+            )
         )
         AND (
           public.current_user_role() = 'admin'
@@ -127,6 +166,18 @@ CREATE POLICY order_return_items_update
           order_return_items.workspace_id,
           order_return_items.order_id
         )
+        AND EXISTS (
+          SELECT 1
+          FROM crm.sales_orders AS sales_order
+          WHERE sales_order.id = order_return_items.order_id
+            AND sales_order.workspace_id = order_return_items.workspace_id
+            AND sales_order.status = 'completed'
+            AND sales_order.return_status <> 'full'
+            AND (
+              NOT (SELECT public.current_user_has_view_own_permission('orders.view_own'))
+              OR sales_order.created_by = (SELECT auth.uid())
+            )
+        )
         AND (
           public.current_user_role() = 'admin'
           OR order_return.returned_by = (SELECT auth.uid())
@@ -145,6 +196,18 @@ CREATE POLICY order_return_items_update
           order_return_items.workspace_id,
           order_return_items.order_id
         )
+        AND EXISTS (
+          SELECT 1
+          FROM crm.sales_orders AS sales_order
+          WHERE sales_order.id = order_return_items.order_id
+            AND sales_order.workspace_id = order_return_items.workspace_id
+            AND sales_order.status = 'completed'
+            AND sales_order.return_status <> 'full'
+            AND (
+              NOT (SELECT public.current_user_has_view_own_permission('orders.view_own'))
+              OR sales_order.created_by = (SELECT auth.uid())
+            )
+        )
         AND (
           public.current_user_role() = 'admin'
           OR order_return.returned_by = (SELECT auth.uid())
@@ -152,9 +215,9 @@ CREATE POLICY order_return_items_update
     )
   );
 
--- Do not let a direct client update persist return aggregate fields without an
--- authorized return record. The original sales-order policy still governs all
--- ordinary updates to an order that has never been returned.
+-- Do not let a staff client persist return aggregate fields unless the actor is
+-- authorized to return this row. This policy only examines the sales_orders row
+-- and a helper that reads permissions, preventing an RLS dependency cycle.
 DROP POLICY IF EXISTS crm_sales_orders_return_update_guard ON crm.sales_orders;
 CREATE POLICY crm_sales_orders_return_update_guard
   ON crm.sales_orders
@@ -170,8 +233,13 @@ CREATE POLICY crm_sales_orders_return_update_guard
     )
     OR public.current_user_role() = 'admin'
     OR (
-      public.current_user_role() = 'staff'
-      AND public.current_user_can_return_sales_order(workspace_id, id)
+      public.current_user_can_return_sales_order(workspace_id, id)
+      AND status = 'completed'
+      AND return_status <> 'full'
+      AND (
+        NOT (SELECT public.current_user_has_view_own_permission('orders.view_own'))
+        OR created_by = (SELECT auth.uid())
+      )
     )
   )
   WITH CHECK (
@@ -180,27 +248,16 @@ CREATE POLICY crm_sales_orders_return_update_guard
       AND returned_amount = 0
       AND returned_at IS NULL
       AND returned_by IS NULL
-      AND NOT EXISTS (
-        SELECT 1
-        FROM public.order_returns AS existing_return
-        WHERE existing_return.order_id = sales_orders.id
-          AND existing_return.workspace_id = sales_orders.workspace_id
-          AND NOT existing_return.is_deleted
-      )
     )
     OR public.current_user_role() = 'admin'
     OR (
-      public.current_user_role() = 'staff'
-      AND return_status <> 'none'
+      public.current_user_can_return_sales_order(workspace_id, id)
+      AND status = 'completed'
+      AND return_status IN ('partial', 'full')
       AND returned_by = (SELECT auth.uid())
-      AND public.current_user_can_return_sales_order(workspace_id, id)
-      AND EXISTS (
-        SELECT 1
-        FROM public.order_returns AS authorized_return
-        WHERE authorized_return.order_id = sales_orders.id
-          AND authorized_return.workspace_id = sales_orders.workspace_id
-          AND authorized_return.returned_by = (SELECT auth.uid())
-          AND NOT authorized_return.is_deleted
+      AND (
+        NOT (SELECT public.current_user_has_view_own_permission('orders.view_own'))
+        OR created_by = (SELECT auth.uid())
       )
     )
   );

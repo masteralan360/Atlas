@@ -24,6 +24,7 @@ type PrintInput = {
   deliveryCurrency?: string
   customerCityLabel?: string
   createdAt?: string
+  trackingCode?: string
 }
 
 const PAGE_WIDTH_MM = 210
@@ -84,7 +85,8 @@ const ATLAS_STANDARD_LAYOUT = {
       'atlasStandard.financialSummary.amountInWords',
       'atlasStandard.financialSummary.currentBalance',
       'atlasStandard.financialSummary.paymentMethod',
-      'atlasStandard.financialSummary.notes'
+      'atlasStandard.financialSummary.notes',
+      'atlasStandard.financialSummary.trackingCode'
     ]
   },
   annotations: [
@@ -104,6 +106,7 @@ const ATLAS_STANDARD_LAYOUT = {
     'atlasStandard.invoiceDetails.time': 'کات',
     'atlasStandard.invoiceDetails.number': 'تەلەفۆن',
     'atlasStandard.financialSummary.notes': 'تێبینی',
+    'atlasStandard.financialSummary.trackingCode': 'کۆدی بەدواداچوونەوە',
     'atlasStandard.invoiceDetails.invoice': 'پسوڵە',
     'atlasStandard.invoiceDetails.partner': 'کڕیار',
     'atlasStandard.invoiceDetails.city': 'شار',
@@ -134,6 +137,7 @@ const ATLAS_STANDARD_LABELS = {
   salesPerson: 'کاشێر',
   status: 'دۆخ',
   notes: ATLAS_STANDARD_LAYOUT.fieldLabelOverrides['atlasStandard.financialSummary.notes'],
+  trackingCode: ATLAS_STANDARD_LAYOUT.fieldLabelOverrides['atlasStandard.financialSummary.trackingCode'],
   invoice: ATLAS_STANDARD_LAYOUT.fieldLabelOverrides['atlasStandard.invoiceDetails.invoice'],
   partner: ATLAS_STANDARD_LAYOUT.fieldLabelOverrides['atlasStandard.invoiceDetails.partner'],
   city: ATLAS_STANDARD_LAYOUT.fieldLabelOverrides['atlasStandard.invoiceDetails.city'],
@@ -383,7 +387,8 @@ function StorefrontAtlasStandardTemplate({ input, createdAt, documentNumber }: {
     { key: 'atlasStandard.financialSummary.paymentMethod', label: label.paymentMethod, value: '-', span: 2 },
     { key: 'atlasStandard.financialSummary.amountInWords', label: label.amountInWords, value: numberToKurdishWords(total), span: 2, showLabel: false },
     { key: 'atlasStandard.financialSummary.printedBy', label: label.printedBy, value: '-', span: 2 },
-    { key: 'atlasStandard.financialSummary.notes', label: label.notes, value: input.customer.notes, span: 4, multiline: true }
+    { key: 'atlasStandard.financialSummary.notes', label: label.notes, value: input.customer.notes, span: 4, multiline: true },
+    { key: 'atlasStandard.financialSummary.trackingCode', label: label.trackingCode, value: input.trackingCode ? input.trackingCode.replace(/^(\d{3})(\d{3})(\d{3})$/, '$1-$2-$3') : '-', span: 4 }
   ]
 
   return (

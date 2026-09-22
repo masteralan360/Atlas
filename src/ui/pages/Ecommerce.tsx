@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useLocation, useRoute } from 'wouter'
 import {
@@ -114,6 +114,9 @@ import {
     useToast
 } from '@/ui/components'
 import { FilterDropdown } from '@/ui/components/FilterDropdown'
+
+const DeveloperTestButton = import.meta.env.DEV && __ATLAS_DEV_TESTING__
+    ? lazy(() => import('@/dev/testing/DeveloperTestButton')) : null
 
 type MarketplaceOrderFilter = 'all' | MarketplaceOrderStatus
 
@@ -709,6 +712,7 @@ function EcommerceListView({
                     </p>
                 </div>
                 <div className="flex flex-col sm:flex-row lg:items-center gap-4 self-start lg:self-auto w-full lg:w-auto">
+                    {DeveloperTestButton && <Suspense fallback={null}><DeveloperTestButton suiteId="ecommerce" /></Suspense>}
                     <div className="relative w-full lg:w-auto">
                         <DateRangeFilters
                             label={t('orders.dateFilters.created', { defaultValue: 'Created date' })}

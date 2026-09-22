@@ -24,6 +24,9 @@ verify_jwt = false
 [functions.get-bound-storefront-inquiry-pdf]
 verify_jwt = false
 
+[functions.get-bound-storefront-order-tracking]
+verify_jwt = false
+
 
 
 [functions.register-device-token]

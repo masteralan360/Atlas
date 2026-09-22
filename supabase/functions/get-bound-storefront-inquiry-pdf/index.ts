@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
 
         let orderQuery = adminClient
             .from('marketplace_orders')
-            .select('id, order_number, customer_name, customer_phone, customer_email, customer_address, customer_city, customer_notes, items, currency, storefront_mode, created_at')
+            .select('id, order_number, tracking_code, customer_name, customer_phone, customer_email, customer_address, customer_city, customer_notes, items, currency, storefront_mode, created_at')
             .eq('workspace_id', context.workspace.id)
             .eq('website_storefront_key', JUMLA_KHALEEJ_SITE_KEY)
             .eq('source_domain', context.config.primary_domain)
@@ -173,6 +173,7 @@ Deno.serve(async (req) => {
 
         return privateJsonResponse({
             documentNumber: order.order_number,
+            trackingCode: order.tracking_code,
             createdAt: order.created_at,
             mode,
             customer: {

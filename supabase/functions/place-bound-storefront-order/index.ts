@@ -151,7 +151,7 @@ Deno.serve(async (req) => {
 
         const { data: existingOrder, error: existingOrderError } = await adminClient
             .from('marketplace_orders')
-            .select('id, order_number')
+            .select('id, order_number, tracking_code')
             .eq('workspace_id', context.workspace.id)
             .eq('checkout_request_id', checkoutRequestId)
             .maybeSingle()
@@ -161,6 +161,7 @@ Deno.serve(async (req) => {
             return privateJsonResponse({
                 id: (existingOrder as { id: string }).id,
                 order_number: (existingOrder as { order_number: string }).order_number,
+                tracking_code: (existingOrder as { tracking_code: string }).tracking_code,
                 message: getLocalizedMarketplaceOrderMessage(language)
             })
         }
@@ -328,14 +329,14 @@ Deno.serve(async (req) => {
                 source_domain: context.config.primary_domain,
                 checkout_request_id: checkoutRequestId
             })
-            .select('id, order_number')
+            .select('id, order_number, tracking_code')
             .single()
 
         if (insertError || !insertedOrder) {
             if (insertError?.code === '23505') {
                 const { data: duplicateOrder } = await adminClient
                     .from('marketplace_orders')
-                    .select('id, order_number')
+                    .select('id, order_number, tracking_code')
                     .eq('workspace_id', context.workspace.id)
                     .eq('checkout_request_id', checkoutRequestId)
                     .maybeSingle()
@@ -343,6 +344,7 @@ Deno.serve(async (req) => {
                     return privateJsonResponse({
                         id: (duplicateOrder as { id: string }).id,
                         order_number: (duplicateOrder as { order_number: string }).order_number,
+                        tracking_code: (duplicateOrder as { tracking_code: string }).tracking_code,
                         message: getLocalizedMarketplaceOrderMessage(language)
                     })
                 }
@@ -362,6 +364,7 @@ Deno.serve(async (req) => {
         return privateJsonResponse({
             id: insertedOrder.id,
             order_number: insertedOrder.order_number,
+            tracking_code: insertedOrder.tracking_code,
             message: getLocalizedMarketplaceOrderMessage(language)
         }, { status: 201 })
     } catch (error) {

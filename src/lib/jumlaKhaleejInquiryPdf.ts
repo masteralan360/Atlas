@@ -9,6 +9,7 @@ type InquirySnapshotRequest = {
 
 export type JumlaKhaleejInquirySnapshot = {
   documentNumber: string
+  trackingCode: string
   createdAt: string
   mode: 'retail' | 'wholesale'
   customer: CustomerForm & { cityLabel: string }
@@ -72,6 +73,7 @@ function isContact(value: unknown): value is JumlaKhaleejInquirySnapshot['store'
 
 export function isJumlaKhaleejInquirySnapshot(value: unknown): value is JumlaKhaleejInquirySnapshot {
   if (!isRecord(value) || !/^MKT-[0-9]{5,}$/.test(String(value.documentNumber || ''))) return false
+  if (typeof value.trackingCode !== 'string' || !/^[1-9][0-9]{8}$/.test(value.trackingCode)) return false
   if (typeof value.createdAt !== 'string' || !value.createdAt) return false
   if (value.mode !== 'retail' && value.mode !== 'wholesale') return false
   if (!isCustomer(value.customer)) return false
@@ -118,6 +120,7 @@ export async function generateJumlaKhaleejInquiryPdf(request: InquirySnapshotReq
   const { createStorefrontInquiryPdf } = await import('@/lib/storefront-atlas-standard-pdf')
   const generated = await createStorefrontInquiryPdf({
     documentNumber: snapshot.documentNumber,
+    trackingCode: snapshot.trackingCode,
     createdAt: snapshot.createdAt,
     customer: snapshot.customer,
     customerCityLabel: snapshot.customer.cityLabel,

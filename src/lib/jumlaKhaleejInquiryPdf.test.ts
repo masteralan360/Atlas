@@ -7,6 +7,7 @@ import {
 
 const snapshot = {
   documentNumber: 'MKT-12345',
+  trackingCode: '123456789',
   createdAt: '2026-09-10T10:00:00.000Z',
   mode: 'wholesale',
   customer: {
@@ -83,11 +84,21 @@ describe('requestJumlaKhaleejInquirySnapshot', () => {
       orderId: '123e4567-e89b-42d3-a456-426614174000'
     })).rejects.toThrow('snapshot is invalid')
   })
+
+  it('rejects snapshots missing the sole client tracking credential', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ ...snapshot, trackingCode: null })))
+
+    await expect(requestJumlaKhaleejInquirySnapshot({
+      accessToken: 'atlas-session-token',
+      orderId: '123e4567-e89b-42d3-a456-426614174000'
+    })).rejects.toThrow('snapshot is invalid')
+  })
 })
 
 describe('isJumlaKhaleejInquirySnapshot', () => {
   it('accepts the canonical snapshot and rejects non-MKT documents', () => {
     expect(isJumlaKhaleejInquirySnapshot(snapshot)).toBe(true)
     expect(isJumlaKhaleejInquirySnapshot({ ...snapshot, documentNumber: 'ORD-12345' })).toBe(false)
+    expect(isJumlaKhaleejInquirySnapshot({ ...snapshot, trackingCode: '123-456-789' })).toBe(false)
   })
 })

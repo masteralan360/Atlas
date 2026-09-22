@@ -61,6 +61,18 @@ CREATE POLICY order_return_items_insert
           order_return_items.workspace_id,
           order_return_items.order_id
         )
+        AND EXISTS (
+          SELECT 1
+          FROM crm.sales_orders AS sales_order
+          WHERE sales_order.id = order_return_items.order_id
+            AND sales_order.workspace_id = order_return_items.workspace_id
+            AND sales_order.status = 'completed'
+            AND sales_order.return_status <> 'full'
+            AND (
+              NOT (SELECT public.current_user_has_view_own_permission('orders.view_own'))
+              OR sales_order.created_by = (SELECT auth.uid())
+            )
+        )
         AND (
           public.current_user_role() = 'admin'
           OR order_return.returned_by = (SELECT auth.uid())
@@ -85,6 +97,18 @@ CREATE POLICY order_return_items_update
           order_return_items.workspace_id,
           order_return_items.order_id
         )
+        AND EXISTS (
+          SELECT 1
+          FROM crm.sales_orders AS sales_order
+          WHERE sales_order.id = order_return_items.order_id
+            AND sales_order.workspace_id = order_return_items.workspace_id
+            AND sales_order.status = 'completed'
+            AND sales_order.return_status <> 'full'
+            AND (
+              NOT (SELECT public.current_user_has_view_own_permission('orders.view_own'))
+              OR sales_order.created_by = (SELECT auth.uid())
+            )
+        )
         AND (
           public.current_user_role() = 'admin'
           OR order_return.returned_by = (SELECT auth.uid())
@@ -102,6 +126,18 @@ CREATE POLICY order_return_items_update
         AND public.current_user_can_return_sales_order(
           order_return_items.workspace_id,
           order_return_items.order_id
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM crm.sales_orders AS sales_order
+          WHERE sales_order.id = order_return_items.order_id
+            AND sales_order.workspace_id = order_return_items.workspace_id
+            AND sales_order.status = 'completed'
+            AND sales_order.return_status <> 'full'
+            AND (
+              NOT (SELECT public.current_user_has_view_own_permission('orders.view_own'))
+              OR sales_order.created_by = (SELECT auth.uid())
+            )
         )
         AND (
           public.current_user_role() = 'admin'

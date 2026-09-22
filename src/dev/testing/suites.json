@@ -402,6 +402,19 @@
       "voice-storage-hardware"
     ]
   },
+  "ecommerce": {
+    "titleKey": "devTesting.ecommerce",
+    "coverageHelpKey": "devTesting.ecommerceCoverageHelp",
+    "groups": [
+      {
+        "id": "jumla-tracking-contract",
+        "titleKey": "devTesting.ecommerceGroups.jumlaTrackingContract",
+        "layer": "contract",
+        "files": ["src/lib/jumlaKhaleejInquiryPdf.test.ts"]
+      }
+    ],
+    "unavailable": ["cloud-database", "browser-workflow", "hybrid-native", "local-native"]
+  },
   "platform": {
     "titleKey": "devTesting.platform",
     "samplesHelpKey": "devTesting.platformSamplesHelp",

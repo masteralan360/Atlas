@@ -23,7 +23,15 @@ Accumilated account statement rows by types and for one day
 
 ##
 
+Fix Destructive Mutation queues like sales order and compare them with non-destructive mutation queues
+
 Purchase Order Return
+
+[$grill-me](E:\\ERP System\\Atlas\\.agents\\skills\\grill-me\\SKILL.md) i want to add "My Orders" to Jumla Khaleej Page, the way it would work is that:
+User A Sends an inquiry Order
+That Inquiry order will create a unique tracked number (9 digits in database and 123-456-789 in display and entry)
+User A will have that tracked id of his order locally saved
+User A can see that inquiry order's status by its Marketplace order status
 
 My Orders with unqiue tracked number and search by my phone number
 Restrict Phone number in khaleej cosmetic
