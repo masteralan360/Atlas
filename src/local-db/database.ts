@@ -3477,6 +3477,21 @@ export class AtlasDatabase extends Dexie {
       users: 'id, email, role, workspaceId, syncStatus, updatedAt, isDeleted, monthlyTarget'
     })
 
+    // Version 131 had already been recorded on some affected installations
+    // before the identity-cache repair was available. Reassert both identity
+    // stores under a later version so those databases receive a real upgrade.
+    this.version(132).stores({
+      users: 'id, email, role, workspaceId, syncStatus, updatedAt, isDeleted, monthlyTarget',
+      profiles: 'id, workspaceId, currentWorkspaceId, name, role, [workspaceId+name], [currentWorkspaceId+name]'
+    })
+
+    // Re-run the identity and storage-access cache repair after a client has
+    // already recorded the incomplete version-132 schema.
+    this.version(133).stores({
+      storage_member_exclusions:
+        'id, workspaceId, storageId, userId, updatedAt, isDeleted, syncStatus, [workspaceId+storageId], [workspaceId+userId], [storageId+userId]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()

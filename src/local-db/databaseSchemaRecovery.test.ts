@@ -71,9 +71,9 @@ describe('POS return schema recovery', () => {
     }
   }, 10_000)
 
-  it('restores the users store for a version-130 cache without deleting cached sales orders', async () => {
+  it('restores identity and storage-access stores for a version-132 cache without deleting cached sales orders', async () => {
     const legacyCache = new Dexie(DATABASE_NAME)
-    legacyCache.version(130).stores({
+    legacyCache.version(132).stores({
       sales_orders: 'id, workspaceId'
     })
     await legacyCache.open()
@@ -88,6 +88,11 @@ describe('POS return schema recovery', () => {
     try {
       await repairedCache.open()
 
+      expect(Array.from(repairedCache.backendDB().objectStoreNames)).toEqual(expect.arrayContaining([
+        'profiles',
+        'storage_member_exclusions',
+        'users'
+      ]))
       expect(await repairedCache.sales_orders.get('existing-sales-order')).toMatchObject({
         workspaceId: 'workspace-1',
         totalAmount: 125
@@ -108,6 +113,34 @@ describe('POS return schema recovery', () => {
         workspaceId: 'workspace-1',
         role: 'staff'
       })
+
+      await repairedCache.profiles.put({
+        id: 'staff-1',
+        workspaceId: 'workspace-1',
+        currentWorkspaceId: 'workspace-1',
+        name: 'Staff',
+        role: 'staff'
+      } as never)
+
+      expect(await repairedCache.profiles.get('staff-1')).toMatchObject({
+        workspaceId: 'workspace-1',
+        currentWorkspaceId: 'workspace-1'
+      })
+
+      await repairedCache.storage_member_exclusions.put({
+        id: 'staff-1-storage-1',
+        workspaceId: 'workspace-1',
+        storageId: 'storage-1',
+        userId: 'staff-1',
+        updatedAt: '2026-09-22T00:00:00.000Z',
+        isDeleted: false,
+        syncStatus: 'synced'
+      } as never)
+
+      expect(await repairedCache.storage_member_exclusions
+        .where('[workspaceId+userId]')
+        .equals(['workspace-1', 'staff-1'])
+        .first()).toMatchObject({ storageId: 'storage-1' })
     } finally {
       repairedCache.close()
     }

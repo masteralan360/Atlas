@@ -25,7 +25,12 @@ import type {
 import { createInventoryTransaction } from './inventoryTransactions'
 import { syncProductBarcodeCachesForWorkspace } from './productBarcodes'
 import { normalizeProductSku } from './productSku'
-import { assertCurrentUserCanAccessStorage, canAccessStorage, useStorageAccess } from './storagePermissions'
+import {
+    assertCurrentUserCanAccessStorage,
+    assertRecentCurrentUserCanAccessStorage,
+    canAccessStorage,
+    useStorageAccess
+} from './storagePermissions'
 import type { StockBatchTransferSelection } from './stockBatches'
 
 type InventorySyncSource = 'local' | 'remote'
@@ -657,7 +662,9 @@ export async function putInventoryQuantity(
 ) {
     if (syncSource === 'local') {
         assertInventoryMutationConnectivity(workspaceId)
-        await assertCurrentUserCanAccessStorage(workspaceId, storageId)
+        if (!assertRecentCurrentUserCanAccessStorage(workspaceId, storageId)) {
+            await assertCurrentUserCanAccessStorage(workspaceId, storageId)
+        }
     }
     const rows = await getInventoryRowsForProductStorage(productId, storageId)
     const activeRow = rows.find((row) => !row.isDeleted)

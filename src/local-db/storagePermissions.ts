@@ -45,7 +45,13 @@ const unresolvedStorageAccess: StorageAccess = {
   isReady: false
 }
 
-const exclusionRefreshesInFlight = new Map<string, Promise<void>>()
+const exclusionRefreshesInFlight = new Map<string, Promise<StorageMemberExclusion[]>>()
+const recentCloudStorageAccesses = new Map<string, {
+  userId: string
+  access: StorageAccess
+  expiresAt: number
+}>()
+const RECENT_CLOUD_STORAGE_ACCESS_TTL_MS = 15_000
 
 function shouldUseCloudStorageData(workspaceId?: string | null) {
   return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
@@ -58,6 +64,26 @@ function getStorageAccessSignature(access: StorageAccess) {
 export function canAccessStorage(storageId: string | null | undefined, access: StorageAccess) {
   return access.isReady !== false
     && (!storageId || access.isAdmin || !access.excludedStorageIds.has(storageId))
+}
+
+/**
+ * Returns true only for a just-fetched Cloud boundary belonging to the active
+ * user. Inventory transactions use this after their preflight so they never
+ * await a network request from inside an IndexedDB transaction.
+ */
+export function assertRecentCurrentUserCanAccessStorage(workspaceId: string, storageId: string) {
+  const userId = getActiveBusinessUserId()
+  const cached = recentCloudStorageAccesses.get(workspaceId)
+  if (!userId || !cached || cached.userId !== userId || cached.expiresAt < Date.now()) {
+    if (cached?.expiresAt && cached.expiresAt < Date.now()) {
+      recentCloudStorageAccesses.delete(workspaceId)
+    }
+    return false
+  }
+  if (!canAccessStorage(storageId, cached.access)) {
+    throw new Error(i18n.t('storages.permissions.errors.accessDenied'))
+  }
+  return true
 }
 
 export function filterStorageScopedRows<T extends { storageId?: string | null }>(
@@ -235,19 +261,24 @@ async function getStorageAccessSnapshot(
     return unrestrictedStorageAccess
   }
 
-  // Do not turn an authenticated admin into a restricted member merely
-  // because the local membership mirror has not finished hydrating. Remote
-  // RLS remains the authority for every cloud mutation.
-  if (userId === getActiveBusinessUserId() && getActiveBusinessUserRole(workspaceId) === 'admin') {
+  // The authenticated identity is authoritative for the active workspace;
+  // local membership mirrors can lag or be unavailable while the cache is
+  // repaired. Remote RLS remains the authority for every cloud mutation.
+  const activeRole = userId === getActiveBusinessUserId()
+    ? getActiveBusinessUserRole(workspaceId)
+    : null
+  if (activeRole === 'admin') {
     return unrestrictedStorageAccess
   }
 
-  const [user, profile] = await Promise.all([db.users.get(userId), db.profiles.get(userId)])
-  const role = user?.workspaceId === workspaceId
-    ? user.role
-    : profile?.workspaceId === workspaceId
-      ? profile.role
-      : undefined
+  const role = activeRole ?? await (async () => {
+    const [user, profile] = await Promise.all([db.users.get(userId), db.profiles.get(userId)])
+    return user?.workspaceId === workspaceId
+      ? user.role
+      : profile?.workspaceId === workspaceId
+        ? profile.role
+        : undefined
+  })()
 
   if (!role) {
     return undefined
@@ -273,9 +304,39 @@ async function getStorageAccessSnapshot(
 /** Non-reactive counterpart for background workflows that must choose a location. */
 export async function getCurrentStorageAccess(workspaceId: string): Promise<StorageAccess> {
   const userId = getActiveBusinessUserId()
+  const activeRole = userId === getActiveBusinessUserId()
+    ? getActiveBusinessUserRole(workspaceId)
+    : null
   // Administrators are never subject to a storage exclusion. Resolve that
   // before refreshing the member deny-list, otherwise a transient refresh
   // failure incorrectly turns an admin-only inventory mutation into a deny.
+  if (activeRole === 'admin') {
+    return unrestrictedStorageAccess
+  }
+
+  if (userId && activeRole && shouldUseCloudStorageData(workspaceId) && isOnline(workspaceId)) {
+    try {
+      // A Cloud mutation uses the just-fetched RLS-scoped deny-list rather
+      // than an optional local mirror. This permits the transaction to remain
+      // safe while a damaged IndexedDB cache is being repaired.
+      const exclusions = await fetchStorageMemberExclusionsFromSupabase(workspaceId)
+      const access: StorageAccess = {
+        isAdmin: false,
+        excludedStorageIds: new Set(exclusions.map((row) => row.storageId)),
+        isReady: true
+      }
+      recentCloudStorageAccesses.set(workspaceId, {
+        userId,
+        access,
+        expiresAt: Date.now() + RECENT_CLOUD_STORAGE_ACCESS_TTL_MS
+      })
+      return access
+    } catch (error) {
+      console.error('[Storage permissions] Could not refresh mutation access:', error)
+      return unresolvedStorageAccess
+    }
+  }
+
   const cachedAccess = await getStorageAccessSnapshot(workspaceId, userId)
   if (cachedAccess?.isAdmin) {
     return unrestrictedStorageAccess
@@ -302,9 +363,48 @@ export async function assertCurrentUserCanAccessStorage(workspaceId: string, sto
   }
 }
 
-export async function refreshStorageMemberExclusionsFromSupabase(workspaceId: string) {
+async function fetchStorageMemberExclusionsFromSupabase(workspaceId: string) {
+  const { data, error } = await runSupabaseAction('storage-exclusions.fetch', () =>
+    supabase
+      .from('storage_member_exclusions')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .eq('is_deleted', false)
+  )
+  if (error) {
+    throw normalizeSupabaseActionError(error)
+  }
+
+  const syncedAt = new Date().toISOString()
+  return (data ?? []).map((row) => ({
+    ...(toCamelCase(row) as unknown as StorageMemberExclusion),
+    syncStatus: 'synced' as const,
+    lastSyncedAt: syncedAt
+  }))
+}
+
+async function persistStorageMemberExclusions(
+  workspaceId: string,
+  remoteRows: StorageMemberExclusion[]
+) {
+  const remoteIds = new Set(remoteRows.map((row) => row.id))
+  await db.transaction('rw', db.storage_member_exclusions, async () => {
+    const localRows = await db.storage_member_exclusions.where('workspaceId').equals(workspaceId).toArray()
+    const staleSyncedIds = localRows
+      .filter((row) => row.syncStatus === 'synced' && !remoteIds.has(row.id))
+      .map((row) => row.id)
+    if (staleSyncedIds.length > 0) {
+      await db.storage_member_exclusions.bulkDelete(staleSyncedIds)
+    }
+    if (remoteRows.length > 0) {
+      await db.storage_member_exclusions.bulkPut(remoteRows)
+    }
+  })
+}
+
+export async function refreshStorageMemberExclusionsFromSupabase(workspaceId: string): Promise<StorageMemberExclusion[]> {
   if (!workspaceId || !shouldUseCloudStorageData(workspaceId)) {
-    return
+    return []
   }
 
   const existingRefresh = exclusionRefreshesInFlight.get(workspaceId)
@@ -313,37 +413,9 @@ export async function refreshStorageMemberExclusionsFromSupabase(workspaceId: st
   }
 
   const refresh = (async () => {
-    const { data, error } = await runSupabaseAction('storage-exclusions.fetch', () =>
-      supabase
-        .from('storage_member_exclusions')
-        .select('*')
-        .eq('workspace_id', workspaceId)
-        .eq('is_deleted', false)
-    )
-    if (error) {
-      throw normalizeSupabaseActionError(error)
-    }
-
-    const syncedAt = new Date().toISOString()
-    const remoteRows = (data ?? []).map((row) => ({
-      ...(toCamelCase(row) as unknown as StorageMemberExclusion),
-      syncStatus: 'synced' as const,
-      lastSyncedAt: syncedAt
-    }))
-    const remoteIds = new Set(remoteRows.map((row) => row.id))
-
-    await db.transaction('rw', db.storage_member_exclusions, async () => {
-      const localRows = await db.storage_member_exclusions.where('workspaceId').equals(workspaceId).toArray()
-      const staleSyncedIds = localRows
-        .filter((row) => row.syncStatus === 'synced' && !remoteIds.has(row.id))
-        .map((row) => row.id)
-      if (staleSyncedIds.length > 0) {
-        await db.storage_member_exclusions.bulkDelete(staleSyncedIds)
-      }
-      if (remoteRows.length > 0) {
-        await db.storage_member_exclusions.bulkPut(remoteRows)
-      }
-    })
+    const remoteRows = await fetchStorageMemberExclusionsFromSupabase(workspaceId)
+    await persistStorageMemberExclusions(workspaceId, remoteRows)
+    return remoteRows
   })()
 
   exclusionRefreshesInFlight.set(workspaceId, refresh)

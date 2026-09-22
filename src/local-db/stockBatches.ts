@@ -19,7 +19,12 @@ import { db } from './database'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
 import { getInventoryQuantityForProductStorage, useInventoryProducts, type InventoryProduct } from './inventory'
 import { addToOfflineMutations } from './offlineMutations'
-import { assertCurrentUserCanAccessStorage, canAccessStorage, useStorageAccess } from './storagePermissions'
+import {
+    assertCurrentUserCanAccessStorage,
+    assertRecentCurrentUserCanAccessStorage,
+    canAccessStorage,
+    useStorageAccess
+} from './storagePermissions'
 import type {
     CurrencyCode,
     InventoryTransferBatchAllocation,
@@ -825,7 +830,9 @@ export async function commitStockBatchAllocations(
     const timestamp = options?.timestamp || new Date().toISOString()
     const syncSource = options?.syncSource || 'local'
     if (syncSource === 'local') {
-        await assertCurrentUserCanAccessStorage(workspaceId, storageId)
+        if (!assertRecentCurrentUserCanAccessStorage(workspaceId, storageId)) {
+            await assertCurrentUserCanAccessStorage(workspaceId, storageId)
+        }
     }
     const updatedBatches = await db.transaction('rw', db.stock_batches, async () => {
         const rowsToSync: StockBatch[] = []

@@ -9,10 +9,12 @@ import type { Inventory, Product, PurchaseOrder, SalesOrder } from './models'
 import { supabase } from '@/auth/supabase'
 import { setActiveBusinessUser, setActiveBusinessWorkspace, setNetworkStatus } from '@/lib/network'
 import { clearWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
+import { db } from './database'
 import {
   canAccessStorage,
   canAccessOrderForStorageAccess,
   filterProductsByStorageAccess,
+  assertRecentCurrentUserCanAccessStorage,
   getCurrentStorageAccess,
   redactPurchaseOrderForStorageAccess,
   redactSaleForStorageAccess,
@@ -65,6 +67,57 @@ describe('storage permissions', () => {
     } finally {
       fromSpy.mockRestore()
       clearWorkspaceModeSnapshot(workspaceId)
+      setActiveBusinessUser(null)
+      setActiveBusinessWorkspace(null)
+    }
+  })
+
+  it('uses the RLS-scoped cloud deny-list when local access caches are unavailable', async () => {
+    const workspaceId = 'storage-access-staff-workspace'
+    const userSpy = vi.spyOn(db.users, 'get').mockRejectedValue(new Error('users store unavailable'))
+    const profileSpy = vi.spyOn(db.profiles, 'get').mockRejectedValue(new Error('profiles store unavailable'))
+    const exclusionTransactionSpy = vi.spyOn(db, 'transaction')
+    const fromSpy = vi.spyOn(supabase, 'from').mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          eq: vi.fn().mockResolvedValue({
+            data: [{
+              id: 'storage-exclusion-1',
+              workspace_id: workspaceId,
+              storage_id: 'storage-a',
+              user_id: 'storage-access-staff',
+              is_deleted: false
+            }],
+            error: null
+          })
+        })
+      })
+    } as never)
+    try {
+      setNetworkStatus(true)
+      setActiveBusinessWorkspace(workspaceId)
+      setActiveBusinessUser('storage-access-staff', 'staff', workspaceId)
+
+      await expect(getCurrentStorageAccess(workspaceId)).resolves.toMatchObject({
+        isAdmin: false,
+        isReady: true
+      })
+      expect(userSpy).not.toHaveBeenCalled()
+      expect(profileSpy).not.toHaveBeenCalled()
+      await expect(getCurrentStorageAccess(workspaceId)).resolves.toMatchObject({
+        excludedStorageIds: new Set(['storage-a'])
+      })
+      expect(fromSpy).toHaveBeenCalledWith('storage_member_exclusions')
+      expect(exclusionTransactionSpy).not.toHaveBeenCalled()
+      expect(assertRecentCurrentUserCanAccessStorage(workspaceId, 'storage-b')).toBe(true)
+      expect(() => assertRecentCurrentUserCanAccessStorage(workspaceId, 'storage-a')).toThrow()
+    } finally {
+      userSpy.mockRestore()
+      profileSpy.mockRestore()
+      exclusionTransactionSpy.mockRestore()
+      fromSpy.mockRestore()
+      clearWorkspaceModeSnapshot(workspaceId)
+      setNetworkStatus(true)
       setActiveBusinessUser(null)
       setActiveBusinessWorkspace(null)
     }

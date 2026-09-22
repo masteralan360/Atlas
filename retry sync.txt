@@ -7,6 +7,8 @@ Transaction Reconciliation & Integrity Audit, Expandable, Plain English Explanat
 Price books selector order form and quick order
 ##
 
+Direct Transactions Print
+
 Retry Sync Test The wind
 
 Jumla-Khaleej App
