@@ -1263,7 +1263,7 @@ describe('order-linked financing', () => {
         expect((await db.products.get(product.id))?.quantity).toBe(5)
     })
 
-    it('rejects a return before changing any data when the caller is not an admin', async () => {
+    it('rejects a staff return without Sales Order Access before changing any data', async () => {
         const customer = await createCustomer()
         const { storage, product } = await createStockedSalesProduct(100)
         const draft = await createSalesOrder(
@@ -1285,7 +1285,7 @@ describe('order-linked financing', () => {
             items: [{ orderItemId: completed.items[0].id, quantity: 1 }],
             reason: 'customer_returned',
             actorRole: 'staff'
-        })).rejects.toThrow('Only admins')
+        })).rejects.toThrow('sales_order_return_not_allowed')
 
         expect(await db.order_returns.where('orderId').equals(completed.id).count()).toBe(0)
         expect((await db.sales_orders.get(completed.id))?.total).toBe(100)

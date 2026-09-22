@@ -35,6 +35,8 @@ import { readWorkspaceCache } from '@/workspace/workspaceCache'
 import { supabase } from '@/auth/supabase'
 import { useViewOwnRecordScope } from '@/permissions/useViewOwnRecordScope'
 import { useOptionalWorkspacePermissions } from '@/permissions/workspacePermissionsState'
+import { canReturnSalesOrder, SALES_ORDER_RETURN_NOT_ALLOWED } from '@/permissions/salesOrderReturnPermissions'
+import type { WorkspacePermissionKey } from '@/permissions/workspacePermissionDefinitions'
 import i18n from '@/i18n/config'
 
 import { db } from './database'
@@ -3730,6 +3732,7 @@ export type ReturnSalesOrderInput = {
     reason: string
     returnedBy?: string | null
     actorRole?: string | null
+    permissionKeys?: readonly WorkspacePermissionKey[]
     accountId?: string | null
     accountNameSnapshot?: string | null
 }
@@ -4546,23 +4549,23 @@ async function returnUnpaidEcommerceOrder(order: SalesOrder, input: ReturnSalesO
 
     await recalculateCustomerAndPartnerSummaries(order.workspaceId, order.customerId, order.businessPartnerId)
 
-    await Promise.all([
-        syncUpsertEntities(
-            'sales_orders',
-            [updatedOrder] as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
-            order.workspaceId
-        ),
-        syncUpsertEntities(
-            'order_returns',
-            [orderReturn] as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
-            order.workspaceId
-        ),
-        syncUpsertEntities(
-            'order_return_items',
-            orderReturnItems as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
-            order.workspaceId
-        )
-    ])
+    // Return rows establish the server-authorized audit trail before the
+    // sales-order summary is updated. This is required by the RLS policy.
+    await syncUpsertEntities(
+        'order_returns',
+        [orderReturn] as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
+        order.workspaceId
+    )
+    await syncUpsertEntities(
+        'order_return_items',
+        orderReturnItems as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
+        order.workspaceId
+    )
+    await syncUpsertEntities(
+        'sales_orders',
+        [updatedOrder] as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
+        order.workspaceId
+    )
 
     await reverseSalesOrderCommissionForReturnBestEffort(
         order.workspaceId,
@@ -4574,13 +4577,17 @@ async function returnUnpaidEcommerceOrder(order: SalesOrder, input: ReturnSalesO
 }
 
 export async function returnSalesOrder(input: ReturnSalesOrderInput) {
-    if (input.actorRole !== 'admin') {
-        throw new Error('Only admins can return completed sales orders')
-    }
-
     const order = await db.sales_orders.get(input.orderId)
     if (!order || order.isDeleted) {
         throw new Error('Sales order not found')
+    }
+    if (!canReturnSalesOrder({
+        actorRole: input.actorRole,
+        actorId: input.returnedBy,
+        orderCreatedBy: order.createdBy,
+        permissionKeys: input.permissionKeys
+    })) {
+        throw new Error(SALES_ORDER_RETURN_NOT_ALLOWED)
     }
     if (order.status !== 'completed') {
         throw new Error('Only completed sales orders can be returned')
@@ -4780,23 +4787,23 @@ export async function returnSalesOrder(input: ReturnSalesOrderInput) {
         await recalculateCustomerAndPartnerSummaries(order.workspaceId, order.customerId, order.businessPartnerId)
     }
 
-    await Promise.all([
-        syncUpsertEntities(
-            'sales_orders',
-            [finalOrder] as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
-            order.workspaceId
-        ),
-        syncUpsertEntities(
-            'order_returns',
-            [orderReturn] as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
-            order.workspaceId
-        ),
-        syncUpsertEntities(
-            'order_return_items',
-            orderReturnItems as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
-            order.workspaceId
-        )
-    ])
+    // Return rows establish the server-authorized audit trail before the
+    // sales-order summary is updated. This is required by the RLS policy.
+    await syncUpsertEntities(
+        'order_returns',
+        [orderReturn] as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
+        order.workspaceId
+    )
+    await syncUpsertEntities(
+        'order_return_items',
+        orderReturnItems as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
+        order.workspaceId
+    )
+    await syncUpsertEntities(
+        'sales_orders',
+        [finalOrder] as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
+        order.workspaceId
+    )
 
     await reverseSalesOrderCommissionForReturnBestEffort(
         order.workspaceId,

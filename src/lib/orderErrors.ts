@@ -8,6 +8,10 @@ const ORDER_ERROR_TRANSLATIONS: Record<string, { key: string; fallback: string }
     order_request_requires_approval: {
         key: 'orders.form.errors.orderRequestRequiresApproval',
         fallback: 'This order request must be approved by an admin before the normal order workflow can continue.'
+    },
+    sales_order_return_not_allowed: {
+        key: 'orders.form.errors.salesOrderReturnNotAllowed',
+        fallback: 'You do not have permission to return this sales order.'
     }
 }
 

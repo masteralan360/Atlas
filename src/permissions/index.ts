@@ -5,3 +5,4 @@ export * from "./useViewOwnRecordScope";
 export * from "./viewOwnRecordPermissions";
 export * from "./useHideCosts";
 export * from "./salesAgentCommissionPermissions";
+export * from "./salesOrderReturnPermissions";

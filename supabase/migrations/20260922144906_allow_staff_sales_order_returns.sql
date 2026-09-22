@@ -1,48 +1,6 @@
-CREATE TABLE public.order_returns (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  workspace_id uuid NOT NULL REFERENCES public.workspaces(id),
-  order_id uuid NOT NULL REFERENCES crm.sales_orders(id),
-  reason text NOT NULL,
-  status text NOT NULL DEFAULT 'posted',
-  refund_amount numeric NOT NULL DEFAULT 0,
-  returned_by uuid NULL,
-  returned_at timestamp with time zone NOT NULL DEFAULT now(),
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  updated_at timestamp with time zone NOT NULL DEFAULT now(),
-  version integer NOT NULL DEFAULT 1,
-  is_deleted boolean NOT NULL DEFAULT false,
-  CONSTRAINT order_returns_status_check CHECK (status IN ('posted', 'voided')),
-  CONSTRAINT order_returns_refund_amount_check CHECK (refund_amount >= 0),
-  PRIMARY KEY (id)
-);
-
-ALTER TABLE public.order_returns ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS order_returns_select ON public.order_returns;
-CREATE POLICY order_returns_select
-  ON public.order_returns
-  FOR SELECT
-  TO authenticated
-  USING (
-    workspace_id = public.current_workspace_id()
-    AND EXISTS (
-      SELECT 1 FROM crm.sales_orders AS sales_order
-      WHERE sales_order.id = order_returns.order_id
-        AND sales_order.workspace_id = order_returns.workspace_id
-        AND (
-          NOT (SELECT public.current_user_has_view_own_permission('orders.view_own'))
-          OR sales_order.created_by = (SELECT auth.uid())
-          OR private.sales_agent_commissions_can_view_assigned_order(
-            order_returns.workspace_id,
-            sales_order.id
-          )
-        )
-    )
-  );
-
--- This helper deliberately uses SECURITY INVOKER. Its reads are still scoped
--- by the caller's sales-order RLS policy; it only centralizes the return
--- authorization predicate shared by return records and the sales-order update.
+-- Staff members with Sales Order Access may return completed sales orders.
+-- The request permission deliberately blocks returns: returns have no
+-- approval-request workflow and must not be submitted for review.
 CREATE OR REPLACE FUNCTION public.current_user_can_return_sales_order(
   p_workspace_id uuid,
   p_order_id uuid
@@ -128,9 +86,75 @@ CREATE POLICY order_returns_update
     )
   );
 
--- A return must have an authorized return record before its aggregate fields
--- can be persisted on the order. Ordinary, unreturned-order updates keep the
--- existing sales-order policy behavior intact.
+DROP POLICY IF EXISTS order_return_items_insert ON public.order_return_items;
+CREATE POLICY order_return_items_insert
+  ON public.order_return_items
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    workspace_id = public.current_workspace_id()
+    AND EXISTS (
+      SELECT 1
+      FROM public.order_returns AS order_return
+      WHERE order_return.id = order_return_items.return_id
+        AND order_return.order_id = order_return_items.order_id
+        AND order_return.workspace_id = order_return_items.workspace_id
+        AND public.current_user_can_return_sales_order(
+          order_return_items.workspace_id,
+          order_return_items.order_id
+        )
+        AND (
+          public.current_user_role() = 'admin'
+          OR order_return.returned_by = (SELECT auth.uid())
+        )
+    )
+  );
+
+DROP POLICY IF EXISTS order_return_items_update ON public.order_return_items;
+CREATE POLICY order_return_items_update
+  ON public.order_return_items
+  FOR UPDATE
+  TO authenticated
+  USING (
+    workspace_id = public.current_workspace_id()
+    AND EXISTS (
+      SELECT 1
+      FROM public.order_returns AS order_return
+      WHERE order_return.id = order_return_items.return_id
+        AND order_return.order_id = order_return_items.order_id
+        AND order_return.workspace_id = order_return_items.workspace_id
+        AND public.current_user_can_return_sales_order(
+          order_return_items.workspace_id,
+          order_return_items.order_id
+        )
+        AND (
+          public.current_user_role() = 'admin'
+          OR order_return.returned_by = (SELECT auth.uid())
+        )
+    )
+  )
+  WITH CHECK (
+    workspace_id = public.current_workspace_id()
+    AND EXISTS (
+      SELECT 1
+      FROM public.order_returns AS order_return
+      WHERE order_return.id = order_return_items.return_id
+        AND order_return.order_id = order_return_items.order_id
+        AND order_return.workspace_id = order_return_items.workspace_id
+        AND public.current_user_can_return_sales_order(
+          order_return_items.workspace_id,
+          order_return_items.order_id
+        )
+        AND (
+          public.current_user_role() = 'admin'
+          OR order_return.returned_by = (SELECT auth.uid())
+        )
+    )
+  );
+
+-- Do not let a direct client update persist return aggregate fields without an
+-- authorized return record. The original sales-order policy still governs all
+-- ordinary updates to an order that has never been returned.
 DROP POLICY IF EXISTS crm_sales_orders_return_update_guard ON crm.sales_orders;
 CREATE POLICY crm_sales_orders_return_update_guard
   ON crm.sales_orders

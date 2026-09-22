@@ -74,7 +74,7 @@ import {
     type WorkspacePaymentMethod
 } from '@/local-db'
 import { useWorkspace } from '@/workspace'
-import { hasEffectiveSalesAgentCommissionPermission, useHideCosts, useViewOwnRecordScope, useWorkspacePermissions } from '@/permissions'
+import { canReturnSalesOrder, hasEffectiveSalesAgentCommissionPermission, useHideCosts, useViewOwnRecordScope, useWorkspacePermissions } from '@/permissions'
 import {
     Button,
     Card,
@@ -488,10 +488,15 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const canDelete = user?.role === 'admin'
     const canApproveOrderRequests = user?.role === 'admin'
     const canViewProfit = !hideCosts
-    const canReturnSalesOrder = resolved?.kind === 'sales'
+    const canReturnCurrentSalesOrder = resolved?.kind === 'sales'
         && resolved.order.status === 'completed'
         && resolved.order.returnStatus !== 'full'
-        && user?.role === 'admin'
+        && canReturnSalesOrder({
+            actorRole: user?.role,
+            actorId: user?.id,
+            orderCreatedBy: resolved.order.createdBy,
+            permissionKeys
+        })
 
     const returnedQuantityByItemId = useMemo(() => {
         const quantities = new Map<string, number>()
@@ -1282,6 +1287,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 reason,
                 returnedBy: user?.id || null,
                 actorRole: user?.role || null,
+                permissionKeys,
                 ...(returnPaymentAccount
                     ? {
                         accountId: returnPaymentAccount.id,
@@ -1466,7 +1472,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             {t('orders.actions.lock') || 'Lock'}
                         </Button>
                     )}
-                    {canReturnSalesOrder && (
+                    {canReturnCurrentSalesOrder && (
                         <Button
                             variant="outline"
                             className="border-rose-500/30 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 hover:text-rose-800"
@@ -2093,7 +2099,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                                          })}
                                                      </div>
                                                 ) : null}
-                                                {canReturnSalesOrder && returnableQuantity > 0 ? (
+                                                {canReturnCurrentSalesOrder && returnableQuantity > 0 ? (
                                                     <Button variant="outline" size="sm" className="mt-4 w-full border-rose-500/30 text-rose-700 hover:bg-rose-500/10" onClick={() => openItemReturn(salesItem)} disabled={isReturning}>
                                                         <RotateCcw className="mr-2 h-3.5 w-3.5" />
                                                         {t('orders.return.itemAction', { defaultValue: 'Return' })} ({returnableQuantity})
@@ -2117,7 +2123,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                                 {isSales && canViewProfit && <TableHead className="text-end">{t('orders.details.costPerUnit') || 'Cost / Unit'}</TableHead>}
                                                 <TableHead className="text-end">{t('common.total') || 'Total'}</TableHead>
                                                 {isSales && canViewProfit && <TableHead className="text-end">{t('orders.details.itemProfit') || 'Item Profit'}</TableHead>}
-                                                {canReturnSalesOrder && <TableHead className="text-end">{t('common.actions') || 'Actions'}</TableHead>}
+                                                {canReturnCurrentSalesOrder && <TableHead className="text-end">{t('common.actions') || 'Actions'}</TableHead>}
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
@@ -2226,7 +2232,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                                                 )}
                                                             </TableCell>
                                                         )}
-                                                        {canReturnSalesOrder && (
+                                                        {canReturnCurrentSalesOrder && (
                                                             <TableCell className="text-end">
                                                                 {returnableQuantity > 0 ? (
                                                                     <Button variant="ghost" size="sm" className="h-8 text-rose-700 hover:bg-rose-500/10 hover:text-rose-800" onClick={() => openItemReturn(salesItem)} disabled={isReturning}>

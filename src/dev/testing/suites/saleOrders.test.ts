@@ -188,6 +188,63 @@ describe('Sale Orders developer scenarios', () => {
         })
     }
 
+    it('lets a staff member with Sales Order Access return an order they created', async () => {
+        const staffId = 'staff-sales-return-user'
+        const { customer, storage, product } = await arrange()
+        const order = await orders.createCompletedSalesOrder(
+            TEST_WORKSPACE_ID,
+            saleOrderInput(customer.id, product, storage.id, 'cash', { paid: true }),
+            staffId
+        )
+
+        const result = await orders.returnSalesOrder({
+            orderId: order.id,
+            items: [{ orderItemId: order.items[0].id, quantity: 0.5 }],
+            reason: 'customer_returned',
+            returnedBy: staffId,
+            actorRole: 'staff',
+            permissionKeys: ['orders.saleOrdersAccess']
+        })
+
+        expect(result.order.returnStatus).toBe('partial')
+        expect(result.return.returnedBy).toBe(staffId)
+        expect(await assertOrderFinancialEffects(order.id, 50, 0)).toHaveLength(2)
+        await assertStock(product.id, storage.id, 9.5)
+    })
+
+    it('denies a staff return without Sales Order Access, with required requests, or outside View Own scope', async () => {
+        const staffId = 'staff-sales-return-user'
+        const otherStaffId = 'another-staff-user'
+        const { customer, storage, product } = await arrange()
+        const order = await orders.createCompletedSalesOrder(
+            TEST_WORKSPACE_ID,
+            saleOrderInput(customer.id, product, storage.id, 'cash', { paid: true }),
+            staffId
+        )
+        const input = {
+            orderId: order.id,
+            items: [{ orderItemId: order.items[0].id, quantity: 0.5 }],
+            reason: 'customer_returned',
+            returnedBy: staffId,
+            actorRole: 'staff' as const
+        }
+
+        await expect(orders.returnSalesOrder(input)).rejects.toThrow('sales_order_return_not_allowed')
+        await expect(orders.returnSalesOrder({
+            ...input,
+            permissionKeys: ['orders.saleOrdersAccess', 'orders.requireSalesOrderRequest']
+        })).rejects.toThrow('sales_order_return_not_allowed')
+        await expect(orders.returnSalesOrder({
+            ...input,
+            returnedBy: otherStaffId,
+            permissionKeys: ['orders.saleOrdersAccess', 'orders.view_own']
+        })).rejects.toThrow('sales_order_return_not_allowed')
+
+        expect(await db.order_returns.where('orderId').equals(order.id).count()).toBe(0)
+        expect(await assertOrderFinancialEffects(order.id, 100, 0)).toHaveLength(1)
+        await assertStock(product.id, storage.id, 9)
+    })
+
     for (const status of ['draft', 'pending', 'completed'] as const) {
         it(`unpaid Quick Order / ${status}: records an obligation without a payment`, async () => {
             const { customer, storage, product } = await arrange()

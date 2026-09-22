@@ -43,3 +43,69 @@ CREATE POLICY order_return_items_select
         )
     )
   );
+
+DROP POLICY IF EXISTS order_return_items_insert ON public.order_return_items;
+CREATE POLICY order_return_items_insert
+  ON public.order_return_items
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    workspace_id = public.current_workspace_id()
+    AND EXISTS (
+      SELECT 1
+      FROM public.order_returns AS order_return
+      WHERE order_return.id = order_return_items.return_id
+        AND order_return.order_id = order_return_items.order_id
+        AND order_return.workspace_id = order_return_items.workspace_id
+        AND public.current_user_can_return_sales_order(
+          order_return_items.workspace_id,
+          order_return_items.order_id
+        )
+        AND (
+          public.current_user_role() = 'admin'
+          OR order_return.returned_by = (SELECT auth.uid())
+        )
+    )
+  );
+
+DROP POLICY IF EXISTS order_return_items_update ON public.order_return_items;
+CREATE POLICY order_return_items_update
+  ON public.order_return_items
+  FOR UPDATE
+  TO authenticated
+  USING (
+    workspace_id = public.current_workspace_id()
+    AND EXISTS (
+      SELECT 1
+      FROM public.order_returns AS order_return
+      WHERE order_return.id = order_return_items.return_id
+        AND order_return.order_id = order_return_items.order_id
+        AND order_return.workspace_id = order_return_items.workspace_id
+        AND public.current_user_can_return_sales_order(
+          order_return_items.workspace_id,
+          order_return_items.order_id
+        )
+        AND (
+          public.current_user_role() = 'admin'
+          OR order_return.returned_by = (SELECT auth.uid())
+        )
+    )
+  )
+  WITH CHECK (
+    workspace_id = public.current_workspace_id()
+    AND EXISTS (
+      SELECT 1
+      FROM public.order_returns AS order_return
+      WHERE order_return.id = order_return_items.return_id
+        AND order_return.order_id = order_return_items.order_id
+        AND order_return.workspace_id = order_return_items.workspace_id
+        AND public.current_user_can_return_sales_order(
+          order_return_items.workspace_id,
+          order_return_items.order_id
+        )
+        AND (
+          public.current_user_role() = 'admin'
+          OR order_return.returned_by = (SELECT auth.uid())
+        )
+    )
+  );

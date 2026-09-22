@@ -21,7 +21,7 @@
     "samplesHelp": "1–100 additional checkout and return scenarios, alongside the fixed payment-method matrix.",
     "coverageLimit": "Full environment coverage is incomplete",
     "blocked": "Blocked · adapter unavailable",
-    "coverageHelp": "V1 checks production business functions with disposable IndexedDB and mocked remote contracts, including financing-return and loan-integrity sync contracts. Reservation coverage verifies that insufficient-stock errors identify every pending sales order consuming the product's available stock, including canonical related-unit quantities. Related Units covers explicit selling/buying-unit selection, ordinary-product quantity labels that do not imply a selectable unit, immutable conversion snapshots, canonical stock quantities, independent sales prices, purchase-cost allocation across free stock, return-unit preservation, and responsive line-item layouts on wide and narrow screens. It also covers saved custom Atlas Standard order layouts and the shared role-based sales-account selector visibility. It does not yet execute the real Supabase or native SQLite stacks. A passing run applies only to the selected checks.",
+    "coverageHelp": "V1 checks production business functions with disposable IndexedDB and mocked remote contracts, including financing-return and loan-integrity sync contracts. It verifies staff sales-order return authorization for Sales Order Access, the request restriction, and View Own ownership. Reservation coverage verifies that insufficient-stock errors identify every pending sales order consuming the product's available stock, including canonical related-unit quantities. Related Units covers explicit selling/buying-unit selection, ordinary-product quantity labels that do not imply a selectable unit, immutable conversion snapshots, canonical stock quantities, independent sales prices, purchase-cost allocation across free stock, return-unit preservation, and responsive line-item layouts on wide and narrow screens. It also covers saved custom Atlas Standard order layouts and the shared role-based sales-account selector visibility. It does not yet execute the real Supabase or native SQLite stacks. A passing run applies only to the selected checks.",
     "results": "Test results",
     "progress": "{{done}} / {{total}} collected checks finished",
     "runSeed": "Seed: {{seed}}",
@@ -3285,6 +3285,7 @@
         "batchNotAvailable": "The selected batch for {{productName}} is no longer available.",
         "batchQuantityExceeded": "The selected source does not have enough stock for {{productName}}.",
         "non_financed_order_must_be_paid": "This order must be paid in full before it can be reserved. To reserve it with an outstanding balance, select Loans or Installments as the payment method.",
+        "salesOrderReturnNotAllowed": "You do not have permission to return this sales order.",
         "firstInstallmentDueDateRequired": "Select the first installment due date.",
         "loanRepaymentTransactionUnavailable": "The original transaction for this loan repayment is unavailable."
       }
