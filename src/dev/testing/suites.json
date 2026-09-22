@@ -188,8 +188,10 @@
         "layer": "business",
         "files": [
           "src/lib/unitRelationships.test.ts",
+          "src/lib/productRelationalConversion.test.ts",
           "src/lib/hierarchicalPackagingMigration.test.ts",
           "src/local-db/unitRelationships.test.ts",
+          "src/local-db/productRelationalConversion.test.ts",
           "src/local-db/units.test.ts"
         ]
       },

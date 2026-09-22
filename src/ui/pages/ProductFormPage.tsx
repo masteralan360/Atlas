@@ -44,6 +44,8 @@ import {
     replaceProductPriceBookItems,
     replaceProductPriceBookUnitPrices,
     replaceProductUnitConversion,
+    convertSingleUnitProductToRelationship,
+    ProductRelationalConversionError,
     syncProductBarcodeCachesForWorkspace,
     updateProductBarcode,
     updateProduct,
@@ -88,6 +90,7 @@ import { useHideCosts } from '@/permissions'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { normalizeUnitCode } from '@/local-db/models'
 import { buildProductUnitSelectionOptions } from '@/lib/unitRelationships'
+import { createRelationalConversionDraft } from '@/lib/productRelationalConversion'
 import { BarcodeScannerToggleButton } from '@/ui/components/BarcodeScannerToggleButton'
 import { ProductUnitIcon } from '@/ui/components/ProductUnitIcon'
 import { ProductUnitPackagingSection } from '@/ui/components/products/ProductUnitPackagingSection'
@@ -167,6 +170,11 @@ type ProductFormData = {
     canBeReturned: boolean
     returnRules: string
     storageId: string
+}
+
+type SingleUnitConversionSnapshot = {
+    formData: ProductFormData
+    priceBookRows: ProductPriceBookDraft[]
 }
 
 function mapPriceBookItemsToDrafts(
@@ -381,7 +389,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const highlightMissingCosts = isEditing && !isReadOnly && !hideCosts
     const catalogProducts = useProducts(workspaceId, { syncBarcodeCache: false })
     const productVariants = useProductVariants(isEditing && !product?.parentProductId ? product?.id : undefined)
-    const canEditStockAllocation = mode !== 'edit'
     const isDesktopShell = isTauri()
     const persistedProductId = isEditing ? product?.id : undefined
     const productBarcodes = useProductBarcodes(persistedProductId)
@@ -414,6 +421,13 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     )
     const [priceBookRows, setPriceBookRows] = useState<ProductPriceBookDraft[]>([])
     const [unitPackaging, setUnitPackaging] = useState<ProductUnitPackagingDraft>(EMPTY_PRODUCT_UNIT_PACKAGING)
+    const sourceUnitConversion = product?.id
+        ? productUnitConversions.find((row) => row.productId === product.id && !row.isDeleted)
+        : undefined
+    const isSingleToRelationalConversion = Boolean(
+        isEditing && product && !sourceUnitConversion && unitPackaging.relationshipId
+    )
+    const canEditStockAllocation = mode !== 'edit' || isSingleToRelationalConversion
     const [productCommissionDraft, setProductCommissionDraft] = useState<ProductCommissionRuleDraft>(() => emptyProductCommissionRuleDraft(features.default_currency))
     const [isSaving, setIsSaving] = useState(false)
     const [overrideAttention, setOverrideAttention] = useState(false)
@@ -453,6 +467,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const initializedProductCommissionRuleKeyRef = useRef<string | null>(null)
     const initialProductCommissionSnapshotRef = useRef<string | null>(null)
     const createdProductIdRef = useRef<string | null>(null)
+    const singleUnitConversionSnapshotRef = useRef<SingleUnitConversionSnapshot | null>(null)
 
     const isProductDirty = useMemo(() => {
         if (!initialFormSnapshotRef.current || isReadOnly) {
@@ -629,6 +644,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
 
         setFormData(nextFormData)
         setImageError(false)
+        singleUnitConversionSnapshotRef.current = null
         initialFormSnapshotRef.current = JSON.stringify(nextFormData)
         initializedKeyRef.current = nextKey
     }, [features.default_currency, hideCosts, mode, product, storages])
@@ -676,14 +692,28 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             return
         }
 
-        const nextRows = mode === 'create'
+        const sourceRows = mode === 'create'
             ? []
             : mapPriceBookItemsToDrafts(sourcePriceBookItems, sourcePriceBookUnitPrices)
+        const nextRows = isSingleToRelationalConversion
+            ? sourceRows.map((row) => ({
+                ...row,
+                price: '',
+                costPrice: '',
+                parentPrice: ''
+            }))
+            : sourceRows
         const nextSnapshot = serializePriceBookDrafts(nextRows)
+        const sourceSnapshot = serializePriceBookDrafts(sourceRows)
 
         if (initializedPriceBookRowsKeyRef.current !== sourceKey) {
             setPriceBookRows(nextRows)
-            initialPriceBookRowsSnapshotRef.current = nextSnapshot
+            initialPriceBookRowsSnapshotRef.current = isSingleToRelationalConversion
+                ? sourceSnapshot
+                : nextSnapshot
+            if (isSingleToRelationalConversion && singleUnitConversionSnapshotRef.current) {
+                singleUnitConversionSnapshotRef.current.priceBookRows = sourceRows.map((row) => ({ ...row }))
+            }
             initializedPriceBookRowsKeyRef.current = sourceKey
             return
         }
@@ -697,6 +727,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         }
     }, [
         isPriceBookCatalogReady,
+        isSingleToRelationalConversion,
         mode,
         priceBookRows,
         priceBooksEnabled,
@@ -944,6 +975,15 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                 variant: 'destructive',
                 title: t('common.error', { defaultValue: 'Error' }),
                 description: error.message
+            })
+            return
+        }
+
+        if (error instanceof ProductRelationalConversionError) {
+            toast({
+                variant: 'destructive',
+                title: t('common.error', { defaultValue: 'Error' }),
+                description: t(`products.packaging.conversionErrors.${error.code}`)
             })
             return
         }
@@ -1202,6 +1242,22 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         const childUnitOption = selectedUnitRelationship
             ? unitOptions.find((option) => option.value === selectedUnitRelationship.childUnitCode)
             : undefined
+        if (isSingleToRelationalConversion && (
+            !formData.storageId
+            || formData.quantity === ''
+            || !Number.isFinite(Number(formData.quantity))
+            || Number(formData.quantity) < 0
+            || (!childUnitOption?.isDynamic && !Number.isInteger(Number(formData.quantity)))
+        )) {
+            toast({
+                variant: 'destructive',
+                title: t('common.error'),
+                description: !formData.storageId
+                    ? t('products.packaging.storageRequired')
+                    : t('products.packaging.initialStockValidation')
+            })
+            return false
+        }
         if (selectedUnitRelationship && (
             !Number.isFinite(unitFactor)
             || unitFactor <= 0
@@ -1218,11 +1274,37 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             return false
         }
 
+        if (selectedUnitRelationship && (
+            formData.price.trim() === ''
+            || !Number.isFinite(Number(formData.price))
+            || Number(formData.price) < 0
+            || (!hideCosts && (
+                formData.costPrice.trim() === ''
+                || !Number.isFinite(Number(formData.costPrice))
+                || Number(formData.costPrice) < 0
+            ))
+        )) {
+            toast({
+                variant: 'destructive',
+                title: t('common.error'),
+                description: t('products.packaging.sellingPriceValidation')
+            })
+            return false
+        }
+
         if (selectedUnitRelationship && priceBookRows.some((row) => (
             row.parentPrice == null
             || row.parentPrice.trim() === ''
             || !Number.isFinite(Number(row.parentPrice))
             || Number(row.parentPrice) < 0
+            || row.price.trim() === ''
+            || !Number.isFinite(Number(row.price))
+            || Number(row.price) < 0
+            || (!hideCosts && (
+                row.costPrice.trim() === ''
+                || !Number.isFinite(Number(row.costPrice))
+                || Number(row.costPrice) < 0
+            ))
         ))) {
             toast({
                 variant: 'destructive',
@@ -1271,15 +1353,53 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             }
 
             let savedProductId: string
+            let convertedRelationalState: Awaited<ReturnType<typeof convertSingleUnitProductToRelationship>> | null = null
+            const replacedImagePath = isEditing && product?.imageUrl && product.imageUrl !== formData.imageUrl
+                ? product.imageUrl
+                : null
 
             if (isEditing && product && !isClone) {
-                if (product.imageUrl && product.imageUrl !== formData.imageUrl) {
-                    assetManager.deleteAsset(product.imageUrl).catch((error) =>
-                        console.error('[Products] Failed to delete old asset:', error)
-                    )
+                if (isSingleToRelationalConversion && selectedUnitRelationship) {
+                    if (normalizedCost == null) {
+                        throw new ProductRelationalConversionError('validation')
+                    }
+                    convertedRelationalState = await convertSingleUnitProductToRelationship({
+                        workspaceId,
+                        productId: product.id,
+                        relationshipId: selectedUnitRelationship.id,
+                        factor: unitFactor,
+                        parentPrice: parentUnitPrice,
+                        childIsDynamic: childUnitOption?.isDynamic === true,
+                        initialStock: roundQuantity(Number(formData.quantity)),
+                        storageId: formData.storageId,
+                        createdBy: user?.id || null,
+                        product: {
+                            sku: dataToSave.sku,
+                            name: dataToSave.name,
+                            description: dataToSave.description,
+                            categoryId: dataToSave.categoryId,
+                            category: dataToSave.category,
+                            price: dataToSave.price,
+                            costPrice: normalizedCost,
+                            minStockLevel: dataToSave.minStockLevel,
+                            currency: dataToSave.currency,
+                            imageUrl: dataToSave.imageUrl,
+                            canBeReturned: dataToSave.canBeReturned,
+                            returnRules: dataToSave.returnRules
+                        },
+                        priceBookItems: priceBooksEnabled
+                            ? priceBookRows.map((row) => ({
+                                priceBookId: row.priceBookId,
+                                costPrice: Number(row.costPrice),
+                                price: Number(row.price),
+                                parentPrice: Number(row.parentPrice),
+                                currency: row.currency
+                            }))
+                            : []
+                    })
+                } else {
+                    await updateProduct(product.id, dataToSave)
                 }
-
-                await updateProduct(product.id, dataToSave)
                 savedProductId = product.id
             } else if (createdProductIdRef.current) {
                 await updateProduct(createdProductIdRef.current, dataToSave)
@@ -1300,19 +1420,27 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             // optional price-book/commission save needs to be retried.
             pendingImportedImagePathRef.current = null
 
-            await replaceProductUnitConversion(
-                workspaceId,
-                savedProductId,
-                selectedUnitRelationship ? {
-                    relationshipId: selectedUnitRelationship.id,
-                    factor: unitFactor,
-                    parentPrice: parentUnitPrice,
-                    childIsDynamic: childUnitOption?.isDynamic === true
-                } : null
-            )
+            if (replacedImagePath) {
+                assetManager.deleteAsset(replacedImagePath).catch((error) =>
+                    console.error('[Products] Failed to delete old asset:', error)
+                )
+            }
+
+            if (!convertedRelationalState) {
+                await replaceProductUnitConversion(
+                    workspaceId,
+                    savedProductId,
+                    selectedUnitRelationship ? {
+                        relationshipId: selectedUnitRelationship.id,
+                        factor: unitFactor,
+                        parentPrice: parentUnitPrice,
+                        childIsDynamic: childUnitOption?.isDynamic === true
+                    } : null
+                )
+            }
             initialUnitPackagingSnapshotRef.current = JSON.stringify(unitPackaging)
 
-            if (priceBooksEnabled) {
+            if (priceBooksEnabled && !convertedRelationalState) {
                 const savedItems = await replaceProductPriceBookItems(
                     workspaceId,
                     savedProductId,
@@ -1339,6 +1467,13 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                 const completeSavedRows = mapPriceBookItemsToDrafts(savedItems, savedUnitPrices)
                 setPriceBookRows(completeSavedRows)
                 initialPriceBookRowsSnapshotRef.current = serializePriceBookDrafts(completeSavedRows)
+            } else if (priceBooksEnabled && convertedRelationalState) {
+                const completeSavedRows = mapPriceBookItemsToDrafts(
+                    convertedRelationalState.priceBookItems.filter((row) => !row.isDeleted),
+                    convertedRelationalState.priceBookUnitPrices.filter((row) => !row.isDeleted)
+                )
+                setPriceBookRows(completeSavedRows)
+                initialPriceBookRowsSnapshotRef.current = serializePriceBookDrafts(completeSavedRows)
             }
 
             if (productCommissionsEnabled && isProductCommissionDirty) {
@@ -1362,6 +1497,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             }
 
             initialFormSnapshotRef.current = JSON.stringify(formData)
+            singleUnitConversionSnapshotRef.current = null
 
             if (navigateAfterSave) {
                 navigate('/products')
@@ -1380,7 +1516,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault()
 
-        if (mode === 'create' && !formData.storageId) {
+        if ((mode === 'create' || isSingleToRelationalConversion) && !formData.storageId) {
             setStorageError(true)
             storageTriggerRef.current?.focus()
             storageTriggerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -1445,9 +1581,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const unitLabel = normalizedUnit
         ? t(`products.units.${normalizedUnit}`, { defaultValue: normalizedUnit })
         : t('units.selectPlaceholder', { defaultValue: 'Select unit' })
-    const sourceUnitConversion = product?.id
-        ? productUnitConversions.find((row) => row.productId === product.id && !row.isDeleted)
-        : undefined
     const sourceUnitRelationship = sourceUnitConversion
         ? unitRelationships.find((row) => row.id === sourceUnitConversion.relationshipId)
         : undefined
@@ -1478,6 +1611,40 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             || displayedParentPrice < 0
             || priceBookRows.some((row) => row.parentPrice == null || row.parentPrice.trim() === '' || Number(row.parentPrice) < 0)
         ))
+    const isRelationalSellingPriceInvalid = Boolean(selectedUnitRelationshipForDisplay && (
+        formData.price.trim() === ''
+        || !Number.isFinite(Number(formData.price))
+        || Number(formData.price) < 0
+        || (!hideCosts && (
+            formData.costPrice.trim() === ''
+            || !Number.isFinite(Number(formData.costPrice))
+            || Number(formData.costPrice) < 0
+        ))
+        || priceBookRows.some((row) => (
+            row.price.trim() === ''
+            || !Number.isFinite(Number(row.price))
+            || Number(row.price) < 0
+            || (!hideCosts && (
+                row.costPrice.trim() === ''
+                || !Number.isFinite(Number(row.costPrice))
+                || Number(row.costPrice) < 0
+            ))
+        ))
+    ))
+    const isRelationalInitialStockInvalid = isSingleToRelationalConversion && (
+        formData.quantity === ''
+        || !Number.isFinite(Number(formData.quantity))
+        || Number(formData.quantity) < 0
+        || (!selectedChildUnitForDisplay?.isDynamic && !Number.isInteger(Number(formData.quantity)))
+        || !formData.storageId
+    )
+    const isProductSaveDisabled = isSaving
+        || isImageProcessing
+        || isUnitPackagingInvalid
+        || isRelationalSellingPriceInvalid
+        || isRelationalInitialStockInvalid
+        || (priceBooksEnabled && !isPriceBookCatalogReady)
+        || Boolean(productCommissionValidationMessage)
 
     const handleUnitRelationshipChange = (relationshipId: string) => {
         if (!relationshipId) {
@@ -1490,10 +1657,32 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             toast({ variant: 'destructive', title: t('common.error'), description: t('products.packaging.switchChildBlocked') })
             return
         }
-        const currentUnit = normalizeUnitCode(product?.unit || formData.unit)
-        if (isEditing && product && !sourceUnitConversion
-            && currentUnit !== normalizeUnitCode(relationship.childUnitCode)) {
-            toast({ variant: 'destructive', title: t('common.error'), description: t('products.packaging.incompatibleUnit') })
+
+        if (isEditing && product && !sourceUnitConversion && hideCosts) {
+            toast({
+                variant: 'destructive',
+                title: t('common.error'),
+                description: t('products.packaging.conversionErrors.hidden_costs')
+            })
+            return
+        }
+        if (isEditing && product && !sourceUnitConversion) {
+            if (!singleUnitConversionSnapshotRef.current) {
+                singleUnitConversionSnapshotRef.current = {
+                    formData: { ...formData },
+                    priceBookRows: priceBookRows.map((row) => ({ ...row }))
+                }
+            }
+            const draft = createRelationalConversionDraft({
+                formData,
+                priceBookRows,
+                childUnitCode: relationship.childUnitCode,
+                inventoryRows: productInventoryRows ?? []
+            })
+            setUnitPackaging({ relationshipId, factor: '', parentPrice: '' })
+            setFormData(draft.formData)
+            setPriceBookRows(draft.priceBookRows)
+            setStorageError(false)
             return
         }
         setUnitPackaging({
@@ -1516,6 +1705,22 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         }
         if (!value.startsWith('unit:')) return
         const unit = normalizeUnitCode(value.slice('unit:'.length))
+        const originalSingleUnit = isEditing && product && !sourceUnitConversion
+            ? normalizeUnitCode(product.unit)
+            : ''
+        if (
+            originalSingleUnit
+            && unit.toLowerCase() === originalSingleUnit.toLowerCase()
+            && singleUnitConversionSnapshotRef.current
+        ) {
+            const snapshot = singleUnitConversionSnapshotRef.current
+            setUnitPackaging(EMPTY_PRODUCT_UNIT_PACKAGING)
+            setFormData({ ...snapshot.formData })
+            setPriceBookRows(snapshot.priceBookRows.map((row) => ({ ...row })))
+            setStorageError(false)
+            singleUnitConversionSnapshotRef.current = null
+            return
+        }
         const reserved = unitRelationships.some((relationship) => (
             !relationship.isDeleted
             && !relationship.isArchived
@@ -1650,7 +1855,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                         <Button
                             type="submit"
                             form="product-form-page"
-                            disabled={isSaving || isImageProcessing || isUnitPackagingInvalid || (priceBooksEnabled && !isPriceBookCatalogReady) || Boolean(productCommissionValidationMessage)}
+                            disabled={isProductSaveDisabled}
                             className="h-10 gap-2 px-4 font-bold"
                             data-tour-id="tutorial-product-save"
                         >
@@ -1959,7 +2164,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                         <div className="order-5 space-y-2 md:order-none md:col-start-1 md:row-start-3">
                                             <Label htmlFor="product-storage-edit" className="flex items-center gap-2 font-bold">
                                                 <Warehouse className="h-4 w-4 text-primary/60" />
-                                                {t('storages.title') || 'Storage'}
+                                                {t('storages.title') || 'Storage'}{isSingleToRelationalConversion ? ' *' : ''}
                                             </Label>
                                             <Select
                                                 value={formData.storageId}
@@ -1993,7 +2198,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                         <div className="order-5 space-y-2 md:order-none md:col-start-1 md:row-start-3">
                                             <Label htmlFor="product-storage" className="flex items-center gap-2 font-bold">
                                                 <Warehouse className="h-4 w-4 text-primary/60" />
-                                                {t('storages.title') || 'Storage'}
+                                                {t('storages.title') || 'Storage'} *
                                             </Label>
                                             <Select
                                                 value={formData.storageId}
@@ -2488,7 +2693,9 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                             <>
                                                 <Label htmlFor="product-quantity" className="flex items-center gap-2 font-bold">
                                                     <Boxes className="h-4 w-4 text-primary/60" />
-                                                    {t('products.form.stock')}
+                                                    {isSingleToRelationalConversion
+                                                        ? t('products.packaging.initialStock')
+                                                        : t('products.form.stock')}
                                                 </Label>
                                                 <div className="relative">
                                                     <Input
@@ -2504,7 +2711,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                             quantity: event.target.value === '' ? '' : Number(event.target.value)
                                                         }))}
                                                         placeholder="0"
-                                                        readOnly={isReadOnly || isEditing}
+                                                        readOnly={isReadOnly || (isEditing && !isSingleToRelationalConversion)}
                                                         required
                                                         className="h-12 rounded-xl border-border/80 bg-background/80 pr-16 font-black shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50"
                                                     />
@@ -2514,7 +2721,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                 </div>
                                             </>
                                         )
-                                        return isEditing ? (
+                                        return isEditing && !isSingleToRelationalConversion ? (
                                             <HoverHintVideo
                                                 src="export-1785734352530.mp4"
                                                 title={t('products.form.stockAdjustmentHint.videoTitle', { defaultValue: 'Watch how to adjust stock' })}
@@ -2903,7 +3110,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                 <Button
                                     type="submit"
                                     form="product-form-page"
-                                    disabled={isSaving || isImageProcessing || (priceBooksEnabled && !isPriceBookCatalogReady) || Boolean(productCommissionValidationMessage)}
+                                    disabled={isProductSaveDisabled}
                                     className="h-12 w-full rounded-xl font-black"
                                     data-tour-id="tutorial-product-save"
                                 >
@@ -2922,7 +3129,9 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                             {!isReadOnly && (
                                 <div className="rounded-2xl border border-border/50 bg-muted/20 p-4 text-xs leading-5 text-muted-foreground">
                                     {isEditing
-                                        ? (t('products.saveHintEdit') || 'Saving updates product details, image, pricing, and return settings. Stock changes happen in Stock Adjustments.')
+                                        ? isSingleToRelationalConversion
+                                            ? t('products.packaging.saveHint')
+                                            : (t('products.saveHintEdit') || 'Saving updates product details, image, pricing, and return settings. Stock changes happen in Stock Adjustments.')
                                         : (t('products.saveHint') || 'Saving applies the current details, image, stock, and return settings together.')}
                                 </div>
                             )}
@@ -3046,7 +3255,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                     {t('common.unsavedChanges.continue') || 'Continue Editing'}
                                 </Button>
                                 <Button
-                                    disabled={isSaving || isImageProcessing || (priceBooksEnabled && !isPriceBookCatalogReady) || Boolean(productCommissionValidationMessage)}
+                                    disabled={isProductSaveDisabled}
                                     onClick={async () => {
                                         const didSave = await persistProduct({ navigateAfterSave: false })
                                         if (didSave) {

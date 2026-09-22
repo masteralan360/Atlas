@@ -81,7 +81,7 @@
     },
     "pos": "POS",
     "posSamplesHelp": "1–100 additional paid POS checkout scenarios with varied currencies, methods, fractional quantities and service lines. Fixed regressions run alongside them.",
-    "posCoverageHelp": "Checks regular POS production checkout, cart calculations, inventory, related-unit hierarchy and conversion, independent packaging prices, combined product-unit selection, and the Quick Order restriction for related-unit products, alongside relationship usage safeguards, persistence, financing, exchange and reversal helpers, Activities and Quick Order routing, role-based sales-account selector visibility, plus centralized image compression and R2 enforcement, with disposable IndexedDB and mocked backend contracts. Related-unit POS sales are covered by Checkout, Cart and Cloud / Hybrid request groups; relationship setup and product conversion are covered by Related Units. Image profile measurements, signature validation, animation rejection and worker upload metadata are covered by Media uploads. Sales return inventory and financing components are covered; the complete Sales return dialog is not automated. SQLite checks use an adapter stub. Real browser checkout, Supabase permissions, native restart and hardware remain unavailable.",
+    "posCoverageHelp": "Checks regular POS production checkout, cart calculations, inventory, related-unit hierarchy and conversion, independent packaging prices, combined product-unit selection, and the Quick Order restriction for related-unit products, alongside relationship usage safeguards, persistence, financing, exchange and reversal helpers, Activities and Quick Order routing, role-based sales-account selector visibility, plus centralized image compression and R2 enforcement, with disposable IndexedDB and mocked backend contracts. Related-unit POS sales are covered by Checkout, Cart and Cloud / Hybrid request groups; Related Units also covers converting a saved single-unit product, draft resets/restoration with a required blank initial-stock input, single-versus-multiple storage selection, atomic stock replacement, retired batches, independent main and Price Book prices, rollback, and Cloud/Hybrid request failures. Image profile measurements, signature validation, animation rejection and worker upload metadata are covered by Media uploads. Sales return inventory and financing components are covered; the complete Sales return dialog is not automated. SQLite checks use an adapter stub. Real browser checkout, Supabase permissions, native restart and hardware remain unavailable.",
     "posGroups": {
       "checkout": "Checkout, payments, accounts and ledger",
       "cart": "Cart and held-sale restoration",
@@ -1188,6 +1188,19 @@
       "independentPrices": "The two selling prices are independent and are not calculated from each other.",
       "validation": "Enter a valid conversion quantity and larger-unit price. Static smaller units require a whole-number conversion.",
       "priceBookValidation": "Enter a valid larger-unit price for every Price Book override.",
+      "sellingPriceValidation": "Enter valid selling and cost prices for both the product and every Price Book override.",
+      "initialStock": "Initial stock",
+      "initialStockValidation": "Enter a valid initial stock quantity in the smaller unit. Static units require a whole number.",
+      "storageRequired": "Select the storage that will receive the new initial stock.",
+      "saveHint": "Saving will replace the existing stock allocations with this initial stock and apply the related-unit prices together.",
+      "conversionErrors": {
+        "online_required": "Connect to the internet before converting this Cloud or Hybrid product.",
+        "already_relational": "This product already uses related selling units. Refresh the page and try again.",
+        "hidden_costs": "You need permission to edit costs before converting this product because its old cost prices must be cleared.",
+        "storage_access": "You do not have access to every storage used by this product. Ask an administrator to perform the conversion.",
+        "validation": "Review the relationship, storage, initial stock, and all price fields, then try again.",
+        "result_missing": "The product was not refreshed after saving. Reload the page before trying again."
+      },
       "unitRequired": "Select a unit or a related-unit combination for this product.",
       "standaloneReserved": "This unit belongs to an active relationship and cannot be selected by itself.",
       "unitChangeBlocked": "An existing product's inventory unit cannot be reinterpreted here. Keep its current base unit or use an explicit inventory conversion workflow.",

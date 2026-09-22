@@ -12,6 +12,11 @@ const relationshipUsageMigrationPath = fileURLToPath(new URL(
   import.meta.url,
 ))
 const relationshipUsageMigrationSql = readFileSync(relationshipUsageMigrationPath, 'utf8')
+const productConversionMigrationPath = fileURLToPath(new URL(
+  '../../supabase/migrations/20260922093317_convert_single_unit_products_to_relational_units.sql',
+  import.meta.url,
+))
+const productConversionMigrationSql = readFileSync(productConversionMigrationPath, 'utf8')
 
 describe('hierarchical packaging database migration', () => {
   it('creates workspace-scoped tables with explicit RLS and API grants', () => {
@@ -55,6 +60,18 @@ describe('hierarchical packaging database migration', () => {
     expect(relationshipUsageMigrationSql).toContain('linked_relationship.parent_unit_ref IN (NEW.parent_unit_ref, NEW.child_unit_ref)')
     expect(relationshipUsageMigrationSql).toContain('Unit relationship endpoint is already used by a product')
     expect(relationshipUsageMigrationSql).toContain('Unit relationship is used by a product and cannot be archived or deleted')
+  })
+
+  it('converts a saved single-unit product with one atomic and storage-aware RPC', () => {
+    expect(productConversionMigrationSql).toContain('CREATE OR REPLACE FUNCTION private.convert_single_unit_product_to_relationship')
+    expect(productConversionMigrationSql).toContain('CREATE OR REPLACE FUNCTION public.convert_single_unit_product_to_relationship')
+    expect(productConversionMigrationSql).toContain('single_unit_conversion_storage_access')
+    expect(productConversionMigrationSql).toContain('UPDATE public.stock_batches')
+    expect(productConversionMigrationSql).toContain('UPDATE public.inventory')
+    expect(productConversionMigrationSql).toContain('INSERT INTO public.product_unit_conversions')
+    expect(productConversionMigrationSql).toContain('INSERT INTO public.price_book_items')
+    expect(productConversionMigrationSql).toContain('INSERT INTO public.price_book_unit_prices')
+    expect(productConversionMigrationSql).toContain("REVOKE ALL ON FUNCTION private.convert_single_unit_product_to_relationship(jsonb) FROM PUBLIC, anon")
   })
 
 })
