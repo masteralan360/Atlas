@@ -8,7 +8,7 @@ import {
     type IQDDisplayPreference,
     type OrderAdjustment
 } from '@/local-db'
-import { getOrderLineFreeBonusQuantity, getOrderLinePaidQuantity, hasOrderLineFreeBonus } from '@/lib/orderLineItems'
+import { getOrderLineFreeBonusQuantity, getOrderLinePaidInventoryQuantity, getOrderLinePaidQuantity, hasOrderLineFreeBonus } from '@/lib/orderLineItems'
 import {
     getOrderTotalWithPostReturnAdjustments,
     isPostReturnOrderAdjustment,
@@ -184,11 +184,24 @@ function getOrderLineUnit(
 
 function formatOrderLineUnit(
     t: TFunction<'translation', undefined>,
-    item: { productId: string; unit?: string | null },
+    item: { productId: string; unit?: string | null; unitRef?: string | null; unitNameSnapshot?: string | null },
     productUnits?: Record<string, string | null | undefined>
 ) {
+    if (item.unitRef?.startsWith('custom:') && item.unitNameSnapshot) return item.unitNameSnapshot
     const unit = getOrderLineUnit(item, productUnits)
     return unit ? t(`products.units.${unit}`, { defaultValue: unit }) : ''
+}
+
+function formatOrderLineBaseEquivalent(
+    t: TFunction<'translation', undefined>,
+    item: { quantity?: unknown; inventoryQuantity?: unknown; unitFactor?: unknown; baseUnitRef?: string | null; baseUnitCode?: string | null; baseUnitNameSnapshot?: string | null }
+) {
+    const factor = Number(item.unitFactor ?? 1)
+    if (!Number.isFinite(factor) || factor <= 0 || factor === 1) return ''
+    const unit = item.baseUnitRef?.startsWith('custom:') && item.baseUnitNameSnapshot
+        ? item.baseUnitNameSnapshot
+        : item.baseUnitCode ? t(`products.units.${item.baseUnitCode}`, { defaultValue: item.baseUnitCode }) : ''
+    return `${getOrderLinePaidInventoryQuantity(item)}${unit ? ` ${unit}` : ''}`
 }
 
 function getOrderLineFreeBonusUnit(
@@ -801,6 +814,7 @@ export function OrderReceiptPrintTemplate({
                                 const freeBonus = getOrderLineFreeBonusQuantity(item)
                                 const unit = formatOrderLineUnit(t, item, productUnits)
                                 const freeBonusUnit = formatOrderLineFreeBonusUnit(t, item, productUnits)
+                                const baseEquivalent = formatOrderLineBaseEquivalent(t, item)
                                 const returnState = isSales && !isOriginalPrint ? getOrderPrintReturnState(item) : null
                                 return (
                                     <tr key={item.id} data-order-print-return-state={returnState?.status}>
@@ -821,7 +835,7 @@ export function OrderReceiptPrintTemplate({
                                             ) : null}
                                         </td>
                                         <td className="py-3 text-center align-top font-mono">
-                                            {returnState
+                                            <div>{returnState
                                                 ? <OrderPrintReturnValue
                                                     state={returnState}
                                                     original={`${quantity}${!hideUnit && unit ? ` ${unit}` : ''}`}
@@ -829,7 +843,8 @@ export function OrderReceiptPrintTemplate({
                                                     stacked
                                                     className="items-center"
                                                 />
-                                                : `${quantity}${!hideUnit && unit ? ` ${unit}` : ''}`}
+                                                : `${quantity}${!hideUnit && unit ? ` ${unit}` : ''}`}</div>
+                                            {baseEquivalent ? <div className="mt-0.5 text-[9px] opacity-60">{baseEquivalent}</div> : null}
                                         </td>
                                         <td className="min-w-0 py-3 align-top text-end">
                                             {formatReceiptPrice(item.convertedUnitPrice, order.currency)}
@@ -1233,6 +1248,7 @@ export function OrderDetailsPrintTemplate({
                     {populatedItemRows.map((item, index) => {
                         const unit = item ? formatOrderLineUnit(t, item, productUnits) : ''
                         const freeBonusUnit = item ? formatOrderLineFreeBonusUnit(t, item, productUnits) : ''
+                        const baseEquivalent = item ? formatOrderLineBaseEquivalent(t, item) : ''
                         const returnState = item && isSales && !isOriginalPrint ? getOrderPrintReturnState(item) : null
                         return (
                             <tr
@@ -1246,7 +1262,7 @@ export function OrderDetailsPrintTemplate({
                                     {item?.productSku ? <span className="text-black" style={labelOpacityStyle}>{item.productSku}</span> : '\u00A0'}
                                 </td>
                                 <td className="border border-slate-300 p-2 text-end">
-                                    {item && returnState
+                                    <div>{item && returnState
                                         ? <OrderPrintReturnValue
                                             state={returnState}
                                             original={`${getOrderLinePaidQuantity(item)}${!hideUnit && unit ? ` ${unit}` : ''}`}
@@ -1254,7 +1270,8 @@ export function OrderDetailsPrintTemplate({
                                             stacked
                                             className="items-end"
                                         />
-                                        : item ? `${getOrderLinePaidQuantity(item)}${!hideUnit && unit ? ` ${unit}` : ''}` : '\u00A0'}
+                                        : item ? `${getOrderLinePaidQuantity(item)}${!hideUnit && unit ? ` ${unit}` : ''}` : '\u00A0'}</div>
+                                    {baseEquivalent ? <div className="text-[9px] text-slate-500">{baseEquivalent}</div> : null}
                                 </td>
                                 {showFreeBonus ? (
                                     <td className="border border-slate-300 p-2 text-end">

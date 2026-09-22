@@ -30,10 +30,48 @@ describe('sales order return print data', () => {
             lines: [{
                 orderItemId: 'line-returned',
                 returnedQuantity: 1,
+                selectedUnitQuantity: 1,
+                paidSelectedUnitQuantity: 1,
                 refundAmount: 20,
                 unitRefundAmount: 20
             }],
             adjustments: []
+        })
+    })
+
+    it('prints related-unit returns in the selected unit and excludes free units from the unit refund price', () => {
+        const order = {
+            id: 'order-related',
+            returnStatus: 'partial',
+            currency: 'iqd',
+            items: [{
+                id: 'line-related',
+                quantity: 2,
+                inventoryQuantity: 40,
+                unitFactor: 20,
+                convertedUnitPrice: 40_000
+            }]
+        } as any
+
+        const printData = createSalesOrderReturnPrintData(order, [
+            { id: 'posted-return', status: 'posted', returnedAt: '2026-09-22T10:00:00.000Z', isDeleted: false }
+        ] as any, [{
+            returnId: 'posted-return',
+            orderItemId: 'line-related',
+            inventoryQuantity: 60,
+            selectedUnitQuantity: 3,
+            paidSelectedUnitQuantity: 2,
+            freeSelectedUnitQuantity: 1,
+            refundAmount: 80_000,
+            isDeleted: false
+        }] as any)
+
+        expect(printData?.lines[0]).toMatchObject({
+            returnedQuantity: 60,
+            selectedUnitQuantity: 3,
+            paidSelectedUnitQuantity: 2,
+            refundAmount: 80_000,
+            unitRefundAmount: 40_000
         })
     })
 

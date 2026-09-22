@@ -1,5 +1,5 @@
 import type { OrderAdjustment, OrderReturn, OrderReturnItem, SalesOrder } from '@/local-db/models'
-import { getOrderLineInventoryQuantity } from '@/lib/orderLineItems'
+import { getOrderLineInventoryQuantity, getOrderLineUnitFactor } from '@/lib/orderLineItems'
 import { isPostReturnOrderAdjustment, normalizeOrderAdjustments } from '@/lib/orderAdjustments'
 import { roundOrderValue } from '@/lib/orderPrecision'
 
@@ -7,7 +7,12 @@ const RETURN_EPSILON = 0.000001
 
 export type SalesOrderReturnPrintLine = {
     orderItemId: string
+    /** Total inventory quantity restored in the base unit. */
     returnedQuantity: number
+    /** Total commercial quantity returned in the selling unit, including free bonus units. */
+    selectedUnitQuantity: number
+    /** Commercial quantity that contributes to the monetary refund. */
+    paidSelectedUnitQuantity: number
     refundAmount: number
     unitRefundAmount: number
 }
@@ -54,23 +59,41 @@ export function createSalesOrderReturnPrintData(
             continue
         }
 
-        const returnedQuantity = positiveNumber(returnItem.quantity)
+        const returnedQuantity = positiveNumber(returnItem.inventoryQuantity ?? returnItem.quantity)
         if (returnedQuantity <= RETURN_EPSILON) continue
+        const orderItem = order.items.find((item) => item.id === returnItem.orderItemId)
+        const selectedUnitQuantity = positiveNumber(
+            returnItem.selectedUnitQuantity ?? returnedQuantity / getOrderLineUnitFactor(orderItem || {})
+        )
+        const paidSelectedUnitQuantity = positiveNumber(
+            returnItem.paidSelectedUnitQuantity
+            ?? (returnItem.paidInventoryQuantity != null
+                ? Number(returnItem.paidInventoryQuantity) / getOrderLineUnitFactor(orderItem || {})
+                : returnItem.quantityKind === 'free'
+                    ? 0
+                    : selectedUnitQuantity)
+        )
 
         const existing = linesByOrderItemId.get(returnItem.orderItemId)
         const refundAmount = positiveNumber(returnItem.refundAmount)
         if (existing) {
             existing.returnedQuantity += returnedQuantity
+            existing.selectedUnitQuantity += selectedUnitQuantity
+            existing.paidSelectedUnitQuantity += paidSelectedUnitQuantity
             existing.refundAmount += refundAmount
-            existing.unitRefundAmount = existing.returnedQuantity > RETURN_EPSILON
-                ? existing.refundAmount / existing.returnedQuantity
+            existing.unitRefundAmount = existing.paidSelectedUnitQuantity > RETURN_EPSILON
+                ? existing.refundAmount / existing.paidSelectedUnitQuantity
                 : 0
         } else {
             linesByOrderItemId.set(returnItem.orderItemId, {
                 orderItemId: returnItem.orderItemId,
                 returnedQuantity,
+                selectedUnitQuantity,
+                paidSelectedUnitQuantity,
                 refundAmount,
-                unitRefundAmount: refundAmount / returnedQuantity
+                unitRefundAmount: paidSelectedUnitQuantity > RETURN_EPSILON
+                    ? refundAmount / paidSelectedUnitQuantity
+                    : 0
             })
         }
     }
@@ -124,18 +147,21 @@ export function createSampleSalesOrderReturnPrintData(order: SalesOrder): SalesO
         }
     }
 
-    const returnedQuantity = Math.min(1, getOrderLineInventoryQuantity(firstItem))
+    const selectedUnitQuantity = Math.min(1, positiveNumber(firstItem.quantity))
+    const returnedQuantity = selectedUnitQuantity * getOrderLineUnitFactor(firstItem)
     const unitRefundAmount = positiveNumber(firstItem.convertedUnitPrice)
     return {
         status: 'partial',
         returnedAt: new Date().toISOString(),
-        baseRefundAmount: returnedQuantity * unitRefundAmount,
+        baseRefundAmount: selectedUnitQuantity * unitRefundAmount,
         adjustmentAmount: 0,
-        totalRefundAmount: returnedQuantity * unitRefundAmount,
+        totalRefundAmount: selectedUnitQuantity * unitRefundAmount,
         lines: [{
             orderItemId: firstItem.id,
             returnedQuantity,
-            refundAmount: returnedQuantity * unitRefundAmount,
+            selectedUnitQuantity,
+            paidSelectedUnitQuantity: selectedUnitQuantity,
+            refundAmount: selectedUnitQuantity * unitRefundAmount,
             unitRefundAmount
         }],
         adjustments: []

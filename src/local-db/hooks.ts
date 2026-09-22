@@ -14,6 +14,7 @@ import { isSyncIntegrityError } from '@/sync/syncErrors'
 import { refreshStockBatchesFromSupabase } from './stockBatches'
 import { isValidNewInventoryQuantity } from './inventoryDeficit'
 import { roundOrderValue } from '@/lib/orderPrecision'
+import { getOrderLineInventoryQuantity, getOrderLineReturnedInventoryQuantity, getOrderLineReturnedPaidInventoryQuantity, getOrderLineUnitFactor } from '@/lib/orderLineItems'
 import { getPrimaryStorageId as getPrimaryStorageIdForWorkspace, normalizeStorageRecord, sortStoragesByPriority } from './storageUtils'
 import {
     assertCurrentUserCanAccessStorage,
@@ -3248,7 +3249,7 @@ export function useDashboardStats(workspaceId: string | undefined) {
                 saleCost += (item.convertedCostPrice || 0) * netQuantity
             })
 
-            let saleProfit = saleRevenue - saleCost
+            const saleProfit = saleRevenue - saleCost
 
             statsByCurrency[curr].revenue += saleRevenue
             statsByCurrency[curr].cost += saleCost
@@ -6736,9 +6737,9 @@ export function toUISaleFromOrder(order: any): any {
         settlement_currency: order.currency || order.settlement_currency,
         returned_quantity: Math.min(
             Math.max(0, Number(item.quantity || 0)),
-            Math.max(0, Number(item.returnedQuantity || item.returned_quantity || 0))
+            getOrderLineReturnedPaidInventoryQuantity(item) / getOrderLineUnitFactor(item)
         ),
-        is_returned: Math.max(0, Number(item.returnedQuantity || item.returned_quantity || 0)) >= Math.max(0, Number(item.quantity || 0))
+        is_returned: getOrderLineReturnedInventoryQuantity(item) >= getOrderLineInventoryQuantity(item)
             && Math.max(0, Number(item.quantity || 0)) > 0,
         product: {
             name: item.productName || 'Unknown Product',

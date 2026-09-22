@@ -3,6 +3,31 @@ import { isService, SERVICES_VIRTUAL_STORAGE_ID } from './catalogItem'
 
 type OrderLineProduct = Pick<Product, 'isService'> | null | undefined
 
+type SalesOrderLineIdentity = {
+    productId: string
+    storageId: string
+    batchId: string
+    unitRef: string
+    quantity: number
+    freeBonusQuantity: number
+    unitPrice: number
+    seq: number
+}
+
+/** Keeps otherwise-identical commercial lines distinct for returns and audit history. */
+export function buildSalesOrderLineId(line: SalesOrderLineIdentity) {
+    return [
+        line.productId,
+        line.storageId,
+        line.batchId,
+        line.unitRef,
+        line.quantity,
+        line.freeBonusQuantity,
+        line.unitPrice,
+        line.seq
+    ].join('-')
+}
+
 /**
  * The Services location is a form affordance only. Keep it out of the order
  * JSON so every persisted storage reference remains a real storage UUID.
@@ -34,6 +59,15 @@ type SalesOrderLineProductSelection = {
     priceBookItemId: string
     priceSourceCurrency: string
     priceBookCostPrice: string
+    unitRef?: string
+    unitRelationshipId?: string
+    unitFactor?: string
+    baseUnitRef?: string
+    baseUnitCode?: string
+    unitNameSnapshot?: string
+    baseUnitNameSnapshot?: string
+    freeBonusQuantity?: string
+    freeBonusUnit?: string
 }
 
 /** Clears product-specific values when a sales line moves to Services. */
@@ -49,6 +83,15 @@ export function clearSalesItemProductForServicesStorage(
         priceBookId: '',
         priceBookItemId: '',
         priceSourceCurrency: '',
-        priceBookCostPrice: ''
+        priceBookCostPrice: '',
+        unitRef: '',
+        unitRelationshipId: '',
+        unitFactor: '',
+        baseUnitRef: '',
+        baseUnitCode: '',
+        unitNameSnapshot: '',
+        baseUnitNameSnapshot: '',
+        freeBonusQuantity: '',
+        freeBonusUnit: ''
     }
 }

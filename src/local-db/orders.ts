@@ -17,7 +17,13 @@ import {
     type OrderSaveProgress,
     type OrderSaveProgressStage
 } from '@/lib/orderSaveProgress'
-import { getOrderLineInventoryQuantity } from '@/lib/orderLineItems'
+import {
+    allocatePurchaseCostToBaseInventory,
+    getOrderLineFreeBonusInventoryQuantity,
+    getOrderLineInventoryQuantity,
+    getOrderLinePaidInventoryQuantity,
+    getOrderLineUnitFactor
+} from '@/lib/orderLineItems'
 import { isPositiveQuantity, roundQuantity } from '@/lib/quantity'
 import { getMissingPriceBookCostMessage, hasValidProductCost } from '@/lib/productCost'
 import { canBePurchased, isService } from '@/lib/catalogItem'
@@ -247,7 +253,7 @@ function getSyncMetadata(workspaceId: string, timestamp: string) {
     }
 }
 
-function sanitizeSyncPayload(tableName: SyncableTableName, entity: Record<string, unknown>) {
+export function sanitizeSyncPayload(tableName: SyncableTableName, entity: Record<string, unknown>) {
     const payload = { ...entity }
     delete payload.syncStatus
     delete payload.lastSyncedAt
@@ -866,12 +872,30 @@ async function getReservedQuantityMaps(workspaceId: string, excludeOrderId?: str
 
     const reservedByStorage = new Map<string, number>()
     const reservedWithoutStorage = new Map<string, number>()
+    const reservationDetails = new Map<string, {
+        orderId: string
+        orderNumber: string
+        productId: string
+        storageId: string | null
+        quantity: number
+        createdAt: string
+    }>()
     for (const order of orders) {
         for (const item of order.items) {
             const product = await db.products.get(item.productId)
             if (isService(product)) continue
             const storageId = resolveSalesOrderItemStorageId(order, item)
             const reservedQuantity = getOrderLineInventoryQuantity(item)
+            const detailKey = `${order.id}:${item.productId}:${storageId || ''}`
+            const existingDetail = reservationDetails.get(detailKey)
+            reservationDetails.set(detailKey, {
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                productId: item.productId,
+                storageId,
+                quantity: roundQuantity((existingDetail?.quantity ?? 0) + reservedQuantity),
+                createdAt: order.createdAt
+            })
             if (storageId) {
                 const key = buildInventoryReservationKey(item.productId, storageId)
                 reservedByStorage.set(key, (reservedByStorage.get(key) || 0) + reservedQuantity)
@@ -884,13 +908,39 @@ async function getReservedQuantityMaps(workspaceId: string, excludeOrderId?: str
 
     return {
         reservedByStorage,
-        reservedWithoutStorage
+        reservedWithoutStorage,
+        reservationDetails: Array.from(reservationDetails.values()).sort((left, right) =>
+            left.createdAt.localeCompare(right.createdAt)
+            || left.orderNumber.localeCompare(right.orderNumber)
+        )
     }
+}
+
+function getOrderInventoryUnitLabel(item: SalesOrderItem, product: Product) {
+    if (item.baseUnitRef?.startsWith('custom:') && item.baseUnitNameSnapshot?.trim()) {
+        return item.baseUnitNameSnapshot.trim()
+    }
+
+    const unitCode = item.baseUnitCode || product.unit || item.unit || ''
+    return unitCode
+        ? i18n.t(`products.units.${unitCode}`, { defaultValue: unitCode })
+        : ''
+}
+
+function formatOrderInventoryQuantity(quantity: number, unitLabel: string) {
+    const formattedQuantity = new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language || 'en', {
+        maximumFractionDigits: 6
+    }).format(roundQuantity(quantity))
+    return unitLabel ? `${formattedQuantity} ${unitLabel}` : formattedQuantity
 }
 
 async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: string) {
     assertInventoryMutationConnectivity(order.workspaceId)
-    const { reservedByStorage, reservedWithoutStorage } = await getReservedQuantityMaps(order.workspaceId, excludeOrderId)
+    const {
+        reservedByStorage,
+        reservedWithoutStorage,
+        reservationDetails
+    } = await getReservedQuantityMaps(order.workspaceId, excludeOrderId)
     const productIds = Array.from(new Set(order.items.map((item) => item.productId)))
     const products = await db.products.where('id').anyOf(productIds).toArray()
     const productMap = new Map(products.map((product) => [product.id, product]))
@@ -899,6 +949,7 @@ async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: str
         storageId: string
         productName: string
         quantity: number
+        unitLabel: string
     }>()
 
     for (const item of order.items) {
@@ -927,7 +978,8 @@ async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: str
             productName: item.productName,
             quantity: roundQuantity(
                 (existingRequirement?.quantity ?? 0) + getOrderLineInventoryQuantity(item)
-            )
+            ),
+            unitLabel: existingRequirement?.unitLabel || getOrderInventoryUnitLabel(item, product)
         })
     }
 
@@ -942,6 +994,32 @@ async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: str
         const globalReserved = reservedWithoutStorage.get(requirement.productId) || 0
         const available = storageQuantity - storageReserved - globalReserved
         if (available < requirement.quantity) {
+            const relevantReservations = reservationDetails.filter((reservation) =>
+                reservation.productId === requirement.productId
+                && (reservation.storageId === requirement.storageId || reservation.storageId === null)
+            )
+            if (relevantReservations.length > 0) {
+                const reservations = relevantReservations.map((reservation) =>
+                    i18n.t('orders.form.errors.stockReservationEntry', {
+                        orderNumber: reservation.orderNumber,
+                        quantity: formatOrderInventoryQuantity(reservation.quantity, requirement.unitLabel)
+                    })
+                ).join(', ')
+                throw new Error(i18n.t('orders.form.errors.insufficientStockWithReservations', {
+                    productName: requirement.productName,
+                    onHand: formatOrderInventoryQuantity(storageQuantity, requirement.unitLabel),
+                    reserved: formatOrderInventoryQuantity(
+                        roundQuantity(storageReserved + globalReserved),
+                        requirement.unitLabel
+                    ),
+                    available: formatOrderInventoryQuantity(
+                        Math.max(0, roundQuantity(available)),
+                        requirement.unitLabel
+                    ),
+                    required: formatOrderInventoryQuantity(requirement.quantity, requirement.unitLabel),
+                    reservations
+                }))
+            }
             throw new Error(i18n.t('orders.form.errors.insufficientStock', {
                 productName: requirement.productName
             }))
@@ -1592,7 +1670,7 @@ async function getPurchaseOrderReceiptLinePlans(order: PurchaseOrder): Promise<P
 
         const receivedQuantity = item.receivedQuantity ?? getOrderLineInventoryQuantity(item)
         const hasPriceBookProvenance = Boolean(item.priceBookId && item.priceBookItemId)
-        const actualUnitCost = roundAmount(
+        const selectedUnitCost = roundAmount(
             hasPriceBookProvenance
                 ? convertCurrencyAmountWithSnapshot(
                     item.originalUnitPrice,
@@ -1601,6 +1679,14 @@ async function getPurchaseOrderReceiptLinePlans(order: PurchaseOrder): Promise<P
                     order.exchangeRates
                 )
                 : item.originalUnitPrice,
+            product.currency
+        )
+        const actualUnitCost = roundAmount(
+            allocatePurchaseCostToBaseInventory(
+                selectedUnitCost,
+                Math.max(0, Number(item.quantity || 0)),
+                receivedQuantity
+            ),
             product.currency
         )
         const productUnitCost = roundAmount(product.costPrice ?? 0, product.currency)
@@ -3631,7 +3717,11 @@ export async function lockSalesOrder(id: string) {
 
 export type SalesOrderReturnLineInput = {
     orderItemId: string
-    quantity: number
+    /** Paid quantity in the order line's original selected selling unit. */
+    quantity?: number
+    paidQuantity?: number
+    /** Free-bonus quantity in the order line's original selected selling unit. */
+    freeQuantity?: number
 }
 
 export type ReturnSalesOrderInput = {
@@ -3720,7 +3810,12 @@ export async function createPostReturnSalesOrderAdjustment(input: CreatePostRetu
 
 type PreparedSalesOrderReturnLine = {
     item: SalesOrderItem
+    selectedUnitQuantity: number
+    paidSelectedUnitQuantity: number
+    freeSelectedUnitQuantity: number
     quantity: number
+    paidInventoryQuantity: number
+    freeInventoryQuantity: number
     previouslyReturnedQuantity: number
     refundAmount: number
     unitRefundAmount: number
@@ -3876,7 +3971,12 @@ async function restoreInventoryForSalesOrderReturn(
 
     return plans.map((plan) => ({
         item: plan.item,
+        selectedUnitQuantity: plan.selectedUnitQuantity,
+        paidSelectedUnitQuantity: plan.paidSelectedUnitQuantity,
+        freeSelectedUnitQuantity: plan.freeSelectedUnitQuantity,
         quantity: plan.quantity,
+        paidInventoryQuantity: plan.paidInventoryQuantity,
+        freeInventoryQuantity: plan.freeInventoryQuantity,
         previouslyReturnedQuantity: plan.previouslyReturnedQuantity,
         refundAmount: plan.refundAmount,
         unitRefundAmount: plan.unitRefundAmount,
@@ -4193,6 +4293,8 @@ async function applySalesOrderReturnToFinancing(input: {
 type PreparedSalesOrderReturn = {
     quantitiesByItemId: Map<string, number>
     returnedQuantityByItemId: Map<string, number>
+    returnedPaidInventoryByItemId: Map<string, number>
+    returnedFreeInventoryByItemId: Map<string, number>
     preparedLines: PreparedSalesOrderReturnLine[]
     returnAmount: number
     willBeFullyReturned: boolean
@@ -4205,15 +4307,17 @@ async function prepareSalesOrderReturn(
     input: ReturnSalesOrderInput
 ): Promise<PreparedSalesOrderReturn> {
     const quantitiesByItemId = new Map<string, number>()
+    const requestedByItemId = new Map<string, { paidSelected: number; freeSelected: number }>()
     for (const line of input.items) {
-        const quantity = roundQuantity(Number(line.quantity || 0))
-        if (!isPositiveQuantity(quantity)) {
+        const paidSelected = roundQuantity(Number(line.paidQuantity ?? line.quantity ?? 0))
+        const freeSelected = roundQuantity(Number(line.freeQuantity ?? 0))
+        if (!isPositiveQuantity(paidSelected + freeSelected) || paidSelected < 0 || freeSelected < 0) {
             throw new Error('Return quantity must be greater than zero')
         }
-        if (quantitiesByItemId.has(line.orderItemId)) {
+        if (requestedByItemId.has(line.orderItemId)) {
             throw new Error('Return items must be unique')
         }
-        quantitiesByItemId.set(line.orderItemId, quantity)
+        requestedByItemId.set(line.orderItemId, { paidSelected, freeSelected })
     }
 
     const [existingReturnItems, existingReturns] = await Promise.all([
@@ -4221,11 +4325,22 @@ async function prepareSalesOrderReturn(
         db.order_returns.where('orderId').equals(order.id).and((item) => !item.isDeleted && item.status === 'posted').toArray()
     ])
     const returnedQuantityByItemId = new Map<string, number>()
+    const returnedPaidInventoryByItemId = new Map<string, number>()
+    const returnedFreeInventoryByItemId = new Map<string, number>()
     for (const returnItem of existingReturnItems) {
+        const orderItem = order.items.find((item) => item.id === returnItem.orderItemId)
+        const totalReturned = returnItem.inventoryQuantity ?? returnItem.quantity
+        const legacyPaidReturned = Math.min(totalReturned, orderItem ? getOrderLinePaidInventoryQuantity(orderItem) : totalReturned)
+        const paidReturned = returnItem.paidInventoryQuantity ?? legacyPaidReturned
+        const freeReturned = returnItem.freeInventoryQuantity ?? Math.max(0, totalReturned - paidReturned)
         returnedQuantityByItemId.set(
             returnItem.orderItemId,
-            roundQuantity((returnedQuantityByItemId.get(returnItem.orderItemId) || 0) + returnItem.quantity)
+            roundQuantity((returnedQuantityByItemId.get(returnItem.orderItemId) || 0) + totalReturned)
         )
+        returnedPaidInventoryByItemId.set(returnItem.orderItemId,
+            roundQuantity((returnedPaidInventoryByItemId.get(returnItem.orderItemId) || 0) + paidReturned))
+        returnedFreeInventoryByItemId.set(returnItem.orderItemId,
+            roundQuantity((returnedFreeInventoryByItemId.get(returnItem.orderItemId) || 0) + freeReturned))
     }
     const returnedAmount = roundAmount(
         existingReturns.reduce((sum, row) => sum + Math.max(0, Number(row.refundAmount || 0)), 0),
@@ -4236,29 +4351,49 @@ async function prepareSalesOrderReturn(
     const fallbackItemValueBase = itemValueBase > ORDER_AMOUNT_EPSILON ? itemValueBase : order.items.length
 
     const preparedLines: PreparedSalesOrderReturnLine[] = []
-    for (const [orderItemId, quantity] of quantitiesByItemId) {
+    for (const [orderItemId, requested] of requestedByItemId) {
         const item = order.items.find((candidate) => candidate.id === orderItemId)
         if (!item) {
             throw new Error('Order item not found')
         }
+        const factor = getOrderLineUnitFactor(item)
+        const paidInventoryQuantity = roundQuantity(requested.paidSelected * factor)
+        const freeInventoryQuantity = roundQuantity(requested.freeSelected * factor)
+        const quantity = roundQuantity(paidInventoryQuantity + freeInventoryQuantity)
+        quantitiesByItemId.set(orderItemId, quantity)
         const totalQuantity = getOrderLineInventoryQuantity(item)
+        const totalPaidQuantity = getOrderLinePaidInventoryQuantity(item)
+        const totalFreeQuantity = getOrderLineFreeBonusInventoryQuantity(item)
         const previouslyReturnedQuantity = returnedQuantityByItemId.get(orderItemId) || 0
-        if (quantity - (totalQuantity - previouslyReturnedQuantity) > ORDER_AMOUNT_EPSILON) {
+        const previouslyReturnedPaid = returnedPaidInventoryByItemId.get(orderItemId) || 0
+        const previouslyReturnedFree = returnedFreeInventoryByItemId.get(orderItemId) || 0
+        if (paidInventoryQuantity - (totalPaidQuantity - previouslyReturnedPaid) > ORDER_AMOUNT_EPSILON
+            || freeInventoryQuantity - (totalFreeQuantity - previouslyReturnedFree) > ORDER_AMOUNT_EPSILON
+            || quantity - (totalQuantity - previouslyReturnedQuantity) > ORDER_AMOUNT_EPSILON) {
             throw new Error(`Return quantity exceeds the remaining quantity for ${item.productName}`)
         }
 
         const itemShare = itemValueBase > ORDER_AMOUNT_EPSILON
             ? Math.max(0, Number(item.lineTotal || 0)) / itemValueBase
             : 1 / fallbackItemValueBase
-        const cumulativePrevious = originalTotal * itemShare * (previouslyReturnedQuantity / totalQuantity)
-        const cumulativeCurrent = originalTotal * itemShare * ((previouslyReturnedQuantity + quantity) / totalQuantity)
+        const cumulativePrevious = totalPaidQuantity > ORDER_AMOUNT_EPSILON
+            ? originalTotal * itemShare * (previouslyReturnedPaid / totalPaidQuantity)
+            : 0
+        const cumulativeCurrent = totalPaidQuantity > ORDER_AMOUNT_EPSILON
+            ? originalTotal * itemShare * ((previouslyReturnedPaid + paidInventoryQuantity) / totalPaidQuantity)
+            : 0
         const refundAmount = roundAmount(Math.max(0, cumulativeCurrent - cumulativePrevious), order.currency)
         preparedLines.push({
             item,
+            selectedUnitQuantity: roundQuantity(requested.paidSelected + requested.freeSelected),
+            paidSelectedUnitQuantity: requested.paidSelected,
+            freeSelectedUnitQuantity: requested.freeSelected,
             quantity,
+            paidInventoryQuantity,
+            freeInventoryQuantity,
             previouslyReturnedQuantity,
             refundAmount,
-            unitRefundAmount: roundAmount(refundAmount / quantity, order.currency)
+            unitRefundAmount: roundAmount(refundAmount / Math.max(requested.paidSelected, 1), order.currency)
         })
     }
 
@@ -4274,12 +4409,12 @@ async function prepareSalesOrderReturn(
         if (Math.abs(fullReturnDifference) > ORDER_AMOUNT_EPSILON) {
             const last = preparedLines[preparedLines.length - 1]
             last.refundAmount = roundAmount(Math.max(0, last.refundAmount + fullReturnDifference), order.currency)
-            last.unitRefundAmount = roundAmount(last.refundAmount / last.quantity, order.currency)
+            last.unitRefundAmount = roundAmount(
+                last.refundAmount / Math.max(last.paidSelectedUnitQuantity, 1),
+                order.currency
+            )
             returnAmount = roundAmount(returnAmount + fullReturnDifference, order.currency)
         }
-    }
-    if (returnAmount <= ORDER_AMOUNT_EPSILON) {
-        throw new Error('The selected items do not have a return value')
     }
     if (returnAmount - Number(order.total || 0) > ORDER_AMOUNT_EPSILON) {
         throw new Error('Return amount exceeds the remaining order total')
@@ -4288,6 +4423,8 @@ async function prepareSalesOrderReturn(
     return {
         quantitiesByItemId,
         returnedQuantityByItemId,
+        returnedPaidInventoryByItemId,
+        returnedFreeInventoryByItemId,
         preparedLines,
         returnAmount,
         willBeFullyReturned,
@@ -4300,6 +4437,8 @@ async function returnUnpaidEcommerceOrder(order: SalesOrder, input: ReturnSalesO
     const {
         quantitiesByItemId,
         returnedQuantityByItemId,
+        returnedPaidInventoryByItemId,
+        returnedFreeInventoryByItemId,
         preparedLines,
         returnAmount,
         willBeFullyReturned,
@@ -4318,13 +4457,24 @@ async function returnUnpaidEcommerceOrder(order: SalesOrder, input: ReturnSalesO
     const scale = nextTotal / Math.max(Number(order.total || 0), 1)
     const updatedOrder: SalesOrder = {
         ...order,
-        items: order.items.map((item) => ({
-            ...item,
-            returnedQuantity: Math.min(
-                getOrderLineInventoryQuantity(item),
-                roundQuantity((returnedQuantityByItemId.get(item.id) || 0) + (quantitiesByItemId.get(item.id) || 0))
-            )
-        })),
+        items: order.items.map((item) => {
+            const returnedLine = preparedLines.find((line) => line.item.id === item.id)
+            return {
+                ...item,
+                returnedQuantity: Math.min(
+                    getOrderLineInventoryQuantity(item),
+                    roundQuantity((returnedQuantityByItemId.get(item.id) || 0) + (quantitiesByItemId.get(item.id) || 0))
+                ),
+                returnedPaidInventoryQuantity: Math.min(
+                    getOrderLinePaidInventoryQuantity(item),
+                    roundQuantity((returnedPaidInventoryByItemId.get(item.id) || 0) + (returnedLine?.paidInventoryQuantity || 0))
+                ),
+                returnedFreeInventoryQuantity: Math.min(
+                    getOrderLineFreeBonusInventoryQuantity(item),
+                    roundQuantity((returnedFreeInventoryByItemId.get(item.id) || 0) + (returnedLine?.freeInventoryQuantity || 0))
+                )
+            }
+        }),
         originalTotalAmount: order.originalTotalAmount ?? originalTotal,
         returnedAmount: newReturnedAmount,
         returnStatus: nextReturnStatus,
@@ -4364,6 +4514,19 @@ async function returnUnpaidEcommerceOrder(order: SalesOrder, input: ReturnSalesO
         orderId: order.id,
         orderItemId: line.item.id,
         quantity: line.quantity,
+        selectedUnitQuantity: line.selectedUnitQuantity,
+        paidSelectedUnitQuantity: line.paidSelectedUnitQuantity,
+        freeSelectedUnitQuantity: line.freeSelectedUnitQuantity,
+        inventoryQuantity: line.quantity,
+        paidInventoryQuantity: line.paidInventoryQuantity,
+        freeInventoryQuantity: line.freeInventoryQuantity,
+        unitRef: line.item.unitRef ?? null,
+        unit: line.item.unit ?? null,
+        unitNameSnapshot: line.item.unitNameSnapshot ?? null,
+        baseUnitRef: line.item.baseUnitRef ?? null,
+        baseUnitCode: line.item.baseUnitCode ?? line.item.unit ?? null,
+        baseUnitNameSnapshot: line.item.baseUnitNameSnapshot ?? null,
+        unitFactor: getOrderLineUnitFactor(line.item),
         unitRefundAmount: line.unitRefundAmount,
         refundAmount: line.refundAmount,
         restoredStorageId: line.restoredStorageId,
@@ -4445,6 +4608,8 @@ export async function returnSalesOrder(input: ReturnSalesOrderInput) {
     const {
         quantitiesByItemId,
         returnedQuantityByItemId,
+        returnedPaidInventoryByItemId,
+        returnedFreeInventoryByItemId,
         preparedLines,
         returnAmount,
         willBeFullyReturned,
@@ -4491,13 +4656,24 @@ export async function returnSalesOrder(input: ReturnSalesOrderInput) {
     const nextReturnStatus = willBeFullyReturned ? 'full' as const : 'partial' as const
     const updatedOrder: SalesOrder = {
         ...order,
-        items: order.items.map((item) => ({
-            ...item,
-            returnedQuantity: Math.min(
-                getOrderLineInventoryQuantity(item),
-                roundQuantity((returnedQuantityByItemId.get(item.id) || 0) + (quantitiesByItemId.get(item.id) || 0))
-            )
-        })),
+        items: order.items.map((item) => {
+            const returnedLine = preparedLines.find((line) => line.item.id === item.id)
+            return {
+                ...item,
+                returnedQuantity: Math.min(
+                    getOrderLineInventoryQuantity(item),
+                    roundQuantity((returnedQuantityByItemId.get(item.id) || 0) + (quantitiesByItemId.get(item.id) || 0))
+                ),
+                returnedPaidInventoryQuantity: Math.min(
+                    getOrderLinePaidInventoryQuantity(item),
+                    roundQuantity((returnedPaidInventoryByItemId.get(item.id) || 0) + (returnedLine?.paidInventoryQuantity || 0))
+                ),
+                returnedFreeInventoryQuantity: Math.min(
+                    getOrderLineFreeBonusInventoryQuantity(item),
+                    roundQuantity((returnedFreeInventoryByItemId.get(item.id) || 0) + (returnedLine?.freeInventoryQuantity || 0))
+                )
+            }
+        }),
         originalTotalAmount: order.originalTotalAmount ?? originalTotal,
         returnedAmount: newReturnedAmount,
         returnStatus: nextReturnStatus,
@@ -4545,6 +4721,19 @@ export async function returnSalesOrder(input: ReturnSalesOrderInput) {
         orderId: order.id,
         orderItemId: line.item.id,
         quantity: line.quantity,
+        selectedUnitQuantity: line.selectedUnitQuantity,
+        paidSelectedUnitQuantity: line.paidSelectedUnitQuantity,
+        freeSelectedUnitQuantity: line.freeSelectedUnitQuantity,
+        inventoryQuantity: line.quantity,
+        paidInventoryQuantity: line.paidInventoryQuantity,
+        freeInventoryQuantity: line.freeInventoryQuantity,
+        unitRef: line.item.unitRef ?? null,
+        unit: line.item.unit ?? null,
+        unitNameSnapshot: line.item.unitNameSnapshot ?? null,
+        baseUnitRef: line.item.baseUnitRef ?? null,
+        baseUnitCode: line.item.baseUnitCode ?? line.item.unit ?? null,
+        baseUnitNameSnapshot: line.item.baseUnitNameSnapshot ?? null,
+        unitFactor: getOrderLineUnitFactor(line.item),
         unitRefundAmount: line.unitRefundAmount,
         refundAmount: line.refundAmount,
         restoredStorageId: line.restoredStorageId,

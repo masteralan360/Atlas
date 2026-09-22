@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  allocatePurchaseCostToBaseInventory,
   getOrderLineFreeBonusQuantity,
+  getOrderLineFreeBonusInventoryQuantity,
   getOrderLineFulfilledQuantity,
   getOrderLineInventoryQuantity,
+  getOrderLinePaidInventoryQuantity,
   getOrderLinePaidQuantity,
+  getOrderLineReturnedFreeInventoryQuantity,
+  getOrderLineReturnedInventoryQuantity,
+  getOrderLineReturnedPaidInventoryQuantity,
+  getOrderLineUnitFactor,
   hasOrderLineInventoryQuantity,
   hasOrderLineFreeBonus,
   isFulfilledUnitsAvailableForOrder
@@ -27,6 +34,51 @@ describe('order line item quantity normalization', () => {
     expect(getOrderLineFreeBonusQuantity(item)).toBe(2)
     expect(getOrderLineInventoryQuantity(item)).toBe(7)
     expect(hasOrderLineFreeBonus([item])).toBe(true)
+  })
+
+  it('converts paid and free commercial quantities into the canonical inventory unit', () => {
+    const item = { quantity: 2, freeBonusQuantity: 1, unitFactor: 20 }
+
+    expect(getOrderLineUnitFactor(item)).toBe(20)
+    expect(getOrderLinePaidQuantity(item)).toBe(2)
+    expect(getOrderLinePaidInventoryQuantity(item)).toBe(40)
+    expect(getOrderLineFreeBonusInventoryQuantity(item)).toBe(20)
+    expect(getOrderLineInventoryQuantity(item)).toBe(60)
+  })
+
+  it('prefers immutable inventory snapshots and tolerates legacy or invalid factors', () => {
+    expect(getOrderLineInventoryQuantity({
+      quantity: 99,
+      freeBonusQuantity: 99,
+      unitFactor: 20,
+      inventoryQuantity: 40,
+      freeBonusInventoryQuantity: 20,
+    })).toBe(60)
+    expect(getOrderLineInventoryQuantity({ quantity: 2, unitFactor: 0 })).toBe(2)
+    expect(getOrderLineInventoryQuantity({ quantity: 2, unitFactor: Number.NaN })).toBe(2)
+  })
+
+  it('allocates paid purchase cost across paid and free base inventory', () => {
+    expect(allocatePurchaseCostToBaseInventory(40000, 2, 60)).toBe(1333.333333)
+    expect(allocatePurchaseCostToBaseInventory(40000, 2, 0)).toBe(0)
+  })
+
+  it('keeps cumulative paid and free returns distinct while preserving legacy paid-first behavior', () => {
+    const line = {
+      quantity: 2,
+      freeBonusQuantity: 1,
+      unitFactor: 20,
+      inventoryQuantity: 40,
+      freeBonusInventoryQuantity: 20,
+      returnedQuantity: 40,
+      returnedPaidInventoryQuantity: 20,
+      returnedFreeInventoryQuantity: 20,
+    }
+
+    expect(getOrderLineReturnedInventoryQuantity(line)).toBe(40)
+    expect(getOrderLineReturnedPaidInventoryQuantity(line)).toBe(20)
+    expect(getOrderLineReturnedFreeInventoryQuantity(line)).toBe(20)
+    expect(getOrderLineReturnedPaidInventoryQuantity({ ...line, returnedPaidInventoryQuantity: undefined })).toBe(40)
   })
 
   it('accepts a bonus-only line while rejecting lines with no valid inventory quantity', () => {

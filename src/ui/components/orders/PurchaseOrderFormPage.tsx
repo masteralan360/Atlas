@@ -22,7 +22,7 @@ import {
     parseLocalDateValue,
     sanitizeNumericInput
 } from '@/lib/utils'
-import { getOrderLineFreeBonusQuantity, hasOrderLineInventoryQuantity } from '@/lib/orderLineItems'
+import { getOrderLineFreeBonusQuantity, getOrderLineInventoryQuantity, hasOrderLineInventoryQuantity } from '@/lib/orderLineItems'
 import { ORDER_DECIMAL_STEP, roundOrderValue } from '@/lib/orderPrecision'
 import { canBePurchased } from '@/lib/catalogItem'
 import {
@@ -35,6 +35,8 @@ import {
     usePriceBookCatalogState,
     useProducts,
     useProductUnitConversions,
+    useUnitRelationships,
+    useUnits,
     useWorkspaceProductBarcodes,
     usePurchaseOrder,
     useStorages,
@@ -44,13 +46,23 @@ import {
     type OrderAdjustment,
     type PurchaseOrder,
     type PurchaseOrderItem,
-    type PurchaseOrderStatus
+    type PurchaseOrderStatus,
+    type UnitRef
 } from '@/local-db'
 import { useWorkspace } from '@/workspace'
 import { useOrderEditorLiveData } from '@/hooks/useOrderEditorLiveData'
 import { isOrderReadOnly } from '@/lib/orderEditability'
 import { isRemoteOrderSaveConfirmationError, type OrderSaveProgress } from '@/lib/orderSaveProgress'
 import { useWorkspacePermissions } from '@/permissions'
+import {
+    assertValidOrderUnitQuantity,
+    buildProductOrderUnitOptions,
+    getUnitDescriptors,
+    indexProductUnitContexts,
+    soldQuantityToInventoryQuantity,
+    type ProductOrderUnitOption
+} from '@/lib/unitRelationships'
+import { isOrderUnitConfigurationError } from '@/lib/orderUnitErrors'
 import {
     Button,
     Badge,
@@ -101,6 +113,13 @@ type FormItem = {
     productSearch: string
     storageId: string
     quantity: string
+    unitRef: string
+    unitRelationshipId: string
+    unitFactor: string
+    baseUnitRef: string
+    baseUnitCode: string
+    unitNameSnapshot: string
+    baseUnitNameSnapshot: string
     freeBonusQuantity: string
     freeBonusUnit: string
     unitPrice: string
@@ -122,6 +141,13 @@ function createEmptyItem(storageId = '', seq = 1): FormItem {
         productSearch: '',
         storageId,
         quantity: '1',
+        unitRef: '',
+        unitRelationshipId: '',
+        unitFactor: '',
+        baseUnitRef: '',
+        baseUnitCode: '',
+        unitNameSnapshot: '',
+        baseUnitNameSnapshot: '',
         freeBonusQuantity: '0',
         freeBonusUnit: '',
         unitPrice: '',
@@ -206,13 +232,17 @@ export function PurchaseOrderFormPage({
     const products = useProducts(workspaceId)
     const purchasableProducts = useMemo(() => products.filter(canBePurchased), [products])
     const productUnitConversions = useProductUnitConversions(workspaceId)
-    const orderSelectableProducts = useMemo(() => {
-        const relatedProductIds = new Set(productUnitConversions.filter((row) => !row.isDeleted).map((row) => row.productId))
-        return purchasableProducts.filter((product) => !relatedProductIds.has(product.id))
-    }, [productUnitConversions, purchasableProducts])
+    const unitRelationships = useUnitRelationships(workspaceId)
+    const customUnits = useUnits(workspaceId)
+    const unitDescriptors = useMemo(() => getUnitDescriptors(customUnits), [customUnits])
+    const productUnitContexts = useMemo(
+        () => indexProductUnitContexts(productUnitConversions, unitRelationships),
+        [productUnitConversions, unitRelationships]
+    )
+    const orderSelectableProducts = purchasableProducts
     const productBarcodes = useWorkspaceProductBarcodes(workspaceId, { syncProductCache: false })
     const storages = useStorages(workspaceId)
-    const { isDynamicUnit, options: unitOptions } = useUnitRegistry(workspaceId)
+    const { options: unitOptions } = useUnitRegistry(workspaceId)
     const supplierPartners = useBusinessPartners(workspaceId, { roles: ['supplier'] })
     const editingOrder = usePurchaseOrder(editingOrderId)
     const defaultStorageId = getPrimaryStorageFromList(storages)?.id || ''
@@ -332,6 +362,13 @@ export function PurchaseOrderFormPage({
                     productSearch: product?.name || '',
                     storageId: item.storageId || editingOrder.destinationStorageId || defaultStorageId,
                     quantity: String(item.quantity),
+                    unitRef: item.unitRef || '',
+                    unitRelationshipId: item.unitRelationshipId || '',
+                    unitFactor: item.unitFactor == null ? '' : String(item.unitFactor),
+                    baseUnitRef: item.baseUnitRef || '',
+                    baseUnitCode: item.baseUnitCode || item.unit || product?.unit || '',
+                    unitNameSnapshot: item.unitNameSnapshot || item.unit || product?.unit || '',
+                    baseUnitNameSnapshot: item.baseUnitNameSnapshot || item.baseUnitCode || item.unit || product?.unit || '',
                     freeBonusQuantity: String(getOrderLineFreeBonusQuantity(item)),
                     freeBonusUnit: item.freeBonusUnit || '',
                     unitPrice: String(item.convertedUnitPrice),
@@ -395,6 +432,13 @@ export function PurchaseOrderFormPage({
                 productSearch: product?.name || '',
                 storageId: item.storageId || editingOrder.destinationStorageId || defaultStorageId,
                 quantity: String(item.quantity),
+                unitRef: item.unitRef || '',
+                unitRelationshipId: item.unitRelationshipId || '',
+                unitFactor: item.unitFactor == null ? '' : String(item.unitFactor),
+                baseUnitRef: item.baseUnitRef || '',
+                baseUnitCode: item.baseUnitCode || item.unit || product?.unit || '',
+                unitNameSnapshot: item.unitNameSnapshot || item.unit || product?.unit || '',
+                baseUnitNameSnapshot: item.baseUnitNameSnapshot || item.baseUnitCode || item.unit || product?.unit || '',
                 freeBonusQuantity: String(getOrderLineFreeBonusQuantity(item)),
                 freeBonusUnit: item.freeBonusUnit || '',
                 unitPrice: String(item.convertedUnitPrice),
@@ -408,25 +452,38 @@ export function PurchaseOrderFormPage({
                 note: item.note || ''
             }
         }))
-    }, [defaultStorageId, editingOrder])
+    }, [defaultStorageId, editingOrder, products])
 
     useEffect(() => {
         if (!editingOrder || !products.length) return
         setItems((current) => {
             let changed = false
             const next = current.map((item) => {
-                if (item.productId && !item.productSearch) {
+                if (item.productId) {
                     const product = products.find((p) => p.id === item.productId)
-                    if (product) {
+                    if (product && (!item.productSearch || !item.unitRef)) {
+                        const legacyUnit = buildProductOrderUnitOptions(product, null, unitDescriptors)[0]
                         changed = true
-                        return { ...item, productSearch: product.name }
+                        return {
+                            ...item,
+                            productSearch: item.productSearch || product.name,
+                            ...(!item.unitRef ? {
+                                unitRef: legacyUnit.unitRef,
+                                unitRelationshipId: '',
+                                unitFactor: '1',
+                                baseUnitRef: legacyUnit.baseUnitRef,
+                                baseUnitCode: legacyUnit.baseUnitCode,
+                                unitNameSnapshot: item.unitNameSnapshot || legacyUnit.unitCode,
+                                baseUnitNameSnapshot: item.baseUnitNameSnapshot || legacyUnit.baseUnitCode
+                            } : {})
+                        }
                     }
                 }
                 return item
             })
             return changed ? next : current
         })
-    }, [products, editingOrder])
+    }, [products, editingOrder, unitDescriptors])
 
     const liveRates = useMemo(() => ({ exchangeData, eurRates, tryRates }), [exchangeData, eurRates, tryRates])
     const adjustmentExchangeRates = useMemo(() => buildOrderExchangeRatesSnapshot(liveRates), [liveRates])
@@ -450,10 +507,46 @@ export function PurchaseOrderFormPage({
         return storage.isSystem ? (t(`storages.${storage.name.toLowerCase()}`) || storage.name) : storage.name
     }
 
+    const getProductUnitOptions = useCallback((productId: string) => {
+        const product = products.find((entry) => entry.id === productId)
+        if (!product) return []
+        return buildProductOrderUnitOptions(product, productUnitContexts.get(productId), unitDescriptors)
+    }, [productUnitContexts, products, unitDescriptors])
+
+    const getFormUnitOption = useCallback((item: FormItem, product: typeof products[number] | undefined): ProductOrderUnitOption | null => {
+        if (!product || !item.unitRef) return null
+        const current = getProductUnitOptions(product.id).find((option) => option.unitRef === item.unitRef)
+        if (!current) return null
+        const snapshotFactor = Number(item.unitFactor)
+        if (!Number.isFinite(snapshotFactor) || snapshotFactor <= 0) return current
+        return {
+            ...current,
+            factor: snapshotFactor,
+            relationshipId: item.unitRelationshipId || current.relationshipId,
+            baseUnitRef: (item.baseUnitRef || current.baseUnitRef) as UnitRef,
+            baseUnitCode: item.baseUnitCode || current.baseUnitCode
+        }
+    }, [getProductUnitOptions])
+
+    const getUnitLabel = useCallback((unitCode: string) =>
+        t(`products.units.${unitCode}`, { defaultValue: unitCode }), [t])
+
+    const getUnitSnapshotFields = useCallback((option: ProductOrderUnitOption): Pick<FormItem,
+        'unitRef' | 'unitRelationshipId' | 'unitFactor' | 'baseUnitRef' | 'baseUnitCode' | 'unitNameSnapshot' | 'baseUnitNameSnapshot'> => ({
+        unitRef: option.unitRef,
+        unitRelationshipId: option.relationshipId || '',
+        unitFactor: String(option.factor),
+        baseUnitRef: option.baseUnitRef,
+        baseUnitCode: option.baseUnitCode,
+        unitNameSnapshot: option.unitCode,
+        baseUnitNameSnapshot: option.baseUnitCode
+    }), [])
+
     const resolveItemPricing = useCallback((
         productId: string,
         partnerCurrency: CurrencyCode,
-        partner: Pick<BusinessPartner, 'priceBookId'> | null | undefined
+        partner: Pick<BusinessPartner, 'priceBookId'> | null | undefined,
+        unitRef: string
     ): Pick<FormItem, 'unitPrice' | 'batchSalePrice' | 'priceBookId' | 'priceBookItemId' | 'priceSourceCurrency'> => {
         const product = products.find((entry) => entry.id === productId)
         if (!product) {
@@ -466,11 +559,23 @@ export function PurchaseOrderFormPage({
             }
         }
 
+        const unitOption = getProductUnitOptions(productId).find((option) => option.unitRef === unitRef)
+        if (productUnitContexts.has(productId) && !unitOption) {
+            return {
+                unitPrice: '',
+                batchSalePrice: '',
+                priceBookId: '',
+                priceBookItemId: '',
+                priceSourceCurrency: ''
+            }
+        }
+        const factor = unitOption?.factor ?? 1
+
         const priceBookItem = getPriceBookItemForPartner(partner, productId)
         if (priceBookItem) {
             return {
                 unitPrice: String(convertCurrencyAmountWithLiveRates(
-                    priceBookItem.costPrice ?? product.costPrice ?? 0,
+                    (priceBookItem.costPrice ?? product.costPrice ?? 0) * factor,
                     priceBookItem.currency,
                     partnerCurrency,
                     liveRates
@@ -488,13 +593,13 @@ export function PurchaseOrderFormPage({
         }
 
         return {
-            unitPrice: String(convertCurrencyAmountWithLiveRates(product.costPrice ?? 0, product.currency, partnerCurrency, liveRates)),
+            unitPrice: String(convertCurrencyAmountWithLiveRates((product.costPrice ?? 0) * factor, product.currency, partnerCurrency, liveRates)),
             batchSalePrice: String(product.price),
             priceBookId: '',
             priceBookItemId: '',
             priceSourceCurrency: ''
         }
-    }, [getPriceBookItemForPartner, liveRates, products])
+    }, [getPriceBookItemForPartner, getProductUnitOptions, liveRates, productUnitContexts, products])
 
     const selectSupplierPartner = useCallback((partner: Pick<BusinessPartner, 'id' | 'partnerName' | 'defaultCurrency' | 'priceBookId'>) => {
         const nextCurrency = partner.defaultCurrency || currency
@@ -503,7 +608,7 @@ export function PurchaseOrderFormPage({
         changeOrderCurrency(nextCurrency)
         if (priceBooksEnabled) {
             setItems((current) => current.map((item) => item.productId
-                ? { ...item, ...resolveItemPricing(item.productId, nextCurrency, partner) }
+                ? { ...item, ...resolveItemPricing(item.productId, nextCurrency, partner, item.unitRef) }
                 : item
             ))
         }
@@ -539,12 +644,52 @@ export function PurchaseOrderFormPage({
                 if (itemIndex !== index) return item
                 if (priceBooksEnabled && changes.productId && !selectedSupplier) return item
                 const next = { ...item, ...changes }
-                if (changes.productId && (!item.unitPrice || changes.productId !== item.productId)) {
-                    Object.assign(next, resolveItemPricing(changes.productId, currency, selectedSupplier))
+                if (changes.productId && changes.productId !== item.productId) {
+                    const unitOptions = getProductUnitOptions(changes.productId)
+                    const defaultUnit = productUnitContexts.has(changes.productId) ? null : unitOptions[0] ?? null
+                    Object.assign(next, defaultUnit ? getUnitSnapshotFields(defaultUnit) : {
+                        unitRef: '',
+                        unitRelationshipId: '',
+                        unitFactor: '',
+                        baseUnitRef: '',
+                        baseUnitCode: '',
+                        unitNameSnapshot: '',
+                        baseUnitNameSnapshot: ''
+                    })
+                    next.unitPrice = ''
+                    next.freeBonusQuantity = ''
+                    next.freeBonusUnit = ''
+                    next.batchNumber = ''
+                    next.batchExpiryDate = ''
+                    next.batchManufacturingDate = ''
+                    if (defaultUnit) Object.assign(next, resolveItemPricing(changes.productId, currency, selectedSupplier, defaultUnit.unitRef))
                 } else if (changes.productId !== undefined && !changes.productId) {
+                    next.unitRef = ''
+                    next.unitRelationshipId = ''
+                    next.unitFactor = ''
+                    next.baseUnitRef = ''
+                    next.baseUnitCode = ''
+                    next.unitNameSnapshot = ''
+                    next.baseUnitNameSnapshot = ''
+                    next.unitPrice = ''
+                    next.freeBonusQuantity = ''
+                    next.freeBonusUnit = ''
                     next.priceBookId = ''
                     next.priceBookItemId = ''
                     next.priceSourceCurrency = ''
+                } else if (changes.unitRef !== undefined && next.productId) {
+                    const selectedUnit = getProductUnitOptions(next.productId).find((option) => option.unitRef === changes.unitRef)
+                    next.freeBonusQuantity = ''
+                    next.freeBonusUnit = ''
+                    next.batchNumber = ''
+                    next.batchExpiryDate = ''
+                    next.batchManufacturingDate = ''
+                    if (selectedUnit) {
+                        Object.assign(next, getUnitSnapshotFields(selectedUnit))
+                        Object.assign(next, resolveItemPricing(next.productId, currency, selectedSupplier, selectedUnit.unitRef))
+                    } else {
+                        next.unitPrice = ''
+                    }
                 }
                 return next
             })
@@ -578,7 +723,7 @@ export function PurchaseOrderFormPage({
         const subtotal = items.reduce((sum, item) => sum + ((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)), 0)
         const existingCalculatedTotal = subtotal - Number(discount || 0)
         return calculateOrderTotalWithAdjustments(existingCalculatedTotal, orderAdjustments)
-    }, [currency, discount, items, orderAdjustments])
+    }, [discount, items, orderAdjustments])
 
     const configuredItemsCount = useMemo(
         () => items.filter((item) => item.productId && hasOrderLineInventoryQuantity(item)).length,
@@ -591,7 +736,8 @@ export function PurchaseOrderFormPage({
     const isFinanced = paymentMethod === 'loan' || paymentMethod === 'installments'
     const isInstallmentBased = paymentMethod === 'installments'
     const canSubmit = Boolean(selectedSupplier) &&
-        items.some((item) => item.productId && hasOrderLineInventoryQuantity(item)) &&
+        items.some((item) => item.productId && item.unitRef && hasOrderLineInventoryQuantity(item)) &&
+        items.every((item) => !item.productId || Boolean(item.unitRef)) &&
         (!priceBooksEnabled || isPriceBookCatalogReady) &&
         (!isFinanced || initialPayment < preview) &&
         (!isInstallmentBased || (
@@ -640,9 +786,18 @@ export function PurchaseOrderFormPage({
                         }))
                     }
 
+                    const unitOption = getFormUnitOption(item, product)
+                    if (!unitOption) {
+                        throw new Error(t('orders.form.errors.unitRequired', {
+                            productName: product.name,
+                            defaultValue: `Select a buying unit for ${product.name}.`
+                        }))
+                    }
                     const quantity = Number(item.quantity)
                     const freeBonusQuantityValue = Number(item.freeBonusQuantity || 0)
-                    if (!Number.isFinite(quantity) || quantity < 0) {
+                    try {
+                        assertValidOrderUnitQuantity(quantity, unitOption.isDynamic)
+                    } catch {
                         throw new Error(t('orders.form.errors.invalidQuantity', {
                             productName: product.name,
                             defaultValue: `Enter a valid quantity for ${product.name}.`
@@ -654,13 +809,17 @@ export function PurchaseOrderFormPage({
                         ? item.priceSourceCurrency
                         : product.currency
                     const unitPrice = Number(item.unitPrice || 0)
-                    if (!Number.isFinite(freeBonusQuantityValue) || freeBonusQuantityValue < 0) {
+                    try {
+                        assertValidOrderUnitQuantity(freeBonusQuantityValue, unitOption.isDynamic)
+                    } catch {
                         throw new Error(t('orders.form.errors.invalidFreeBonus', {
                             productName: product.name,
                             defaultValue: `Enter a valid free bonus for ${product.name}.`
                         }))
                     }
                     const freeBonusQuantity = freeBonusQuantityValue
+                    const paidInventoryQuantity = soldQuantityToInventoryQuantity(quantity, unitOption.factor)
+                    const freeBonusInventoryQuantity = soldQuantityToInventoryQuantity(freeBonusQuantity, unitOption.factor)
                     const batchSalePrice = item.batchSalePrice === '' ? null : Number(item.batchSalePrice)
                     if (batchSalePrice !== null && (!Number.isFinite(batchSalePrice) || batchSalePrice < 0)) {
                         throw new Error(t('orders.form.errors.invalidBatchSalePrice', {
@@ -677,10 +836,20 @@ export function PurchaseOrderFormPage({
                         storageId: item.storageId,
                         productName: product.name,
                         productSku: product.sku,
-                        unit: product.unit,
+                        unit: unitOption.unitCode,
+                        unitRelationshipId: unitOption.relationshipId,
+                        unitRef: unitOption.unitRef,
+                        unitNameSnapshot: item.unitNameSnapshot || unitOption.unitCode,
+                        baseUnitRef: unitOption.baseUnitRef,
+                        baseUnitCode: unitOption.baseUnitCode,
+                        baseUnitNameSnapshot: item.baseUnitNameSnapshot || unitOption.baseUnitCode,
+                        unitFactor: unitOption.factor,
                         quantity,
                         ...(freeBonusQuantity > 0 ? { freeBonusQuantity } : {}),
-                        ...(item.freeBonusUnit && item.freeBonusUnit !== product.unit ? { freeBonusUnit: item.freeBonusUnit } : {}),
+                        inventoryQuantity: paidInventoryQuantity,
+                        freeBonusInventoryQuantity,
+                        receivedQuantity: paidInventoryQuantity + freeBonusInventoryQuantity,
+                        ...(!unitOption.relationshipId && item.freeBonusUnit && item.freeBonusUnit !== unitOption.unitCode ? { freeBonusUnit: item.freeBonusUnit } : {}),
                         lineTotal: roundFormAmount(quantity * unitPrice),
                         originalCurrency: sourceCurrency,
                         originalUnitPrice: convertCurrencyAmountWithLiveRates(
@@ -792,6 +961,8 @@ export function PurchaseOrderFormPage({
                 title: t('common.error') || 'Error',
                 description: isRemoteOrderSaveConfirmationError(error)
                     ? t('orders.form.errors.remoteSaveFailed')
+                    : isOrderUnitConfigurationError(error)
+                        ? t('orders.form.errors.unitConfigurationChanged')
                     : error?.message || t('orders.form.errors.savePurchaseFailed', { defaultValue: 'Failed to save purchase order.' }),
                 variant: 'destructive',
                 action: (
@@ -1007,18 +1178,29 @@ export function PurchaseOrderFormPage({
                                     <CardContent className="space-y-3">
                                         {items.map((item, index) => {
                                             const product = products.find((entry) => entry.id === item.productId)
-                                            const freeBonusDisplayUnit = item.freeBonusUnit || product?.unit || ''
+                                            const itemUnitOptions = product ? getProductUnitOptions(product.id) : []
+                                            const hasRelatedUnits = Boolean(product && productUnitContexts.has(product.id))
+                                            const selectedUnitOption = getFormUnitOption(item, product)
+                                            const selectedUnitCode = selectedUnitOption?.unitCode || ''
+                                            const freeBonusDisplayUnit = item.freeBonusUnit || selectedUnitCode
                                             const lineTotal = roundFormAmount((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0))
                                             const freeBonusQuantity = Math.max(0, Number(item.freeBonusQuantity || 0))
-                                            const inventoryQuantity = (Number(item.quantity) || 0) + (canUseFreeBonus ? freeBonusQuantity : 0)
+                                            const inventoryQuantity = getOrderLineInventoryQuantity({
+                                                quantity: Number(item.quantity) || 0,
+                                                freeBonusQuantity: canUseFreeBonus ? freeBonusQuantity : 0,
+                                                unitFactor: selectedUnitOption?.factor ?? 1
+                                            })
+                                            const receivedBaseUnitCost = inventoryQuantity > 0
+                                                ? convertCurrencyAmountWithLiveRates(
+                                                    lineTotal / inventoryQuantity,
+                                                    currency,
+                                                    product?.currency || currency,
+                                                    liveRates
+                                                )
+                                                : 0
                                             const createsBatch = product
                                                 ? shouldCreatePurchaseCostBatch(
-                                                    convertCurrencyAmountWithLiveRates(
-                                                        Number(item.unitPrice) || 0,
-                                                        currency,
-                                                        product.currency,
-                                                        liveRates
-                                                    ),
+                                                    receivedBaseUnitCost,
                                                     product.costPrice ?? 0,
                                                     product.currency
                                                 ) || (Boolean(item.priceBookId && item.priceBookItemId) && (
@@ -1037,10 +1219,7 @@ export function PurchaseOrderFormPage({
                                                 <div
                                                     key={item.id}
                                                     className={cn(
-                                                        'relative grid gap-3 rounded-2xl border bg-background p-4 transition-all duration-700',
-                                                        canUseFreeBonus
-                                                            ? 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(80px,0.55fr)_minmax(80px,0.55fr)_minmax(108px,0.8fr)_minmax(72px,0.18fr)]'
-                                                            : 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(80px,0.55fr)_minmax(108px,0.8fr)_minmax(72px,0.18fr)]',
+                                                        'relative grid gap-4 rounded-2xl border bg-background p-4 transition-all duration-700 sm:grid-cols-2 lg:grid-cols-[repeat(24,minmax(0,1fr))]',
                                                         item.seq === highlightedNewSeq && 'border-primary ring-2 ring-primary/60 bg-primary/5'
                                                     )}
                                                 >
@@ -1048,7 +1227,10 @@ export function PurchaseOrderFormPage({
                                                         {item.seq}
                                                     </span>
                                                     <div
-                                                        className="space-y-2"
+                                                        className={cn(
+                                                            'min-w-0 space-y-2 sm:col-span-2',
+                                                            canUseFreeBonus ? 'lg:col-span-6' : 'lg:col-span-7'
+                                                        )}
                                                         data-tour-id={index === 0 ? 'tutorial-order-product-picker' : undefined}
                                                         data-demo-product-linked={item.productId ? 'true' : 'false'}
                                                     >
@@ -1082,10 +1264,18 @@ export function PurchaseOrderFormPage({
                                                             />
                                                         </div>
                                                     </div>
-                                                    <div id={`purchase-storage-${index}`} className={cn('space-y-2', highlightedStorageIndex === index && 'animate-pulse')} data-tour-id={index === 0 ? 'tutorial-order-storage' : undefined}>
+                                                    <div
+                                                        id={`purchase-storage-${index}`}
+                                                        className={cn(
+                                                            'min-w-0 space-y-2',
+                                                            canUseFreeBonus ? 'lg:col-span-4' : 'lg:col-span-5',
+                                                            highlightedStorageIndex === index && 'animate-pulse'
+                                                        )}
+                                                        data-tour-id={index === 0 ? 'tutorial-order-storage' : undefined}
+                                                    >
                                                         <Label className={cn(highlightedStorageIndex === index && 'text-destructive font-bold')}>{t('orders.form.selectStorage', { defaultValue: 'Select Storage' })}</Label>
                                                         <Select value={item.storageId} onValueChange={(value) => { setHighlightedStorageIndex(null); updateItem(index, { storageId: value }) }}>
-                                                            <SelectTrigger className={cn(highlightedStorageIndex === index && 'ring-2 ring-destructive')}><SelectValue placeholder={t('orders.form.selectStorage', { defaultValue: 'Select Storage' })} /></SelectTrigger>
+                                                            <SelectTrigger className={cn('w-full min-w-0', highlightedStorageIndex === index && 'ring-2 ring-destructive')}><SelectValue placeholder={t('orders.form.selectStorage', { defaultValue: 'Select Storage' })} /></SelectTrigger>
                                                             <SelectContent>
                                                                 {storages.map((storage) => (
                                                                     <SelectItem key={storage.id} value={storage.id}>
@@ -1094,7 +1284,7 @@ export function PurchaseOrderFormPage({
                                                                 ))}
                                                             </SelectContent>
                                                         </Select>
-                                                        <p className="text-xs text-muted-foreground">
+                                                        <p className="break-words text-xs text-muted-foreground">
                                                             {item.storageId
                                                                 ? t('orders.form.receiveIntoStorageHint', {
                                                                     storageName: getStorageDisplayName(item.storageId),
@@ -1103,28 +1293,56 @@ export function PurchaseOrderFormPage({
                                                                 : t('orders.form.chooseTargetStorageForLine', { defaultValue: 'Choose a target storage for this line.' })}
                                                         </p>
                                                     </div>
-                                                    <div className="space-y-2" data-tour-id={index === 0 ? 'tutorial-order-quantity' : undefined}>
-                                                        <Label>{t('common.quantity', { defaultValue: 'Quantity' })}</Label>
-                                                        <div className="flex items-center gap-1">
-                                                            <Input type="number" min={isDynamicUnit(product?.unit) ? ORDER_DECIMAL_STEP : "1"} step={isDynamicUnit(product?.unit) ? ORDER_DECIMAL_STEP : "1"} value={item.quantity} onChange={(event) => updateItem(index, { quantity: event.target.value })} placeholder={t('common.quantity', { defaultValue: 'Quantity' })} />
-                                                            {product?.unit && <span className="text-xs text-muted-foreground shrink-0">{t(`products.units.${product.unit}`, product.unit)}</span>}
+                                                    <div className="min-w-0 space-y-2 lg:col-span-5" data-tour-id={index === 0 ? 'tutorial-order-quantity' : undefined}>
+                                                        <Label>
+                                                            {hasRelatedUnits
+                                                                ? t('orders.form.quantityAndUnit', { defaultValue: 'Quantity and unit' })
+                                                                : t('common.quantity', { defaultValue: 'Quantity' })} *
+                                                        </Label>
+                                                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                                            <Input
+                                                                className="min-w-20 flex-1 basis-20"
+                                                                type="number"
+                                                                min={selectedUnitOption?.isDynamic ? ORDER_DECIMAL_STEP : '1'}
+                                                                step={selectedUnitOption?.isDynamic ? ORDER_DECIMAL_STEP : '1'}
+                                                                value={item.quantity}
+                                                                onChange={(event) => updateItem(index, { quantity: event.target.value })}
+                                                                placeholder={t('common.quantity', { defaultValue: 'Quantity' })}
+                                                            />
+                                                            {hasRelatedUnits ? (
+                                                                <Select value={item.unitRef} onValueChange={(value) => updateItem(index, { unitRef: value })}>
+                                                                    <SelectTrigger className="min-w-28 flex-1 basis-28" aria-label={t('orders.form.unit', { defaultValue: 'Unit' })}>
+                                                                        <SelectValue placeholder={t('orders.form.selectUnit', { defaultValue: 'Select unit' })} />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        {itemUnitOptions.map((option) => (
+                                                                            <SelectItem key={option.unitRef} value={option.unitRef}>
+                                                                                {getUnitLabel(option.unitCode)}
+                                                                            </SelectItem>
+                                                                        ))}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            ) : selectedUnitCode ? (
+                                                                <Badge variant="outline" className="max-w-full shrink-0 truncate">{getUnitLabel(selectedUnitCode)}</Badge>
+                                                            ) : null}
                                                         </div>
                                                     </div>
                                                     {canUseFreeBonus ? (
-                                                        <div className="space-y-2">
+                                                        <div className="min-w-0 space-y-2 lg:col-span-3">
                                                             <Label>{t('orders.form.freeBonus', { defaultValue: 'Free Bonus' })}</Label>
-                                                            <div className="flex items-center gap-1">
+                                                            <div className="min-w-0 space-y-1.5">
                                                                 <Input
+                                                                    className="w-full min-w-0"
                                                                     type="number"
                                                                     min="0"
-                                                                    step={isDynamicUnit(product?.unit) ? ORDER_DECIMAL_STEP : '1'}
+                                                                    step={selectedUnitOption?.isDynamic ? ORDER_DECIMAL_STEP : '1'}
                                                                     value={item.freeBonusQuantity}
                                                                     onChange={(event) => updateItem(index, { freeBonusQuantity: event.target.value })}
                                                                     placeholder={t('orders.form.freeBonus', { defaultValue: 'Free Bonus' })}
                                                                 />
-                                                                {(item.freeBonusUnit || product?.unit) && <span className="text-xs text-muted-foreground shrink-0">{t(`products.units.${freeBonusDisplayUnit}`, freeBonusDisplayUnit)}</span>}
+                                                                {(item.freeBonusUnit || product?.unit) && <span className="block truncate text-xs text-muted-foreground">{t(`products.units.${freeBonusDisplayUnit}`, freeBonusDisplayUnit)}</span>}
                                                             </div>
-                                                            {isAccessKeyHeld ? (
+                                                                {isAccessKeyHeld && !hasRelatedUnits ? (
                                                             <FreeBonusUnitSelect
                                                                 value={item.freeBonusUnit}
                                                                 productUnit={product?.unit}
@@ -1134,11 +1352,17 @@ export function PurchaseOrderFormPage({
                                                             ) : null}
                                                         </div>
                                                     ) : null}
-                                                    <div className="space-y-2" data-tour-id={index === 0 ? 'tutorial-order-unit-price' : undefined}>
+                                                    <div
+                                                        className={cn(
+                                                            'min-w-0 space-y-2',
+                                                            canUseFreeBonus ? 'lg:col-span-4' : 'lg:col-span-5'
+                                                        )}
+                                                        data-tour-id={index === 0 ? 'tutorial-order-unit-price' : undefined}
+                                                    >
                                                         <Label>{t('common.buyingPrice', { defaultValue: 'Buying Price' })}</Label>
-                                                        <Input value={formatNumericInput(item.unitPrice)} onChange={(event) => updateItem(index, { unitPrice: sanitizeNumericInput(event.target.value, { allowDecimal: true, maxFractionDigits: 3 }) })} placeholder={t('common.buyingPrice', { defaultValue: 'Buying Price' })} />
+                                                        <Input className="w-full min-w-0" value={formatNumericInput(item.unitPrice)} onChange={(event) => updateItem(index, { unitPrice: sanitizeNumericInput(event.target.value, { allowDecimal: true, maxFractionDigits: 3 }) })} placeholder={t('common.buyingPrice', { defaultValue: 'Buying Price' })} />
                                                     </div>
-                                                    <div className="flex items-start justify-end gap-1" data-tour-id={index === 0 ? 'tutorial-order-line-actions' : undefined}>
+                                                    <div className="flex min-w-0 items-start justify-end gap-0 sm:col-span-2 lg:col-span-2 lg:justify-center" data-tour-id={index === 0 ? 'tutorial-order-line-actions' : undefined}>
                                                         <OrderLineItemNoteDialog
                                                             note={item.note}
                                                             onSave={(note) => updateItem(index, { note })}
@@ -1155,16 +1379,16 @@ export function PurchaseOrderFormPage({
                                                             <Trash2 className="h-4 w-4" />
                                                         </Button>
                                                     </div>
-                                                    <div className={cn('flex items-center justify-between text-xs text-muted-foreground', canUseFreeBonus ? 'md:col-span-6' : 'md:col-span-5')}>
+                                                    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-muted-foreground sm:col-span-2 lg:col-span-full">
                                                         <span>{product?.sku ? `SKU: ${product.sku}` : '\u00A0'}</span>
-                                                        <span>
-                                                            {canUseFreeBonus && freeBonusQuantity > 0
-                                                                ? `${t('orders.form.inventoryQuantity', { defaultValue: 'Inventory Qty' })}: ${inventoryQuantity} - `
+                                                        <span className="ms-auto text-end">
+                                                            {selectedUnitOption && (hasRelatedUnits || (canUseFreeBonus && freeBonusQuantity > 0))
+                                                                ? `${t('orders.form.inventoryQuantity', { defaultValue: 'Inventory Qty' })}: ${inventoryQuantity} ${getUnitLabel(selectedUnitOption.baseUnitCode)} - `
                                                                 : ''}
                                                             {(t('orders.form.table.total', { defaultValue: 'Total' }))}: {formatCurrency(lineTotal, currency, features.iqd_display_preference)}
                                                         </span>
                                                     </div>
-                                                    {createsBatch && <div className={cn('grid gap-3 border-t pt-3 md:grid-cols-4', canUseFreeBonus ? 'md:col-span-6' : 'md:col-span-5')}>
+                                                    {createsBatch && <div className="grid gap-3 border-t pt-3 sm:col-span-2 sm:grid-cols-2 lg:col-span-full xl:grid-cols-4">
                                                         <div className="space-y-2">
                                                             <Label>{t('orders.form.batchNumber', { defaultValue: 'Batch / Lot Number' })}</Label>
                                                             <Input

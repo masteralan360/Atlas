@@ -23,7 +23,7 @@ import {
     formatAtlasStandardPartnerBalanceAtPosting,
     formatAtlasStandardPartnerCurrentBalance
 } from '@/lib/atlasStandardPartnerBalance'
-import { getOrderLineFreeBonusQuantity, getOrderLineInventoryQuantity, getOrderLinePaidQuantity } from '@/lib/orderLineItems'
+import { getOrderLineFreeBonusQuantity, getOrderLineInventoryQuantity, getOrderLinePaidInventoryQuantity, getOrderLinePaidQuantity } from '@/lib/orderLineItems'
 import {
     getOrderTotalWithPostReturnAdjustments,
     isPostReturnOrderAdjustment,
@@ -1425,7 +1425,9 @@ export function AtlasStandardOrderInvoiceTemplate({
         return startIndex
     })
     const paidQuantityTotal = items.reduce((sum, item) => sum + (isReturnPrint
-        ? returnLineByOrderItemId.get(item.id)?.returnedQuantity || 0
+        ? returnLineByOrderItemId.get(item.id)?.selectedUnitQuantity
+            ?? returnLineByOrderItemId.get(item.id)?.returnedQuantity
+            ?? 0
         : isSales && !isOriginalPrint
         ? getOrderPrintReturnState(item).remainingQuantity
         : getOrderLinePaidQuantity(item)), 0)
@@ -1435,7 +1437,9 @@ export function AtlasStandardOrderInvoiceTemplate({
     const paidQuantityUnits = Array.from(new Set(
         items
             .filter((item) => isReturnPrint
-                ? (returnLineByOrderItemId.get(item.id)?.returnedQuantity || 0) > 0
+                ? (returnLineByOrderItemId.get(item.id)?.selectedUnitQuantity
+                    ?? returnLineByOrderItemId.get(item.id)?.returnedQuantity
+                    ?? 0) > 0
                 : getOrderLinePaidQuantity(item) > 0)
             .map((item) => normalizeUnitCode(item.unit))
             .filter((unit): unit is string => Boolean(unit))
@@ -1594,13 +1598,23 @@ export function AtlasStandardOrderInvoiceTemplate({
                         const paidQuantity = getOrderLinePaidQuantity(item)
                         const returnLine = returnLineByOrderItemId.get(item.id)
                         const unit = normalizeUnitCode(item.unit)
+                        const unitLabel = item.unitRef?.startsWith('custom:') && item.unitNameSnapshot
+                            ? item.unitNameSnapshot
+                            : unit ? t(`products.units.${unit}`, { defaultValue: unit }) : ''
+                        const baseUnit = normalizeUnitCode(item.baseUnitCode || item.unit)
+                        const baseUnitLabel = item.baseUnitRef?.startsWith('custom:') && item.baseUnitNameSnapshot
+                            ? item.baseUnitNameSnapshot
+                            : baseUnit ? t(`products.units.${baseUnit}`, { defaultValue: baseUnit }) : ''
+                        const baseEquivalent = (item.unitFactor || 1) !== 1
+                            ? `${getOrderLinePaidInventoryQuantity(item)}${baseUnitLabel ? ` ${baseUnitLabel}` : ''}`
+                            : ''
                         const freeBonusUnit = normalizeUnitCode(item.freeBonusUnit || item.unit)
                         const returnState = isSales && !isOriginalPrint ? getOrderPrintReturnState(item) : null
-                        const originalQuantity = unit
-                            ? `${paidQuantity} ${t(`products.units.${unit}`, { defaultValue: unit })}`
+                        const originalQuantity = unitLabel
+                            ? `${paidQuantity} ${unitLabel}`
                             : paidQuantity
-                        const remainingQuantity = unit
-                            ? `${returnState?.remainingQuantity} ${t(`products.units.${unit}`, { defaultValue: unit })}`
+                        const remainingQuantity = unitLabel
+                            ? `${returnState?.remainingQuantity} ${unitLabel}`
                             : returnState?.remainingQuantity
                         const values: Record<string, ReactNode> = {
                             [tableKeys.productImage]: (
@@ -1615,7 +1629,7 @@ export function AtlasStandardOrderInvoiceTemplate({
                             [tableKeys.expiry]: batch.expiry || '\u00a0',
                             [tableKeys.batchNumber]: batch.batchNumber || '\u00a0',
                             [tableKeys.quantity]: isReturnPrint
-                                ? `${returnLine?.returnedQuantity || 0}${unit ? ` ${t(`products.units.${unit}`, { defaultValue: unit })}` : ''}`
+                                ? `${returnLine?.selectedUnitQuantity || 0}${unitLabel ? ` ${unitLabel}` : ''}`
                                 : returnState
                                 ? <OrderPrintReturnValue
                                     state={returnState}
@@ -1624,7 +1638,9 @@ export function AtlasStandardOrderInvoiceTemplate({
                                     stacked
                                     className="items-center"
                                 />
-                                : originalQuantity,
+                                : baseEquivalent
+                                    ? <div>{originalQuantity}<div className="text-[8px] opacity-60">{baseEquivalent}</div></div>
+                                    : originalQuantity,
                             [tableKeys.freeQuantity]: isReturnPrint
                                 ? '\u00a0'
                                 : getOrderLineFreeBonusQuantity(item)

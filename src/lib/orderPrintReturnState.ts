@@ -1,5 +1,5 @@
 import { roundQuantity } from '@/lib/quantity'
-import { getOrderLineInventoryQuantity, getOrderLinePaidQuantity } from '@/lib/orderLineItems'
+import { getOrderLineInventoryQuantity, getOrderLinePaidQuantity, getOrderLineReturnedPaidInventoryQuantity } from '@/lib/orderLineItems'
 
 const RETURN_EPSILON = 0.000001
 
@@ -13,6 +13,9 @@ type OrderPrintLine = {
     freeBonusQuantity?: unknown
     freeQuantity?: unknown
     returnedQuantity?: unknown
+    returnedPaidInventoryQuantity?: unknown
+    returnedFreeInventoryQuantity?: unknown
+    unitFactor?: unknown
     lineTotal?: unknown
 }
 
@@ -24,6 +27,7 @@ type OrderPrintTotal = {
 
 type OrderPrintReturnOverrides = {
     returnedQuantity?: unknown
+    returnedPaidInventoryQuantity?: unknown
     returnedAmount?: unknown
 }
 
@@ -100,7 +104,16 @@ export function getOrderPrintReturnState(
         inventoryQuantity,
         normalizeReturnedQuantity(overrides.returnedQuantity ?? item.returnedQuantity)
     )
-    const returnedPaidQuantity = Math.min(originalQuantity, returnedQuantity)
+    const factor = Number(item.unitFactor ?? 1)
+    const normalizedFactor = Number.isFinite(factor) && factor > 0 ? factor : 1
+    const returnedPaidQuantity = Math.min(
+        originalQuantity,
+        roundQuantity(getOrderLineReturnedPaidInventoryQuantity({
+            ...item,
+            returnedQuantity: overrides.returnedQuantity ?? item.returnedQuantity,
+            returnedPaidInventoryQuantity: overrides.returnedPaidInventoryQuantity ?? item.returnedPaidInventoryQuantity
+        }) / normalizedFactor)
+    )
     const remainingQuantity = roundQuantity(Math.max(0, originalQuantity - returnedPaidQuantity))
     const originalLineTotal = normalizeAmount(item.lineTotal)
     const remainingLineTotal = overrides.returnedAmount !== undefined

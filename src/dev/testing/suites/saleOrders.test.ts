@@ -21,7 +21,7 @@ let partners: typeof import('@/local-db/businessPartners')
 let accounts: typeof import('@/local-db/paymentAccounts')
 let payments: typeof import('@/local-db/payments')
 
-async function arrange(currency: 'usd' | 'iqd' = 'usd') {
+async function arrange(currency: 'usd' | 'iqd' = 'usd', quantity = 10) {
     const customer = await partners.createBusinessPartner(TEST_WORKSPACE_ID, {
         partnerName: 'Scenario Customer', phone: '07500000000', defaultCurrency: currency,
         creditLimit: 0, receivableCreditLimit: null, payableCreditLimit: null, role: 'customer'
@@ -30,7 +30,7 @@ async function arrange(currency: 'usd' | 'iqd' = 'usd') {
     const product = await hooks.createProduct(TEST_WORKSPACE_ID, {
         sku: 'DEV-SALE', name: 'Scenario Product', description: '',
         categoryId: null, category: null, storageId: storage.id, storageName: storage.name,
-        price: 100, costPrice: 40, quantity: 10, minStockLevel: 0, unit: 'pcs', currency,
+        price: 100, costPrice: 40, quantity, minStockLevel: 0, unit: 'pcs', currency,
         barcode: '', barcodes: [], imageUrl: '', canBeReturned: true, returnRules: '', createdBy: null
     })
     return { customer, storage, product }
@@ -211,6 +211,37 @@ describe('Sale Orders developer scenarios', () => {
         expect(await db.sales_orders.count()).toBe(1)
         expect(await assertOrderFinancialEffects(first.id, 100, 0)).toHaveLength(1)
         await assertStock(product.id, storage.id, 10)
+    })
+
+    it('an insufficient-stock error names every pending sales order reserving the product', async () => {
+        const { customer, storage, product } = await arrange('usd', 3)
+        const firstReservation = await orders.createSalesOrder(
+            TEST_WORKSPACE_ID,
+            saleOrderInput(customer.id, product, storage.id, 'cash', { quantity: 2, paid: true })
+        )
+        await orders.updateSalesOrderStatus(firstReservation.id, 'pending')
+        const secondReservation = await orders.createSalesOrder(
+            TEST_WORKSPACE_ID,
+            saleOrderInput(customer.id, product, storage.id, 'cash', { quantity: 1, paid: true })
+        )
+        await orders.updateSalesOrderStatus(secondReservation.id, 'pending')
+        const blockedOrder = await orders.createSalesOrder(
+            TEST_WORKSPACE_ID,
+            saleOrderInput(customer.id, product, storage.id, 'cash', { quantity: 1, paid: true })
+        )
+
+        const error = await orders.updateSalesOrderStatus(blockedOrder.id, 'pending')
+            .then(() => null, (reason: unknown) => reason)
+
+        expect(error).toBeInstanceOf(Error)
+        expect((error as Error).message).toBe(
+            `Not enough stock is available for Scenario Product. `
+            + `On hand: 3 pcs; reserved: 3 pcs; available: 0 pcs; required: 1 pcs. `
+            + `Reserved by sales orders: ${firstReservation.orderNumber} (2 pcs), `
+            + `${secondReservation.orderNumber} (1 pcs).`
+        )
+        expect((await db.sales_orders.get(blockedOrder.id))?.status).toBe('draft')
+        await assertStock(product.id, storage.id, 3)
     })
 
     it('rejects a duplicate partial reversal above the remaining amount', async () => {

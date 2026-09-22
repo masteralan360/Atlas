@@ -321,6 +321,65 @@ describe('Price Book order pricing', () => {
         })
     })
 
+    it('receives related buying units in base inventory and allocates paid carton cost across free sheets', async () => {
+        const fixture = await createPurchaseFixture()
+        const input = receivedPurchaseOrderInput(
+            fixture,
+            {
+                originalCurrency: 'iqd',
+                originalUnitPrice: 40_000,
+                convertedUnitPrice: 40_000,
+                batchSalePrice: fixture.product.price
+            },
+            null
+        )
+        input.currency = 'iqd'
+        input.subtotal = 80_000
+        input.total = 80_000
+        input.paidAmount = 80_000
+        input.items[0] = {
+            ...input.items[0],
+            quantity: 2,
+            freeBonusQuantity: 1,
+            unitRelationshipId: 'relationship-carton-sheet',
+            unitRef: 'builtin:carton',
+            unitNameSnapshot: 'Carton',
+            baseUnitRef: 'builtin:sheet',
+            baseUnitCode: 'sheet',
+            baseUnitNameSnapshot: 'Sheet',
+            unitFactor: 20,
+            inventoryQuantity: 40,
+            freeBonusInventoryQuantity: 20,
+            receivedQuantity: 60,
+            originalCurrency: 'iqd',
+            originalUnitPrice: 40_000,
+            convertedUnitPrice: 40_000,
+            lineTotal: 80_000
+        }
+
+        const order = await createPurchaseOrder(WORKSPACE_ID, input)
+        const inventory = await db.inventory
+            .where('[productId+storageId]')
+            .equals([fixture.product.id, fixture.storage.id])
+            .first()
+        const batch = await db.stock_batches
+            .where('[sourcePurchaseOrderId+sourcePurchaseOrderItemId]')
+            .equals([order.id, order.items[0].id])
+            .first()
+        const transaction = await db.inventory_transactions
+            .where('referenceId')
+            .equals(order.id)
+            .first()
+
+        expect(inventory?.quantity).toBe(60)
+        expect(transaction).toMatchObject({ quantityDelta: 60, newQuantity: 60 })
+        expect(batch).toMatchObject({
+            quantity: 60,
+            costPrice: 1_333.333,
+            currency: 'iqd'
+        })
+    })
+
     it('rolls back the local order, inventory, and receipt ledger when a line is not receivable', async () => {
         const fixture = await createPurchaseFixture()
         const input = receivedPurchaseOrderInput(

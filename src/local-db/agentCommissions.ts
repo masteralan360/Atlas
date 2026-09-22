@@ -4,7 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 
 import { supabase } from "@/auth/supabase";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
-import { getOrderLineInventoryQuantity, getOrderLinePaidQuantity } from "@/lib/orderLineItems";
+import { getOrderLineInventoryQuantity, getOrderLinePaidInventoryQuantity, getOrderLinePaidQuantity, getOrderLineReturnedInventoryQuantity, getOrderLineReturnedPaidInventoryQuantity, getOrderLineUnitFactor } from "@/lib/orderLineItems";
 import { isOnline } from "@/lib/network";
 import { normalizeOrderAdjustments } from "@/lib/orderAdjustments";
 import { getAppliedCurrencyConversion } from "@/lib/orderCurrency";
@@ -1182,11 +1182,10 @@ export function calculateSalesOrderCommission(
   let itemCost = 0;
   let fullItemRevenue = 0;
   for (const item of order.items ?? []) {
-    const returnedQuantity = Math.min(
-      getOrderLineInventoryQuantity(item),
-      Math.max(0, Number(item.returnedQuantity ?? 0)),
-    );
-    const netPaidQuantity = Math.max(0, getOrderLinePaidQuantity(item) - returnedQuantity);
+    const returnedQuantity = getOrderLineReturnedInventoryQuantity(item);
+    const returnedPaidInventoryQuantity = getOrderLineReturnedPaidInventoryQuantity(item);
+    const netPaidQuantity = Math.max(0,
+      getOrderLinePaidQuantity(item) - returnedPaidInventoryQuantity / getOrderLineUnitFactor(item));
     const netCostQuantity = Math.max(0, getOrderLineInventoryQuantity(item) - returnedQuantity);
     const itemRevenueAmount = netPaidQuantity * Math.max(0, Number(item.convertedUnitPrice || 0));
     const itemCostAmount = netCostQuantity * Math.max(0, Number(item.convertedCostPrice ?? item.costPrice ?? 0));
@@ -1383,8 +1382,7 @@ async function ensureLocalOrderCreatorProductCommissionAssignmentInternal(order:
   const occurredAt = orderCommissionEventAt(order, order.updatedAt);
   const productIds = [...new Set((order.items || [])
     .filter((item) => (
-      getOrderLinePaidQuantity(item)
-      - Math.min(getOrderLineInventoryQuantity(item), Math.max(0, Number(item.returnedQuantity ?? 0)))
+      getOrderLinePaidInventoryQuantity(item) - getOrderLineReturnedPaidInventoryQuantity(item)
     ) > 0)
     .map((item) => item.productId)
     .filter(Boolean))];
@@ -1492,10 +1490,11 @@ async function getProductCommissionTargets(
   }
 
   const orderedItems = (order.items || []).map((item) => {
-    const returnedQuantity = Math.min(getOrderLineInventoryQuantity(item), Math.max(0, Number(item.returnedQuantity ?? 0)));
-    const quantity = Math.max(0, getOrderLinePaidQuantity(item) - returnedQuantity);
-    const grossAmount = quantity * Math.max(0, Number(item.convertedUnitPrice || 0));
-    return { item, quantity, grossAmount };
+    const returnedPaidInventoryQuantity = getOrderLineReturnedPaidInventoryQuantity(item);
+    const baseQuantity = Math.max(0, getOrderLinePaidInventoryQuantity(item) - returnedPaidInventoryQuantity);
+    const commercialQuantity = Math.max(0, getOrderLinePaidQuantity(item) - returnedPaidInventoryQuantity / getOrderLineUnitFactor(item));
+    const grossAmount = commercialQuantity * Math.max(0, Number(item.convertedUnitPrice || 0));
+    return { item, baseQuantity, commercialQuantity, grossAmount };
   });
   const grossTotal = orderedItems.reduce((sum, item) => sum + item.grossAmount, 0);
   const adjustmentNet = normalizeOrderAdjustments(order.orderAdjustments, order.currency)
@@ -1503,13 +1502,13 @@ async function getProductCommissionTargets(
 
   const targets: ProductCommissionTarget[] = [];
   for (const line of orderedItems) {
-    if (line.quantity <= 0) continue;
+    if (line.baseQuantity <= 0) continue;
     const rule = activeProductCommissionRule(rules, line.item.productId, occurredAt);
     if (!rule) continue;
     if (rule.recipientScope === 'selected_assigned' && !recipientIdsByRule.get(rule.id)?.has(assignment.agentId)) continue;
     const allocation = grossTotal > 0 ? line.grossAmount / grossTotal : 0;
     const basisAmountPerUnit = roundCommissionAmount(Math.max(0,
-      (line.grossAmount - Math.max(0, Number(order.discount || 0)) * allocation + adjustmentNet * allocation) / line.quantity,
+      (line.grossAmount - Math.max(0, Number(order.discount || 0)) * allocation + adjustmentNet * allocation) / Math.max(line.commercialQuantity, 1),
     ));
     const commissionType = resolveCommissionPlanType(rule.commissionType);
     let commissionPerUnit: number;
@@ -1538,7 +1537,9 @@ async function getProductCommissionTargets(
       productId: line.item.productId,
       productNameSnapshot: line.item.productName,
       productSkuSnapshot: line.item.productSku || null,
-      unitSnapshot: line.item.unit || null,
+      unitSnapshot: commissionType === 'fixed_amount'
+        ? line.item.baseUnitCode || line.item.unit || null
+        : line.item.unit || null,
       ruleId: rule.id,
       commissionType,
       ratePercent: commissionType === 'percentage' ? assertRate(rule.ratePercent) : 0,
@@ -1548,7 +1549,7 @@ async function getProductCommissionTargets(
       fixedExchangeRateSource,
       fixedExchangeRateTimestamp,
       fixedExchangeRates,
-      quantity: line.quantity,
+      quantity: commissionType === 'fixed_amount' ? line.baseQuantity : line.commercialQuantity,
       basisAmountPerUnit,
       commissionPerUnit,
     });

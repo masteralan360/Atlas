@@ -113,7 +113,43 @@ vi.mock('./businessPartners', () => ({
     recalculateBusinessPartnerSummary: vi.fn()
 }))
 
-import { recalculateCustomerSummary } from './orders'
+import { recalculateCustomerSummary, sanitizeSyncPayload } from './orders'
+
+describe('order related-unit Cloud request contract', () => {
+    it('keeps immutable line snapshots in the JSON payload while removing client-only sync metadata', () => {
+        const payload = sanitizeSyncPayload('sales_orders', {
+            id: 'order-related',
+            workspaceId: WORKSPACE_ID,
+            syncStatus: 'pending',
+            lastSyncedAt: null,
+            items: [{
+                id: 'line-related',
+                quantity: 2,
+                unitRelationshipId: 'relationship-carton-sheet',
+                unitRef: 'builtin:carton',
+                baseUnitRef: 'builtin:sheet',
+                baseUnitCode: 'sheet',
+                unitFactor: 20,
+                inventoryQuantity: 40,
+                freeBonusInventoryQuantity: 20
+            }]
+        })
+
+        expect(payload).toMatchObject({
+            workspace_id: WORKSPACE_ID,
+            items: [expect.objectContaining({
+                unitRelationshipId: 'relationship-carton-sheet',
+                unitRef: 'builtin:carton',
+                baseUnitRef: 'builtin:sheet',
+                unitFactor: 20,
+                inventoryQuantity: 40,
+                freeBonusInventoryQuantity: 20
+            })]
+        })
+        expect(payload).not.toHaveProperty('sync_status')
+        expect(payload).not.toHaveProperty('last_synced_at')
+    })
+})
 
 describe('order counterparty summary sync', () => {
     beforeEach(() => {

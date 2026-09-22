@@ -21,6 +21,17 @@ export interface ProductUnitContext {
   relationship: UnitRelationship
 }
 
+export interface ProductOrderUnitOption {
+  kind: 'single' | 'parent' | 'child'
+  unitRef: UnitRef
+  unitCode: string
+  baseUnitRef: UnitRef
+  baseUnitCode: string
+  factor: number
+  relationshipId: string | null
+  isDynamic: boolean
+}
+
 export type ProductUnitSelectionOption =
   | {
     kind: 'unit'
@@ -207,6 +218,70 @@ export function soldQuantityToInventoryQuantity(quantity: number, factor = 1): n
 export function inventoryQuantityToSellingAvailability(quantity: number, factor = 1): number {
   if (!Number.isFinite(quantity) || !Number.isFinite(factor) || factor <= 0) return 0
   return roundQuantity(quantity / factor)
+}
+
+export function buildProductOrderUnitOptions(
+  product: Pick<Product, 'unit'>,
+  context: ProductUnitContext | null | undefined,
+  descriptors: readonly UnitDescriptor[],
+): ProductOrderUnitOption[] {
+  if (context) {
+    const { conversion, relationship } = context
+    const parent = findUnitDescriptor(descriptors, relationship.parentUnitRef)
+    const child = findUnitDescriptor(descriptors, relationship.childUnitRef)
+    return [
+      {
+        kind: 'parent',
+        unitRef: relationship.parentUnitRef,
+        unitCode: relationship.parentUnitCode,
+        baseUnitRef: relationship.childUnitRef,
+        baseUnitCode: relationship.childUnitCode,
+        factor: conversion.factor,
+        relationshipId: relationship.id,
+        isDynamic: parent?.isDynamic === true,
+      },
+      {
+        kind: 'child',
+        unitRef: relationship.childUnitRef,
+        unitCode: relationship.childUnitCode,
+        baseUnitRef: relationship.childUnitRef,
+        baseUnitCode: relationship.childUnitCode,
+        factor: 1,
+        relationshipId: relationship.id,
+        isDynamic: child?.isDynamic === true,
+      },
+    ]
+  }
+
+  const descriptor = findUnitDescriptorByCode(descriptors, product.unit)
+  const unitRef = descriptor?.ref ?? builtinUnitRef(product.unit)
+  const unitCode = descriptor?.code ?? normalizeUnitCode(product.unit)
+  return [{
+    kind: 'single',
+    unitRef,
+    unitCode,
+    baseUnitRef: unitRef,
+    baseUnitCode: unitCode,
+    factor: 1,
+    relationshipId: null,
+    isDynamic: descriptor?.isDynamic === true,
+  }]
+}
+
+export function findProductOrderUnitOption(
+  product: Pick<Product, 'unit'>,
+  context: ProductUnitContext | null | undefined,
+  descriptors: readonly UnitDescriptor[],
+  unitRef: string | null | undefined,
+) {
+  return buildProductOrderUnitOptions(product, context, descriptors)
+    .find((option) => option.unitRef === unitRef)
+}
+
+export function assertValidOrderUnitQuantity(quantity: number, isDynamic: boolean) {
+  if (!Number.isFinite(quantity) || quantity < 0) throw new Error('order_unit_quantity_invalid')
+  if (!isDynamic && !Number.isInteger(quantity)) throw new Error('order_unit_quantity_whole')
+  if (Math.abs(quantity - roundQuantity(quantity)) > 1e-9) throw new Error('order_unit_quantity_precision')
 }
 
 /**

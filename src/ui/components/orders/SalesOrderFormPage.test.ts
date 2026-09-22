@@ -1,12 +1,28 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+    buildSalesOrderLineId,
     clearSalesItemProductForServicesStorage,
     getPersistedSalesOrderItemStorageId,
     getSalesOrderFormItemStorageId
 } from '@/lib/salesOrderLineStorage'
 
 describe('clearSalesItemProductForServicesStorage', () => {
+    it('keeps otherwise-identical product lines separately addressable', () => {
+        const line = {
+            productId: 'product-1',
+            storageId: 'storage-1',
+            batchId: '',
+            unitRef: 'builtin:carton',
+            quantity: 2,
+            freeBonusQuantity: 0,
+            unitPrice: 40_000,
+            seq: 1
+        }
+
+        expect(buildSalesOrderLineId(line)).not.toBe(buildSalesOrderLineId({ ...line, seq: 2 }))
+    })
+
     it('clears the selected product and selling-price fields while preserving the rest of the line', () => {
         const line = {
             seq: 3,
@@ -30,8 +46,6 @@ describe('clearSalesItemProductForServicesStorage', () => {
             seq: 3,
             storageId: '__atlas_services__',
             quantity: '2',
-            freeBonusQuantity: '1',
-            freeBonusUnit: 'box',
             note: 'Keep this note',
             productId: '',
             productSearch: '',
@@ -40,7 +54,16 @@ describe('clearSalesItemProductForServicesStorage', () => {
             priceBookId: '',
             priceBookItemId: '',
             priceSourceCurrency: '',
-            priceBookCostPrice: ''
+            priceBookCostPrice: '',
+            unitRef: '',
+            unitRelationshipId: '',
+            unitFactor: '',
+            baseUnitRef: '',
+            baseUnitCode: '',
+            unitNameSnapshot: '',
+            baseUnitNameSnapshot: '',
+            freeBonusQuantity: '',
+            freeBonusUnit: ''
         })
     })
 

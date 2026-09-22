@@ -2,7 +2,13 @@ import type { SalesOrder } from '@/local-db'
 import type { Sale } from '@/types'
 import { convertToStoreBase } from '@/lib/currency'
 import { isDateInDateRange } from '@/lib/dateRangeFilters'
-import { getOrderLineInventoryQuantity, getOrderLinePaidQuantity } from '@/lib/orderLineItems'
+import {
+    getOrderLineInventoryQuantity,
+    getOrderLinePaidQuantity,
+    getOrderLineReturnedInventoryQuantity,
+    getOrderLineReturnedPaidInventoryQuantity,
+    getOrderLineUnitFactor
+} from '@/lib/orderLineItems'
 
 export interface RevenueAnalysisItem {
     productId: string
@@ -13,6 +19,7 @@ export interface RevenueAnalysisItem {
     quantity: number
     returnedQuantity: number
     costQuantity?: number
+    returnedCostQuantity?: number
     unitPrice: number
     costPrice: number
 }
@@ -204,10 +211,14 @@ export function toRevenueRecordFromSalesOrder(order: SalesOrder, options: Revenu
                 ], options),
                 quantity: getOrderLinePaidQuantity(item),
                 returnedQuantity: Math.min(
-                    getOrderLineInventoryQuantity(item),
-                    Math.max(0, Number(item.returnedQuantity || 0))
+                    getOrderLinePaidQuantity(item),
+                    getOrderLineReturnedPaidInventoryQuantity(item) / getOrderLineUnitFactor(item)
                 ),
                 costQuantity: getOrderLineInventoryQuantity(item),
+                returnedCostQuantity: Math.min(
+                    getOrderLineInventoryQuantity(item),
+                    getOrderLineReturnedInventoryQuantity(item)
+                ),
                 unitPrice: item.convertedUnitPrice || 0,
                 costPrice: item.convertedCostPrice || item.costPrice || 0
             }
@@ -276,7 +287,7 @@ export function getRevenueAnalysisTotals(record: RevenueAnalysisRecord): Revenue
     let cost = 0
     for (const item of record.items) {
         const netQuantity = Math.max(0, item.quantity - item.returnedQuantity)
-        const netCostQuantity = Math.max(0, (item.costQuantity ?? item.quantity) - item.returnedQuantity)
+        const netCostQuantity = Math.max(0, (item.costQuantity ?? item.quantity) - (item.returnedCostQuantity ?? item.returnedQuantity))
         if (netQuantity <= 0 && netCostQuantity <= 0) continue
 
         revenue += item.unitPrice * netQuantity

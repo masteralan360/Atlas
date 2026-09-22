@@ -54,6 +54,20 @@
         ]
       },
       {
+        "id": "related-units",
+        "titleKey": "devTesting.groups.relatedUnits",
+        "layer": "business",
+        "files": [
+            "src/dev/testing/suites/orderLineItemLayout.test.ts",
+            "src/dev/testing/suites/orderRelatedUnits.test.ts",
+            "src/dev/testing/suites/orderRelatedUnitsTransactions.test.ts",
+            "src/lib/orderLineItems.test.ts",
+            "src/lib/orderUnitErrors.test.ts",
+            "src/lib/unitRelationships.test.ts",
+          "src/lib/orderPrintReturnState.test.ts"
+        ]
+      },
+      {
         "id": "payments",
         "titleKey": "devTesting.groups.payments",
         "layer": "business",

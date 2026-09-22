@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
@@ -937,7 +937,7 @@ export function Revenue() {
         }
     }, [allTimeFilteredRevenueRecords])
 
-    const calculateStats = (records: RevenueAnalysisRecord[], defaultCurrency: string) => {
+    const calculateStats = useCallback((records: RevenueAnalysisRecord[], defaultCurrency: string) => {
         const statsByCurrency: Record<string, {
             revenue: number,
             cost: number,
@@ -998,7 +998,7 @@ export function Revenue() {
 
             record.items.forEach((item) => {
                 const netQuantity = Math.max(0, item.quantity - item.returnedQuantity)
-                const netCostQuantity = Math.max(0, (item.costQuantity ?? item.quantity) - item.returnedQuantity)
+                const netCostQuantity = Math.max(0, (item.costQuantity ?? item.quantity) - (item.returnedCostQuantity ?? item.returnedQuantity))
                 if (netQuantity <= 0 && netCostQuantity <= 0) return
 
                 const itemRevenue = item.unitPrice * netQuantity
@@ -1064,12 +1064,12 @@ export function Revenue() {
             statsByCurrency,
             saleStats
         }
-    }
+    }, [userNameById])
 
     const stats = useMemo(() => {
         const { statsByCurrency, saleStats } = calculateStats(filteredRevenueRecords, features.default_currency || 'usd')
         return { statsByCurrency, saleStats }
-    }, [filteredRevenueRecords, features.default_currency, userNameById])
+    }, [calculateStats, filteredRevenueRecords, features.default_currency])
 
     const currencySettings = useMemo(() => ({
         currency: Object.keys(stats.statsByCurrency)[0] || features.default_currency || 'usd',

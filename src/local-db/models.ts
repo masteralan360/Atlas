@@ -833,12 +833,30 @@ export interface OrderLineItem {
   storageId?: string | null
   productName: string
   productSku: string
-  /** Product unit at the time this line was added, retained for accurate historical prints. */
+  /** Selected commercial unit code at the time this line was added. */
   unit?: string | null
+  /** Relationship selected for this line, when the product has hierarchical units. */
+  unitRelationshipId?: string | null
+  /** Stable selected commercial unit identifier. */
+  unitRef?: UnitRef | null
+  /** Historical selected-unit label. Custom-unit renames do not rewrite this value. */
+  unitNameSnapshot?: string | null
+  /** Stable canonical inventory unit identifier. */
+  baseUnitRef?: UnitRef | null
+  /** Canonical inventory unit code retained for historical display and validation. */
+  baseUnitCode?: string | null
+  /** Historical canonical inventory-unit label. */
+  baseUnitNameSnapshot?: string | null
+  /** Number of canonical inventory units represented by one selected commercial unit. */
+  unitFactor?: number | null
   /** Display-only unit override for the free bonus quantity. Never affects logic, which always uses `unit`. */
   freeBonusUnit?: string | null
   quantity: number
   freeBonusQuantity?: number | null
+  /** Paid quantity expressed in the canonical inventory unit. */
+  inventoryQuantity?: number | null
+  /** Free quantity expressed in the canonical inventory unit. */
+  freeBonusInventoryQuantity?: number | null
   lineTotal: number
   originalCurrency: CurrencyCode
   originalUnitPrice: number
@@ -851,6 +869,10 @@ export interface SalesOrderItem extends OrderLineItem {
   convertedCostPrice: number
   /** Cumulative quantity returned from this line. The immutable return rows remain the source of truth. */
   returnedQuantity?: number
+  /** Cumulative returned paid quantity in the canonical inventory unit. */
+  returnedPaidInventoryQuantity?: number
+  /** Cumulative returned free-bonus quantity in the canonical inventory unit. */
+  returnedFreeInventoryQuantity?: number
   reservedQuantity?: number
   fulfilledQuantity?: number
   batchAllocations?: StockBatchAllocation[] | null
@@ -2021,6 +2043,22 @@ export interface OrderReturnItem extends BaseEntity {
   orderId: string
   orderItemId: string
   quantity: number
+  /** Returned commercial quantity in the original selected selling unit. */
+  selectedUnitQuantity?: number | null
+  paidSelectedUnitQuantity?: number | null
+  freeSelectedUnitQuantity?: number | null
+  /** Returned quantity in the product's canonical inventory unit. */
+  inventoryQuantity?: number | null
+  paidInventoryQuantity?: number | null
+  freeInventoryQuantity?: number | null
+  unitRef?: UnitRef | null
+  unit?: string | null
+  unitNameSnapshot?: string | null
+  baseUnitRef?: UnitRef | null
+  baseUnitCode?: string | null
+  baseUnitNameSnapshot?: string | null
+  unitFactor?: number | null
+  quantityKind?: 'paid' | 'free' | null
   unitRefundAmount: number
   refundAmount: number
   restoredStorageId?: string | null

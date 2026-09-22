@@ -732,6 +732,8 @@ export function createSalesHistoryAtlasStandardReturnPrintData(
         return {
             orderItemId: item.id,
             returnedQuantity,
+            selectedUnitQuantity: returnedQuantity,
+            paidSelectedUnitQuantity: returnedQuantity,
             unitRefundAmount,
             refundAmount: recorded?.amount || unitRefundAmount * returnedQuantity
         }

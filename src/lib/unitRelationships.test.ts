@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   assertValidProductUnitFactor,
+  assertValidOrderUnitQuantity,
   assertValidUnitRelationship,
+  buildProductOrderUnitOptions,
   buildProductUnitSelectionOptions,
   countActiveProductsByRelationship,
   formatHierarchicalQuantity,
@@ -28,6 +30,35 @@ describe('hierarchical unit calculations', () => {
   it('rounds the canonical stock effect', () => {
     expect(soldQuantityToInventoryQuantity(2, 20)).toBe(40)
     expect(soldQuantityToInventoryQuantity(0.333333, 3)).toBe(0.999999)
+  })
+
+  it('builds explicit parent and child order choices from one product conversion', () => {
+    const relationship = {
+      id: 'carton-sheet',
+      parentUnitRef: 'builtin:carton',
+      parentUnitCode: 'carton',
+      childUnitRef: 'builtin:sheet',
+      childUnitCode: 'sheet',
+      isDeleted: false,
+    } as any
+    const context = {
+      relationship,
+      conversion: { relationshipId: relationship.id, factor: 20, parentPrice: 40000 } as any,
+    }
+
+    expect(buildProductOrderUnitOptions({ unit: 'sheet' } as any, context, getUnitDescriptors([])))
+      .toEqual([
+        expect.objectContaining({ kind: 'parent', unitRef: 'builtin:carton', factor: 20, baseUnitRef: 'builtin:sheet' }),
+        expect.objectContaining({ kind: 'child', unitRef: 'builtin:sheet', factor: 1, baseUnitRef: 'builtin:sheet' }),
+      ])
+  })
+
+  it('uses a factor-one option for ordinary products and validates quantity precision', () => {
+    expect(buildProductOrderUnitOptions({ unit: 'pcs' } as any, null, getUnitDescriptors([]))[0])
+      .toMatchObject({ kind: 'single', unitRef: 'builtin:pcs', factor: 1 })
+    expect(() => assertValidOrderUnitQuantity(1.5, false)).toThrow('order_unit_quantity_whole')
+    expect(() => assertValidOrderUnitQuantity(1.5, true)).not.toThrow()
+    expect(() => assertValidOrderUnitQuantity(0.1234567, true)).toThrow('order_unit_quantity_precision')
   })
 
   it('rejects invalid whole and dynamic factors', () => {

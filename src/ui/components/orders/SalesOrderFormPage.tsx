@@ -22,10 +22,11 @@ import {
     parseLocalDateValue,
     sanitizeNumericInput
 } from '@/lib/utils'
-import { getOrderLineFreeBonusQuantity, hasOrderLineInventoryQuantity } from '@/lib/orderLineItems'
+import { getOrderLineFreeBonusQuantity, getOrderLineInventoryQuantity, hasOrderLineInventoryQuantity } from '@/lib/orderLineItems'
 import { ORDER_DECIMAL_STEP, roundOrderValue } from '@/lib/orderPrecision'
 import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import {
+    buildSalesOrderLineId,
     clearSalesItemProductForServicesStorage,
     getPersistedSalesOrderItemStorageId,
     getSalesOrderFormItemStorageId
@@ -46,6 +47,9 @@ import {
     usePriceBookCatalogState,
     useProducts,
     useProductUnitConversions,
+    usePriceBookUnitPrices,
+    useUnitRelationships,
+    useUnits,
     useWorkspaceProductBarcodes,
     useSalesOrderAgentAssignments,
     useSalesOrder,
@@ -58,6 +62,7 @@ import {
     type SalesOrder,
     type SalesOrderItem,
     type SalesOrderStatus,
+    type UnitRef,
     type PaymentObligation,
     type WorkspacePaymentMethod,
     type StockBatch
@@ -68,6 +73,16 @@ import { isOrderReadOnly } from '@/lib/orderEditability'
 import { isRemoteOrderSaveConfirmationError, type OrderSaveProgress } from '@/lib/orderSaveProgress'
 import { hasEffectiveSalesAgentCommissionPermission, useHideCosts, useWorkspacePermissions } from '@/permissions'
 import { getMissingPriceBookCostMessage, getMissingProductCostMessage, hasValidProductCost } from '@/lib/productCost'
+import {
+    assertValidOrderUnitQuantity,
+    buildProductOrderUnitOptions,
+    formatHierarchicalQuantity,
+    getUnitDescriptors,
+    indexProductUnitContexts,
+    soldQuantityToInventoryQuantity,
+    type ProductOrderUnitOption
+} from '@/lib/unitRelationships'
+import { isOrderUnitConfigurationError } from '@/lib/orderUnitErrors'
 import {
     Button,
     Badge,
@@ -145,6 +160,13 @@ type FormItem = {
     productSearch: string
     storageId: string
     quantity: string
+    unitRef: string
+    unitRelationshipId: string
+    unitFactor: string
+    baseUnitRef: string
+    baseUnitCode: string
+    unitNameSnapshot: string
+    baseUnitNameSnapshot: string
     freeBonusQuantity: string
     freeBonusUnit: string
     unitPrice: string
@@ -163,6 +185,13 @@ function createEmptyItem(storageId = '', seq = 1): FormItem {
         productSearch: '',
         storageId,
         quantity: '1',
+        unitRef: '',
+        unitRelationshipId: '',
+        unitFactor: '',
+        baseUnitRef: '',
+        baseUnitCode: '',
+        unitNameSnapshot: '',
+        baseUnitNameSnapshot: '',
         freeBonusQuantity: '',
         freeBonusUnit: '',
         unitPrice: '',
@@ -262,16 +291,20 @@ export function SalesOrderFormPage({
 
     const products = useProducts(workspaceId)
     const productUnitConversions = useProductUnitConversions(workspaceId)
-    const relatedUnitProductIds = useMemo(
-        () => new Set(productUnitConversions.filter((row) => !row.isDeleted).map((row) => row.productId)),
-        [productUnitConversions]
+    const unitRelationships = useUnitRelationships(workspaceId)
+    const priceBookUnitPrices = usePriceBookUnitPrices(workspaceId)
+    const customUnits = useUnits(workspaceId)
+    const unitDescriptors = useMemo(() => getUnitDescriptors(customUnits), [customUnits])
+    const productUnitContexts = useMemo(
+        () => indexProductUnitContexts(productUnitConversions, unitRelationships),
+        [productUnitConversions, unitRelationships]
     )
     const productBarcodes = useWorkspaceProductBarcodes(workspaceId, { syncProductCache: false })
     const inventory = useInventory(workspaceId)
     const resolveDiscountForPrice = useDiscountPriceResolver(workspaceId, { inventoryRows: inventory })
     const stockBatches = useStockBatches(workspaceId)
     const storages = useStorages(workspaceId)
-    const { isDynamicUnit, options: unitOptions } = useUnitRegistry(workspaceId)
+    const { options: unitOptions } = useUnitRegistry(workspaceId)
     const customerPartners = useBusinessPartners(workspaceId, { roles: ['customer'] })
     const agentPartners = useBusinessPartners(workspaceId, { roles: ['agent'], includeAgentRoles: true })
     const agents = useAgents(workspaceId)
@@ -453,6 +486,13 @@ export function SalesOrderFormPage({
                         editingOrder.sourceStorageId || defaultStorageId
                     ),
                     quantity: String(item.quantity),
+                    unitRef: item.unitRef || '',
+                    unitRelationshipId: item.unitRelationshipId || '',
+                    unitFactor: item.unitFactor == null ? '' : String(item.unitFactor),
+                    baseUnitRef: item.baseUnitRef || '',
+                    baseUnitCode: item.baseUnitCode || item.unit || product?.unit || '',
+                    unitNameSnapshot: item.unitNameSnapshot || item.unit || product?.unit || '',
+                    baseUnitNameSnapshot: item.baseUnitNameSnapshot || item.baseUnitCode || item.unit || product?.unit || '',
                     freeBonusQuantity: String(getOrderLineFreeBonusQuantity(item)),
                     freeBonusUnit: item.freeBonusUnit || '',
                     unitPrice: String(item.convertedUnitPrice),
@@ -529,6 +569,13 @@ export function SalesOrderFormPage({
                     editingOrder.sourceStorageId || defaultStorageId
                 ),
                 quantity: String(item.quantity),
+                unitRef: item.unitRef || '',
+                unitRelationshipId: item.unitRelationshipId || '',
+                unitFactor: item.unitFactor == null ? '' : String(item.unitFactor),
+                baseUnitRef: item.baseUnitRef || '',
+                baseUnitCode: item.baseUnitCode || item.unit || product?.unit || '',
+                unitNameSnapshot: item.unitNameSnapshot || item.unit || product?.unit || '',
+                baseUnitNameSnapshot: item.baseUnitNameSnapshot || item.baseUnitCode || item.unit || product?.unit || '',
                 freeBonusQuantity: String(getOrderLineFreeBonusQuantity(item)),
                 freeBonusUnit: item.freeBonusUnit || '',
                 unitPrice: String(item.convertedUnitPrice),
@@ -540,25 +587,38 @@ export function SalesOrderFormPage({
                 note: item.note || ''
             }
         }))
-    }, [defaultStorageId, editingOrder])
+    }, [defaultStorageId, editingOrder, products])
 
     useEffect(() => {
         if (!editingOrder || !products.length) return
         setItems((current) => {
             let changed = false
             const next = current.map((item) => {
-                if (item.productId && !item.productSearch) {
+                if (item.productId) {
                     const product = products.find((p) => p.id === item.productId)
-                    if (product) {
+                    if (product && (!item.productSearch || !item.unitRef)) {
+                        const legacyUnit = buildProductOrderUnitOptions(product, null, unitDescriptors)[0]
                         changed = true
-                        return { ...item, productSearch: product.name }
+                        return {
+                            ...item,
+                            productSearch: item.productSearch || product.name,
+                            ...(!item.unitRef ? {
+                                unitRef: legacyUnit.unitRef,
+                                unitRelationshipId: '',
+                                unitFactor: '1',
+                                baseUnitRef: legacyUnit.baseUnitRef,
+                                baseUnitCode: legacyUnit.baseUnitCode,
+                                unitNameSnapshot: item.unitNameSnapshot || legacyUnit.unitCode,
+                                baseUnitNameSnapshot: item.baseUnitNameSnapshot || legacyUnit.baseUnitCode
+                            } : {})
+                        }
                     }
                 }
                 return item
             })
             return changed ? next : current
         })
-    }, [products, editingOrder])
+    }, [products, editingOrder, unitDescriptors])
 
     const liveRates = useMemo(() => ({ exchangeData, eurRates, tryRates }), [exchangeData, eurRates, tryRates])
     const adjustmentExchangeRates = useMemo(() => buildOrderExchangeRatesSnapshot(liveRates), [liveRates])
@@ -621,7 +681,7 @@ export function SalesOrderFormPage({
         id: String(item.seq),
         productId: item.productId,
         productName: item.productSearch,
-        quantity: Number(item.quantity) || 0,
+        quantity: soldQuantityToInventoryQuantity(Number(item.quantity) || 0, Number(item.unitFactor) || 1),
         convertedUnitPrice: Number(item.unitPrice) || 0
     })), [items])
     const inventoryByStorageProduct = useMemo(() => new Map(
@@ -695,17 +755,64 @@ export function SalesOrderFormPage({
             return (product.id === selectedProductId
                 || availableIds.has(product.id)
                 || serviceInServicesSource)
-                && (product.id === selectedProductId || !relatedUnitProductIds.has(product.id))
                 && (serviceInServicesSource || hasValidProductCost(product.costPrice))
                 && (serviceInServicesSource || !hasMissingPartnerPriceBookCost(selectedCustomer, product.id))
         })
     }
 
+    const getProductUnitOptions = useCallback((productId: string) => {
+        const product = products.find((entry) => entry.id === productId)
+        if (!product) return []
+        return buildProductOrderUnitOptions(product, productUnitContexts.get(productId), unitDescriptors)
+    }, [productUnitContexts, products, unitDescriptors])
+
+    const getFormUnitOption = useCallback((item: FormItem, product: typeof products[number] | undefined): ProductOrderUnitOption | null => {
+        if (!product || !item.unitRef) return null
+        const current = getProductUnitOptions(product.id).find((option) => option.unitRef === item.unitRef)
+        if (!current) return null
+        const snapshotFactor = Number(item.unitFactor)
+        if (!Number.isFinite(snapshotFactor) || snapshotFactor <= 0) return current
+        return {
+            ...current,
+            factor: snapshotFactor,
+            relationshipId: item.unitRelationshipId || current.relationshipId,
+            baseUnitRef: (item.baseUnitRef || current.baseUnitRef) as UnitRef,
+            baseUnitCode: item.baseUnitCode || current.baseUnitCode
+        }
+    }, [getProductUnitOptions])
+
+    const getUnitLabel = useCallback((unitCode: string) =>
+        t(`products.units.${unitCode}`, { defaultValue: unitCode }), [t])
+
+    const getUnitSnapshotFields = useCallback((option: ProductOrderUnitOption): Pick<FormItem,
+        'unitRef' | 'unitRelationshipId' | 'unitFactor' | 'baseUnitRef' | 'baseUnitCode' | 'unitNameSnapshot' | 'baseUnitNameSnapshot'> => ({
+        unitRef: option.unitRef,
+        unitRelationshipId: option.relationshipId || '',
+        unitFactor: String(option.factor),
+        baseUnitRef: option.baseUnitRef,
+        baseUnitCode: option.baseUnitCode,
+        unitNameSnapshot: option.unitCode,
+        baseUnitNameSnapshot: option.baseUnitCode
+    }), [])
+
+    const formatProductAvailability = useCallback((productId: string, baseQuantity: number) => {
+        const context = productUnitContexts.get(productId)
+        if (!context) return String(baseQuantity)
+        return formatHierarchicalQuantity(
+            baseQuantity,
+            context.conversion.factor,
+            getUnitLabel(context.relationship.parentUnitCode),
+            getUnitLabel(context.relationship.childUnitCode),
+            t('common.and', { defaultValue: 'and' })
+        )
+    }, [getUnitLabel, productUnitContexts, t])
+
     const resolveItemPricing = useCallback((
         productId: string,
         batchId: string,
         partnerCurrency: CurrencyCode,
-        partner: Pick<BusinessPartner, 'priceBookId'> | null | undefined
+        partner: Pick<BusinessPartner, 'priceBookId'> | null | undefined,
+        unitRef: string
     ): Pick<FormItem, 'unitPrice' | 'priceBookId' | 'priceBookItemId' | 'priceSourceCurrency' | 'priceBookCostPrice'> => {
         const product = products.find((entry) => entry.id === productId)
         if (!product) {
@@ -718,23 +825,46 @@ export function SalesOrderFormPage({
             }
         }
 
+        const unitOption = getProductUnitOptions(productId).find((option) => option.unitRef === unitRef)
+        const unitContext = productUnitContexts.get(productId)
+        if (unitContext && !unitOption) {
+            return {
+                unitPrice: '',
+                priceBookId: '',
+                priceBookItemId: '',
+                priceSourceCurrency: '',
+                priceBookCostPrice: ''
+            }
+        }
+
         const priceBookItem = getPriceBookItemForPartner(partner, productId)
         if (priceBookItem) {
+            const selectedUnitPrice = unitOption && partner?.priceBookId
+                ? priceBookUnitPrices.find((entry) => entry.priceBookId === partner.priceBookId
+                    && entry.productId === productId
+                    && entry.unitRef === unitOption.unitRef
+                    && !entry.isDeleted)
+                : undefined
+            const isParentUnit = unitOption?.kind === 'parent'
+            const basePrice = selectedUnitPrice?.price
+                ?? (isParentUnit ? unitContext?.conversion.parentPrice : priceBookItem.price)
+                ?? priceBookItem.price
+            const sourceCurrency = selectedUnitPrice?.currency ?? (isParentUnit ? product.currency : priceBookItem.currency)
             const discount = resolveDiscountForPrice(product, {
                 priceBookId: partner?.priceBookId ?? null,
-                basePrice: priceBookItem.price,
-                currency: priceBookItem.currency
+                basePrice,
+                currency: sourceCurrency
             })
             return {
                 unitPrice: String(convertCurrencyAmountWithLiveRates(
-                    discount?.discountPrice ?? priceBookItem.price,
-                    priceBookItem.currency,
+                    discount?.discountPrice ?? basePrice,
+                    sourceCurrency,
                     partnerCurrency,
                     liveRates
                 )),
                 priceBookId: priceBookItem.priceBookId,
                 priceBookItemId: priceBookItem.id,
-                priceSourceCurrency: priceBookItem.currency,
+                priceSourceCurrency: sourceCurrency,
                 priceBookCostPrice: priceBookItem.costPrice == null ? '' : String(priceBookItem.costPrice)
             }
         }
@@ -742,8 +872,13 @@ export function SalesOrderFormPage({
         const batch = batchId && batchId !== PRODUCT_STOCK_SELECTION
             ? stockBatchesById.get(batchId)
             : undefined
-        const sourcePrice = batch && batch.productId === productId ? batch.price : product.price
-        const sourceCurrency = batch && batch.productId === productId ? batch.currency : product.currency
+        const isParentUnit = unitOption?.kind === 'parent'
+        const sourcePrice = isParentUnit
+            ? unitContext?.conversion.parentPrice ?? product.price
+            : batch && batch.productId === productId ? batch.price : product.price
+        const sourceCurrency = isParentUnit
+            ? product.currency
+            : batch && batch.productId === productId ? batch.currency : product.currency
         const discount = resolveDiscountForPrice(product, {
             priceBookId: partner?.priceBookId ?? null,
             basePrice: sourcePrice,
@@ -756,13 +891,18 @@ export function SalesOrderFormPage({
             priceSourceCurrency: '',
             priceBookCostPrice: ''
         }
-    }, [getPriceBookItemForPartner, liveRates, products, resolveDiscountForPrice, stockBatchesById])
+    }, [getPriceBookItemForPartner, getProductUnitOptions, liveRates, priceBookUnitPrices, productUnitContexts, products, resolveDiscountForPrice, stockBatchesById])
 
     const getItemCostDetails = useCallback((item: FormItem, product: typeof products[number]) => {
         const hasPriceBookProvenance = Boolean(item.priceBookId && item.priceBookItemId)
-        const sourceCurrency = hasPriceBookProvenance && item.priceSourceCurrency
-            ? item.priceSourceCurrency
-            : product.currency
+        const priceBookItem = hasPriceBookProvenance
+            ? priceBookItems.find((entry) => entry.id === item.priceBookItemId)
+            : undefined
+        // A selected-unit Price Book price may use a different currency from
+        // the base Price Book row. Cost always belongs to the base row.
+        const sourceCurrency = priceBookItem?.currency
+            ?? (hasPriceBookProvenance && item.priceSourceCurrency ? item.priceSourceCurrency : undefined)
+            ?? product.currency
         const priceBookCostPrice = item.priceBookCostPrice === ''
             ? (product.costPrice ?? 0)
             : Number(item.priceBookCostPrice)
@@ -770,6 +910,7 @@ export function SalesOrderFormPage({
             ? priceBookCostPrice
             : (product.costPrice ?? 0)
 
+        const unitFactor = getFormUnitOption(item, product)?.factor ?? 1
         return {
             sourceCostPrice,
             convertedCostPrice: convertCurrencyAmountWithLiveRates(
@@ -777,18 +918,24 @@ export function SalesOrderFormPage({
                 sourceCurrency,
                 currency,
                 liveRates
+            ),
+            selectedConvertedCostPrice: convertCurrencyAmountWithLiveRates(
+                sourceCostPrice * unitFactor,
+                sourceCurrency,
+                currency,
+                liveRates
             )
         }
-    }, [currency, liveRates])
+    }, [currency, getFormUnitOption, liveRates, priceBookItems])
 
     const isItemSellingAtLoss = useCallback((item: FormItem, product: typeof products[number] | undefined) => {
         if (!product || item.unitPrice.trim() === '') return false
 
         const sellingPrice = Number(item.unitPrice)
-        const { convertedCostPrice } = getItemCostDetails(item, product)
+        const { selectedConvertedCostPrice } = getItemCostDetails(item, product)
         return Number.isFinite(sellingPrice)
-            && convertedCostPrice > 0
-            && sellingPrice < convertedCostPrice
+            && selectedConvertedCostPrice > 0
+            && sellingPrice < selectedConvertedCostPrice
     }, [getItemCostDetails])
 
     const selectCustomerPartner = useCallback((partner: Pick<BusinessPartner, 'id' | 'partnerName' | 'defaultCurrency' | 'priceBookId'>) => {
@@ -798,7 +945,7 @@ export function SalesOrderFormPage({
         setCustomerId(partner.id)
         changeOrderCurrency(nextCurrency)
         setItems((current) => current.map((item) => item.productId
-            ? { ...item, ...resolveItemPricing(item.productId, item.batchId, nextCurrency, partner) }
+            ? { ...item, ...resolveItemPricing(item.productId, item.batchId, nextCurrency, partner, item.unitRef) }
             : item
         ))
     }, [changeOrderCurrency, currency, resolveItemPricing])
@@ -825,7 +972,7 @@ export function SalesOrderFormPage({
         setCustomerId(partner.id)
         changeOrderCurrency(nextCurrency)
         setItems((current) => current.map((item) => item.productId
-            ? { ...item, ...resolveItemPricing(item.productId, item.batchId, nextCurrency, partner) }
+            ? { ...item, ...resolveItemPricing(item.productId, item.batchId, nextCurrency, partner, item.unitRef) }
             : item
         ))
     }, [agentPartners, agents, changeOrderCurrency, currency, resolveItemPricing])
@@ -863,23 +1010,58 @@ export function SalesOrderFormPage({
                 if (changes.productId !== undefined) {
                     if (!changes.productId) {
                         next.batchId = ''
+                        next.unitRef = ''
+                        next.unitRelationshipId = ''
+                        next.unitFactor = ''
+                        next.baseUnitRef = ''
+                        next.baseUnitCode = ''
+                        next.unitNameSnapshot = ''
+                        next.baseUnitNameSnapshot = ''
+                        next.unitPrice = ''
+                        next.freeBonusQuantity = ''
+                        next.freeBonusUnit = ''
                         next.priceBookId = ''
                         next.priceBookItemId = ''
                         next.priceSourceCurrency = ''
                         next.priceBookCostPrice = ''
                     } else {
                         const selectedProduct = products.find((product) => product.id === changes.productId)
+                        const unitOptions = getProductUnitOptions(changes.productId)
+                        const defaultUnit = productUnitContexts.has(changes.productId) ? null : unitOptions[0] ?? null
+                        Object.assign(next, defaultUnit ? getUnitSnapshotFields(defaultUnit) : {
+                            unitRef: '',
+                            unitRelationshipId: '',
+                            unitFactor: '',
+                            baseUnitRef: '',
+                            baseUnitCode: '',
+                            unitNameSnapshot: '',
+                            baseUnitNameSnapshot: ''
+                        })
+                        next.unitPrice = ''
+                        next.freeBonusQuantity = ''
+                        next.freeBonusUnit = ''
                         if (isService(selectedProduct)) {
                             next.storageId = SERVICES_VIRTUAL_STORAGE_ID
                             next.batchId = ''
-                            Object.assign(next, resolveItemPricing(changes.productId, '', currency, selectedCustomer))
+                            if (defaultUnit) Object.assign(next, resolveItemPricing(changes.productId, '', currency, selectedCustomer, defaultUnit.unitRef))
                             return next
                         }
                         const preferredBatchId = changes.batchId === undefined
                             ? getBatchesForPosition(changes.productId, next.storageId)[0]?.id || ''
                             : changes.batchId
                         next.batchId = preferredBatchId
-                        Object.assign(next, resolveItemPricing(changes.productId, next.batchId, currency, selectedCustomer))
+                        if (defaultUnit) Object.assign(next, resolveItemPricing(changes.productId, next.batchId, currency, selectedCustomer, defaultUnit.unitRef))
+                    }
+                } else if (changes.unitRef !== undefined && next.productId) {
+                    const selectedUnit = getProductUnitOptions(next.productId).find((option) => option.unitRef === changes.unitRef)
+                    next.batchId = ''
+                    next.freeBonusQuantity = ''
+                    next.freeBonusUnit = ''
+                    if (selectedUnit) {
+                        Object.assign(next, getUnitSnapshotFields(selectedUnit))
+                        Object.assign(next, resolveItemPricing(next.productId, '', currency, selectedCustomer, selectedUnit.unitRef))
+                    } else {
+                        next.unitPrice = ''
                     }
                 } else if (
                     changes.storageId === SERVICES_VIRTUAL_STORAGE_ID
@@ -892,9 +1074,9 @@ export function SalesOrderFormPage({
                 } else if (changes.storageId !== undefined && next.productId) {
                     const preferredBatch = getBatchesForPosition(next.productId, changes.storageId)[0]
                     next.batchId = preferredBatch?.id || ''
-                    next.unitPrice = resolveItemPricing(next.productId, next.batchId, currency, selectedCustomer).unitPrice
+                    next.unitPrice = resolveItemPricing(next.productId, next.batchId, currency, selectedCustomer, next.unitRef).unitPrice
                 } else if (changes.batchId !== undefined) {
-                    next.unitPrice = resolveItemPricing(next.productId, changes.batchId, currency, selectedCustomer).unitPrice
+                    next.unitPrice = resolveItemPricing(next.productId, changes.batchId, currency, selectedCustomer, next.unitRef).unitPrice
                 }
                 return next
             })
@@ -964,12 +1146,12 @@ export function SalesOrderFormPage({
                 return {
                     ...item,
                     batchId: preferredBatch.id,
-                    unitPrice: resolveItemPricing(item.productId, preferredBatch.id, currency, selectedCustomer).unitPrice
+                    unitPrice: resolveItemPricing(item.productId, preferredBatch.id, currency, selectedCustomer, item.unitRef).unitPrice
                 }
             })
             return changed ? next : current
         })
-    }, [currency, getBatchesForPosition, priceBooksEnabled, resolveItemPricing, selectedCustomer, stockBatches.length])
+    }, [currency, getBatchesForPosition, priceBooksEnabled, products, resolveItemPricing, selectedCustomer, stockBatches.length])
 
     const lossMakingItems = useMemo(() => {
         const rows: Array<{
@@ -998,7 +1180,7 @@ export function SalesOrderFormPage({
         const subtotal = items.reduce((sum, item) => sum + ((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)), 0)
         const existingCalculatedTotal = subtotal - Number(discount || 0) + Number(tax || 0)
         return calculateOrderTotalWithAdjustments(existingCalculatedTotal, orderAdjustments)
-    }, [currency, discount, items, orderAdjustments, tax])
+    }, [discount, items, orderAdjustments, tax])
 
     const configuredItemsCount = useMemo(
         () => items.filter((item) => item.productId && hasOrderLineInventoryQuantity(item)).length,
@@ -1009,7 +1191,8 @@ export function SalesOrderFormPage({
     const isFinanced = paymentMethod === 'loan' || paymentMethod === 'installments'
     const isInstallmentBased = paymentMethod === 'installments'
     const canSubmit = Boolean(selectedCustomer) &&
-        items.some((item) => item.productId && hasOrderLineInventoryQuantity(item)) &&
+        items.some((item) => item.productId && item.unitRef && hasOrderLineInventoryQuantity(item)) &&
+        items.every((item) => !item.productId || Boolean(item.unitRef)) &&
         (!priceBooksEnabled || isPriceBookCatalogReady) &&
         (!isFinanced || initialPayment < preview) &&
         (!isInstallmentBased || (
@@ -1107,9 +1290,18 @@ export function SalesOrderFormPage({
                         }))
                     }
 
+                    const unitOption = getFormUnitOption(item, product)
+                    if (!unitOption) {
+                        throw new Error(t('orders.form.errors.unitRequired', {
+                            productName: product.name,
+                            defaultValue: `Select a selling unit for ${product.name}.`
+                        }))
+                    }
                     const quantity = Number(item.quantity)
                     const freeBonusQuantityValue = Number(item.freeBonusQuantity || 0)
-                    if (!Number.isFinite(quantity) || quantity < 0) {
+                    try {
+                        assertValidOrderUnitQuantity(quantity, service || unitOption.isDynamic)
+                    } catch {
                         throw new Error(t('orders.form.errors.invalidQuantity', {
                             productName: product.name,
                             defaultValue: `Enter a valid quantity for ${product.name}.`
@@ -1122,14 +1314,18 @@ export function SalesOrderFormPage({
                         : product.currency
                     const { sourceCostPrice, convertedCostPrice } = getItemCostDetails(item, product)
                     const unitPrice = Number(item.unitPrice || 0)
-                    if (!Number.isFinite(freeBonusQuantityValue) || freeBonusQuantityValue < 0) {
+                    try {
+                        assertValidOrderUnitQuantity(freeBonusQuantityValue, unitOption.isDynamic)
+                    } catch {
                         throw new Error(t('orders.form.errors.invalidFreeBonus', {
                             productName: product.name,
                             defaultValue: `Enter a valid free bonus for ${product.name}.`
                         }))
                     }
                     const freeBonusQuantity = freeBonusQuantityValue
-                    const inventoryQuantity = quantity + freeBonusQuantity
+                    const paidInventoryQuantity = soldQuantityToInventoryQuantity(quantity, unitOption.factor)
+                    const freeBonusInventoryQuantity = soldQuantityToInventoryQuantity(freeBonusQuantity, unitOption.factor)
+                    const inventoryQuantity = paidInventoryQuantity + freeBonusInventoryQuantity
                     const selectedBatch = !service && item.batchId && item.batchId !== PRODUCT_STOCK_SELECTION
                         ? stockBatchesById.get(item.batchId)
                         : null
@@ -1150,7 +1346,16 @@ export function SalesOrderFormPage({
                         }
                     }
                     return {
-                        id: `${product.id}-${item.storageId}-${item.batchId}-${quantity}-${freeBonusQuantity}-${unitPrice}`,
+                        id: buildSalesOrderLineId({
+                            productId: product.id,
+                            storageId: item.storageId,
+                            batchId: item.batchId,
+                            unitRef: unitOption.unitRef,
+                            quantity,
+                            freeBonusQuantity,
+                            unitPrice,
+                            seq: item.seq
+                        }),
                         productId: product.id,
                         note: item.note.trim() || null,
                         priceBookId: hasPriceBookProvenance ? item.priceBookId : null,
@@ -1158,10 +1363,19 @@ export function SalesOrderFormPage({
                         storageId: getPersistedSalesOrderItemStorageId(product, item.storageId),
                         productName: product.name,
                         productSku: product.sku,
-                        unit: product.unit,
+                        unit: unitOption.unitCode,
+                        unitRelationshipId: unitOption.relationshipId,
+                        unitRef: unitOption.unitRef,
+                        unitNameSnapshot: item.unitNameSnapshot || unitOption.unitCode,
+                        baseUnitRef: unitOption.baseUnitRef,
+                        baseUnitCode: unitOption.baseUnitCode,
+                        baseUnitNameSnapshot: item.baseUnitNameSnapshot || unitOption.baseUnitCode,
+                        unitFactor: unitOption.factor,
                         quantity,
                         ...(freeBonusQuantity > 0 ? { freeBonusQuantity } : {}),
-                        ...(item.freeBonusUnit && item.freeBonusUnit !== product.unit ? { freeBonusUnit: item.freeBonusUnit } : {}),
+                        inventoryQuantity: paidInventoryQuantity,
+                        freeBonusInventoryQuantity,
+                        ...(!unitOption.relationshipId && item.freeBonusUnit && item.freeBonusUnit !== unitOption.unitCode ? { freeBonusUnit: item.freeBonusUnit } : {}),
                         lineTotal: roundFormAmount(quantity * unitPrice),
                         originalCurrency: sourceCurrency,
                         originalUnitPrice: convertCurrencyAmountWithLiveRates(
@@ -1197,7 +1411,7 @@ export function SalesOrderFormPage({
                 throw new Error(t('orders.form.errors.atLeastOneItem', { defaultValue: 'Add at least one item.' }))
             }
             if (!hideCosts && !skipLossWarning && orderItems.some((item) =>
-                item.convertedCostPrice > 0 && item.convertedUnitPrice < item.convertedCostPrice
+                item.convertedCostPrice > 0 && item.convertedUnitPrice < item.convertedCostPrice * (item.unitFactor || 1)
             )) {
                 setIsLossWarningOpen(true)
                 return
@@ -1355,6 +1569,8 @@ export function SalesOrderFormPage({
         } catch (error: any) {
             const message = isRemoteOrderSaveConfirmationError(error)
                 ? t('orders.form.errors.remoteSaveFailed')
+                : isOrderUnitConfigurationError(error)
+                    ? t('orders.form.errors.unitConfigurationChanged')
                 : error?.message === 'agent_sales_accounts_not_enabled'
                 ? t('agentSalesAccounts.notEnabled')
                 : error?.message === 'agent_sales_account_unavailable'
@@ -1663,12 +1879,20 @@ export function SalesOrderFormPage({
                                 <CardContent className="space-y-3">
                                     {items.map((item, index) => {
                                         const product = products.find((entry) => entry.id === item.productId)
-                                        const freeBonusDisplayUnit = item.freeBonusUnit || product?.unit || ''
+                                        const itemUnitOptions = product ? getProductUnitOptions(product.id) : []
+                                        const hasRelatedUnits = Boolean(product && productUnitContexts.has(product.id))
+                                        const selectedUnitOption = getFormUnitOption(item, product)
+                                        const selectedUnitCode = selectedUnitOption?.unitCode || ''
+                                        const freeBonusDisplayUnit = item.freeBonusUnit || selectedUnitCode
                                         const lineTotal = roundFormAmount((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0))
-                                        const costPrice = product ? getItemCostDetails(item, product).convertedCostPrice : 0
+                                        const costPrice = product ? getItemCostDetails(item, product).selectedConvertedCostPrice : 0
                                         const isSellingAtLoss = isItemSellingAtLoss(item, product)
                                         const freeBonusQuantity = Math.max(0, Number(item.freeBonusQuantity || 0))
-                                        const inventoryQuantity = (Number(item.quantity) || 0) + (canUseFreeBonus ? freeBonusQuantity : 0)
+                                        const inventoryQuantity = getOrderLineInventoryQuantity({
+                                            quantity: Number(item.quantity) || 0,
+                                            freeBonusQuantity: canUseFreeBonus ? freeBonusQuantity : 0,
+                                            unitFactor: selectedUnitOption?.factor ?? 1
+                                        })
                                         const lineBatches = getBatchesForPosition(item.productId, item.storageId)
                                         const selectedBatch = item.batchId && item.batchId !== PRODUCT_STOCK_SELECTION
                                             ? stockBatchesById.get(item.batchId)
@@ -1684,10 +1908,7 @@ export function SalesOrderFormPage({
                                             <div
                                                 key={`sales-item-${index}`}
                                                 className={cn(
-                                                    'relative grid gap-3 rounded-2xl border bg-background p-4 transition-all duration-700',
-                                                    canUseFreeBonus
-                                                        ? 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(80px,0.55fr)_minmax(80px,0.55fr)_minmax(108px,0.8fr)_minmax(72px,0.18fr)]'
-                                                        : 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(80px,0.55fr)_minmax(108px,0.8fr)_minmax(72px,0.18fr)]',
+                                                    'relative grid gap-4 rounded-2xl border bg-background p-4 transition-all duration-700 sm:grid-cols-2 lg:grid-cols-[repeat(24,minmax(0,1fr))]',
                                                     isSellingAtLoss && 'border-destructive bg-destructive/5',
                                                     item.seq === highlightedNewSeq && 'border-primary ring-2 ring-primary/60 bg-primary/5'
                                                 )}
@@ -1696,7 +1917,10 @@ export function SalesOrderFormPage({
                                                     {item.seq}
                                                 </span>
                                                 <div
-                                                    className="space-y-2"
+                                                    className={cn(
+                                                        'min-w-0 space-y-2 sm:col-span-2',
+                                                        canUseFreeBonus ? 'lg:col-span-6' : 'lg:col-span-7'
+                                                    )}
                                                     data-tour-id={index === 0 ? 'tutorial-order-product-picker' : undefined}
                                                     data-demo-product-linked={item.productId ? 'true' : 'false'}
                                                 >
@@ -1761,11 +1985,11 @@ export function SalesOrderFormPage({
                                                                 <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
                                                                 <SelectContent>
                                                                     <SelectItem value={PRODUCT_STOCK_SELECTION} disabled={regularStockQuantity <= 0 && lineBatches.length > 0}>
-                                                                        {t('orders.form.productStock', { defaultValue: 'Product stock' })} · {regularStockQuantity} {t('orders.form.available', { defaultValue: 'available' })}
+                                                                         {t('orders.form.productStock', { defaultValue: 'Product stock' })} · {formatProductAvailability(item.productId, regularStockQuantity)} {t('orders.form.available', { defaultValue: 'available' })}
                                                                     </SelectItem>
                                                                     {lineBatches.map((batch) => (
                                                                         <SelectItem key={batch.id} value={batch.id}>
-                                                                            {t('orders.form.batch', { defaultValue: 'Batch' })} {batch.batchNumber} · {batch.quantity} · {formatCurrency(
+                                                                             {t('orders.form.batch', { defaultValue: 'Batch' })} {batch.batchNumber} · {formatProductAvailability(item.productId, batch.quantity)} · {formatCurrency(
                                                                                 convertCurrencyAmountWithLiveRates(batch.price, batch.currency, currency, liveRates),
                                                                                 currency,
                                                                                 features.iqd_display_preference
@@ -1776,8 +2000,8 @@ export function SalesOrderFormPage({
                                                             </Select>
                                                             <p className={cn('text-xs', selectedSourceExceeded ? 'text-destructive' : 'text-muted-foreground')}>
                                                                 {selectedBatch
-                                                                    ? `${t('orders.form.batch', { defaultValue: 'Batch' })} ${selectedBatch.batchNumber}: ${selectedBatch.quantity} ${t('orders.form.available', { defaultValue: 'available' })}`
-                                                                    : `${t('orders.form.productStock', { defaultValue: 'Product stock' })}: ${regularStockQuantity} ${t('orders.form.available', { defaultValue: 'available' })}`}
+                                                                     ? `${t('orders.form.batch', { defaultValue: 'Batch' })} ${selectedBatch.batchNumber}: ${formatProductAvailability(item.productId, selectedBatch.quantity)} ${t('orders.form.available', { defaultValue: 'available' })}`
+                                                                     : `${t('orders.form.productStock', { defaultValue: 'Product stock' })}: ${formatProductAvailability(item.productId, regularStockQuantity)} ${t('orders.form.available', { defaultValue: 'available' })}`}
                                                                 {selectedSourceExceeded ? ` — ${t('orders.form.errors.batchQuantityExceeded', {
                                                                     productName: product?.name || '',
                                                                     defaultValue: 'Selected source does not have enough stock.'
@@ -1787,17 +2011,28 @@ export function SalesOrderFormPage({
                                                     ) : null}
                                                 </div>
                                                 {isService(product) ? (
-                                                    <div className="space-y-2">
+                                                    <div className={cn(
+                                                        'min-w-0 space-y-2',
+                                                        canUseFreeBonus ? 'lg:col-span-4' : 'lg:col-span-5'
+                                                    )}>
                                                         <Label>{t('services.title', { defaultValue: 'Services' })}</Label>
                                                         <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
                                                             {t('services.noInventory', { defaultValue: 'Service sale — no stock or storage movement.' })}
                                                         </p>
                                                     </div>
                                                 ) : (
-                                                    <div id={`sales-storage-${index}`} className={cn('space-y-2', highlightedStorageIndex === index && 'animate-pulse')} data-tour-id={index === 0 ? 'tutorial-order-storage' : undefined}>
+                                                    <div
+                                                        id={`sales-storage-${index}`}
+                                                        className={cn(
+                                                            'min-w-0 space-y-2',
+                                                            canUseFreeBonus ? 'lg:col-span-4' : 'lg:col-span-5',
+                                                            highlightedStorageIndex === index && 'animate-pulse'
+                                                        )}
+                                                        data-tour-id={index === 0 ? 'tutorial-order-storage' : undefined}
+                                                    >
                                                         <Label className={cn(highlightedStorageIndex === index && 'text-destructive font-bold')}>{t('orders.form.selectStorage', { defaultValue: 'Select Storage' })}</Label>
                                                         <Select value={item.storageId} onValueChange={(value) => { setHighlightedStorageIndex(null); updateItem(index, { storageId: value }) }}>
-                                                            <SelectTrigger className={cn(highlightedStorageIndex === index && 'ring-2 ring-destructive')}><SelectValue placeholder={t('orders.form.selectStorage', { defaultValue: 'Select Storage' })} /></SelectTrigger>
+                                                            <SelectTrigger className={cn('w-full min-w-0', highlightedStorageIndex === index && 'ring-2 ring-destructive')}><SelectValue placeholder={t('orders.form.selectStorage', { defaultValue: 'Select Storage' })} /></SelectTrigger>
                                                             <SelectContent>
                                                                 {storages.map((storage) => (
                                                                     <SelectItem key={storage.id} value={storage.id}>
@@ -1811,38 +2046,66 @@ export function SalesOrderFormPage({
                                                                 )}
                                                             </SelectContent>
                                                         </Select>
-                                                        <p className="text-xs text-muted-foreground">
+                                                        <p className="break-words text-xs text-muted-foreground">
                                                             {item.storageId && item.productId
                                                                 ? t('orders.form.availableQuantity', {
-                                                                    quantity: getAvailableQuantity(item.productId, item.storageId),
-                                                                    defaultValue: `Available: ${getAvailableQuantity(item.productId, item.storageId)}`
+                                                                     quantity: formatProductAvailability(item.productId, getAvailableQuantity(item.productId, item.storageId)),
+                                                                     defaultValue: `Available: ${formatProductAvailability(item.productId, getAvailableQuantity(item.productId, item.storageId))}`
                                                                 })
                                                                 : t('orders.form.chooseSourceStorageForLine', { defaultValue: 'Choose a source storage for this line.' })}
                                                         </p>
                                                     </div>
                                                 )}
-                                                <div className="space-y-2" data-tour-id={index === 0 ? 'tutorial-order-quantity' : undefined}>
-                                                    <Label>{t('common.quantity', { defaultValue: 'Quantity' })}</Label>
-                                                    <div className="flex items-center gap-1">
-                                                        <Input type="number" min={(isService(product) || isDynamicUnit(product?.unit)) ? ORDER_DECIMAL_STEP : "1"} step={(isService(product) || isDynamicUnit(product?.unit)) ? ORDER_DECIMAL_STEP : "1"} value={item.quantity} onChange={(event) => updateItem(index, { quantity: event.target.value })} placeholder={t('common.quantity', { defaultValue: 'Quantity' })} />
-                                                        {product?.unit && <span className="text-xs text-muted-foreground shrink-0">{t(`products.units.${product.unit}`, product.unit)}</span>}
+                                                <div className="min-w-0 space-y-2 lg:col-span-5" data-tour-id={index === 0 ? 'tutorial-order-quantity' : undefined}>
+                                                    <Label>
+                                                        {hasRelatedUnits
+                                                            ? t('orders.form.quantityAndUnit', { defaultValue: 'Quantity and unit' })
+                                                            : t('common.quantity', { defaultValue: 'Quantity' })} *
+                                                    </Label>
+                                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                                        <Input
+                                                            className="min-w-20 flex-1 basis-20"
+                                                            type="number"
+                                                            min={(isService(product) || selectedUnitOption?.isDynamic) ? ORDER_DECIMAL_STEP : '1'}
+                                                            step={(isService(product) || selectedUnitOption?.isDynamic) ? ORDER_DECIMAL_STEP : '1'}
+                                                            value={item.quantity}
+                                                            onChange={(event) => updateItem(index, { quantity: event.target.value })}
+                                                            placeholder={t('common.quantity', { defaultValue: 'Quantity' })}
+                                                        />
+                                                        {hasRelatedUnits ? (
+                                                            <Select value={item.unitRef} onValueChange={(value) => updateItem(index, { unitRef: value })}>
+                                                                <SelectTrigger className="min-w-28 flex-1 basis-28" aria-label={t('orders.form.unit', { defaultValue: 'Unit' })}>
+                                                                    <SelectValue placeholder={t('orders.form.selectUnit', { defaultValue: 'Select unit' })} />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {itemUnitOptions.map((option) => (
+                                                                        <SelectItem key={option.unitRef} value={option.unitRef}>
+                                                                            {getUnitLabel(option.unitCode)}
+                                                                        </SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        ) : selectedUnitCode ? (
+                                                            <Badge variant="outline" className="max-w-full shrink-0 truncate">{getUnitLabel(selectedUnitCode)}</Badge>
+                                                        ) : null}
                                                     </div>
                                                 </div>
                                                 {canUseFreeBonus ? (
-                                                    <div className="space-y-2">
+                                                    <div className="min-w-0 space-y-2 lg:col-span-3">
                                                         <Label>{t('orders.form.freeBonus', { defaultValue: 'Free Bonus' })}</Label>
-                                                        <div className="flex items-center gap-1">
+                                                        <div className="min-w-0 space-y-1.5">
                                                             <Input
+                                                                className="w-full min-w-0"
                                                                 type="number"
                                                                 min="0"
-                                                                step={isDynamicUnit(product?.unit) ? ORDER_DECIMAL_STEP : '1'}
+                                                                step={selectedUnitOption?.isDynamic ? ORDER_DECIMAL_STEP : '1'}
                                                                 value={item.freeBonusQuantity}
                                                                 onChange={(event) => updateItem(index, { freeBonusQuantity: event.target.value })}
                                                                 placeholder="0"
                                                             />
-                                                            {freeBonusDisplayUnit && <span className="text-xs text-muted-foreground shrink-0">{t(`products.units.${freeBonusDisplayUnit}`, freeBonusDisplayUnit)}</span>}
+                                                            {freeBonusDisplayUnit && <span className="block truncate text-xs text-muted-foreground">{t(`products.units.${freeBonusDisplayUnit}`, freeBonusDisplayUnit)}</span>}
                                                         </div>
-                                                        {isAccessKeyHeld ? (
+                                                        {isAccessKeyHeld && !hasRelatedUnits ? (
                                                             <FreeBonusUnitSelect
                                                                 value={item.freeBonusUnit}
                                                                 productUnit={product?.unit}
@@ -1852,9 +2115,15 @@ export function SalesOrderFormPage({
                                                         ) : null}
                                                     </div>
                                                 ) : null}
-                                                <div className="space-y-2" data-tour-id={index === 0 ? 'tutorial-order-unit-price' : undefined}>
+                                                <div
+                                                    className={cn(
+                                                        'min-w-0 space-y-2',
+                                                        canUseFreeBonus ? 'lg:col-span-4' : 'lg:col-span-5'
+                                                    )}
+                                                    data-tour-id={index === 0 ? 'tutorial-order-unit-price' : undefined}
+                                                >
                                                     <Label>{t('common.sellingPrice', { defaultValue: 'Selling Price' })}</Label>
-                                                    <Input value={formatNumericInput(item.unitPrice)} onChange={(event) => updateItem(index, { unitPrice: sanitizeNumericInput(event.target.value, { allowDecimal: true, maxFractionDigits: 3 }) })} placeholder={t('common.sellingPrice', { defaultValue: 'Selling Price' })} />
+                                                    <Input className="w-full min-w-0" value={formatNumericInput(item.unitPrice)} onChange={(event) => updateItem(index, { unitPrice: sanitizeNumericInput(event.target.value, { allowDecimal: true, maxFractionDigits: 3 }) })} placeholder={t('common.sellingPrice', { defaultValue: 'Selling Price' })} />
                                                     {!hideCosts && isSellingAtLoss ? (
                                                         <div role="alert" className="flex items-start gap-1.5 text-xs text-destructive">
                                                             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -1866,7 +2135,7 @@ export function SalesOrderFormPage({
                                                         </div>
                                                     ) : null}
                                                 </div>
-                                                <div className="flex items-start justify-end gap-1" data-tour-id={index === 0 ? 'tutorial-order-line-actions' : undefined}>
+                                                <div className="flex min-w-0 items-start justify-end gap-0 sm:col-span-2 lg:col-span-2 lg:justify-center" data-tour-id={index === 0 ? 'tutorial-order-line-actions' : undefined}>
                                                     <OrderLineItemNoteDialog
                                                         note={item.note}
                                                         onSave={(note) => updateItem(index, { note })}
@@ -1883,11 +2152,11 @@ export function SalesOrderFormPage({
                                                         <Trash2 className="h-4 w-4" />
                                                     </Button>
                                                 </div>
-                                                <div className={cn('flex items-center justify-between text-xs text-muted-foreground', canUseFreeBonus ? 'md:col-span-6' : 'md:col-span-5')}>
+                                                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-muted-foreground sm:col-span-2 lg:col-span-full">
                                                     <span>{product?.sku ? `SKU: ${product.sku}` : '\u00A0'}</span>
-                                                    <span>
-                                                        {canUseFreeBonus && freeBonusQuantity > 0
-                                                            ? `${t('orders.form.inventoryQuantity', { defaultValue: 'Inventory Qty' })}: ${inventoryQuantity} - `
+                                                    <span className="ms-auto text-end">
+                                                        {selectedUnitOption && (hasRelatedUnits || (canUseFreeBonus && freeBonusQuantity > 0))
+                                                            ? `${t('orders.form.inventoryQuantity', { defaultValue: 'Inventory Qty' })}: ${inventoryQuantity} ${getUnitLabel(selectedUnitOption.baseUnitCode)} - `
                                                             : ''}
                                                         {(t('orders.form.table.total', { defaultValue: 'Total' }))}: {formatCurrency(lineTotal, currency, features.iqd_display_preference)}
                                                     </span>

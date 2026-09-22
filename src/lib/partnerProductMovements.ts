@@ -156,8 +156,9 @@ export function buildPartnerProductMovements(data: PartnerProductMovementsData, 
   for (const order of unique(active(data.purchaseOrders)).filter(row => row.status !== 'draft' && row.status !== 'cancelled'
     && (row.businessPartnerId === data.partnerId || row.supplierId === data.partnerId))) {
     for (const item of order.items) {
-      const received = item.receivedQuantity != null ? positive(item.receivedQuantity)
-        : order.status === 'received' || order.status === 'completed' ? getOrderLineInventoryQuantity(item) : 0
+      const received = order.status === 'received' || order.status === 'completed'
+        ? item.receivedQuantity != null ? positive(item.receivedQuantity) : getOrderLineInventoryQuantity(item)
+        : 0
       const base: PartnerProductMovement = {
         id: `po:${order.id}:${item.id}`, date: orderDate(order, 'purchase_order'), productId: item.productId,
         item: item.productName, unit: item.unit || null, quantity: received, direction: 'purchased', kind: 'purchase', note: item.note || null,

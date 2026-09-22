@@ -25,6 +25,7 @@ interface ReturnConfirmationModalProps {
     isItemReturn?: boolean
     maxQuantity?: number
     itemName?: string
+    quantityUnitLabel?: string
     workspaceId?: string
     paymentAccount?: PaymentAccount | null
     onPaymentAccountChange?: (account: PaymentAccount | null) => void
@@ -41,6 +42,7 @@ export function ReturnConfirmationModal({
     isItemReturn = false,
     maxQuantity = 1,
     itemName = '',
+    quantityUnitLabel = '',
     workspaceId,
     paymentAccount = null,
     onPaymentAccountChange,
@@ -125,7 +127,7 @@ export function ReturnConfirmationModal({
                                         {itemName}
                                     </p>
                                     <p className="text-xs text-muted-foreground">
-                                        {t('sales.return.availableToReturn') || 'Available to return'}: {maxQuantity}
+                                        {t('sales.return.availableToReturn') || 'Available to return'}: {maxQuantity}{quantityUnitLabel ? ` ${quantityUnitLabel}` : ''}
                                     </p>
                                 </div>
                             )}
@@ -172,11 +174,11 @@ export function ReturnConfirmationModal({
                                             aria-hidden="true"
                                             className="pointer-events-none absolute right-6 top-1/2 -translate-y-1/2 whitespace-nowrap tabular-nums text-muted-foreground font-bold"
                                         >
-                                            / {maxQuantity}
+                                            / {maxQuantity}{quantityUnitLabel ? ` ${quantityUnitLabel}` : ''}
                                         </div>
                                     </div>
                                     <p id={maxQuantityDescriptionId} className="text-sm text-muted-foreground font-medium px-2">
-                                        {t('sales.return.maxQuantity', { max: maxQuantity }) || `Maximum allowed: ${maxQuantity}`}
+                                        {t('sales.return.maxQuantity', { max: maxQuantity }) || `Maximum allowed: ${maxQuantity}`}{quantityUnitLabel ? ` ${quantityUnitLabel}` : ''}
                                     </p>
                                 </div>
                                 <div className="flex gap-2">

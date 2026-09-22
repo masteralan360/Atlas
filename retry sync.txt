@@ -25,3 +25,6 @@ Accumilated account statement rows by types and for one day
 ##
 
 Restrict Phone number in khaleej cosmetic
+Allow Shipped to be cancelled
+Allow E-Commerce Sales Orders to be returned
+Make Maintenence Mode servier-side

@@ -3,6 +3,37 @@ import { describe, expect, it } from 'vitest'
 import { getOrderPrintOriginalTotal, getOrderPrintReturnState } from './orderPrintReturnState'
 
 describe('order print return state', () => {
+    it('converts returned base inventory back to the original commercial unit', () => {
+        expect(getOrderPrintReturnState({
+            quantity: 2,
+            freeBonusQuantity: 1,
+            unitFactor: 20,
+            returnedQuantity: 20,
+            lineTotal: 80000
+        })).toMatchObject({
+            status: 'partially-returned',
+            originalQuantity: 2,
+            remainingQuantity: 1,
+            remainingLineTotal: 40000
+        })
+    })
+
+    it('does not treat returned free units as returned paid quantity', () => {
+        expect(getOrderPrintReturnState({
+            quantity: 2,
+            freeBonusQuantity: 1,
+            unitFactor: 20,
+            returnedQuantity: 40,
+            returnedPaidInventoryQuantity: 20,
+            returnedFreeInventoryQuantity: 20,
+            lineTotal: 80000
+        })).toMatchObject({
+            status: 'partially-returned',
+            originalQuantity: 2,
+            remainingQuantity: 1,
+            remainingLineTotal: 40000
+        })
+    })
     it('keeps active order lines unchanged', () => {
         expect(getOrderPrintReturnState({ quantity: 3, lineTotal: 75 })).toEqual({
             status: 'active',
@@ -45,7 +76,7 @@ describe('order print return state', () => {
     })
 
     it('only marks a bonus-bearing line fully returned after all inventory is returned', () => {
-        expect(getOrderPrintReturnState({ quantity: 3, freeBonusQuantity: 1, returnedQuantity: 3, lineTotal: 75 }).status)
+    expect(getOrderPrintReturnState({ quantity: 3, freeBonusQuantity: 1, returnedQuantity: 3, lineTotal: 75 }).status)
             .toBe('partially-returned')
     })
 

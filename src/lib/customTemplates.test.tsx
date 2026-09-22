@@ -1363,7 +1363,14 @@ describe('Atlas Standard return custom print template', () => {
                 baseRefundAmount: 20,
                 adjustmentAmount: 5,
                 totalRefundAmount: 25,
-                lines: [{ orderItemId: 'returned-line', returnedQuantity: 1, refundAmount: 20, unitRefundAmount: 20 }],
+                lines: [{
+                    orderItemId: 'returned-line',
+                    returnedQuantity: 1,
+                    selectedUnitQuantity: 1,
+                    paidSelectedUnitQuantity: 1,
+                    refundAmount: 20,
+                    unitRefundAmount: 20
+                }],
                 adjustments: [{
                     id: 'return-packaging-adjustment',
                     type: 'deduction',

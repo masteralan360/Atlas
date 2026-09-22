@@ -102,6 +102,56 @@ describe('sales order revenue analysis', () => {
     })
   })
 
+  it('uses paid returns for related-unit revenue and total returned stock for cost', () => {
+    const order = {
+      id: 'order-related-return',
+      orderNumber: 'SO-RELATED-RETURN',
+      customerId: 'customer-1',
+      customerName: 'Customer',
+      createdAt: '2026-09-22T00:00:00.000Z',
+      updatedAt: '2026-09-22T00:00:00.000Z',
+      currency: 'iqd',
+      status: 'completed',
+      returnStatus: 'partial',
+      isDeleted: false,
+      total: 40_000,
+      items: [{
+        id: 'line-related',
+        productId: 'product-1',
+        productName: 'Medicine',
+        productSku: 'MED-1',
+        quantity: 2,
+        freeBonusQuantity: 1,
+        unitFactor: 20,
+        inventoryQuantity: 40,
+        freeBonusInventoryQuantity: 20,
+        returnedQuantity: 40,
+        returnedPaidInventoryQuantity: 20,
+        returnedFreeInventoryQuantity: 20,
+        lineTotal: 80_000,
+        originalCurrency: 'iqd',
+        originalUnitPrice: 40_000,
+        convertedUnitPrice: 40_000,
+        settlementCurrency: 'iqd',
+        costPrice: 1_000,
+        convertedCostPrice: 1_000
+      }]
+    } as SalesOrder
+
+    const record = toRevenueRecordFromSalesOrder(order)
+    expect(record.items[0]).toMatchObject({
+      quantity: 2,
+      returnedQuantity: 1,
+      costQuantity: 60,
+      returnedCostQuantity: 40
+    })
+    expect(getRevenueAnalysisTotals(record)).toMatchObject({
+      revenue: 40_000,
+      cost: 20_000,
+      profit: 20_000
+    })
+  })
+
   it('excludes a fully returned order from revenue totals', () => {
     const order = {
       id: 'order-returned-2',

@@ -592,6 +592,41 @@ describe("sales agent commission lifecycle", () => {
     expect(recognizedProductCommission).toBe(7);
   });
 
+  it("does not reverse related-unit revenue for returned free stock", () => {
+    const order = completedOrder(crypto.randomUUID());
+    order.total = 40_000;
+    order.subtotal = 40_000;
+    order.returnStatus = "partial";
+    order.items[0] = {
+      ...order.items[0],
+      quantity: 2,
+      freeBonusQuantity: 1,
+      unitFactor: 20,
+      inventoryQuantity: 40,
+      freeBonusInventoryQuantity: 20,
+      returnedQuantity: 40,
+      returnedPaidInventoryQuantity: 20,
+      returnedFreeInventoryQuantity: 20,
+      convertedUnitPrice: 40_000,
+      convertedCostPrice: 1_000,
+      lineTotal: 80_000,
+    };
+
+    const calculation = commissions.calculateSalesOrderCommission(order, {
+      ratePercent: 10,
+      calculationBasis: "net_profit",
+      includeTax: false,
+      includeDeliveryCharge: false,
+    });
+
+    expect(calculation).toMatchObject({
+      revenueAmount: 40_000,
+      costAmount: 20_000,
+      basisAmount: 20_000,
+      commissionAmount: 2_000,
+    });
+  });
+
   it("keeps a paid product commission return-linked through one reversal and makes the excess recoverable", async () => {
     const productCommissions = await import("./productCommissions");
     const agent = fieldAgent(crypto.randomUUID());

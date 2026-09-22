@@ -11,7 +11,7 @@ import { useDemoTutorial } from '@/demo'
 import { useProfileData } from '@/hooks/useProfileData'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { resolveOrderDetailsLookupStatus, type OrderDetailsRemoteLookupStatus } from '@/lib/orderDetailsLookup'
-import { getOrderLineFreeBonusQuantity, getOrderLineFulfilledQuantity, getOrderLineInventoryQuantity, getOrderLinePaidQuantity, hasOrderLineFreeBonus, isFulfilledUnitsAvailableForOrder } from '@/lib/orderLineItems'
+import { getOrderLineFreeBonusInventoryQuantity, getOrderLineFreeBonusQuantity, getOrderLineFulfilledQuantity, getOrderLineInventoryQuantity, getOrderLinePaidInventoryQuantity, getOrderLinePaidQuantity, getOrderLineUnitFactor, hasOrderLineFreeBonus, isFulfilledUnitsAvailableForOrder } from '@/lib/orderLineItems'
 import {
     getOrderAdjustmentTotals,
     getOrderTotalWithPostReturnAdjustments,
@@ -333,7 +333,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const [transactionToReverse, setTransactionToReverse] = useState<PaymentTransaction | null>(null)
     const [isReversingPayment, setIsReversingPayment] = useState(false)
     const [isLoadingOrderInvoice, setIsLoadingOrderInvoice] = useState(false)
-    const [returnTarget, setReturnTarget] = useState<{ orderItemId: string | null; maxQuantity: number; itemName: string } | null>(null)
+    const [returnTarget, setReturnTarget] = useState<{ orderItemId: string | null; maxQuantity: number; itemName: string; unitLabel: string } | null>(null)
     const [isReturning, setIsReturning] = useState(false)
     const [returnPaymentAccount, setReturnPaymentAccount] = useState<PaymentAccount | null>(null)
     const [isPostReturnAdjustmentOpen, setIsPostReturnAdjustmentOpen] = useState(false)
@@ -501,6 +501,28 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         return quantities
     }, [salesOrderReturnItems])
 
+    const returnedPaidInventoryByItemId = useMemo(() => {
+        const quantities = new Map<string, number>()
+        for (const returnItem of salesOrderReturnItems) {
+            const orderItem = salesOrder?.items.find((item) => item.id === returnItem.orderItemId)
+            const fallback = Math.min(returnItem.inventoryQuantity ?? returnItem.quantity, orderItem ? getOrderLinePaidInventoryQuantity(orderItem) : returnItem.quantity)
+            quantities.set(returnItem.orderItemId,
+                (quantities.get(returnItem.orderItemId) || 0) + (returnItem.paidInventoryQuantity ?? fallback))
+        }
+        return quantities
+    }, [salesOrder, salesOrderReturnItems])
+
+    const returnedFreeInventoryByItemId = useMemo(() => {
+        const quantities = new Map<string, number>()
+        for (const returnItem of salesOrderReturnItems) {
+            const total = returnItem.inventoryQuantity ?? returnItem.quantity
+            const paid = returnItem.paidInventoryQuantity ?? total
+            quantities.set(returnItem.orderItemId,
+                (quantities.get(returnItem.orderItemId) || 0) + (returnItem.freeInventoryQuantity ?? Math.max(0, total - paid)))
+        }
+        return quantities
+    }, [salesOrderReturnItems])
+
     const returnedAmountByItemId = useMemo(() => {
         const amounts = new Map<string, number>()
         for (const item of salesOrderReturnItems) {
@@ -535,8 +557,8 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
 
     const getReturnableQuantity = useCallback((item: SalesOrderItem) => Math.max(
         0,
-        getOrderLineInventoryQuantity(item) - (returnedQuantityByItemId.get(item.id) || 0)
-    ), [returnedQuantityByItemId])
+        (getOrderLinePaidInventoryQuantity(item) - (returnedPaidInventoryByItemId.get(item.id) || 0)) / getOrderLineUnitFactor(item)
+    ), [returnedPaidInventoryByItemId])
 
     const storageName = (storageId?: string | null) => {
         if (!storageId) return 'N/A'
@@ -1013,7 +1035,9 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         : null
     const margin = profit !== null && order.total > 0 ? (profit / order.total) * 100 : null
     const receivedUnits = !isSales
-        ? (order as PurchaseOrder).items.reduce((sum, item) => sum + (item.receivedQuantity ?? ((order.status === 'received' || order.status === 'completed') ? getOrderLineInventoryQuantity(item) : 0)), 0)
+        ? (order.status === 'received' || order.status === 'completed'
+            ? (order as PurchaseOrder).items.reduce((sum, item) => sum + (item.receivedQuantity ?? getOrderLineInventoryQuantity(item)), 0)
+            : 0)
         : null
     const fulfilledUnitsAvailable = isSales && isFulfilledUnitsAvailableForOrder(order.createdAt, order.items)
     const fulfilledUnits = fulfilledUnitsAvailable
@@ -1205,13 +1229,21 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
             })
             return
         }
-        setReturnTarget({ orderItemId: null, maxQuantity: 0, itemName: '' })
+        setReturnTarget({ orderItemId: null, maxQuantity: 0, itemName: '', unitLabel: '' })
     }
 
     const openItemReturn = (item: SalesOrderItem) => {
         const maxQuantity = getReturnableQuantity(item)
         if (maxQuantity <= 0) return
-        setReturnTarget({ orderItemId: item.id, maxQuantity, itemName: item.productName })
+        const unitCode = item.unit?.trim() || productUnits[item.productId]?.trim() || ''
+        setReturnTarget({
+            orderItemId: item.id,
+            maxQuantity,
+            itemName: item.productName,
+            unitLabel: item.unitRef?.startsWith('custom:') && item.unitNameSnapshot
+                ? item.unitNameSnapshot
+                : unitCode ? t(`products.units.${unitCode}`, unitCode) : ''
+        })
     }
 
     const handleOrderReturnConfirm = async (reason: string, quantity?: number) => {
@@ -1228,8 +1260,17 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
             items = [{ orderItemId: returnTarget.orderItemId, quantity }]
         } else {
             items = resolved.order.items
-                .map((item) => ({ orderItemId: item.id, quantity: getReturnableQuantity(item) }))
-                .filter((item) => item.quantity > 0)
+                .map((item) => {
+                    const factor = getOrderLineUnitFactor(item)
+                    return {
+                        orderItemId: item.id,
+                        paidQuantity: getReturnableQuantity(item),
+                        freeQuantity: Math.max(0,
+                            (getOrderLineFreeBonusInventoryQuantity(item) - (returnedFreeInventoryByItemId.get(item.id) || 0)) / factor
+                        )
+                    }
+                })
+                .filter((item) => item.paidQuantity > 0 || item.freeQuantity > 0)
         }
         if (items.length === 0) return
 
@@ -1934,7 +1975,11 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                          const returnedQuantity = isSales ? (returnedQuantityByItemId.get(item.id) || 0) : 0
                                          const returnedAmount = isSales ? (returnedAmountByItemId.get(item.id) || 0) : 0
                                          const returnState = isSales
-                                             ? getOrderPrintReturnState(item, { returnedQuantity, returnedAmount })
+                                             ? getOrderPrintReturnState(item, {
+                                                 returnedQuantity,
+                                                 returnedPaidInventoryQuantity: returnedPaidInventoryByItemId.get(item.id) || 0,
+                                                 returnedAmount
+                                             })
                                              : null
                                          const hasReturnAdjustment = Boolean(returnState && returnState.status !== 'active')
                                          const remainingQuantity = returnState?.remainingQuantity ?? paidQuantity
@@ -1944,10 +1989,18 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                          const remainingLineTotal = returnState?.remainingLineTotal ?? item.lineTotal
                                          const originalItemProfit = isSales ? item.lineTotal - (salesItem.convertedCostPrice * inventoryQuantity) : 0
                                          const itemProfit = isSales ? remainingLineTotal - (salesItem.convertedCostPrice * remainingInventoryQuantity) : 0
-                                         const itemReceived = !isSales ? purchaseItem.receivedQuantity ?? ((order.status === 'received' || order.status === 'completed') ? inventoryQuantity : 0) : 0
+                                         const itemReceived = !isSales && (order.status === 'received' || order.status === 'completed')
+                                             ? purchaseItem.receivedQuantity ?? inventoryQuantity
+                                             : 0
                                          const returnableQuantity = isSales ? getReturnableQuantity(salesItem) : 0
                                          const itemUnit = item.unit?.trim() || productUnits[item.productId]?.trim() || ''
-                                         const itemUnitLabel = itemUnit ? t(`products.units.${itemUnit}`, itemUnit) : ''
+                                         const itemUnitLabel = item.unitRef?.startsWith('custom:') && item.unitNameSnapshot
+                                             ? item.unitNameSnapshot
+                                             : itemUnit ? t(`products.units.${itemUnit}`, itemUnit) : ''
+                                         const baseUnit = item.baseUnitCode?.trim() || itemUnit
+                                         const baseUnitLabel = item.baseUnitRef?.startsWith('custom:') && item.baseUnitNameSnapshot
+                                             ? item.baseUnitNameSnapshot
+                                             : baseUnit ? t(`products.units.${baseUnit}`, baseUnit) : ''
                                          const freeBonusItemUnit = item.freeBonusUnit?.trim() || itemUnit
                                          const freeBonusItemUnitLabel = freeBonusItemUnit ? t(`products.units.${freeBonusItemUnit}`, freeBonusItemUnit) : ''
 
@@ -1987,6 +2040,11 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                                                 originalValue={`${paidQuantity}${itemUnitLabel ? ` ${itemUnitLabel}` : ''}`}
                                                             />
                                                         ) : <div className="mt-1 font-medium">{paidQuantity}{itemUnitLabel ? ` ${itemUnitLabel}` : ''}</div>}
+                                                        {(item.unitFactor || 1) !== 1 ? (
+                                                            <div className="mt-1 text-xs text-muted-foreground">
+                                                                {t('orders.form.baseEquivalent', { defaultValue: 'Base equivalent' })}: {item.inventoryQuantity ?? paidQuantity * (item.unitFactor || 1)}{baseUnitLabel ? ` ${baseUnitLabel}` : ''}
+                                                            </div>
+                                                        ) : null}
                                                     </div>
                                                     {showFreeBonus ? (
                                                         <div className="rounded-2xl border bg-muted/20 p-3">
@@ -2072,7 +2130,11 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                                  const returnedQuantity = isSales ? (returnedQuantityByItemId.get(item.id) || 0) : 0
                                                  const returnedAmount = isSales ? (returnedAmountByItemId.get(item.id) || 0) : 0
                                                  const returnState = isSales
-                                                     ? getOrderPrintReturnState(item, { returnedQuantity, returnedAmount })
+                                                     ? getOrderPrintReturnState(item, {
+                                                         returnedQuantity,
+                                                         returnedPaidInventoryQuantity: returnedPaidInventoryByItemId.get(item.id) || 0,
+                                                         returnedAmount
+                                                     })
                                                      : null
                                                  const hasReturnAdjustment = Boolean(returnState && returnState.status !== 'active')
                                                  const remainingQuantity = returnState?.remainingQuantity ?? paidQuantity
@@ -2080,12 +2142,20 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                                  const isItemFullyReturned = returnState?.status === 'fully-returned'
                                                  const hasItemPartialReturn = returnState?.status === 'partially-returned'
                                                  const remainingLineTotal = returnState?.remainingLineTotal ?? item.lineTotal
-                                                 const itemReceived = purchaseItem.receivedQuantity ?? ((order.status === 'received' || order.status === 'completed') ? inventoryQuantity : 0)
+                                                 const itemReceived = order.status === 'received' || order.status === 'completed'
+                                                     ? purchaseItem.receivedQuantity ?? inventoryQuantity
+                                                     : 0
                                                  const originalItemProfit = isSales ? item.lineTotal - (salesItem.convertedCostPrice * inventoryQuantity) : 0
                                                  const itemProfit = isSales ? remainingLineTotal - (salesItem.convertedCostPrice * remainingInventoryQuantity) : 0
                                                  const returnableQuantity = isSales ? getReturnableQuantity(salesItem) : 0
                                                  const itemUnit = item.unit?.trim() || productUnits[item.productId]?.trim() || ''
-                                                 const itemUnitLabel = itemUnit ? t(`products.units.${itemUnit}`, itemUnit) : ''
+                                                  const itemUnitLabel = item.unitRef?.startsWith('custom:') && item.unitNameSnapshot
+                                                      ? item.unitNameSnapshot
+                                                      : itemUnit ? t(`products.units.${itemUnit}`, itemUnit) : ''
+                                                  const baseUnit = item.baseUnitCode?.trim() || itemUnit
+                                                  const baseUnitLabel = item.baseUnitRef?.startsWith('custom:') && item.baseUnitNameSnapshot
+                                                      ? item.baseUnitNameSnapshot
+                                                      : baseUnit ? t(`products.units.${baseUnit}`, baseUnit) : ''
                                                  const freeBonusItemUnit = item.freeBonusUnit?.trim() || itemUnit
                                                  const freeBonusItemUnitLabel = freeBonusItemUnit ? t(`products.units.${freeBonusItemUnit}`, freeBonusItemUnit) : ''
 
@@ -2118,14 +2188,21 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                                                      currentValue={`${remainingQuantity}${itemUnitLabel ? ` ${itemUnitLabel}` : ''}`}
                                                                      originalValue={`${paidQuantity}${itemUnitLabel ? ` ${itemUnitLabel}` : ''}`}
                                                                  />
-                                                             ) : (
-                                                                 <span>{paidQuantity}{itemUnitLabel ? ` ${itemUnitLabel}` : ''}</span>
-                                                             )}
+                                                              ) : (
+                                                                  <div>
+                                                                      <span>{paidQuantity}{itemUnitLabel ? ` ${itemUnitLabel}` : ''}</span>
+                                                                      {(item.unitFactor || 1) !== 1 ? (
+                                                                          <div className="text-xs text-muted-foreground">
+                                                                              {item.inventoryQuantity ?? paidQuantity * (item.unitFactor || 1)}{baseUnitLabel ? ` ${baseUnitLabel}` : ''}
+                                                                          </div>
+                                                                      ) : null}
+                                                                  </div>
+                                                              )}
                                                          </TableCell>
                                                         {showFreeBonus && <TableCell className="text-end">{freeBonusQuantity}{freeBonusItemUnitLabel ? ` ${freeBonusItemUnitLabel}` : ''}</TableCell>}
                                                         {!isSales && <TableCell className="text-end">{itemReceived}</TableCell>}
                                                         <TableCell className="text-end">{formatCurrency(item.convertedUnitPrice, currency, iqd)}</TableCell>
-                                                        {isSales && canViewProfit && <TableCell className="text-end">{formatCurrency(salesItem.convertedCostPrice, currency, iqd)}</TableCell>}
+                                                        {isSales && canViewProfit && <TableCell className="text-end">{formatCurrency(salesItem.convertedCostPrice * (item.unitFactor || 1), currency, iqd)}</TableCell>}
                                                         <TableCell className="text-end font-semibold">
                                                             {hasReturnAdjustment ? (
                                                                 <ReturnedOrderValue
@@ -2284,6 +2361,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 isItemReturn={!!returnTarget?.orderItemId}
                 maxQuantity={returnTarget?.maxQuantity || 1}
                 itemName={returnTarget?.itemName || ''}
+                quantityUnitLabel={returnTarget?.unitLabel || ''}
                 workspaceId={workspaceId}
                 paymentAccount={returnPaymentAccount}
                 onPaymentAccountChange={setReturnPaymentAccount}
