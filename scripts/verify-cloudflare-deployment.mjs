@@ -76,10 +76,15 @@ export function validatePwaRelease(value) {
     ))
 }
 
-export async function verifyPwaRelease(fetchImpl, origin, expectedRelease) {
-    const response = await fetchImpl(new URL(releasePath, origin), {
+async function verifyPwaReleaseAttempt(fetchImpl, origin, expectedRelease, attempt) {
+    const descriptorUrl = new URL(releasePath, origin)
+    descriptorUrl.searchParams.set('__atlas_deployment_verify', `${Date.now()}-${attempt}`)
+    const response = await fetchImpl(descriptorUrl, {
         cache: 'no-store',
-        headers: { Accept: 'application/json' },
+        headers: {
+            Accept: 'application/json',
+            'Cache-Control': 'no-cache',
+        },
     })
     if (!response.ok) throw new Error(`PWA release descriptor returned ${response.status}`)
     if (!response.headers.get('content-type')?.includes('application/json')) {
@@ -113,6 +118,29 @@ export async function verifyPwaRelease(fetchImpl, origin, expectedRelease) {
     return release
 }
 
+export async function verifyPwaRelease(fetchImpl, origin, expectedRelease, {
+    attempts = 1,
+    delayMs = readinessRetryDelayMs,
+    sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+    onRetry = () => {},
+} = {}) {
+    const boundedAttempts = Number.isInteger(attempts) && attempts > 0 ? attempts : 1
+    let lastError
+
+    for (let attempt = 1; attempt <= boundedAttempts; attempt += 1) {
+        try {
+            return await verifyPwaReleaseAttempt(fetchImpl, origin, expectedRelease, attempt)
+        } catch (error) {
+            lastError = error
+            if (attempt === boundedAttempts) throw error
+            onRetry(error, attempt, boundedAttempts, delayMs)
+            await sleep(delayMs)
+        }
+    }
+
+    throw lastError
+}
+
 async function main() {
     if (!requiredAnonKey?.trim()) {
         failure('SUPABASE_ANON_KEY is required to verify the Worker runtime bindings.')
@@ -135,7 +163,13 @@ async function main() {
         const localReleasePath = path.resolve(process.cwd(), 'dist', 'pwa-release.json')
         if (!existsSync(localReleasePath)) failure('The local build is missing dist/pwa-release.json.')
         const expectedRelease = JSON.parse(readFileSync(localReleasePath, 'utf8'))
-        const deployedRelease = await verifyPwaRelease(fetch, workerOrigin, expectedRelease)
+        const deployedRelease = await verifyPwaRelease(fetch, workerOrigin, expectedRelease, {
+            attempts: maximumReadinessAttempts,
+            onRetry(error, attempt, attempts, delayMs) {
+                const message = error instanceof Error ? error.message : String(error)
+                console.log(`[cf:verify] PWA assets are still propagating (${message}); retrying in ${delayMs / 1_000}s (${attempt}/${attempts - 1}).`)
+            },
+        })
 
         // Supplying the public key forces the Worker to read its Supabase runtime
         // values while still using no user data or privileged credentials.

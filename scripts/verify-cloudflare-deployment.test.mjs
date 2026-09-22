@@ -75,6 +75,46 @@ describe('Cloudflare deployment verification', () => {
         expect(fetchImpl).toHaveBeenCalledTimes(3)
     })
 
+    it('retries the temporary SPA fallback returned while release assets propagate', async () => {
+        const release = {
+            schemaVersion: 1,
+            buildId: `sha256-${'a'.repeat(64)}`,
+            assets: [{ url: '/', bytes: 10, sha256: 'b'.repeat(64) }],
+        }
+        const fetchImpl = vi.fn()
+            .mockResolvedValueOnce(new Response('<!doctype html><html></html>', {
+                status: 200,
+                headers: { 'Content-Type': 'text/html' },
+            }))
+            .mockResolvedValueOnce(Response.json(release, {
+                headers: { 'Cache-Control': 'no-store, max-age=0' },
+            }))
+            .mockResolvedValueOnce(new Response(null, { status: 200 }))
+        const sleep = vi.fn().mockResolvedValue(undefined)
+        const onRetry = vi.fn()
+
+        await expect(verifyPwaRelease(fetchImpl, 'https://atlas.example', release, {
+            attempts: 3,
+            delayMs: 1,
+            sleep,
+            onRetry,
+        })).resolves.toEqual(release)
+
+        expect(fetchImpl).toHaveBeenCalledTimes(3)
+        expect(sleep).toHaveBeenCalledWith(1)
+        expect(onRetry).toHaveBeenCalledWith(
+            expect.objectContaining({ message: 'PWA release descriptor did not return JSON' }),
+            1,
+            3,
+            1,
+        )
+        const firstUrl = new URL(fetchImpl.mock.calls[0][0])
+        const secondUrl = new URL(fetchImpl.mock.calls[1][0])
+        expect(firstUrl.searchParams.get('__atlas_deployment_verify')).not.toBe(
+            secondUrl.searchParams.get('__atlas_deployment_verify'),
+        )
+    })
+
     it('rejects a release descriptor that points to a different deployment', async () => {
         const deployed = {
             schemaVersion: 1,
