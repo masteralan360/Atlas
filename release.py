@@ -26,6 +26,7 @@ TAURI_CONF  = SCRIPT_DIR / "src-tauri" / "tauri.conf.json"
 PACKAGE_JSON = SCRIPT_DIR / "package.json"
 PATCH_NOTES = SCRIPT_DIR / "src" / "data" / "patch-notes.json"
 RELEASE_CONFIG = SCRIPT_DIR / ".release-config.json"
+RELEASE_MANAGED_FILES = (TAURI_CONF, PACKAGE_JSON, PATCH_NOTES, RELEASE_CONFIG)
 
 RTL_LANGS = ('ar', 'ku')
 
@@ -95,6 +96,58 @@ def is_git_clean():
         return False
 
 
+def has_staged_changes():
+    """Return whether the Git index contains changes ready to commit."""
+    try:
+        result = subprocess.run(
+            ['git', 'diff', '--cached', '--quiet'],
+            cwd=SCRIPT_DIR, capture_output=True, check=False
+        )
+        return result.returncode == 1
+    except OSError:
+        return False
+
+
+def unstaged_release_managed_files():
+    """Return release metadata files with unstaged or untracked changes.
+
+    Staged-only releases stage the current release metadata after it is updated.
+    Refuse to do that when one of those files already has local unstaged work, so
+    that the helper never stages an unrelated edit in a release-managed file.
+    """
+    try:
+        modified = subprocess.run(
+            ['git', 'diff', '--name-only'],
+            cwd=SCRIPT_DIR, capture_output=True, text=True, check=True
+        ).stdout.splitlines()
+        untracked = subprocess.run(
+            ['git', 'ls-files', '--others', '--exclude-standard'],
+            cwd=SCRIPT_DIR, capture_output=True, text=True, check=True
+        ).stdout.splitlines()
+    except subprocess.CalledProcessError:
+        return []
+
+    managed_paths = {
+        str(path.relative_to(SCRIPT_DIR)).replace('\\', '/')
+        for path in RELEASE_MANAGED_FILES
+    }
+    changed_paths = {
+        path.replace('\\', '/')
+        for path in [*modified, *untracked]
+    }
+    return sorted(managed_paths & changed_paths)
+
+
+def stage_release_metadata():
+    """Stage only the files the release helper updates itself."""
+    paths = [
+        str(path.relative_to(SCRIPT_DIR))
+        for path in RELEASE_MANAGED_FILES
+        if path.exists()
+    ]
+    subprocess.run(['git', 'add', '--', *paths], cwd=SCRIPT_DIR, check=True)
+
+
 def optimize_tip_videos():
     """Re-encode any raw videos dropped into public/tips before they get committed."""
     print("--- Optimizing tip videos ---")
@@ -105,11 +158,12 @@ def optimize_tip_videos():
         print(f"⚠️ Tip video optimization failed: {e}")
 
 
-def run_git_commands(version, commit_msg):
+def run_git_commands(version, commit_msg, stage_all_changes=True):
     tag = f"v{version}"
     try:
         print(f"--- Starting Release {tag} ---")
-        subprocess.run(['git', 'add', '.'], cwd=SCRIPT_DIR, check=True)
+        if stage_all_changes:
+            subprocess.run(['git', 'add', '.'], cwd=SCRIPT_DIR, check=True)
         subprocess.run(['git', 'commit', '-m', commit_msg], cwd=SCRIPT_DIR, check=True)
         subprocess.run(['git', 'push', 'origin', 'main'], cwd=SCRIPT_DIR, check=True)
         subprocess.run(['git', 'tag', tag], cwd=SCRIPT_DIR, check=True)
@@ -276,7 +330,7 @@ class ReleaseApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Asaas Release Helper")
-        self.setFixedSize(440, 580)
+        self.setFixedSize(440, 700)
 
         self.localized_highlights = {'en': [], 'ar': [], 'ku': []}
         self.localized_team_msg   = {'en': '', 'ar': '', 'ku': ''}
@@ -321,6 +375,31 @@ class ReleaseApp(QMainWindow):
         layout.addWidget(QLabel("Commit Message:"))
         self.msg_edit = QLineEdit(f"Release v{increment_version(current)}")
         layout.addWidget(self.msg_edit)
+
+        # Release scope
+        scope_box = QGroupBox("Changes to Include")
+        scope_box.setMinimumHeight(76)
+        scope_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        scope_layout = QVBoxLayout(scope_box)
+        scope_layout.setContentsMargins(10, 8, 10, 8)
+        self.release_scope_group = QButtonGroup(self)
+
+        self.all_changes_rb = QRadioButton("All changes")
+        self.all_changes_rb.setChecked(True)
+        self.all_changes_rb.setToolTip(
+            "Stage and release every changed and untracked file in the repository."
+        )
+        self.release_scope_group.addButton(self.all_changes_rb)
+        scope_layout.addWidget(self.all_changes_rb)
+
+        self.staged_changes_rb = QRadioButton("Staged changes only")
+        self.staged_changes_rb.setToolTip(
+            "Keep unrelated unstaged and untracked work out of the release commit. "
+            "Release version and configuration files are staged automatically."
+        )
+        self.release_scope_group.addButton(self.staged_changes_rb)
+        scope_layout.addWidget(self.staged_changes_rb)
+        layout.addWidget(scope_box)
 
         # Highlights button
         self.highlights_btn = QPushButton("📝 Manage Highlights")
@@ -502,12 +581,31 @@ class ReleaseApp(QMainWindow):
     def release(self):
         version = self.version_edit.text().strip().lstrip('vV')
         msg = self.msg_edit.text().strip()
+        staged_only = self.staged_changes_rb.isChecked()
 
         if not version or not msg:
             QMessageBox.critical(self, "Error", "Version and message are required!")
             return
 
-        if not is_git_clean():
+        if staged_only:
+            managed_files_with_unstaged_work = unstaged_release_managed_files()
+            if managed_files_with_unstaged_work:
+                QMessageBox.critical(
+                    self, "Unstaged Release Metadata",
+                    "Staged-only releases cannot safely continue because these release "
+                    "metadata files have unstaged or untracked changes:\n\n"
+                    f"{chr(10).join(managed_files_with_unstaged_work)}\n\n"
+                    "Stage or discard those changes first, then try again."
+                )
+                return
+            if not has_staged_changes():
+                QMessageBox.critical(
+                    self, "No Staged Changes",
+                    "Stage the changes you want to release before choosing "
+                    "'Staged changes only'."
+                )
+                return
+        elif not is_git_clean():
             reply = QMessageBox.question(
                 self, "Uncommitted Changes",
                 "You have uncommitted changes in your repository.\n\n"
@@ -519,7 +617,10 @@ class ReleaseApp(QMainWindow):
 
         steps = "\n".join([
             f"1. Update version to {version}",
-            f"2. Commit: {msg}",
+            (
+                f"2. Commit staged changes and release metadata: {msg}"
+                if staged_only else f"2. Commit all changes: {msg}"
+            ),
             f"3. Create tag v{version}",
             f"4. Push to GitHub (Triggers Auto-Releases)",
         ])
@@ -556,7 +657,12 @@ class ReleaseApp(QMainWindow):
             self.status_label.setText("Pushing to GitHub...")
             QApplication.processEvents()
 
-            success, message = run_git_commands(version, msg)
+            if staged_only:
+                stage_release_metadata()
+
+            success, message = run_git_commands(
+                version, msg, stage_all_changes=not staged_only
+            )
             if success:
                 QMessageBox.information(
                     self, "Success",

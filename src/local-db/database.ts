@@ -3470,6 +3470,13 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, priceBookId, productId, unitRef, updatedAt, isDeleted, syncStatus, [workspaceId+productId], [priceBookId+productId+unitRef], [workspaceId+updatedAt]'
     })
 
+    // Some installed 0.11.1 clients reached IndexedDB schema version 130
+    // without the legacy staff cache. A new version is required because Dexie
+    // does not rerun an already-applied version declaration.
+    this.version(131).stores({
+      users: 'id, email, role, workspaceId, syncStatus, updatedAt, isDeleted, monthlyTarget'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()

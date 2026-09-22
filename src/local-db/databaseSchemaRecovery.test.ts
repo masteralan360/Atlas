@@ -70,4 +70,46 @@ describe('POS return schema recovery', () => {
       repairedCache.close()
     }
   }, 10_000)
+
+  it('restores the users store for a version-130 cache without deleting cached sales orders', async () => {
+    const legacyCache = new Dexie(DATABASE_NAME)
+    legacyCache.version(130).stores({
+      sales_orders: 'id, workspaceId'
+    })
+    await legacyCache.open()
+    await legacyCache.table('sales_orders').put({
+      id: 'existing-sales-order',
+      workspaceId: 'workspace-1',
+      totalAmount: 125
+    })
+    legacyCache.close()
+
+    const repairedCache = new AtlasDatabase(DATABASE_NAME)
+    try {
+      await repairedCache.open()
+
+      expect(await repairedCache.sales_orders.get('existing-sales-order')).toMatchObject({
+        workspaceId: 'workspace-1',
+        totalAmount: 125
+      })
+
+      await repairedCache.users.put({
+        id: 'staff-1',
+        email: 'staff@example.test',
+        role: 'staff',
+        workspaceId: 'workspace-1',
+        syncStatus: 'synced',
+        updatedAt: '2026-09-22T00:00:00.000Z',
+        isDeleted: false,
+        monthlyTarget: 0
+      } as never)
+
+      expect(await repairedCache.users.get('staff-1')).toMatchObject({
+        workspaceId: 'workspace-1',
+        role: 'staff'
+      })
+    } finally {
+      repairedCache.close()
+    }
+  }, 10_000)
 })
