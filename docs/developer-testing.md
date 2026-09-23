@@ -5,6 +5,25 @@ For architecture, contracts, isolation, and extension instructions, read the
 first independent V1 suite using shared infrastructure; its business scenarios
 are a reference implementation, not a universal specification for other modules.
 
+Sales Order **Cloud / Hybrid request contracts**, Business Partners **Order
+summary refresh**, and POS **Checkout** include deferred sales-order summary
+coverage. Tests hold summary RPCs open and verify that confirmed create/edit
+saves finish, payments and ledger effects remain correct, draft stock is unchanged,
+both counterparties refresh after a customer change, and failed summary writes
+enter the existing offline retry queue. Refresh-ordering tests prevent older
+summary writes from overwriting newer totals. Deferred saves now commit recovery
+jobs to IndexedDB before reporting success. The authenticated workspace resumes
+them at startup, reconnect, wake, and periodic retry. A completed refresh removes
+its job only after remote acknowledgement or durable offline-queue handoff, and
+only if a newer save has not replaced that job. Recovery forces sync even when
+cached totals match, covering interruption between the local write and upload.
+Tests cover database reopen, workspace isolation, overlapping saves, missing local
+sources, job-storage failure with an idempotent payment retry, and recovery cleanup.
+Jobs contain references, not order/payment operations; recovery does not repeat
+the transaction. Clearing application storage removes these device-local jobs.
+Local-mode saves still await their summaries. These are disposable IndexedDB and mocked request checks, not native
+SQLite or live Supabase integration tests.
+
 Start the development server with `npm run dev`, open its localhost URL, and go
 to **Orders → Sale Orders → Developer tests**, **POS → Developer tests**, or **Post Service → Developer tests**. The button and runner are enabled
 automatically during development and excluded from production builds.

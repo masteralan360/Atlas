@@ -16,6 +16,7 @@ import { generateId } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
+import { serializePartnerSummaryRefresh } from './partnerSummaryRefresh'
 import { toLiveCollection } from './liveCollection'
 import {
   canAccessBusinessPartner,
@@ -1167,9 +1168,18 @@ async function getPartnerDirectAccountEffects(workspaceId: string, partner: Busi
   return { receivable, payable }
 }
 
-export async function recalculateBusinessPartnerSummary(workspaceId: string, partnerId: string) {
+export function recalculateBusinessPartnerSummary(workspaceId: string, partnerId: string, options?: { ensureSync?: boolean }) {
+  return serializePartnerSummaryRefresh('business_partners', workspaceId, partnerId, () =>
+    calculateBusinessPartnerSummary(workspaceId, partnerId, options)
+  )
+}
+
+async function calculateBusinessPartnerSummary(workspaceId: string, partnerId: string, options?: { ensureSync?: boolean }) {
   const partner = await db.business_partners.get(partnerId)
-  if (!partner || partner.isDeleted) {
+  if (options?.ensureSync && (!partner || partner.workspaceId !== workspaceId)) {
+    throw new Error('Business partner summary source is not available in this workspace yet')
+  }
+  if (!partner || partner.isDeleted || partner.workspaceId !== workspaceId) {
     return partner
   }
 
@@ -1307,6 +1317,9 @@ export async function recalculateBusinessPartnerSummary(workspaceId: string, par
     partner.loanOutstandingBalance === loanOutstandingBalance &&
     partner.netExposure === netExposure
   ) {
+    if (options?.ensureSync) {
+      await syncUpsertEntities('business_partners', [partner as unknown as SyncEntity], workspaceId)
+    }
     return partner
   }
 

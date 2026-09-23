@@ -17,6 +17,7 @@ Multi-Color Partner
 Balance Color Settings
 Context-menu partner account statement & invoice redirect
 Accumilated account statement rows by types and for one day
+Same day order payment one-row
 
 
 ##

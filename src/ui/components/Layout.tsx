@@ -301,6 +301,15 @@ export function Layout({ children }: LayoutProps) {
     loadedWorkspaceId
   } = useWorkspace()
   const { hasPermission } = useWorkspacePermissions()
+  useEffect(() => {
+    if (!user?.id || !user.workspaceId || isWorkspaceLoading || loadedWorkspaceId !== user.workspaceId || isLocalMode) return
+    let disposed = false
+    let stop: (() => void) | undefined
+    void import('@/local-db/partnerSummaryRecovery').then(({ startPartnerSummaryRecovery }) => {
+      if (!disposed) stop = startPartnerSummaryRecovery(user.workspaceId)
+    }).catch(console.error)
+    return () => { disposed = true; stop?.() }
+  }, [user?.id, user?.workspaceId, isWorkspaceLoading, loadedWorkspaceId, isLocalMode])
   const demoExpiryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pageContentRef = useRef<HTMLElement>(null)
   const desktopStickyBarScrollFrameRef = useRef<number | null>(null)

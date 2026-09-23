@@ -34,6 +34,9 @@
         "files": [
           "src/local-db/quickOrderAtomic.test.ts",
           "src/local-db/orders.test.ts",
+          "src/local-db/partnerSummaryRefresh.test.ts",
+          "src/local-db/partnerSummaryJobs.test.ts",
+          "src/local-db/partnerSummaryRecovery.test.ts",
           "src/lib/orderSaveProgress.test.ts",
           "src/sync/syncEngine.test.ts",
           "src/sync/syncErrors.test.ts"
@@ -123,6 +126,17 @@
         ]
       },
       {
+        "id": "order-summaries",
+        "titleKey": "devTesting.businessPartnersGroups.orderSummaries",
+        "layer": "contract",
+        "files": [
+          "src/local-db/quickOrderAtomic.test.ts",
+          "src/local-db/partnerSummaryRefresh.test.ts",
+          "src/local-db/partnerSummaryJobs.test.ts",
+          "src/local-db/partnerSummaryRecovery.test.ts"
+        ]
+      },
+      {
         "id": "privacy-and-sync",
         "titleKey": "devTesting.businessPartnersGroups.privacyAndSync",
         "layer": "contract",
@@ -153,6 +167,9 @@
         "files": [
           "src/dev/testing/suites/posCheckout.test.ts",
           "src/local-db/quickOrderAtomic.test.ts",
+          "src/local-db/partnerSummaryRefresh.test.ts",
+          "src/local-db/partnerSummaryJobs.test.ts",
+          "src/local-db/partnerSummaryRecovery.test.ts",
           "src/local-db/payments.test.ts",
           "src/local-db/paymentAccounts.test.ts",
           "src/lib/ledgerPaymentTransactions.test.ts",

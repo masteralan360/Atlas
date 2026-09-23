@@ -6,6 +6,7 @@ import Dexie, {
   type EntityTable,
   type Transaction
 } from 'dexie'
+import type { PartnerSummaryJob } from './partnerSummaryJobs'
 import type {
   Product,
   ProductBarcode,
@@ -475,6 +476,7 @@ export class AtlasDatabase extends Dexie {
   dividend_statuses!: EntityTable<DividendStatus, 'id'>
   syncQueue!: EntityTable<SyncQueueItem, 'id'>
   offline_mutations!: EntityTable<OfflineMutation, 'id'>
+  partner_summary_jobs!: EntityTable<PartnerSummaryJob, 'id'>
   app_settings!: EntityTable<AppSetting, 'key'>
   workspace_contacts!: EntityTable<WorkspaceContact, 'id'>
   restaurant_table_settings!: EntityTable<RestaurantTableSettings, 'id'>
@@ -3492,6 +3494,9 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, storageId, userId, updatedAt, isDeleted, syncStatus, [workspaceId+storageId], [workspaceId+userId], [storageId+userId]'
     })
 
+    // Local recovery metadata only; never synchronized as business data.
+    this.version(134).stores({ partner_summary_jobs: 'id, workspaceId' })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
@@ -3935,7 +3940,8 @@ export async function clearDatabase(): Promise<void> {
       db.product_commission_rule_agents,
       db.product_commission_rules,
       db.storage_member_exclusions,
-      db.syncQueue
+      db.syncQueue,
+      db.partner_summary_jobs
     ],
     async () => {
       await db.products.clear()
@@ -4010,6 +4016,7 @@ export async function clearDatabase(): Promise<void> {
       await db.product_commission_rules.clear()
       await db.storage_member_exclusions.clear()
       await db.syncQueue.clear()
+      await db.partner_summary_jobs.clear()
     }
   )
 }

@@ -14,6 +14,7 @@ import { isOnline } from '@/lib/network'
 import {
     createRemoteOrderSaveConfirmationError,
     ORDER_SAVE_PROGRESS,
+    ORDER_SUMMARY_RECOVERY_PERSISTENCE_ERROR,
     type OrderSaveProgress,
     type OrderSaveProgressStage
 } from '@/lib/orderSaveProgress'
@@ -40,6 +41,8 @@ import type { WorkspacePermissionKey } from '@/permissions/workspacePermissionDe
 import i18n from '@/i18n/config'
 
 import { db } from './database'
+import { serializePartnerSummaryRefresh } from './partnerSummaryRefresh'
+import { enqueuePartnerSummaryJobs, processPartnerSummaryJobs, type PartnerSummaryTarget } from './partnerSummaryJobs'
 import {
     ORDER_AMOUNT_EPSILON,
     getOrderBalanceAmount,
@@ -214,6 +217,8 @@ export type OrderFormSaveOptions = {
     onProgress?: (progress: OrderSaveProgress) => void
     /** Prevents Cloud and Hybrid forms from treating an offline queue as a successful save. */
     requireRemoteConfirmation?: boolean
+    /** Confirm Cloud/Hybrid form saves before refreshing derived partner totals. */
+    deferSummaryRefresh?: boolean
     /** Stable client identity makes a retried create an upsert of the same order. */
     orderId?: string
     /** Stable client identity prevents a retry from duplicating the first payment. */
@@ -512,9 +517,18 @@ async function getInitialOrderNumber(tableName: OrderTableName, workspaceId: str
     return `${prefix}-PENDING-${generateId().toUpperCase()}`
 }
 
-export async function recalculateCustomerSummary(workspaceId: string, customerId: string) {
+export function recalculateCustomerSummary(workspaceId: string, customerId: string, options?: { ensureSync?: boolean }) {
+    return serializePartnerSummaryRefresh('customers', workspaceId, customerId, () =>
+        calculateCustomerSummary(workspaceId, customerId, options)
+    )
+}
+
+async function calculateCustomerSummary(workspaceId: string, customerId: string, options?: { ensureSync?: boolean }) {
     const customer = await db.customers.get(customerId)
-    if (!customer || customer.isDeleted) {
+    if (options?.ensureSync && (!customer || customer.workspaceId !== workspaceId)) {
+        throw new Error('Customer summary source is not available in this workspace yet')
+    }
+    if (!customer || customer.isDeleted || customer.workspaceId !== workspaceId) {
         return customer
     }
 
@@ -558,6 +572,9 @@ export async function recalculateCustomerSummary(workspaceId: string, customerId
         && customer.totalSpent === totalSpent
         && customer.outstandingBalance === outstandingBalance
     ) {
+        if (options?.ensureSync) {
+            await syncUpsertEntities('customers', [customer as unknown as Record<string, unknown> & { id: string; version: number }], workspaceId)
+        }
         return customer
     }
 
@@ -730,6 +747,37 @@ async function recalculateCustomerAndPartnerSummaries(workspaceId: string, custo
         tasks.push(recalculateBusinessPartnerSummary(workspaceId, businessPartnerId))
     }
     await Promise.all(tasks)
+}
+
+async function refreshSavedSalesOrderSummaries(orders: SalesOrder[], options?: OrderFormSaveOptions) {
+    const counterparties = new Map(orders.map((order) => [
+        `${order.workspaceId}:${order.customerId}:${order.businessPartnerId || ''}`,
+        order
+    ]))
+    if (options?.deferSummaryRefresh && options.requireRemoteConfirmation
+        && orders.every((order) => shouldUseCloudBusinessData(order.workspaceId))) {
+        const targets: PartnerSummaryTarget[] = []
+        for (const order of counterparties.values()) {
+            if (order.customerId) targets.push({ workspaceId: order.workspaceId, table: 'customers', entityId: order.customerId })
+            if (order.businessPartnerId) targets.push({ workspaceId: order.workspaceId, table: 'business_partners', entityId: order.businessPartnerId })
+        }
+        try {
+            await enqueuePartnerSummaryJobs(targets)
+        } catch (cause) {
+            const error = new Error(ORDER_SUMMARY_RECOVERY_PERSISTENCE_ERROR)
+            Object.defineProperty(error, 'cause', { value: cause })
+            throw error
+        }
+        for (const workspaceId of new Set(orders.map((order) => order.workspaceId))) {
+            void processPartnerSummaryJobs(workspaceId).catch((error) => {
+                console.error('[Orders] Failed to start saved sales order summary refresh:', error)
+            })
+        }
+        return
+    }
+    await Promise.all(Array.from(counterparties.values()).map((order) =>
+        recalculateCustomerAndPartnerSummaries(order.workspaceId, order.customerId, order.businessPartnerId)
+    ))
 }
 
 async function recalculateSupplierAndPartnerSummaries(workspaceId: string, supplierId?: string | null, businessPartnerId?: string | null) {
@@ -2866,7 +2914,6 @@ export async function createSalesOrder(
     )
     reportOrderSaveProgress(options, 'confirming')
     await synchronizeSalesAccountCommissionBeneficiaryBestEffort(workspaceId, order.id, createdBy)
-    await recalculateCustomerAndPartnerSummaries(workspaceId, order.customerId, order.businessPartnerId)
     const createdOrder = (await db.sales_orders.get(order.id)) as SalesOrder
 
     if (!isOrderApprovalRequested(createdOrder)) {
@@ -2877,6 +2924,7 @@ export async function createSalesOrder(
         await reconcileSalesOrderCommissionBestEffort(workspaceId, createdOrder.id, createdBy)
     }
 
+    await refreshSavedSalesOrderSummaries([createdOrder], options)
     reportOrderSaveProgress(options, 'complete')
     return createdOrder
 }
@@ -3257,24 +3305,12 @@ export async function updateSalesOrder(id: string, data: Partial<SalesOrder>, op
     reportOrderSaveProgress(options, 'confirming')
     await synchronizeSalesAccountCommissionBeneficiaryBestEffort(existing.workspaceId, updated.id, updated.createdBy)
 
-    await Promise.all(
-        Array.from(new Set([
-            `${existing.customerId}::${existing.businessPartnerId || ''}`,
-            `${updated.customerId}::${updated.businessPartnerId || ''}`
-        ])).map((key) => {
-            const [customerId, businessPartnerId] = key.split('::')
-            return recalculateCustomerAndPartnerSummaries(
-                existing.workspaceId,
-                customerId || null,
-                businessPartnerId || null
-            )
-        })
-    )
     await reconcileSalesOrderCommissionBestEffort(
         existing.workspaceId,
         updated.id,
         updated.createdBy
     )
+    await refreshSavedSalesOrderSummaries([existing, updated], options)
     reportOrderSaveProgress(options, 'complete')
     return updated
 }

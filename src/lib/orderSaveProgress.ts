@@ -26,6 +26,7 @@ export type OrderSaveProgressStage = keyof typeof ORDER_SAVE_PROGRESS
 export type OrderSaveProgress = (typeof ORDER_SAVE_PROGRESS)[OrderSaveProgressStage]
 
 export const REMOTE_ORDER_SAVE_CONFIRMATION_ERROR = 'remote_order_save_confirmation_failed'
+export const ORDER_SUMMARY_RECOVERY_PERSISTENCE_ERROR = 'order_summary_recovery_persistence_failed'
 
 export function createRemoteOrderSaveConfirmationError(cause?: unknown) {
     const error = new Error(REMOTE_ORDER_SAVE_CONFIRMATION_ERROR)

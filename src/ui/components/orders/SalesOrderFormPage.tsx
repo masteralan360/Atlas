@@ -70,7 +70,7 @@ import {
 import { useWorkspace } from '@/workspace'
 import { useOrderEditorLiveData } from '@/hooks/useOrderEditorLiveData'
 import { isOrderReadOnly } from '@/lib/orderEditability'
-import { isRemoteOrderSaveConfirmationError, type OrderSaveProgress } from '@/lib/orderSaveProgress'
+import { isRemoteOrderSaveConfirmationError, ORDER_SUMMARY_RECOVERY_PERSISTENCE_ERROR, type OrderSaveProgress } from '@/lib/orderSaveProgress'
 import { hasEffectiveSalesAgentCommissionPermission, useHideCosts, useWorkspacePermissions } from '@/permissions'
 import { getMissingPriceBookCostMessage, getMissingProductCostMessage, hasValidProductCost } from '@/lib/productCost'
 import {
@@ -1521,6 +1521,7 @@ export function SalesOrderFormPage({
             saveOperationRef.current = saveOperation
             const saveOptions = {
                 requireRemoteConfirmation: true,
+                deferSummaryRefresh: true,
                 orderId: saveOperation.orderId,
                 initialPaymentTransactionId: saveOperation.initialPaymentTransactionId,
                 onProgress: updateSaveProgressToast
@@ -1569,6 +1570,8 @@ export function SalesOrderFormPage({
         } catch (error: any) {
             const message = isRemoteOrderSaveConfirmationError(error)
                 ? t('orders.form.errors.remoteSaveFailed')
+                : error?.message === ORDER_SUMMARY_RECOVERY_PERSISTENCE_ERROR
+                    ? t('orders.form.errors.summaryRecoveryFailed')
                 : isOrderUnitConfigurationError(error)
                     ? t('orders.form.errors.unitConfigurationChanged')
                 : error?.message === 'agent_sales_accounts_not_enabled'
