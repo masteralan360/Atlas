@@ -84,8 +84,9 @@
       "run_not_found": "This run is no longer available. Reconnect and start a new run."
     },
     "businessPartnersSamplesHelp": "Runs fixed privacy, visibility, offline-sync, and safe-discard recovery scenarios.",
-    "businessPartnersCoverageHelp": "Checks the local business-partner privacy rules, Cloud / Hybrid write-RPC routing, revoked-access error classification, and safe removal of an inaccessible cached partner. It uses disposable IndexedDB and mocked remote contracts; a real Supabase permission test remains unavailable in this developer suite.",
+    "businessPartnersCoverageHelp": "Checks the local business-partner privacy rules, Cloud / Hybrid write-RPC routing, revoked-access error classification, and safe removal of an inaccessible cached partner. It uses disposable IndexedDB and mocked remote contracts; a real Supabase permission test remains unavailable in this developer suite. Statement-template checks cover legacy defaults, valid and invalid HEX colors, positive/negative/zero balance rendering in A4 output, and Cloud / Hybrid save requests, results, and friendly failure messages.",
     "businessPartnersGroups": {
+      "accountStatementTemplates": "Statement templates and balance colors",
       "privacyAndSync": "Privacy, sync contract, and access-revocation recovery"
     },
     "pos": "POS",
@@ -1784,6 +1785,11 @@
       "templateNamePlaceholder": "e.g. Detailed collections",
       "templateSettings": "Statement settings",
       "templateSettingsDescription": "These options are saved in the template and apply to both the screen and printout.",
+      "balanceColorsTitle": "Balance text colors",
+      "balanceColorsDescription": "Choose the colors for amounts due from and due to the partner on screen and in the A4 printout. Zero balances keep the normal text color.",
+      "resetBalanceColors": "Reset colors",
+      "chooseBalanceColor": "Choose color for {{balance}}",
+      "invalidBalanceColor": "Enter a six-digit HEX color, such as #059669.",
       "tableColumns": "Account activity columns",
       "tableColumnsDescription": "Show, hide, and reorder any activity or audit column. Keep at least one column visible.",
       "hideColumn": "Hide {{column}}",

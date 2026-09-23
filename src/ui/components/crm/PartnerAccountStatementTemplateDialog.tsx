@@ -8,7 +8,9 @@ import {
   Eye,
   EyeOff,
   Loader2,
+  Palette,
   Plus,
+  RotateCcw,
   Save,
   Settings2,
   Star,
@@ -17,13 +19,16 @@ import {
 
 import {
   createPartnerAccountStatementTemplateConfiguration,
+  DEFAULT_PARTNER_ACCOUNT_STATEMENT_BALANCE_COLORS,
   DEFAULT_PARTNER_ACCOUNT_STATEMENT_TEMPLATE_CONFIGURATION,
+  isValidPartnerAccountStatementBalanceColor,
   isPartnerAccountStatementColumnVisible,
   type PartnerAccountStatementColumnId,
   type PartnerAccountStatementTemplate,
   type PartnerAccountStatementTemplateConfiguration,
   PARTNER_ACCOUNT_STATEMENT_COLUMN_IDS
 } from '@/lib/partnerAccountStatementTemplates'
+import { getPartnerAccountStatementTemplateSaveFailure } from '@/lib/partnerAccountStatementTemplatePersistence'
 import {
   AppDialog,
   AppDialogBody,
@@ -112,7 +117,7 @@ export function PartnerAccountStatementTemplateDialog({
   onSetDefault,
   onDeleteTemplate
 }: PartnerAccountStatementTemplateDialogProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { toast } = useToast()
   const [draftTemplateId, setDraftTemplateId] = useState<string | null>(null)
   const [draftLabel, setDraftLabel] = useState('')
@@ -144,7 +149,12 @@ export function PartnerAccountStatementTemplateDialog({
     || !editedTemplate
     || draftLabel.trim() !== editedTemplate.label
     || !isSameConfiguration(draftConfiguration, editedTemplate.configuration)
-  const canSave = canManageTemplates && draftLabel.trim().length > 0 && visibleColumnCount > 0 && !isProcessing
+  const canSave = canManageTemplates
+    && draftLabel.trim().length > 0
+    && visibleColumnCount > 0
+    && isValidPartnerAccountStatementBalanceColor(draftConfiguration.dueFromBalanceColor)
+    && isValidPartnerAccountStatementBalanceColor(draftConfiguration.dueToBalanceColor)
+    && !isProcessing
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!isProcessing) onOpenChange(nextOpen)
@@ -208,13 +218,7 @@ export function PartnerAccountStatementTemplateDialog({
         })
       })
     } catch {
-      toast({
-        title: t('businessPartners.accountStatement.templateSaveFailedTitle', { defaultValue: 'Could not save template' }),
-        description: t('businessPartners.accountStatement.templateSaveFailedDescription', {
-          defaultValue: 'Check your connection and try again.'
-        }),
-        variant: 'destructive'
-      })
+      toast(getPartnerAccountStatementTemplateSaveFailure(t))
     } finally {
       setIsProcessing(false)
     }
@@ -432,6 +436,82 @@ export function PartnerAccountStatementTemplateDialog({
                         />
                       </div>
                     </div>
+                  </div>
+                </section>
+
+                <section className="space-y-3 rounded-2xl border p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="flex items-center gap-2 font-semibold">
+                        <Palette className="h-4 w-4 text-primary" />
+                        {t('businessPartners.accountStatement.balanceColorsTitle')}
+                      </h3>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {t('businessPartners.accountStatement.balanceColorsDescription')}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={() => setDraftConfiguration((current) => ({ ...current, ...DEFAULT_PARTNER_ACCOUNT_STATEMENT_BALANCE_COLORS }))}
+                      disabled={isProcessing}
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      {t('businessPartners.accountStatement.resetBalanceColors')}
+                    </Button>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {([
+                      ['dueFromBalanceColor', 'dueFromPartner'],
+                      ['dueToBalanceColor', 'dueToPartner']
+                    ] as const).map(([colorKey, labelKey]) => {
+                      const value = draftConfiguration[colorKey]
+                      const isValid = isValidPartnerAccountStatementBalanceColor(value)
+                      const inputId = `partner-template-${colorKey}`
+                      return (
+                        <div key={colorKey} className="min-w-0 space-y-2 rounded-xl bg-muted/30 p-3">
+                          <label htmlFor={inputId} className="text-sm font-medium">
+                            {t(`businessPartners.accountStatement.${labelKey}`)} *
+                          </label>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <input
+                              type="color"
+                              value={isValid ? value : DEFAULT_PARTNER_ACCOUNT_STATEMENT_BALANCE_COLORS[colorKey]}
+                              onChange={(event) => setDraftConfiguration((current) => ({ ...current, [colorKey]: event.target.value }))}
+                              aria-label={t('businessPartners.accountStatement.chooseBalanceColor', {
+                                balance: t(`businessPartners.accountStatement.${labelKey}`)
+                              })}
+                              disabled={isProcessing}
+                              className="h-10 w-12 shrink-0 cursor-pointer rounded-md border bg-background p-1 disabled:cursor-not-allowed"
+                            />
+                            <Input
+                              id={inputId}
+                              value={value}
+                              onChange={(event) => setDraftConfiguration((current) => ({ ...current, [colorKey]: event.target.value }))}
+                              aria-invalid={!isValid}
+                              aria-describedby={!isValid ? `${inputId}-error` : undefined}
+                              maxLength={7}
+                              spellCheck={false}
+                              disabled={isProcessing}
+                              className="min-w-0 font-mono uppercase"
+                            />
+                          </div>
+                          {!isValid ? (
+                            <p id={`${inputId}-error`} className="text-xs text-destructive">
+                              {t('businessPartners.accountStatement.invalidBalanceColor')}
+                            </p>
+                          ) : null}
+                          <p className="text-sm font-semibold">
+                            {t(`businessPartners.accountStatement.${labelKey}`)} ·{' '}
+                            <span style={{ color: isValid ? value : undefined }}>
+                              {(1000).toLocaleString(i18n.resolvedLanguage || i18n.language)}
+                            </span>
+                          </p>
+                        </div>
+                      )
+                    })}
                   </div>
                 </section>
 

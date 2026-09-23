@@ -113,6 +113,16 @@
     "coverageHelpKey": "devTesting.businessPartnersCoverageHelp",
     "groups": [
       {
+        "id": "account-statement-templates",
+        "titleKey": "devTesting.businessPartnersGroups.accountStatementTemplates",
+        "layer": "contract",
+        "files": [
+          "src/lib/partnerAccountStatementTemplates.test.ts",
+          "src/lib/partnerAccountStatementTemplatePersistence.test.ts",
+          "src/ui/components/crm/PartnerAccountStatementPrintTemplate.test.ts"
+        ]
+      },
+      {
         "id": "privacy-and-sync",
         "titleKey": "devTesting.businessPartnersGroups.privacyAndSync",
         "layer": "contract",

@@ -18,15 +18,18 @@ import {
     type StoredCustomTemplateRow
 } from '@/lib/customTemplates'
 import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
+import { saveRemotePartnerAccountStatementTemplate } from '@/lib/partnerAccountStatementTemplatePersistence'
 import {
     createPartnerAccountStatementTemplateConfiguration,
     DEFAULT_PARTNER_ACCOUNT_STATEMENT_TEMPLATE_CONFIGURATION,
+    getPartnerAccountStatementBalanceColor,
     getPartnerAccountStatementSummaryLabelColumn,
     getPartnerAccountStatementVisibleColumns,
     PARTNER_ACCOUNT_STATEMENT_ACTIVITY_TEMPLATE_KEY,
     readPartnerAccountStatementTemplate,
     serializePartnerAccountStatementTemplate,
     type PartnerAccountStatementColumnId,
+    type PartnerAccountStatementBalanceColors,
     type PartnerAccountStatementTemplate,
     type PartnerAccountStatementTemplateConfiguration
 } from '@/lib/partnerAccountStatementTemplates'
@@ -124,12 +127,6 @@ function balanceLabel(balance: number, t: (key: string, options?: Record<string,
     return t('businessPartners.accountStatement.settled', { defaultValue: 'Settled' })
 }
 
-function balanceClass(balance: number) {
-    if (balance > 0.000001) return 'text-emerald-600'
-    if (balance < -0.000001) return 'text-yellow-500'
-    return ''
-}
-
 function entrySourcePath(entry: PartnerAccountStatementEntry) {
     if (entry.source?.recordType === 'order') {
         return `/orders/${entry.source.recordId}`
@@ -178,6 +175,7 @@ function LedgerCard({
     i18n,
     language,
     columns,
+    balanceColors,
     onNavigate
 }: {
     ledger: PartnerAccountStatementCurrencyLedger
@@ -186,6 +184,7 @@ function LedgerCard({
     i18n: I18n
     language: string
     columns: PartnerAccountStatementColumnId[]
+    balanceColors: PartnerAccountStatementBalanceColors
     onNavigate: (path: string) => void
 }) {
     const display = (amount: number) => formatCurrency(Math.abs(amount), ledger.currency, iqdPreference)
@@ -228,10 +227,10 @@ function LedgerCard({
                             <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                                 {t(String(key), { defaultValue: String(fallback) })}
                             </div>
-                            <div className={cn(
-                                'mt-1 truncate text-sm font-black tabular-nums',
-                                index === 3 && balanceClass(ledger.closingBalance)
-                            )}>
+                            <div
+                                className="mt-1 truncate text-sm font-black tabular-nums"
+                                style={index === 3 ? { color: getPartnerAccountStatementBalanceColor(ledger.closingBalance, balanceColors) } : undefined}
+                            >
                                 {display(Number(amount))}
                             </div>
                         </div>
@@ -268,16 +267,15 @@ function LedgerCard({
                                                 key={columnId}
                                                 className={cn(
                                                     statementColumnIsNumeric(columnId) && 'text-right tabular-nums',
-                                                    columnId === 'balance' && balanceClass(ledger.openingBalance),
                                                     isLabel && value && 'font-semibold'
                                                 )}
                                             >
                                                 {isLabel && value ? (
                                                     <span className="flex items-center justify-between gap-3">
                                                         <span>{t('businessPartners.accountStatement.openingBalance', { defaultValue: 'Opening balance' })}</span>
-                                                        <span className="tabular-nums">{value}</span>
+                                                        <span className="tabular-nums" style={columnId === 'balance' ? { color: getPartnerAccountStatementBalanceColor(ledger.openingBalance, balanceColors) } : undefined}>{value}</span>
                                                     </span>
-                                                ) : isLabel ? t('businessPartners.accountStatement.openingBalance', { defaultValue: 'Opening balance' }) : value || null}
+                                                ) : isLabel ? t('businessPartners.accountStatement.openingBalance', { defaultValue: 'Opening balance' }) : columnId === 'balance' && value ? <span style={{ color: getPartnerAccountStatementBalanceColor(ledger.openingBalance, balanceColors) }}>{value}</span> : value || null}
                                             </TableCell>
                                         )
                                     })}
@@ -312,7 +310,7 @@ function LedgerCard({
                                                 case 'credit':
                                                     return <TableCell key={columnId} className="text-right font-medium tabular-nums">{entry.delta < 0 ? display(entry.delta) : '—'}</TableCell>
                                                 case 'balance':
-                                                    return <TableCell key={columnId} className={cn('text-right font-bold tabular-nums', balanceClass(entry.runningBalance))}>{display(entry.runningBalance)}</TableCell>
+                                                    return <TableCell key={columnId} className="text-right font-bold tabular-nums" style={{ color: getPartnerAccountStatementBalanceColor(entry.runningBalance, balanceColors) }}>{display(entry.runningBalance)}</TableCell>
                                             }
                                         })}
                                     </TableRow>
@@ -339,15 +337,14 @@ function LedgerCard({
                                     return (
                                         <TableCell key={columnId} className={cn(
                                             statementColumnIsNumeric(columnId) && 'text-right tabular-nums',
-                                            columnId === 'balance' && balanceClass(ledger.closingBalance),
                                             isLabel && value && 'font-semibold'
                                         )}>
                                             {isLabel && value ? (
                                                 <span className="flex items-center justify-between gap-3">
                                                     <span>{t('common.total', { defaultValue: 'Total' })}</span>
-                                                    <span className="tabular-nums">{value}</span>
+                                                    <span className="tabular-nums" style={columnId === 'balance' ? { color: getPartnerAccountStatementBalanceColor(ledger.closingBalance, balanceColors) } : undefined}>{value}</span>
                                                 </span>
-                                            ) : isLabel ? t('common.total', { defaultValue: 'Total' }) : value || null}
+                                            ) : isLabel ? t('common.total', { defaultValue: 'Total' }) : columnId === 'balance' && value ? <span style={{ color: getPartnerAccountStatementBalanceColor(ledger.closingBalance, balanceColors) }}>{value}</span> : value || null}
                                         </TableCell>
                                     )
                                 })}
@@ -515,6 +512,10 @@ export function AccountStatements() {
         return {
             ...statementDataForDisplay,
             tableColumns: statementColumns,
+            balanceColors: {
+                dueFromBalanceColor: activeStatementTemplate.configuration.dueFromBalanceColor,
+                dueToBalanceColor: activeStatementTemplate.configuration.dueToBalanceColor
+            },
             workspace: workspacePrintContacts,
             partner: {
                 partnerName: partner.partnerName,
@@ -524,7 +525,7 @@ export function AccountStatements() {
             },
             generatedAt: new Date().toISOString()
         }
-    }, [partner, statementColumns, statementDataForDisplay, workspacePrintContacts])
+    }, [activeStatementTemplate.configuration, partner, statementColumns, statementDataForDisplay, workspacePrintContacts])
     const printTarget = useMemo(
         () => getCustomTemplateTarget(PARTNER_ACCOUNT_STATEMENT_TEMPLATE_KEY),
         []
@@ -661,7 +662,7 @@ export function AccountStatements() {
         label: string
         configuration: PartnerAccountStatementTemplateConfiguration
     }) => {
-        if (!workspaceId || !user?.id) throw new Error('Missing workspace context.')
+        if (!workspaceId || !user?.id || user.role !== 'admin') throw new Error('Missing template permission or workspace context.')
         const existingTemplate = input.id
             ? statementTemplates.find((template) => template.id === input.id)
             : undefined
@@ -683,43 +684,20 @@ export function AccountStatements() {
         }
 
         if (!isSupabaseConfigured) throw new Error('Template storage is unavailable.')
-        const payload = {
-            workspace_id: workspaceId,
-            module_type_key: PARTNER_ACCOUNT_STATEMENT_ACTIVITY_TEMPLATE_KEY,
+        const savedId = await saveRemotePartnerAccountStatementTemplate({
+            workspaceId,
+            userId: user.id,
+            existingTemplateId: existingTemplate?.id,
             label: input.label,
-            layout_json: layoutJson,
-            updated_by: user.id
-        }
-        const { data, error } = existingTemplate
-            ? await runSupabaseAction('partnerAccountStatementTemplates.update', () =>
-                supabase
-                    .from('custom_templates')
-                    .update(payload)
-                    .eq('id', existingTemplate.id)
-                    .eq('workspace_id', workspaceId)
-                    .select('id')
-                    .single()
-            )
-            : await runSupabaseAction('partnerAccountStatementTemplates.create', () =>
-                supabase
-                    .from('custom_templates')
-                    .insert({
-                        ...payload,
-                        created_by: user.id,
-                        active: true,
-                        primary: statementTemplates.length === 0
-                    })
-                    .select('id')
-                    .single()
-            )
-        if (error) throw normalizeSupabaseActionError(error)
+            configuration: input.configuration,
+            isFirstTemplate: statementTemplates.length === 0
+        })
         await loadCustomTemplates()
-        if (!data?.id) throw new Error('Template was saved without an identifier.')
-        return data.id
-    }, [isLocalMode, loadCustomTemplates, statementTemplates, user?.id, workspaceId])
+        return savedId
+    }, [isLocalMode, loadCustomTemplates, statementTemplates, user?.id, user?.role, workspaceId])
 
     const setDefaultStatementTemplate = useCallback(async (templateId: string) => {
-        if (!workspaceId || !user?.id) throw new Error('Missing workspace context.')
+        if (!workspaceId || !user?.id || user.role !== 'admin') throw new Error('Missing template permission or workspace context.')
         const template = statementTemplates.find((candidate) => candidate.id === templateId)
         if (!template) throw new Error('Statement template not found.')
 
@@ -745,10 +723,10 @@ export function AccountStatements() {
             if (error) throw normalizeSupabaseActionError(error)
         }
         await loadCustomTemplates()
-    }, [isLocalMode, loadCustomTemplates, statementTemplates, user?.id, workspaceId])
+    }, [isLocalMode, loadCustomTemplates, statementTemplates, user?.id, user?.role, workspaceId])
 
     const deleteStatementTemplate = useCallback(async (templateId: string) => {
-        if (!workspaceId || !user?.id) throw new Error('Missing workspace context.')
+        if (!workspaceId || !user?.id || user.role !== 'admin') throw new Error('Missing template permission or workspace context.')
         const template = statementTemplates.find((candidate) => candidate.id === templateId)
         if (!template) throw new Error('Statement template not found.')
         if (template.primary || statementTemplates.length <= 1) {
@@ -772,7 +750,7 @@ export function AccountStatements() {
             }
         }
         await loadCustomTemplates()
-    }, [isLocalMode, loadCustomTemplates, statementTemplates, user?.id, workspaceId])
+    }, [isLocalMode, loadCustomTemplates, statementTemplates, user?.id, user?.role, workspaceId])
 
     if (!workspaceId) return null
 
@@ -926,8 +904,8 @@ export function AccountStatements() {
                                 </p>
                             </div>
                             <div className="flex gap-2 text-xs text-muted-foreground">
-                                <span className="inline-flex items-center gap-1"><TrendingUp className="h-3.5 w-3.5 text-emerald-600" /> {t('businessPartners.accountStatement.dueFromPartner', { defaultValue: 'Due from partner' })}</span>
-                                <span className="inline-flex items-center gap-1"><TrendingDown className="h-3.5 w-3.5 text-amber-600" /> {t('businessPartners.accountStatement.dueToPartner', { defaultValue: 'Due to partner' })}</span>
+                                <span className="inline-flex items-center gap-1"><TrendingUp className="h-3.5 w-3.5" style={{ color: activeStatementTemplate.configuration.dueFromBalanceColor }} /> {t('businessPartners.accountStatement.dueFromPartner', { defaultValue: 'Due from partner' })}</span>
+                                <span className="inline-flex items-center gap-1"><TrendingDown className="h-3.5 w-3.5" style={{ color: activeStatementTemplate.configuration.dueToBalanceColor }} /> {t('businessPartners.accountStatement.dueToPartner', { defaultValue: 'Due to partner' })}</span>
                             </div>
                         </CardContent>
                     </Card>
@@ -941,6 +919,7 @@ export function AccountStatements() {
                                 i18n={i18n}
                                 language={i18n.language}
                                 columns={statementColumns}
+                                balanceColors={activeStatementTemplate.configuration}
                                 onNavigate={navigate}
                             />
                         ))}

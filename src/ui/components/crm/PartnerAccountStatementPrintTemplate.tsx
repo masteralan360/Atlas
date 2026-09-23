@@ -15,8 +15,10 @@ import {
 } from '@/lib/partnerAccountStatementPresentation'
 import {
     DEFAULT_PARTNER_ACCOUNT_STATEMENT_TEMPLATE_CONFIGURATION,
+    getPartnerAccountStatementBalanceColor,
     getPartnerAccountStatementSummaryLabelColumn,
     getPartnerAccountStatementVisibleColumns,
+    type PartnerAccountStatementBalanceColors,
     type PartnerAccountStatementColumnId
 } from '@/lib/partnerAccountStatementTemplates'
 import { formatProductQuantity } from '@/lib/productUnitPresentation'
@@ -33,6 +35,7 @@ export {
 
 export type PartnerAccountStatementPrintData = PartnerAccountStatementData & {
     tableColumns?: PartnerAccountStatementColumnId[]
+    balanceColors?: PartnerAccountStatementBalanceColors
     workspace?: {
         phone?: string
         address?: string
@@ -105,12 +108,6 @@ function balanceLabel(balance: number, t: (key: string, options?: Record<string,
     return t('businessPartners.accountStatement.settled', { defaultValue: 'Settled' })
 }
 
-function balanceClass(balance: number) {
-    if (balance > 0.000001) return 'text-emerald-600'
-    if (balance < -0.000001) return 'text-yellow-500'
-    return ''
-}
-
 // Keep the same fixed-table pagination model as Atlas Standard: the first
 // table stays in document flow, while every continuation table is marked for
 // the shared A4 centering pass used by preview and PDF generation.
@@ -145,6 +142,7 @@ function LedgerTableChunk({
     i18n,
     language,
     columns,
+    balanceColors,
     iqdPreference
 }: {
     ledger: PartnerAccountStatementCurrencyLedger
@@ -157,6 +155,7 @@ function LedgerTableChunk({
     i18n: I18n
     language: string
     columns: PartnerAccountStatementColumnId[]
+    balanceColors?: PartnerAccountStatementBalanceColors
     iqdPreference: IQDDisplayPreference
 }) {
     const displayAmount = (amount: number) => formatCurrency(Math.abs(amount), ledger.currency, iqdPreference)
@@ -236,8 +235,7 @@ function LedgerTableChunk({
                             return <td key={columnId} className={cn(
                                 'border border-slate-300 px-1.5 py-1',
                                 numericColumn(columnId) && 'text-end',
-                                columnId === 'balance' && balanceClass(ledger.openingBalance)
-                            )}>{isLabel && value ? <span className="flex items-center justify-between gap-2"><span>{t('businessPartners.accountStatement.openingBalance', { defaultValue: 'Opening balance' })}</span><span>{value}</span></span> : isLabel ? t('businessPartners.accountStatement.openingBalance', { defaultValue: 'Opening balance' }) : value || null}</td>
+                            )}>{isLabel && value ? <span className="flex items-center justify-between gap-2"><span>{t('businessPartners.accountStatement.openingBalance', { defaultValue: 'Opening balance' })}</span><span style={columnId === 'balance' ? { color: getPartnerAccountStatementBalanceColor(ledger.openingBalance, balanceColors) } : undefined}>{value}</span></span> : isLabel ? t('businessPartners.accountStatement.openingBalance', { defaultValue: 'Opening balance' }) : columnId === 'balance' && value ? <span style={{ color: getPartnerAccountStatementBalanceColor(ledger.openingBalance, balanceColors) }}>{value}</span> : value || null}</td>
                         })}
                     </tr>
                 ) : null}
@@ -275,7 +273,7 @@ function LedgerTableChunk({
                                     case 'credit':
                                         return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top font-semibold whitespace-nowrap">{entry.delta < 0 ? displayAmount(entry.delta) : '—'}</td>
                                     case 'balance':
-                                        return <td key={columnId} className={cn('border border-slate-300 px-1.5 py-1 text-end align-top font-bold whitespace-nowrap', balanceClass(entry.runningBalance))}>{displayAmount(entry.runningBalance)}</td>
+                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top font-bold whitespace-nowrap" style={{ color: getPartnerAccountStatementBalanceColor(entry.runningBalance, balanceColors) }}>{displayAmount(entry.runningBalance)}</td>
                                 }
                             })}
                         </tr>
@@ -291,8 +289,7 @@ function LedgerTableChunk({
                             return <td key={columnId} className={cn(
                                 'border border-slate-400 px-1.5 py-1.5',
                                 numericColumn(columnId) && 'text-end whitespace-nowrap',
-                                columnId === 'balance' && balanceClass(ledger.closingBalance)
-                            )}>{isLabel && value ? <span className="flex items-center justify-between gap-2"><span>{t('common.total', { defaultValue: 'Total' })}</span><span>{value}</span></span> : isLabel ? t('common.total', { defaultValue: 'Total' }) : value || null}</td>
+                            )}>{isLabel && value ? <span className="flex items-center justify-between gap-2"><span>{t('common.total', { defaultValue: 'Total' })}</span><span style={columnId === 'balance' ? { color: getPartnerAccountStatementBalanceColor(ledger.closingBalance, balanceColors) } : undefined}>{value}</span></span> : isLabel ? t('common.total', { defaultValue: 'Total' }) : columnId === 'balance' && value ? <span style={{ color: getPartnerAccountStatementBalanceColor(ledger.closingBalance, balanceColors) }}>{value}</span> : value || null}</td>
                         })}
                     </tr>
                 </tfoot>
@@ -308,6 +305,7 @@ function LedgerTable({
     i18n,
     language,
     columns,
+    balanceColors,
     iqdPreference
 }: {
     ledger: PartnerAccountStatementCurrencyLedger
@@ -316,6 +314,7 @@ function LedgerTable({
     i18n: I18n
     language: string
     columns: PartnerAccountStatementColumnId[]
+    balanceColors?: PartnerAccountStatementBalanceColors
     iqdPreference: IQDDisplayPreference
 }) {
     const displayAmount = (amount: number) => formatCurrency(Math.abs(amount), ledger.currency, iqdPreference)
@@ -346,12 +345,13 @@ function LedgerTable({
                     i18n={i18n}
                     language={language}
                     columns={columns}
+                    balanceColors={balanceColors}
                     iqdPreference={iqdPreference}
                 />
             ))}
             <div className="mt-1 text-end text-[9px] font-semibold">
                 {balanceLabel(ledger.closingBalance, t)}:{' '}
-                <span className={balanceClass(ledger.closingBalance)}>{displayAmount(ledger.closingBalance)}</span>
+                <span style={{ color: getPartnerAccountStatementBalanceColor(ledger.closingBalance, balanceColors) }}>{displayAmount(ledger.closingBalance)}</span>
             </div>
         </section>
     )
@@ -446,6 +446,7 @@ export function PartnerAccountStatementPrintTemplate({
                         i18n={i18n}
                         language={printLang}
                         columns={columns}
+                        balanceColors={data.balanceColors}
                         iqdPreference={iqdPreference}
                     />
                 ))}

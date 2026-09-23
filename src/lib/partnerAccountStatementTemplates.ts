@@ -30,6 +30,39 @@ export type PartnerAccountStatementTemplateConfiguration = {
   hiddenColumns: PartnerAccountStatementColumnId[]
   showOrderItems: boolean
   showPosSaleItems: boolean
+  dueFromBalanceColor: string
+  dueToBalanceColor: string
+}
+
+export type PartnerAccountStatementBalanceColors = Pick<
+  PartnerAccountStatementTemplateConfiguration,
+  'dueFromBalanceColor' | 'dueToBalanceColor'
+>
+
+export const DEFAULT_PARTNER_ACCOUNT_STATEMENT_BALANCE_COLORS: PartnerAccountStatementBalanceColors = {
+  dueFromBalanceColor: '#059669', // Tailwind emerald-600
+  dueToBalanceColor: '#eab308' // Tailwind yellow-500
+}
+
+export function isValidPartnerAccountStatementBalanceColor(value: unknown): value is string {
+  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value)
+}
+
+export function getPartnerAccountStatementBalanceColor(
+  balance: number,
+  colors?: PartnerAccountStatementBalanceColors
+): string | undefined {
+  if (balance > 0.000001) {
+    return isValidPartnerAccountStatementBalanceColor(colors?.dueFromBalanceColor)
+      ? colors.dueFromBalanceColor
+      : DEFAULT_PARTNER_ACCOUNT_STATEMENT_BALANCE_COLORS.dueFromBalanceColor
+  }
+  if (balance < -0.000001) {
+    return isValidPartnerAccountStatementBalanceColor(colors?.dueToBalanceColor)
+      ? colors.dueToBalanceColor
+      : DEFAULT_PARTNER_ACCOUNT_STATEMENT_BALANCE_COLORS.dueToBalanceColor
+  }
+  return undefined
 }
 
 export type PartnerAccountStatementTemplate = {
@@ -55,7 +88,8 @@ export const DEFAULT_PARTNER_ACCOUNT_STATEMENT_TEMPLATE_CONFIGURATION: PartnerAc
   columnOrder: [...PARTNER_ACCOUNT_STATEMENT_COLUMN_IDS],
   hiddenColumns: [],
   showOrderItems: false,
-  showPosSaleItems: false
+  showPosSaleItems: false,
+  ...DEFAULT_PARTNER_ACCOUNT_STATEMENT_BALANCE_COLORS
 }
 
 function isColumnId(value: unknown): value is PartnerAccountStatementColumnId {
@@ -100,7 +134,13 @@ export function normalizePartnerAccountStatementTemplateConfiguration(
     columnOrder,
     hiddenColumns,
     showOrderItems: candidate.showOrderItems === true,
-    showPosSaleItems: candidate.showPosSaleItems === true
+    showPosSaleItems: candidate.showPosSaleItems === true,
+    dueFromBalanceColor: isValidPartnerAccountStatementBalanceColor(candidate.dueFromBalanceColor)
+      ? candidate.dueFromBalanceColor
+      : DEFAULT_PARTNER_ACCOUNT_STATEMENT_BALANCE_COLORS.dueFromBalanceColor,
+    dueToBalanceColor: isValidPartnerAccountStatementBalanceColor(candidate.dueToBalanceColor)
+      ? candidate.dueToBalanceColor
+      : DEFAULT_PARTNER_ACCOUNT_STATEMENT_BALANCE_COLORS.dueToBalanceColor
   }
 }
 

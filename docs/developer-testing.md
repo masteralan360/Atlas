@@ -64,6 +64,13 @@ report lists them under `unavailable`. IndexedDB reopen verifies cache survival
 only; remote mocks verify client contracts only. Neither is presented as proof
 of native persistence, server atomicity, permissions, or every possible scenario.
 
+## Business Partners coverage
+
+The `business-partners` suite includes a **Statement templates and balance colors**
+group. It checks legacy template defaults, HEX validation, balance signs and zero,
+A4 rendering, and the Cloud / Hybrid client save contract with friendly failure
+copy. Run it with `node scripts/dev-testing/cli.mjs --suite business-partners --groups account-statement-templates`.
+
 ## Regular POS coverage
 
 The independent `pos` suite covers production checkout for cash and all four

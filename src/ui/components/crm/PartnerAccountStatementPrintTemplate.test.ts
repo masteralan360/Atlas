@@ -668,7 +668,51 @@ describe('buildPartnerAccountStatementLedger', () => {
         expect(html).toContain('>Description</th>')
         expect(html.indexOf('>Description</th>')).toBeLessThan(html.indexOf('>Credit</th>'))
         expect(footer).toContain('>Total</td>')
-        expect(footer).toContain('>100 usd</td>')
+        expect(footer).toContain('style="color:#059669">100 usd</span>')
+    })
+
+    it('uses template balance colors in A4 output and leaves zero balances uncolored', () => {
+        const positive = statementData()
+        positive.period = { type: 'allTime' }
+        positive.statementOrders = [{
+            id: 'positive-sale', orderNumber: 'SO-COLOR', customerId: 'partner-1', total: 100,
+            currency: 'usd', status: 'completed', createdAt: '2026-01-04T10:00:00.000Z', isDeleted: false, linkedLoanId: null
+        }] as any
+        positive.settlementTransactions = []
+        const colors = { dueFromBalanceColor: '#123456', dueToBalanceColor: '#abcdef' }
+        const positiveHtml = renderToStaticMarkup(createElement(PartnerAccountStatementPrintTemplate, {
+            printLang: 'en', data: { ...positive, balanceColors: colors }
+        }))
+        expect(positiveHtml).toContain('style="color:#123456">100 usd</')
+
+        const negative = statementData()
+        negative.period = { type: 'allTime' }
+        negative.statementOrders = [{
+            id: 'negative-purchase', orderNumber: 'PO-COLOR', supplierId: 'partner-1', total: 40,
+            currency: 'usd', status: 'received', createdAt: '2026-01-04T10:00:00.000Z', isDeleted: false, linkedLoanId: null
+        }] as any
+        negative.settlementTransactions = []
+        const negativeHtml = renderToStaticMarkup(createElement(PartnerAccountStatementPrintTemplate, {
+            printLang: 'en', data: { ...negative, balanceColors: colors }
+        }))
+        expect(negativeHtml).toContain('style="color:#abcdef">40 usd</')
+
+        const zero = statementData()
+        zero.period = { type: 'allTime' }
+        zero.statementOrders = [{
+            id: 'settled-sale', orderNumber: 'SO-SETTLED', customerId: 'partner-1', total: 100,
+            currency: 'usd', status: 'completed', createdAt: '2026-01-04T10:00:00.000Z', isDeleted: false, linkedLoanId: null
+        }] as any
+        zero.settlementTransactions = [{
+            id: 'full-settlement', sourceType: 'sales_order', sourceRecordId: 'settled-sale',
+            direction: 'incoming', amount: 100, currency: 'usd',
+            paidAt: '2026-01-05T10:00:00.000Z', createdAt: '2026-01-05T10:00:00.000Z', isDeleted: false
+        }] as any
+        const zeroHtml = renderToStaticMarkup(createElement(PartnerAccountStatementPrintTemplate, {
+            printLang: 'en', data: { ...zero, balanceColors: colors }
+        }))
+        expect(zeroHtml).toContain('style="color:#123456">100 usd</')
+        expect(zeroHtml).toMatch(/Settled.*?<span>0 usd<\/span>/)
     })
 
     it('keeps a single-currency running balance from opening activity through payments and reversals', () => {

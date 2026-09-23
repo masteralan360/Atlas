@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest'
 
 import {
   createPartnerAccountStatementTemplateConfiguration,
+  DEFAULT_PARTNER_ACCOUNT_STATEMENT_BALANCE_COLORS,
   DEFAULT_PARTNER_ACCOUNT_STATEMENT_TEMPLATE_CONFIGURATION,
+  getPartnerAccountStatementBalanceColor,
   getPartnerAccountStatementSummaryLabelColumn,
   getPartnerAccountStatementVisibleColumns,
   normalizePartnerAccountStatementTemplateConfiguration,
+  isValidPartnerAccountStatementBalanceColor,
   PARTNER_ACCOUNT_STATEMENT_COLUMN_IDS,
   readPartnerAccountStatementTemplate,
   serializePartnerAccountStatementTemplate
@@ -16,7 +19,8 @@ describe('Partner Account Statement templates', () => {
     expect(DEFAULT_PARTNER_ACCOUNT_STATEMENT_TEMPLATE_CONFIGURATION).toMatchObject({
       showOrderItems: false,
       showPosSaleItems: false,
-      hiddenColumns: []
+      hiddenColumns: [],
+      ...DEFAULT_PARTNER_ACCOUNT_STATEMENT_BALANCE_COLORS
     })
 
     expect(getPartnerAccountStatementVisibleColumns(
@@ -28,6 +32,43 @@ describe('Partner Account Statement templates', () => {
       DEFAULT_PARTNER_ACCOUNT_STATEMENT_TEMPLATE_CONFIGURATION,
       { showItemColumns: true, showProductCommissionColumns: true }
     )).toEqual(PARTNER_ACCOUNT_STATEMENT_COLUMN_IDS)
+  })
+
+  it('uses saved HEX colors for positive and negative balances while zero stays uncolored', () => {
+    const colors = { dueFromBalanceColor: '#123ABC', dueToBalanceColor: '#fedcba' }
+    const configuration = createPartnerAccountStatementTemplateConfiguration(colors)
+
+    expect(isValidPartnerAccountStatementBalanceColor('#123ABC')).toBe(true)
+    expect(isValidPartnerAccountStatementBalanceColor('#123AB')).toBe(false)
+    expect(isValidPartnerAccountStatementBalanceColor('red')).toBe(false)
+    expect(getPartnerAccountStatementBalanceColor(25, configuration)).toBe('#123ABC')
+    expect(getPartnerAccountStatementBalanceColor(-25, configuration)).toBe('#fedcba')
+    expect(getPartnerAccountStatementBalanceColor(0, configuration)).toBeUndefined()
+    expect(getPartnerAccountStatementBalanceColor(0.000001, configuration)).toBeUndefined()
+    expect(getPartnerAccountStatementBalanceColor(-0.000001, configuration)).toBeUndefined()
+    expect(getPartnerAccountStatementBalanceColor(0.000002, configuration)).toBe('#123ABC')
+    expect(getPartnerAccountStatementBalanceColor(-0.000002, configuration)).toBe('#fedcba')
+  })
+
+  it('keeps legacy template colors and repairs invalid saved colors', () => {
+    const legacy = readPartnerAccountStatementTemplate({
+      id: 'legacy',
+      layout_json: { kind: 'partner-account-statement-template', configuration: { version: 1 } }
+    })
+    expect(legacy?.configuration).toMatchObject(DEFAULT_PARTNER_ACCOUNT_STATEMENT_BALANCE_COLORS)
+
+    const repaired = normalizePartnerAccountStatementTemplateConfiguration({
+      dueFromBalanceColor: 'javascript:alert(1)',
+      dueToBalanceColor: '#12345G'
+    })
+    expect(repaired).toMatchObject(DEFAULT_PARTNER_ACCOUNT_STATEMENT_BALANCE_COLORS)
+
+    const saved = serializePartnerAccountStatementTemplate(
+      createPartnerAccountStatementTemplateConfiguration({ dueFromBalanceColor: '#123456', dueToBalanceColor: '#abcdef' })
+    )
+    expect(readPartnerAccountStatementTemplate({ id: 'custom', layout_json: saved })?.configuration).toMatchObject({
+      dueFromBalanceColor: '#123456', dueToBalanceColor: '#abcdef'
+    })
   })
 
   it('preserves a saved column order and hides only the requested columns', () => {
