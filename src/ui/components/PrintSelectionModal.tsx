@@ -49,6 +49,8 @@ interface PrintSelectionModalProps {
     nativeOptions: PrintSelectionNativeOption[]
     templateOptions?: PrintSelectionTemplateOption[]
     onCreateReturnTemplate?: () => void
+    /** A4 business documents that are independent of the invoice entitlement. */
+    allowA4Document?: boolean
 }
 
 function PrintOptionIcon({ format, custom = false }: { format: PrintFormat; custom?: boolean }) {
@@ -105,11 +107,12 @@ export function PrintSelectionModal({
     onSelect,
     nativeOptions,
     templateOptions = [],
-    onCreateReturnTemplate
+    onCreateReturnTemplate,
+    allowA4Document = false
 }: PrintSelectionModalProps) {
     const { t } = useTranslation()
     const { hasCapability } = useWorkspace()
-    const canUseA4Invoices = hasCapability('a4PdfInvoices')
+    const canUseA4Invoices = allowA4Document || hasCapability('a4PdfInvoices')
     const hasPrintVersionSelector = nativeOptions.some((option) => option.returned)
         || templateOptions.some((option) => option.returned)
     const hasNormalPrintOptions = nativeOptions.some((option) => !option.returned)

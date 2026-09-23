@@ -18,7 +18,8 @@ import {
 } from '@/lib/orderSaveProgress'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
-import { generateId, toSnakeCase } from '@/lib/utils'
+import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
+import { nextDirectTransactionVoucherNumber } from '@/lib/directTransactionVoucher'
 import { isReportablePaymentTransaction } from '@/lib/financialReportability'
 import {
   getPaymentTransactionReversalState,
@@ -32,6 +33,7 @@ export {
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
+import { persistLocalDirectTransactionWithVoucher } from './localModeSqlite'
 import {
   getSalesOrderCommissionMode,
   isPayableCommissionEntry,
@@ -1613,7 +1615,21 @@ export async function appendPaymentTransaction(
 
   if (!shouldUseCloudBusinessData(workspaceId)) {
     await assertPaymentAccountTransactionCanBeAppliedLocally(transaction)
-    await db.payment_transactions.put(transaction)
+    if (transaction.sourceType === 'direct_transaction') {
+      const sqliteNumber = await persistLocalDirectTransactionWithVoucher(db, transaction)
+      if (sqliteNumber === null) {
+        // Preserve the existing Dexie path where no Local SQLite runtime exists.
+        await db.transaction('rw', db.payment_transactions, async () => {
+          const posted = await db.payment_transactions.where('workspaceId').equals(workspaceId).toArray()
+          transaction.voucherNumber = nextDirectTransactionVoucherNumber(posted)
+          await db.payment_transactions.put(transaction)
+        })
+      } else {
+        await db.payment_transactions.put(transaction)
+      }
+    } else {
+      await db.payment_transactions.put(transaction)
+    }
     await mirrorPaymentAccountTransactionLocally(transaction)
     return transaction
   }
@@ -1640,19 +1656,25 @@ export async function appendPaymentTransaction(
   try {
     const client = getSupabaseClientForTable('payment_transactions')
     const payload = sanitizeSyncPayload(transaction as unknown as Record<string, unknown>)
-    const { error } = await runMutation('payment_transactions.create', () =>
-      input.idempotent || input.requireRemoteConfirmation
-        ? client.from('payment_transactions').upsert(payload, { onConflict: 'id' })
-        : client.from('payment_transactions').insert(payload)
-    )
-
-    if (error) {
-      throw error
+    const mutation = input.idempotent || input.requireRemoteConfirmation
+      ? client.from('payment_transactions').upsert(payload, { onConflict: 'id' })
+      : client.from('payment_transactions').insert(payload)
+    let voucherNumber: number | null = null
+    if (transaction.sourceType === 'direct_transaction') {
+      const { data, error } = await runMutation('payment_transactions.create', () =>
+        mutation.select('voucher_number').single()
+      )
+      if (error) throw error
+      voucherNumber = Number(data?.voucher_number || 0) || null
+    } else {
+      const { error } = await runMutation('payment_transactions.create', () => mutation)
+      if (error) throw error
     }
 
     const syncedAt = new Date().toISOString()
     const syncedTransaction: PaymentTransaction = {
       ...transaction,
+      ...(transaction.sourceType === 'direct_transaction' ? { voucherNumber } : {}),
       syncStatus: 'synced',
       lastSyncedAt: syncedAt
     }
@@ -1682,6 +1704,53 @@ export async function appendPaymentTransaction(
 
     throw normalizeSupabaseActionError(error)
   }
+}
+
+/** Read a complete, current direct-transaction chain for printing, independent of page filters. */
+export async function loadDirectTransactionVoucher(workspaceId: string, transactionId: string) {
+  const local = await db.payment_transactions.get(transactionId)
+  if (!local || local.workspaceId !== workspaceId || local.isDeleted || local.sourceType !== 'direct_transaction') {
+    throw new Error('Direct transaction is unavailable')
+  }
+
+  if (!shouldUseCloudBusinessData(workspaceId)) {
+    const rows = await db.payment_transactions.where('workspaceId').equals(workspaceId).toArray()
+    return {
+      transaction: local,
+      related: rows.filter(row => row.sourceType === 'direct_transaction'
+        && row.sourceRecordId === local.sourceRecordId),
+      asOf: new Date().toISOString()
+    }
+  }
+
+  if (!isOnline()) throw new Error('Connect and wait for synchronization before printing this voucher')
+
+  const client = getSupabaseClientForTable('payment_transactions')
+  const { data, error } = await runMutation('payment_transactions.voucher', () =>
+    client.from('payment_transactions').select('*')
+      .eq('workspace_id', workspaceId)
+      .eq('source_type', 'direct_transaction')
+      .eq('source_record_id', local.sourceRecordId)
+  )
+  if (error) throw normalizeSupabaseActionError(error)
+  const related = (data || []).map(row => toCamelCase(row as Record<string, unknown>) as unknown as PaymentTransaction)
+  const transaction = related.find(row => row.id === transactionId)
+  if (!transaction) throw new Error('Connect and wait for synchronization before printing this voucher')
+  const cachedRelated = await db.payment_transactions.where('workspaceId').equals(workspaceId).toArray()
+  const remoteById = new Map(related.map(row => [row.id, row]))
+  if (cachedRelated.some(row => row.sourceType === 'direct_transaction'
+    && row.sourceRecordId === local.sourceRecordId
+    && !row.isDeleted
+    && row.syncStatus === 'pending'
+    && (!remoteById.has(row.id) || !remoteById.get(row.id)?.voucherNumber))) {
+    throw new Error('Connect and wait for synchronization before printing this voucher')
+  }
+  await db.payment_transactions.bulkPut(related.map(row => ({
+    ...row,
+    syncStatus: 'synced' as const,
+    lastSyncedAt: new Date().toISOString()
+  })))
+  return { transaction, related, asOf: new Date().toISOString() }
 }
 
 function isProvisionalOrderReference(referenceLabel: string) {

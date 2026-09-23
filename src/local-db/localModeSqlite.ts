@@ -7,6 +7,7 @@ import { recordWorkspaceDataFetch } from "@/workspace/workspaceDataFreshness";
 import { isAllowedInventoryQuantityTransition } from "./inventoryDeficit";
 import { runUsbBackupIfNeeded } from "./usbBackup";
 import { normalizeProductSku } from "./productSku";
+import type { PaymentTransaction } from "./models";
 import { createPwaSqliteConnection, isOpfsSupported, getPwaDbInstance, ensurePwaDatabase, replacePwaDatabaseFile, validateAtlasLocalDatabase, DB_FILENAME as PWA_DB_FILENAME } from "./pwaSqlite";
 
 const LOCAL_MODE_SQLITE_PATH = "sqlite:atlas-local-mode.db";
@@ -1221,6 +1222,40 @@ async function persistEntity(
   if (tableName === "cashier_shift_occurrences") {
     await synchronizeCashierShiftActiveClaim(connection, row, workspaceId);
   }
+}
+
+/** Allocate and persist a Local-mode direct voucher in the SQLite authority. */
+export async function persistLocalDirectTransactionWithVoucher(
+  cacheDb: Dexie,
+  transaction: PaymentTransaction,
+): Promise<number | null> {
+  if (!isSupported()) return null;
+
+  return runLocalModeSqliteTransaction(async (connection) => {
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS direct_transaction_voucher_counters (
+        workspace_id TEXT PRIMARY KEY,
+        last_number INTEGER NOT NULL CHECK (last_number > 0)
+      )
+    `);
+    const rows = await connection.select<Array<{ last_number: number }>>(`
+      INSERT INTO direct_transaction_voucher_counters (workspace_id, last_number)
+      VALUES ($1, 1)
+      ON CONFLICT (workspace_id) DO UPDATE SET last_number = last_number + 1
+      RETURNING last_number
+    `, [transaction.workspaceId]);
+    const number = Number(rows[0]?.last_number);
+    if (!Number.isSafeInteger(number) || number <= 0) {
+      throw new Error('Could not allocate a direct-transaction voucher number');
+    }
+    transaction.voucherNumber = number;
+    await persistEntity(cacheDb, 'payment_transactions', transaction as unknown as Record<string, unknown>, {
+      connection,
+      authority: true,
+      workspaceId: transaction.workspaceId,
+    });
+    return number;
+  });
 }
 
 async function deleteEntity(

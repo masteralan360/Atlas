@@ -1,6 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
+const capability = vi.hoisted(() => ({ a4: true }))
+
 vi.mock('react-i18next', () => ({
     useTranslation: () => ({
         t: (_key: string, options?: { defaultValue?: string }) => options?.defaultValue || _key
@@ -9,7 +11,7 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('@/workspace', () => ({
     useWorkspace: () => ({
-        hasCapability: () => true
+        hasCapability: () => capability.a4
     })
 }))
 
@@ -39,6 +41,21 @@ beforeAll(async () => {
 })
 
 describe('PrintSelectionModal', () => {
+    it('offers a voucher A4 layout independently of the invoice entitlement', () => {
+        capability.a4 = false
+        try {
+            const props = {
+                isOpen: true,
+                onClose: () => undefined,
+                onSelect: () => undefined,
+                nativeOptions: [{ format: 'a4' as const, label: 'Direct voucher', description: 'Voucher A4' }]
+            }
+            expect(renderToStaticMarkup(<PrintSelectionModal {...props} />)).not.toContain('Direct voucher')
+            expect(renderToStaticMarkup(<PrintSelectionModal {...props} allowA4Document />)).toContain('Direct voucher')
+        } finally {
+            capability.a4 = true
+        }
+    })
     it('renders native formats and saved custom templates in one selection surface', () => {
         const customTemplate = {
             id: 'partner-template',

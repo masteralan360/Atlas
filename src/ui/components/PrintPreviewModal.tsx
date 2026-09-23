@@ -78,6 +78,8 @@ interface PrintPreviewModalProps {
     onCreateReturnTemplate?: () => void
     onPreviewPrint?: (blob: Blob) => Promise<void>
     previewPrintActionLabel?: string
+    /** A4 business documents that are independent of the invoice entitlement. */
+    allowA4Document?: boolean
 }
 
 type WorkspaceContactPair = {
@@ -121,7 +123,8 @@ export function PrintPreviewModal({
     onPrintSelection,
     onCreateReturnTemplate,
     onPreviewPrint,
-    previewPrintActionLabel
+    previewPrintActionLabel,
+    allowA4Document = false
 }: PrintPreviewModalProps) {
     const { t, i18n } = useTranslation()
     const { toast } = useToast()
@@ -173,7 +176,7 @@ export function PrintPreviewModal({
 
     const hasPdfData = !!pdfBuilder || !!(pdfData && features)
     const requestedPrintFormat: PrintFormat = (invoiceData?.printFormat || 'a4') as PrintFormat
-    const defaultPrintFormat: PrintFormat = requestedPrintFormat === 'a4' && !hasCapability('a4PdfInvoices')
+    const defaultPrintFormat: PrintFormat = requestedPrintFormat === 'a4' && !allowA4Document && !hasCapability('a4PdfInvoices')
         ? 'receipt'
         : requestedPrintFormat
     useLayoutEffect(() => {
@@ -605,6 +608,7 @@ export function PrintPreviewModal({
                 nativeOptions={resolvedPrintSelectionOptions}
                 templateOptions={printSelectionTemplates}
                 onCreateReturnTemplate={onCreateReturnTemplate}
+                allowA4Document={allowA4Document}
             />
             <SmallDialog
                 open={isOpen && selectedPrintFormat !== null}

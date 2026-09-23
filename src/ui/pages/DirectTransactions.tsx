@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
-import { ArrowDownLeft, ArrowUpRight, Plus, RotateCcw, Search } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, Plus, Printer, RotateCcw, Search } from 'lucide-react'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 
@@ -11,8 +11,10 @@ import {
     getPaymentTransactionReversalState,
     getPaymentTransactionRoutePath,
     getRemainingPaymentTransactions,
+    loadDirectTransactionVoucher,
     recordDirectTransaction,
     reversePaymentTransaction,
+    useWorkspaceContacts,
     usePaymentTransactions,
     type PaymentTransaction
 } from '@/local-db'
@@ -41,7 +43,13 @@ import {
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { DirectTransactionDialog } from '@/ui/components/payments/DirectTransactionDialog'
+import { DirectTransactionVoucherPrintTemplate, type DirectTransactionVoucherData } from '@/ui/components/payments/DirectTransactionVoucherPrintTemplate'
 import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
+import { PrintPreviewModal } from '@/ui/components/PrintPreviewModal'
+import { formatDirectTransactionVoucherNumber } from '@/lib/directTransactionVoucher'
+import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
+import { generateTemplatePdf } from '@/services/pdfGenerator'
+import { printPdfBlob } from '@/services/pdfPrintService'
 import { useWorkspace } from '@/workspace'
 
 type DirectionFilter = 'all' | 'incoming' | 'outgoing'
@@ -68,10 +76,10 @@ function paymentMethodLabel(value: PaymentTransaction['paymentMethod'], t: any) 
 }
 
 export function DirectTransactions() {
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const { user } = useAuth()
     const { toast } = useToast()
-    const { features } = useWorkspace()
+    const { features, workspaceName } = useWorkspace()
     const { dateRange, customDates } = useDateRange()
     const [, setLocation] = useLocation()
     const workspaceId = user?.workspaceId
@@ -83,6 +91,31 @@ export function DirectTransactions() {
     const [isSubmittingDirectTransaction, setIsSubmittingDirectTransaction] = useState(false)
     const [reversingTransactionId, setReversingTransactionId] = useState<string | null>(null)
     const [transactionToReverse, setTransactionToReverse] = useState<PaymentTransaction | null>(null)
+    const [voucherData, setVoucherData] = useState<DirectTransactionVoucherData | null>(null)
+    const [preparingPrintId, setPreparingPrintId] = useState<string | null>(null)
+    const printLang = features.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
+    const workspaceContacts = useWorkspaceContacts(workspaceId)
+    const printContactLine = useMemo(() => (['phone', 'email', 'address'] as const)
+        .map(type => workspaceContacts.find(contact => contact.type === type && contact.isPrimary)
+            || workspaceContacts.find(contact => contact.type === type))
+        .map(contact => contact?.value.trim())
+        .filter(Boolean)
+        .join(' · '), [workspaceContacts])
+    const voucherPreview = useMemo<TemplatePreview | undefined>(() => voucherData ? {
+        fields: [],
+        page: { widthMm: 210, heightMm: 297 },
+        createElement: (_fields, _effectiveId, printLangOverride) => <DirectTransactionVoucherPrintTemplate
+            data={voucherData}
+            workspaceName={workspaceName || workspaceId || 'Atlas'}
+            logoUrl={features.logo_url}
+            contactLine={printContactLine}
+            printLang={printLangOverride || printLang}
+            iqdPreference={features.iqd_display_preference}
+        />,
+        buildPdf: (element, printLangOverride) => generateTemplatePdf({
+            element, format: 'a4', printLang: printLangOverride || printLang
+        })
+    } : undefined, [features.iqd_display_preference, features.logo_url, printContactLine, printLang, voucherData, workspaceId, workspaceName])
 
     const allTransactions = usePaymentTransactions(workspaceId, { includeReversals: true })
     const directTransactions = useMemo(() => {
@@ -108,6 +141,7 @@ export function DirectTransactions() {
 
                 return [
                     item.referenceLabel,
+                    formatDirectTransactionVoucherNumber(item),
                     item.counterpartyName,
                     item.note,
                     item.paymentMethod
@@ -189,6 +223,23 @@ export function DirectTransactions() {
             })
         } finally {
             setReversingTransactionId(null)
+        }
+    }
+
+    const handlePrint = async (transactionId: string) => {
+        if (!workspaceId || preparingPrintId) return
+        setPreparingPrintId(transactionId)
+        try {
+            setVoucherData(await loadDirectTransactionVoucher(workspaceId, transactionId))
+        } catch (error) {
+            const needsSync = error instanceof Error && error.message.includes('synchronization')
+            toast({
+                title: t('common.error'),
+                description: t(needsSync ? 'directTransactions.printWaitForSync' : 'directTransactions.printFailed'),
+                variant: 'destructive'
+            })
+        } finally {
+            setPreparingPrintId(null)
         }
     }
 
@@ -285,6 +336,7 @@ export function DirectTransactions() {
                         <TableHeader>
                             <TableRow>
                                 <TableHead>{t('directTransactions.table.time', { defaultValue: 'Time' })}</TableHead>
+                                <TableHead>{t('directTransactions.voucher.reference')}</TableHead>
                                 <TableHead>{t('directTransactions.table.reason', { defaultValue: 'Reason' })}</TableHead>
                                 <TableHead>{t('directTransactions.table.counterparty', { defaultValue: 'Counterparty' })}</TableHead>
                                 <TableHead>{t('directTransactions.table.linked', { defaultValue: 'Linked' })}</TableHead>
@@ -299,7 +351,7 @@ export function DirectTransactions() {
                         <TableBody>
                             {visibleDirectTransactions.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={10} className="py-12 text-center text-muted-foreground">
+                                    <TableCell colSpan={11} className="py-12 text-center text-muted-foreground">
                                         {t('directTransactions.noMatch', { defaultValue: 'No direct transactions match the current filters.' })}
                                     </TableCell>
                                 </TableRow>
@@ -317,6 +369,7 @@ export function DirectTransactions() {
                                 return (
                                     <TableRow key={item.id}>
                                         <TableCell>{formatDateTime(item.paidAt)}</TableCell>
+                                        <TableCell className="font-mono text-xs">{formatDirectTransactionVoucherNumber(item)}</TableCell>
                                         <TableCell className="font-medium">{item.referenceLabel || t('directTransactions.defaultReason', { defaultValue: 'Direct transaction' })}</TableCell>
                                         <TableCell>{item.counterpartyName || '-'}</TableCell>
                                         <TableCell>
@@ -371,6 +424,10 @@ export function DirectTransactions() {
                                         </TableCell>
                                         <TableCell className="text-right">
                                             <div className="flex justify-end gap-2">
+                                                <Button variant="outline" size="sm" onClick={() => void handlePrint(item.id)} disabled={!!preparingPrintId}>
+                                                    <Printer className="mr-1 h-3.5 w-3.5" />
+                                                    {preparingPrintId === item.id ? t('common.loading') : t('directTransactions.print')}
+                                                </Button>
                                                 <Button variant="outline" size="sm" onClick={() => setLocation(getPaymentTransactionRoutePath(item))}>
                                                     {t('common.view', { defaultValue: 'View' })}
                                                 </Button>
@@ -418,6 +475,27 @@ export function DirectTransactions() {
                 workspaceId={workspaceId}
                 iqdPreference={features.iqd_display_preference}
             />
+            {voucherData && voucherPreview ? <PrintPreviewModal
+                module="directTransaction"
+                isOpen
+                onClose={() => setVoucherData(null)}
+                onConfirm={() => setVoucherData(null)}
+                title={t(voucherData.transaction.reversalOfTransactionId
+                    ? 'directTransactions.voucher.reversalTitle'
+                    : voucherData.transaction.direction === 'incoming'
+                        ? 'directTransactions.voucher.receiptTitle'
+                        : 'directTransactions.voucher.paymentTitle')}
+                features={features}
+                workspaceName={workspaceName}
+                originId={voucherData.transaction.id}
+                showSaveButton={false}
+                allowA4Document
+                templatePreview={voucherPreview}
+                pdfBuilder={async ({ effectiveId, printLangOverride }) => voucherPreview.buildPdf(
+                    voucherPreview.createElement({}, effectiveId, printLangOverride), printLangOverride
+                )}
+                onPreviewPrint={blob => printPdfBlob(blob, { title: formatDirectTransactionVoucherNumber(voucherData.transaction) })}
+            /> : null}
         </div>
     )
 }

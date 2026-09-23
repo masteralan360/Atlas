@@ -261,7 +261,7 @@ The `sale-orders` registry entry owns these groups:
 | `lifecycle` | Existing financing and installment regressions |
 | `remote-contract` | Mocked Cloud/Hybrid order-save, Quick Order, progress, and retry contracts |
 | `pricing` | Existing pricing, exchange, rounding, customer-balance, and line-storage checks |
-| `payments` | Existing payment transactions, accounts, reversals, and ledger regressions |
+| `payments` | Payment transactions, accounts, reversals, ledger effects, and direct-transaction voucher numbering and A4 layout |
 
 Use the registry for the exact current file list. The matrix draws payment
 methods from the shared app registries. It covers standard methods, USD/IQD,
@@ -277,6 +277,16 @@ payment transactions, linked reversal counter-entries, ledger projections,
 account movements/balances, and financing records where relevant. Expected values
 must be independently derived; calling the calculation under test to generate
 its own expected result cannot demonstrate correctness.
+
+The Payments group also checks Local direct-transaction voucher assignment,
+partial reversal history and remaining amount, legacy ID fallback, A4 table
+chunking, and signature lines. Mocked Cloud / Hybrid checks verify the insert
+return value, workspace-scoped chain read, pending offline state, and read failure.
+The SQLite adapter check verifies atomic local counter allocation and rollback
+when the payment row cannot be persisted.
+Cloud / Hybrid numbering depends on the database
+trigger in `20260923063458_direct_transaction_voucher_number.sql`; real Supabase
+and native SQLite behavior require integration verification outside this suite.
 
 Initial V1 validation with the default 16 generated cases passed 229 suite checks
 and 22 runner/client checks. These are historical validation counts, not a target

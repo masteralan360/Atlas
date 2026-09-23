@@ -2263,6 +2263,8 @@ export interface PaymentTransaction extends BaseEntity {
   /** The active cashier-shift occurrence that owned this payment when it was posted. */
   cashierShiftOccurrenceId?: string | null
   reversalOfTransactionId?: string | null
+  /** Workspace-wide posted direct-transaction reference; older rows retain their ID. */
+  voucherNumber?: number | null
   /** Immutable correction audit. Voided transactions remain stored but have no reporting effect. */
   voidId?: string | null
   metadata?: Record<string, unknown> | null
