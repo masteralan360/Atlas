@@ -30,6 +30,8 @@ export function PostSaveInvoiceDialog() {
 
     if (!pendingPDFPreview) return null
 
+    const isVoucher = pendingPDFPreview.kind === 'voucher'
+
     return (
         <Dialog open={true} onOpenChange={(open) => {
             if (!open) clearPendingPDFPreview()
@@ -53,17 +55,17 @@ export function PostSaveInvoiceDialog() {
                     <div className="space-y-2">
                         <DialogHeader>
                             <DialogTitle className="text-2xl font-black text-foreground tracking-tight text-center">
-                                {t('print.saveSuccess') || 'Invoice Saved'}
+                                {t(isVoucher ? 'directTransactions.voucher.saveSuccess' : 'print.saveSuccess')}
                             </DialogTitle>
                         </DialogHeader>
                         <p className="text-muted-foreground font-medium text-sm leading-relaxed px-4">
-                            {t('print.saveSuccessDesc') || 'A record of this invoice has been added to history.'}
+                            {t(isVoucher ? 'directTransactions.voucher.saveSuccessDesc' : 'print.saveSuccessDesc')}
                         </p>
                     </div>
 
                     <div className="w-full bg-muted/30 p-4 rounded-2xl border border-border/50">
                         <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground opacity-60">
-                            {t('common.invoice') || 'Invoice'}
+                            {t(isVoucher ? 'directTransactions.voucher.documentLabel' : 'common.invoice')}
                         </span>
                         <p className="text-base font-bold text-foreground truncate mt-1">
                             {pendingPDFPreview.title}
@@ -90,7 +92,7 @@ export function PostSaveInvoiceDialog() {
                             className="h-12 rounded-2xl font-black shadow-lg shadow-primary/20 bg-primary hover:bg-primary/90 border-t border-white/10 flex gap-2 items-center justify-center transition-all active:scale-95"
                         >
                             <CheckCircle2 className="w-4 h-4" />
-                            {t('common.view') || 'View Invoice'}
+                            {t('common.view')}
                         </Button>
                     </DialogFooter>
                 </div>

@@ -295,6 +295,8 @@ export type PrintPreviewEditorSource = {
     printFormat?: PrintFormat
     title: string
     onSave?: (blob: Blob) => Promise<string | undefined | void>
+    /** Names a saved non-invoice document in the shared post-save preview. */
+    savedDocumentKind?: 'voucher'
     /** Opens the browser/native print dialog without persisting the generated document. */
     onPrint?: (blob: Blob) => Promise<void>
     printActionLabel?: string

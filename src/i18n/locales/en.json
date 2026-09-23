@@ -2311,6 +2311,10 @@
     "printFailed": "Could not prepare the voucher. Please try again.",
     "printWaitForSync": "Connect and wait for this transaction to sync before printing its numbered voucher.",
     "voucher": {
+      "saveSuccess": "Voucher saved",
+      "saveSuccessDesc": "The voucher PDF was saved to document history.",
+      "saveFailed": "Could not save the voucher PDF. Please try again.",
+      "documentLabel": "Voucher",
       "receiptTitle": "Receipt of Funds",
       "paymentTitle": "Payment Voucher",
       "reversalTitle": "Reversal Voucher",

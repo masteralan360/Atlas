@@ -26,6 +26,7 @@ export function clearPDFPreviewSource() {
 export type PendingPDFPreview = {
     url: string
     title: string
+    kind?: 'voucher'
 }
 
 let pendingPDFPreview: PendingPDFPreview | null = null

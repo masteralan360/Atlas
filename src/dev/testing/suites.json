@@ -77,6 +77,8 @@
           "src/local-db/directTransactionVoucher.test.tsx",
           "src/local-db/directTransactionVoucherRemote.test.ts",
           "src/local-db/directTransactionVoucherSqlite.test.ts",
+          "src/services/directTransactionVoucherSave.test.ts",
+          "src/services/directTransactionVoucherRemoteSave.test.ts",
           "src/ui/components/PrintSelectionModal.test.tsx",
           "src/local-db/paymentReversalState.test.ts",
           "src/lib/ledgerPaymentTransactions.test.ts",

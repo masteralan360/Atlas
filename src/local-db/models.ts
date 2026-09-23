@@ -1838,6 +1838,7 @@ export type InvoiceOrigin =
   | 'car_rental'
   | 'travel_transportation'
   | 'upload'
+  | 'direct_transaction'
 
 export interface Invoice extends BaseEntity {
   invoiceid: string

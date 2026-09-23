@@ -77,6 +77,8 @@ interface PrintPreviewModalProps {
     onPrintSelection?: (format: PrintFormat, template?: StoredCustomTemplateRow, nativeTemplateKey?: string, printVersion?: OrderPrintVersion) => void
     onCreateReturnTemplate?: () => void
     onPreviewPrint?: (blob: Blob) => Promise<void>
+    onPreviewSave?: (blob: Blob) => Promise<string | undefined | void>
+    savedDocumentKind?: 'voucher'
     previewPrintActionLabel?: string
     /** A4 business documents that are independent of the invoice entitlement. */
     allowA4Document?: boolean
@@ -123,6 +125,8 @@ export function PrintPreviewModal({
     onPrintSelection,
     onCreateReturnTemplate,
     onPreviewPrint,
+    onPreviewSave,
+    savedDocumentKind,
     previewPrintActionLabel,
     allowA4Document = false
 }: PrintPreviewModalProps) {
@@ -563,8 +567,9 @@ export function PrintPreviewModal({
                 if (templatePreviewProp) {
                     setPrintPreviewEditorSource({
                         title: title || t('print.previewTitle') || 'Print Preview',
-                        onSave: showSaveButton || enableTemplatePreviewSave ? handleSave : undefined,
+                        onSave: onPreviewSave || (!onPreviewPrint && (showSaveButton || enableTemplatePreviewSave) ? handleSave : undefined),
                         onPrint: onPreviewPrint,
+                        savedDocumentKind,
                         printActionLabel: previewPrintActionLabel,
                         effectiveId,
                         printFormat,
@@ -597,7 +602,7 @@ export function PrintPreviewModal({
         } catch (err) {
             console.error('Failed to open preview:', err)
         }
-    }, [printFormat, printLang, title, t, setLocation, handleSave, pdfData, printableFeatures, workspaceId, workspaceName, workspaceFooterContacts, invoiceData, effectiveId, pdfBuilder, translations, buildPdfBlobs, blobToDataUrl, templatePreviewProp, customTemplate, templateFieldValues, initialTemplateLayout, allowTemplateFieldEditing, enableTemplatePreviewSave, templatePrimaryActionLabel, generateTemplateLayoutBlob, onPreviewPrint, previewPrintActionLabel, showSaveButton])
+    }, [printFormat, printLang, title, t, setLocation, handleSave, pdfData, printableFeatures, workspaceId, workspaceName, workspaceFooterContacts, invoiceData, effectiveId, pdfBuilder, translations, buildPdfBlobs, blobToDataUrl, templatePreviewProp, customTemplate, templateFieldValues, initialTemplateLayout, allowTemplateFieldEditing, enableTemplatePreviewSave, templatePrimaryActionLabel, generateTemplateLayoutBlob, onPreviewPrint, onPreviewSave, savedDocumentKind, previewPrintActionLabel, showSaveButton])
 
     return (
         <>

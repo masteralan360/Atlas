@@ -211,7 +211,7 @@ export function InvoicesHistory() {
 
             setPDFPreviewSource({
                 url,
-                title: `${t('invoices.viewInvoice') || 'Invoice'} ${invoice.invoiceid}`
+                title: `${t(invoice.origin === 'direct_transaction' ? 'directTransactions.voucher.documentLabel' : 'invoices.viewInvoice')} ${invoice.invoiceid}`
             })
             setLocation('/pdf-preview')
         } catch (error) {
@@ -268,7 +268,7 @@ export function InvoicesHistory() {
                 return
             }
 
-            const fileName = `${t('invoices.invoice') || 'Invoice'}_${invoice.sequenceId ? String(invoice.sequenceId).padStart(5, '0') : invoice.invoiceid}.pdf`
+            const fileName = `${t(invoice.origin === 'direct_transaction' ? 'directTransactions.voucher.documentLabel' : 'invoices.invoice')}_${invoice.sequenceId ? String(invoice.sequenceId).padStart(5, '0') : invoice.invoiceid}.pdf`
             const file = new File([blob], fileName, { type: 'application/pdf' })
 
             if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -336,7 +336,7 @@ export function InvoicesHistory() {
 
             setPDFPreviewSource({
                 url,
-                title: `${versionsTarget?.invoiceid || t('invoices.invoice', { defaultValue: 'Invoice' })} · ${t('invoices.version', { defaultValue: 'Version' })} ${version.versionNumber}`,
+                title: `${versionsTarget?.invoiceid || t(versionsTarget?.origin === 'direct_transaction' ? 'directTransactions.voucher.documentLabel' : 'invoices.invoice')} · ${t('invoices.version', { defaultValue: 'Version' })} ${version.versionNumber}`,
             })
             setVersionsTarget(null)
             setLocation('/pdf-preview')
@@ -450,7 +450,7 @@ export function InvoicesHistory() {
                                             </TableCell>
                                             <TableCell className="text-center">
                                                 <span className="rounded-lg bg-secondary/50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-secondary-foreground">
-                                                    {formatOriginLabel(invoice.origin)}
+                                                    {invoice.origin === 'direct_transaction' ? t('directTransactions.title') : formatOriginLabel(invoice.origin)}
                                                 </span>
                                             </TableCell>
                                             <TableCell className="text-right font-black tabular-nums">
@@ -542,7 +542,7 @@ export function InvoicesHistory() {
                             {t('invoices.versionsDescription', { defaultValue: 'Immutable PDF snapshots, sorted from latest to oldest.' })}
                             {versionsTarget && (
                                 <span className="mt-1 block font-mono text-[11px]">
-                                    {formatOriginLabel(versionsTarget.origin)} · {versionsTarget.sourceId || versionsTarget.orderId || versionsTarget.id}
+                                    {versionsTarget.origin === 'direct_transaction' ? t('directTransactions.title') : formatOriginLabel(versionsTarget.origin)} · {versionsTarget.sourceId || versionsTarget.orderId || versionsTarget.id}
                                 </span>
                             )}
                         </DialogDescription>

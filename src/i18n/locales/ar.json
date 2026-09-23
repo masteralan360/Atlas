@@ -5675,6 +5675,10 @@
     "printFailed": "تعذّر إعداد السند. يرجى المحاولة مرة أخرى.",
     "printWaitForSync": "اتصل بالإنترنت وانتظر مزامنة المعاملة قبل طباعة السند المرقم.",
     "voucher": {
+      "saveSuccess": "تم حفظ السند",
+      "saveSuccessDesc": "حُفظ ملف السند PDF في سجل المستندات.",
+      "saveFailed": "تعذّر حفظ ملف السند PDF. يرجى المحاولة مرة أخرى.",
+      "documentLabel": "السند",
       "receiptTitle": "سند قبض",
       "paymentTitle": "سند صرف",
       "reversalTitle": "سند عكس",

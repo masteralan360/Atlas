@@ -282,6 +282,11 @@ The Payments group also checks Local direct-transaction voucher assignment,
 partial reversal history and remaining amount, legacy ID fallback, A4 table
 chunking, and signature lines. Mocked Cloud / Hybrid checks verify the insert
 return value, workspace-scoped chain read, pending offline state, and read failure.
+The Print & Save check verifies that the edited A4 PDF and voucher identity are
+passed to the standard document snapshot and immutable PDF-version persistence
+flow, including validation and failure propagation. A separate Cloud / Hybrid
+contract check verifies the workspace-scoped invoice parent request, PDF upload,
+version RPC response, and cleanup when version creation fails.
 The SQLite adapter check verifies atomic local counter allocation and rollback
 when the payment row cannot be persisted.
 Cloud / Hybrid numbering depends on the database

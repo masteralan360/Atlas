@@ -455,7 +455,7 @@ export function Dashboard() {
                                                 #{invoice.invoiceid.slice(-4)}
                                             </div>
                                             <div>
-                                                <p className="font-black text-sm uppercase tracking-tight">{t('common.invoice') || 'Invoice'}</p>
+                                                <p className="font-black text-sm uppercase tracking-tight">{t(invoice.origin === 'direct_transaction' ? 'directTransactions.voucher.documentLabel' : 'common.invoice')}</p>
                                                 <p className="text-xs font-bold text-muted-foreground/60">
                                                     {formatDate(invoice.createdAt)}
                                                 </p>
@@ -467,7 +467,7 @@ export function Dashboard() {
                                                 {formatCurrency(invoice.totalAmount, invoice.settlementCurrency || 'usd', features.iqd_display_preference)}
                                             </p>
                                             <p className="text-[10px] font-bold uppercase text-muted-foreground/60 tracking-wider">
-                                                {formatOriginLabel(invoice.origin)}
+                                                {invoice.origin === 'direct_transaction' ? t('directTransactions.title') : formatOriginLabel(invoice.origin)}
                                             </p>
                                         </div>
                                     </div>

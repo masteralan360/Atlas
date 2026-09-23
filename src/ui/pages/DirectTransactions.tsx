@@ -50,6 +50,7 @@ import { formatDirectTransactionVoucherNumber } from '@/lib/directTransactionVou
 import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { generateTemplatePdf } from '@/services/pdfGenerator'
 import { printPdfBlob } from '@/services/pdfPrintService'
+import { saveDirectTransactionVoucherPdf } from '@/services/directTransactionVoucherSave'
 import { useWorkspace } from '@/workspace'
 
 type DirectionFilter = 'all' | 'incoming' | 'outgoing'
@@ -490,11 +491,29 @@ export function DirectTransactions() {
                 originId={voucherData.transaction.id}
                 showSaveButton={false}
                 allowA4Document
+                templatePrimaryActionLabel={t('print.printAndSave')}
                 templatePreview={voucherPreview}
                 pdfBuilder={async ({ effectiveId, printLangOverride }) => voucherPreview.buildPdf(
                     voucherPreview.createElement({}, effectiveId, printLangOverride), printLangOverride
                 )}
                 onPreviewPrint={blob => printPdfBlob(blob, { title: formatDirectTransactionVoucherNumber(voucherData.transaction) })}
+                onPreviewSave={async blob => {
+                    try {
+                        return await saveDirectTransactionVoucherPdf(voucherData.transaction.workspaceId, voucherData.transaction, blob, {
+                            id: user?.id,
+                            name: user?.name
+                        })
+                    } catch (error) {
+                        console.error('[DirectTransactions] Failed to save voucher:', error)
+                        toast({
+                            title: t('common.error'),
+                            description: t('directTransactions.voucher.saveFailed'),
+                            variant: 'destructive'
+                        })
+                        throw error
+                    }
+                }}
+                savedDocumentKind="voucher"
             /> : null}
         </div>
     )

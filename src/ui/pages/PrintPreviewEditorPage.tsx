@@ -1100,7 +1100,11 @@ export function PrintPreviewEditorPage() {
                 const langOverride = tempPrintLang !== 'auto' ? tempPrintLang : undefined
                 const blob = await source.generatePdfBlob(editableData, langOverride)
                 const invoiceId = await source.onSave?.(blob)
-                setPendingPDFPreview({ url: URL.createObjectURL(blob), title: invoiceId ? `Invoice ${invoiceId}` : title })
+                setPendingPDFPreview({
+                    url: URL.createObjectURL(blob),
+                    title: source.savedDocumentKind === 'voucher' ? invoiceId || title : invoiceId ? `Invoice ${invoiceId}` : title,
+                    kind: source.savedDocumentKind
+                })
                 return
             } else {
                 await source.onSave?.(new Blob())
@@ -1155,7 +1159,7 @@ export function PrintPreviewEditorPage() {
         }
     }, [source, templatePreview, fieldValues, initialTemplateLayout?.label, templateAnnotations, templateComponentPositions, templateHiddenFields, templateFieldOrders, templateFieldLabelOverrides, templateFieldValueOverrides, templateFieldDisplayModes, templateBackground, templateTexts, templateImages, templateShapes, templatePageHeight, templatePageWidth])
 
-    const saveTemplatePreview = useCallback(async (layout?: CustomTemplateLayout, label?: string) => {
+    const saveTemplatePreview = useCallback(async (layout?: CustomTemplateLayout, label?: string, action: 'primary' | 'print' = 'primary') => {
         if (!source || !templatePreview || !fieldValues || isSaving || !isTemplatePrintReady) return
         beginProgressToast(title || t('print.progressTitle', { defaultValue: 'Saving & Printing' }))
         let shouldCloseAfterAction = true
@@ -1193,7 +1197,7 @@ export function PrintPreviewEditorPage() {
                         fieldValues
                     )
 
-                if (source.onPrint) {
+                if (source.onPrint && (action === 'print' || !source.onSave)) {
                     await source.onPrint(blob)
                     shouldCloseAfterAction = false
                     return
@@ -1208,7 +1212,11 @@ export function PrintPreviewEditorPage() {
                 }
 
                 const invoiceId = await source.onSave(blob)
-                setPendingPDFPreview({ url: URL.createObjectURL(blob), title: invoiceId ? `Invoice ${invoiceId}` : title })
+                setPendingPDFPreview({
+                    url: URL.createObjectURL(blob),
+                    title: source.savedDocumentKind === 'voucher' ? invoiceId || title : invoiceId ? `Invoice ${invoiceId}` : title,
+                    kind: source.savedDocumentKind
+                })
                 setIsSaving(false)
                 setIsTemplateLabelDialogOpen(false)
                 setPendingTemplateLayout(null)
@@ -1824,6 +1832,19 @@ export function PrintPreviewEditorPage() {
                                     {editPanelOpen ? (t('common.close') || 'Close') : (t('common.fields') || 'Editable Fields')}
                                 </span>
                             </button>
+                        )}
+                        {hasTemplatePrimaryAction && (
+                            source.onSave && source.onPrint ? (
+                                <button
+                                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs font-medium hover:bg-accent disabled:opacity-50"
+                                    onClick={() => void saveTemplatePreview(undefined, undefined, 'print')}
+                                    disabled={isSaving || !isTemplatePrintReady}
+                                    aria-label={t('common.print')}
+                                >
+                                    <Printer className="h-3.5 w-3.5" />
+                                    <span>{t('common.print')}</span>
+                                </button>
+                            ) : null
                         )}
                         {hasTemplatePrimaryAction && (
                             <button

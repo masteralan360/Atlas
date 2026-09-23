@@ -7,8 +7,6 @@ Transaction Reconciliation & Integrity Audit, Expandable, Plain English Explanat
 Price books selector order form and quick order
 ##
 
-Direct Transactions Print
-
 Retry Sync Test The wind
 
 Jumla-Khaleej App
@@ -28,6 +26,5 @@ Fix Destructive Mutation queues like sales order and compare them with non-destr
 Purchase Order Return
 
 My Orders with unqiue tracked number and search by my phone number
-Restrict Phone number in khaleej cosmetic
 Allow Shipped to be cancelled
 Make Maintenence Mode servier-side

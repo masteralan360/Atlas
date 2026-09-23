@@ -490,6 +490,7 @@ export function formatOriginLabel(origin?: string | null, sourceChannel?: string
     if (normalized === 'upload' || normalized === 'uploads') return 'Upload'
     if (normalized === 'exchange') return 'Exchange'
     if (normalized === 'post_service' || normalized === 'post-service' || normalized === 'post service') return 'Post Service'
+    if (normalized === 'direct_transaction') return 'Direct Transaction'
     return origin
 }
 
