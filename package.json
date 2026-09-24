@@ -1,7 +1,7 @@
 {
   "name": "atlas",
   "private": true,
-  "version": "0.11.11",
+  "version": "0.11.12",
   "main": "electron/main.cjs",
   "type": "module",
   "repository": {
@@ -35,6 +35,7 @@
     "dev": "vite --host",
     "dev:testing": "node scripts/dev-testing/dev.mjs",
     "test:sale-orders": "node scripts/dev-testing/cli.mjs",
+    "test:sale-orders:live": "node scripts/dev-testing/cli.mjs --suite sale-orders --environment hosted-supabase",
     "test:pos": "node scripts/dev-testing/cli.mjs --suite pos",
     "test:post-service": "node scripts/dev-testing/cli.mjs --suite post-service",
     "build": "node scripts/build.mjs",
@@ -163,5 +164,5 @@
     "workbox-window": "^7.1.0",
     "wrangler": "^4.72.0"
   },
-  "min_version": "0.11.11"
+  "min_version": "0.11.12"
 }
