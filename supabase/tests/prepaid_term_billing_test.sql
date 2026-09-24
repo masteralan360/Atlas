@@ -326,5 +326,80 @@ SELECT throws_ok(
   'prepaid activation rejects an unknown allowance mode'
 );
 
+UPDATE public.workspace_usage
+SET data_transfer_bytes = 1000000000
+WHERE workspace_id = '95000000-0000-0000-0000-000000000002';
+
+SELECT throws_ok(
+  format(
+    'SELECT public.admin_activate_workspace_prepaid_term_v3(%L::uuid, %L, %L, %s, %L, %L, %L, false, NULL::uuid, %L)',
+    '95000000-0000-0000-0000-000000000002',
+    '10000', '16', 5, '40000', current_date::text, 'term_pool',
+    'Prepaid term test administrator'
+  ),
+  '23514',
+  'prepaid_term_overlaps_existing_term',
+  'an overlapping change still requires explicit replacement'
+);
+
+SELECT throws_ok(
+  format(
+    'SELECT public.admin_activate_workspace_prepaid_term_v3(%L::uuid, %L, %L, %s, %L, %L, %L, true, %L::uuid, %L)',
+    '95000000-0000-0000-0000-000000000002',
+    '10000', '16', 5, '40000', current_date::text, 'term_pool',
+    '95000000-0000-0000-0000-000000000099',
+    'Prepaid term test administrator'
+  ),
+  '23514',
+  'prepaid_term_replacement_stale',
+  'replacement rejects a stale approved payment ID'
+);
+
+SELECT lives_ok(
+  format(
+    'SELECT public.admin_activate_workspace_prepaid_term_v3(%L::uuid, %L, %L, %s, %L, %L, %L, true, %L::uuid, %L)',
+    '95000000-0000-0000-0000-000000000002',
+    '10000', '16', 5, '40000', current_date::text, 'term_pool',
+    (SELECT prepaid_term_payment_transaction_id
+     FROM billing.workspace_payment_configurations
+     WHERE workspace_id = '95000000-0000-0000-0000-000000000002'),
+    'Prepaid term test administrator'
+  ),
+  'explicit replacement edits the current approved manual term'
+);
+SELECT is(
+  (SELECT count(*) FROM billing.payment_transactions
+   WHERE billing_workspace_id = '95000000-0000-0000-0000-000000000002'
+     AND payment_type = 'prepaid_term'),
+  1::bigint,
+  'replacement keeps a single approved payment transaction'
+);
+SELECT results_eq(
+  $$
+    SELECT transaction_row.amount, transaction_row.monthly_allowance_gb,
+      transaction_row.prepaid_allowance_mode, transaction_row.term_allowance_gb
+    FROM billing.payment_transactions transaction_row
+    JOIN billing.workspace_payment_configurations configuration_row
+      ON configuration_row.prepaid_term_payment_transaction_id = transaction_row.id
+    WHERE configuration_row.workspace_id = '95000000-0000-0000-0000-000000000002'
+  $$,
+  $$VALUES (40000::numeric, 16::numeric, 'term_pool'::text, 80::numeric)$$,
+  'replacement updates the existing payment and its configuration'
+);
+SELECT is(
+  (SELECT count(*) FROM billing.prepaid_term_replacement_audit
+   WHERE billing_workspace_id = '95000000-0000-0000-0000-000000000002'
+     AND old_record->>'prepaid_allowance_mode' = 'monthly_reset'
+     AND new_record->>'prepaid_allowance_mode' = 'term_pool'),
+  1::bigint,
+  'replacement preserves the previous approved values in audit history'
+);
+SELECT is(
+  (SELECT data_transfer_bytes FROM public.workspace_usage
+   WHERE workspace_id = '95000000-0000-0000-0000-000000000002'),
+  1000000000::bigint,
+  'replacement retains usage already consumed'
+);
+
 SELECT * FROM finish();
 ROLLBACK;

@@ -1,5 +1,9 @@
 # Atlas Architecture
 
+## Admin dashboard backend files
+
+All Supabase Edge Functions and database migrations related to the Admin dashboard live in this Atlas repository under `supabase/functions` and `supabase/migrations`, not in `E:\ERP System\Admin`. Make Admin dashboard backend changes here; the Admin repository contains its frontend.
+
 ## Workspace data modes
 
 - **Cloud:** Supabase is the source of truth; Dexie is a local cache and offline changes sync when connectivity returns.

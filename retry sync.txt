@@ -7,6 +7,9 @@ Transaction Reconciliation & Integrity Audit, Expandable, Plain English Explanat
 Price books selector order form and quick order
 ##
 
+Cancel Order NO LOAN
+Simple Loan Final Localize
+
 Retry Sync Test The wind
 
 Jumla-Khaleej App

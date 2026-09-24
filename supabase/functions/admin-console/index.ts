@@ -1,5 +1,6 @@
 import { createAdminClient } from '../_shared/supabase.ts'
 import { corsHeaders, errorResponse, jsonResponse, readJson } from '../_shared/http.ts'
+import { resolveWorkspaceUsageOwnerId } from './workspaceUsagePresence.ts'
 
 type VerifyRequest = {
     action: 'verify'
@@ -135,6 +136,8 @@ type ActivateWorkspacePrepaidTermRequest = {
     prepaidCycles?: number
     amountPaid?: string | number
     termStartedAt?: string
+    replaceExistingTerm?: boolean
+    expectedTransactionId?: string | null
 }
 
 type GetPaygPricingScheduleRequest = {
@@ -469,6 +472,22 @@ async function listUsers(adminClient: ReturnType<typeof createAdminClient>) {
         return errorResponse(workspacesError.message, 500)
     }
 
+    const [usageResult, branchResult] = await Promise.all([
+        adminClient.from('workspace_usage').select('workspace_id, updated_at'),
+        adminClient.from('workspace_branches').select('branch_workspace_id, source_workspace_id')
+    ])
+    const { data: usageRows, error: usageError } = usageResult
+
+    if (usageError) {
+        return errorResponse(usageError.message, 500)
+    }
+
+    const { data: branchRows, error: branchError } = branchResult
+
+    if (branchError) {
+        return errorResponse(branchError.message, 500)
+    }
+
     let workspaceA2cPhones: Map<string, string>
     try {
         workspaceA2cPhones = await getWorkspaceA2cPhones(adminClient)
@@ -487,6 +506,12 @@ async function listUsers(adminClient: ReturnType<typeof createAdminClient>) {
         workspaceNamesById.set(String(workspace.id), String(workspace.name))
     }
 
+    const usageUpdatedAtByWorkspaceId = new Map(
+        (usageRows ?? []).map((row) => [String(row.workspace_id), String(row.updated_at)])
+    )
+    const sourceByBranchId = new Map(
+        (branchRows ?? []).map((row) => [String(row.branch_workspace_id), String(row.source_workspace_id)])
+    )
     const rows = (authData.users ?? []).map((authUser) => {
         const profile = profilesById.get(authUser.id)
         const workspaceId = profile?.workspace_id ?? null
@@ -499,7 +524,10 @@ async function listUsers(adminClient: ReturnType<typeof createAdminClient>) {
             workspace_a2c_phone: workspaceId ? (workspaceA2cPhones.get(workspaceId) ?? null) : null,
             created_at: authUser.created_at,
             email: authUser.email ?? null,
-            phone: authUser.user_metadata?.phone ?? null
+            phone: authUser.user_metadata?.phone ?? null,
+            last_seen_at: workspaceId
+                ? (usageUpdatedAtByWorkspaceId.get(resolveWorkspaceUsageOwnerId(workspaceId, sourceByBranchId)) ?? null)
+                : null
         }
     })
 
@@ -1338,7 +1366,16 @@ async function activateWorkspacePrepaidTerm(
         return errorResponse('A valid prepaid term start date is required')
     }
 
-    const { data, error } = await adminClient.rpc('admin_activate_workspace_prepaid_term_v2', {
+    if (body.replaceExistingTerm !== undefined && typeof body.replaceExistingTerm !== 'boolean') {
+        return errorResponse('Replace existing term must be true or false')
+    }
+    const replaceExistingTerm = body.replaceExistingTerm === true
+    const expectedTransactionId = body.expectedTransactionId?.trim() || null
+    if (replaceExistingTerm && (!expectedTransactionId || !UUID_PATTERN.test(expectedTransactionId))) {
+        return errorResponse('The current approved term is required for replacement')
+    }
+
+    const { data, error } = await adminClient.rpc('admin_activate_workspace_prepaid_term_v3', {
         p_workspace_id: workspaceId,
         p_monthly_list_price: monthlyListPrice.value,
         p_monthly_allowance_gb: monthlyAllowanceGb.value,
@@ -1346,6 +1383,8 @@ async function activateWorkspacePrepaidTerm(
         p_amount_paid: amountPaid.value,
         p_term_started_at: termStartedAt,
         p_prepaid_allowance_mode: prepaidAllowanceMode,
+        p_replace_existing_term: replaceExistingTerm,
+        p_expected_transaction_id: expectedTransactionId,
         p_actor: 'admin-console-passkey'
     })
 
