@@ -1501,7 +1501,8 @@ export function Sales() {
                     quantityDelta: plan.quantity,
                     timestamp: input.timestamp,
                     syncSource: input.syncSource === 'remote' ? 'remote' : undefined,
-                    skipRemoteSync: input.syncSource === 'remote'
+                    skipRemoteSync: input.syncSource === 'remote',
+                    skipReorderCheck: input.syncSource === 'local'
                 })
 
                 if (plan.restoredAllocations.length > 0) {
@@ -1548,7 +1549,8 @@ export function Sales() {
                         quantityDelta: -plan.quantity,
                         timestamp: input.timestamp,
                         syncSource: input.syncSource === 'remote' ? 'remote' : undefined,
-                        skipRemoteSync: input.syncSource === 'remote'
+                        skipRemoteSync: input.syncSource === 'remote',
+                        skipReorderCheck: input.syncSource === 'local'
                     })
                 } catch (rollbackError) {
                     console.error('[Sales] Failed to rollback local return inventory:', rollbackError)
@@ -1898,7 +1900,7 @@ export function Sales() {
                     })
                 }
 
-                })
+                }, { reorderProductIds: (saleToReturn.items || []).map((item) => item.product_id) })
                 if (nextSelectedSale) setSelectedSale(nextSelectedSale)
                 if (tutorialSaleId === saleToReturn.id) {
                     demoTutorial.completeSaleReturned()

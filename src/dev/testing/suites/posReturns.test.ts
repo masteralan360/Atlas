@@ -53,7 +53,7 @@ describe('POS return records and refund audit entries used by Sales', () => {
         returns = await import('@/local-db/posSaleReturns'); accounts = await import('@/local-db/paymentAccounts')
     }, 30_000)
     beforeEach(async () => { await db.delete(); await db.open(); writeWorkspaceModeSnapshot({ workspaceId: POS_WORKSPACE, dataMode: 'local' }) })
-    afterEach(() => clearWorkspaceModeSnapshot(POS_WORKSPACE))
+    afterEach(() => { vi.restoreAllMocks(); clearWorkspaceModeSnapshot(POS_WORKSPACE) })
     afterAll(async () => { await db.delete() })
 
     it('partial then full refunds retain the original payment and exact linked counter-entries', async () => {
@@ -123,17 +123,20 @@ describe('POS return records and refund audit entries used by Sales', () => {
     it('Local return scope rolls stock, sale header and refund entries back together on failure', async () => {
         const { input, refund } = await arrange()
         const { adjustInventoryQuantity } = await import('@/local-db/inventory')
+        const reorderRules = await import('@/local-db/reorderTransferRules')
+        const evaluate = vi.spyOn(reorderRules, 'evaluateReorderTransferRulesForProduct')
         await expect(returns.commitLocalSaleReturn(POS_WORKSPACE, async () => {
             await adjustInventoryQuantity({ workspaceId: POS_WORKSPACE, productId: POS_PRODUCT, storageId: POS_STORAGE,
                 quantityDelta: 2, timestamp: POS_TIME, skipRemoteSync: true, skipReorderCheck: true })
             await returns.persistSaleReturnLedger(refund(200, 2))
             await db.sales.update(input.payload.id, { totalAmount: 0, returnedAmount: 200, returnStatus: 'full' })
             throw new Error('Injected return failure')
-        })).rejects.toThrow('Injected return failure')
+        }, { reorderProductIds: [POS_PRODUCT] })).rejects.toThrow('Injected return failure')
         expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 18 })
         expect(await db.sales.get(input.payload.id)).toMatchObject({ totalAmount: 200, returnedAmount: 0 })
         expect(await db.sale_returns.count()).toBe(0)
         await assertRefundLedger(input.payload.id, [200], 200)
+        expect(evaluate).not.toHaveBeenCalled()
     })
 
     it('Local return scope commits stock, sale header and refund ledger together', async () => {
@@ -147,6 +150,48 @@ describe('POS return records and refund audit entries used by Sales', () => {
         })
         expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 20 })
         expect(await db.sales.get(input.payload.id)).toMatchObject({ totalAmount: 0, returnedAmount: 200 })
+        await assertRefundLedger(input.payload.id, [200, -200], 0)
+    })
+
+    it('Local return evaluates reorder rules only after stock, sale and refund commit', async () => {
+        const { input, refund } = await arrange()
+        const { adjustInventoryQuantity } = await import('@/local-db/inventory')
+        const reorderRules = await import('@/local-db/reorderTransferRules')
+        const full = refund(200, 2)
+        let sawCommittedSale = false
+        let sawRefundPayment = false
+        const evaluate = vi.spyOn(reorderRules, 'evaluateReorderTransferRulesForProduct').mockImplementation(async () => {
+            const sale = await db.sales.get(input.payload.id)
+            const payment = await db.payment_transactions.get(full.returnId)
+            sawCommittedSale = sale?.totalAmount === 0 && sale.returnedAmount === 200
+            sawRefundPayment = payment?.amount === -200
+            await new Promise((resolve) => setTimeout(resolve, 25))
+            return 0
+        })
+        await returns.commitLocalSaleReturn(POS_WORKSPACE, async () => {
+            await adjustInventoryQuantity({ workspaceId: POS_WORKSPACE, productId: POS_PRODUCT, storageId: POS_STORAGE,
+                quantityDelta: 2, timestamp: POS_TIME, skipRemoteSync: true, skipReorderCheck: true })
+            await returns.persistSaleReturnLedger(full)
+            await db.sales.update(input.payload.id, { totalAmount: 0, returnedAmount: 200, returnStatus: 'full' })
+        }, { reorderProductIds: [POS_PRODUCT, POS_PRODUCT] })
+        expect(evaluate).toHaveBeenCalledOnce()
+        expect(sawCommittedSale).toBe(true)
+        expect(sawRefundPayment).toBe(true)
+        expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 20 })
+        expect(await db.sales.get(input.payload.id)).toMatchObject({ totalAmount: 0, returnedAmount: 200 })
+        await assertRefundLedger(input.payload.id, [200, -200], 0)
+    })
+
+    it('a post-commit reorder failure does not report a completed return as failed', async () => {
+        const { input, refund } = await arrange()
+        const reorderRules = await import('@/local-db/reorderTransferRules')
+        vi.spyOn(reorderRules, 'evaluateReorderTransferRulesForProduct').mockRejectedValueOnce(new Error('Rule unavailable'))
+        const report = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        await expect(returns.commitLocalSaleReturn(POS_WORKSPACE, async () => {
+            await returns.persistSaleReturnLedger(refund(200, 2))
+            await db.sales.update(input.payload.id, { totalAmount: 0, returnedAmount: 200, returnStatus: 'full' })
+        }, { reorderProductIds: [POS_PRODUCT] })).resolves.toBeUndefined()
+        expect(report).toHaveBeenCalledWith('[Sales] Failed to evaluate reorder rules after sale return:', expect.any(Error))
         await assertRefundLedger(input.payload.id, [200, -200], 0)
     })
 })

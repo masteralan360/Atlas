@@ -10,6 +10,10 @@ import {
     type PartnerAccountStatementPeriod
 } from '@/lib/partnerAccountStatement'
 import {
+    buildPartnerAccountStatementDisplayEntries,
+    type PartnerAccountStatementDisplayEntry
+} from '@/lib/partnerAccountStatementDisplay'
+import {
     getPartnerAccountStatementEntryDescription,
     getPartnerAccountStatementEntryDetail
 } from '@/lib/partnerAccountStatementPresentation'
@@ -119,7 +123,7 @@ function balanceLabel(balance: number, t: (key: string, options?: Record<string,
 const PARTNER_STATEMENT_TABLE_ROW_HEIGHT_MM = 12
 const PARTNER_STATEMENT_MAX_ROWS_PER_TABLE = 12
 
-type LedgerEntry = PartnerAccountStatementCurrencyLedger['entries'][number]
+type LedgerEntry = PartnerAccountStatementDisplayEntry
 
 function chunkLedgerEntries(entries: LedgerEntry[]) {
     if (entries.length === 0) return [[]] as LedgerEntry[][]
@@ -269,9 +273,9 @@ function LedgerTableChunk({
                                     case 'totalProductCommission':
                                         return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{entry.totalProductCommission == null ? '—' : displayAmount(entry.totalProductCommission)}</td>
                                     case 'debit':
-                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top font-semibold whitespace-nowrap">{entry.delta > 0 ? displayAmount(entry.delta) : '—'}</td>
+                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top font-semibold whitespace-nowrap">{entry.debit > 0 ? displayAmount(entry.debit) : '—'}</td>
                                     case 'credit':
-                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top font-semibold whitespace-nowrap">{entry.delta < 0 ? displayAmount(entry.delta) : '—'}</td>
+                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top font-semibold whitespace-nowrap">{entry.credit > 0 ? displayAmount(entry.credit) : '—'}</td>
                                     case 'balance':
                                         return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top font-bold whitespace-nowrap" style={{ color: getPartnerAccountStatementBalanceColor(entry.runningBalance, balanceColors) }}>{displayAmount(entry.runningBalance)}</td>
                                 }
@@ -318,7 +322,9 @@ function LedgerTable({
     iqdPreference: IQDDisplayPreference
 }) {
     const displayAmount = (amount: number) => formatCurrency(Math.abs(amount), ledger.currency, iqdPreference)
-    const entryChunks = chunkLedgerEntries(ledger.entries)
+    const entryChunks = chunkLedgerEntries(buildPartnerAccountStatementDisplayEntries(ledger, {
+        combineOrderPayments: columns.includes('debit') && columns.includes('credit')
+    }))
 
     return (
         <section className="mt-5" data-partner-account-statement-section>

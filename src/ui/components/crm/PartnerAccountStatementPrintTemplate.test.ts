@@ -742,6 +742,63 @@ describe('buildPartnerAccountStatementLedger', () => {
         })
     })
 
+    it('prints each same-day sale and purchase payment in the order row debit and credit columns', () => {
+        const data = statementData()
+        data.period = { type: 'allTime' }
+        data.statementOrders = [
+            {
+                id: 'same-day-sale', orderNumber: 'SO-SAME', customerId: 'partner-1', total: 1000,
+                currency: 'usd', status: 'completed', createdAt: '2026-01-04T10:00:00',
+                isDeleted: false, linkedLoanId: null
+            },
+            {
+                id: 'same-day-purchase', orderNumber: 'PO-SAME', supplierId: 'partner-1', total: 500,
+                currency: 'usd', status: 'received', createdAt: '2026-01-05T10:00:00',
+                isDeleted: false, linkedLoanId: null
+            }
+        ] as any
+        data.settlementTransactions = [
+            {
+                id: 'sale-receipt', sourceType: 'sales_order', sourceRecordId: 'same-day-sale',
+                referenceLabel: 'SALE-RECEIPT', direction: 'incoming', amount: 600, currency: 'usd',
+                paidAt: '2026-01-04T11:00:00', createdAt: '2026-01-04T11:00:00', isDeleted: false
+            },
+            {
+                id: 'purchase-payment', sourceType: 'purchase_order', sourceRecordId: 'same-day-purchase',
+                referenceLabel: 'PURCHASE-PAYMENT', direction: 'outgoing', amount: 200, currency: 'usd',
+                paidAt: '2026-01-05T11:00:00', createdAt: '2026-01-05T11:00:00', isDeleted: false
+            }
+        ] as any
+
+        const html = renderToStaticMarkup(createElement(PartnerAccountStatementPrintTemplate, {
+            printLang: 'en', data: data as any
+        }))
+        const rows = [...html.matchAll(/<tr\b[^>]*>[\s\S]*?<\/tr>/g)].map((match) => match[0])
+        const saleRow = rows.find((row) => row.includes('SO-SAME'))
+        const purchaseRow = rows.find((row) => row.includes('PO-SAME'))
+        expect(saleRow).toContain('1000 usd')
+        expect(saleRow).toContain('600 usd')
+        expect(saleRow).toContain('400 usd')
+        expect(purchaseRow).toContain('200 usd')
+        expect(purchaseRow).toContain('500 usd')
+        expect(purchaseRow).toContain('100 usd')
+        expect(html).not.toContain('SALE-RECEIPT')
+        expect(html).not.toContain('PURCHASE-PAYMENT')
+        expect(buildPartnerAccountStatementLedger(data)[0]).toMatchObject({
+            debitTotal: 1200, creditTotal: 1100, closingBalance: 100
+        })
+
+        const withoutCreditColumn = renderToStaticMarkup(createElement(PartnerAccountStatementPrintTemplate, {
+            printLang: 'en',
+            data: {
+                ...data,
+                tableColumns: ['date', 'reference', 'type', 'description', 'debit', 'balance']
+            } as any
+        }))
+        expect(withoutCreditColumn).toContain('SALE-RECEIPT')
+        expect(withoutCreditColumn).toContain('PURCHASE-PAYMENT')
+    })
+
     it('includes every merchant-facing Post Service movement once with the inverse delivery-ledger sign', () => {
         const data = statementData()
         data.statementOrders = []

@@ -40,6 +40,7 @@ import {
     type PartnerAccountStatementEntryKind,
     type PartnerAccountStatementPeriod
 } from '@/lib/partnerAccountStatement'
+import { buildPartnerAccountStatementDisplayEntries } from '@/lib/partnerAccountStatementDisplay'
 import { PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES } from '@/lib/partnerAccountStatementLiveData'
 import {
     getPartnerAccountStatementEntryDescription,
@@ -188,6 +189,11 @@ function LedgerCard({
     onNavigate: (path: string) => void
 }) {
     const display = (amount: number) => formatCurrency(Math.abs(amount), ledger.currency, iqdPreference)
+    const canShowBothAmounts = columns.includes('debit') && columns.includes('credit')
+    const entries = useMemo(
+        () => buildPartnerAccountStatementDisplayEntries(ledger, { combineOrderPayments: canShowBothAmounts }),
+        [canShowBothAmounts, ledger]
+    )
     const summaryLabelColumn = getPartnerAccountStatementSummaryLabelColumn(columns)
     const summaryValue = (columnId: PartnerAccountStatementColumnId, kind: 'opening' | 'total') => {
         if (columnId === 'debit') return kind === 'opening'
@@ -281,7 +287,7 @@ function LedgerCard({
                                     })}
                                 </TableRow>
                             ) : null}
-                            {ledger.entries.map((entry) => {
+                            {entries.map((entry) => {
                                 const sourcePath = entrySourcePath(entry)
                                 const description = getPartnerAccountStatementEntryDescription(entry, t)
                                 const detail = getPartnerAccountStatementEntryDetail(entry, { t, i18n, language })
@@ -306,9 +312,9 @@ function LedgerCard({
                                                 case 'totalProductCommission':
                                                     return <TableCell key={columnId} className="text-right font-medium tabular-nums whitespace-nowrap">{entry.totalProductCommission == null ? '—' : display(entry.totalProductCommission)}</TableCell>
                                                 case 'debit':
-                                                    return <TableCell key={columnId} className="text-right font-medium tabular-nums">{entry.delta > 0 ? display(entry.delta) : '—'}</TableCell>
+                                                    return <TableCell key={columnId} className="text-right font-medium tabular-nums">{entry.debit > 0 ? display(entry.debit) : '—'}</TableCell>
                                                 case 'credit':
-                                                    return <TableCell key={columnId} className="text-right font-medium tabular-nums">{entry.delta < 0 ? display(entry.delta) : '—'}</TableCell>
+                                                    return <TableCell key={columnId} className="text-right font-medium tabular-nums">{entry.credit > 0 ? display(entry.credit) : '—'}</TableCell>
                                                 case 'balance':
                                                     return <TableCell key={columnId} className="text-right font-bold tabular-nums" style={{ color: getPartnerAccountStatementBalanceColor(entry.runningBalance, balanceColors) }}>{display(entry.runningBalance)}</TableCell>
                                             }

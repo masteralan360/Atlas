@@ -19,6 +19,15 @@
         ]
       },
       {
+        "id": "account-statement",
+        "titleKey": "devTesting.groups.accountStatement",
+        "layer": "calculation",
+        "files": [
+          "src/lib/partnerAccountStatementDisplay.test.ts",
+          "src/ui/components/crm/PartnerAccountStatementPrintTemplate.test.ts"
+        ]
+      },
+      {
         "id": "lifecycle",
         "titleKey": "devTesting.groups.lifecycle",
         "layer": "business",
@@ -120,6 +129,7 @@
         "titleKey": "devTesting.businessPartnersGroups.accountStatementTemplates",
         "layer": "contract",
         "files": [
+          "src/lib/partnerAccountStatementDisplay.test.ts",
           "src/lib/partnerAccountStatementTemplates.test.ts",
           "src/lib/partnerAccountStatementTemplatePersistence.test.ts",
           "src/ui/components/crm/PartnerAccountStatementPrintTemplate.test.ts"

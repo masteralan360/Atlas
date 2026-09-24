@@ -100,7 +100,9 @@ unmount, reload or device restart; durable reconciliation is a future adapter.
 
 **Local returns:** Sales uses `commitLocalSaleReturn` around its stock restoration,
 return records, refund and financing effects. Selected-sale UI updates occur after
-commit and financing failures propagate to roll back that scope.
+commit and financing failures propagate to roll back that scope. Reorder-rule
+evaluation runs after commit so a delayed rule cannot close the Dexie transaction
+early. A rule failure is logged without reporting the completed return as failed.
 `persistSaleReturnLedger` records returns and POS refunds with stable return IDs,
 negative payments linked to the original receipt, proportional refund amounts,
 over-reversal validation, optional account selection and idempotent replay. Refund
@@ -124,7 +126,7 @@ The registry at `src/dev/testing/suites.json` is the authoritative file allowlis
 | `currency` | Supported direct/inverse/cross pairs, IQD/decimal rounding, missing/invalid rate availability and immutable rate payloads |
 | `inventory` | Batch allocation/costing/FEFO/fraction/duplicate-line regressions, Local stock effects and storage access |
 | `financing` | Simple/standard POS loans in all four currencies, schedule sums, zero checkout receipt and repayment-related ledger rules |
-| `returns-exchanges` | Partial/full refund audit entries, account net effects, replay/over-reversal/math validation, Local return transaction scope, return stock, exchanges and financing cancellation |
+| `returns-exchanges` | Partial/full refund audit entries, account net effects, replay/over-reversal/math validation, Local return transaction scope and post-commit reorder evaluation, return stock, exchanges and financing cancellation |
 | `entry-routing` | Barcode parsing/timing regressions, payment/catalog/capability routing, finite/infinite Activities across immediate methods, existing Quick Order atomic contracts |
 | `remote-contract` | RPC names/payloads, authoritative conversion-policy reads, success and loan aggregates, retry identities, offline rejection, friendly failures, confirmed-commit recovery, refund upserts, Sales sync guards |
 | `failure-recovery` | Invalid/unavailable quantity/price/financing, payment/batch/loan failure rollback, duplicate submission, frozen attempt behavior, SQLite write-set commit/rollback and offline queue regressions |

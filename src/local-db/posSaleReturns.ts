@@ -12,9 +12,29 @@ export function calculateSaleReturnAmount(items: ReadonlyArray<{ converted_unit_
 }
 
 /** Keep Local stock restoration, return records, refunds and loan changes inseparable. */
-export async function commitLocalSaleReturn<T>(workspaceId: string, operation: () => Promise<T>) {
+export async function commitLocalSaleReturn<T>(
+    workspaceId: string,
+    operation: () => Promise<T>,
+    options: { reorderProductIds?: string[] } = {}
+) {
     if (!isLocalWorkspaceMode(workspaceId)) throw new Error(i18n.t('inventory.errors.onlineRequired'))
-    return db.transaction('rw', db.tables, operation)
+    const result = await db.transaction('rw', db.tables, operation)
+    const productIds = Array.from(new Set(options.reorderProductIds?.filter(Boolean) ?? []))
+    if (productIds.length > 0) {
+        try {
+            const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')
+            for (const productId of productIds) {
+                try {
+                    await evaluateReorderTransferRulesForProduct(workspaceId, productId)
+                } catch (error) {
+                    console.error('[Sales] Failed to evaluate reorder rules after sale return:', error)
+                }
+            }
+        } catch (error) {
+            console.error('[Sales] Failed to load reorder rules after sale return:', error)
+        }
+    }
+    return result
 }
 
 /** Sales return records and POS refund audit entries. Inventory and loan returns use their existing adapters. */

@@ -7,6 +7,8 @@ Transaction Reconciliation & Integrity Audit, Expandable, Plain English Explanat
 Price books selector order form and quick order
 ##
 
+Remake Dashboard for desktop and mobile
+
 Cancel Order NO LOAN
 Simple Loan Final Localize
 
