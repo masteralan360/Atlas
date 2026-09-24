@@ -238,6 +238,12 @@ function shouldUseCloudBusinessData(workspaceId?: string | null) {
     return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
 }
 
+async function assertNoPendingFinancedOrderCancellation(workspaceId: string, orderId: string) {
+    if (!shouldUseCloudBusinessData(workspaceId)) return
+    const cancellation = await import('./orderCancellation')
+    await cancellation.assertNoPendingFinancedOrderCancellation(workspaceId, orderId)
+}
+
 function roundAmount(amount: number, _currency: CurrencyCode) {
     return roundOrderValue(amount)
 }
@@ -2708,6 +2714,7 @@ export async function recordOrderPayment(
     if (!order || order.isDeleted || order.workspaceId !== workspaceId) {
         throw new Error('Order not found')
     }
+    await assertNoPendingFinancedOrderCancellation(workspaceId, order.id)
     if (isOrderFinancingMethod(order.paymentMethod) || order.linkedLoanId) {
         throw new Error('financed_order_payments_managed_in_loan_module')
     }
@@ -3202,6 +3209,7 @@ export async function updateSalesOrder(id: string, data: Partial<SalesOrder>, op
     if (!existing || existing.isDeleted) {
         throw new Error('Sales order not found')
     }
+    await assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id)
 
     if (existing.status !== 'draft') {
         throw new Error('Only draft sales orders can be edited')
@@ -3563,6 +3571,16 @@ async function updateSalesOrderStatusOnce(
     // record before making any financial or inventory side effect, because a
     // details view may contain only its permitted lines.
     await assertOrderStorageAccess(existing)
+
+    if (status !== 'cancelled') {
+        await assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id)
+    }
+
+    if (status === 'cancelled' && shouldUseCloudBusinessData(existing.workspaceId)
+        && (isOrderFinancingMethod(existing.paymentMethod) || existing.linkedLoanId)) {
+        const { cancelFinancedOrder } = await import('./orderCancellation')
+        return (await cancelFinancedOrder('sales', existing)).order as SalesOrder
+    }
 
     let workingOrder = existing
     let linkedLoanId = existing.linkedLoanId || null
@@ -4855,6 +4873,7 @@ export async function deleteSalesOrder(id: string) {
     if (!existing || existing.isDeleted) {
         return
     }
+    await assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id)
 
     if (existing.status === 'completed' || existing.status === 'pending') {
         throw new Error('Active sales orders cannot be deleted')
@@ -5003,6 +5022,7 @@ export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrde
     if (!existing || existing.isDeleted) {
         throw new Error('Purchase order not found')
     }
+    await assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id)
 
     if (existing.status !== 'draft') {
         throw new Error('Only draft purchase orders can be edited')
@@ -5123,6 +5143,16 @@ export async function updatePurchaseOrderStatus(id: string, status: PurchaseOrde
     // A status update persists the complete raw document. Do not let a
     // partially redacted details view change hidden order lines or inventory.
     await assertOrderStorageAccess(existing)
+
+    if (status !== 'cancelled') {
+        await assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id)
+    }
+
+    if (status === 'cancelled' && shouldUseCloudBusinessData(existing.workspaceId)
+        && (isOrderFinancingMethod(existing.paymentMethod) || existing.linkedLoanId)) {
+        const { cancelFinancedOrder } = await import('./orderCancellation')
+        return (await cancelFinancedOrder('purchase', existing)).order as PurchaseOrder
+    }
 
     let workingOrder = existing
     let linkedLoanId = existing.linkedLoanId || null
@@ -5337,6 +5367,7 @@ export async function deletePurchaseOrder(id: string) {
     if (!existing || existing.isDeleted) {
         return
     }
+    await assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id)
 
     if (existing.status === 'received' || existing.status === 'completed' || existing.status === 'ordered') {
         throw new Error('Active purchase orders cannot be deleted')

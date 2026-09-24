@@ -4,8 +4,9 @@ import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 import { useAuth } from '@/auth'
 import { Sale } from '@/types'
-import { applySalesOrderReturnQuantities, getActiveTravelBookingPayments, useCategories, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useDeliveryMerchantProfiles, useDeliveryShipments, useRentalContracts, useRentalVehicles, toUISale, toUISaleFromExchangeTransaction, toUISaleFromRealEstateCommissionTransaction, toUISaleFromPaidClinicalAppointment, toUISaleFromActivityTransaction, toUISaleFromDeliveryShipment, toUISaleFromRentalContract, toUISaleFromTravelBookingPayment } from '@/local-db'
+import { applySalesOrderReturnQuantities, useCategories, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useDeliveryMerchantProfiles, useDeliveryShipments, useRentalContracts, useRentalVehicles } from '@/local-db'
 import { formatCurrency, formatDateTime, formatDate, formatTime } from '@/lib/utils'
+import { buildRevenueSourceSales } from '@/lib/revenueSourceSales'
 import { cn } from '@/lib/utils'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
@@ -626,70 +627,18 @@ export function Revenue() {
         () => new Map(workspaceUsers.map((member) => [member.id, member.name || member.email || member.id] as const)),
         [workspaceUsers]
     )
-    const deliveryMerchantNameByProfileId = useMemo(() => {
-        const partnerNameById = new Map(deliveryBusinessPartners.map((partner) => [partner.id, partner.partnerName] as const))
-        return new Map(deliveryMerchantProfiles.map((profile) => [profile.id, partnerNameById.get(profile.businessPartnerId) || null] as const))
-    }, [deliveryBusinessPartners, deliveryMerchantProfiles])
-    const deliveryMerchantBusinessPartnerIdByProfileId = useMemo(
-        () => new Map(deliveryMerchantProfiles.map((profile) => [profile.id, profile.businessPartnerId] as const)),
-        [deliveryMerchantProfiles]
-    )
-    const rentalVehicleById = useMemo(
-        () => new Map(rentalVehicles.map((vehicle) => [vehicle.id, vehicle] as const)),
-        [rentalVehicles]
-    )
     const salesOrders = useMemo(
         () => applySalesOrderReturnQuantities(rawSalesOrders || [], salesOrderReturnItems),
         [rawSalesOrders, salesOrderReturnItems]
     )
 
-    const allSales = useMemo<Sale[]>(() => {
-        const sales = (rawSales || []).map(toUISale)
-        const exchangeSales = (rawExchangeTransactions || [])
-            .filter(tx => !tx.isDeleted && !tx.isReversed && tx.transactionType === 'sell' && tx.profitAmount != null && tx.profitAmount > 0)
-            .map(toUISaleFromExchangeTransaction)
-        const realEstateCommissionSales = (realEstateCommissionTransactions || [])
-            .filter(transaction => transaction.amount > 0)
-            .map(toUISaleFromRealEstateCommissionTransaction)
-        const travelBookingProfitSales = getActiveTravelBookingPayments(travelBookingPayments || [])
-            .map(toUISaleFromTravelBookingPayment)
-        const clinicalSales = (clinicalAppointments || [])
-            .map(appointment => toUISaleFromPaidClinicalAppointment(appointment, clinicalAppointmentTransactions))
-            .filter((sale): sale is NonNullable<typeof sale> => !!sale)
-        const activitySales = activityTransactions
-            .filter((transaction) => transaction.status === 'completed')
-            .map((transaction) => toUISaleFromActivityTransaction(
-                transaction,
-                activityTransactionLines.filter((line) => line.transactionId === transaction.id),
-                transaction.createdBy ? userNameById.get(transaction.createdBy) : undefined
-            ))
-        const deliverySales = deliveryShipments
-            .filter((shipment) => shipment.status === 'delivered' && !!shipment.deliveredAt)
-            .filter((shipment) => (!dateBounds.startDate || shipment.deliveredAt! >= dateBounds.startDate)
-                && (!dateBounds.endDate || shipment.deliveredAt! <= dateBounds.endDate))
-            .map((shipment) => toUISaleFromDeliveryShipment(shipment, {
-                merchantName: deliveryMerchantNameByProfileId.get(shipment.merchantProfileId),
-                merchantBusinessPartnerId: deliveryMerchantBusinessPartnerIdByProfileId.get(shipment.merchantProfileId),
-                serviceName: t('postService.reporting.serviceName', { defaultValue: 'Delivery service' }),
-                serviceCategory: t('postService.reporting.serviceCategory', { defaultValue: 'Delivery service' }),
-                feePayerNote: t('postService.reporting.feePayerNote', {
-                    payer: t(`postService.feePayer.${shipment.feePayer}`, { defaultValue: shipment.feePayer }),
-                    defaultValue: `Fee charged to ${shipment.feePayer}`
-                })
-            }))
-        const rentalSales = rentalContracts
-            .filter((contract) => ['active', 'returned', 'closed'].includes(contract.status))
-            .filter((contract) => {
-                const recognitionDate = contract.actualPickupAt || contract.plannedPickupAt
-                return (!dateBounds.startDate || recognitionDate >= dateBounds.startDate)
-                    && (!dateBounds.endDate || recognitionDate <= dateBounds.endDate)
-            })
-            .map((contract) => toUISaleFromRentalContract(contract, rentalVehicleById.get(contract.vehicleId), {
-                serviceName: t('carRental.reporting.serviceName'),
-                serviceCategory: t('carRental.reporting.serviceCategory'),
-            }))
-        return [...sales, ...exchangeSales, ...realEstateCommissionSales, ...travelBookingProfitSales, ...clinicalSales, ...activitySales, ...deliverySales, ...rentalSales]
-    }, [rawSales, rawExchangeTransactions, realEstateCommissionTransactions, travelBookingPayments, clinicalAppointments, clinicalAppointmentTransactions, activityTransactions, activityTransactionLines, userNameById, dateBounds.endDate, dateBounds.startDate, deliveryMerchantBusinessPartnerIdByProfileId, deliveryMerchantNameByProfileId, deliveryShipments, rentalContracts, rentalVehicleById, t])
+    const allSales = useMemo<Sale[]>(() => buildRevenueSourceSales({
+        sales: rawSales || [], exchangeTransactions: rawExchangeTransactions || [], realEstateCommissionTransactions,
+        travelBookingPayments, clinicalAppointments, clinicalAppointmentTransactions, activityTransactions,
+        activityTransactionLines, deliveryShipments, deliveryMerchantProfiles, rentalContracts, rentalVehicles,
+        partnerNameById: new Map(deliveryBusinessPartners.map((partner) => [partner.id, partner.partnerName] as const)),
+        userNameById, startDate: dateBounds.startDate, endDate: dateBounds.endDate, t,
+    }), [rawSales, rawExchangeTransactions, realEstateCommissionTransactions, travelBookingPayments, clinicalAppointments, clinicalAppointmentTransactions, activityTransactions, activityTransactionLines, deliveryShipments, deliveryMerchantProfiles, rentalContracts, rentalVehicles, deliveryBusinessPartners, userNameById, dateBounds.startDate, dateBounds.endDate, t])
     const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
     const [selectedMetric, setSelectedMetric] = useState<MetricType | null>(null)
     const [isMetricModalOpen, setIsMetricModalOpen] = useState(false)

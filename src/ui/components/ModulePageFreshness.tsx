@@ -80,11 +80,14 @@ function useRegisterModulePageFreshnessLoading(isLoading: boolean) {
 
 export function ModulePageFreshness({
     className,
-    tableNames
+    tableNames,
+    loadingIconOnly = false
 }: {
     className?: string
     /** Limits freshness feedback to the data actually shown by this module. */
     tableNames?: readonly string[]
+    /** Shows only a spinner while the scoped tables are refreshing. */
+    loadingIconOnly?: boolean
 }) {
     const { t, i18n } = useTranslation()
     const { user } = useAuth()
@@ -162,6 +165,18 @@ export function ModulePageFreshness({
 
     const isChecking = hydration?.isLoading === true
     useRegisterModulePageFreshnessLoading(isChecking)
+    if (loadingIconOnly) {
+        return isChecking ? (
+            <span
+                className={cn('inline-flex shrink-0 items-center', className)}
+                role="status"
+                aria-live="polite"
+                aria-label={t('launcher.freshness.checking', { defaultValue: 'Checking for updates…' })}
+            >
+                <Loader2 aria-hidden="true" className="size-4 animate-spin text-current" />
+            </span>
+        ) : null
+    }
     const hasFailed = !isChecking && hydration?.lastResult?.state === 'error'
     const label = isChecking
         ? t('launcher.freshness.checking', { defaultValue: 'Checking for updates…' })

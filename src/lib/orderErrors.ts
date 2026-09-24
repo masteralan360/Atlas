@@ -12,6 +12,14 @@ const ORDER_ERROR_TRANSLATIONS: Record<string, { key: string; fallback: string }
     sales_order_return_not_allowed: {
         key: 'orders.form.errors.salesOrderReturnNotAllowed',
         fallback: 'You do not have permission to return this sales order.'
+    },
+    order_cancellation_pending: {
+        key: 'orders.cancellationPending',
+        fallback: 'Cancellation is pending. Resolve any sync error before changing this order.'
+    },
+    order_cancellation_waiting_for_sync: {
+        key: 'orders.cancellationWaitingForSync',
+        fallback: 'Sync earlier order changes, then try cancelling again.'
     }
 }
 
@@ -25,6 +33,11 @@ export function getLocalizedOrderError(error: unknown, t: TFunction, fallback = 
         .find(([code]) => message === code || message.includes(code))?.[1]
     if (translation) {
         return t(translation.key, { defaultValue: translation.fallback })
+    }
+    if (/order_cancellation_|financed_order_|loan_payment_transaction_missing|deleted_loan_has_active_installments|orders_module_not_available/.test(message)) {
+        return t('orders.cancellationFailed', {
+            defaultValue: 'The order and loan could not be cancelled together. Refresh and try again.'
+        })
     }
     return message || fallback
 }

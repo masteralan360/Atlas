@@ -341,6 +341,9 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
       addCommandParent("loan_commands", "loan_payment_id");
       break;
     }
+    case "order_cancellation_commands":
+      addParent(payload.orderType === "sales" ? "sales_orders" : "purchase_orders", "orderId");
+      break;
     case "sales_orders":
       // A queued commission-mode setting change must reach the workspace before
       // an offline-created order snapshots that setting on the server.
@@ -1013,7 +1016,8 @@ export async function processMutationQueue(
         isRecoverableProductSkuKeyMutation(mutation) ||
         isRecoverablePriceBookMutation(mutation) ||
         isRecoverableCashierShiftTerminalReplayMutation(mutation) ||
-        mutation.entityType === "loan_commands",
+        mutation.entityType === "loan_commands" ||
+        mutation.entityType === "order_cancellation_commands",
     )
     .sortBy("createdAt");
   const mutations = mutationGroups
@@ -1170,6 +1174,48 @@ export async function processMutationQueue(
         reportCompleted();
         continue;
       }
+      if (entityType === "order_cancellation_commands") {
+        const orderType = payload.orderType;
+        const orderId = payload.orderId;
+        if ((orderType !== "sales" && orderType !== "purchase")
+          || orderId !== entityId) {
+          throw new Error("Order cancellation replay command is invalid");
+        }
+        const order = orderType === "sales"
+          ? await db.sales_orders.get(orderId)
+          : await db.purchase_orders.get(orderId);
+        if (!order || order.workspaceId !== workspaceId) {
+          throw new Error("Order cancellation is waiting for its local order");
+        }
+        const prerequisites = await db.offline_mutations
+          .where("workspaceId").equals(workspaceId)
+          .filter((candidate) => candidate.id !== id
+            && candidate.createdAt <= mutation.createdAt
+            && candidate.status !== "synced"
+            && ((candidate.entityType === (orderType === "sales" ? "sales_orders" : "purchase_orders")
+              && candidate.entityId === orderId)
+              || (candidate.entityType === "loan_commands"
+                && candidate.payload.payload
+                && typeof candidate.payload.payload === "object"
+                && (candidate.payload.payload as Record<string, unknown>).loan_id === order.linkedLoanId)))
+          .count();
+        if (prerequisites > 0) {
+          throw new Error("Order cancellation is waiting for earlier order or loan changes to sync");
+        }
+        const { data, error } = await supabase.rpc("cancel_order_with_financing", {
+          p_order_type: orderType,
+          p_order_id: orderId,
+        });
+        if (error) throw error;
+        const { persistFinancedOrderCancellation } = await import("@/local-db/orderCancellation");
+        await persistFinancedOrderCancellation(
+          data, orderType, orderId, workspaceId, order.linkedLoanId,
+        );
+        await db.offline_mutations.update(id, { status: "synced", error: undefined });
+        successCount++;
+        reportCompleted();
+        continue;
+      }
       if (entityType === "delivery_voice_cleanup") {
         const shipmentId = payload.shipmentId ?? payload.shipment_id;
         if (typeof shipmentId !== "string" || !shipmentId || shipmentId !== entityId) {
@@ -1205,6 +1251,19 @@ export async function processMutationQueue(
       const shouldHardDelete =
         operation === "delete" &&
         (entityType === "loans" || payload.hardDelete === true);
+
+      if (entityType === "loans" && operation === "delete") {
+        const loan = await db.loans.get(entityId);
+        const { data: remoteLoan, error: remoteLoanError } = await client
+          .from(remoteTableName)
+          .select("source,order_id")
+          .eq("id", entityId)
+          .maybeSingle();
+        if (remoteLoanError) throw remoteLoanError;
+        if (loan?.source === "order" || remoteLoan?.source === "order") {
+          throw new Error("Order-linked loans must be cancelled with their order transaction");
+        }
+      }
 
       // Prepare only fields Atlas has deliberately classified as remote-safe.
       // Unknown fields are intentionally not removed: a server rejection must

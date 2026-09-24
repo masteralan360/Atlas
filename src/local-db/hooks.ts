@@ -6276,6 +6276,10 @@ export async function reverseLoanPayment(
     if (!loan || loan.isDeleted) {
         throw new Error('Loan not found')
     }
+    if (loan.source === 'order' && loan.orderId) {
+        const { assertNoPendingFinancedOrderCancellation } = await import('./orderCancellation')
+        await assertNoPendingFinancedOrderCancellation(workspaceId, loan.orderId)
+    }
 
     const loanPaymentId = resolveLoanPaymentIdFromTransaction(transaction)
     if (!loanPaymentId) {
@@ -6468,6 +6472,10 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
     const loan = await db.loans.get(input.loanId)
     if (!loan || loan.isDeleted) {
         throw new Error('Loan not found')
+    }
+    if (loan.source === 'order' && loan.orderId) {
+        const { assertNoPendingFinancedOrderCancellation } = await import('./orderCancellation')
+        await assertNoPendingFinancedOrderCancellation(workspaceId, loan.orderId)
     }
 
     const installmentRows = await db.loan_installments

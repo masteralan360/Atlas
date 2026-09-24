@@ -42,6 +42,7 @@
         "layer": "contract",
         "files": [
           "src/local-db/quickOrderAtomic.test.ts",
+          "src/local-db/orderCancellation.test.ts",
           "src/local-db/orders.test.ts",
           "src/local-db/partnerSummaryRefresh.test.ts",
           "src/local-db/partnerSummaryJobs.test.ts",

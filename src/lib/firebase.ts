@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app'
 import { getMessaging, getToken, onMessage, isSupported, Messaging } from 'firebase/messaging'
+import { isDesktop } from '@/lib/platform'
 
 const firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -14,6 +15,8 @@ let messaging: Messaging | null = null
 const FIREBASE_MESSAGING_SCOPE = '/firebase-cloud-messaging-push-scope/'
 
 export const initMessaging = async (): Promise<Messaging | null> => {
+    // Desktop Tauri does not use the browser's Firebase push service worker.
+    if (isDesktop()) return null
     if (messaging) return messaging
 
     // Only initialize if we have the minimal config required

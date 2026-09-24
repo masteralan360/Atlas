@@ -2874,6 +2874,7 @@ export interface OfflineMutation {
     | 'loan_installments'
     | 'loan_payments'
     | 'loan_commands'
+    | 'order_cancellation_commands'
     | 'installment_sales'
     | 'installment_sale_installments'
     | 'installment_sale_payments'

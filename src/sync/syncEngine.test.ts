@@ -28,9 +28,14 @@ const dbMock = vi.hoisted(() => {
         update: vi.fn(async () => 1)
     }
     const salesOrders = {
-        update: vi.fn(async () => 1)
+        update: vi.fn(async () => 1),
+        get: vi.fn(async (): Promise<Record<string, any> | undefined> => undefined)
     }
     const purchaseOrders = {
+        update: vi.fn(async () => 1)
+    }
+    const loans = {
+        get: vi.fn(async (): Promise<Record<string, any> | undefined> => undefined),
         update: vi.fn(async () => 1)
     }
     const salesOrderAgentAssignments = {
@@ -44,7 +49,9 @@ const dbMock = vi.hoisted(() => {
     const offlineMutations = {
         where: vi.fn((indexName: string) => ({
             equals: vi.fn((value: unknown) => {
-                const matchingRows = () => rows.filter((row) => row.status === value)
+                const matchingRows = () => rows.filter((row) => indexName === 'workspaceId'
+                    ? row.workspaceId === value
+                    : row.status === value)
                 const sortRows = async (sourceRows: Array<Record<string, any>>, sortField: string) => {
                     if (indexName !== 'status' || sortField !== 'createdAt') {
                         throw new Error(`Unsupported query: ${indexName}/${sortField}`)
@@ -81,6 +88,7 @@ const dbMock = vi.hoisted(() => {
         products,
         salesOrders,
         purchaseOrders,
+        loans,
         salesOrderAgentAssignments,
         inventoryTransactions,
         reset() {
@@ -97,7 +105,10 @@ const dbMock = vi.hoisted(() => {
             saleReturnItems.where.mockClear()
             products.update.mockClear()
             salesOrders.update.mockClear()
+            salesOrders.get.mockReset()
             purchaseOrders.update.mockClear()
+            loans.get.mockReset()
+            loans.update.mockClear()
             salesOrderAgentAssignments.delete.mockClear()
             salesOrderAgentAssignments.put.mockClear()
             inventoryTransactions.put.mockClear()
@@ -114,6 +125,7 @@ const supabaseMock = vi.hoisted(() => {
         select: vi.fn(async () => ({ data: [] as any[], error: null as any }))
     }))
     let saleLookup: Record<string, any> | null = null
+    let loanLookup: Record<string, any> | null = null
     let activeSalesOrderAssignment: Record<string, any> | null = null
     let pullError: Error | null = null
     const pullRowsByTable = new Map<string, Array<Record<string, any>>>()
@@ -140,6 +152,8 @@ const supabaseMock = vi.hoisted(() => {
             maybeSingle: vi.fn(async () => ({
                 data: tableName === 'sales'
                     ? saleLookup
+                    : tableName === 'loans'
+                        ? loanLookup
                     : tableName === 'sales_order_agent_assignments'
                         ? activeSalesOrderAssignment
                         : null,
@@ -173,6 +187,9 @@ const supabaseMock = vi.hoisted(() => {
         setSaleLookup(row: Record<string, any> | null) {
             saleLookup = row
         },
+        setLoanLookup(row: Record<string, any> | null) {
+            loanLookup = row
+        },
         setPullError(error: Error | null) {
             pullError = error
         },
@@ -189,6 +206,7 @@ const supabaseMock = vi.hoisted(() => {
             insert.mockClear()
             orderUpsert.mockClear()
             saleLookup = null
+            loanLookup = null
             activeSalesOrderAssignment = null
             pullError = null
             pullRowsByTable.clear()
@@ -198,6 +216,12 @@ const supabaseMock = vi.hoisted(() => {
 
 const workspaceModeMock = vi.hoisted(() => ({
     isLocalWorkspaceMode: vi.fn(() => false)
+}))
+
+const persistCancellationMock = vi.hoisted(() => vi.fn(async () => undefined))
+
+vi.mock('@/local-db/orderCancellation', () => ({
+    persistFinancedOrderCancellation: persistCancellationMock
 }))
 
 const schemaRoutingMock = vi.hoisted(() => ({
@@ -225,6 +249,7 @@ vi.mock('@/local-db', () => ({
         products: dbMock.products,
         sales_orders: dbMock.salesOrders,
         purchase_orders: dbMock.purchaseOrders,
+        loans: dbMock.loans,
         sales_order_agent_assignments: dbMock.salesOrderAgentAssignments,
         inventory_transactions: dbMock.inventoryTransactions
     }
@@ -523,6 +548,96 @@ describe('loan command ordering', () => {
             'b-payment-command',
             'a-reversal-command'
         ])
+    })
+})
+
+describe('financed order cancellation replay', () => {
+    it('quarantines a legacy loan delete when the server loan is order-linked', async () => {
+        dbMock.reset()
+        supabaseMock.reset()
+        supabaseMock.setLoanLookup({ id: 'loan-1', source: 'order', order_id: 'order-1' })
+        dbMock.rows.push({
+            id: 'legacy-loan-delete', workspaceId: 'workspace-1', entityType: 'loans',
+            entityId: 'loan-1', operation: 'delete', payload: { id: 'loan-1' },
+            createdAt: '2026-09-24T10:00:00.000Z', status: 'pending'
+        })
+        const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        try {
+            expect(await processMutationQueue('user-1')).toMatchObject({ success: 0, failed: 1 })
+            expect(dbMock.rows[0]).toMatchObject({
+                status: 'failed', error: 'Order-linked loans must be cancelled with their order transaction'
+            })
+        } finally {
+            log.mockRestore()
+        }
+    })
+
+    it('orders the cancellation after a queued order write', () => {
+        const ordered = orderMutationsForSync([
+            {
+                id: 'cancel', workspaceId: 'workspace-1', entityType: 'order_cancellation_commands',
+                entityId: 'order-1', operation: 'create', payload: { orderType: 'sales', orderId: 'order-1' },
+                createdAt: '2026-09-24T10:00:00.000Z'
+            },
+            {
+                id: 'reserve', workspaceId: 'workspace-1', entityType: 'sales_orders',
+                entityId: 'order-1', operation: 'update', payload: { id: 'order-1' },
+                createdAt: '2026-09-24T10:00:01.000Z'
+            }
+        ])
+        expect(ordered.map((mutation) => mutation.id)).toEqual(['reserve', 'cancel'])
+    })
+
+    it('replays one server transaction and marks the command synced only after persisting its result', async () => {
+        dbMock.reset()
+        supabaseMock.reset()
+        persistCancellationMock.mockClear()
+        dbMock.salesOrders.get.mockResolvedValueOnce({
+            id: 'order-1', workspaceId: 'workspace-1', linkedLoanId: 'loan-1', status: 'pending'
+        })
+        const aggregate = { linked_order: { id: 'order-1', status: 'cancelled' } }
+        supabaseMock.rpc.mockResolvedValue({ data: aggregate, error: null })
+        dbMock.rows.push({
+            id: 'cancel-order-1', workspaceId: 'workspace-1',
+            entityType: 'order_cancellation_commands', entityId: 'order-1',
+            operation: 'create', payload: { orderType: 'sales', orderId: 'order-1' },
+            createdAt: '2026-09-24T10:00:00.000Z', status: 'pending'
+        })
+
+        const result = await processMutationQueue('user-1')
+
+        expect(result).toMatchObject({ success: 1, failed: 0 })
+        expect(supabaseMock.rpc).toHaveBeenCalledWith('cancel_order_with_financing', {
+            p_order_type: 'sales', p_order_id: 'order-1'
+        })
+        expect(persistCancellationMock).toHaveBeenCalledWith(
+            aggregate, 'sales', 'order-1', 'workspace-1', 'loan-1'
+        )
+        expect(dbMock.rows[0].status).toBe('synced')
+    })
+
+    it('keeps a failed replay command available for retry when persistence rejects the response', async () => {
+        dbMock.reset()
+        supabaseMock.reset()
+        persistCancellationMock.mockReset()
+        dbMock.salesOrders.get.mockResolvedValueOnce({
+            id: 'order-1', workspaceId: 'workspace-1', linkedLoanId: 'loan-1', status: 'pending'
+        })
+        supabaseMock.rpc.mockResolvedValue({ data: {}, error: null })
+        persistCancellationMock.mockRejectedValueOnce(new Error('order_cancellation_invalid_result'))
+        dbMock.rows.push({
+            id: 'cancel-order-1', workspaceId: 'workspace-1',
+            entityType: 'order_cancellation_commands', entityId: 'order-1',
+            operation: 'create', payload: { orderType: 'sales', orderId: 'order-1' },
+            createdAt: '2026-09-24T10:00:00.000Z', status: 'pending'
+        })
+        const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        try {
+            expect(await processMutationQueue('user-1')).toMatchObject({ success: 0, failed: 1 })
+            expect(dbMock.rows[0]).toMatchObject({ status: 'failed', error: 'order_cancellation_invalid_result' })
+        } finally {
+            log.mockRestore()
+        }
     })
 })
 

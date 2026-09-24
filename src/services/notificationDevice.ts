@@ -1,7 +1,7 @@
 ﻿import { supabase, isSupabaseConfigured } from '@/auth/supabase'
 import { requestFirebaseTokenSync } from '@/lib/firebase'
 import { normalizeNotificationLanguage } from '@/lib/notificationLocalization'
-import { isMobile, isTauri } from '@/lib/platform'
+import { isDesktop, isMobile, isTauri } from '@/lib/platform'
 import { getActiveBusinessWorkspaceId } from '@/lib/network'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
@@ -68,6 +68,7 @@ async function readWebPushToken(): Promise<string | null> {
 }
 
 export async function registerDeviceTokenIfNeeded(userId: string, requestedLanguage?: string | null): Promise<void> {
+    if (isDesktop()) return
     console.log('[Notifications] registerDeviceTokenIfNeeded called. userId:', userId)
 
     if (isLocalWorkspaceMode(getActiveBusinessWorkspaceId())) {

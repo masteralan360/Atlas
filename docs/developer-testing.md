@@ -75,6 +75,13 @@ Seeded cases add fractional prices/quantities with checkout and full return.
 Existing regression groups add financing repayment/reversal, stock aggregation,
 commission mode snapshots, customer summaries, currency conversion, pricing,
 rounding, and Cloud/Hybrid client request/result/failure contracts.
+The remote-contract group also checks financed sales and purchase cancellation
+for simple loans and installments: the RPC request, authoritative order and loan
+projection, reversal ledger pairs, account mirroring, offline queue behavior,
+replay, and invalid or rejected server results. The lifecycle group retains the
+Local financing cancellation cases. Run the read-only manual SQL check in
+`supabase/manual_checks/check_cancelled_order_linked_loans.sql` separately; the
+suite does not change historical cancelled orders.
 
 **Not implemented in V1:** browser automation of the real order form, real
 Supabase SQL/RLS integration, Hybrid desktop SQLite mirroring, and Local native

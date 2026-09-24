@@ -17,7 +17,7 @@ import {
     Terminal,
     Upload,
 } from 'lucide-react'
-import type { DateRangeType } from '@/context/DateRangeContext'
+import { useDateRange } from '@/context/DateRangeContext'
 import { isDateInDateRange } from '@/lib/dateRangeFilters'
 import {
     copyErrorLogRecord,
@@ -33,6 +33,7 @@ import {
 } from '@/lib/errorLogger'
 import { formatDateTime } from '@/lib/utils'
 import {
+    AppPagination,
     Button,
     Card,
     CardContent,
@@ -57,6 +58,7 @@ import {
     useToast,
 } from '@/ui/components'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
+import { getLogsPageSize, paginateLogRecords } from './logsPagination'
 
 function getLogSummary(argument: SerializedConsoleValue | undefined) {
     if (typeof argument === 'string') return argument
@@ -83,8 +85,9 @@ export function Logs() {
     const [records, setRecords] = useState<ErrorLogRecord[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [search, setSearch] = useState('')
-    const [dateRange, setDateRange] = useState<DateRangeType>('allTime')
-    const [customDates, setCustomDates] = useState({ start: '', end: '' })
+    const { dateRange, customDates, setDateRange, setCustomDates } = useDateRange()
+    const [currentPage, setCurrentPage] = useState(1)
+    const [pageSize, setPageSize] = useState(() => getLogsPageSize(localStorage.getItem('logs_page_size')))
     const [selectedRecord, setSelectedRecord] = useState<ErrorLogRecord | null>(null)
     const [isCopying, setIsCopying] = useState(false)
     const [isExporting, setIsExporting] = useState(false)
@@ -106,6 +109,10 @@ export function Logs() {
         return () => window.clearInterval(interval)
     }, [refresh])
 
+    useEffect(() => {
+        localStorage.setItem('logs_page_size', String(pageSize))
+    }, [pageSize])
+
     const filteredRecords = useMemo(() => {
         const normalizedSearch = search.trim().toLocaleLowerCase()
         return records.filter((record) => {
@@ -116,6 +123,17 @@ export function Logs() {
                 .includes(normalizedSearch)
         })
     }, [customDates, dateRange, records, search])
+
+    const paginatedRecords = useMemo(
+        () => paginateLogRecords(filteredRecords, currentPage, pageSize),
+        [currentPage, filteredRecords, pageSize]
+    )
+
+    useEffect(() => {
+        if (currentPage !== paginatedRecords.currentPage) {
+            setCurrentPage(paginatedRecords.currentPage)
+        }
+    }, [currentPage, paginatedRecords.currentPage])
 
     const copySelectedRecord = async () => {
         if (!selectedRecord) return
@@ -188,7 +206,7 @@ export function Logs() {
                     <div className="min-w-0">
                         <h1 className="flex flex-wrap items-center gap-3 text-3xl font-bold tracking-tight">
                             {t('errorLogs.title')}
-                            <DateRangeBadge dateRange={dateRange} customDates={customDates} />
+                            <DateRangeBadge />
                         </h1>
                         <p className="mt-1 text-sm text-muted-foreground">{t('errorLogs.subtitle')}</p>
                     </div>
@@ -249,23 +267,43 @@ export function Logs() {
                         </CardTitle>
                         <CardDescription>{t('errorLogs.path')}</CardDescription>
                     </div>
-                    <div className="relative w-full xl:max-w-sm">
-                        <Search className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                            value={search}
-                            onChange={(event) => setSearch(event.target.value)}
-                            placeholder={t('errorLogs.search')}
-                            className="ps-9"
+                    <div className="flex w-full flex-wrap items-center gap-3 xl:w-auto">
+                        <AppPagination
+                            currentPage={paginatedRecords.currentPage}
+                            totalCount={filteredRecords.length}
+                            pageSize={pageSize}
+                            onPageChange={setCurrentPage}
+                            onPageSizeChange={(nextPageSize) => {
+                                setPageSize(nextPageSize)
+                                setCurrentPage(1)
+                            }}
+                            className="w-auto"
                         />
+                        <div className="relative w-full xl:w-80">
+                            <Search className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                                value={search}
+                                onChange={(event) => {
+                                    setSearch(event.target.value)
+                                    setCurrentPage(1)
+                                }}
+                                placeholder={t('errorLogs.search')}
+                                className="ps-9"
+                            />
+                        </div>
                     </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <DateRangeFilters
                         label={t('errorLogs.dateFilter')}
-                        dateRange={dateRange}
-                        customDates={customDates}
-                        onDateRangeChange={setDateRange}
-                        onCustomDatesChange={setCustomDates}
+                        onDateRangeChange={(range) => {
+                            setDateRange(range)
+                            setCurrentPage(1)
+                        }}
+                        onCustomDatesChange={(dates) => {
+                            setCustomDates(dates)
+                            setCurrentPage(1)
+                        }}
                     />
 
                     <div className="overflow-x-auto rounded-2xl border border-border/60">
@@ -287,7 +325,7 @@ export function Logs() {
                                             {t('errorLogs.loading')}
                                         </TableCell>
                                     </TableRow>
-                                ) : filteredRecords.length > 0 ? filteredRecords.map((record) => (
+                                ) : paginatedRecords.records.length > 0 ? paginatedRecords.records.map((record) => (
                                     <TableRow key={record.id}>
                                         <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                                             {formatDateTime(record.timestamp)}

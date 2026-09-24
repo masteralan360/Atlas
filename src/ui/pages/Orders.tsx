@@ -541,6 +541,8 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         paymentMethod: 'cash',
         items: [createEmptyItem(defaultStorageId)]
     })
+    const [isCancellingOrder, setIsCancellingOrder] = useState(false)
+    const cancellingOrderRef = useRef(false)
     const [salesPaymentAccount, setSalesPaymentAccount] = useState<PaymentAccount | null>(null)
     const [purchasePaymentAccount, setPurchasePaymentAccount] = useState<PaymentAccount | null>(null)
 
@@ -1549,13 +1551,26 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     }
 
     async function handleCancelConfirm() {
-        if (!cancelConfirm.orderId || !cancelConfirm.type) return
+        if (!cancelConfirm.orderId || !cancelConfirm.type || cancellingOrderRef.current) return
+
+        cancellingOrderRef.current = true
+        setIsCancellingOrder(true)
 
         const action = cancelConfirm.type === 'sales'
             ? () => updateSalesOrderStatus(cancelConfirm.orderId, 'cancelled')
             : () => updatePurchaseOrderStatus(cancelConfirm.orderId, 'cancelled')
-        await runAction(action, cancelConfirm.type === 'sales' ? 'Sales order cancelled' : 'Purchase order cancelled')
-        setCancelConfirm({ isOpen: false, orderId: '', type: null })
+        try {
+            const result = await action()
+            toast({ title: result.status === 'cancelled'
+                ? t('orders.cancellationComplete')
+                : t('orders.cancellationQueued') })
+            setCancelConfirm({ isOpen: false, orderId: '', type: null })
+        } catch (error) {
+            toast({ title: t('common.error'), description: getLocalizedOrderError(error, t, 'Cancellation failed'), variant: 'destructive' })
+        } finally {
+            cancellingOrderRef.current = false
+            setIsCancellingOrder(false)
+        }
     }
 
     function renderOrderTable() {
@@ -2949,7 +2964,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                 </DialogContent>
             </Dialog>
 
-            <Dialog open={cancelConfirm.isOpen} onOpenChange={(open) => !open && setCancelConfirm({ isOpen: false, orderId: '', type: null })}>
+            <Dialog open={cancelConfirm.isOpen} onOpenChange={(open) => !isCancellingOrder && !open && setCancelConfirm({ isOpen: false, orderId: '', type: null })}>
                 <DialogContent className="max-w-[400px] rounded-3xl p-0 overflow-hidden border-none shadow-2xl">
                     <div className="bg-gradient-to-b from-red-500/10 to-transparent p-8 text-center space-y-4">
                         <div className="mx-auto w-16 h-16 bg-red-500/20 rounded-2xl flex items-center justify-center mb-2">
@@ -2967,14 +2982,16 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                             variant="outline"
                             className="rounded-xl h-12 font-bold border-2"
                             onClick={() => setCancelConfirm({ isOpen: false, orderId: '', type: null })}
+                            disabled={isCancellingOrder}
                         >
                             {t('common.back') || 'Back'}
                         </Button>
                         <Button
                             className="rounded-xl h-12 font-bold bg-red-600 hover:bg-red-700 shadow-lg shadow-red-600/20"
                             onClick={handleCancelConfirm}
+                            disabled={isCancellingOrder}
                         >
-                            {t('orders.actions.cancel') || 'Cancel Order'}
+                            {isCancellingOrder ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{t('orders.details.cancelling')}</> : t('orders.actions.cancel')}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

@@ -2,7 +2,7 @@
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/auth'
 import { initMessaging, onForegroundMessage } from '@/lib/firebase'
-import { isMobile, isTauri } from '@/lib/platform'
+import { isDesktop, isMobile, isTauri } from '@/lib/platform'
 import { registerDeviceTokenIfNeeded } from '@/services/notificationDevice'
 
 function openNotificationTarget(data: Record<string, string> | undefined) {
@@ -23,12 +23,12 @@ export function DeviceTokenBootstrap() {
     const usesLocalBusinessData = workspaceMode === 'local' || workspaceMode === 'demo'
 
     useEffect(() => {
-        if (!isAuthenticated || !userId || usesLocalBusinessData) return
+        if (!isAuthenticated || !userId || usesLocalBusinessData || isDesktop()) return
         void registerDeviceTokenIfNeeded(userId, language)
     }, [isAuthenticated, language, userId, usesLocalBusinessData])
 
     useEffect(() => {
-        if (!isAuthenticated || !userId || usesLocalBusinessData) return
+        if (!isAuthenticated || !userId || usesLocalBusinessData || isDesktop()) return
         if (isTauri() && isMobile()) return
 
         let unsubscribe: (() => void) | undefined

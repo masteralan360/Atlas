@@ -1129,9 +1129,12 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const handleCancelConfirm = async () => {
         setIsCancelling(true)
         try {
-            if (isSales) await updateSalesOrderStatus(order.id, 'cancelled')
-            else await updatePurchaseOrderStatus(order.id, 'cancelled')
-            toast({ title: t('orders.details.messages.cancelSuccess') || (isSales ? 'Sales order cancelled' : 'Purchase order cancelled') })
+            const result = isSales
+                ? await updateSalesOrderStatus(order.id, 'cancelled')
+                : await updatePurchaseOrderStatus(order.id, 'cancelled')
+            toast({ title: result.status === 'cancelled'
+                ? t('orders.cancellationComplete')
+                : t('orders.cancellationQueued') })
             setCancelConfirm({ isOpen: false })
         } catch (error: any) {
             toast({
