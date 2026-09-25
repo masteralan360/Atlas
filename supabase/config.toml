@@ -31,3 +31,6 @@ verify_jwt = false
 
 [functions.register-device-token]
 verify_jwt = false
+
+[functions.workspace-account-switcher]
+verify_jwt = true

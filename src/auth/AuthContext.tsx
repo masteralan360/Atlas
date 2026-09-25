@@ -2,9 +2,12 @@ import { createContext, useContext, useEffect, useState, useRef, type ReactNode 
 import {
   supabase,
   isSupabaseConfigured,
+  resolvedSupabaseAnonKey,
+  resolvedSupabaseUrl,
   refreshSupabaseSession,
   signOutCurrentSupabaseSession
 } from './supabase'
+import { createClient } from '@supabase/supabase-js'
 import { isSupabaseRateLimitedError } from './sessionManager'
 import { isAuthenticatedState, resolveCachedWorkspaceAssignment } from './authenticationState'
 import type { User, Session } from '@supabase/supabase-js'
@@ -32,6 +35,11 @@ import {
   persistLocalAccountProfile,
   verifyLocalAccountPassword
 } from './localAccountAuth'
+import {
+  CloudAccountSwitchError,
+  performCloudAccountSwitch,
+  requestCloudWorkspaceAccount
+} from './cloudAccountSwitcher'
 import { writeCachedPermissions } from '@/permissions/workspacePermissionCache'
 import {
   completeCashierShiftOccurrence,
@@ -101,6 +109,7 @@ interface AuthContextType {
   refreshUser: () => Promise<void>
   updateUser: (updates: Partial<AuthUser>) => void
   switchLocalAccount: (userId: string, password: string) => Promise<{ error: Error | null }>
+  switchCloudAccount: (userId: string, password: string) => Promise<{ error: Error | null }>
 }
 
 interface CashierShiftAuthRequest {
@@ -1526,6 +1535,120 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  const switchCloudAccount = async (userId: string, password: string) => {
+    const currentUser = userRef.current
+    const currentSession = sessionRef.current
+    if (
+      !currentUser?.workspaceId ||
+      (currentUser.workspaceMode !== 'cloud' && currentUser.workspaceMode !== 'hybrid')
+    ) {
+      return { error: new CloudAccountSwitchError('unavailable') }
+    }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return { error: new CloudAccountSwitchError('offline') }
+    }
+
+    let verifiedAuthUser: User | null = null
+    const result = await performCloudAccountSwitch<AuthUser, Session>(
+      {
+        currentIdentity: currentUser,
+        currentSession,
+        targetUserId: userId,
+        password
+      },
+      {
+        isOnline: () =>
+          connectionManager.getState().isOnline &&
+          (typeof navigator === 'undefined' || navigator.onLine !== false),
+        loadMember: (workspaceId, targetUserId) =>
+          requestCloudWorkspaceAccount(workspaceId, targetUserId),
+        verifyCredentials: async (email, enteredPassword) => {
+          try {
+            const isolatedClient = createClient(resolvedSupabaseUrl, resolvedSupabaseAnonKey, {
+              auth: {
+                autoRefreshToken: false,
+                persistSession: false,
+                detectSessionInUrl: false
+              }
+            })
+            const { data, error } = (await runSupabaseAction(
+              'auth.verifyCloudAccountSwitchPassword',
+              () => isolatedClient.auth.signInWithPassword({ email, password: enteredPassword }),
+              { timeoutMs: 15000, platform: 'all' }
+            )) as any
+
+            if (error || !data?.user || !data?.session) {
+              const message = String(error?.message ?? '')
+              const status = Number(error?.status ?? error?.context?.status)
+              return {
+                error:
+                  status === 400 ||
+                  status === 401 ||
+                  /invalid login credentials|invalid credentials|email not confirmed/i.test(message)
+                    ? 'credentials' as const
+                    : 'connection' as const
+              }
+            }
+
+            verifiedAuthUser = data.user as User
+            return {
+              credential: {
+                user: { id: data.user.id },
+                session: data.session
+              }
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            return {
+              error: /invalid login credentials|invalid credentials|email not confirmed/i.test(message)
+                ? 'credentials' as const
+                : 'connection' as const
+            }
+          }
+        },
+        completeOutgoingShift: (identity) => requestCashierShiftLogoutConfirmation(identity),
+        commitSession: async (credential) => {
+          const nextSession = credential.session as Session
+          const { data, error } = await supabase.auth.setSession({
+            access_token: nextSession.access_token,
+            refresh_token: nextSession.refresh_token
+          })
+          if (error || !data.session) throw error ?? new Error('Session could not be changed.')
+          sessionRef.current = data.session
+          setSession(data.session)
+          return data.session
+        },
+        loadIdentity: async () => {
+          if (!verifiedAuthUser) throw new Error('Verified account is unavailable.')
+          return enrichUser(parseUserFromSupabase(verifiedAuthUser))
+        },
+        publishIdentity: (nextIdentity) => {
+          userRef.current = nextIdentity
+          setUser({ ...nextIdentity })
+          if (sessionRef.current) setSession(sessionRef.current)
+          saveRecovery(nextIdentity)
+        },
+        confirmIncomingShift: (nextIdentity) => requestCashierShiftStartConfirmation(nextIdentity),
+        restoreIdentity: async (previousSession, previousIdentity) => {
+          const { data, error } = await supabase.auth.setSession({
+            access_token: previousSession.access_token,
+            refresh_token: previousSession.refresh_token
+          })
+          if (error || !data.session) throw error ?? new Error('Session could not be restored.')
+          sessionRef.current = data.session
+          userRef.current = previousIdentity
+          setSession(sessionRef.current)
+          setUser({ ...previousIdentity })
+          saveRecovery(previousIdentity)
+        }
+      }
+    )
+
+    return {
+      error: result.error ? new CloudAccountSwitchError(result.error) : null
+    }
+  }
+
   // User is kicked if authenticated but has no workspace
   const isKicked = !!user && !user.workspaceId
 
@@ -1549,7 +1672,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         hasRole,
         refreshUser,
         updateUser,
-        switchLocalAccount
+        switchLocalAccount,
+        switchCloudAccount
       }}
     >
       {children}

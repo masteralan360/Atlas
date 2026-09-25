@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   Check,
@@ -12,22 +12,29 @@ import { useTranslation } from "react-i18next";
 
 import { useAuth } from "@/auth";
 import {
+  CloudAccountSwitchError,
+  requestCloudWorkspaceAccounts,
+  type CloudWorkspaceAccount,
+} from "@/auth/cloudAccountSwitcher";
+import {
   listLocalWorkspaceAccounts,
   type LocalWorkspaceAccount,
 } from "@/auth/localAccountAuth";
 import { cn } from "@/lib/utils";
 import { platformService } from "@/services/platformService";
+import { connectionManager } from "@/lib/connectionManager";
 import { Button } from "./button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "./dialog";
 import { Input } from "./input";
 import { Label } from "./label";
+import {
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+} from "./dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,15 +46,26 @@ import {
 
 interface LocalAccountSwitcherProps {
   isCompact: boolean;
+  nameRoleOnly?: boolean;
   shiftBadge?: "ready" | "complete" | null;
   manualShiftActiveDuration?: string | null;
 }
+
+type SwitcherAccount = {
+  id: string;
+  workspaceId: string;
+  email: string;
+  name: string;
+  role: string;
+  profileUrl?: string | null;
+  hasCredential: boolean;
+};
 
 function AccountAvatar({
   account,
   className,
 }: {
-  account: Pick<LocalWorkspaceAccount, "name" | "profileUrl">;
+  account: Pick<SwitcherAccount, "name" | "profileUrl">;
   className?: string;
 }) {
   return (
@@ -76,22 +94,74 @@ function AccountAvatar({
 
 export function LocalAccountSwitcher({
   isCompact,
+  nameRoleOnly = false,
   shiftBadge = null,
   manualShiftActiveDuration = null,
 }: LocalAccountSwitcherProps) {
   const { t } = useTranslation();
-  const { user, switchLocalAccount } = useAuth();
-  const [selectedAccount, setSelectedAccount] =
-    useState<LocalWorkspaceAccount | null>(null);
+  const { user, switchLocalAccount, switchCloudAccount } = useAuth();
+  const isLocalMode = user?.workspaceMode === "local";
+  const isCloudMode = user?.workspaceMode === "cloud" || user?.workspaceMode === "hybrid";
+  const [isOnline, setIsOnline] = useState(
+    () => connectionManager.getState().isOnline && navigator.onLine !== false,
+  );
+  const [cloudAccounts, setCloudAccounts] = useState<CloudWorkspaceAccount[]>([]);
+  const [isLoadingAccounts, setIsLoadingAccounts] = useState(false);
+  const [accountsLoadError, setAccountsLoadError] = useState(false);
+  const [isSwitcherOpen, setIsSwitcherOpen] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState<SwitcherAccount | null>(null);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSwitching, setIsSwitching] = useState(false);
 
   const storedAccounts = useLiveQuery(
-    () => listLocalWorkspaceAccounts(user?.workspaceId ?? ""),
-    [user?.workspaceId],
+    () => isLocalMode ? listLocalWorkspaceAccounts(user?.workspaceId ?? "") : Promise.resolve([]),
+    [isLocalMode, user?.workspaceId],
     [],
   );
+
+  useEffect(() => {
+    const updateOnline = () => {
+      setIsOnline(connectionManager.getState().isOnline && navigator.onLine !== false);
+    };
+    const unsubscribe = connectionManager.subscribe(updateOnline);
+    window.addEventListener("online", updateOnline);
+    window.addEventListener("offline", updateOnline);
+    updateOnline();
+    return () => {
+      unsubscribe();
+      window.removeEventListener("online", updateOnline);
+      window.removeEventListener("offline", updateOnline);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isCloudMode || !user?.workspaceId || !isOnline || !isSwitcherOpen) {
+      setCloudAccounts([]);
+      setIsLoadingAccounts(false);
+      setAccountsLoadError(false);
+      return;
+    }
+
+    let isCurrent = true;
+    setIsLoadingAccounts(true);
+    setAccountsLoadError(false);
+    void requestCloudWorkspaceAccounts(user.workspaceId)
+      .then((accounts) => {
+        if (isCurrent) setCloudAccounts(accounts);
+      })
+      .catch(() => {
+        if (isCurrent) {
+          setCloudAccounts([]);
+          setAccountsLoadError(true);
+        }
+      })
+      .finally(() => {
+        if (isCurrent) setIsLoadingAccounts(false);
+      });
+
+    return () => { isCurrent = false; };
+  }, [isCloudMode, user?.workspaceId, user?.id, isOnline, isSwitcherOpen]);
 
   const accounts = useMemo(() => {
     if (!user?.workspaceId) return storedAccounts;
@@ -113,11 +183,11 @@ export function LocalAccountSwitcher({
     ];
   }, [storedAccounts, user]);
 
-  if (!user || user.workspaceMode !== "local") {
+  if (!user || (!isLocalMode && !isCloudMode)) {
     return null;
   }
 
-  const currentAccount: LocalWorkspaceAccount = {
+  const localCurrentAccount: SwitcherAccount = {
     id: user.id,
     workspaceId: user.workspaceId,
     email: user.email,
@@ -127,6 +197,25 @@ export function LocalAccountSwitcher({
     hasCredential:
       accounts.find((account) => account.id === user.id)?.hasCredential ?? false,
   };
+
+  const currentAccount: SwitcherAccount = isLocalMode
+    ? localCurrentAccount
+    : {
+        id: user.id,
+        workspaceId: user.workspaceId,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        profileUrl: user.profileUrl,
+        hasCredential: true,
+      };
+  const visibleAccounts: SwitcherAccount[] = isLocalMode
+    ? accounts
+    : cloudAccounts.map((account) => ({
+        ...account,
+        workspaceId: user.workspaceId,
+        hasCredential: true,
+      }));
 
   const openPasswordDialog = (account: LocalWorkspaceAccount) => {
     setSelectedAccount(account);
@@ -143,13 +232,19 @@ export function LocalAccountSwitcher({
 
   const handleSwitch = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedAccount || !password) return;
+    if (!selectedAccount || !password || (isCloudMode && !isOnline)) return;
 
     setIsSwitching(true);
     setError(null);
-    const result = await switchLocalAccount(selectedAccount.id, password);
+    const result = isLocalMode
+      ? await switchLocalAccount(selectedAccount.id, password)
+      : await switchCloudAccount(selectedAccount.id, password);
     if (result.error) {
-      setError(result.error.message);
+      if (isCloudMode && result.error instanceof CloudAccountSwitchError) {
+        setError(t(`accounts.cloudSwitchErrors.${result.error.code}`));
+      } else {
+        setError(result.error.message);
+      }
       setIsSwitching(false);
       return;
     }
@@ -159,65 +254,80 @@ export function LocalAccountSwitcher({
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu
+        open={isSwitcherOpen}
+        onOpenChange={(open) => {
+          setIsSwitcherOpen(open);
+          if (open && isCloudMode && isOnline) {
+            setIsLoadingAccounts(true);
+            setAccountsLoadError(false);
+          }
+        }}
+      >
         <DropdownMenuTrigger asChild>
           <button
             type="button"
             className={cn(
-              "flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2 text-start transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+              "flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-start transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
               isCompact && "flex-col gap-1 px-1",
+              nameRoleOnly && !isCompact && "gap-1 px-1",
               manualShiftActiveDuration && "mb-3",
             )}
-            title={t("accounts.openSwitcher", {
-              defaultValue: "Switch local account",
-            })}
+            title={t(isLocalMode ? "accounts.openSwitcher" : "accounts.openCloudSwitcher")}
           >
-            <span className="relative shrink-0">
-              <AccountAvatar account={currentAccount} className="h-9 w-9 text-sm" />
-              {shiftBadge ? (
-                <span className="pointer-events-none absolute -bottom-1 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap">
-                  <span
-                    className={cn(
-                      "block rounded-[3px] border px-1.5 py-0.5 text-[8px] font-bold leading-none text-white shadow-sm",
-                      shiftBadge === "ready"
-                        ? "border-emerald-200 bg-emerald-500 dark:border-emerald-300/40"
-                        : "border-primary/30 bg-primary",
-                    )}
-                    title={t(
-                      shiftBadge === "ready"
-                        ? "paymentAccounts.readyShiftBadge"
-                        : "paymentAccounts.completeShiftBadge",
-                    )}
-                    aria-label={t(
-                      shiftBadge === "ready"
-                        ? "paymentAccounts.shiftStatuses.available"
-                        : "paymentAccounts.completeShift",
-                    )}
-                  >
-                    {t(
-                      shiftBadge === "ready"
-                        ? "paymentAccounts.readyShiftBadge"
-                        : "paymentAccounts.completeShiftBadge",
-                    )}
-                  </span>
-                  {manualShiftActiveDuration ? (
+            {!nameRoleOnly && (
+              <span className="relative shrink-0">
+                <AccountAvatar account={currentAccount} className="h-9 w-9 text-sm" />
+                {shiftBadge ? (
+                  <span className="pointer-events-none absolute -bottom-1 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap">
                     <span
-                      className="absolute left-1/2 top-full -mt-px -translate-x-1/2 rounded-[3px] border border-muted-foreground/25 bg-muted px-1.5 py-0.5 font-mono text-[8px] font-bold leading-none text-muted-foreground shadow-sm"
-                      title={t("paymentAccounts.manualShiftActiveDuration", {
-                        time: manualShiftActiveDuration,
-                      })}
-                      aria-label={t("paymentAccounts.manualShiftActiveDuration", {
-                        time: manualShiftActiveDuration,
-                      })}
+                      className={cn(
+                        "block rounded-[3px] border px-1.5 py-0.5 text-[8px] font-bold leading-none text-white shadow-sm",
+                        shiftBadge === "ready"
+                          ? "border-emerald-200 bg-emerald-500 dark:border-emerald-300/40"
+                          : "border-primary/30 bg-primary",
+                      )}
+                      title={t(
+                        shiftBadge === "ready"
+                          ? "paymentAccounts.readyShiftBadge"
+                          : "paymentAccounts.completeShiftBadge",
+                      )}
+                      aria-label={t(
+                        shiftBadge === "ready"
+                          ? "paymentAccounts.shiftStatuses.available"
+                          : "paymentAccounts.completeShift",
+                      )}
                     >
-                      {manualShiftActiveDuration}
+                      {t(
+                        shiftBadge === "ready"
+                          ? "paymentAccounts.readyShiftBadge"
+                          : "paymentAccounts.completeShiftBadge",
+                      )}
                     </span>
-                  ) : null}
-                </span>
-              ) : null}
-            </span>
-            {!isCompact && (
-              <div className="min-w-0 flex-1">
+                    {manualShiftActiveDuration ? (
+                      <span
+                        className="absolute left-1/2 top-full -mt-px -translate-x-1/2 rounded-[3px] border border-muted-foreground/25 bg-muted px-1.5 py-0.5 font-mono text-[8px] font-bold leading-none text-muted-foreground shadow-sm"
+                        title={t("paymentAccounts.manualShiftActiveDuration", {
+                          time: manualShiftActiveDuration,
+                        })}
+                        aria-label={t("paymentAccounts.manualShiftActiveDuration", {
+                          time: manualShiftActiveDuration,
+                        })}
+                      >
+                        {manualShiftActiveDuration}
+                      </span>
+                    ) : null}
+                  </span>
+                ) : null}
+              </span>
+            )}
+            {(!isCompact || nameRoleOnly) && (
+              <div
+                className={cn(
+                  "min-w-0 flex-1",
+                  nameRoleOnly && isCompact && "max-w-[80px] text-center",
+                )}
+              >
                 <p className="truncate text-sm font-medium text-foreground">
                   {currentAccount.name}
                 </p>
@@ -248,15 +358,27 @@ export function LocalAccountSwitcher({
                 })}
               </p>
               <p className="text-xs font-normal text-muted-foreground">
-                {t("accounts.localWorkspaceOnly", {
-                  defaultValue: "Accounts available in this local workspace",
-                })}
+                {t(isLocalMode ? "accounts.localWorkspaceOnly" : "accounts.cloudWorkspaceOnly")}
               </p>
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <div className="max-h-[280px] overflow-y-auto">
-            {accounts.length === 0 ? (
+            {isCloudMode && !isOnline ? (
+              <DropdownMenuItem disabled className="gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground data-[disabled]:opacity-100">
+                <KeyRound className="h-4 w-4 shrink-0" />
+                {t("accounts.cloudSwitchOffline")}
+              </DropdownMenuItem>
+            ) : isCloudMode && isLoadingAccounts ? (
+              <DropdownMenuItem disabled className="gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground data-[disabled]:opacity-100">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {t("accounts.loadingMembers")}
+              </DropdownMenuItem>
+            ) : accountsLoadError ? (
+              <DropdownMenuItem disabled className="rounded-lg px-3 py-2 text-xs text-destructive data-[disabled]:opacity-100">
+                {t("accounts.cloudMembersUnavailable")}
+              </DropdownMenuItem>
+            ) : visibleAccounts.length === 0 ? (
               <DropdownMenuItem
                 disabled
                 className="rounded-lg px-3 py-2 text-xs text-muted-foreground data-[disabled]:opacity-100"
@@ -266,14 +388,14 @@ export function LocalAccountSwitcher({
                 })}
               </DropdownMenuItem>
             ) : (
-              accounts.map((account) => {
+              visibleAccounts.map((account) => {
                 const isCurrent = account.id === user.id;
                 const isCurrentAndReady = isCurrent && account.hasCredential;
 
                 return (
                   <DropdownMenuItem
                     key={account.id}
-                    disabled={isCurrentAndReady}
+                    disabled={isCurrentAndReady || (isCloudMode && !isOnline)}
                     onSelect={() => openPasswordDialog(account)}
                     className="gap-3 rounded-lg px-3 py-2 data-[disabled]:opacity-100"
                   >
@@ -293,20 +415,18 @@ export function LocalAccountSwitcher({
                         {account.name}
                       </p>
                       <p className="truncate text-xs text-muted-foreground">
-                        {account.hasCredential
-                          ? t("accounts.offlineReady", {
-                              defaultValue: "Offline ready",
-                            })
-                          : account.email
-                            ? t("accounts.setupRequired", {
-                                defaultValue: "Password setup required",
-                              })
-                            : t("accounts.onlineSignInRequired", {
-                                defaultValue: "Online sign-in required",
-                              })}
+                        {isCloudMode
+                          ? account.email
+                          : account.hasCredential
+                            ? t("accounts.offlineReady")
+                            : account.email
+                              ? t("accounts.setupRequired")
+                              : t("accounts.onlineSignInRequired")}
                       </p>
                     </div>
-                    {account.hasCredential ? (
+                    {isCloudMode ? (
+                      <KeyRound className="h-4 w-4 shrink-0 text-primary" />
+                    ) : account.hasCredential ? (
                       <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-500" />
                     ) : (
                       <KeyRound className="h-4 w-4 shrink-0 text-amber-500" />
@@ -319,27 +439,32 @@ export function LocalAccountSwitcher({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Dialog
+      <AppDialog
         open={Boolean(selectedAccount)}
         onOpenChange={(open) => {
           if (!open) closePasswordDialog();
         }}
       >
-        <DialogContent className="sm:max-w-md">
-          <form onSubmit={handleSwitch} className="space-y-5">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
+        <AppDialogContent
+          className="max-w-md"
+          showCloseButton={false}
+          onPointerDownOutside={(event) => event.preventDefault()}
+          onEscapeKeyDown={(event) => event.preventDefault()}
+        >
+          <form onSubmit={handleSwitch} className="flex min-h-0 flex-1 flex-col">
+            <AppDialogHeader>
+              <AppDialogTitle className="flex items-center gap-2">
                 <UserRound className="h-5 w-5 text-primary" />
-                {selectedAccount?.id === user.id
+                {isLocalMode && selectedAccount?.id === user.id
                   ? t("accounts.prepareOffline", {
                       defaultValue: "Prepare Offline Access",
                     })
-                  : t("accounts.confirmSwitch", {
-                      defaultValue: "Confirm Account Switch",
-                    })}
-              </DialogTitle>
-              <DialogDescription>
-                {selectedAccount?.hasCredential
+                  : t("accounts.confirmSwitch")}
+              </AppDialogTitle>
+              <AppDialogDescription>
+                {isCloudMode
+                  ? t("accounts.cloudConfirmSwitchDescription")
+                  : selectedAccount?.hasCredential
                   ? t("accounts.enterPasswordFor", {
                       defaultValue:
                         "Enter {{name}}'s password to switch accounts.",
@@ -349,51 +474,48 @@ export function LocalAccountSwitcher({
                       defaultValue:
                         "This account needs one online password validation on this device. Future switches will work fully offline.",
                     })}
-              </DialogDescription>
-            </DialogHeader>
+              </AppDialogDescription>
+            </AppDialogHeader>
 
-            <div className="flex items-center gap-3 rounded-xl border border-border/70 bg-muted/35 p-3">
-              {selectedAccount && (
-                <AccountAvatar
-                  account={selectedAccount}
-                  className="h-10 w-10 text-sm"
+            <AppDialogBody className="space-y-5">
+              <div className="flex items-center gap-3 rounded-xl border border-border/70 bg-muted/35 p-3">
+                {selectedAccount && (
+                  <AccountAvatar account={selectedAccount} className="h-10 w-10 text-sm" />
+                )}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold">{selectedAccount?.name}</p>
+                  {isCloudMode ? (
+                    <p className="truncate text-xs text-muted-foreground">{selectedAccount?.email}</p>
+                  ) : (
+                    <p className="truncate text-xs capitalize text-muted-foreground">{selectedAccount?.role}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="account-switcher-password">
+                  {t("auth.password")} *
+                </Label>
+                <Input
+                  id="account-switcher-password"
+                  type="password"
+                  autoComplete="current-password"
+                  autoFocus
+                  required
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  disabled={isSwitching}
                 />
+              </div>
+
+              {error && (
+                <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {error}
+                </div>
               )}
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">
-                  {selectedAccount?.name}
-                </p>
-                <p className="truncate text-xs capitalize text-muted-foreground">
-                  {selectedAccount?.role}
-                </p>
-              </div>
-            </div>
+            </AppDialogBody>
 
-            <div className="space-y-2">
-              <Label htmlFor="local-account-password">
-                {t("auth.password", { defaultValue: "Password" })}
-              </Label>
-              <Input
-                id="local-account-password"
-                type="password"
-                autoComplete="current-password"
-                autoFocus
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                disabled={isSwitching}
-              />
-            </div>
-
-            {error && (
-              <div
-                role="alert"
-                className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-              >
-                {error}
-              </div>
-            )}
-
-            <DialogFooter>
+            <AppDialogFooter>
               <Button
                 type="button"
                 variant="ghost"
@@ -406,17 +528,17 @@ export function LocalAccountSwitcher({
               <Button
                 type="submit"
                 allowViewer
-                disabled={!password || isSwitching}
+                disabled={!password || isSwitching || (isCloudMode && !isOnline)}
               >
                 {isSwitching && <Loader2 className="h-4 w-4 animate-spin" />}
-                {selectedAccount?.id === user.id
+                {isLocalMode && selectedAccount?.id === user.id
                   ? t("accounts.prepare", { defaultValue: "Prepare" })
-                  : t("accounts.switch", { defaultValue: "Switch Account" })}
+                  : t("accounts.switch")}
               </Button>
-            </DialogFooter>
+            </AppDialogFooter>
           </form>
-        </DialogContent>
-      </Dialog>
+        </AppDialogContent>
+      </AppDialog>
     </>
   );
 }

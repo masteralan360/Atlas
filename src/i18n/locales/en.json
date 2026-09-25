@@ -1,6 +1,9 @@
 {
   "devTesting": {
     "button": "Developer tests",
+    "accountSwitcher": "Account switching",
+    "accountSwitcherCoverageHelp": "Covers the authenticated workspace member request, email roster filtering, isolated Supabase password validation, online-only enforcement, outgoing then incoming cashier-shift handoff, and restoring the original session after an incoming-shift cancellation or failure.",
+    "accountSwitcherGroups": { "cloudHybrid": "Cloud / Hybrid account switching" },
     "saleOrders": "Sale Orders",
     "businessPartners": "Business Partners",
     "ecommerce": "E-Commerce",
@@ -3647,12 +3650,12 @@
   "errorLogs": {
     "title": "Logs",
     "subtitle": "Review console errors and error notifications recorded on this device.",
-    "storageUnavailable": "Local error logs are available only in the installed desktop app.",
+    "storageUnavailable": "Local error logs are available only in an installed desktop app.",
     "records": "Error records",
     "captureSources": "Console errors and destructive error notifications are recorded. Their display is unchanged.",
-    "retention": "Daily files are stored locally and removed after 30 days.",
+    "retention": "Logs are stored locally and removed after 30 days.",
     "recordsTitle": "Recorded errors",
-    "path": "Stored locally in AppData\\Roaming\\com.atlas.app\\Logs.",
+    "path": "Stored locally on this device.",
     "search": "Search errors, routes, or details",
     "dateFilter": "Recorded date",
     "timestamp": "Timestamp",
@@ -4769,6 +4772,38 @@
     "noOtherWorkspaces": "No other workspaces available.",
     "createHint": "Create an isolated workspace branch for testing or parallel operations.",
     "noNested": "Cannot create branches from a branch workspace."
+  },
+  "accounts": {
+    "openSwitcher": "Switch local account",
+    "openCloudSwitcher": "Switch account",
+    "switchAccount": "Switch Account",
+    "localWorkspaceOnly": "Accounts available in this local workspace",
+    "cloudWorkspaceOnly": "Active accounts in this workspace",
+    "noneAvailable": "No accounts available.",
+    "offlineReady": "Offline ready",
+    "setupRequired": "Password setup required",
+    "onlineSignInRequired": "Online sign-in required",
+    "prepareOffline": "Prepare Offline Access",
+    "confirmSwitch": "Confirm Account Switch",
+    "enterPasswordFor": "Enter {{name}}'s password to switch accounts.",
+    "firstSetupDescription": "This account needs one online password validation on this device. Future switches will work fully offline.",
+    "prepare": "Prepare",
+    "switch": "Switch Account",
+    "cloudSwitchOffline": "Connect to the internet to switch accounts.",
+    "loadingMembers": "Loading workspace accounts…",
+    "cloudMembersUnavailable": "Workspace accounts could not be loaded.",
+    "cloudConfirmSwitchDescription": "Enter this account's password to switch. Your password will not be saved.",
+    "cloudSwitchErrors": {
+      "offline": "Connect to the internet before switching accounts.",
+      "unavailable": "This account is no longer available in this workspace.",
+      "connection": "Could not reach the sign-in service. Check your connection and try again.",
+      "credentials": "The password is incorrect for this account.",
+      "workspace_changed": "This account is no longer active in the current workspace.",
+      "outgoing_shift_cancelled": "Account switching was canceled before the current cashier shift was closed.",
+      "incoming_shift_cancelled": "The incoming cashier shift was canceled. The outgoing shift is closed and your original account has been restored.",
+      "restore_failed": "The outgoing cashier shift is closed, but your original sign-in could not be restored. Reload the app and sign in again.",
+      "failed": "Account switching could not be completed. Your original account has been restored."
+    }
   },
   "return": {
     "continueWithReturnable": "Continue with Returnable Items"

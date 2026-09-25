@@ -2377,8 +2377,9 @@ export function Settings() {
                     )}
 
                     {DeveloperTestButton && (
-                        <div className="flex justify-end">
+                        <div className="flex justify-end gap-2">
                             <Suspense fallback={null}>
+                                <DeveloperTestButton suiteId="account-switching" labelKey="devTesting.accountSwitcher" />
                                 <DeveloperTestButton suiteId="platform" />
                             </Suspense>
                         </div>

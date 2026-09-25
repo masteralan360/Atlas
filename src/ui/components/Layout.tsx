@@ -2550,7 +2550,9 @@ export function Layout({ children }: LayoutProps) {
                   isSidebarMini && !mobileSidebarOpen && 'flex-col p-0 gap-2'
                 )}
               >
-                {isLocalMode && !isDemoWorkspace(user?.workspaceCode) ? (
+                {user &&
+                !isDemoWorkspace(user.workspaceCode) &&
+                user.workspaceMode === 'local' ? (
                   <>
                     <LocalAccountSwitcher
                       isCompact={isSidebarMini && !mobileSidebarOpen}
@@ -2589,6 +2591,15 @@ export function Layout({ children }: LayoutProps) {
                       </Button>
                     ) : null}
                   </>
+                ) : user &&
+                  !isDemoWorkspace(user.workspaceCode) &&
+                  ['cloud', 'hybrid'].includes(user.workspaceMode) &&
+                  !sidebarCashierShift ? (
+                  <LocalAccountSwitcher
+                    isCompact={isSidebarMini && !mobileSidebarOpen}
+                    shiftBadge={sidebarAvatarShiftBadge}
+                    manualShiftActiveDuration={sidebarManualShiftActiveDuration}
+                  />
                 ) : (
                   <>
                     <div
@@ -2723,7 +2734,14 @@ export function Layout({ children }: LayoutProps) {
                       ) : null}
                     </div>
 
-                    {isSidebarMini && !mobileSidebarOpen ? (
+                    {user &&
+                    !isDemoWorkspace(user.workspaceCode) &&
+                    ['cloud', 'hybrid'].includes(user.workspaceMode) ? (
+                      <LocalAccountSwitcher
+                        isCompact={isSidebarMini && !mobileSidebarOpen}
+                        nameRoleOnly
+                      />
+                    ) : isSidebarMini && !mobileSidebarOpen ? (
                       <div className="text-center">
                         <p className="text-xs font-medium truncate max-w-[80px]">{user?.name}</p>
                         <p className="text-[10px] text-muted-foreground capitalize">{user?.role}</p>

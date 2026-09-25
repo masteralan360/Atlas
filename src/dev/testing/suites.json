@@ -1,4 +1,17 @@
 {
+  "account-switching": {
+    "titleKey": "devTesting.accountSwitcher",
+    "coverageHelpKey": "devTesting.accountSwitcherCoverageHelp",
+    "groups": [
+      {
+        "id": "cloud-hybrid",
+        "titleKey": "devTesting.accountSwitcherGroups.cloudHybrid",
+        "layer": "contract",
+        "files": ["src/auth/cloudAccountSwitcher.test.ts"]
+      }
+    ],
+    "unavailable": ["hosted-supabase", "browser-workflow", "native-session-storage"]
+  },
   "sale-orders": {
     "titleKey": "devTesting.saleOrders",
     "coverageHelpKey": "devTesting.saleOrdersIsolatedCoverageHelp",

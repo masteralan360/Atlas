@@ -4,9 +4,13 @@ import {
     LOG_SPAM_SUMMARY_INTERVAL_MS,
     type ErrorLogSpamSummary,
 } from './errorLogSpamBlocker'
+import { isPwaDesktop } from './platform'
 
 const ERROR_LOG_DIRECTORY = 'Logs'
 export const ERROR_LOG_RETENTION_DAYS = 30
+const PWA_ERROR_LOG_DATABASE_NAME = 'atlas-error-logs'
+const PWA_ERROR_LOG_DATABASE_VERSION = 1
+const PWA_ERROR_LOG_OBJECT_STORE = 'records'
 
 const ERROR_LOG_FILE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})\.jsonl$/
 const MAX_SERIALIZATION_DEPTH = 8
@@ -86,6 +90,7 @@ export interface ErrorToastLogInput {
 type FileSystemApi = typeof import('@tauri-apps/plugin-fs')
 
 let fileSystemPromise: Promise<FileSystemApi> | undefined
+let pwaErrorLogDatabasePromise: Promise<IDBDatabase> | undefined
 let cleanupScheduled = false
 let consoleErrorLoggerInstalled = false
 const pendingErrorLogRecords: ErrorLogRecord[] = []
@@ -101,6 +106,14 @@ let errorLogSpamBlocker = new ErrorLogSpamBlocker()
 function isTauriRuntime() {
     return typeof window !== 'undefined'
         && ('__TAURI__' in window || '__TAURI_METADATA__' in window || '__TAURI_INTERNALS__' in window)
+}
+
+function isPwaErrorLogRuntime() {
+    return isPwaDesktop() && typeof indexedDB !== 'undefined'
+}
+
+function isErrorLogRuntime() {
+    return isTauriRuntime() || isPwaErrorLogRuntime()
 }
 
 function isTauriDevelopmentRuntime() {
@@ -152,6 +165,46 @@ export function setErrorLogRecordingEnabled(enabled: boolean) {
 function loadFileSystem() {
     fileSystemPromise ??= import('@tauri-apps/plugin-fs')
     return fileSystemPromise
+}
+
+function loadPwaErrorLogDatabase() {
+    if (typeof indexedDB === 'undefined') {
+        return Promise.reject(new Error('IndexedDB is unavailable.'))
+    }
+
+    if (!pwaErrorLogDatabasePromise) {
+        const requestPromise = new Promise<IDBDatabase>((resolve, reject) => {
+            const request = indexedDB.open(PWA_ERROR_LOG_DATABASE_NAME, PWA_ERROR_LOG_DATABASE_VERSION)
+            request.onupgradeneeded = () => {
+                const database = request.result
+                if (!database.objectStoreNames.contains(PWA_ERROR_LOG_OBJECT_STORE)) {
+                    const store = database.createObjectStore(PWA_ERROR_LOG_OBJECT_STORE, { keyPath: 'id' })
+                    store.createIndex('timestamp', 'timestamp')
+                }
+            }
+            request.onsuccess = () => {
+                const database = request.result
+                database.onversionchange = () => database.close()
+                resolve(database)
+            }
+            request.onerror = () => reject(request.error ?? new Error('Unable to open the error log database.'))
+            request.onblocked = () => reject(new Error('The error log database is blocked.'))
+        })
+        pwaErrorLogDatabasePromise = requestPromise.catch((error: unknown) => {
+            pwaErrorLogDatabasePromise = undefined
+            throw error
+        })
+    }
+
+    return pwaErrorLogDatabasePromise
+}
+
+function waitForPwaErrorLogTransaction(transaction: IDBTransaction) {
+    return new Promise<void>((resolve, reject) => {
+        transaction.oncomplete = () => resolve()
+        transaction.onerror = () => reject(transaction.error ?? new Error('The error log database request failed.'))
+        transaction.onabort = () => reject(transaction.error ?? new Error('The error log database request was cancelled.'))
+    })
 }
 
 function getCurrentRoute() {
@@ -379,6 +432,26 @@ export function isExpiredErrorLogFile(fileName: string, now = new Date()) {
 }
 
 export async function cleanExpiredErrorLogs(now = new Date()) {
+    if (isPwaErrorLogRuntime()) {
+        try {
+            const database = await loadPwaErrorLogDatabase()
+            const transaction = database.transaction(PWA_ERROR_LOG_OBJECT_STORE, 'readwrite')
+            const store = transaction.objectStore(PWA_ERROR_LOG_OBJECT_STORE)
+            const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ERROR_LOG_RETENTION_DAYS).toISOString()
+            const request = store.index('timestamp').openCursor(IDBKeyRange.upperBound(cutoff, true))
+            request.onsuccess = () => {
+                const cursor = request.result
+                if (!cursor) return
+                cursor.delete()
+                cursor.continue()
+            }
+            await waitForPwaErrorLogTransaction(transaction)
+        } catch {
+            // Logging must never create another console error or interrupt the app.
+        }
+        return
+    }
+
     if (!isTauriRuntime()) return
 
     try {
@@ -393,6 +466,15 @@ export async function cleanExpiredErrorLogs(now = new Date()) {
 }
 
 async function persistErrorLogs(records: ErrorLogRecord[]) {
+    if (isPwaErrorLogRuntime()) {
+        const database = await loadPwaErrorLogDatabase()
+        const transaction = database.transaction(PWA_ERROR_LOG_OBJECT_STORE, 'readwrite')
+        const store = transaction.objectStore(PWA_ERROR_LOG_OBJECT_STORE)
+        records.forEach((record) => store.put(record))
+        await waitForPwaErrorLogTransaction(transaction)
+        return
+    }
+
     if (!isTauriRuntime()) return
 
     const { BaseDirectory, mkdir, writeTextFile } = await loadFileSystem()
@@ -503,7 +585,7 @@ function enqueueErrorLog(record: ErrorLogRecord) {
 }
 
 function queueErrorLog(record: ErrorLogRecord) {
-    if (!isTauriRuntime() || !isErrorLogRecordingEnabled()) return
+    if (!isErrorLogRuntime() || !isErrorLogRecordingEnabled()) return
 
     const decision = errorLogSpamBlocker.evaluate(record)
     decision.summaries.forEach((summary) => {
@@ -558,6 +640,28 @@ export function installConsoleErrorLogger() {
 }
 
 export async function readErrorLogs(): Promise<ErrorLogRecord[]> {
+    if (isPwaErrorLogRuntime()) {
+        try {
+            const database = await loadPwaErrorLogDatabase()
+            const transaction = database.transaction(PWA_ERROR_LOG_OBJECT_STORE, 'readonly')
+            const request = transaction.objectStore(PWA_ERROR_LOG_OBJECT_STORE).getAll()
+            const records = await new Promise<unknown[]>((resolve, reject) => {
+                request.onsuccess = () => resolve(request.result as unknown[])
+                request.onerror = () => reject(request.error ?? new Error('Unable to read the error log database.'))
+            })
+
+            return records.flatMap((value) => {
+                if (!value || typeof value !== 'object') return []
+                const record = value as Partial<ErrorLogRecord>
+                return record.version === 1 && typeof record.timestamp === 'string' && Array.isArray(record.arguments)
+                    ? [{ ...record, source: record.source === 'toast' ? 'toast' : 'console' } as ErrorLogRecord]
+                    : []
+            }).sort((first, second) => second.timestamp.localeCompare(first.timestamp))
+        } catch {
+            return []
+        }
+    }
+
     if (!isTauriRuntime()) return []
 
     const { BaseDirectory, readDir, readTextFile } = await loadFileSystem()
@@ -646,5 +750,5 @@ export async function exportErrorLogRecord(record: ErrorLogRecord) {
 }
 
 export function isErrorLogStorageAvailable() {
-    return isTauriRuntime()
+    return isTauriRuntime() || isPwaErrorLogRuntime()
 }
