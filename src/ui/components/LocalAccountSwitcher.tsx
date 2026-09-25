@@ -18,7 +18,6 @@ import {
 } from "@/auth/cloudAccountSwitcher";
 import {
   listLocalWorkspaceAccounts,
-  type LocalWorkspaceAccount,
 } from "@/auth/localAccountAuth";
 import { cn } from "@/lib/utils";
 import { platformService } from "@/services/platformService";
@@ -217,7 +216,7 @@ export function LocalAccountSwitcher({
         hasCredential: true,
       }));
 
-  const openPasswordDialog = (account: LocalWorkspaceAccount) => {
+  const openPasswordDialog = (account: SwitcherAccount) => {
     setSelectedAccount(account);
     setPassword("");
     setError(null);

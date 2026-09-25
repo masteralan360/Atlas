@@ -85,11 +85,11 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
         if (!open || environment !== 'hosted-supabase' || !ready || !token.current) return
         const abort = new AbortController()
         setLiveReadiness(null)
-        void testRunnerClient.liveReadiness(token.current, abort.signal)
+        void testRunnerClient.liveReadiness(token.current, suiteId, abort.signal)
             .then((result) => { if (!abort.signal.aborted) setLiveReadiness(result) })
             .catch((error) => { if (!abort.signal.aborted) setLiveReadiness({ status: 'blocked', reason: runnerErrorKey(error).replace('devTesting.errors.', '') }) })
         return () => abort.abort()
-    }, [open, environment, ready])
+    }, [open, environment, ready, suiteId])
 
     const selectEnvironment = (next: 'isolated' | 'hosted-supabase') => {
         setEnvironment(next)
@@ -180,7 +180,7 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
                     <div className="grid gap-2 sm:grid-cols-2">
                         {availableGroups.map((group) => <label key={group.id} className="flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm">
                             <Checkbox allowViewer aria-label={t(group.titleKey)} checked={selected.includes(group.id)} onCheckedChange={(checked) => setSelected((previous) => checked ? [...previous, group.id] : previous.filter((id) => id !== group.id))} disabled={busy} />
-                            <span><span className="block font-medium">{t(group.titleKey)}</span><span className="text-xs text-muted-foreground">{t(`devTesting.layers.${group.layer}`)}</span></span>
+                            <span><span className="block font-medium">{t(group.titleKey)}</span><span className="text-xs text-muted-foreground">{t(environment === 'hosted-supabase' && group.isolatedOnly ? 'devTesting.adapters.isolated' : `devTesting.layers.${group.layer}`)}</span></span>
                         </label>)}
                     </div>
                     {environment === 'isolated' && <div className="grid gap-3 sm:grid-cols-2">

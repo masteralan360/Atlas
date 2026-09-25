@@ -15,6 +15,7 @@ export interface TestGroup {
     layer: string
     files: string[]
     isolatedGroupId?: string
+    isolatedOnly?: boolean
 }
 export interface SuiteDefinition {
     titleKey: string

@@ -271,7 +271,7 @@ async function getStorageAccessSnapshot(
     return unrestrictedStorageAccess
   }
 
-  const role = activeRole ?? await (async () => {
+  const mirroredRole = await (async () => {
     const [user, profile] = await Promise.all([db.users.get(userId), db.profiles.get(userId)])
     return user?.workspaceId === workspaceId
       ? user.role
@@ -279,6 +279,11 @@ async function getStorageAccessSnapshot(
         ? profile.role
         : undefined
   })()
+  // Local mode has no server RLS to enforce membership. The active role alone
+  // cannot authorize a staff mutation when both membership mirrors are absent.
+  const role = isLocalWorkspaceMode(workspaceId)
+    ? mirroredRole ? activeRole ?? mirroredRole : undefined
+    : activeRole ?? mirroredRole
 
   if (!role) {
     return undefined

@@ -60,7 +60,7 @@ function dependencies(overrides: Partial<CloudAccountSwitchDependencies<Identity
       calls.push('check-incoming')
       return true
     },
-    restoreIdentity: async () => calls.push('restore'),
+    restoreIdentity: async () => { calls.push('restore') },
     ...overrides
   }
   return { deps, calls }

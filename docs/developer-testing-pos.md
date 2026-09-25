@@ -17,6 +17,8 @@ from production builds. The localhost preview is
 ```sh
 npm run test:pos
 npm run test:pos -- --groups checkout,remote-contract,failure-recovery --seed 42 --samples 100
+npm run test:pos:live
+npm run test:pos:live -- --groups checkout,financing,returns-exchanges --samples 1
 ```
 
 The controller saves live results and a JSON report under
@@ -47,6 +49,23 @@ financial assertions in `src/dev/testing/assertions/pos.ts`. Persistence cases d
 and reopen their disposable fake IndexedDB database and use a test-only workspace.
 Business scenarios fail on unexpected Supabase calls. Remote tests supply mocks;
 the controller strips app credentials and disables dotenv/live fetches.
+
+The **Hosted Supabase** environment uses the same dedicated, verified Cloud or
+Hybrid `DEV TEST` workspace as Sale Orders, with POS-owned fixtures and cases.
+Configure `.env.atlas-live-tests.local` as described in
+[the operator guide](./developer-testing.md). The runner checks the exact
+workspace and admin account before each group, limits live requests to that
+Supabase origin, and never inherits the current Atlas session or service key.
+Each hosted selection first runs its complete isolated group in a credential-free
+child. Checkout, pricing, currency, inventory, related units, financing,
+returns, service routing, remote authorization and recovery then run separate
+live cases. Cart, media uploads and UI access have **isolated checks only** in
+the hosted selection; their results are labeled as such and are not server
+checks. Hosted tests use `src/dev/testing/fixtures/posLive.ts`, create
+run-tagged product/storage/batch records, and inspect their own IDs through a
+fresh authenticated client. A passing case may retire its product; sale,
+payment, loan and return audit records remain. Failed fixtures are retained for
+inspection. Use an empty test workspace rather than business data.
 
 Cash, FIB, QiCard, ZainCash and FastPay are immediate POS methods. The fixture uses
 `CASH_AND_DIGITAL_PAYMENT_METHODS`; bank transfer belongs to other flows and is
@@ -137,13 +156,28 @@ fixed regressions always run. Assertions use independent expected values and rea
 actual persisted rows and the production ledger projection. When a generated
 failure reveals a defect, keep a small fixed regression after fixing it.
 
+Hosted cases call regular POS `commitPosCheckout` and the Sales return RPC and
+ledger persistence used by the product. They check actual sales, sale items,
+inventory, stock batches, payment transactions, account movements, loans and
+installments, and return audit/reversal rows. The account case needs the Payment
+Accounts module enabled; financing needs Loans. The dedicated workspace must
+have current POS migrations, including `complete_sale_with_loan`. This does not
+automate the rendered POS payment or return dialog.
+
+The hosted pricing regression sells a fractional quantity at a negotiated
+fractional unit price and requires the stored sale, line, and payment to keep
+the same exact amount. The hosted return regression requires partial and final
+returns to restore the original stock batch ID, even when its optional batch
+metadata is null, and to post linked cash reversal entries.
+
 ## Honest coverage limits
 
 Passing checks prove the selected functions and contracts. They do not guarantee
-no bugs or every possible scenario. Real POS payment-dialog interaction and the
-complete Sales return dialog, real Supabase SQL/RLS/server atomicity, native Local
-SQLite persistence/restart, Hybrid mirror recovery and scanner/camera/printer
-hardware remain declared unavailable. The recording SQLite stub verifies the
+no bugs or every possible scenario. Hosted checks verify only their selected
+Supabase effects and the dedicated admin account's access; broader SQL/RLS and
+other roles, real POS payment-dialog interaction and the complete Sales return
+dialog, native Local SQLite persistence/restart, Hybrid mirror recovery and
+scanner/camera/printer hardware remain outside the suite. The recording SQLite stub verifies the
 production write-set and commit/rollback contract, not a real database file.
 Existing Quick Order and return component tests do not automate their entire UI.
 

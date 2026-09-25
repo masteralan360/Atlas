@@ -52,7 +52,12 @@ describe('hosted Supabase test boundary', () => {
     ])
     expect(hosted.filter((group) => group.isolatedGroupId).map((group) => group.isolatedGroupId))
       .toEqual(validateRunOptions({ suiteId: 'sale-orders' }).groups.map((group) => group.id))
-    expect(() => validateRunOptions({ suiteId: 'pos', environment: 'hosted-supabase' })).toThrow('live_suite_unavailable')
+    const posIsolated = validateRunOptions({ suiteId: 'pos' }).groups.map((group) => group.id)
+    const posHosted = validateRunOptions({ suiteId: 'pos', environment: 'hosted-supabase' }).groups
+    expect(posHosted.map((group) => group.id)).toEqual(posIsolated)
+    expect(posHosted.filter((group) => group.isolatedOnly).map((group) => group.id))
+      .toEqual(['cart', 'media-uploads', 'ui-access'])
+    expect(posHosted.filter((group) => !group.isolatedOnly).every((group) => group.files.length > 0)).toBe(true)
   })
 
   it('blocks a workspace mismatch before any scenario write', async () => {
@@ -71,5 +76,29 @@ describe('hosted Supabase test boundary', () => {
     })
     await expect(preflightLive(parseLiveConfig(source), { fetchImpl })).rejects.toThrow('live_workspace_mismatch')
     expect(requests.every(({ path }) => path.startsWith('/auth/') || path === '/rest/v1/profiles' || path === '/rest/v1/workspaces')).toBe(true)
+  })
+
+  it('preflights POS tables without requiring the Sale Orders schema', async () => {
+    const paths = []
+    const fetchImpl = vi.fn(async (input) => {
+      const target = new URL(typeof input === 'string' ? input : input.url)
+      paths.push(target.pathname)
+      if (target.pathname === '/auth/v1/token') return Response.json({
+        access_token: 'test-access', refresh_token: 'test-refresh', token_type: 'bearer', expires_in: 3600,
+        user: { id, email: 'dev-test@example.com', aud: 'authenticated', role: 'authenticated' }
+      })
+      if (target.pathname === '/rest/v1/profiles') return Response.json({ id, current_workspace: id, role: 'admin' })
+      if (target.pathname === '/rest/v1/workspaces') return Response.json(target.searchParams.get('select') === 'id'
+        ? [{ id }] : { id, name: 'DEV TEST Atlas', data_mode: 'cloud' })
+      if (target.pathname === '/auth/v1/logout') return new Response(null, { status: 204 })
+      if (['sales', 'sale_items', 'inventory', 'stock_batches', 'payment_transactions']
+        .some((table) => target.pathname === `/rest/v1/${table}`)) return Response.json([])
+      throw new Error(`unexpected request: ${target.pathname}`)
+    })
+    const result = await preflightLive(parseLiveConfig(source), { fetchImpl, suiteId: 'pos' })
+    expect(result.mode).toBe('cloud')
+    expect(paths).not.toContain('/rest/v1/sales_orders')
+    expect(paths).toContain('/rest/v1/sales')
+    expect(paths).toContain('/rest/v1/payment_transactions')
   })
 })

@@ -160,6 +160,23 @@ describe('developer runner execution and reports', () => {
     expect(new Set(run.groups[0].tests.map((test) => test.id)).size).toBe(2)
   })
 
+  it('keeps a POS hosted selection with no server scenario labeled as isolated', async () => {
+    const { controller, children, spawnChild } = await arrangeController()
+    controller.preflight = vi.fn(async () => ({ target: { host: 'project.supabase.co', workspaceId: 'test-workspace', workspaceName: 'DEV TEST Atlas' }, mode: 'cloud' }))
+    const options = validateRunOptions({ suiteId: 'pos', environment: 'hosted-supabase', groupIds: ['cart'], seed: 0, samples: 1 })
+    const config = {
+      origin: 'https://project.supabase.co', ATLAS_LIVE_SUPABASE_KEY: 'public-test-key',
+      ATLAS_LIVE_TEST_EMAIL: 'dev-test@example.com', ATLAS_LIVE_TEST_PASSWORD: 'test-password',
+      ATLAS_LIVE_WORKSPACE_ID: 'test-workspace', ATLAS_LIVE_WORKSPACE_NAME: 'DEV TEST Atlas'
+    }
+    const run = controller.startValidated(options, { config, readiness: await controller.preflight(config) })
+    finishChild(children[0])
+    await controller.completion
+    expect(run.status).toBe('passed')
+    expect(run.groups[0].tests.map((test) => test.environment)).toEqual(['isolated'])
+    expect(spawnChild).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps a paired group failed when its isolated checks fail but hosted checks pass', async () => {
     const { controller, children } = await arrangeController()
     controller.preflight = vi.fn(async () => ({ target: { host: 'project.supabase.co', workspaceId: 'test-workspace', workspaceName: 'DEV TEST Atlas' }, mode: 'cloud' }))

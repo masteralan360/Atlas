@@ -27,8 +27,9 @@ runner architecture, rather than a universal test specification.
 - UI runs and CLI runs share the registry, execution controller, and reporter.
   The selected environment chooses the isolated or hosted Vitest configuration.
 - Sale Orders V1, regular POS and Post Service are independent suites. Sale Orders
-  has an opt-in hosted Supabase cancellation group; POS and Post Service retain
-  isolated request contract groups. Complete browser, Hybrid native, and Local
+  and POS have opt-in hosted Supabase groups; Post Service retains isolated
+  request contract groups. POS cart, media uploads and UI access are local-only
+  selections even in a hosted run. Complete browser, Hybrid native, and Local
   native adapters remain unavailable.
 
 "Selected checks passed" means precisely that. It is not a guarantee of no
@@ -65,7 +66,7 @@ CLI → the same TestController and registered suite
 | Order financial/stock assertions | `src/dev/testing/assertions/saleOrders.ts` | Sale Orders-specific |
 | Page integration | `src/ui/pages/Orders.tsx` | Entry point on the sales tab only |
 | Regular POS scenario suites | `src/dev/testing/suites/pos*.test.ts` | POS-specific, excluding Instant POS |
-| POS fixtures and assertions | `src/dev/testing/fixtures/pos.ts`, `src/dev/testing/assertions/pos.ts` | Independent of Sale Orders fixtures and business rules |
+| POS fixtures and assertions | `src/dev/testing/fixtures/pos.ts`, `posLive.ts`, `src/dev/testing/assertions/pos.ts` | Independent of Sale Orders fixtures and business rules; hosted fixture verifies the workspace and records IDs |
 | POS SQLite adapter stub | `src/dev/testing/fixtures/sqlite.ts` | Recording contract adapter, not native persistence |
 | POS production persistence | `src/local-db/posCheckout.ts`, `posSaleReturns.ts` | Used by the actual POS and Sales pages as well as tests |
 | POS cart and retry snapshot logic | `src/lib/posCart.ts`, `posCheckoutAttempt.ts`, `posPaymentPolicy.ts` | Production calculations, held carts, retry identities and domain routing |
@@ -113,8 +114,8 @@ execution adapter. All current groups use the same isolated Vitest configuration
 New layers need appropriate translations and, when necessary, explicit runner
 support. Merely labeling a group `browser` or `native` implements neither.
 
-The Sale Orders suite also has `liveGroups` for its independent hosted Supabase
-adapter. The `live` layer describes those tests, while the explicit run
+Sale Orders and POS have independent `liveGroups` for the hosted Supabase
+adapter. The `live` layer describes server tests, while the explicit run
 `environment` selects `hosted-supabase`. A hosted group may declare
 `isolatedGroupId`; the controller runs that exact isolated group first in a
 credential-free, network-blocked child, then rechecks the live target and runs
@@ -123,6 +124,10 @@ environment, and both parts must pass. Keep each module's live scenarios
 independent; Sale Orders is a reference for runner wiring, not a universal
 business fixture or assertion model. Do not move isolated files into the live
 allowlist or treat a mocked request contract as a deployed database check.
+For a hosted POS selection with no relevant Supabase scenario,
+set `isolatedOnly: true` and `files: []`; the controller runs just the paired
+isolated group, retains its isolated label and result, and makes no claim of a
+server check. Document such groups in the suite coverage copy.
 
 `unavailable` lists declared coverage gaps, rendered using
 `devTesting.environments.<id>`. It is copied into reports and does not make an
@@ -353,14 +358,14 @@ when its semantics actually apply to multiple independently defined suites.
 ### Independent regular POS suite
 
 Regular POS is registered as `pos` and mounted on `/pos`, without an Instant POS
-entry point. Its fixture, assertions, generator and ten groups are independent
+entry point. Its fixtures, assertions, generator and thirteen groups are independent
 from Sale Orders V1. Cash, FIB, QiCard, ZainCash and FastPay use the shared immediate
 payment registry; loans create obligations. POS Quick Orders remain normal Sales
 Orders and Activities retain their own transaction domain.
 
 Read [the POS agent handoff](./developer-testing-pos.md) for production entry
 points, transaction boundaries, group ownership, failure/recovery behavior and
-coverage limits. Existing stock, payment, exchange and Quick Order regressions
+hosted fixture rules. Existing stock, payment, exchange and Quick Order regressions
 can support both suites without coupling their scenario definitions.
 
 ## 7. Extension workflow
@@ -481,6 +486,7 @@ npm run test:sale-orders:live
 # Regular POS, including its own generated checkout cases
 npm run test:pos
 npm run test:pos -- --groups checkout,remote-contract,failure-recovery --seed 42 --samples 100
+npm run test:pos:live
 
 # Generic runner, after another suite has actually been registered
 node scripts/dev-testing/cli.mjs --suite purchase-orders --groups receiving --seed 42 --samples 16

@@ -32,7 +32,7 @@ export const testRunnerClient = {
     session: (signal?: AbortSignal) => request<RunnerSession>('/session', { signal }),
     run: (token: string, signal?: AbortSignal) => request<TestRun | null>('/run', { token, signal }),
     start: (token: string, options: { suiteId: string; environment: 'isolated' | 'hosted-supabase'; groupIds: string[]; seed: number; samples: number }) => request<TestRun>(options.environment === 'hosted-supabase' ? '/live-runs' : '/runs', { token, body: options, timeoutMs: options.environment === 'hosted-supabase' ? 90_000 : 10_000 }),
-    liveReadiness: (token: string, signal?: AbortSignal) => request<LiveReadiness>('/live-readiness', { token, signal, timeoutMs: 90_000 }),
+    liveReadiness: (token: string, suiteId: string, signal?: AbortSignal) => request<LiveReadiness>(`/live-readiness?suite=${encodeURIComponent(suiteId)}`, { token, signal, timeoutMs: 90_000 }),
     cancel: (token: string, id: string) => request<TestRun>('/cancel', { token, body: { id } })
 }
 

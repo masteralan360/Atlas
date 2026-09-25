@@ -97,17 +97,18 @@ export class TestController {
     try {
       const config = loadLiveConfig(this.root)
       let readiness
-      try { readiness = await this.preflight(config) }
+      try { readiness = await this.preflight(config, { suiteId: options.suiteId }) }
       catch (error) { throw new Error(String(error.message || error).startsWith('live_') ? error.message : 'live_preflight_failed') }
       if (this.disposed) throw new Error('runner_closed')
       return this.startValidated(options, { config, readiness })
     } finally { this.preflighting = false }
   }
 
-  async liveReadiness() {
+  async liveReadiness(suiteId = 'sale-orders') {
     try {
+      if (!suites[suiteId]?.liveGroups?.length) throw new Error('live_suite_unavailable')
       const config = loadLiveConfig(this.root)
-      const readiness = await this.preflight(config)
+      const readiness = await this.preflight(config, { suiteId })
       return { status: 'ready', target: readiness.target, mode: readiness.mode }
     } catch (error) {
       return { status: 'blocked', reason: String(error.message || error).startsWith('live_') ? error.message : 'live_preflight_failed' }
@@ -158,8 +159,15 @@ export class TestController {
           continue
         }
       }
+      // A hosted selection can include a local-only group. Preserve the isolated
+      // labels and result instead of running an empty live child or implying a
+      // database assertion that the group does not have.
+      if (live && group.isolatedOnly) {
+        this.onGroupResult(result)
+        continue
+      }
       if (live) {
-        try { await this.preflight(live.config) }
+        try { await this.preflight(live.config, { suiteId: options.suiteId }) }
         catch (error) {
           result.status = 'failed'
           result.errors.push(String(error.message || error).startsWith('live_') ? error.message : 'live_preflight_failed')
@@ -286,7 +294,10 @@ export function testingMiddleware(controller) {
     try {
       if (req.method === 'POST' && path === `${PREFIX}/runs`) return json(res, 202, controller.start(await readBody(req)))
       if (req.method === 'POST' && path === `${PREFIX}/live-runs`) return json(res, 202, await controller.startLive(await readBody(req)))
-      if (req.method === 'GET' && path === `${PREFIX}/live-readiness`) return json(res, 200, await controller.liveReadiness())
+      if (req.method === 'GET' && path === `${PREFIX}/live-readiness`) {
+        const suiteId = new URL(req.url, 'http://localhost').searchParams.get('suite') ?? 'sale-orders'
+        return json(res, 200, await controller.liveReadiness(suiteId))
+      }
       if (req.method === 'GET' && path === `${PREFIX}/run`) return json(res, 200, controller.run)
       if (req.method === 'POST' && path === `${PREFIX}/cancel`) return json(res, 200, controller.cancel((await readBody(req)).id))
       return json(res, 404, { error: 'not_found' })

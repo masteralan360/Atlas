@@ -184,6 +184,22 @@
     "titleKey": "devTesting.pos",
     "samplesHelpKey": "devTesting.posSamplesHelp",
     "coverageHelpKey": "devTesting.posCoverageHelp",
+    "liveCoverageHelpKey": "devTesting.posLiveCoverageHelp",
+    "liveGroups": [
+      { "id": "checkout", "titleKey": "devTesting.posGroups.checkout", "layer": "live", "isolatedGroupId": "checkout", "files": ["src/dev/testing/suites/posCheckoutLive.test.ts"] },
+      { "id": "cart", "titleKey": "devTesting.posGroups.cart", "layer": "calculation", "isolatedGroupId": "cart", "isolatedOnly": true, "files": [] },
+      { "id": "pricing", "titleKey": "devTesting.posGroups.pricing", "layer": "live", "isolatedGroupId": "pricing", "files": ["src/dev/testing/suites/posPricingLive.test.ts"] },
+      { "id": "currency", "titleKey": "devTesting.posGroups.currency", "layer": "live", "isolatedGroupId": "currency", "files": ["src/dev/testing/suites/posCurrencyLive.test.ts"] },
+      { "id": "inventory", "titleKey": "devTesting.posGroups.inventory", "layer": "live", "isolatedGroupId": "inventory", "files": ["src/dev/testing/suites/posInventoryLive.test.ts"] },
+      { "id": "related-units", "titleKey": "devTesting.posGroups.relatedUnits", "layer": "live", "isolatedGroupId": "related-units", "files": ["src/dev/testing/suites/posUnitsLive.test.ts"] },
+      { "id": "financing", "titleKey": "devTesting.posGroups.financing", "layer": "live", "isolatedGroupId": "financing", "files": ["src/dev/testing/suites/posFinancingLive.test.ts"] },
+      { "id": "returns-exchanges", "titleKey": "devTesting.posGroups.returns", "layer": "live", "isolatedGroupId": "returns-exchanges", "files": ["src/dev/testing/suites/posReturnsLive.test.ts"] },
+      { "id": "entry-routing", "titleKey": "devTesting.posGroups.routing", "layer": "live", "isolatedGroupId": "entry-routing", "files": ["src/dev/testing/suites/posRoutingLive.test.ts"] },
+      { "id": "remote-contract", "titleKey": "devTesting.posGroups.remote", "layer": "live", "isolatedGroupId": "remote-contract", "files": ["src/dev/testing/suites/posRemoteLive.test.ts"] },
+      { "id": "media-uploads", "titleKey": "devTesting.posGroups.mediaUploads", "layer": "contract", "isolatedGroupId": "media-uploads", "isolatedOnly": true, "files": [] },
+      { "id": "failure-recovery", "titleKey": "devTesting.posGroups.recovery", "layer": "live", "isolatedGroupId": "failure-recovery", "files": ["src/dev/testing/suites/posRecoveryLive.test.ts"] },
+      { "id": "ui-access", "titleKey": "devTesting.groups.uiAccess", "layer": "calculation", "isolatedGroupId": "ui-access", "isolatedOnly": true, "files": [] }
+    ],
     "groups": [
       {
         "id": "checkout",
@@ -331,7 +347,7 @@
     ],
     "unavailable": [
       "browser-workflow",
-      "cloud-database",
+      "cloud-database-broad",
       "hybrid-native",
       "local-native",
       "hardware"

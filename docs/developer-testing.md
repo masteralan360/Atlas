@@ -51,6 +51,7 @@ npm run test:sale-orders
 npm run test:sale-orders -- --groups matrix,lifecycle --seed 42 --samples 100
 npm run test:pos
 npm run test:pos -- --groups checkout,remote-contract,failure-recovery --seed 42 --samples 100
+npm run test:pos:live
 npm run test:post-service
 npm run test:post-service -- --groups remote-contract,failure-recovery --seed 42 --samples 16
 ```
@@ -61,10 +62,12 @@ checks passed; the report also records environment coverage gaps.
 
 ## Hosted Supabase checks
 
-Sale Orders has a separate **Hosted Supabase** environment in the Developer Test
-dialog. It signs in as a dedicated admin test user and runs production order
-functions against a dedicated Cloud or Hybrid `DEV TEST` workspace. It creates
-real partner, storage, product, financed order, loan and payment records. Some
+Sale Orders and regular POS have a separate **Hosted Supabase** environment in
+their Developer Test dialogs. It signs in as a dedicated admin test user and
+runs production functions against a dedicated Cloud or Hybrid `DEV TEST`
+workspace. Sale Orders creates real partner, storage, product, financed order,
+loan and payment records. POS creates its own storage, product, batch, sale,
+payment, loan and return records. Some
 financial history remains for audit; use an empty test workspace, never a
 business workspace. A Hybrid selection checks its Supabase source of truth,
 but does not exercise the desktop SQLite mirror.
@@ -75,7 +78,7 @@ publishable or legacy anon key, dedicated admin email/password, and exact
 workspace ID/name. Give this test account access to only that workspace. The
 filled file is gitignored. The local runner checks the account's current and
 only visible workspace, its `DEV TEST` name, Cloud/Hybrid mode, and the
-Sale Orders schema before each live group. A mismatch blocks the run before
+required Supabase schema before each live group. A mismatch blocks the run before
 scenario writes. The developer UI receives readiness and the target identity,
 never the credentials. Network requests in the live child are limited to the
 configured Supabase HTTPS origin. The isolated environment remains network
@@ -117,10 +120,15 @@ order, payment, or stock movement is created. This boundary requires the
 Run it from the dialog or with `npm run test:sale-orders:live`. This command is
 opt-in and is excluded from normal `npm test` and isolated developer runs.
 
-Regular POS, Post Service, browser interaction, and native SQLite still require
-their own live adapters and scenarios. Their isolated request contract checks
-remain useful for client failures and retry logic; they cannot prove deployed
-RLS or server-side effects.
+Regular POS uses the same guarded hosted environment with POS-owned fixtures.
+Its hosted groups pair isolated checks with focused live checkout, payment,
+account, pricing, currency, batch, related-unit, financing, return, service,
+authorization and rollback scenarios. Cart, media uploads and UI access remain
+isolated-only selections and are labeled accordingly. Run
+`npm run test:pos:live`; its cases do not exercise Instant POS. Post Service,
+browser interaction and native SQLite still require separate live adapters or
+scenarios. Isolated request contracts remain useful for failures and retries,
+but only hosted cases prove their selected server effects.
 
 ## Sale Orders V1 coverage
 
@@ -173,8 +181,9 @@ reuse Sale Orders' scenarios. The complete rendered POS checkout and Sales retur
 dialog are not automated by this suite.
 
 Local transaction checks use disposable IndexedDB, with an additional recording
-SQLite adapter test for commit/rollback. Real Supabase SQL/RLS, native Local and
-Hybrid persistence/restart, and scanner/camera/printer hardware remain unavailable.
+SQLite adapter test for commit/rollback. Hosted cases verify selected Supabase
+SQL and persisted effects; broader permissions, native Local and Hybrid
+persistence/restart, and scanner/camera/printer hardware remain unavailable.
 Read [the POS implementation and agent handoff](./developer-testing-pos.md) before
 expanding the suite or changing its production transaction boundaries.
 

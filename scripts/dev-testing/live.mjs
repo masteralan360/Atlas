@@ -82,7 +82,7 @@ export function createLiveFetch(origin, fetchImpl = globalThis.fetch) {
   }
 }
 
-export async function preflightLive(config, { fetchImpl = globalThis.fetch } = {}) {
+export async function preflightLive(config, { fetchImpl = globalThis.fetch, suiteId = 'sale-orders' } = {}) {
   const client = createClient(config.origin, config.ATLAS_LIVE_SUPABASE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     global: { fetch: createLiveFetch(config.origin, fetchImpl) }
@@ -104,9 +104,17 @@ export async function preflightLive(config, { fetchImpl = globalThis.fetch } = {
       .select('id').limit(2)
     if (accessError || !Array.isArray(accessible) || accessible.length !== 1
       || accessible[0].id !== config.ATLAS_LIVE_WORKSPACE_ID) throw new Error('live_workspace_mismatch')
-    const { error: crmError } = await client.schema('crm').from('sales_orders')
-      .select('id').eq('workspace_id', config.ATLAS_LIVE_WORKSPACE_ID).limit(1)
-    if (crmError) throw new Error('live_schema_unavailable')
+    if (suiteId === 'sale-orders') {
+      const { error } = await client.schema('crm').from('sales_orders')
+        .select('id').eq('workspace_id', config.ATLAS_LIVE_WORKSPACE_ID).limit(1)
+      if (error) throw new Error('live_schema_unavailable')
+    } else if (suiteId === 'pos') {
+      for (const table of ['sales', 'sale_items', 'inventory', 'stock_batches', 'payment_transactions']) {
+        const { error } = await client.from(table).select('id')
+          .eq('workspace_id', config.ATLAS_LIVE_WORKSPACE_ID).limit(1)
+        if (error) throw new Error('live_schema_unavailable')
+      }
+    } else throw new Error('live_suite_unavailable')
     return { target: liveTarget(config), mode: workspace.data_mode, userId: signIn.user.id }
   } finally { await client.auth.signOut().catch(() => undefined) }
 }
