@@ -312,6 +312,9 @@ async function syncUpserts(tableName: InstallmentSalesTableName, entities: SyncE
 }
 
 async function assertPartner(workspaceId: string, partnerId: string) {
+  if (!await canAccessBusinessPartnerInLocalCache(workspaceId, partnerId)) {
+    throw new Error('Customer business partner is required')
+  }
   const partner = await db.business_partners.get(partnerId)
   if (!partner || partner.workspaceId !== workspaceId || partner.isDeleted || partner.mergedIntoBusinessPartnerId) {
     throw new Error('Customer business partner is required')

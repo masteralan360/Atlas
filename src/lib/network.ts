@@ -7,6 +7,8 @@ let activeBusinessWorkspaceId: string | null = null;
 let activeBusinessUserId: string | null = null;
 let activeBusinessUserRole: 'admin' | 'staff' | 'viewer' | null = null;
 let activeBusinessUserWorkspaceId: string | null = null;
+let businessPartnerGroupPrivacyWorkspaceId: string | null = null;
+let businessPartnerGroupPrivacyEnabled = false;
 
 // Update the global state
 export function setNetworkStatus(online: boolean) {
@@ -47,6 +49,19 @@ export function getActiveBusinessUserRole(workspaceId?: string | null) {
 
 export function getActiveBusinessWorkspaceId() {
     return activeBusinessWorkspaceId;
+}
+
+export function setBusinessPartnerGroupPrivacyAccess(workspaceId: string | null | undefined, enabled: boolean) {
+    businessPartnerGroupPrivacyWorkspaceId = workspaceId ?? null;
+    businessPartnerGroupPrivacyEnabled = Boolean(workspaceId && enabled);
+}
+
+export function hasBusinessPartnerGroupPrivacyAccess(workspaceId?: string | null) {
+    return Boolean(
+        businessPartnerGroupPrivacyEnabled
+        && businessPartnerGroupPrivacyWorkspaceId
+        && (!workspaceId || businessPartnerGroupPrivacyWorkspaceId === workspaceId)
+    );
 }
 
 function getWorkspaceIdForBusinessData(workspaceId?: string | null) {

@@ -1,6 +1,8 @@
 import { db } from './database'
+import { getActiveBusinessUserId, getActiveBusinessUserRole, hasBusinessPartnerGroupPrivacyAccess } from '@/lib/network'
+import { getVisibleBusinessPartnerIdsByGroup } from '@/lib/businessPartnerGroupPrivacy'
 
-import type { BusinessPartnerRole } from './models'
+import type { BusinessPartner, BusinessPartnerRole } from './models'
 
 export type BusinessPartnerAccessScope = 'customer' | 'supplier'
 
@@ -18,12 +20,48 @@ export async function canAccessBusinessPartnerInLocalCache(
     }
 
     const partner = await db.business_partners.get(businessPartnerId)
-    return Boolean(
+    const validPartner = Boolean(
         partner
         && !partner.isDeleted
         && partner.workspaceId === workspaceId
         && hasRoleForScope(partner.role, scope)
     )
+    if (!validPartner || !partner) return false
+    return canViewBusinessPartnerByGroupPrivacy(workspaceId, partner)
+}
+
+export async function filterBusinessPartnersByGroupPrivacy(
+    workspaceId: string,
+    partners: readonly BusinessPartner[]
+): Promise<BusinessPartner[]> {
+    if (!hasBusinessPartnerGroupPrivacyAccess(workspaceId)) return [...partners]
+    const viewer = {
+        userId: getActiveBusinessUserId(),
+        role: getActiveBusinessUserRole(workspaceId),
+        featureEnabled: true
+    }
+    const [groups, memberships, assignments] = await Promise.all([
+        db.business_partner_groups.where('workspaceId').equals(workspaceId).toArray(),
+        db.business_partner_group_users.where('workspaceId').equals(workspaceId).toArray(),
+        db.business_partner_group_partners.where('workspaceId').equals(workspaceId).toArray()
+    ])
+    const visiblePartnerIds = getVisibleBusinessPartnerIdsByGroup(groups, memberships, assignments, viewer)
+    return visiblePartnerIds === null ? [...partners] : partners.filter((partner) => visiblePartnerIds.has(partner.id))
+}
+
+async function canViewBusinessPartnerByGroupPrivacy(workspaceId: string, partner: BusinessPartner) {
+    if (!hasBusinessPartnerGroupPrivacyAccess(workspaceId)) return true
+    const [groups, memberships, assignments] = await Promise.all([
+        db.business_partner_groups.where('workspaceId').equals(workspaceId).toArray(),
+        db.business_partner_group_users.where('workspaceId').equals(workspaceId).toArray(),
+        db.business_partner_group_partners.where('workspaceId').equals(workspaceId).toArray()
+    ])
+    const visiblePartnerIds = getVisibleBusinessPartnerIdsByGroup(groups, memberships, assignments, {
+        userId: getActiveBusinessUserId(),
+        role: getActiveBusinessUserRole(workspaceId),
+        featureEnabled: true
+    })
+    return visiblePartnerIds === null || visiblePartnerIds.has(partner.id)
 }
 
 export async function canAccessBusinessPartnerFacetInLocalCache(

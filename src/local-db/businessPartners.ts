@@ -14,6 +14,11 @@ import {
 import { roundOrderValue } from '@/lib/orderPrecision'
 import { generateId } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { assignNewBusinessPartnerToCreatorGroups } from './businessPartnerGroups'
+import { getVisibleBusinessPartnerIdsByGroup, type BusinessPartnerGroupPrivacyViewer } from '@/lib/businessPartnerGroupPrivacy'
+import { useAuth } from '@/auth/AuthContext'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { getActiveBusinessUserId, getActiveBusinessUserRole, hasBusinessPartnerGroupPrivacyAccess } from '@/lib/network'
 
 import { db } from './database'
 import { serializePartnerSummaryRefresh } from './partnerSummaryRefresh'
@@ -478,7 +483,14 @@ async function getPartnerByAnyId(id: string) {
 }
 
 export async function getBusinessPartnerByAnyId(id: string) {
-  return getPartnerByAnyId(id)
+  const partner = await getPartnerByAnyId(id)
+  if (!partner || !hasBusinessPartnerGroupPrivacyAccess(partner.workspaceId)) return partner
+  const viewer: BusinessPartnerGroupPrivacyViewer = {
+    userId: getActiveBusinessUserId(),
+    role: getActiveBusinessUserRole(partner.workspaceId),
+    featureEnabled: true,
+  }
+  return await canViewPartnerForGroupPrivacy(partner, viewer) ? partner : undefined
 }
 
 async function syncCustomerFacet(customer: Customer) {
@@ -1336,7 +1348,11 @@ export async function ensurePartnerFacet(partnerId: string, facetType: PartnerFa
   return facet
 }
 
-async function readBusinessPartners(workspaceId: string | undefined, filters?: PartnerFilterOptions) {
+async function readBusinessPartners(
+  workspaceId: string | undefined,
+  filters?: PartnerFilterOptions,
+  viewer?: BusinessPartnerGroupPrivacyViewer,
+) {
   if (!workspaceId) return []
   const rows = await db.business_partners
       .where('workspaceId')
@@ -1365,19 +1381,37 @@ async function readBusinessPartners(workspaceId: string | undefined, filters?: P
         return true
       })
       .toArray()
-  return rows
+  let visibleRows = rows
+  if (viewer?.featureEnabled && viewer.role !== 'admin') {
+    const [groups, groupUsers, groupPartners] = await Promise.all([
+      db.business_partner_groups.where('workspaceId').equals(workspaceId).toArray(),
+      db.business_partner_group_users.where('workspaceId').equals(workspaceId).toArray(),
+      db.business_partner_group_partners.where('workspaceId').equals(workspaceId).toArray(),
+    ])
+    const visiblePartnerIds = getVisibleBusinessPartnerIdsByGroup(groups, groupUsers, groupPartners, viewer) ?? new Set<string>()
+    visibleRows = rows.filter((partner) => visiblePartnerIds.has(partner.id))
+  }
+
+  return visibleRows
     .map(normalizeRuntimePartnerName)
     .filter((partner) => matchesPartnerRoleFilter(partner, filters?.roles))
     .sort((a, b) => a.partnerName.localeCompare(b.partnerName))
 }
 
 export function useBusinessPartners(workspaceId: string | undefined, filters?: PartnerFilterOptions) {
+  const { user } = useAuth()
+  const { hasCapability } = useWorkspace()
   const online = useNetworkStatus()
   const filtersKey = JSON.stringify(filters || {})
+  const viewer = useMemo<BusinessPartnerGroupPrivacyViewer>(() => ({
+    userId: user?.id,
+    role: user?.role,
+    featureEnabled: hasCapability('businessPartnerGroupPrivacy'),
+  }), [hasCapability, user?.id, user?.role])
 
   const partners = useLiveQuery(
-    () => readBusinessPartners(workspaceId, filters),
-    [filtersKey, workspaceId]
+    () => readBusinessPartners(workspaceId, filters, viewer),
+    [filtersKey, workspaceId, viewer.featureEnabled, viewer.role, viewer.userId]
   )
 
   useEffect(() => {
@@ -1401,6 +1435,13 @@ export function useBusinessPartners(workspaceId: string | undefined, filters?: P
           acquireTableHydrationFromSupabase('payment_transactions', db.payment_transactions, workspaceId)
         ]
       : []
+    if (shouldHydrate && viewer.featureEnabled) {
+      leases.push(
+        acquireTableHydrationFromSupabase('business_partner_groups', db.business_partner_groups, workspaceId),
+        acquireTableHydrationFromSupabase('business_partner_group_users', db.business_partner_group_users, workspaceId),
+        acquireTableHydrationFromSupabase('business_partner_group_partners', db.business_partner_group_partners, workspaceId),
+      )
+    }
 
     const finishHydration = async () => {
       if (!shouldHydrate) {
@@ -1425,7 +1466,7 @@ export function useBusinessPartners(workspaceId: string | undefined, filters?: P
       disposed = true
       leases.forEach((lease) => lease.release())
     }
-  }, [online, workspaceId])
+  }, [online, workspaceId, viewer.featureEnabled])
 
   return useMemo(
     () => toLiveCollection(partners, Boolean(workspaceId) && partners === undefined),
@@ -1434,17 +1475,66 @@ export function useBusinessPartners(workspaceId: string | undefined, filters?: P
 }
 
 export function useBusinessPartnersLoading(workspaceId: string | undefined, filters?: PartnerFilterOptions) {
+  const { user } = useAuth()
+  const { hasCapability } = useWorkspace()
   const filtersKey = JSON.stringify(filters || {})
+  const viewer: BusinessPartnerGroupPrivacyViewer = {
+    userId: user?.id,
+    role: user?.role,
+    featureEnabled: hasCapability('businessPartnerGroupPrivacy'),
+  }
   const partners = useLiveQuery(
-    () => readBusinessPartners(workspaceId, filters),
-    [filtersKey, workspaceId]
+    () => readBusinessPartners(workspaceId, filters, viewer),
+    [filtersKey, workspaceId, viewer.featureEnabled, viewer.role, viewer.userId]
   )
 
   return Boolean(workspaceId) && partners === undefined
 }
 
 export function useBusinessPartner(partnerId: string | undefined) {
-  return useLiveQuery(() => (partnerId ? getPartnerByAnyId(partnerId) : undefined), [partnerId])
+  const { user } = useAuth()
+  const { activeWorkspace, hasCapability } = useWorkspace()
+  const online = useNetworkStatus()
+  const activeWorkspaceId = activeWorkspace?.id ?? user?.workspaceId
+  const viewer: BusinessPartnerGroupPrivacyViewer = {
+    userId: user?.id,
+    role: user?.role,
+    featureEnabled: hasCapability('businessPartnerGroupPrivacy'),
+  }
+  const partner = useLiveQuery(async () => {
+    if (!partnerId) return undefined
+    const candidate = await getPartnerByAnyId(partnerId)
+    if (!candidate || !await canViewPartnerForGroupPrivacy(candidate, viewer)) return undefined
+    return candidate
+  }, [partnerId, viewer.featureEnabled, viewer.role, viewer.userId])
+
+  useEffect(() => {
+    if (!partnerId || !viewer.featureEnabled || !online || !shouldUseCloudBusinessData(activeWorkspaceId)) return
+    const workspaceId = activeWorkspaceId
+    if (!workspaceId) return
+    const leases = [
+      acquireTableHydrationFromSupabase('business_partner_groups', db.business_partner_groups, workspaceId),
+      acquireTableHydrationFromSupabase('business_partner_group_users', db.business_partner_group_users, workspaceId),
+      acquireTableHydrationFromSupabase('business_partner_group_partners', db.business_partner_group_partners, workspaceId),
+    ]
+    return () => leases.forEach((lease) => lease.release())
+  }, [activeWorkspaceId, online, partnerId, viewer.featureEnabled])
+
+  return partner
+}
+
+async function canViewPartnerForGroupPrivacy(
+  partner: BusinessPartner,
+  viewer: BusinessPartnerGroupPrivacyViewer,
+) {
+  if (!viewer.featureEnabled || viewer.role === 'admin') return true
+  const [groups, groupUsers, groupPartners] = await Promise.all([
+    db.business_partner_groups.where('workspaceId').equals(partner.workspaceId).toArray(),
+    db.business_partner_group_users.where('workspaceId').equals(partner.workspaceId).toArray(),
+    db.business_partner_group_partners.where('workspaceId').equals(partner.workspaceId).toArray(),
+  ])
+  const visiblePartnerIds = getVisibleBusinessPartnerIdsByGroup(groups, groupUsers, groupPartners, viewer)
+  return visiblePartnerIds === null || visiblePartnerIds.has(partner.id)
 }
 
 export function useAgents(workspaceId: string | undefined) {
@@ -1534,6 +1624,7 @@ export async function createBusinessPartner(
   }) as BusinessPartner
 
   await db.business_partners.put(partner)
+  await assignNewBusinessPartnerToCreatorGroups(workspaceId, partner.id)
   await syncUpsertEntities('business_partners', [partner as unknown as SyncEntity], workspaceId)
 
   let workingPartner = partner
@@ -1590,6 +1681,15 @@ export async function updateBusinessPartner(
   const storedPartner = await db.business_partners.get(visiblePartner.id)
   const existing =
     storedPartner && !storedPartner.isDeleted ? normalizeRuntimePartnerName(storedPartner) : visiblePartner
+
+  if (hasBusinessPartnerGroupPrivacyAccess(existing.workspaceId)) {
+    const viewer: BusinessPartnerGroupPrivacyViewer = {
+      userId: getActiveBusinessUserId(),
+      role: getActiveBusinessUserRole(existing.workspaceId),
+      featureEnabled: true,
+    }
+    if (!await canViewPartnerForGroupPrivacy(existing, viewer)) throw new Error('Business partner not found')
+  }
 
   const {
     agent: agentInput,
@@ -1710,7 +1810,7 @@ export async function updateBusinessPartner(
 }
 
 export async function deleteBusinessPartner(id: string) {
-  const partner = await getPartnerByAnyId(id)
+  const partner = await getBusinessPartnerByAnyId(id)
   if (!partner || partner.isDeleted) {
     return
   }
@@ -1785,8 +1885,10 @@ export async function deleteBusinessPartner(id: string) {
 }
 
 export async function mergeBusinessPartners(primaryPartnerId: string, secondaryPartnerId: string) {
-  const primary = await db.business_partners.get(primaryPartnerId)
-  const secondary = await db.business_partners.get(secondaryPartnerId)
+  const [primary, secondary] = await Promise.all([
+    getBusinessPartnerByAnyId(primaryPartnerId),
+    getBusinessPartnerByAnyId(secondaryPartnerId)
+  ])
   if (!primary || !secondary || primary.isDeleted || secondary.isDeleted) {
     throw new Error('Business partner not found')
   }
@@ -1942,7 +2044,7 @@ export function useCustomer(customerId: string | undefined) {
       return undefined
     }
 
-    const partner = await getPartnerByAnyId(customerId)
+    const partner = await getBusinessPartnerByAnyId(customerId)
     if (!partner || !roleIncludesCustomer(partner.role)) {
       return undefined
     }
@@ -1957,7 +2059,7 @@ export function useSupplier(supplierId: string | undefined) {
       return undefined
     }
 
-    const partner = await getPartnerByAnyId(supplierId)
+    const partner = await getBusinessPartnerByAnyId(supplierId)
     if (!partner || !roleIncludesSupplier(partner.role)) {
       return undefined
     }

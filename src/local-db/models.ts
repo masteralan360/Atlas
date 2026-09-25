@@ -768,6 +768,29 @@ export interface BusinessPartner extends BaseEntity {
   priceBookId?: string | null
 }
 
+export type BusinessPartnerGroupAccessType = 'non_grouped' | 'protected'
+
+/** Workspace-local visibility group for business partners. */
+export interface BusinessPartnerGroup extends BaseEntity {
+  name: string
+  accessType: BusinessPartnerGroupAccessType
+  createdBy?: string | null
+}
+
+/** A workspace user assigned to a business-partner visibility group. */
+export interface BusinessPartnerGroupUser extends BaseEntity {
+  groupId: string
+  userId: string
+  /** Defaults to enabled for group memberships created before this preference existed. */
+  autoAssignOnCreate?: boolean
+}
+
+/** A business partner assigned to a visibility group. */
+export interface BusinessPartnerGroupPartner extends BaseEntity {
+  groupId: string
+  businessPartnerId: string
+}
+
 export type BusinessPartnerMergeType = 'customer_supplier'
 export type BusinessPartnerMergeStatus = 'pending' | 'accepted' | 'dismissed'
 
@@ -2685,6 +2708,9 @@ export interface SyncQueueItem {
     | 'rental_requests'
     | 'rental_contracts'
     | 'business_partners'
+    | 'business_partner_groups'
+    | 'business_partner_group_users'
+    | 'business_partner_group_partners'
     | 'business_partner_merge_candidates'
     | 'sales_orders'
     | 'purchase_orders'
@@ -2917,6 +2943,9 @@ export interface OfflineMutation {
     | 'rental_requests'
     | 'rental_contracts'
     | 'business_partners'
+    | 'business_partner_groups'
+    | 'business_partner_group_users'
+    | 'business_partner_group_partners'
     | 'business_partner_merge_candidates'
     | 'sales_orders'
     | 'purchase_orders'

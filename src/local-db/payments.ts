@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
-import { canAccessBusinessPartnerInLocalCache } from './businessPartnerAccess'
+import { canAccessBusinessPartnerInLocalCache, filterBusinessPartnersByGroupPrivacy } from './businessPartnerAccess'
 import {
     addMonths,
     buildDueDate,
@@ -2272,6 +2272,9 @@ export async function recordDirectTransaction(workspaceId: string, input: Record
   let partnerAccountEffect: DirectTransactionPartnerAccountEffect = input.partnerAccountEffect || 'none'
 
   if (businessPartnerId) {
+    if (!await canAccessBusinessPartnerInLocalCache(workspaceId, businessPartnerId)) {
+      throw new Error('Business partner not found')
+    }
     const partner = await db.business_partners.get(businessPartnerId)
     if (!partner || partner.isDeleted || partner.mergedIntoBusinessPartnerId) {
       throw new Error('Business partner not found')
@@ -2340,6 +2343,9 @@ const PARTNER_SETTLEMENT_SOURCE_TYPES = new Set<PaymentTransactionSourceType>([
 ])
 
 async function resolveSettlementPartner(workspaceId: string, partnerId: string) {
+  if (!await canAccessBusinessPartnerInLocalCache(workspaceId, partnerId)) {
+    throw new Error('Business partner not found')
+  }
   const partner = await db.business_partners.get(partnerId)
   if (!partner || partner.isDeleted || partner.mergedIntoBusinessPartnerId || partner.workspaceId !== workspaceId) {
     throw new Error('Business partner not found')
@@ -2365,13 +2371,14 @@ type AgentCommissionBalance = {
 export async function buildAgentCommissionObligations(
   workspaceId: string
 ): Promise<PaymentObligation[]> {
-  const [agents, partners, entries, orders, assignments] = await Promise.all([
+  const [agents, rawPartners, entries, orders, assignments] = await Promise.all([
     db.agents.where('workspaceId').equals(workspaceId).toArray(),
     db.business_partners.where('workspaceId').equals(workspaceId).toArray(),
     db.agent_commission_entries.where('workspaceId').equals(workspaceId).toArray(),
     db.sales_orders.where('workspaceId').equals(workspaceId).toArray(),
     db.sales_order_agent_assignments.where('workspaceId').equals(workspaceId).toArray()
   ])
+  const partners = await filterBusinessPartnersByGroupPrivacy(workspaceId, rawPartners)
 
   const partnersById = new Map(
     partners

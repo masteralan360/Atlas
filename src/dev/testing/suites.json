@@ -175,6 +175,17 @@
           "src/sync/syncEngine.test.ts",
           "src/sync/syncErrors.test.ts"
         ]
+      },
+      {
+        "id": "group-privacy",
+        "titleKey": "devTesting.businessPartnersGroups.groupPrivacy",
+        "layer": "contract",
+        "coverageHelpKey": "devTesting.businessPartnersGroupPrivacyCoverageHelp",
+        "files": [
+          "src/lib/businessPartnerGroupPrivacy.test.ts",
+          "src/local-db/businessPartnerGroups.test.ts",
+          "src/plans/workspacePlans.test.ts"
+        ]
       }
     ],
     "unavailable": [

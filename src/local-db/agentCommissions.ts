@@ -38,6 +38,7 @@ import {
 } from "./productCommissions";
 import { getSalesOrderCommissionMode, isPayableCommissionEntry } from "./commissionMode";
 import { addToOfflineMutations } from "./offlineMutations";
+import { canAccessBusinessPartnerInLocalCache } from "./businessPartnerAccess";
 
 const PLAN_TABLE = "agent_commission_plans";
 const MEMBERSHIP_TABLE = "agent_commission_memberships";
@@ -2109,7 +2110,9 @@ export async function assignSalesOrderAgent(
     : normalizeText(input.customerCitySnapshot);
   if (input.customerCitySnapshot === undefined && !current) {
     const [partner, customer] = await Promise.all([
-      order.businessPartnerId ? db.business_partners.get(order.businessPartnerId) : null,
+      order.businessPartnerId && await canAccessBusinessPartnerInLocalCache(workspaceId, order.businessPartnerId)
+        ? db.business_partners.get(order.businessPartnerId)
+        : null,
       order.customerId ? db.customers.get(order.customerId) : null,
     ]);
     citySnapshot = normalizeText(partner?.city || customer?.city || null);
@@ -2546,6 +2549,7 @@ const COMMISSION_RECOVERY_SOURCE_TYPE = "agent_commission_recovery";
 async function resolveAgentCounterpartyName(agentId: string) {
   const agent = await db.agents.get(agentId);
   if (!agent) return null;
+  if (!await canAccessBusinessPartnerInLocalCache(agent.workspaceId, agent.businessPartnerId)) return null;
   const partner = await db.business_partners.get(agent.businessPartnerId);
   return partner && !partner.isDeleted ? partner.partnerName : null;
 }
@@ -2798,6 +2802,9 @@ export async function recordAgentCommissionPayout(
     throw new Error('Commission payout cannot exceed the outstanding balance');
   }
 
+  if (!await canAccessBusinessPartnerInLocalCache(workspaceId, agent.businessPartnerId)) {
+    throw new Error('Sales agent business partner not found');
+  }
   const partner = await db.business_partners.get(agent.businessPartnerId);
   if (!partner || partner.isDeleted || partner.workspaceId !== workspaceId) {
     throw new Error('Sales agent business partner not found');
@@ -2937,6 +2944,9 @@ export async function recordAgentCommissionRecovery(
     throw new Error('Commission recovery cannot exceed the recoverable balance');
   }
 
+  if (!await canAccessBusinessPartnerInLocalCache(workspaceId, agent.businessPartnerId)) {
+    throw new Error('Sales agent business partner not found');
+  }
   const partner = await db.business_partners.get(agent.businessPartnerId);
   if (!partner || partner.isDeleted || partner.workspaceId !== workspaceId) {
     throw new Error('Sales agent business partner not found');

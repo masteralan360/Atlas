@@ -674,7 +674,7 @@ async function resolveCustomerBusinessPartner(customerId?: string | null, busine
 
     const customer = await db.customers.get(facetId)
     if (customer?.businessPartnerId) {
-        const partner = await db.business_partners.get(customer.businessPartnerId)
+        const partner = await getBusinessPartnerByAnyId(customer.businessPartnerId)
         if (partner && !partner.isDeleted && !partner.mergedIntoBusinessPartnerId) {
             return partner
         }
@@ -703,7 +703,7 @@ async function resolveSupplierBusinessPartner(supplierId?: string | null, busine
 
     const supplier = await db.suppliers.get(facetId)
     if (supplier?.businessPartnerId) {
-        const partner = await db.business_partners.get(supplier.businessPartnerId)
+        const partner = await getBusinessPartnerByAnyId(supplier.businessPartnerId)
         if (partner && !partner.isDeleted && !partner.mergedIntoBusinessPartnerId) {
             return partner
         }

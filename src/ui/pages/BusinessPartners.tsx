@@ -49,6 +49,7 @@ import {
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { BusinessPartnerFormDialog, type BusinessPartnerFormPayload } from '@/ui/components/crm/BusinessPartnerFormDialog'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
+import { BusinessPartnerGroupsPanel } from '@/ui/components/crm/BusinessPartnerGroupsPanel'
 import { AutocompleteLoadingIndicator } from '@/ui/components/AutocompleteLoadingIndicator'
 function roleLabel(role: BusinessPartnerRole, t: (key: string, options?: Record<string, unknown>) => string) {
     switch (role) {
@@ -180,14 +181,14 @@ function PartnerMapBounds({
 export function BusinessPartners() {
     const { t } = useTranslation()
     const { user } = useAuth()
-    const { features } = useWorkspace()
+    const { features, hasCapability } = useWorkspace()
     const { toast } = useToast()
     const [, navigate] = useLocation()
     const demoTutorial = useDemoTutorial()
     const { hasPermission } = useWorkspacePermissions()
     const canViewCustomers = hasPermission('customers.access')
     const canViewSuppliers = hasPermission('suppliers.access')
-    const [scope, setScope] = useState<'all' | 'customers' | 'suppliers'>('all')
+    const [scope, setScope] = useState<'all' | 'customers' | 'suppliers' | 'groups'>('all')
     const partners = useBusinessPartners(user?.workspaceId, {
         includeRealEstateRoles: features.real_estate,
         includeAgentRoles: features.agents
@@ -205,7 +206,13 @@ export function BusinessPartners() {
 
     const canEdit = user?.role === 'admin' || user?.role === 'staff'
     const canDelete = user?.role === 'admin'
+    const canManageGroups = user?.role === 'admin' && hasCapability('businessPartnerGroupPrivacy')
+    const showGroupManagementTab = canManageGroups && Boolean(user?.workspaceId)
     const isTutorialBusinessPartnerTask = demoTutorial.isCurrentTask('business-partner')
+
+    useEffect(() => {
+        if (!showGroupManagementTab && scope === 'groups') setScope('all')
+    }, [scope, showGroupManagementTab])
 
     const availableCurrencies = useMemo(() => {
         return Array.from(new Set([features.default_currency, ...features.allowed_currencies])) as CurrencyCode[]
@@ -360,7 +367,7 @@ export function BusinessPartners() {
             <Tabs
                 value={scope}
                 onValueChange={(value) => {
-                    const next = value as 'all' | 'customers' | 'suppliers'
+                    const next = value as 'all' | 'customers' | 'suppliers' | 'groups'
                     setScope(next)
                     if (next === 'customers') {
                         navigate('/customers')
@@ -371,12 +378,18 @@ export function BusinessPartners() {
                 className="space-y-4"
             >
                 <TabsList className={cn(
-                    'grid w-full max-w-[420px] rounded-2xl bg-secondary/50 p-1',
-                    canViewCustomers && canViewSuppliers
-                        ? 'grid-cols-3'
-                        : canViewCustomers || canViewSuppliers
-                            ? 'grid-cols-2'
-                            : 'grid-cols-1'
+                    'grid w-full max-w-[600px] rounded-2xl bg-secondary/50 p-1',
+                    showGroupManagementTab
+                        ? canViewCustomers && canViewSuppliers
+                            ? 'grid-cols-4'
+                            : canViewCustomers || canViewSuppliers
+                                ? 'grid-cols-3'
+                                : 'grid-cols-2'
+                        : canViewCustomers && canViewSuppliers
+                            ? 'grid-cols-3'
+                            : canViewCustomers || canViewSuppliers
+                                ? 'grid-cols-2'
+                                : 'grid-cols-1'
                 )}>
                     <TabsTrigger value="all" className="rounded-xl">{t('businessPartners.scope.all', { defaultValue: 'All' })}</TabsTrigger>
                     {canViewCustomers ? (
@@ -384,6 +397,9 @@ export function BusinessPartners() {
                     ) : null}
                     {canViewSuppliers ? (
                         <TabsTrigger value="suppliers" className="rounded-xl">{t('nav.suppliers', { defaultValue: 'Suppliers' })}</TabsTrigger>
+                    ) : null}
+                    {showGroupManagementTab ? (
+                        <TabsTrigger value="groups" className="rounded-xl">{t('businessPartners.groupPrivacy.tab')}</TabsTrigger>
                     ) : null}
                 </TabsList>
 
@@ -680,6 +696,12 @@ export function BusinessPartners() {
 
             </Tabs>
                 </TabsContent>
+
+                {showGroupManagementTab ? (
+                    <TabsContent value="groups" className="mt-0">
+                        <BusinessPartnerGroupsPanel workspaceId={user?.workspaceId ?? ''} featureEnabled={canManageGroups} />
+                    </TabsContent>
+                ) : null}
             </Tabs>
 
             <BusinessPartnerFormDialog

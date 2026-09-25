@@ -67,6 +67,9 @@ import type {
   DeliverySettlement,
   DeliveryLedgerEntry,
   BusinessPartner,
+  BusinessPartnerGroup,
+  BusinessPartnerGroupUser,
+  BusinessPartnerGroupPartner,
   BusinessPartnerMergeCandidate,
   Employee,
   WorkspaceContact,
@@ -465,6 +468,9 @@ export class AtlasDatabase extends Dexie {
   delivery_settlements!: EntityTable<DeliverySettlement, 'id'>
   delivery_ledger_entries!: EntityTable<DeliveryLedgerEntry, 'id'>
   business_partners!: EntityTable<BusinessPartner, 'id'>
+  business_partner_groups!: EntityTable<BusinessPartnerGroup, 'id'>
+  business_partner_group_users!: EntityTable<BusinessPartnerGroupUser, 'id'>
+  business_partner_group_partners!: EntityTable<BusinessPartnerGroupPartner, 'id'>
   business_partner_merge_candidates!: EntityTable<BusinessPartnerMergeCandidate, 'id'>
   employees!: EntityTable<Employee, 'id'>
   budget_settings!: EntityTable<BudgetSettings, 'id'>
@@ -3547,6 +3553,15 @@ export class AtlasDatabase extends Dexie {
       ])
     })
 
+    this.version(136).stores({
+      business_partner_groups:
+        'id, workspaceId, name, accessType, updatedAt, isDeleted, syncStatus, [workspaceId+name], [workspaceId+updatedAt]',
+      business_partner_group_users:
+        'id, workspaceId, groupId, userId, updatedAt, isDeleted, syncStatus, [workspaceId+groupId], [workspaceId+userId], [groupId+userId]',
+      business_partner_group_partners:
+        'id, workspaceId, groupId, businessPartnerId, updatedAt, isDeleted, syncStatus, [workspaceId+groupId], [workspaceId+businessPartnerId], [groupId+businessPartnerId]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
@@ -3769,6 +3784,9 @@ export class AtlasDatabase extends Dexie {
       'delivery_settlements',
       'delivery_ledger_entries',
       'business_partners',
+      'business_partner_groups',
+      'business_partner_group_users',
+      'business_partner_group_partners',
       'employees',
       'workspace_contacts',
       'loans',

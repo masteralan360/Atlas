@@ -115,6 +115,7 @@ export type PlanCapabilityKey =
     | 'orderFreeBonus'
     | 'priceBooks'
     | 'quickOrder'
+    | 'businessPartnerGroupPrivacy'
 
 export interface WorkspacePlanLimits {
     maxMembers: number

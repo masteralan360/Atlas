@@ -2,15 +2,18 @@ Post Service Archiver
 icon
 remove R2 Print only
 account switch
-Transaction Reconciliation & Integrity Audit, Expandable, Plain English Explanation, AGENTS.md guide
+
 
 Price books selector order form and quick order
 ##
 
 Remake Dashboard for desktop and mobile
 
-Cancel Order NO LOAN
+Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide,
+
 Simple Loan Final Localize
+
+Create Product register movement
 
 Retry Sync Test The wind
 

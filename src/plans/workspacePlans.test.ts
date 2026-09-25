@@ -207,6 +207,26 @@ describe('Instant POS and KDS workspace module access', () => {
     })
 })
 
+describe('Business Partner Group Privacy workspace capability', () => {
+    it('is not included in a plan and is available only through an admin-granted capability override', () => {
+        for (const plan of WORKSPACE_PLANS) {
+            expect(planHasCapability(plan, 'businessPartnerGroupPrivacy')).toBe(false)
+        }
+
+        const resolved = applyWorkspaceOverrides(getPlanCapabilities('enterprise'), [{
+            id: 'override-business-partner-group-privacy',
+            workspace_id: 'workspace-1',
+            type: 'capability',
+            key: 'businessPartnerGroupPrivacy',
+            value: 'grant',
+            created_by: null,
+            created_at: new Date(0).toISOString(),
+        }])
+
+        expect(resolved.capabilities).toContain('businessPartnerGroupPrivacy')
+    })
+})
+
 describe('Orders workspace module access', () => {
     it('maps the orders feature to the revocable orders module', () => {
         expect(planHasWorkspaceFeature('enterprise', 'orders')).toBe(true)

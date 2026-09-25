@@ -568,7 +568,9 @@ export async function recordRealEstateCommissionPayment(
     let counterpartyName = normalizeOptionalText(input.counterpartyName)
 
     if (businessPartnerId) {
-        const partner = await db.business_partners.get(businessPartnerId)
+        const partner = await canAccessBusinessPartnerInLocalCache(workspaceId, businessPartnerId)
+            ? await db.business_partners.get(businessPartnerId)
+            : undefined
         if (!partner || partner.workspaceId !== workspaceId || partner.isDeleted || partner.mergedIntoBusinessPartnerId) {
             if (requestedBusinessPartnerId) {
                 throw new Error('Selected business partner is not available')
