@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { liveChildEnv, loadLiveConfig, preflightLive, redactLiveText } from './live.mjs'
 
 const registryUrl = new URL('../../src/dev/testing/suites.json', import.meta.url)
 export const suites = JSON.parse(readFileSync(registryUrl, 'utf8'))
@@ -28,15 +29,19 @@ export function validateRunOptions(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid_options')
   const suite = typeof input.suiteId === 'string' && Object.hasOwn(suites, input.suiteId) && suites[input.suiteId]
   if (!suite) throw new Error('invalid_suite')
-  const groups = input.groupIds ?? suite.groups.map((group) => group.id)
-  if (!Array.isArray(groups) || !groups.length || groups.length > suite.groups.length
-    || groups.some((id) => typeof id !== 'string' || !suite.groups.some((group) => group.id === id))
+  const environment = input.environment ?? 'isolated'
+  if (!['isolated', 'hosted-supabase'].includes(environment)) throw new Error('invalid_options')
+  const availableGroups = environment === 'isolated' ? suite.groups : suite.liveGroups ?? []
+  if (!availableGroups.length) throw new Error('live_suite_unavailable')
+  const groups = input.groupIds ?? availableGroups.map((group) => group.id)
+  if (!Array.isArray(groups) || !groups.length || groups.length > availableGroups.length
+    || groups.some((id) => typeof id !== 'string' || !availableGroups.some((group) => group.id === id))
     || new Set(groups).size !== groups.length) throw new Error('invalid_groups')
   const seed = input.seed ?? 20260918
   const samples = input.samples ?? 16
   if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff
     || !Number.isInteger(samples) || samples < 1 || samples > 100) throw new Error('invalid_options')
-  return { suiteId: input.suiteId, groups: suite.groups.filter((group) => groups.includes(group.id)), seed, samples }
+  return { suiteId: input.suiteId, environment, groups: availableGroups.filter((group) => groups.includes(group.id)), seed, samples }
 }
 
 export function isolatedChildEnv(seed, samples) {
@@ -61,33 +66,69 @@ export function isLocalRequest(req) {
 }
 
 export class TestController {
-  constructor({ root = ROOT, spawnChild = spawn, timeoutMs = 180_000, onGroupResult = () => {} } = {}) {
+  constructor({ root = ROOT, spawnChild = spawn, preflight = preflightLive, timeoutMs = 180_000, onGroupResult = () => {} } = {}) {
     this.root = root
     this.spawnChild = spawnChild
+    this.preflight = preflight
     this.timeoutMs = timeoutMs
     this.onGroupResult = onGroupResult
     this.token = randomBytes(32).toString('hex')
     this.run = null
     this.child = null
     this.disposed = false
+    this.preflighting = false
     this.completion = Promise.resolve()
   }
 
   start(input) {
     if (this.disposed) throw new Error('runner_closed')
-    if (this.run?.status === 'running') throw new Error('run_busy')
+    if (this.run?.status === 'running' || this.preflighting) throw new Error('run_busy')
     const options = validateRunOptions(input)
+    if (options.environment !== 'isolated') throw new Error('live_preflight_required')
+    return this.startValidated(options)
+  }
+
+  async startLive(input) {
+    if (this.disposed) throw new Error('runner_closed')
+    if (this.run?.status === 'running' || this.preflighting) throw new Error('run_busy')
+    const options = validateRunOptions(input)
+    if (options.environment !== 'hosted-supabase') throw new Error('invalid_options')
+    this.preflighting = true
+    try {
+      const config = loadLiveConfig(this.root)
+      let readiness
+      try { readiness = await this.preflight(config) }
+      catch (error) { throw new Error(String(error.message || error).startsWith('live_') ? error.message : 'live_preflight_failed') }
+      if (this.disposed) throw new Error('runner_closed')
+      return this.startValidated(options, { config, readiness })
+    } finally { this.preflighting = false }
+  }
+
+  async liveReadiness() {
+    try {
+      const config = loadLiveConfig(this.root)
+      const readiness = await this.preflight(config)
+      return { status: 'ready', target: readiness.target, mode: readiness.mode }
+    } catch (error) {
+      return { status: 'blocked', reason: String(error.message || error).startsWith('live_') ? error.message : 'live_preflight_failed' }
+    }
+  }
+
+  startValidated(options, live = null) {
     this.run = {
-      id: randomUUID(), suiteId: options.suiteId, seed: options.seed, samples: options.samples,
+      id: randomUUID(), suiteId: options.suiteId, environment: options.environment,
+      ...(live ? { target: live.readiness.target, mode: live.readiness.mode } : {}),
+      seed: options.seed, samples: options.samples,
       startedAt: new Date().toISOString(), status: 'running', cancelRequested: false,
+      fixtures: [],
       groups: options.groups.map((group) => ({ id: group.id, status: 'pending', tests: [], errors: [] })),
       unavailable: suites[options.suiteId].unavailable
     }
     const run = this.run
-    this.completion = this.execute(run, options).catch((error) => {
+    this.completion = this.execute(run, options, live).catch((error) => {
       run.status = 'failed'
       run.finishedAt = new Date().toISOString()
-      run.groups[0].errors.push(String(error.message || error))
+      run.groups[0].errors.push(live ? redactLiveText(error.message || error, live.config) : String(error.message || error))
     })
     return run
   }
@@ -98,11 +139,35 @@ export class TestController {
     return this.run
   }
 
-  async execute(run, options) {
+  async execute(run, options, live) {
     for (const group of options.groups) {
       const result = run.groups.find((row) => row.id === group.id)
       if (run.cancelRequested || this.disposed) { result.status = 'cancelled'; continue }
-      await this.executeGroup(run, group, result)
+      if (live && group.isolatedGroupId) {
+        const isolatedGroup = suites[options.suiteId].groups.find((row) => row.id === group.isolatedGroupId)
+        if (!isolatedGroup) {
+          result.status = 'failed'
+          result.errors.push('invalid_isolated_group')
+          this.onGroupResult(result)
+          continue
+        }
+        await this.executeGroup(run, isolatedGroup, result, null)
+        if (run.cancelRequested || this.disposed) {
+          result.status = 'cancelled'
+          this.onGroupResult(result)
+          continue
+        }
+      }
+      if (live) {
+        try { await this.preflight(live.config) }
+        catch (error) {
+          result.status = 'failed'
+          result.errors.push(String(error.message || error).startsWith('live_') ? error.message : 'live_preflight_failed')
+          this.onGroupResult(result)
+          continue
+        }
+      }
+      await this.executeGroup(run, group, result, live)
       this.onGroupResult(result)
     }
     run.status = run.cancelRequested || this.disposed ? 'cancelled'
@@ -120,7 +185,7 @@ export class TestController {
     }
   }
 
-  executeGroup(run, group, result) {
+  executeGroup(run, group, result, live) {
     result.status = 'running'
     return new Promise((resolve) => {
       let stderr = ''
@@ -133,10 +198,11 @@ export class TestController {
         settled = true
         clearTimeout(timer)
         this.child = null
-        if (error) result.errors.push(String(error.message || error).slice(0, 4000))
+        const sanitize = (value) => live ? redactLiveText(value, live.config) : String(value)
+        if (error) result.errors.push(sanitize(error.message || error).slice(0, 4000))
         if (timedOut) result.errors.push('group_timeout')
         if (!finished) result.errors.push('runner_did_not_finish')
-        if (code !== 0 && stderr) result.errors.push(stderr.slice(-8000))
+        if (code !== 0 && stderr) result.errors.push(sanitize(stderr).slice(-8000))
         for (const test of result.tests) {
           if (test.status === 'pending' || test.status === 'running') test.status = 'cancelled'
         }
@@ -144,21 +210,36 @@ export class TestController {
           && result.tests.every((test) => test.status === 'passed') ? 'passed' : 'failed'
         resolve()
       }
-      const timer = setTimeout(() => { timedOut = true; stopChild(child) }, this.timeoutMs)
+      const timer = setTimeout(() => { timedOut = true; stopChild(child) }, live ? Math.max(this.timeoutMs, 900_000) : this.timeoutMs)
       try {
         child = this.spawnChild(process.execPath, [
           join(this.root, 'node_modules/vitest/vitest.mjs'), 'run',
-          '--config', join(this.root, 'scripts/dev-testing/vitest.config.mts'),
+          '--config', join(this.root, live ? 'scripts/dev-testing/vitest.live.config.mts' : 'scripts/dev-testing/vitest.config.mts'),
           '--reporter', join(this.root, 'scripts/dev-testing/reporter.mjs'),
           '--maxWorkers', '1', ...group.files
-        ], { cwd: this.root, env: isolatedChildEnv(run.seed, run.samples), shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+        ], { cwd: this.root, env: live
+          ? liveChildEnv(live.config, isolatedChildEnv(run.seed, run.samples), run.id)
+          : isolatedChildEnv(run.seed, run.samples), shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
         this.child = child
         createInterface({ input: child.stdout }).on('line', (line) => {
           if (!line.startsWith('ATLAS_TEST_EVENT ')) return
           try {
             const event = JSON.parse(line.slice(17))
-            if (event.type === 'finished') { finished = true; result.errors.push(...event.errors) }
+            if (live && event.type === 'fixture') {
+              const fixture = event.fixture
+              if (fixture?.runId === run.id && fixture?.workspaceId === run.target.workspaceId
+                && Object.values(fixture).every((value) => value === null || typeof value === 'string')) {
+                run.fixtures.push(fixture)
+              } else result.errors.push('invalid_fixture_event')
+            }
+            if (event.type === 'finished') { finished = true; result.errors.push(...event.errors.map((value) => live ? redactLiveText(value, live.config) : value)) }
             for (const test of event.tests ?? (event.test ? [event.test] : [])) {
+              if (live) {
+                test.name = redactLiveText(test.name, live.config)
+                test.errors = test.errors.map((value) => redactLiveText(value, live.config))
+              }
+              test.id = `${live ? 'hosted-supabase' : 'isolated'}:${test.id}`
+              test.environment = live ? 'hosted-supabase' : 'isolated'
               const index = result.tests.findIndex((row) => row.id === test.id)
               if (index === -1) result.tests.push(test)
               else result.tests[index] = test
@@ -204,6 +285,8 @@ export function testingMiddleware(controller) {
     if (req.headers['x-atlas-test-token'] !== controller.token) return json(res, 403, { error: 'invalid_session' })
     try {
       if (req.method === 'POST' && path === `${PREFIX}/runs`) return json(res, 202, controller.start(await readBody(req)))
+      if (req.method === 'POST' && path === `${PREFIX}/live-runs`) return json(res, 202, await controller.startLive(await readBody(req)))
+      if (req.method === 'GET' && path === `${PREFIX}/live-readiness`) return json(res, 200, await controller.liveReadiness())
       if (req.method === 'GET' && path === `${PREFIX}/run`) return json(res, 200, controller.run)
       if (req.method === 'POST' && path === `${PREFIX}/cancel`) return json(res, 200, controller.cancel((await readBody(req)).id))
       return json(res, 404, { error: 'not_found' })

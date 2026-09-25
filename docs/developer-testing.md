@@ -5,7 +5,7 @@ For architecture, contracts, isolation, and extension instructions, read the
 first independent V1 suite using shared infrastructure; its business scenarios
 are a reference implementation, not a universal specification for other modules.
 
-Sales Order **Cloud / Hybrid request contracts**, Business Partners **Order
+Standalone Sales Order **Cloud / Hybrid request contracts**, Business Partners **Order
 summary refresh**, and POS **Checkout** include deferred sales-order summary
 coverage. Tests hold summary RPCs open and verify that confirmed create/edit
 saves finish, payments and ledger effects remain correct, draft stock is unchanged,
@@ -48,7 +48,7 @@ The same registry and controller work from the command line and CI:
 
 ```sh
 npm run test:sale-orders
-npm run test:sale-orders -- --groups matrix,remote-contract --seed 42 --samples 100
+npm run test:sale-orders -- --groups matrix,lifecycle --seed 42 --samples 100
 npm run test:pos
 npm run test:pos -- --groups checkout,remote-contract,failure-recovery --seed 42 --samples 100
 npm run test:post-service
@@ -58,6 +58,69 @@ npm run test:post-service -- --groups remote-contract,failure-recovery --seed 42
 The CLI exits nonzero for failed, skipped, empty, timed-out, or cancelled runs.
 It does not silently retry a failed check. Successful runs mean the selected
 checks passed; the report also records environment coverage gaps.
+
+## Hosted Supabase checks
+
+Sale Orders has a separate **Hosted Supabase** environment in the Developer Test
+dialog. It signs in as a dedicated admin test user and runs production order
+functions against a dedicated Cloud or Hybrid `DEV TEST` workspace. It creates
+real partner, storage, product, financed order, loan and payment records. Some
+financial history remains for audit; use an empty test workspace, never a
+business workspace. A Hybrid selection checks its Supabase source of truth,
+but does not exercise the desktop SQLite mirror.
+
+Copy [the configuration example](./developer-testing-live.env.example) to
+`.env.atlas-live-tests.local` in the Atlas root, then set the project URL,
+publishable or legacy anon key, dedicated admin email/password, and exact
+workspace ID/name. Give this test account access to only that workspace. The
+filled file is gitignored. The local runner checks the account's current and
+only visible workspace, its `DEV TEST` name, Cloud/Hybrid mode, and the
+Sale Orders schema before each live group. A mismatch blocks the run before
+scenario writes. The developer UI receives readiness and the target identity,
+never the credentials. Network requests in the live child are limited to the
+configured Supabase HTTPS origin. The isolated environment remains network
+blocked.
+
+The eight regular Sale Orders groups are also selectable in Hosted Supabase.
+Each selection runs its complete existing isolated group in a credential-free,
+network-blocked child, then runs a focused live scenario in a separate child.
+Results are labeled **Isolated checks** or **Hosted Supabase**. A group passes
+only if both parts pass; a local assertion is never presented as proof of a
+server effect. The hosted scenarios cover payment methods and overpayment,
+print source records, partner statements, draft and approval lifecycle,
+fractional prices and discounts, related-unit stock, payment account movements,
+and workspace-scoped order reads. Printing and UI role/layout cases still rely
+on their isolated checks; the live printing scenario verifies saved print input,
+and the access scenario verifies only the dedicated admin account's workspace.
+The Payments live case needs the Payment Accounts module enabled in the target
+workspace. Account and unit configuration created by passing scenarios may
+remain because financial and order history can refer to them.
+
+The independent `live-transactions` group creates a paid cash Quick Order and
+full return, plus simple-loan and installment sale orders with and without a
+down payment. It uses production functions and fresh authenticated clients to
+check stored orders, returns, loans, installments, payment counter-entries and
+stock. The runner refreshes the workspace's storages into its local cache
+before creating test storages, so existing primary or marketplace locations
+remain respected.
+The target project must have the app's current Sale Orders migrations deployed,
+including `cancel_order_with_financing`.
+The report records run and fixture IDs to aid investigation. A failed fixture
+is retained for inspection; the test may retire a successful catalog item.
+The hosted related-units group follows the supported Sale Order lifecycle for
+two paid packs and one free pack at a factor of 20. It verifies that stock moves
+from 100 base units to 40, then back to 100 after a full return, with linked
+payment reversals. A separate live check calls the atomic Quick Order RPC with
+an active product conversion and requires it to reject the request before an
+order, payment, or stock movement is created. This boundary requires the
+`reject_related_unit_quick_orders` migration on the target project.
+Run it from the dialog or with `npm run test:sale-orders:live`. This command is
+opt-in and is excluded from normal `npm test` and isolated developer runs.
+
+Regular POS, Post Service, browser interaction, and native SQLite still require
+their own live adapters and scenarios. Their isolated request contract checks
+remain useful for client failures and retry logic; they cannot prove deployed
+RLS or server-side effects.
 
 ## Sale Orders V1 coverage
 
@@ -74,21 +137,21 @@ Seeded cases add fractional prices/quantities with checkout and full return.
 
 Existing regression groups add financing repayment/reversal, stock aggregation,
 commission mode snapshots, customer summaries, currency conversion, pricing,
-rounding, and Cloud/Hybrid client request/result/failure contracts.
-The remote-contract group also checks financed sales and purchase cancellation
-for simple loans and installments: the RPC request, authoritative order and loan
-projection, reversal ledger pairs, account mirroring, offline queue behavior,
-replay, and invalid or rejected server results. The lifecycle group retains the
-Local financing cancellation cases. Run the read-only manual SQL check in
+and rounding. Mocked Cloud/Hybrid request contract tests remain as standalone
+Vitest unit tests for client retry, offline queue, invalid server result, and
+friendly failure behavior; they are no longer a selectable Sale Orders group.
+The Hosted Supabase group covers the financed Sale Order cancellation server
+effect. The lifecycle group retains Local financing cancellation cases.
+Run the read-only manual SQL check in
 `supabase/manual_checks/check_cancelled_order_linked_loans.sql` separately; the
 suite does not change historical cancelled orders.
 
-**Not implemented in V1:** browser automation of the real order form, real
-Supabase SQL/RLS integration, Hybrid desktop SQLite mirroring, and Local native
-SQLite persistence/restart. The modal labels these as blocked adapters and the
-report lists them under `unavailable`. IndexedDB reopen verifies cache survival
-only; remote mocks verify client contracts only. Neither is presented as proof
-of native persistence, server atomicity, permissions, or every possible scenario.
+Browser automation of the real order form, Hybrid desktop SQLite mirroring,
+Local native SQLite persistence/restart, and exhaustive live Supabase/RLS
+coverage remain outside these groups. The modal and report label those gaps.
+IndexedDB reopen verifies cache survival only; standalone remote mocks verify
+client contracts only. Hosted scenarios verify their selected server effects,
+not every module workflow or permission role.
 
 ## Business Partners coverage
 

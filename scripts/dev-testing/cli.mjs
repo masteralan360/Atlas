@@ -7,12 +7,16 @@ const value = (flag) => {
 const controller = new TestController({ onGroupResult: (group) => console.log(`${group.id}: ${group.status} (${group.tests.length} checks)`) })
 process.once('SIGINT', () => { if (controller.run) controller.cancel(controller.run.id) })
 try {
-  const run = controller.start({
+  const options = {
     suiteId: value('--suite') ?? 'sale-orders',
+    environment: value('--environment') ?? 'isolated',
     groupIds: value('--groups')?.split(','),
     seed: value('--seed') === undefined ? undefined : Number(value('--seed')),
     samples: value('--samples') === undefined ? undefined : Number(value('--samples'))
-  })
+  }
+  const run = options.environment === 'hosted-supabase'
+    ? await controller.startLive(options)
+    : controller.start(options)
   console.log(`Running ${run.suiteId}, seed ${run.seed}, ${run.samples} generated cases`)
   await controller.completion
   console.log(`Full environment checks unavailable: ${run.unavailable.join(', ')}`)

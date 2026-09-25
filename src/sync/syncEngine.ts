@@ -1195,7 +1195,7 @@ export async function processMutationQueue(
             && ((candidate.entityType === (orderType === "sales" ? "sales_orders" : "purchase_orders")
               && candidate.entityId === orderId)
               || (candidate.entityType === "loan_commands"
-                && candidate.payload.payload
+                && candidate.payload.payload != null
                 && typeof candidate.payload.payload === "object"
                 && (candidate.payload.payload as Record<string, unknown>).loan_id === order.linkedLoanId)))
           .count();

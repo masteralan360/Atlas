@@ -95,7 +95,7 @@ export function getDashboardTransactions(
     const existing = new Set(records.filter((record) => record.source === 'sales_order').map((record) => record.id))
     const pending = orders
         .filter((order) => !order.isDeleted && !existing.has(order.id))
-        .map(toRevenueRecordFromSalesOrder)
+        .map((order) => toRevenueRecordFromSalesOrder(order))
     return [...records, ...pending]
         .map((record) => {
             const totals = getRevenueAnalysisTotals(record)

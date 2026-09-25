@@ -456,7 +456,7 @@ export function Dashboard() {
             car_rental: 'revenue.filters.origins.carRental',
             travel_transportation: 'travelTransportation.title',
         }
-        return t(keyByOrigin[origin] || 'dashboard.unknownSource', { defaultValue: origin.replaceAll('_', ' ') })
+        return t(keyByOrigin[origin] || 'dashboard.unknownSource', { defaultValue: origin.replace(/_/g, ' ') })
     }
     const openTransaction = (record: (typeof transactions)[number]['record']) => {
         if (record.source === 'sales_order') setLocation(`/orders/${record.id}`)

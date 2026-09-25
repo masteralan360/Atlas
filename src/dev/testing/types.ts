@@ -7,18 +7,22 @@ export interface TestResult {
     status: TestStatus
     durationMs: number
     errors: string[]
+    environment?: 'isolated' | 'hosted-supabase'
 }
 export interface TestGroup {
     id: string
     titleKey: string
     layer: string
     files: string[]
+    isolatedGroupId?: string
 }
 export interface SuiteDefinition {
     titleKey: string
     samplesHelpKey?: string
     coverageHelpKey?: string
+    liveCoverageHelpKey?: string
     groups: TestGroup[]
+    liveGroups?: TestGroup[]
     unavailable: string[]
 }
 export interface GroupResult {
@@ -30,6 +34,10 @@ export interface GroupResult {
 export interface TestRun {
     id: string
     suiteId: string
+    environment: 'isolated' | 'hosted-supabase'
+    target?: { host: string; workspaceId: string; workspaceName: string }
+    mode?: 'cloud' | 'hybrid'
+    fixtures?: Record<string, string | null>[]
     seed: number
     samples: number
     startedAt: string
@@ -40,6 +48,9 @@ export interface TestRun {
     unavailable: string[]
     reportPath?: string
 }
+export type LiveReadiness =
+    | { status: 'ready'; target: { host: string; workspaceId: string; workspaceName: string }; mode: 'cloud' | 'hybrid' }
+    | { status: 'blocked'; reason: string }
 export interface RunnerSession {
     token: string
     suites: Record<string, SuiteDefinition>

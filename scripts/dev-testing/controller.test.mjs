@@ -49,7 +49,7 @@ describe('developer runner boundaries', () => {
       expect(() => validateRunOptions(options)).toThrow()
     }
     expect(validateRunOptions({ suiteId: 'sale-orders' }).groups.length).toBe(suites['sale-orders'].groups.length)
-    expect(validateRunOptions({ suiteId: 'business-partners' }).groups).toEqual([
+    expect(validateRunOptions({ suiteId: 'business-partners', groupIds: ['privacy-and-sync'] }).groups).toEqual([
       expect.objectContaining({
         id: 'privacy-and-sync',
         titleKey: 'devTesting.businessPartnersGroups.privacyAndSync',
@@ -59,7 +59,7 @@ describe('developer runner boundaries', () => {
         ])
       })
     ])
-    expect(validateRunOptions({ suiteId: 'pos' }).groups.length).toBe(12)
+    expect(validateRunOptions({ suiteId: 'pos' }).groups.length).toBe(13)
     expect(validateRunOptions({ suiteId: 'post-service' }).groups.length).toBe(13)
     expect(validateRunOptions({ suiteId: 'platform' }).groups).toEqual([
       expect.objectContaining({
@@ -135,6 +135,48 @@ describe('developer runner execution and reports', () => {
     const saved = JSON.parse(await readFile(run.reportPath, 'utf8'))
     expect(saved).toMatchObject({ seed: 0, samples: 1, status: 'passed' })
     expect(saved.unavailable).toContain('local-native')
+  })
+
+  it('runs paired Sale Orders checks in separate isolated and hosted children', async () => {
+    const { controller, children, spawnChild } = await arrangeController()
+    controller.preflight = vi.fn(async () => ({ target: { host: 'project.supabase.co', workspaceId: 'test-workspace', workspaceName: 'DEV TEST Atlas' }, mode: 'cloud' }))
+    const options = validateRunOptions({ suiteId: 'sale-orders', environment: 'hosted-supabase', groupIds: ['matrix'], seed: 0, samples: 1 })
+    const config = {
+      origin: 'https://project.supabase.co', ATLAS_LIVE_SUPABASE_KEY: 'public-test-key',
+      ATLAS_LIVE_TEST_EMAIL: 'dev-test@example.com', ATLAS_LIVE_TEST_PASSWORD: 'test-password',
+      ATLAS_LIVE_WORKSPACE_ID: 'test-workspace', ATLAS_LIVE_WORKSPACE_NAME: 'DEV TEST Atlas'
+    }
+    const run = controller.startValidated(options, { config, readiness: await controller.preflight(config) })
+    expect(spawnChild.mock.calls[0][1]).toContain('src/dev/testing/suites/saleOrders.test.ts')
+    expect(spawnChild.mock.calls[0][2].env).not.toHaveProperty('ATLAS_LIVE_TEST_PASSWORD')
+    finishChild(children[0])
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(spawnChild.mock.calls[1][1]).toContain('src/dev/testing/suites/saleOrdersMatrixLive.test.ts')
+    expect(spawnChild.mock.calls[1][2].env.ATLAS_LIVE_TEST_PASSWORD).toBe('test-password')
+    finishChild(children[1])
+    await controller.completion
+    expect(run.status).toBe('passed')
+    expect(run.groups[0].tests.map((test) => test.environment)).toEqual(['isolated', 'hosted-supabase'])
+    expect(new Set(run.groups[0].tests.map((test) => test.id)).size).toBe(2)
+  })
+
+  it('keeps a paired group failed when its isolated checks fail but hosted checks pass', async () => {
+    const { controller, children } = await arrangeController()
+    controller.preflight = vi.fn(async () => ({ target: { host: 'project.supabase.co', workspaceId: 'test-workspace', workspaceName: 'DEV TEST Atlas' }, mode: 'cloud' }))
+    const options = validateRunOptions({ suiteId: 'sale-orders', environment: 'hosted-supabase', groupIds: ['matrix'], seed: 0, samples: 1 })
+    const config = {
+      origin: 'https://project.supabase.co', ATLAS_LIVE_SUPABASE_KEY: 'public-test-key',
+      ATLAS_LIVE_TEST_EMAIL: 'dev-test@example.com', ATLAS_LIVE_TEST_PASSWORD: 'test-password',
+      ATLAS_LIVE_WORKSPACE_ID: 'test-workspace', ATLAS_LIVE_WORKSPACE_NAME: 'DEV TEST Atlas'
+    }
+    const run = controller.startValidated(options, { config, readiness: await controller.preflight(config) })
+    finishChild(children[0], { state: 'failed', code: 1 })
+    await new Promise((resolve) => setImmediate(resolve))
+    finishChild(children[1])
+    await controller.completion
+    expect(run.status).toBe('failed')
+    expect(run.groups[0].status).toBe('failed')
+    expect(run.groups[0].tests.map((test) => test.status)).toEqual(['failed', 'passed'])
   })
 
   it.each([

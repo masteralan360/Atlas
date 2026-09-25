@@ -127,7 +127,7 @@ The registry at `src/dev/testing/suites.json` is the authoritative file allowlis
 | `inventory` | Batch allocation/costing/FEFO/fraction/duplicate-line regressions, Local stock effects and storage access |
 | `financing` | Simple/standard POS loans in all four currencies, schedule sums, zero checkout receipt and repayment-related ledger rules |
 | `returns-exchanges` | Partial/full refund audit entries, account net effects, replay/over-reversal/math validation, Local return transaction scope and post-commit reorder evaluation, return stock, exchanges and financing cancellation |
-| `entry-routing` | Barcode parsing/timing regressions, payment/catalog/capability routing, finite/infinite Activities across immediate methods, existing Quick Order atomic contracts |
+| `entry-routing` | Barcode parsing/timing regressions, payment/catalog/capability routing, finite/infinite Activities across immediate methods, Quick Order atomic contracts and rejection of related-unit products before checkout |
 | `remote-contract` | RPC names/payloads, authoritative conversion-policy reads, success and loan aggregates, retry identities, offline rejection, friendly failures, confirmed-commit recovery, refund upserts, Sales sync guards |
 | `failure-recovery` | Invalid/unavailable quantity/price/financing, payment/batch/loan failure rollback, duplicate submission, frozen attempt behavior, SQLite write-set commit/rollback and offline queue regressions |
 

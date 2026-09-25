@@ -945,6 +945,44 @@ describe('atomic POS Quick Order completion', () => {
         expect(supabaseMock.rpc).toHaveBeenCalledTimes(1)
     })
 
+    it('rejects a related-unit product before the cloud Quick Order RPC or any local writes', async () => {
+        await db.product_unit_conversions.put({
+            ...baseEntity('10000000-0000-4000-8000-000000000010'),
+            productId: PRODUCT_ID,
+            relationshipId: '10000000-0000-4000-8000-000000000011',
+            factor: 20,
+            parentPrice: 40
+        })
+
+        await expect(createCompletedSalesOrder(WORKSPACE_ID, quickOrderInput(), USER_ID))
+            .rejects.toThrow('quick_order_related_units_unsupported')
+
+        expect(supabaseMock.rpc).not.toHaveBeenCalled()
+        expect(await db.sales_orders.count()).toBe(0)
+        expect(await db.payment_transactions.count()).toBe(0)
+        expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(5)
+    })
+
+    it('rejects related-unit line metadata even when the conversion cache is empty', async () => {
+        const input = quickOrderInput()
+        input.items[0] = {
+            ...input.items[0],
+            unitRelationshipId: '10000000-0000-4000-8000-000000000011',
+            unitRef: 'builtin:carton',
+            baseUnitRef: 'builtin:pcs',
+            unitFactor: 20,
+            inventoryQuantity: 20
+        }
+
+        await expect(createCompletedSalesOrder(WORKSPACE_ID, input, USER_ID))
+            .rejects.toThrow('quick_order_related_units_unsupported')
+
+        expect(supabaseMock.rpc).not.toHaveBeenCalled()
+        expect(await db.sales_orders.count()).toBe(0)
+        expect(await db.payment_transactions.count()).toBe(0)
+        expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(5)
+    })
+
     it('retains the existing transaction flow for Local Mode', async () => {
         writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'local' })
 

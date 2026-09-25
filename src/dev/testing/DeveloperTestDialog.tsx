@@ -9,7 +9,7 @@ import { Checkbox } from '@/ui/components/checkbox'
 import { cn } from '@/lib/utils'
 import suitesJson from './suites.json'
 import { runnerErrorKey, testRunnerClient } from './client'
-import type { SuiteDefinition, TestRun, TestStatus } from './types'
+import type { LiveReadiness, SuiteDefinition, TestRun, TestStatus } from './types'
 
 const suites: Record<string, SuiteDefinition> = suitesJson
 const icons = { pending: Circle, running: Loader2, passed: CheckCircle2, failed: XCircle, skipped: AlertTriangle, cancelled: Square }
@@ -22,6 +22,9 @@ function StatusIcon({ status }: { status: TestStatus }) {
 export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { suiteId: string; open: boolean; onOpenChange: (open: boolean) => void }) {
     const { t, i18n } = useTranslation()
     const suite = suites[suiteId]
+    const [environment, setEnvironment] = useState<'isolated' | 'hosted-supabase'>('isolated')
+    const [liveReadiness, setLiveReadiness] = useState<LiveReadiness | null>(null)
+    const availableGroups = environment === 'hosted-supabase' ? suite?.liveGroups ?? [] : suite?.groups ?? []
     const [selected, setSelected] = useState(() => suite?.groups.map((group) => group.id) ?? [])
     const [seed, setSeed] = useState('20,260,918')
     const [samples, setSamples] = useState('16')
@@ -42,6 +45,7 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
     const valid = !!suite && selected.length > 0 && seed !== '' && samples !== ''
         && Number.isInteger(parsedSeed) && parsedSeed >= 0 && parsedSeed <= 0xffffffff
         && Number.isInteger(parsedSamples) && parsedSamples >= 1 && parsedSamples <= 100
+        && (environment === 'isolated' || liveReadiness?.status === 'ready')
 
     useEffect(() => {
         mounted.current = true
@@ -77,6 +81,22 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
         return () => { abort.abort(); clearTimeout(timer) }
     }, [open])
 
+    useEffect(() => {
+        if (!open || environment !== 'hosted-supabase' || !ready || !token.current) return
+        const abort = new AbortController()
+        setLiveReadiness(null)
+        void testRunnerClient.liveReadiness(token.current, abort.signal)
+            .then((result) => { if (!abort.signal.aborted) setLiveReadiness(result) })
+            .catch((error) => { if (!abort.signal.aborted) setLiveReadiness({ status: 'blocked', reason: runnerErrorKey(error).replace('devTesting.errors.', '') }) })
+        return () => abort.abort()
+    }, [open, environment, ready])
+
+    const selectEnvironment = (next: 'isolated' | 'hosted-supabase') => {
+        setEnvironment(next)
+        setSelected((next === 'isolated' ? suite?.groups : suite?.liveGroups)?.map((group) => group.id) ?? [])
+        setError(null)
+    }
+
     const start = async (groupIds = selected, usePreviousInputs = false) => {
         if (submittingRef.current || busy || !ready || !valid) return
         submittingRef.current = true
@@ -86,7 +106,7 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
         setOnlyFailures(false)
         try {
             const next = await testRunnerClient.start(token.current, {
-                suiteId, groupIds,
+                suiteId, environment, groupIds,
                 seed: usePreviousInputs && activeRun ? activeRun.seed : parsedSeed,
                 samples: usePreviousInputs && activeRun ? activeRun.samples : parsedSamples
             })
@@ -136,21 +156,34 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
                 <AppDialogDescription>{t('devTesting.description')}</AppDialogDescription>
             </AppDialogHeader>
             <AppDialogBody className="space-y-5">
-                <div className="flex gap-3 rounded-xl border border-emerald-600/20 bg-emerald-600/5 p-3 text-sm">
-                    <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-600" /><p>{t('devTesting.isolation')}</p>
+                <div className="space-y-2">
+                    <p className="font-medium">{t('devTesting.environment')} *</p>
+                    <div className="flex flex-wrap gap-2">
+                        {(['isolated', 'hosted-supabase'] as const).map((option) => <Button key={option} type="button" allowViewer variant={environment === option ? 'default' : 'outline'} disabled={busy || (option === 'hosted-supabase' && !suite?.liveGroups?.length)} onClick={() => selectEnvironment(option)}>{t(`devTesting.adapters.${option}`)}</Button>)}
+                    </div>
                 </div>
+                <div className={cn('flex gap-3 rounded-xl border p-3 text-sm', environment === 'hosted-supabase' ? 'border-amber-600/30 bg-amber-600/5' : 'border-emerald-600/20 bg-emerald-600/5')}>
+                    <ShieldCheck className="h-5 w-5 shrink-0" /><p>{t(environment === 'hosted-supabase' ? 'devTesting.liveWrites' : 'devTesting.isolation')}</p>
+                </div>
+                {environment === 'hosted-supabase' && <div className="rounded-xl border p-3 text-sm" role="status">
+                    {liveReadiness?.status === 'ready'
+                        ? <p>{t('devTesting.liveReady', { name: liveReadiness.target.workspaceName, id: liveReadiness.target.workspaceId, host: liveReadiness.target.host, mode: liveReadiness.mode })}</p>
+                        : liveReadiness?.status === 'blocked'
+                            ? <p className="text-destructive">{t(`devTesting.errors.${liveReadiness.reason}`, { defaultValue: t('devTesting.errors.live_preflight_failed') })}</p>
+                            : <p className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />{t('devTesting.liveChecking')}</p>}
+                </div>}
                 {error && <p role="alert" className="rounded-xl border border-destructive/30 p-3 text-sm text-destructive">{t(error)}</p>}
                 {!ready && !error && <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="h-4 w-4 animate-spin" />{t('devTesting.connecting')}</p>}
                 {run && !activeRun && <p role="status" className="text-sm">{t('devTesting.anotherSuite')}</p>}
                 <fieldset disabled={busy} className="space-y-3">
                     <legend className="mb-2 font-medium">{t('devTesting.checks')} *</legend>
                     <div className="grid gap-2 sm:grid-cols-2">
-                        {suite?.groups.map((group) => <label key={group.id} className="flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm">
+                        {availableGroups.map((group) => <label key={group.id} className="flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm">
                             <Checkbox allowViewer aria-label={t(group.titleKey)} checked={selected.includes(group.id)} onCheckedChange={(checked) => setSelected((previous) => checked ? [...previous, group.id] : previous.filter((id) => id !== group.id))} disabled={busy} />
                             <span><span className="block font-medium">{t(group.titleKey)}</span><span className="text-xs text-muted-foreground">{t(`devTesting.layers.${group.layer}`)}</span></span>
                         </label>)}
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    {environment === 'isolated' && <div className="grid gap-3 sm:grid-cols-2">
                         <div className="space-y-1">
                             <Label htmlFor="dev-test-seed">{t('devTesting.seed')} *</Label>
                             <Input allowViewer id="dev-test-seed" value={seed} inputMode="numeric" placeholder="0" disabled={busy} onChange={(event) => {
@@ -167,19 +200,19 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
                             }} />
                             <p className="text-xs text-muted-foreground">{t(suite?.samplesHelpKey ?? 'devTesting.samplesHelp')}</p>
                         </div>
-                    </div>
+                    </div>}
                 </fieldset>
                 <div className="rounded-xl border border-amber-600/25 bg-amber-600/5 p-3 text-sm">
                     <p className="mb-2 flex items-center gap-2 font-medium"><AlertTriangle className="h-4 w-4" />{t('devTesting.coverageLimit')}</p>
                     <ul className="space-y-1">
                         {suite?.unavailable.map((id) => <li key={id} className="flex flex-wrap items-center justify-between gap-2"><span>{t(`devTesting.environments.${id}`)}</span><span className="text-xs text-amber-700 dark:text-amber-400">{t('devTesting.blocked')}</span></li>)}
                     </ul>
-                    <p className="mt-2 text-xs text-muted-foreground">{t(suite?.coverageHelpKey ?? 'devTesting.coverageHelp')}</p>
+                    <p className="mt-2 text-xs text-muted-foreground">{t(environment === 'hosted-supabase' ? suite?.liveCoverageHelpKey ?? 'devTesting.coverageHelp' : suite?.coverageHelpKey ?? 'devTesting.coverageHelp')}</p>
                 </div>
                 {activeRun && <section className="select-text space-y-3" aria-label={t('devTesting.results')}>
                     <div role="status" aria-live="polite" className="flex flex-wrap items-center justify-between gap-2 text-sm">
                         <p className="flex items-center gap-2 font-medium"><StatusIcon status={activeRun.status} />{t(`devTesting.runStatus.${activeRun.status}`)} · {t('devTesting.progress', { done: format(finished), total: format(tests.length) })}</p>
-                        <span className="text-xs text-muted-foreground">{t('devTesting.runSeed', { seed: format(activeRun.seed) })}</span>
+                        <span className="text-xs text-muted-foreground">{activeRun.environment === 'hosted-supabase' ? t('devTesting.adapters.hosted-supabase') : t('devTesting.runSeed', { seed: format(activeRun.seed) })}</span>
                     </div>
                     <div role="progressbar" aria-label={t('devTesting.results')} aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary transition-all" style={{ width: `${progress}%` }} /></div>
                     <div className="flex flex-wrap gap-3 text-xs">
@@ -188,22 +221,35 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
                     <label className="flex items-center gap-2 text-sm"><Checkbox allowViewer aria-label={t('devTesting.onlyFailures')} checked={onlyFailures} onCheckedChange={(checked) => setOnlyFailures(checked === true)} />{t('devTesting.onlyFailures')}</label>
                     {activeRun.cancelRequested && activeRun.status === 'running' && <p role="status" className="text-sm text-amber-700 dark:text-amber-400">{t('devTesting.cancelling')}</p>}
                     {activeRun.groups.map((group) => <details key={group.id} open={group.status === 'failed'} className="rounded-xl border p-3">
-                        <summary className="cursor-pointer text-sm"><span className="inline-flex items-center gap-2"><StatusIcon status={group.status} />{t(suite.groups.find((entry) => entry.id === group.id)?.titleKey ?? 'devTesting.checks')} · {t(`devTesting.status.${group.status}`)} · {format(group.tests.length)}</span></summary>
+                        <summary className="cursor-pointer text-sm"><span className="inline-flex items-center gap-2"><StatusIcon status={group.status} />{t([...suite.groups, ...(suite.liveGroups ?? [])].find((entry) => entry.id === group.id)?.titleKey ?? 'devTesting.checks')} · {t(`devTesting.status.${group.status}`)} · {format(group.tests.length)}</span></summary>
                         {group.errors.map((error, index) => <pre key={index} className="mt-2 max-w-full whitespace-pre-wrap break-words rounded-lg bg-destructive/5 p-2 text-xs text-destructive" dir="ltr">{error}</pre>)}
                         <div className="mt-2 space-y-2">
                             {group.tests.filter((test) => !onlyFailures || test.status === 'failed').map((test) => <div key={test.id} className="rounded-lg bg-muted/40 p-2 text-xs">
-                                <div className="flex items-start gap-2"><StatusIcon status={test.status} /><span className="min-w-0 flex-1 break-words" dir="ltr">{test.name}</span><span className="shrink-0 text-muted-foreground">{t('devTesting.duration', { ms: format(Math.round(test.durationMs)) })}</span></div>
+                                <div className="flex flex-wrap items-start gap-2">
+                                    <StatusIcon status={test.status} />
+                                    <span className="min-w-[10rem] flex-1 break-words" dir="ltr">{test.name}</span>
+                                    {activeRun.environment === 'hosted-supabase' && test.environment && (
+                                        <span className="shrink-0 rounded border px-1 text-[10px] text-muted-foreground">
+                                            {t(`devTesting.adapters.${test.environment}`)}
+                                        </span>
+                                    )}
+                                    <span className="shrink-0 text-muted-foreground">
+                                        {t('devTesting.duration', { ms: format(Math.round(test.durationMs)) })}
+                                    </span>
+                                </div>
                                 <p className="mt-1 break-all text-muted-foreground" dir="ltr">{test.file}</p>
                                 {test.errors.map((error, index) => <pre key={index} className="mt-2 whitespace-pre-wrap break-words text-destructive" dir="ltr">{error}</pre>)}
                             </div>)}
                         </div>
                     </details>)}
+                    {activeRun.target && <p className="text-xs text-muted-foreground">{t('devTesting.liveReady', { name: activeRun.target.workspaceName, id: activeRun.target.workspaceId, host: activeRun.target.host, mode: activeRun.mode })}</p>}
+                    {activeRun.fixtures?.length ? <p className="text-xs text-muted-foreground">{t('devTesting.liveFixtureCount', { count: activeRun.fixtures.length })}</p> : null}
                     {activeRun.reportPath && <p className="break-all text-xs text-muted-foreground" dir="ltr">{activeRun.reportPath}</p>}
                 </section>}
             </AppDialogBody>
             <AppDialogFooter className="flex-wrap">
                 {activeRun && <Button variant="outline" allowViewer disabled={busy} onClick={download}><Download />{t('devTesting.export')}</Button>}
-                {failedGroups.length > 0 && <Button variant="outline" allowViewer disabled={busy || !ready || !valid} onClick={() => void start(failedGroups, true)}><RotateCcw />{t('devTesting.rerun')}</Button>}
+                {failedGroups.length > 0 && <Button variant="outline" allowViewer disabled={busy || !ready || !valid || activeRun?.environment !== environment} onClick={() => void start(failedGroups, true)}><RotateCcw />{t('devTesting.rerun')}</Button>}
                 {busy ? <Button variant="outline" allowViewer disabled={submitting || !!run?.cancelRequested || !ready} onClick={() => void cancel()}><Square />{t('devTesting.cancel')}</Button> : <Button variant="outline" allowViewer onClick={() => onOpenChange(false)}>{t('common.close')}</Button>}
                 <Button allowViewer disabled={!valid || !ready || busy} onClick={() => void start()}>{busy ? <Loader2 className="animate-spin" /> : <Play />}{t(busy ? 'devTesting.running' : 'devTesting.run')}</Button>
             </AppDialogFooter>

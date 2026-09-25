@@ -1,6 +1,24 @@
 {
   "sale-orders": {
     "titleKey": "devTesting.saleOrders",
+    "coverageHelpKey": "devTesting.saleOrdersIsolatedCoverageHelp",
+    "liveCoverageHelpKey": "devTesting.saleOrdersLiveCoverageHelp",
+    "liveGroups": [
+      { "id": "matrix", "titleKey": "devTesting.groups.matrix", "layer": "live", "isolatedGroupId": "matrix", "files": ["src/dev/testing/suites/saleOrdersMatrixLive.test.ts"] },
+      { "id": "printing", "titleKey": "devTesting.groups.printing", "layer": "live", "isolatedGroupId": "printing", "files": ["src/dev/testing/suites/saleOrdersPrintingLive.test.ts"] },
+      { "id": "account-statement", "titleKey": "devTesting.groups.accountStatement", "layer": "live", "isolatedGroupId": "account-statement", "files": ["src/dev/testing/suites/saleOrdersStatementLive.test.ts"] },
+      { "id": "lifecycle", "titleKey": "devTesting.groups.lifecycle", "layer": "live", "isolatedGroupId": "lifecycle", "files": ["src/dev/testing/suites/saleOrdersLifecycleLive.test.ts"] },
+      { "id": "pricing", "titleKey": "devTesting.groups.pricing", "layer": "live", "isolatedGroupId": "pricing", "files": ["src/dev/testing/suites/saleOrdersPricingLive.test.ts"] },
+      { "id": "related-units", "titleKey": "devTesting.groups.relatedUnits", "layer": "live", "isolatedGroupId": "related-units", "files": ["src/dev/testing/suites/saleOrdersUnitsLive.test.ts"] },
+      { "id": "payments", "titleKey": "devTesting.groups.payments", "layer": "live", "isolatedGroupId": "payments", "files": ["src/dev/testing/suites/saleOrdersPaymentsLive.test.ts"] },
+      { "id": "ui-access", "titleKey": "devTesting.groups.uiAccess", "layer": "live", "isolatedGroupId": "ui-access", "files": ["src/dev/testing/suites/saleOrdersAccessLive.test.ts"] },
+      {
+        "id": "live-transactions",
+        "titleKey": "devTesting.groups.liveTransactions",
+        "layer": "live",
+        "files": ["src/dev/testing/suites/saleOrdersLive.test.ts"]
+      }
+    ],
     "groups": [
       {
         "id": "matrix",
@@ -34,22 +52,6 @@
         "files": [
           "src/local-db/orderFinancing.test.ts",
           "src/local-db/orderInstallments.test.ts"
-        ]
-      },
-      {
-        "id": "remote-contract",
-        "titleKey": "devTesting.groups.remoteContract",
-        "layer": "contract",
-        "files": [
-          "src/local-db/quickOrderAtomic.test.ts",
-          "src/local-db/orderCancellation.test.ts",
-          "src/local-db/orders.test.ts",
-          "src/local-db/partnerSummaryRefresh.test.ts",
-          "src/local-db/partnerSummaryJobs.test.ts",
-          "src/local-db/partnerSummaryRecovery.test.ts",
-          "src/lib/orderSaveProgress.test.ts",
-          "src/sync/syncEngine.test.ts",
-          "src/sync/syncErrors.test.ts"
         ]
       },
       {
@@ -113,12 +115,11 @@
     ],
     "unavailable": [
       "browser-workflow",
-      "cloud-database",
+      "cloud-database-broad",
       "hybrid-native",
       "local-native"
     ],
-    "samplesHelpKey": "devTesting.samplesHelp",
-    "coverageHelpKey": "devTesting.coverageHelp"
+    "samplesHelpKey": "devTesting.samplesHelp"
   },
   "business-partners": {
     "titleKey": "devTesting.businessPartners",

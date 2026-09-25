@@ -47,7 +47,7 @@ import { BarcodeLabelTemplate } from '@/ui/components/BarcodeLabelTemplate'
 import { PriceBookManagementDialog } from '@/ui/components/PriceBookManagementDialog'
 import { ProductImportPreviewModal } from '@/ui/components/ProductImportPreviewModal'
 import { ProductCategoryManagerDialog } from '@/ui/components/products/ProductCategoryManagerDialog'
-import { useProductQuantityFormatter } from '@/ui/hooks/useProductQuantityFormatter'
+import { useProductQuantityPresentation } from '@/ui/hooks/useProductQuantityFormatter'
 import {
     Button,
     Card,
@@ -172,7 +172,12 @@ export function Products() {
     const categories = useCategories(user?.workspaceId)
     const storages = useStorages(user?.workspaceId)
     const workspaceId = user?.workspaceId || ''
-    const formatProductQuantity = useProductQuantityFormatter(workspaceId || undefined)
+    const getProductQuantityPresentation = useProductQuantityPresentation(workspaceId || undefined)
+    const formatProductQuantity = useCallback(
+        (productId: string, quantity: number, unit: string) =>
+            getProductQuantityPresentation(productId, quantity, unit).label,
+        [getProductQuantityPresentation]
+    )
     const priceBooksEnabled = hasCapability('priceBooks')
     const { priceBooks, priceBookItems } = usePriceBookCatalogState(
         priceBooksEnabled ? workspaceId || undefined : undefined,
@@ -450,6 +455,28 @@ export function Products() {
         const storage = storageById.get(id)
         return storage ? storage.name : ''
     }, [storageById])
+
+    const renderStockQuantity = (product: Product, serviceLabel: string) => {
+        if (isService(product)) return serviceLabel
+
+        const { label, smallerUnitTotal } = getProductQuantityPresentation(product.id, product.quantity, product.unit)
+        if (!smallerUnitTotal) return label
+
+        return (
+            <TooltipProvider>
+                <Tooltip delayDuration={150}>
+                    <TooltipTrigger asChild>
+                        <span tabIndex={0} className="cursor-help border-b border-dotted border-current">
+                            {label}
+                        </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        {t('products.stockTotalInSmallerUnits', { quantity: smallerUnitTotal })}
+                    </TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+        )
+    }
 
     const renderStorage = (productId: string) => {
         const entries = productStorageMap.get(productId)
@@ -1487,7 +1514,7 @@ export function Products() {
                                                                                     isLinkedVariant && 'text-[10px]',
                                                                                     product.quantity <= product.minStockLevel ? 'text-amber-500' : 'text-muted-foreground/60'
                                                                                 )}>
-                                                                                    {isService(product) ? t('services.noInventory', { defaultValue: 'No inventory' }) : formatProductQuantity(product.id, product.quantity, product.unit)}
+                                                                                    {renderStockQuantity(product, t('services.noInventory', { defaultValue: 'No inventory' }))}
                                                                                 </div>
                                                                             </div>
                                                                         </div>
@@ -1624,7 +1651,7 @@ export function Products() {
                                                                         {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
                                                                     </div>
                                                                     <div className="text-[11px] font-medium text-muted-foreground">
-                                                                        {isService(product) ? t('services.noInventory', { defaultValue: 'No inventory' }) : formatProductQuantity(product.id, product.quantity, product.unit)}
+                                                                        {renderStockQuantity(product, t('services.noInventory', { defaultValue: 'No inventory' }))}
                                                                     </div>
                                                                 </div>
 
@@ -1825,7 +1852,7 @@ export function Products() {
                                                                 </TableCell>
                                                                 <TableCell className="text-right">
                                                                     <span className={product.quantity <= product.minStockLevel ? 'font-medium text-amber-500' : ''}>
-                                                                        {isService(product) ? '—' : formatProductQuantity(product.id, product.quantity, product.unit)}
+                                                                        {renderStockQuantity(product, '—')}
                                                                     </span>
                                                                 </TableCell>
                                                                 {(canEdit || canDelete || user?.role === 'viewer') && (

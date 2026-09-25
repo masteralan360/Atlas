@@ -497,6 +497,8 @@ export function QuickOrderModal({
                 ? t('agentSalesAccounts.notEnabled')
                 : message === 'agent_sales_account_unavailable'
                     ? t('agentSalesAccounts.unavailable')
+                    : message.includes('quick_order_related_units_unsupported')
+                        ? t('pos.unitSelection.ordersUnsupported')
                     : message || t('orders.form.errors.saveSalesFailed'))
         }
     }

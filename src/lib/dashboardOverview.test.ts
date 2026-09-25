@@ -111,17 +111,36 @@ describe('dashboard cash overview', () => {
 
 describe('dashboard transactions and partner profit', () => {
     it('keeps actual order status and shows zero realized revenue for an incomplete order', () => {
-        const order = {
+        const order: SalesOrder = {
             id: 'order-1',
+            workspaceId: 'workspace-1',
             orderNumber: 'SO-1',
             status: 'pending',
             createdAt: at(24),
             updatedAt: at(24),
+            syncStatus: 'synced',
+            lastSyncedAt: at(24),
+            version: 1,
+            isDeleted: false,
             currency: 'usd',
             items: [],
             customerId: 'customer',
             customerName: 'Customer',
-        } as SalesOrder
+            subtotal: 0,
+            discount: 0,
+            tax: 0,
+            total: 0,
+            exchangeRate: null,
+            exchangeRateSource: null,
+            exchangeRateTimestamp: null,
+            isPaid: false,
+            paymentStatus: 'unpaid',
+            paidAmount: 0,
+            balanceAmount: 0,
+            initialPaymentAmount: 0,
+            isInstallmentBased: false,
+            installmentCount: 0,
+        }
         const rows = getDashboardTransactions([saleRecord('pos-1', null)], [order])
         expect(rows.map((row) => row.status)).toEqual(['sold', 'pending'])
         expect(rows[1].revenue).toBe(0)

@@ -8,7 +8,7 @@ describe('developer runner client', () => {
         const run = { id: 'run', status: 'running' }
         const fetch = vi.fn(async () => new Response(JSON.stringify(run)))
         vi.stubGlobal('fetch', fetch)
-        const options = { suiteId: 'sale-orders', groupIds: ['matrix'], seed: 42, samples: 3 }
+        const options = { suiteId: 'sale-orders', environment: 'isolated' as const, groupIds: ['matrix'], seed: 42, samples: 3 }
         expect(await testRunnerClient.start('session-token', options)).toEqual(run)
         expect(fetch).toHaveBeenCalledWith('/__atlas-dev-testing/runs', expect.objectContaining({
             method: 'POST', credentials: 'omit', cache: 'no-store', body: JSON.stringify(options),
@@ -26,9 +26,22 @@ describe('developer runner client', () => {
         expect(await testRunnerClient.run(session.token)).toBeNull()
     })
 
+    it('uses the separate hosted endpoint and reads the verified target', async () => {
+        const readiness = { status: 'ready', target: { host: 'test.supabase.co', workspaceId: 'id', workspaceName: 'DEV TEST Atlas' }, mode: 'cloud' }
+        const fetch = vi.fn()
+            .mockResolvedValueOnce(new Response(JSON.stringify(readiness)))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'live-run', environment: 'hosted-supabase' })))
+        vi.stubGlobal('fetch', fetch)
+        expect(await testRunnerClient.liveReadiness('token')).toEqual(readiness)
+        expect(fetch.mock.calls[0][0]).toBe('/__atlas-dev-testing/live-readiness')
+        const run = await testRunnerClient.start('token', { suiteId: 'sale-orders', environment: 'hosted-supabase', groupIds: ['live-transactions'], seed: 0, samples: 1 })
+        expect(run.environment).toBe('hosted-supabase')
+        expect(fetch.mock.calls[1][0]).toBe('/__atlas-dev-testing/live-runs')
+    })
+
     it.each(['run_busy', 'local_only', 'invalid_session'])('maps %s to a localized, friendly failure', async (error) => {
         vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ error }), { status: 403 }))
-        await expect(testRunnerClient.start('token', { suiteId: 'sale-orders', groupIds: ['matrix'], seed: 0, samples: 1 })).rejects.toThrow(error)
+        await expect(testRunnerClient.start('token', { suiteId: 'sale-orders', environment: 'isolated', groupIds: ['matrix'], seed: 0, samples: 1 })).rejects.toThrow(error)
         expect(runnerErrorKey(new Error(error))).toBe(`devTesting.errors.${error}`)
     })
 

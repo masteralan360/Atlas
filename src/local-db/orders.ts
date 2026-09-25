@@ -2579,7 +2579,7 @@ export function useWorkspaceOrderInstallments(workspaceId: string | undefined) {
 export async function rebuildOrderPaymentState(
     orderType: OrderType,
     orderId: string,
-    options: { throwOnOrderSyncError?: boolean; skipCommissionReconcile?: boolean } = {}
+    options: { throwOnOrderSyncError?: boolean; skipCommissionReconcile?: boolean; deferOrderSync?: boolean } = {}
 ) {
     const orderTable = orderType === 'sales' ? db.sales_orders : db.purchase_orders
     const sourceType = orderType === 'sales' ? 'sales_order' : 'purchase_order'
@@ -2654,12 +2654,14 @@ export async function rebuildOrderPaymentState(
     })
 
     await Promise.all([
-        syncUpsertEntities(
+        // A return must persist its audit rows before the order can become
+        // fully returned on the server; its INSERT policy checks the old state.
+        ...(options.deferOrderSync ? [] : [syncUpsertEntities(
             orderType === 'sales' ? 'sales_orders' : 'purchase_orders',
             [updated as unknown as Record<string, unknown> & { id: string; version: number }],
             order.workspaceId,
             { throwOnNonRetriableError: options.throwOnOrderSyncError }
-        ),
+        )]),
         syncUpsertEntities(
             'order_installments',
             rebuiltInstallments as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
@@ -3128,6 +3130,21 @@ export async function createQuickSalesOrder(
 
     if (targetStatus !== 'draft' && targetStatus !== 'pending' && targetStatus !== 'completed') {
         throw new Error('Quick orders must be saved as draft, pending, or completed')
+    }
+    // POS deliberately excludes products with related selling units from Quick
+    // Orders. Enforce the same boundary for callers that bypass the POS cart;
+    // the hosted atomic checkout does not convert pack quantities to base stock.
+    const productIds = new Set(data.items.map((item) => item.productId))
+    const hasRelatedUnitLine = data.items.some((item) => (
+        Boolean(item.unitRelationshipId || item.baseUnitRef)
+        || (item.unitFactor != null && Number(item.unitFactor) !== 1)
+    ))
+    const hasRelatedUnitProduct = productIds.size > 0 && await db.product_unit_conversions
+        .where('productId').anyOf([...productIds])
+        .filter((conversion) => conversion.workspaceId === workspaceId && !conversion.isDeleted)
+        .first()
+    if (hasRelatedUnitLine || hasRelatedUnitProduct) {
+        throw new Error('quick_order_related_units_unsupported')
     }
     if (targetStatus !== 'draft') {
         assertInventoryMutationConnectivity(workspaceId)
@@ -4835,7 +4852,8 @@ export async function returnSalesOrder(input: ReturnSalesOrderInput) {
             throw new Error('The order does not have enough posted payments to reverse this return')
         }
         finalOrder = await rebuildOrderPaymentState('sales', order.id, {
-            skipCommissionReconcile: true
+            skipCommissionReconcile: true,
+            deferOrderSync: true
         }) as SalesOrder
     } else {
         await recalculateCustomerAndPartnerSummaries(order.workspaceId, order.customerId, order.businessPartnerId)

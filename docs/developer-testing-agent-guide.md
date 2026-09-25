@@ -24,11 +24,12 @@ runner architecture, rather than a universal test specification.
   count, displays streamed results, reruns failed groups, and exports JSON.
 - A local Node controller executes existing Vitest tests in separate processes.
   The browser never substitutes its current workspace database with test data.
-- UI runs and CLI runs share the registry, execution controller, reporter, and
-  isolated Vitest configuration.
-- Sale Orders V1, regular POS and Post Service are independent suites with business-function, calculation, and mocked remote-contract coverage.
-  Current suites have no complete business-form browser automation, Supabase integration adapter,
-  Hybrid native adapter, or Local native persistence adapter.
+- UI runs and CLI runs share the registry, execution controller, and reporter.
+  The selected environment chooses the isolated or hosted Vitest configuration.
+- Sale Orders V1, regular POS and Post Service are independent suites. Sale Orders
+  has an opt-in hosted Supabase cancellation group; POS and Post Service retain
+  isolated request contract groups. Complete browser, Hybrid native, and Local
+  native adapters remain unavailable.
 
 "Selected checks passed" means precisely that. It is not a guarantee of no
 bugs, every possible scenario, or coverage of the unimplemented adapters.
@@ -106,16 +107,29 @@ exist; it does not register an implemented Purchase Orders suite:
 }
 ```
 
-Current layer values are `business`, `contract`, and `calculation`, with matching
+Isolated layer values are `business`, `contract`, and `calculation`, with matching
 localized descriptions. `layer` is descriptive metadata; it does not select an
 execution adapter. All current groups use the same isolated Vitest configuration.
 New layers need appropriate translations and, when necessary, explicit runner
 support. Merely labeling a group `browser` or `native` implements neither.
 
+The Sale Orders suite also has `liveGroups` for its independent hosted Supabase
+adapter. The `live` layer describes those tests, while the explicit run
+`environment` selects `hosted-supabase`. A hosted group may declare
+`isolatedGroupId`; the controller runs that exact isolated group first in a
+credential-free, network-blocked child, then rechecks the live target and runs
+the hosted files in a separate child. Each result is labeled with its actual
+environment, and both parts must pass. Keep each module's live scenarios
+independent; Sale Orders is a reference for runner wiring, not a universal
+business fixture or assertion model. Do not move isolated files into the live
+allowlist or treat a mocked request contract as a deployed database check.
+
 `unavailable` lists declared coverage gaps, rendered using
 `devTesting.environments.<id>`. It is copied into reports and does not make an
 otherwise successful run fail. It is not an adapter registry, and removing an
-ID does not prove that the missing coverage exists. For a future CI policy that
+ID does not prove that the missing coverage exists. The hosted Sale Orders run
+still reports the broader Cloud coverage gap beyond its selected live scenario.
+For a future CI policy that
 requires specific adapters, implement and test a separate coverage requirement.
 
 ## 4. Runner contracts and lifecycle
@@ -132,6 +146,8 @@ a workspace role or admin grant.
 | --- | --- | --- |
 | `GET /session` | None | `{ token, suites, run }` |
 | `POST /runs` | `{ suiteId, groupIds, seed, samples }` | Accepted run, HTTP 202 |
+| `POST /live-runs` | `{ suiteId, environment: 'hosted-supabase', groupIds }` | Accepted live run after preflight, HTTP 202 |
+| `GET /live-readiness` | None | Readiness, target identity, or a blocked reason |
 | `GET /run` | None | Current run or `null` |
 | `POST /cancel` | `{ id }` | Current run with cancellation requested |
 | `GET /preview` | None | Local-only visual harness HTML, without Atlas login |
@@ -162,7 +178,8 @@ separate controllers, not a global machine-wide lock.
 The controller supplies fixed config/reporter paths and the group's registered
 test file filters to Vitest using `shell: false`. It currently allows 180 seconds
 per group. The test configuration allows 30 seconds per test/hook, has no retries,
-uses Node and fork workers, and includes `src/**/*.test.{ts,tsx}`. Tests outside
+uses Node and fork workers, and includes `src/**/*.test.{ts,tsx}` except
+`*Live.test.ts`. Tests outside
 that include pattern need a deliberate configuration change before registry use.
 
 The reporter emits stdout lines prefixed with `ATLAS_TEST_EVENT `:
@@ -219,11 +236,28 @@ They do not inherit app credentials, `VITE_*`, or `NODE_OPTIONS`. Their config
 sets `envDir: false`, substitutes non-routable backend URLs and a placeholder
 key, and installs a fetch guard that rejects live network calls.
 
+Hosted Supabase runs deliberately use a separate `vitest.live.config.mts` and
+the gitignored `.env.atlas-live-tests.local`. Only the configured test URL,
+publishable/anon key, test credentials, workspace ID/name and run ID enter that
+child. Do not pass the app's service-role key or current browser session. The
+server performs a fresh login and checks the exact `DEV TEST` workspace before
+each group; the test repeats the guard before mutations. The live network guard
+allows only the configured HTTPS origin and rejects redirects. This is a
+trusted test process boundary, not an operating-system firewall. Hydrate remote
+storages before creating test storages: `createStorage` determines the primary
+and marketplace flags from the local cache, which starts empty in the live
+child even when the hosted workspace already has storages. Any new live
+scenario must use run-scoped fixtures, query its own IDs through a fresh
+authenticated client, inspect server effects, report fixture IDs, and describe
+retained audit records. Live tests must stay out of normal `npm test` and the
+isolated controller config.
+
 This is process/environment isolation, not an operating-system sandbox or a
 complete network firewall. Trusted repository tests can still access filesystem
-or other networking APIs. Do not add tests that open the user's native database,
-load app secrets, start business synchronization, or contact a live workspace.
-Do not weaken the shared guard to make a missing mock pass.
+or other networking APIs. Do not add isolated tests that open the user's native
+database, load app secrets, start business synchronization, or contact a live
+workspace. The hosted adapter may contact only its verified dedicated test
+workspace. Do not weaken the shared guard to make a missing mock pass.
 
 The Sale Orders matrix uses `fake-indexeddb/auto`, deletes/reopens its disposable
 database before each case, uses a test-only workspace ID and Local mode snapshot,
@@ -259,9 +293,21 @@ The `sale-orders` registry entry owns these groups:
 | --- | --- |
 | `matrix` | Production order/payment/return functions with fixed and generated scenarios |
 | `lifecycle` | Existing financing and installment regressions |
-| `remote-contract` | Mocked Cloud/Hybrid order-save, Quick Order, progress, and retry contracts |
+| `live-transactions` (hosted) | Independent real Supabase cash checkout/full return and financed Sale Order cancellation, with persisted inventory and payment effects |
 | `pricing` | Existing pricing, exchange, rounding, customer-balance, and line-storage checks |
 | `payments` | Payment transactions, accounts, reversals, ledger effects, and direct-transaction voucher numbering and A4 layout |
+
+All eight isolated Sale Orders groups (`matrix`, `printing`,
+`account-statement`, `lifecycle`, `pricing`, `related-units`, `payments`, and
+`ui-access`) have corresponding hosted selections. Each retains its full
+isolated checks and adds a scoped live scenario: method checkout and return;
+persisted print inputs; partner statement balance; draft edit/deletion and
+approval; fractional pricing and discount; regular Sale Order product unit
+conversion, stock, return, and atomic Quick Order rejection;
+selected/unselected payment account movements; or workspace-scoped access.
+Do not infer full live parity from the paired selection. Extend the live file
+when a new behavior needs database verification, and extend the isolated file
+for its local or contract behavior. Keep their expectations independent.
 
 Use the registry for the exact current file list. The matrix draws payment
 methods from the shared app registries. It covers standard methods, USD/IQD,
@@ -297,8 +343,8 @@ Initial V1 validation with the default 16 generated cases passed 229 suite check
 and 22 runner/client checks. These are historical validation counts, not a target
 for every suite or a fixed count after future changes. Even the existing
 `SalesOrderFormPage.test.ts` registry entry tests utilities, not a rendered form
-workflow. Real Supabase SQL/RLS, order-form automation, Hybrid native mirroring,
-and Local native persistence remain explicitly unavailable.
+workflow. Broader Supabase SQL/RLS, order-form automation, Hybrid native
+mirroring, and Local native persistence remain explicitly unavailable.
 
 Do not reuse `saleOrderInput`, `seededCases`, or order-stock/payment assertions in
 unrelated modules merely because they already exist. Extract a shared helper only
@@ -429,7 +475,8 @@ npm run dev:testing -- --port 1422
 
 # Sale Orders, default seed and generated-case count
 npm run test:sale-orders
-npm run test:sale-orders -- --groups matrix,remote-contract --seed 42 --samples 100
+npm run test:sale-orders -- --groups matrix,lifecycle --seed 42 --samples 100
+npm run test:sale-orders:live
 
 # Regular POS, including its own generated checkout cases
 npm run test:pos
@@ -493,7 +540,7 @@ and whitespace; rerunning business scenarios is unnecessary.
 | Browser-global import error | Install compatible stubs before affected imports or improve the production import boundary; do not claim browser coverage from more stubs |
 | Unexpected remote call | Missing mock or wrong mode state; preserve the live-fetch guard |
 | `group_timeout` | Stalled hooks/imports, excessive generated cases or group size; fix causes before changing timeouts |
-| Passing mocked contract but broken backend | Add isolated real integration coverage; mocks do not execute migrations/RPC SQL/RLS |
+| Passing mocked contract but broken backend | Run or extend the hosted adapter on a dedicated DEV TEST workspace; mocks do not execute migrations/RPC SQL/RLS |
 | Run absent after restart | Session state is in memory; use the saved disk report, not an assumed history API |
 
 Leave each extension with its own documented scope, reproducible cases, verified
