@@ -12,7 +12,7 @@ import { useViewOwnRecordScope, type ViewOwnRecordScope } from "@/permissions/us
 import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 
 import { db } from "./database";
-import { canAccessBusinessPartnerInLocalCache } from "./businessPartnerPrivacy";
+import { canAccessBusinessPartnerInLocalCache } from "./businessPartnerAccess";
 import { fetchTableFromSupabase } from "./hooks";
 import { addToOfflineMutations } from "./offlineMutations";
 import { appendPaymentTransaction } from "./payments";

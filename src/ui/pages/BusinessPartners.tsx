@@ -187,7 +187,6 @@ export function BusinessPartners() {
     const { hasPermission } = useWorkspacePermissions()
     const canViewCustomers = hasPermission('customers.access')
     const canViewSuppliers = hasPermission('suppliers.access')
-        && (!features.suppliers_admin_only || user?.role === 'admin')
     const [scope, setScope] = useState<'all' | 'customers' | 'suppliers'>('all')
     const partners = useBusinessPartners(user?.workspaceId, {
         includeRealEstateRoles: features.real_estate,

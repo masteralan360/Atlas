@@ -1798,7 +1798,6 @@ function App() {
                           allowedRoles={["admin", "staff", "viewer"]}
                           requiredFeature="orders"
                           requiredPermission="orders.purchaseOrdersAccess"
-                          requiresSupplierAccess
                         >
                           <Layout>
                             <Orders />
@@ -1821,7 +1820,6 @@ function App() {
                           allowedRoles={["admin", "staff"]}
                           requiredFeature="orders"
                           requiredPermission="orders.purchaseOrdersAccess"
-                          requiresSupplierAccess
                         >
                           <Layout>
                             <Orders />
@@ -1855,7 +1853,6 @@ function App() {
                           allowedRoles={["admin", "staff", "viewer"]}
                           requiredFeature="orders"
                           requiredPermission="orders.purchaseOrdersAccess"
-                          requiresSupplierAccess
                         >
                           <Layout>
                             <Orders />

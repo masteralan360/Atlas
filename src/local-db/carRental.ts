@@ -10,7 +10,7 @@ import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 
 import { db } from "./database";
 import { toLiveCollection } from "./liveCollection";
-import { canAccessBusinessPartnerInLocalCache } from "./businessPartnerPrivacy";
+import { canAccessBusinessPartnerInLocalCache } from "./businessPartnerAccess";
 import { addToOfflineMutations, fetchTableFromSupabase } from "./hooks";
 import { appendPaymentTransaction } from "./payments";
 import type {

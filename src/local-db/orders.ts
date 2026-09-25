@@ -6,7 +6,7 @@ import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import {
     canAccessBusinessPartnerFacetInLocalCache,
     canAccessBusinessPartnerInLocalCache
-} from './businessPartnerPrivacy'
+} from './businessPartnerAccess'
 import { roundOrderValue } from '@/lib/orderPrecision'
 import { convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
 import { createOrderAdjustment, normalizeOrderAdjustments, type OrderAdjustmentDraft } from '@/lib/orderAdjustments'

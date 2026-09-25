@@ -125,9 +125,6 @@ export interface WorkspaceFeatures {
     sales_agent_commission_sheet_type: SalesAgentCommissionSheetType
     sales_agent_commission_mode: SalesAgentCommissionMode
     ledger_dashboard_config: LedgerDashboardConfig
-    private_staff_customers: boolean
-    private_staff_suppliers: boolean
-    suppliers_admin_only: boolean
 }
 
 export interface UpdateInfo {
@@ -168,7 +165,7 @@ interface WorkspaceContextType {
     refreshFeatures: () => Promise<void>
     refreshPaymentSummary: () => Promise<WorkspacePaymentSummary | null>
     updateSettings: (
-        settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'pos_convert_to_workspace_currency' | 'iqd_display_preference' | 'allow_whatsapp' | 'logo_url' | 'coordination' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'thermal_printing' | 'visibility' | 'store_slug' | 'store_description' | 'sales_agent_commission_sheet_type' | 'sales_agent_commission_mode' | 'ledger_dashboard_config' | 'private_staff_customers' | 'private_staff_suppliers' | 'suppliers_admin_only' | 'upload_limit_mb' | 'data_mode' | 'plan' | 'is_configured'>> & { name?: string },
+        settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'pos_convert_to_workspace_currency' | 'iqd_display_preference' | 'allow_whatsapp' | 'logo_url' | 'coordination' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'thermal_printing' | 'visibility' | 'store_slug' | 'store_description' | 'sales_agent_commission_sheet_type' | 'sales_agent_commission_mode' | 'ledger_dashboard_config' | 'upload_limit_mb' | 'data_mode' | 'plan' | 'is_configured'>> & { name?: string },
         options?: { requireRemoteSync?: boolean }
     ) => Promise<void>
     switchDataMode: (newMode: 'cloud' | 'hybrid') => Promise<{ error: string | null }>
@@ -288,9 +285,6 @@ const defaultFeatures: WorkspaceFeatures = {
     sales_agent_commission_sheet_type: 'normal',
     sales_agent_commission_mode: 'payable',
     ledger_dashboard_config: { ...DEFAULT_LEDGER_DASHBOARD_CONFIG, groupOrder: [...DEFAULT_LEDGER_DASHBOARD_CONFIG.groupOrder] },
-    private_staff_customers: false,
-    private_staff_suppliers: false,
-    suppliers_admin_only: false
 }
 
 const WORKSPACE_FEATURE_COLUMNS = [
@@ -319,9 +313,6 @@ const WORKSPACE_FEATURE_COLUMNS = [
     'sales_agent_commission_sheet_type',
     'sales_agent_commission_mode',
     'ledger_dashboard_config',
-    'private_staff_customers',
-    'private_staff_suppliers',
-    'suppliers_admin_only'
 ].join(', ')
 
 function mergeWorkspaceFeatures(
@@ -429,9 +420,6 @@ function getFeaturesFromLocalWorkspace(localWorkspace: Workspace): WorkspaceFeat
         sales_agent_commission_sheet_type: localWorkspace.sales_agent_commission_sheet_type ?? 'normal',
         sales_agent_commission_mode: localWorkspace.sales_agent_commission_mode === 'tracked' ? 'tracked' : 'payable',
         ledger_dashboard_config: normalizeLedgerDashboardConfig(localWorkspace.ledger_dashboard_config),
-        private_staff_customers: localWorkspace.private_staff_customers ?? false,
-        private_staff_suppliers: localWorkspace.private_staff_suppliers ?? false,
-        suppliers_admin_only: localWorkspace.suppliers_admin_only ?? false
     })
 }
 
@@ -615,9 +603,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             sales_agent_commission_sheet_type: nextFeatures.sales_agent_commission_sheet_type,
             sales_agent_commission_mode: nextFeatures.sales_agent_commission_mode,
             ledger_dashboard_config: nextFeatures.ledger_dashboard_config,
-            private_staff_customers: nextFeatures.private_staff_customers,
-            private_staff_suppliers: nextFeatures.private_staff_suppliers,
-            suppliers_admin_only: nextFeatures.suppliers_admin_only,
             syncStatus: 'synced',
             lastSyncedAt: timestamp,
             version: existing?.version ?? 1,
@@ -829,9 +814,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 sales_agent_commission_sheet_type: workspaceRow.sales_agent_commission_sheet_type ?? currentFeatures.sales_agent_commission_sheet_type,
                 sales_agent_commission_mode: workspaceRow.sales_agent_commission_mode === 'tracked' ? 'tracked' : 'payable',
                 ledger_dashboard_config: normalizeLedgerDashboardConfig(workspaceRow.ledger_dashboard_config ?? currentFeatures.ledger_dashboard_config),
-                private_staff_customers: workspaceRow.private_staff_customers ?? currentFeatures.private_staff_customers,
-                private_staff_suppliers: workspaceRow.private_staff_suppliers ?? currentFeatures.private_staff_suppliers,
-                suppliers_admin_only: workspaceRow.suppliers_admin_only ?? currentFeatures.suppliers_admin_only
             }, fetchedOverrides)
             const nextWorkspaceName = resolveFetchedWorkspaceName({
                 workspaceMode: workspaceRow.data_mode,
@@ -1066,9 +1048,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                             sales_agent_commission_sheet_type: data.sales_agent_commission_sheet_type ?? currentFeatures.sales_agent_commission_sheet_type,
                             sales_agent_commission_mode: data.sales_agent_commission_mode === 'tracked' ? 'tracked' : 'payable',
                             ledger_dashboard_config: normalizeLedgerDashboardConfig(data.ledger_dashboard_config ?? currentFeatures.ledger_dashboard_config),
-                            private_staff_customers: data.private_staff_customers ?? currentFeatures.private_staff_customers,
-                            private_staff_suppliers: data.private_staff_suppliers ?? currentFeatures.private_staff_suppliers,
-                            suppliers_admin_only: data.suppliers_admin_only ?? currentFeatures.suppliers_admin_only
                         }, overridesRef.current)
                         const nextWorkspaceName = resolveFetchedWorkspaceName({
                             workspaceMode: data.data_mode,
@@ -1283,7 +1262,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
 
     const updateSettings = async (
-        settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'pos_convert_to_workspace_currency' | 'iqd_display_preference' | 'allow_whatsapp' | 'logo_url' | 'coordination' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'thermal_printing' | 'visibility' | 'store_slug' | 'store_description' | 'sales_agent_commission_sheet_type' | 'sales_agent_commission_mode' | 'ledger_dashboard_config' | 'private_staff_customers' | 'private_staff_suppliers' | 'suppliers_admin_only' | 'upload_limit_mb' | 'data_mode' | 'plan' | 'is_configured'>> & { name?: string },
+        settings: Partial<Pick<WorkspaceFeatures, 'default_currency' | 'pos_convert_to_workspace_currency' | 'iqd_display_preference' | 'allow_whatsapp' | 'logo_url' | 'coordination' | 'print_lang' | 'print_qr' | 'receipt_template' | 'a4_template' | 'thermal_printing' | 'visibility' | 'store_slug' | 'store_description' | 'sales_agent_commission_sheet_type' | 'sales_agent_commission_mode' | 'ledger_dashboard_config' | 'upload_limit_mb' | 'data_mode' | 'plan' | 'is_configured'>> & { name?: string },
         options?: { requireRemoteSync?: boolean }
     ) => {
         const workspaceId = user?.workspaceId
@@ -1404,9 +1383,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 sales_agent_commission_mode_changed_at: commissionModeChanged ? now : undefined,
                 sales_agent_commission_mode_changed_by: commissionModeChanged ? user?.id ?? null : undefined,
                 ledger_dashboard_config: newFeatures.ledger_dashboard_config,
-                private_staff_customers: newFeatures.private_staff_customers,
-                private_staff_suppliers: newFeatures.private_staff_suppliers,
-                suppliers_admin_only: newFeatures.suppliers_admin_only,
                 syncStatus: shouldSync ? 'pending' : 'synced',
                 lastSyncedAt: shouldSync ? null : new Date().toISOString(),
                 version: 1,

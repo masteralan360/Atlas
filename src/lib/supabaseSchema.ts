@@ -135,17 +135,16 @@ export function isRealEstateTable(tableName: string): boolean {
     return realEstateTables.has(tableName)
 }
 
-// Partner directory reads are routed through policy-aware RPCs. This lets a
-// non-admin keep using the customer side of a mixed customer/supplier record
-// without receiving supplier-only fields in the local cache.
-const visibilityScopedTableRpcs: Record<string, string> = {
+// Partner reads use workspace-scoped RPCs; raw SELECT remains revoked so all
+// directory reads pass through the active-workspace check.
+const workspaceScopedPartnerReadRpcs: Record<string, string> = {
     business_partners: 'list_visible_business_partners',
     customers: 'list_visible_customers',
     suppliers: 'list_visible_suppliers'
 }
 
-// These writes must not go through the raw REST tables: direct SELECT is
-// intentionally revoked so privacy-projected partner data cannot leak.
+// Writes use explicit RPCs so workspace and module authorization are checked
+// consistently by the database.
 const partnerSyncWriteRpcs: Record<string, string> = {
     business_partners: 'sync_business_partner',
     customers: 'sync_customer',
@@ -188,8 +187,8 @@ export function getSupabaseRemoteTableName(tableName: string): string {
     return paymentAccountRemoteTableNames[tableName] ?? tableName
 }
 
-export function getVisibilityScopedTableRpc(tableName: string): string | undefined {
-    return visibilityScopedTableRpcs[tableName]
+export function getWorkspaceScopedPartnerReadRpc(tableName: string): string | undefined {
+    return workspaceScopedPartnerReadRpcs[tableName]
 }
 
 export function getPartnerSyncWriteRpc(tableName: string): string | undefined {

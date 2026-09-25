@@ -102,7 +102,7 @@ vi.mock('@/permissions/workspacePermissionsState', () => ({
     useOptionalWorkspacePermissions: vi.fn()
 }))
 
-vi.mock('./businessPartnerPrivacy', () => ({
+vi.mock('./businessPartnerAccess', () => ({
     canAccessBusinessPartnerFacetInLocalCache: vi.fn(() => true),
     canAccessBusinessPartnerInLocalCache: vi.fn(() => true)
 }))
@@ -180,7 +180,7 @@ describe('order counterparty summary sync', () => {
         })
     })
 
-    it('uses the privacy-checked customer RPC after an order changes its summary', async () => {
+    it('uses the workspace-scoped customer RPC after an order changes its summary', async () => {
         await recalculateCustomerSummary(WORKSPACE_ID, CUSTOMER_ID)
 
         expect(supabaseMock.from).not.toHaveBeenCalled()

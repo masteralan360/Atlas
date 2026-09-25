@@ -5,7 +5,7 @@ import { syncProductStockSnapshot } from "@/local-db/inventory";
 import { syncProductBarcodeCachesForWorkspace } from "@/local-db/productBarcodes";
 import { rekeyPriceBookItemReferences } from "@/local-db/priceBookReferences";
 import { runSupabaseAction } from "@/lib/supabaseRequest";
-import { getPartnerSyncWriteRpc, getSupabaseClientForTable, getSupabaseRemoteTableName, getVisibilityScopedTableRpc } from "@/lib/supabaseSchema";
+import { getPartnerSyncWriteRpc, getSupabaseClientForTable, getSupabaseRemoteTableName, getWorkspaceScopedPartnerReadRpc } from "@/lib/supabaseSchema";
 import {
   getSchemaMismatchError,
   getSyncIntegrityError,
@@ -749,7 +749,7 @@ async function fetchPullRows(
 ): Promise<Array<Record<string, unknown>>> {
   const client = getSupabaseClientForTable(table);
   const remoteTableName = getSupabaseRemoteTableName(table);
-  const visibilityScopedRpc = getVisibilityScopedTableRpc(table);
+  const workspaceScopedRpc = getWorkspaceScopedPartnerReadRpc(table);
 
   if (table === "workspaces") {
     const { data, error } = (await withTimeout(
@@ -774,8 +774,8 @@ async function fetchPullRows(
   while (true) {
     const to = from + PULL_PAGE_SIZE - 1;
     const { data, error } = (await withTimeout(
-      ((visibilityScopedRpc
-        ? client.rpc(visibilityScopedRpc, { p_workspace_id: workspaceId })
+      ((workspaceScopedRpc
+        ? client.rpc(workspaceScopedRpc, { p_workspace_id: workspaceId })
         : client
           .from(remoteTableName)
           .select("*")

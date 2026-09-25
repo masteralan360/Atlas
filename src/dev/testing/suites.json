@@ -163,12 +163,15 @@
         ]
       },
       {
-        "id": "privacy-and-sync",
-        "titleKey": "devTesting.businessPartnersGroups.privacyAndSync",
+        "id": "workspace-access-and-sync",
+        "titleKey": "devTesting.businessPartnersGroups.workspaceAccessAndSync",
         "layer": "contract",
         "files": [
           "src/local-db/businessPartners.test.ts",
           "src/local-db/offlineMutationRecovery.test.ts",
+          "src/local-db/localModeSqliteAuthority.test.ts",
+          "src/local-db/orders.test.ts",
+          "src/lib/supabaseSchema.test.ts",
           "src/sync/syncEngine.test.ts",
           "src/sync/syncErrors.test.ts"
         ]

@@ -18,12 +18,6 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { db } from './database'
 import { serializePartnerSummaryRefresh } from './partnerSummaryRefresh'
 import { toLiveCollection } from './liveCollection'
-import {
-  canAccessBusinessPartner,
-  getBusinessPartnerPrivacyContext as getPartnerPrivacyContext,
-  getBusinessPartnerStaffVisibility,
-  type BusinessPartnerPrivacyContext
-} from './businessPartnerPrivacy'
 import { acquireTableHydrationFromSupabase, fetchTableFromSupabase } from './hooks'
 import { addToOfflineMutations } from './offlineMutations'
 import { getOrderBalanceAmount } from './orderInstallments'
@@ -36,7 +30,6 @@ import type {
   AgentFacetInput,
   BusinessPartner,
   BusinessPartnerRole,
-  BusinessPartnerStaffVisibility,
   CurrencyCode,
   Customer,
   Loan,
@@ -145,59 +138,23 @@ function normalizeRuntimePartnerName(partner: BusinessPartner): BusinessPartner 
   const {
     email: _email,
     country: _country,
+    staffVisibility: _staffVisibility,
+    ownerUserId: _ownerUserId,
+    staff_visibility: _staff_visibility,
+    owner_user_id: _owner_user_id,
     ...activePartner
   } = partner as BusinessPartner & {
     email?: unknown
     country?: unknown
+    staffVisibility?: unknown
+    ownerUserId?: unknown
+    staff_visibility?: unknown
+    owner_user_id?: unknown
   }
   const partnerName = typeof partner.partnerName === 'string' ? partner.partnerName.trim() : ''
-  const normalizedPartner =
-    partnerName === partner.partnerName
-      ? activePartner
-      : { ...activePartner, partnerName: partnerName || 'Unnamed partner' }
-
-  return {
-    ...normalizedPartner,
-    staffVisibility: normalizedPartner.staffVisibility ?? 'shared',
-    ownerUserId: normalizedPartner.ownerUserId ?? null
-  }
-}
-
-function canActorSeePartner(partner: BusinessPartner, context: BusinessPartnerPrivacyContext): boolean {
-  // A mixed partner remains usable as a customer. Its supplier facet is
-  // redacted below rather than dropping the entire customer record.
-  const scope = partner.role === 'supplier' ? 'supplier' : 'customer'
-  return canAccessBusinessPartner(partner, context, scope)
-}
-
-function redactSupplierFacetForActor(
-  partner: BusinessPartner,
-  context: BusinessPartnerPrivacyContext
-): BusinessPartner {
-  if (context.actor.isAdmin || !context.suppliersAdminOnly || partner.role !== 'both') {
-    return partner
-  }
-
-  return {
-    ...partner,
-    role: 'customer',
-    supplierFacetId: null,
-    payableCreditLimit: null,
-    totalPurchaseOrders: 0,
-    totalPurchaseValue: 0,
-    payableBalance: 0
-  }
-}
-
-function visiblePartnerForActor(
-  partner: BusinessPartner | undefined,
-  context: BusinessPartnerPrivacyContext
-): BusinessPartner | undefined {
-  if (!partner || partner.isDeleted || !canActorSeePartner(partner, context)) {
-    return undefined
-  }
-
-  return normalizeRuntimePartnerName(redactSupplierFacetForActor(partner, context))
+  return partnerName === partner.partnerName
+    ? activePartner
+    : { ...activePartner, partnerName: partnerName || 'Unnamed partner' }
 }
 
 function matchesPartnerRoleFilter(partner: BusinessPartner, roles?: BusinessPartnerRole[]) {
@@ -206,76 +163,6 @@ function matchesPartnerRoleFilter(partner: BusinessPartner, roles?: BusinessPart
     roles.some(
       (role) => partner.role === role || (partner.role === 'both' && (role === 'customer' || role === 'supplier'))
     )
-  )
-}
-
-async function resolveNewPartnerPrivacy(
-  workspaceId: string,
-  role: BusinessPartnerRole,
-  requestedVisibility?: BusinessPartnerStaffVisibility,
-  requestedOwnerUserId?: string | null
-): Promise<Pick<BusinessPartner, 'staffVisibility' | 'ownerUserId'>> {
-  const context = await getPartnerPrivacyContext(workspaceId)
-
-  if (!context.actor.isAdmin) {
-    const shouldMakeOwnerPrivate =
-      context.actor.id &&
-      ((context.privateStaffCustomers && roleIncludesCustomer(role)) ||
-        (context.privateStaffSuppliers && roleIncludesSupplier(role)))
-    if (shouldMakeOwnerPrivate) {
-      return {
-        staffVisibility: 'owner_private',
-        ownerUserId: context.actor.id
-      }
-    }
-    return { staffVisibility: 'shared', ownerUserId: null }
-  }
-
-  const staffVisibility = requestedVisibility ?? 'shared'
-  if (staffVisibility !== 'shared' && !roleIncludesCustomer(role) && !roleIncludesSupplier(role)) {
-    throw new Error('Only customer- or supplier-capable business partners can use staff privacy')
-  }
-  if (staffVisibility !== 'owner_private') {
-    return { staffVisibility, ownerUserId: null }
-  }
-
-  if (!requestedOwnerUserId) {
-    throw new Error('Select a staff owner for a private business partner')
-  }
-
-  const owner = (await db.users.get(requestedOwnerUserId)) ?? (await db.profiles.get(requestedOwnerUserId))
-  if (!owner || owner.workspaceId !== workspaceId || owner.role === 'admin') {
-    throw new Error('Select an active non-admin workspace member as the owner')
-  }
-
-  return { staffVisibility, ownerUserId: requestedOwnerUserId }
-}
-
-async function resolveUpdatedPartnerPrivacy(
-  existing: BusinessPartner,
-  changes: Partial<BusinessPartner>
-): Promise<Pick<BusinessPartner, 'staffVisibility' | 'ownerUserId'>> {
-  const hasPrivacyChange = changes.staffVisibility !== undefined || changes.ownerUserId !== undefined
-  const existingPrivacy = {
-    staffVisibility: getBusinessPartnerStaffVisibility(existing),
-    ownerUserId: existing.ownerUserId ?? null
-  } satisfies Pick<BusinessPartner, 'staffVisibility' | 'ownerUserId'>
-
-  if (!hasPrivacyChange) {
-    return existingPrivacy
-  }
-
-  const context = await getPartnerPrivacyContext(existing.workspaceId)
-  if (!context.actor.isAdmin) {
-    throw new Error('Only an administrator can change business partner privacy')
-  }
-
-  const nextRole = (changes.role ?? existing.role) as BusinessPartnerRole
-  return resolveNewPartnerPrivacy(
-    existing.workspaceId,
-    nextRole,
-    changes.staffVisibility ?? existingPrivacy.staffVisibility,
-    changes.ownerUserId ?? existingPrivacy.ownerUserId
   )
 }
 
@@ -311,6 +198,13 @@ function sanitizeSyncPayload(tableName: PartnerTableName, entity: Record<string,
     delete payload.contactName
     delete payload.email
     delete payload.country
+  }
+
+  if (tableName === 'business_partners') {
+    delete payload.staffVisibility
+    delete payload.ownerUserId
+    delete payload.staff_visibility
+    delete payload.owner_user_id
   }
 
   // Agent images are owned by the linked user profile, not by crm.agents.
@@ -546,21 +440,21 @@ function partnerToSupplier(partner: BusinessPartner): Supplier {
 }
 
 async function getPartnerByAnyId(id: string) {
-  const applyVisibility = async (partner: BusinessPartner | undefined) => {
+  const normalizePartner = (partner: BusinessPartner | undefined) => {
     if (!partner) return undefined
-    return visiblePartnerForActor(partner, await getPartnerPrivacyContext(partner.workspaceId))
+    return normalizeRuntimePartnerName(partner)
   }
 
   const direct = await db.business_partners.get(id)
   if (direct && !direct.isDeleted) {
-    return applyVisibility(direct)
+    return normalizePartner(direct)
   }
 
   const customerFacet = await db.customers.get(id)
   if (customerFacet?.businessPartnerId) {
     const customerPartner = await db.business_partners.get(customerFacet.businessPartnerId)
     if (customerPartner && !customerPartner.isDeleted) {
-      return applyVisibility(customerPartner)
+      return normalizePartner(customerPartner)
     }
   }
 
@@ -568,7 +462,7 @@ async function getPartnerByAnyId(id: string) {
   if (supplierFacet?.businessPartnerId) {
     const supplierPartner = await db.business_partners.get(supplierFacet.businessPartnerId)
     if (supplierPartner && !supplierPartner.isDeleted) {
-      return applyVisibility(supplierPartner)
+      return normalizePartner(supplierPartner)
     }
   }
 
@@ -576,7 +470,7 @@ async function getPartnerByAnyId(id: string) {
   if (agentFacet?.businessPartnerId) {
     const agentPartner = await db.business_partners.get(agentFacet.businessPartnerId)
     if (agentPartner && !agentPartner.isDeleted) {
-      return applyVisibility(agentPartner)
+      return normalizePartner(agentPartner)
     }
   }
 
@@ -998,11 +892,9 @@ async function setAgentFacetInactive(partner: BusinessPartner) {
   await endActiveFleetAssignmentsForAgent(agent.id)
 }
 
-async function assertBusinessPartnerRoleAllowed(
-  workspaceId: string,
+function assertBusinessPartnerRoleAllowed(
   role: BusinessPartnerRole,
-  options?: BusinessPartnerRoleAccessOptions,
-  allowExistingSupplierRole = false
+  options?: BusinessPartnerRoleAccessOptions
 ) {
   if (isRemovedBusinessPartnerRole(role)) {
     throw new Error('Witness is not a supported business partner role')
@@ -1016,15 +908,6 @@ async function assertBusinessPartnerRoleAllowed(
     throw new Error('Agent roles require workspace Agents module access')
   }
 
-  const context = await getPartnerPrivacyContext(workspaceId)
-  if (
-    context.suppliersAdminOnly &&
-    !context.actor.isAdmin &&
-    roleIncludesSupplier(role) &&
-    !allowExistingSupplierRole
-  ) {
-    throw new Error('Supplier access is restricted to administrators in this workspace')
-  }
 }
 
 function isRemovedBusinessPartnerRole(role: unknown) {
@@ -1455,7 +1338,6 @@ export async function ensurePartnerFacet(partnerId: string, facetType: PartnerFa
 
 async function readBusinessPartners(workspaceId: string | undefined, filters?: PartnerFilterOptions) {
   if (!workspaceId) return []
-  const privacyContext = await getPartnerPrivacyContext(workspaceId)
   const rows = await db.business_partners
       .where('workspaceId')
       .equals(workspaceId)
@@ -1484,8 +1366,7 @@ async function readBusinessPartners(workspaceId: string | undefined, filters?: P
       })
       .toArray()
   return rows
-    .map((partner) => visiblePartnerForActor(partner, privacyContext))
-    .filter((partner): partner is BusinessPartner => Boolean(partner))
+    .map(normalizeRuntimePartnerName)
     .filter((partner) => matchesPartnerRoleFilter(partner, filters?.roles))
     .sort((a, b) => a.partnerName.localeCompare(b.partnerName))
 }
@@ -1597,26 +1478,27 @@ export async function createBusinessPartner(
   data: BusinessPartnerCreateInput,
   options?: BusinessPartnerRoleAccessOptions
 ) {
-  await assertBusinessPartnerRoleAllowed(workspaceId, data.role, options)
+  assertBusinessPartnerRoleAllowed(data.role, options)
   const {
     agent: agentInput,
     email: _email,
     country: _country,
+    staffVisibility: _staffVisibility,
+    ownerUserId: _ownerUserId,
+    staff_visibility: _staff_visibility,
+    owner_user_id: _owner_user_id,
     ...partnerData
   } = data as BusinessPartnerCreateInput & {
     email?: unknown
     country?: unknown
+    staffVisibility?: unknown
+    ownerUserId?: unknown
+    staff_visibility?: unknown
+    owner_user_id?: unknown
   }
   const partnerName = normalizeRequiredPartnerName(partnerData.partnerName)
   const normalizedAgentInput = roleIncludesAgent(data.role) ? normalizeAgentFacetInput(agentInput) : undefined
   await assertAgentLinkedUserAvailable(workspaceId, normalizedAgentInput?.linkedUserId)
-  const privacy = await resolveNewPartnerPrivacy(
-    workspaceId,
-    data.role,
-    partnerData.staffVisibility,
-    partnerData.ownerUserId
-  )
-
   const legacyLimit = partnerData.creditLimit && partnerData.creditLimit > 0 ? partnerData.creditLimit : null
   const partner = buildBaseEntity(workspaceId, {
     ...partnerData,
@@ -1648,8 +1530,7 @@ export async function createBusinessPartner(
     netExposure: 0,
     mergedIntoBusinessPartnerId: null,
     latitude: partnerData.latitude ?? null,
-    longitude: partnerData.longitude ?? null,
-    ...privacy
+    longitude: partnerData.longitude ?? null
   }) as BusinessPartner
 
   await db.business_partners.put(partner)
@@ -1706,9 +1587,6 @@ export async function updateBusinessPartner(
   if (!visiblePartner || visiblePartner.isDeleted) {
     throw new Error('Business partner not found')
   }
-  // A restricted mixed partner is projected locally as customer-only. Keep
-  // its persisted role while the staff member edits the customer side, so a
-  // routine name or address edit cannot silently remove its supplier facet.
   const storedPartner = await db.business_partners.get(visiblePartner.id)
   const existing =
     storedPartner && !storedPartner.isDeleted ? normalizeRuntimePartnerName(storedPartner) : visiblePartner
@@ -1717,18 +1595,18 @@ export async function updateBusinessPartner(
     agent: agentInput,
     email: _email,
     country: _country,
+    staffVisibility: _staffVisibility,
+    ownerUserId: _ownerUserId,
+    staff_visibility: _staff_visibility,
+    owner_user_id: _owner_user_id,
     ...partnerChanges
   } = data as BusinessPartnerUpdateInput & {
     email?: unknown
     country?: unknown
-  }
-  const privacyContext = await getPartnerPrivacyContext(existing.workspaceId)
-  const preservesHiddenSupplierFacet =
-    privacyContext.suppliersAdminOnly && !privacyContext.actor.isAdmin && existing.role === 'both'
-  if (preservesHiddenSupplierFacet) {
-    delete partnerChanges.role
-    delete partnerChanges.creditLimit
-    delete partnerChanges.payableCreditLimit
+    staffVisibility?: unknown
+    ownerUserId?: unknown
+    staff_visibility?: unknown
+    owner_user_id?: unknown
   }
   if (partnerChanges.partnerName !== undefined) {
     partnerChanges.partnerName = normalizeRequiredPartnerName(partnerChanges.partnerName)
@@ -1742,12 +1620,7 @@ export async function updateBusinessPartner(
       partnerChanges.payableCreditLimit = partnerChanges.creditLimit
     }
   }
-  await assertBusinessPartnerRoleAllowed(
-    existing.workspaceId,
-    nextRole,
-    options,
-    preservesHiddenSupplierFacet && nextRole === 'both'
-  )
+  assertBusinessPartnerRoleAllowed(nextRole, options)
   await assertRoleRemovalAllowed(existing, nextRole)
   const existingAgent = existing.agentFacetId
     ? await db.agents.get(existing.agentFacetId)
@@ -1766,7 +1639,6 @@ export async function updateBusinessPartner(
     email?: unknown
     country?: unknown
   }
-  const privacy = await resolveUpdatedPartnerPrivacy(existing, partnerChanges)
   let updated: BusinessPartner = {
     ...activeExisting,
     ...partnerChanges,
@@ -1781,7 +1653,6 @@ export async function updateBusinessPartner(
         ? partnerChanges.payableCreditLimit
         : (existing.payableCreditLimit ??
           (roleIncludesSupplier(nextRole) && existing.creditLimit ? existing.creditLimit : null)),
-    ...privacy,
     updatedAt: now,
     version: existing.version + 1,
     ...getSyncMetadata(existing.workspaceId, now)

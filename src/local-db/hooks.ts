@@ -6,7 +6,7 @@ import i18n from '@/i18n/config'
 
 import { db } from './database'
 import { toLiveCollection } from './liveCollection'
-import { canAccessBusinessPartnerInLocalCache } from './businessPartnerPrivacy'
+import { canAccessBusinessPartnerInLocalCache } from './businessPartnerAccess'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
 import { createInventoryTransferTransactions } from './inventoryTransferTransactions'
 import { addToOfflineMutations } from './offlineMutations'
@@ -97,7 +97,7 @@ import { convertCurrencyAmountWithAvailableSnapshot, getEffectiveExchangeRatesSn
 import { QUANTITY_EPSILON, isPositiveQuantity, roundQuantity } from '@/lib/quantity'
 import { salesExchangeRowsToSnapshots } from '@/lib/salesExchange'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
-import { getSupabaseClientForTable, getSupabaseRemoteTableName, getVisibilityScopedTableRpc } from '@/lib/supabaseSchema'
+import { getSupabaseClientForTable, getSupabaseRemoteTableName, getWorkspaceScopedPartnerReadRpc } from '@/lib/supabaseSchema'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { persistLoanAggregateRpcResult } from './loanTransactions'
 import {
@@ -1889,20 +1889,20 @@ async function fetchTableFromSupabaseInternal<T extends { id: string, syncStatus
     const includeDeleted = options?.includeDeleted ?? false
     const client = getSupabaseClientForTable(tableName)
     const remoteTableName = getSupabaseRemoteTableName(tableName)
-    const visibilityScopedRpc = getVisibilityScopedTableRpc(tableName)
+        const workspaceScopedRpc = getWorkspaceScopedPartnerReadRpc(tableName)
     const remoteRows: any[] = []
 
     for (let from = 0; ; from += TABLE_FETCH_PAGE_SIZE) {
         if (signal?.aborted) return false
-        let query = visibilityScopedRpc
-            ? client.rpc(visibilityScopedRpc, { p_workspace_id: workspaceId })
+        let query = workspaceScopedRpc
+            ? client.rpc(workspaceScopedRpc, { p_workspace_id: workspaceId })
             : client
                 .from(remoteTableName)
                 .select('*')
                 .eq('workspace_id', workspaceId)
 
         // Only filter by is_deleted for tables that still have that column.
-        if (!visibilityScopedRpc && tableName !== 'workspace_contacts' && !includeDeleted) {
+        if (!workspaceScopedRpc && tableName !== 'workspace_contacts' && !includeDeleted) {
             query = query.eq('is_deleted', false)
         }
 

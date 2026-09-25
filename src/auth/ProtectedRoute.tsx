@@ -16,7 +16,6 @@ interface ProtectedRouteProps {
     requiredFeature?: ModuleFeatureKey
     requiredAnyFeature?: ModuleFeatureKey[]
     requiredCapability?: PlanCapabilityKey
-    requiresSupplierAccess?: boolean
     requiredPermission?: WorkspacePermissionKey
     requiredAnyPermission?: WorkspacePermissionKey[]
 }
@@ -29,7 +28,6 @@ export function ProtectedRoute({
     requiredFeature,
     requiredAnyFeature,
     requiredCapability,
-    requiresSupplierAccess = false,
     requiredPermission,
     requiredAnyPermission
 }: ProtectedRouteProps) {
@@ -137,17 +135,6 @@ export function ProtectedRoute({
                 </div>
             )
         }
-    }
-
-    // This workspace-level privacy control is intentionally stronger than a
-    // member permission. A non-admin must not be able to confirm that the
-    // supplier module exists by opening a saved or manually typed route.
-    if (
-        (requiredPermission === 'suppliers.access' || requiresSupplierAccess)
-        && features.suppliers_admin_only
-        && user?.role !== 'admin'
-    ) {
-        return <Redirect to="/" />
     }
 
     if (requiredPermission && !hasPermission(requiredPermission)) {

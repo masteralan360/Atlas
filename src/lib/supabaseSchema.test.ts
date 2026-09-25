@@ -16,7 +16,7 @@ vi.mock('@/auth/supabase', () => ({
 import {
     getPartnerSyncWriteRpc,
     getSupabaseClientForTable,
-    getVisibilityScopedTableRpc,
+    getWorkspaceScopedPartnerReadRpc,
     isCrmTable
 } from './supabaseSchema'
 
@@ -32,13 +32,13 @@ describe('commission Supabase schema routing', () => {
     })
 })
 
-describe('business partner privacy schema routing', () => {
+describe('business partner workspace-scoped schema routing', () => {
     it.each([
         ['business_partners', 'list_visible_business_partners', 'sync_business_partner'],
         ['customers', 'list_visible_customers', 'sync_customer'],
         ['suppliers', 'list_visible_suppliers', 'sync_supplier']
-    ])('routes %s through its protected read and write RPCs', (tableName, readRpc, writeRpc) => {
-        expect(getVisibilityScopedTableRpc(tableName)).toBe(readRpc)
+    ])('routes %s through its workspace-scoped read and authorized write RPCs', (tableName, readRpc, writeRpc) => {
+        expect(getWorkspaceScopedPartnerReadRpc(tableName)).toBe(readRpc)
         expect(getPartnerSyncWriteRpc(tableName)).toBe(writeRpc)
     })
 })

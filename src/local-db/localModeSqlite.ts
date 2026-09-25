@@ -237,11 +237,21 @@ function normalizeLegacyPartnerPayload(
     : "";
   const legacyName = typeof payload.name === "string" ? payload.name.trim() : "";
   const partnerName = existingPartnerName || legacyName || "Unnamed partner";
-  const changed = payload.partnerName !== partnerName || "email" in payload || "country" in payload;
+  const changed = payload.partnerName !== partnerName
+    || "email" in payload
+    || "country" in payload
+    || "staffVisibility" in payload
+    || "ownerUserId" in payload
+    || "staff_visibility" in payload
+    || "owner_user_id" in payload;
 
   payload.partnerName = partnerName;
   delete payload.email;
   delete payload.country;
+  delete payload.staffVisibility;
+  delete payload.ownerUserId;
+  delete payload.staff_visibility;
+  delete payload.owner_user_id;
   return changed;
 }
 
@@ -339,6 +349,7 @@ async function purgeRetiredModuleEntities(connection: SqliteConnection) {
     FROM local_entities
     WHERE entity_type IN (
       'workspaces',
+      'business_partners',
       'workspace_permissions',
       'payment_transactions',
       'payment_account_movements',
@@ -370,9 +381,29 @@ async function purgeRetiredModuleEntities(connection: SqliteConnection) {
   const workspaceRows = rows.filter((row) => row.entity_type === 'workspaces');
   for (const row of workspaceRows) {
     const payload = parsePayload(row);
-    if (!payload || !('travel_agency' in payload)) continue;
-    const { travel_agency: _retiredModuleFlag, ...updatedPayload } = payload;
-    await updatePayload(row, updatedPayload);
+    if (!payload) continue;
+    let changed = false;
+    if ('travel_agency' in payload) {
+      delete payload.travel_agency;
+      changed = true;
+    }
+    for (const field of ['private_staff_customers', 'private_staff_suppliers', 'suppliers_admin_only']) {
+      if (field in payload) {
+        delete payload[field];
+        changed = true;
+      }
+    }
+    if (changed) await updatePayload(row, payload);
+  }
+
+  const partnerRows = rows.filter((row) => row.entity_type === 'business_partners');
+  for (const row of partnerRows) {
+    const payload = parsePayload(row);
+    if (!payload) continue;
+    const fields = ['staffVisibility', 'ownerUserId', 'staff_visibility', 'owner_user_id'];
+    if (!fields.some((field) => field in payload)) continue;
+    for (const field of fields) delete payload[field];
+    await updatePayload(row, payload);
   }
 
   const permissionRows = rows.filter((row) => row.entity_type === 'workspace_permissions');
@@ -1499,7 +1530,7 @@ export async function hydrateLocalModeCacheFromSqlite(
 
         const payload = JSON.parse(row.payload) as unknown;
         const revived = deserializeValue(payload) as Record<string, unknown>;
-        const normalizedPartnerPayload = normalizeLegacyPartnerPayload(
+        const normalizedRetiredPartnerFields = normalizeLegacyPartnerPayload(
           row.entity_type,
           revived,
         );
@@ -1520,7 +1551,7 @@ export async function hydrateLocalModeCacheFromSqlite(
             parentSaleCreatedAt,
             row.updated_at,
           );
-          if (normalizedPartnerPayload || normalizedSaleItem) {
+          if (normalizedRetiredPartnerFields || normalizedSaleItem) {
             await connection.execute(
               `
                 UPDATE local_entities
@@ -1530,7 +1561,7 @@ export async function hydrateLocalModeCacheFromSqlite(
               [JSON.stringify(await serializeValue(revived)), row.entity_type, row.entity_id],
             );
           }
-        } else if (normalizedPartnerPayload) {
+        } else if (normalizedRetiredPartnerFields) {
           await connection.execute(
             `
               UPDATE local_entities

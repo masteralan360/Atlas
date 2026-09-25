@@ -117,9 +117,7 @@ export function buildWorkspaceNavigation({
     features.data_mode !== "local" &&
     features.data_mode !== "demo" &&
     hasFeature("ecommerce");
-  const canAccessSuppliers =
-    canAccessPermission("suppliers.access")
-    && (!features.suppliers_admin_only || role === "admin");
+  const canAccessSuppliers = canAccessPermission("suppliers.access");
 
   // 1. Define all possible individual navigation items with their visibility logic
   const dashboardItem: WorkspaceNavigationItem = {

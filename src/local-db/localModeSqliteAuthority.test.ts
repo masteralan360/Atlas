@@ -25,6 +25,7 @@ import {
 
 const WORKSPACE_ID = "local-authority-workspace";
 const LEGACY_TIMESTAMP_WORKSPACE_ID = "local-timestamp-workspace";
+const LEGACY_PARTNER_WORKSPACE_ID = "local-partner-workspace";
 const testDb = new AtlasDatabase("AtlasDatabaseLocalAuthorityTest");
 
 function installBrowserStorage() {
@@ -413,6 +414,53 @@ describe("local-mode SQLite authority", () => {
       });
     } finally {
       clearWorkspaceModeSnapshot(LEGACY_TIMESTAMP_WORKSPACE_ID);
+      setLocalModeSqliteConnectionForTests(sqlite);
+    }
+  });
+
+  it("removes retired partner access fields while hydrating a legacy SQLite cache", async () => {
+    const legacyPartnerId = "legacy-private-partner";
+    const sqlite = new HydrationSqliteConnection([
+      {
+        entity_type: "business_partners",
+        entity_id: legacyPartnerId,
+        workspace_id: LEGACY_PARTNER_WORKSPACE_ID,
+        current_workspace: null,
+        payload: JSON.stringify({
+          id: legacyPartnerId,
+          workspaceId: LEGACY_PARTNER_WORKSPACE_ID,
+          partnerName: "Legacy partner",
+          role: "customer",
+          staffVisibility: "owner_private",
+          ownerUserId: "staff-1",
+        }),
+        updated_at: "2026-07-02T10:00:00.000Z",
+      },
+    ]);
+    setLocalModeSqliteConnectionForTests(sqlite);
+    writeWorkspaceModeSnapshot({
+      workspaceId: LEGACY_PARTNER_WORKSPACE_ID,
+      dataMode: "local",
+    });
+
+    try {
+      await hydrateLocalModeCacheFromSqlite(
+        testDb,
+        LEGACY_PARTNER_WORKSPACE_ID,
+      );
+
+      const partner = await testDb.business_partners.get(legacyPartnerId);
+      expect(partner).toMatchObject({
+        id: legacyPartnerId,
+        partnerName: "Legacy partner",
+        role: "customer",
+      });
+      expect(partner).not.toHaveProperty("staffVisibility");
+      expect(partner).not.toHaveProperty("ownerUserId");
+      expect(JSON.parse(sqlite.storedRows[0].payload)).not.toHaveProperty("staffVisibility");
+      expect(JSON.parse(sqlite.storedRows[0].payload)).not.toHaveProperty("ownerUserId");
+    } finally {
+      clearWorkspaceModeSnapshot(LEGACY_PARTNER_WORKSPACE_ID);
       setLocalModeSqliteConnectionForTests(sqlite);
     }
   });

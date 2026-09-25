@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
-import { canAccessBusinessPartnerInLocalCache } from './businessPartnerPrivacy'
+import { canAccessBusinessPartnerInLocalCache } from './businessPartnerAccess'
 import {
     addMonths,
     buildDueDate,

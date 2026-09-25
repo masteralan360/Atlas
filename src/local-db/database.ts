@@ -3497,6 +3497,56 @@ export class AtlasDatabase extends Dexie {
     // Local recovery metadata only; never synchronized as business data.
     this.version(134).stores({ partner_summary_jobs: 'id, workspaceId' })
 
+    // Remove retired business-partner visibility values from cached rows and
+    // queued mutations. The database now scopes partner access by workspace.
+    this.version(135).upgrade(async (tx) => {
+      const stripPartnerAccessFields = (value: Record<string, unknown>) => {
+        const cleaned = { ...value }
+        delete cleaned.staffVisibility
+        delete cleaned.ownerUserId
+        delete cleaned.staff_visibility
+        delete cleaned.owner_user_id
+        return cleaned
+      }
+      const stripWorkspacePartnerPrivacyFields = (value: Record<string, unknown>) => {
+        const cleaned = { ...value }
+        delete cleaned.private_staff_customers
+        delete cleaned.private_staff_suppliers
+        delete cleaned.suppliers_admin_only
+        return cleaned
+      }
+      const stripQueuedFields = async (
+        tableName: 'offline_mutations' | 'syncQueue',
+        field: 'payload' | 'data'
+      ) => {
+        const rows = (await tx.table(tableName).toArray()) as Array<Record<string, unknown>>
+        const updated = rows.flatMap((row) => {
+          const payload = row[field]
+          if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return []
+          const cleanPayload = row.entityType === 'business_partners'
+            ? stripPartnerAccessFields(payload as Record<string, unknown>)
+            : row.entityType === 'workspaces'
+              ? stripWorkspacePartnerPrivacyFields(payload as Record<string, unknown>)
+              : null
+          return cleanPayload ? [{ ...row, [field]: cleanPayload }] : []
+        })
+        if (updated.length) await tx.table(tableName).bulkPut(updated)
+      }
+
+      const partners = (await tx.table('business_partners').toArray()) as Array<Record<string, unknown>>
+      const workspaces = (await tx.table('workspaces').toArray()) as Array<Record<string, unknown>>
+      if (partners.length) {
+        await tx.table('business_partners').bulkPut(partners.map(stripPartnerAccessFields))
+      }
+      if (workspaces.length) {
+        await tx.table('workspaces').bulkPut(workspaces.map(stripWorkspacePartnerPrivacyFields))
+      }
+      await Promise.all([
+        stripQueuedFields('offline_mutations', 'payload'),
+        stripQueuedFields('syncQueue', 'data'),
+      ])
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()

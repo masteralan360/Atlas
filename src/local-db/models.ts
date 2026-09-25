@@ -458,7 +458,6 @@ export interface Customer extends BaseEntity {
 export type RealEstateBusinessPartnerRole = 'buyer' | 'seller'
 export type BusinessPartnerRole =
   'customer' | 'supplier' | 'both' | 'agent' | 'online_customer' | RealEstateBusinessPartnerRole
-export type BusinessPartnerStaffVisibility = 'shared' | 'admin_only' | 'owner_private'
 export type AgentType = 'driver' | 'field_agent' | 'courier'
 export type AgentStatus = 'active' | 'inactive' | 'blocked'
 
@@ -767,10 +766,6 @@ export interface BusinessPartner extends BaseEntity {
   latitude?: number | null
   longitude?: number | null
   priceBookId?: string | null
-  /** Controls non-admin visibility. Missing values from old caches are shared. */
-  staffVisibility?: BusinessPartnerStaffVisibility
-  /** The sole non-admin who may see an owner-private partner. */
-  ownerUserId?: string | null
 }
 
 export type BusinessPartnerMergeType = 'customer_supplier'
@@ -2785,12 +2780,6 @@ export interface Workspace extends BaseEntity {
     hiddenGroups: Array<'operating' | 'borrowing' | 'lending'>
     groupOrder: Array<'operating' | 'borrowing' | 'lending'>
   }
-  /** Opt-in: new non-admin customer partners are private to their creator. */
-  private_staff_customers?: boolean
-  /** Opt-in: new non-admin supplier partners are private to their creator. */
-  private_staff_suppliers?: boolean
-  /** Opt-in: supplier data and supplier workflows are administrator-only. */
-  suppliers_admin_only?: boolean
 }
 
 export interface WorkspaceContact extends Omit<BaseEntity, 'isDeleted'> {

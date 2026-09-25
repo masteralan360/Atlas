@@ -106,12 +106,12 @@
       "live_schema_unavailable": "The required Sale Orders Supabase schema is unavailable to this test account.",
       "live_preflight_failed": "Could not verify the hosted test workspace. No scenario started."
     },
-    "businessPartnersSamplesHelp": "Runs fixed privacy, visibility, offline-sync, and safe-discard recovery scenarios.",
-    "businessPartnersCoverageHelp": "Checks the local business-partner privacy rules, Cloud / Hybrid write-RPC routing, revoked-access error classification, and removing an inaccessible cached partner and its queued edits while preserving other queued records. It uses disposable IndexedDB and mocked remote contracts; a real Supabase permission test remains unavailable in this developer suite. Order-save coverage verifies Cloud / Hybrid saves complete after authoritative confirmation while derived customer and partner summaries refresh in the background, including paid/unpaid records, ledger and stock effects, customer changes, queued sync failures, serialized refreshes, and unchanged Local-mode completion. Recovery checks cover persisted refresh jobs before save success, database reopen, unchanged cached totals with interrupted uploads, reconnect and wake retries, workspace isolation, newer saves during refresh, and failure to store a recovery job without duplicate payment. Statement-template checks cover legacy defaults, valid and invalid HEX colors, positive/negative/zero balance rendering in A4 output, and Cloud / Hybrid save requests, results, and friendly failure messages. Statement checks also cover same-day sale and purchase payments in one order row on screen and in A4 output, unchanged totals, later payments, reversals, and itemized sales.",
+    "businessPartnersSamplesHelp": "Runs fixed workspace-access, offline-sync, and safe-discard recovery scenarios.",
+    "businessPartnersCoverageHelp": "Checks workspace-scoped business-partner access, Cloud / Hybrid write-RPC routing, revoked-access error classification, and removing an inaccessible cached partner and its queued edits while preserving other queued records. It uses disposable IndexedDB and mocked remote contracts; a real Supabase permission test remains unavailable in this developer suite. Order-save coverage verifies Cloud / Hybrid saves complete after authoritative confirmation while derived customer and partner summaries refresh in the background, including paid/unpaid records, ledger and stock effects, customer changes, queued sync failures, serialized refreshes, and unchanged Local-mode completion. Recovery checks cover persisted refresh jobs before save success, database reopen, unchanged cached totals with interrupted uploads, reconnect and wake retries, workspace isolation, newer saves during refresh, and failure to store a recovery job without duplicate payment. Statement-template checks cover legacy defaults, valid and invalid HEX colors, positive/negative/zero balance rendering in A4 output, and Cloud / Hybrid save requests, results, and friendly failure messages. Statement checks also cover same-day sale and purchase payments in one order row on screen and in A4 output, unchanged totals, later payments, reversals, and itemized sales.",
     "businessPartnersGroups": {
       "accountStatementTemplates": "Account statement and templates",
       "orderSummaries": "Order summary refresh",
-      "privacyAndSync": "Privacy, sync contract, and access-revocation recovery"
+      "workspaceAccessAndSync": "Workspace access, sync contract, and access-revocation recovery"
     },
     "pos": "POS",
     "posSamplesHelp": "1–100 additional paid POS checkout scenarios with varied currencies, methods, fractional quantities and service lines. Fixed regressions run alongside them.",
@@ -1715,17 +1715,6 @@
     "title": "Business Partners",
     "overview": "Overview",
     "subtitle": "Manage shared customer and supplier profiles in one place.",
-    "privacy": {
-      "title": "Staff visibility",
-      "description": "Control which staff members can access this customer's connected information.",
-      "visibility": "Staff visibility",
-      "visibilityDescription": "Control which staff members can access this customer's connected information.",
-      "shared": "Shared with staff",
-      "adminOnly": "Admins only",
-      "ownerPrivate": "Private to owner",
-      "owner": "Owner *",
-      "ownerPlaceholder": "Select a staff owner"
-    },
     "addPartner": "Add Business Partner",
     "editPartner": "Edit Business Partner",
     "searchPlaceholder": "Search business partners...",
@@ -3794,19 +3783,6 @@
         "updates-disabled-incomplete": "The installed application cache is incomplete. Enable application updates once, then retry preparation.",
         "unexpected": "Atlas could not finish offline preparation. The existing installation and local data remain unchanged."
       }
-    },
-    "partnerPrivacy": {
-      "title": "Business partner privacy",
-      "description": "Optional controls that protect staff-owned customers and suppliers. Existing behavior stays unchanged until enabled.",
-      "privateStaffCustomers": "Keep staff-created customers private",
-      "privateStaffCustomersDescription": "New customers created by non-admin staff are visible only to their creator and administrators.",
-      "privateStaffSuppliers": "Keep staff-created suppliers private",
-      "privateStaffSuppliersDescription": "New suppliers created by non-admin staff are visible only to their creator and administrators.",
-      "suppliersAdminOnly": "Restrict suppliers to administrators",
-      "suppliersAdminOnlyDescription": "Non-admin staff cannot access suppliers or supplier-linked information.",
-      "savedTitle": "Privacy setting saved",
-      "savedDescription": "The business partner privacy setting has been updated.",
-      "saveError": "Couldn't update the business partner privacy setting. Please try again."
     },
     "downloadMedia": "Download Workspace Media",
     "plan": "Subscription Plan",

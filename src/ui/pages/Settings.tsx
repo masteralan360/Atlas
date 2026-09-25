@@ -9,7 +9,7 @@ import { Link } from 'wouter'
 import { useWorkspace } from '@/workspace'
 import { Coins } from 'lucide-react'
 import type { IQDDisplayPreference, CurrencyCode } from '@/local-db/models'
-import { Settings as SettingsIcon, Database, Cloud, Trash2, RefreshCw, User, Copy, Check, CreditCard, Globe, Download, Upload, AlertCircle, Printer, Contact, Fingerprint, Store, ExternalLink, Usb, Bluetooth, CalendarClock, Plus, Menu, ShieldCheck, UsersRound, Table2, Crown } from 'lucide-react'
+import { Settings as SettingsIcon, Database, Cloud, Trash2, RefreshCw, User, Copy, Check, CreditCard, Globe, Download, Upload, AlertCircle, Printer, Contact, Fingerprint, Store, ExternalLink, Usb, Bluetooth, CalendarClock, Plus, Menu, Table2, Crown } from 'lucide-react'
 import { formatDate, formatDateTime, formatTime, cn, generateId, getHourDisplayPreference, setHourDisplayPreference, type HourDisplayPreference } from '@/lib/utils'
 import { useTheme } from '@/ui/components/theme-provider'
 import { Moon, Sun, Monitor, Unlock, Server, MessageSquare, Bell, MonitorPlay, Wifi } from 'lucide-react'
@@ -127,9 +127,6 @@ export function Settings() {
     const [dateFilterDayBoundary, setDateFilterDayBoundaryState] = useState(getDateFilterDayBoundary)
     const [hasFxAccountingData, setHasFxAccountingData] = useState(false)
     const [isClinicalRegistrySaving, setIsClinicalRegistrySaving] = useState(false)
-    const [partnerPrivacySaving, setPartnerPrivacySaving] = useState<
-        'private_staff_customers' | 'private_staff_suppliers' | 'suppliers_admin_only' | null
-    >(null)
     const [restaurantTableViewEnabled, setRestaurantTableViewEnabled] = useState(false)
     const [restaurantLiveSyncEnabled, setRestaurantLiveSyncEnabled] = useState(false)
     const [restaurantTableCount, setRestaurantTableCount] = useState('20')
@@ -370,26 +367,6 @@ export function Settings() {
             }))
         } finally {
             setIsClinicalRegistrySaving(false)
-        }
-    }
-
-    const handlePartnerPrivacyChange = async (
-        key: 'private_staff_customers' | 'private_staff_suppliers' | 'suppliers_admin_only',
-        value: boolean
-    ) => {
-        if (partnerPrivacySaving) return
-
-        setPartnerPrivacySaving(key)
-        try {
-            await updateSettings({ [key]: value })
-            toast({
-                title: t('settings.partnerPrivacy.savedTitle'),
-                description: t('settings.partnerPrivacy.savedDescription')
-            })
-        } catch (error) {
-            showActionError(error, t('settings.partnerPrivacy.saveError'))
-        } finally {
-            setPartnerPrivacySaving(null)
         }
     }
 
@@ -2909,78 +2886,6 @@ export function Settings() {
                                                         <Trash2 className="w-4 h-4" />
                                                     </Button>
                                                 )}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="pt-6 border-t border-border/50 space-y-4">
-                                        <div className="flex items-start gap-3">
-                                            <div className="rounded-xl bg-primary/10 p-2 text-primary">
-                                                <ShieldCheck className="h-5 w-5" />
-                                            </div>
-                                            <div className="space-y-1">
-                                                <Label className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
-                                                    {t('settings.partnerPrivacy.title')}
-                                                </Label>
-                                                <p className="text-sm text-muted-foreground">
-                                                    {t('settings.partnerPrivacy.description')}
-                                                </p>
-                                            </div>
-                                        </div>
-
-                                        <div className="grid gap-4 lg:grid-cols-3">
-                                            <div className="flex items-start justify-between gap-4 rounded-2xl border border-border/60 bg-muted/20 p-4">
-                                                <div className="space-y-1.5">
-                                                    <div className="flex items-center gap-2 font-semibold">
-                                                        <UsersRound className="h-4 w-4 text-primary" />
-                                                        {t('settings.partnerPrivacy.privateStaffCustomers')}
-                                                    </div>
-                                                    <p className="text-sm leading-5 text-muted-foreground">
-                                                        {t('settings.partnerPrivacy.privateStaffCustomersDescription')}
-                                                    </p>
-                                                </div>
-                                                <Switch
-                                                    checked={features.private_staff_customers}
-                                                    disabled={partnerPrivacySaving !== null}
-                                                    onCheckedChange={(value) => void handlePartnerPrivacyChange('private_staff_customers', value)}
-                                                    aria-label={t('settings.partnerPrivacy.privateStaffCustomers')}
-                                                />
-                                            </div>
-
-                                            <div className="flex items-start justify-between gap-4 rounded-2xl border border-border/60 bg-muted/20 p-4">
-                                                <div className="space-y-1.5">
-                                                    <div className="flex items-center gap-2 font-semibold">
-                                                        <UsersRound className="h-4 w-4 text-primary" />
-                                                        {t('settings.partnerPrivacy.privateStaffSuppliers')}
-                                                    </div>
-                                                    <p className="text-sm leading-5 text-muted-foreground">
-                                                        {t('settings.partnerPrivacy.privateStaffSuppliersDescription')}
-                                                    </p>
-                                                </div>
-                                                <Switch
-                                                    checked={features.private_staff_suppliers}
-                                                    disabled={partnerPrivacySaving !== null}
-                                                    onCheckedChange={(value) => void handlePartnerPrivacyChange('private_staff_suppliers', value)}
-                                                    aria-label={t('settings.partnerPrivacy.privateStaffSuppliers')}
-                                                />
-                                            </div>
-
-                                            <div className="flex items-start justify-between gap-4 rounded-2xl border border-border/60 bg-muted/20 p-4">
-                                                <div className="space-y-1.5">
-                                                    <div className="flex items-center gap-2 font-semibold">
-                                                        <ShieldCheck className="h-4 w-4 text-primary" />
-                                                        {t('settings.partnerPrivacy.suppliersAdminOnly')}
-                                                    </div>
-                                                    <p className="text-sm leading-5 text-muted-foreground">
-                                                        {t('settings.partnerPrivacy.suppliersAdminOnlyDescription')}
-                                                    </p>
-                                                </div>
-                                                <Switch
-                                                    checked={features.suppliers_admin_only}
-                                                    disabled={partnerPrivacySaving !== null}
-                                                    onCheckedChange={(value) => void handlePartnerPrivacyChange('suppliers_admin_only', value)}
-                                                    aria-label={t('settings.partnerPrivacy.suppliersAdminOnly')}
-                                                />
                                             </div>
                                         </div>
                                     </div>

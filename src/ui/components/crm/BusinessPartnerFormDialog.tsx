@@ -20,7 +20,6 @@ import {
     type AgentType,
     type BusinessPartner,
     type BusinessPartnerRole,
-    type BusinessPartnerStaffVisibility,
     type CurrencyCode
 } from '@/local-db'
 import {
@@ -69,8 +68,6 @@ type BusinessPartnerFormState = {
     payableCreditLimit: string
     priceBookId: string
     role: BusinessPartnerRole
-    staffVisibility: BusinessPartnerStaffVisibility
-    ownerUserId: string
     agentZone: string
     agentType: AgentType
     agentCarModel: string
@@ -97,8 +94,6 @@ function createEmptyState(defaultCurrency: CurrencyCode, role: BusinessPartnerRo
         payableCreditLimit: '',
         priceBookId: '',
         role,
-        staffVisibility: 'shared',
-        ownerUserId: '',
         agentZone: '',
         agentType,
         agentCarModel: '',
@@ -128,8 +123,6 @@ function mapPartnerToState(partner: BusinessPartner, agent?: Agent): BusinessPar
             : String(partner.payableCreditLimit),
         priceBookId: partner.priceBookId || '',
         role: partner.role,
-        staffVisibility: partner.staffVisibility ?? 'shared',
-        ownerUserId: partner.ownerUserId || '',
         agentZone: agent?.zone || '',
         agentType: agent?.agentType || 'field_agent',
         agentCarModel: agent?.carModel || '',
@@ -155,8 +148,6 @@ export interface BusinessPartnerFormPayload {
     payableCreditLimit: number | null
     priceBookId?: string | null
     role: BusinessPartnerRole
-    staffVisibility?: BusinessPartnerStaffVisibility
-    ownerUserId?: string | null
     agent?: AgentFacetInput
 }
 
@@ -266,10 +257,8 @@ export function BusinessPartnerFormDialog({
             })
         }
 
-        return features.suppliers_admin_only && user?.role !== 'admin'
-            ? options.filter((option) => option.value !== 'supplier' && option.value !== 'both')
-            : options
-    }, [enableAgentRole, enableRealEstateRoles, features.suppliers_admin_only, partner?.role, t, user?.role])
+        return options
+    }, [enableAgentRole, enableRealEstateRoles, partner?.role, t])
 
     useEffect(() => {
         if (!isOpen) {
@@ -282,13 +271,12 @@ export function BusinessPartnerFormDialog({
                 : createEmptyState(defaultCurrency, initialRole, initialAgentType)
         const hasAllowedRole = (enableRealEstateRoles || !isRealEstateBusinessPartnerRole(nextState.role))
             && (enableAgentRole || !isAgentBusinessPartnerRole(nextState.role))
-            && (!features.suppliers_admin_only || user?.role === 'admin' || (nextState.role !== 'supplier' && nextState.role !== 'both'))
 
         setFormState({
             ...nextState,
             role: lockedRole ?? (hasAllowedRole ? nextState.role : DEFAULT_ROLE)
         })
-    }, [agent, defaultCurrency, enableAgentRole, enableRealEstateRoles, features.suppliers_admin_only, initialAgentType, initialRole, isOpen, lockedRole, partner, user?.role])
+    }, [agent, defaultCurrency, enableAgentRole, enableRealEstateRoles, initialAgentType, initialRole, isOpen, lockedRole, partner])
 
     useEffect(() => {
         if (!isOpen) {
@@ -366,14 +354,6 @@ export function BusinessPartnerFormDialog({
             payableCreditLimit,
             ...(priceBooksEnabled ? { priceBookId: formState.priceBookId || null } : {}),
             role: effectiveRole,
-            ...(user?.role === 'admin' && (effectiveRole === 'customer' || effectiveRole === 'supplier' || effectiveRole === 'both')
-                ? {
-                    staffVisibility: formState.staffVisibility,
-                    ownerUserId: formState.staffVisibility === 'owner_private'
-                        ? formState.ownerUserId || null
-                        : null
-                }
-                : {}),
             agent: isAgent ? {
                 zone: formState.agentZone.trim(),
                 agentType: formState.agentType,
@@ -392,14 +372,7 @@ export function BusinessPartnerFormDialog({
     }
 
     const isAgentRole = isAgentBusinessPartnerRole(formState.role)
-    const canManageStaffVisibility = user?.role === 'admin'
-        && (formState.role === 'customer' || formState.role === 'supplier' || formState.role === 'both')
     const canSubmit = formState.partnerName.trim().length > 0
-        && (!canManageStaffVisibility || formState.staffVisibility !== 'owner_private' || Boolean(formState.ownerUserId))
-    const privateOwnerCandidates = useMemo(
-        () => workspaceUsers.filter((workspaceUser) => workspaceUser.role !== 'admin'),
-        [workspaceUsers]
-    )
     const lockedRoleLabel = lockedRole
         ? roleOptions.find((role) => role.value === lockedRole)?.label || lockedRole
         : null
@@ -483,59 +456,6 @@ export function BusinessPartnerFormDialog({
                                     </div>
                                 </div>
                             )}
-                            {canManageStaffVisibility ? (
-                                <div className="space-y-2 md:col-span-2 rounded-xl border border-primary/20 bg-primary/5 p-3">
-                                    <div className="space-y-1">
-                                        <Label>{t('businessPartners.privacy.visibility')}</Label>
-                                        <p className="text-xs leading-5 text-muted-foreground">
-                                            {t('businessPartners.privacy.visibilityDescription')}
-                                        </p>
-                                    </div>
-                                    <Select
-                                        value={formState.staffVisibility}
-                                        onValueChange={(value) => setFormState((current) => ({
-                                            ...current,
-                                            staffVisibility: value as BusinessPartnerStaffVisibility,
-                                            ownerUserId: value === 'owner_private' ? current.ownerUserId : ''
-                                        }))}
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="shared">{t('businessPartners.privacy.shared')}</SelectItem>
-                                            <SelectItem value="admin_only">{t('businessPartners.privacy.adminOnly')}</SelectItem>
-                                            <SelectItem value="owner_private">{t('businessPartners.privacy.ownerPrivate')}</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                    {formState.staffVisibility === 'owner_private' ? (
-                                        <div className="space-y-2 pt-1">
-                                            <Label>
-                                                {t('businessPartners.privacy.owner')} <span className="text-destructive">*</span>
-                                            </Label>
-                                            <Select
-                                                value={formState.ownerUserId || 'none'}
-                                                onValueChange={(value) => setFormState((current) => ({
-                                                    ...current,
-                                                    ownerUserId: value === 'none' ? '' : value
-                                                }))}
-                                            >
-                                                <SelectTrigger aria-invalid={!formState.ownerUserId}>
-                                                    <SelectValue placeholder={t('businessPartners.privacy.ownerPlaceholder')} />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="none">{t('businessPartners.privacy.ownerPlaceholder')}</SelectItem>
-                                                    {privateOwnerCandidates.map((workspaceUser) => (
-                                                        <SelectItem key={workspaceUser.id} value={workspaceUser.id}>
-                                                            {workspaceUser.name || workspaceUser.email || workspaceUser.id}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                    ) : null}
-                                </div>
-                            ) : null}
                             {priceBooksEnabled ? (
                                 <div ref={priceBookFieldRef} className="space-y-2">
                                     <Label className={cn(priceBookAttention && 'text-yellow-600 dark:text-yellow-400')}>

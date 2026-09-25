@@ -9,7 +9,7 @@ import { generateId, toSnakeCase } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
-import { canAccessBusinessPartnerInLocalCache } from './businessPartnerPrivacy'
+import { canAccessBusinessPartnerInLocalCache } from './businessPartnerAccess'
 import { addToOfflineMutations, fetchTableFromSupabase } from './hooks'
 import { getBusinessPartnerByAnyId } from './businessPartners'
 import type {

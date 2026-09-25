@@ -126,7 +126,7 @@ vi.mock('./database', () => ({
 vi.mock('@/lib/supabaseSchema', () => ({
     getSupabaseClientForTable: vi.fn(() => recoveryState.client),
     getSupabaseRemoteTableName: vi.fn((tableName: string) => tableName),
-    getVisibilityScopedTableRpc: vi.fn(() => undefined)
+    getWorkspaceScopedPartnerReadRpc: vi.fn(() => undefined)
 }))
 
 vi.mock('@/lib/supabaseRequest', () => ({

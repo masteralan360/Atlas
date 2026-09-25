@@ -16,7 +16,7 @@ const REALTIME_CHANGE_DEBOUNCE_MS = 250
 /**
  * Owns the sole marketplace-order Realtime channel for a layout instance.
  * It deliberately publishes only an invalidation so each view continues to
- * read its complete, privacy-filtered representation from Supabase.
+ * read its complete, workspace-scoped representation from Supabase.
  */
 export function MarketplaceOrderRealtimeBridge() {
     const { user } = useAuth()

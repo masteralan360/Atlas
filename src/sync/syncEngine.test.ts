@@ -228,7 +228,7 @@ const schemaRoutingMock = vi.hoisted(() => ({
     getPartnerSyncWriteRpc: vi.fn((tableName: string) => tableName === 'business_partners'
         ? 'sync_business_partner'
         : undefined),
-    getVisibilityScopedTableRpc: vi.fn<(tableName: string) => string | undefined>(() => undefined)
+    getWorkspaceScopedPartnerReadRpc: vi.fn<(tableName: string) => string | undefined>(() => undefined)
 }))
 
 vi.mock('@/auth/supabase', () => ({
@@ -275,7 +275,7 @@ vi.mock('@/lib/supabaseSchema', () => ({
     getSupabaseClientForTable: vi.fn(() => supabaseMock.client),
     getSupabaseRemoteTableName: vi.fn((tableName: string) => tableName),
     getPartnerSyncWriteRpc: schemaRoutingMock.getPartnerSyncWriteRpc,
-    getVisibilityScopedTableRpc: schemaRoutingMock.getVisibilityScopedTableRpc
+    getWorkspaceScopedPartnerReadRpc: schemaRoutingMock.getWorkspaceScopedPartnerReadRpc
 }))
 
 vi.mock('@/workspace/workspaceMode', () => ({
@@ -348,6 +348,32 @@ describe('Price Book sync recovery', () => {
         expect(payload).not.toHaveProperty('contact_name')
         expect(payload).not.toHaveProperty('email')
         expect(payload).not.toHaveProperty('country')
+    })
+
+    it('strips retired business partner access fields from old queued payloads', () => {
+        const payload = prepareRemoteMutationPayload('business_partners', {
+            id: 'partner-1',
+            partnerName: 'Workspace partner',
+            staffVisibility: 'owner_private',
+            ownerUserId: 'staff-1',
+            staff_visibility: 'admin_only',
+            owner_user_id: 'staff-2'
+        })
+
+        expect(payload).toMatchObject({ id: 'partner-1', partner_name: 'Workspace partner' })
+        expect(payload).not.toHaveProperty('staff_visibility')
+        expect(payload).not.toHaveProperty('owner_user_id')
+    })
+
+    it('strips retired partner access settings from old workspace mutations', () => {
+        const payload = prepareRemoteMutationPayload('workspaces', {
+            id: 'workspace-1',
+            private_staff_customers: true,
+            private_staff_suppliers: true,
+            suppliers_admin_only: true
+        })
+
+        expect(payload).toEqual({ id: 'workspace-1' })
     })
 
     it('does not send retired order balance data from an older offline cache', () => {
@@ -985,8 +1011,8 @@ describe('fullSync error reporting', () => {
         schemaRoutingMock.getPartnerSyncWriteRpc.mockImplementation((tableName: string) => tableName === 'business_partners'
             ? 'sync_business_partner'
             : undefined)
-        schemaRoutingMock.getVisibilityScopedTableRpc.mockReset()
-        schemaRoutingMock.getVisibilityScopedTableRpc.mockReturnValue(undefined)
+        schemaRoutingMock.getWorkspaceScopedPartnerReadRpc.mockReset()
+        schemaRoutingMock.getWorkspaceScopedPartnerReadRpc.mockReturnValue(undefined)
     })
 
     it.each(['inventory', 'stock_batches'])('quarantines legacy %s snapshots instead of replaying them', async (entityType) => {
@@ -1142,7 +1168,7 @@ describe('fullSync error reporting', () => {
         expect(supabaseMock.from).not.toHaveBeenCalledWith('business_partner_merge_candidates')
     })
 
-    it('replays a queued business partner through its privacy-checked write RPC', async () => {
+    it('replays a queued business partner through its authorized write RPC', async () => {
         dbMock.rows.push({
             id: 'partner-mutation',
             workspaceId: 'workspace-1',
@@ -1171,13 +1197,13 @@ describe('fullSync error reporting', () => {
         }))
     })
 
-    it('pulls business partners from the redacted directory RPC instead of the raw table', async () => {
+    it('pulls business partners from the workspace-scoped directory RPC instead of the raw table', async () => {
         const rpcBuilder = {
             gt: vi.fn(() => rpcBuilder),
             order: vi.fn(() => rpcBuilder),
             range: vi.fn(async () => ({ data: [], error: null }))
         }
-        schemaRoutingMock.getVisibilityScopedTableRpc.mockImplementation((tableName: string) => tableName === 'business_partners'
+        schemaRoutingMock.getWorkspaceScopedPartnerReadRpc.mockImplementation((tableName: string) => tableName === 'business_partners'
             ? 'list_visible_business_partners'
             : undefined)
         supabaseMock.rpc.mockImplementation((...args: unknown[]) => args[0] === 'list_visible_business_partners'

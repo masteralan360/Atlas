@@ -1,4 +1,4 @@
-import { getSupabaseClientForTable, getSupabaseRemoteTableName, getVisibilityScopedTableRpc } from '@/lib/supabaseSchema'
+import { getSupabaseClientForTable, getSupabaseRemoteTableName, getWorkspaceScopedPartnerReadRpc } from '@/lib/supabaseSchema'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
 import { toCamelCase } from '@/lib/utils'
 import { canReconcileCloudWorkspaceData } from '@/local-db/cloudReconciliation'
@@ -146,14 +146,14 @@ async function fetchAuthoritativeRow(
 ): Promise<Record<string, unknown> | null> {
     const client = getSupabaseClientForTable(mutation.entityType) as any
     const remoteTableName = getSupabaseRemoteTableName(mutation.entityType)
-    const visibilityScopedRpc = getVisibilityScopedTableRpc(mutation.entityType)
+    const workspaceScopedRpc = getWorkspaceScopedPartnerReadRpc(mutation.entityType)
 
-    let query: any = visibilityScopedRpc
-        ? client.rpc(visibilityScopedRpc, { p_workspace_id: mutation.workspaceId })
+    let query: any = workspaceScopedRpc
+        ? client.rpc(workspaceScopedRpc, { p_workspace_id: mutation.workspaceId })
         : client.from(remoteTableName).select('*')
 
     query = query.eq('id', mutation.entityId)
-    if (!visibilityScopedRpc && mutation.entityType !== 'workspaces') {
+    if (!workspaceScopedRpc && mutation.entityType !== 'workspaces') {
         query = query.eq('workspace_id', mutation.workspaceId)
     }
 
@@ -199,7 +199,7 @@ export async function discardAndRestoreOfflineMutation(
     const recoveredAt = new Date().toISOString()
 
     // An access-revoked partner cannot be fetched through the normal
-    // visibility-scoped RPC. Retire edits to that partner and remove its local
+    // workspace-scoped RPC. Retire edits to that partner and remove its local
     // row so private data is neither retained nor retried after access changes.
     if (isRevokedPartnerMutation) {
         try {

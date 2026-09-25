@@ -8,7 +8,7 @@ import { runSupabaseAction } from '@/lib/supabaseRequest'
 import { generateId, toSnakeCase } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
-import { canAccessBusinessPartnerInLocalCache } from './businessPartnerPrivacy'
+import { canAccessBusinessPartnerInLocalCache } from './businessPartnerAccess'
 import { db } from './database'
 import { addToOfflineMutations, fetchTableFromSupabase } from './hooks'
 import { recalculateBusinessPartnerSummary } from './businessPartners'
