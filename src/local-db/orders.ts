@@ -1157,7 +1157,8 @@ function waitForInventoryConflictRetry(retryAfterMs: number) {
 
 async function deductInventoryForSalesOrder(
     order: SalesOrder,
-    conflictRetryCount = 0
+    conflictRetryCount = 0,
+    completeExistingPendingOrder = false
 ) {
     const now = new Date().toISOString()
     const changedInventoryRows: Inventory[] = []
@@ -1318,15 +1319,54 @@ async function deductInventoryForSalesOrder(
         }
     )
 
+    let remotelyCompletedOrder: SalesOrder | null = null
     try {
         // Inventory is the authoritative guard for a sale. Do not publish its
         // matching batch deductions until the compare-and-set write succeeds.
-        await syncInventoryRowsBestEffort(changedInventoryRows, order.workspaceId, {
+        const inventorySyncResult = await syncInventoryRowsBestEffort(changedInventoryRows, order.workspaceId, {
             operationId: uuidv5(order.id, SALES_ORDER_INVENTORY_OPERATION_UUID_NAMESPACE),
             operationKind: 'sales_order_completion',
-            expectedVersions
+            expectedVersions,
+            ...(completeExistingPendingOrder && shouldUseCloudBusinessData(order.workspaceId) ? {
+                salesOrderCompletion: {
+                    orderId: order.id,
+                    expectedOrderVersion: Math.max(0, order.version - 1),
+                    items: updatedItems,
+                    actualDeliveryDate: order.actualDeliveryDate ?? now
+                }
+            } : {})
         })
+
+        if (completeExistingPendingOrder && shouldUseCloudBusinessData(order.workspaceId)) {
+            if (!inventorySyncResult?.order) {
+                throw new Error('Sales order completion did not return the completed order')
+            }
+            remotelyCompletedOrder = {
+                ...(toCamelCase(inventorySyncResult.order) as unknown as SalesOrder),
+                syncStatus: 'synced',
+                lastSyncedAt: new Date().toISOString()
+            }
+        }
     } catch (error) {
+        if (completeExistingPendingOrder && shouldUseCloudBusinessData(order.workspaceId)) {
+            // The local cache was optimistically adjusted before the RPC. If
+            // cancellation or a competing stock write won on the server, put
+            // the cache and batches back on the authoritative positions.
+            await Promise.allSettled([
+                ...Array.from(inventoryDeductions.values()).map(({ productId, storageId }) =>
+                    hydrateInventoryProductStoragesFromSupabase(
+                        order.workspaceId,
+                        productId,
+                        [storageId],
+                        { requireAuthoritative: true }
+                    )
+                ),
+                refreshStockBatchesFromSupabase(order.workspaceId)
+            ])
+            await Promise.all(Array.from(inventoryDeductions.values()).map(({ productId }) =>
+                syncProductStockSnapshot(productId, new Date().toISOString(), 'remote')
+            ))
+        }
         if (
             error instanceof InventorySnapshotConflictError
             && conflictRetryCount < SALES_ORDER_INVENTORY_CONFLICT_RETRY_LIMIT
@@ -1334,7 +1374,7 @@ async function deductInventoryForSalesOrder(
             await waitForInventoryConflictRetry(error.retryAfterMs)
             // The next attempt reloads inventory and batches from Supabase and
             // rebuilds the deduction from that authoritative snapshot.
-            return deductInventoryForSalesOrder(order, conflictRetryCount + 1)
+            return deductInventoryForSalesOrder(order, conflictRetryCount + 1, completeExistingPendingOrder)
         }
         throw error
     }
@@ -1347,7 +1387,8 @@ async function deductInventoryForSalesOrder(
     ))
 
     return {
-        updatedItems
+        updatedItems,
+        remotelyCompletedOrder
     }
 }
 
@@ -3537,24 +3578,28 @@ async function cancelOrderFinancialRecords(orderType: OrderType, order: SalesOrd
     }
 }
 
-const salesOrderStatusTransitionsInFlight = new Map<string, Promise<SalesOrder>>()
+const salesOrderStatusTransitionsInFlight = new Map<string, {
+    status: SalesOrderStatus
+    promise: Promise<SalesOrder>
+}>()
 
 export function updateSalesOrderStatus(
     id: string,
     status: SalesOrderStatus,
     options?: { allowUnpaidNonFinanced?: boolean }
 ) {
-    const transitionKey = `${id}:${status}`
-    const existingTransition = salesOrderStatusTransitionsInFlight.get(transitionKey)
-    if (existingTransition) {
-        return existingTransition
+    const existingTransition = salesOrderStatusTransitionsInFlight.get(id)
+    if (existingTransition?.status === status) {
+        return existingTransition.promise
     }
 
-    const transition = updateSalesOrderStatusOnce(id, status, options)
-    salesOrderStatusTransitionsInFlight.set(transitionKey, transition)
+    const transition = existingTransition
+        ? existingTransition.promise.catch(() => undefined).then(() => updateSalesOrderStatusOnce(id, status, options))
+        : updateSalesOrderStatusOnce(id, status, options)
+    salesOrderStatusTransitionsInFlight.set(id, { status, promise: transition })
     void transition.finally(() => {
-        if (salesOrderStatusTransitionsInFlight.get(transitionKey) === transition) {
-            salesOrderStatusTransitionsInFlight.delete(transitionKey)
+        if (salesOrderStatusTransitionsInFlight.get(id)?.promise === transition) {
+            salesOrderStatusTransitionsInFlight.delete(id)
         }
     }).catch(() => undefined)
     return transition
@@ -3622,7 +3667,7 @@ async function updateSalesOrderStatusOnce(
         customerId: workingOrder.businessPartnerId ?? workingOrder.customerId,
         customerName: workingOrder.customerName
     })
-    const updated: SalesOrder = {
+    let updated: SalesOrder = {
         ...workingOrder,
         ...counterparty,
         status,
@@ -3643,16 +3688,23 @@ async function updateSalesOrderStatusOnce(
         ...getSyncMetadata(existing.workspaceId, now)
     }
 
+    let completedRemotely = false
     if (status === 'completed') {
         await assertSalesProductsHaveCosts(updated)
         await assertSalesStockAvailable(updated, workingOrder.id)
-        const fulfillment = await deductInventoryForSalesOrder(updated)
+        const fulfillment = await deductInventoryForSalesOrder(updated, 0, true)
         updated.items = fulfillment.updatedItems
+        if (fulfillment.remotelyCompletedOrder) {
+            updated = fulfillment.remotelyCompletedOrder
+            completedRemotely = true
+        }
     }
 
     await db.sales_orders.put(updated)
 
-    await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
+    if (!completedRemotely) {
+        await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
+    }
     await Promise.all(
         Array.from(new Set([
             `${workingOrder.customerId}::${workingOrder.businessPartnerId || ''}`,

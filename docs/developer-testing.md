@@ -103,11 +103,18 @@ The independent `live-transactions` group creates a paid cash Quick Order and
 full return, plus simple-loan and installment sale orders with and without a
 down payment. It uses production functions and fresh authenticated clients to
 check stored orders, returns, loans, installments, payment counter-entries and
-stock. The runner refreshes the workspace's storages into its local cache
-before creating test storages, so existing primary or marketplace locations
-remain respected.
+stock. It also completes a regular pending Sale Order through the atomic
+completion RPC and verifies one stock deduction with one sale-ledger entry.
+The group races that completion against financed cancellation and verifies
+that a cancelled order has no stock deduction or sale-ledger entry, while a
+completed order has exactly one of each. Earlier hosted checks tested pending
+cancellation and completed Quick Orders separately; they did not test those
+two transitions competing on the same order. The runner refreshes the
+workspace's storages into its local cache before creating test storages, so
+existing primary or marketplace locations remain respected.
 The target project must have the app's current Sale Orders migrations deployed,
-including `cancel_order_with_financing`.
+including `cancel_order_with_financing` and
+`complete_sales_order_with_inventory`.
 The report records run and fixture IDs to aid investigation. A failed fixture
 is retained for inspection; the test may retire a successful catalog item.
 The hosted related-units group follows the supported Sale Order lifecycle for

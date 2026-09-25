@@ -64,7 +64,8 @@
         "layer": "business",
         "files": [
           "src/local-db/orderFinancing.test.ts",
-          "src/local-db/orderInstallments.test.ts"
+          "src/local-db/orderInstallments.test.ts",
+          "src/local-db/inventorySnapshotSync.test.ts"
         ]
       },
       {

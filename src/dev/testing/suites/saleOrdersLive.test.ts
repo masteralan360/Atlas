@@ -173,6 +173,179 @@ describe('Sale Orders · hosted Supabase', () => {
         }
     }
 
+    it('serializes financed cancellation against order completion and stock posting', async () => {
+        const orders = await import('@/local-db/orders')
+        const hooks = await import('@/local-db/hooks')
+        const partners = await import('@/local-db/businessPartners')
+        const tag = `DEV TEST ${runId.slice(0, 8)} ${crypto.randomUUID().slice(0, 8)}`
+        const ids: Record<string, string | null> = { partnerId: null, storageId: null, productId: null, orderId: null, loanId: null }
+        let scenarioPassed = false
+        try {
+            const partner = await partners.createBusinessPartner(workspaceId, {
+                partnerName: `${tag} customer`, phone: '', defaultCurrency: 'usd',
+                creditLimit: 0, receivableCreditLimit: null, payableCreditLimit: null, role: 'customer'
+            })
+            ids.partnerId = partner.id
+            fixtureEvent(ids)
+            const storage = await hooks.createStorage(workspaceId, { name: `${tag} storage` })
+            ids.storageId = storage.id
+            fixtureEvent(ids)
+            const product = await hooks.createProduct(workspaceId, {
+                sku: `DT-${crypto.randomUUID().slice(0, 12)}`, name: `${tag} product`, description: '',
+                categoryId: null, category: null, storageId: storage.id, storageName: storage.name,
+                price: 100, costPrice: 40, quantity: 10, minStockLevel: 0, unit: 'pcs',
+                currency: 'usd', barcode: '', barcodes: [], imageUrl: '', canBeReturned: true,
+                returnRules: '', createdBy: null
+            })
+            ids.productId = product.id
+            fixtureEvent(ids)
+            const draft = await orders.createSalesOrder(workspaceId, {
+                ...saleOrderInput(partner.id, product, storage.id, 'loan'),
+                customerName: partner.partnerName, notes: tag,
+                firstDueDate: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+                nextDueDate: new Date(Date.now() + 30 * 86_400_000).toISOString()
+            }, undefined, { requireRemoteConfirmation: true })
+            ids.orderId = draft.id
+            fixtureEvent(ids)
+            const pending = await orders.updateSalesOrderStatus(draft.id, 'pending')
+            ids.loanId = pending.linkedLoanId ?? null
+            fixtureEvent(ids)
+            expect(pending.linkedLoanId).toBeTruthy()
+
+            const cancellationClient = await freshClient()
+            let cancellation: { data: unknown; error: { message: string } | null } | null = null
+            let completion: PromiseSettledResult<unknown> | null = null
+            try {
+                const completionPromise = orders.updateSalesOrderStatus(draft.id, 'completed')
+                const cancellationPromise = cancellationClient.rpc('cancel_order_with_financing', {
+                    p_order_type: 'sales', p_order_id: draft.id
+                })
+                ;[completion, cancellation] = await Promise.all([
+                    completionPromise.then<PromiseSettledResult<unknown>, PromiseSettledResult<unknown>>(
+                        (value) => ({ status: 'fulfilled', value }),
+                        (reason) => ({ status: 'rejected', reason })
+                    ),
+                    cancellationPromise
+                ])
+            } finally { await cancellationClient.auth.signOut() }
+
+            const fresh = await freshClient()
+            try {
+                const serverOrder = requireData<{ status: string; items: Array<Record<string, unknown>> }>(
+                    await fresh.schema('crm').from('sales_orders')
+                        .select('status,items').eq('id', draft.id).single(),
+                    'raced order'
+                )
+                const stock = requireData<{ quantity: number }>(await fresh.from('inventory')
+                    .select('quantity').eq('workspace_id', workspaceId).eq('product_id', product.id)
+                    .eq('storage_id', storage.id).single(), 'raced inventory')
+                const saleTransactions = requireData<Array<{
+                    quantity_delta: number; previous_quantity: number; new_quantity: number
+                }>>(await fresh.from('inventory_transactions')
+                    .select('quantity_delta,previous_quantity,new_quantity')
+                    .eq('workspace_id', workspaceId).eq('reference_type', 'sales_order')
+                    .eq('reference_id', draft.id).eq('transaction_type', 'sale'), 'raced inventory ledger')
+
+                if (serverOrder.status === 'cancelled') {
+                    expect(Number(stock.quantity)).toBe(10)
+                    expect(saleTransactions).toHaveLength(0)
+                    expect(cancellation?.error).toBeNull()
+                    expect(completion?.status).toBe('rejected')
+                } else {
+                    expect(serverOrder.status).toBe('completed')
+                    expect(Number(stock.quantity)).toBe(9)
+                    expect(saleTransactions).toHaveLength(1)
+                    expect(saleTransactions[0]).toMatchObject({
+                        quantity_delta: -1, previous_quantity: 10, new_quantity: 9
+                    })
+                    expect(cancellation?.error).toBeTruthy()
+                    expect(completion?.status).toBe('fulfilled')
+                    expect(serverOrder.items[0]).toMatchObject({ reservedQuantity: 1, fulfilledQuantity: 1 })
+                }
+                scenarioPassed = true
+            } finally { await fresh.auth.signOut() }
+        } finally {
+            let cleanup = 'retained'
+            if (scenarioPassed && ids.productId) {
+                try { await hooks.deleteProduct(ids.productId); cleanup = 'product-retired' }
+                catch { cleanup = 'product-retire-failed' }
+            }
+            fixtureEvent(ids, cleanup)
+        }
+    }, 120_000)
+
+    it('completes a pending Sale Order with one atomic stock and sale-ledger post', async () => {
+        const orders = await import('@/local-db/orders')
+        const hooks = await import('@/local-db/hooks')
+        const partners = await import('@/local-db/businessPartners')
+        const tag = `DEV TEST ${runId.slice(0, 8)} ${crypto.randomUUID().slice(0, 8)}`
+        const ids: Record<string, string | null> = { partnerId: null, storageId: null, productId: null, orderId: null }
+        let scenarioPassed = false
+        try {
+            const partner = await partners.createBusinessPartner(workspaceId, {
+                partnerName: `${tag} customer`, phone: '', defaultCurrency: 'usd',
+                creditLimit: 0, receivableCreditLimit: null, payableCreditLimit: null, role: 'customer'
+            })
+            ids.partnerId = partner.id
+            fixtureEvent(ids)
+            const storage = await hooks.createStorage(workspaceId, { name: `${tag} storage` })
+            ids.storageId = storage.id
+            fixtureEvent(ids)
+            const product = await hooks.createProduct(workspaceId, {
+                sku: `DT-${crypto.randomUUID().slice(0, 12)}`, name: `${tag} product`, description: '',
+                categoryId: null, category: null, storageId: storage.id, storageName: storage.name,
+                price: 100, costPrice: 40, quantity: 10, minStockLevel: 0, unit: 'pcs',
+                currency: 'usd', barcode: '', barcodes: [], imageUrl: '', canBeReturned: true,
+                returnRules: '', createdBy: null
+            })
+            ids.productId = product.id
+            fixtureEvent(ids)
+            const order = await orders.createSalesOrder(workspaceId, {
+                ...saleOrderInput(partner.id, product, storage.id, 'cash', { paid: true }),
+                customerName: partner.partnerName, notes: tag,
+                paidAt: new Date().toISOString()
+            }, undefined, { requireRemoteConfirmation: true })
+            ids.orderId = order.id
+            fixtureEvent(ids)
+            await orders.updateSalesOrderStatus(order.id, 'pending')
+            const completed = await orders.updateSalesOrderStatus(order.id, 'completed')
+            expect(completed.status).toBe('completed')
+
+            const fresh = await freshClient()
+            try {
+                const serverOrder = requireData<{ status: string; items: Array<Record<string, unknown>> }>(
+                    await fresh.schema('crm').from('sales_orders')
+                        .select('status,items').eq('id', order.id).single(),
+                    'completed order'
+                )
+                const stock = requireData<{ quantity: number }>(await fresh.from('inventory')
+                    .select('quantity').eq('workspace_id', workspaceId).eq('product_id', product.id)
+                    .eq('storage_id', storage.id).single(), 'completed order inventory')
+                const saleTransactions = requireData<Array<{
+                    quantity_delta: number; previous_quantity: number; new_quantity: number
+                }>>(await fresh.from('inventory_transactions')
+                    .select('quantity_delta,previous_quantity,new_quantity')
+                    .eq('workspace_id', workspaceId).eq('reference_type', 'sales_order')
+                    .eq('reference_id', order.id).eq('transaction_type', 'sale'), 'completed sale ledger')
+                expect(serverOrder.status).toBe('completed')
+                expect(serverOrder.items[0]).toMatchObject({ reservedQuantity: 1, fulfilledQuantity: 1 })
+                expect(Number(stock.quantity)).toBe(9)
+                expect(saleTransactions).toHaveLength(1)
+                expect(saleTransactions[0]).toMatchObject({
+                    quantity_delta: -1, previous_quantity: 10, new_quantity: 9
+                })
+                scenarioPassed = true
+            } finally { await fresh.auth.signOut() }
+        } finally {
+            let cleanup = 'retained'
+            if (scenarioPassed && ids.productId) {
+                try { await hooks.deleteProduct(ids.productId); cleanup = 'product-retired' }
+                catch { cleanup = 'product-retire-failed' }
+            }
+            fixtureEvent(ids, cleanup)
+        }
+    }, 120_000)
+
     it('paid cash Quick Order and full return persist stock and exact payment reversal', async () => {
         const orders = await import('@/local-db/orders')
         const hooks = await import('@/local-db/hooks')

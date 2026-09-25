@@ -297,8 +297,8 @@ The `sale-orders` registry entry owns these groups:
 | Group | Scope |
 | --- | --- |
 | `matrix` | Production order/payment/return functions with fixed and generated scenarios |
-| `lifecycle` | Existing financing and installment regressions |
-| `live-transactions` (hosted) | Independent real Supabase cash checkout/full return and financed Sale Order cancellation, with persisted inventory and payment effects |
+| `lifecycle` | Existing financing and installment regressions plus the Cloud / Hybrid inventory completion RPC contract |
+| `live-transactions` (hosted) | Real Supabase cash checkout/full return, regular Sale Order atomic completion, and a concurrent financed cancellation/completion race with persisted inventory and sale-ledger effects |
 | `pricing` | Existing pricing, exchange, rounding, customer-balance, and line-storage checks |
 | `payments` | Payment transactions, accounts, reversals, ledger effects, and direct-transaction voucher numbering and A4 layout |
 

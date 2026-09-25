@@ -19,6 +19,7 @@ import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
 import { isAllowedInventoryQuantityTransition, isValidNewInventoryQuantity } from './inventoryDeficit'
 import type {
     Inventory,
+    InventoryTransaction,
     InventoryTransferBatchAllocation,
     Product
 } from './models'
@@ -66,6 +67,12 @@ export interface InventorySnapshotSyncOptions {
     operationId?: string
     operationKind?: string
     expectedVersions?: ReadonlyArray<InventorySnapshotExpectedVersion>
+    salesOrderCompletion?: {
+        orderId: string
+        expectedOrderVersion: number
+        items: unknown[]
+        actualDeliveryDate: string | null
+    }
 }
 
 export interface InventoryPositionHydrationOptions {
@@ -292,13 +299,26 @@ export async function syncInventoryRowsBestEffort(
         ) ?? Math.max(0, Number(row.version || 1) - 1)
     }))
     const client = getSupabaseClientForTable('inventory')
-    const execute = () => runSupabaseAction('inventory.sync.authoritative', () =>
-        client.rpc('apply_inventory_snapshot_changes', {
-            p_operation_id: operationId,
-            p_workspace_id: workspaceId,
-            p_operation_kind: operationKind,
-            p_changes: changes
-        })
+    const execute = () => runSupabaseAction(
+        options.salesOrderCompletion
+            ? 'orders.complete.inventory.authoritative'
+            : 'inventory.sync.authoritative',
+        () => options.salesOrderCompletion
+            ? client.rpc('complete_sales_order_with_inventory', {
+                p_order_id: options.salesOrderCompletion.orderId,
+                p_workspace_id: workspaceId,
+                p_expected_order_version: options.salesOrderCompletion.expectedOrderVersion,
+                p_operation_id: operationId,
+                p_items: options.salesOrderCompletion.items,
+                p_actual_delivery_date: options.salesOrderCompletion.actualDeliveryDate,
+                p_changes: changes
+            })
+            : client.rpc('apply_inventory_snapshot_changes', {
+                p_operation_id: operationId,
+                p_workspace_id: workspaceId,
+                p_operation_kind: operationKind,
+                p_changes: changes
+            })
     )
 
     let response = await execute()
@@ -321,6 +341,8 @@ export async function syncInventoryRowsBestEffort(
 
     const result = response.data as {
         inventory?: Record<string, unknown>[] | null
+        inventory_transactions?: Record<string, unknown>[] | null
+        order?: Record<string, unknown> | null
         conflict?: boolean
         retry_after_ms?: number
     } | null
@@ -352,6 +374,23 @@ export async function syncInventoryRowsBestEffort(
     await Promise.all(productIds.map((productId) =>
         syncProductStockSnapshot(productId, syncedAt, 'remote')
     ))
+
+    if (options.salesOrderCompletion) {
+        const remoteTransactions = result?.inventory_transactions
+        if (!result?.order || !remoteTransactions) {
+            throw new Error(i18n.t('inventory.errors.authoritativeResultMissing'))
+        }
+
+        if (remoteTransactions.length > 0) {
+            await db.inventory_transactions.bulkPut(remoteTransactions.map((row) => ({
+                ...(toCamelCase(row) as unknown as InventoryTransaction),
+                syncStatus: 'synced' as const,
+                lastSyncedAt: syncedAt
+            })))
+        }
+
+        return { order: result.order }
+    }
 }
 
 async function evaluateReorderRulesIfNeeded(input: {

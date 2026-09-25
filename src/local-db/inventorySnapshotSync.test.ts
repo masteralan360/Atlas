@@ -90,8 +90,11 @@ const WORKSPACE_ID = '20000000-0000-4000-8000-000000000001'
 const PRODUCT_ID = '20000000-0000-4000-8000-000000000002'
 const STORAGE_ID = '20000000-0000-4000-8000-000000000003'
 const INVENTORY_ID = '20000000-0000-4000-8000-000000000004'
+const INVENTORY_TRANSACTION_ID = '20000000-0000-4000-8000-000000000007'
 const OPERATION_ID = '20000000-0000-5000-8000-000000000005'
 const CONFLICT_OPERATION_ID = '20000000-0000-5000-8000-000000000006'
+const COMPLETION_OPERATION_ID = '20000000-0000-5000-8000-000000000009'
+const COMPLETION_CONFLICT_OPERATION_ID = '20000000-0000-5000-8000-000000000010'
 
 function inventoryRow(version: number): Inventory {
     return {
@@ -198,6 +201,100 @@ describe('authoritative inventory snapshot sync', () => {
         })
         expect(await getInventoryVersionForProductStorage(PRODUCT_ID, STORAGE_ID)).toBe(8)
         expect(supabaseMock.filters).not.toContainEqual(['is_deleted', false])
+    })
+
+    it('completes an existing cloud order through the atomic order and inventory RPC', async () => {
+        const orderId = '20000000-0000-4000-8000-000000000008'
+        const actualDeliveryDate = '2026-09-18T09:00:00.000Z'
+        const orderItems = [{ id: 'line-1', productId: PRODUCT_ID, storageId: STORAGE_ID, quantity: 1 }]
+        supabaseMock.rpc.mockResolvedValue({
+            data: {
+                order: { id: orderId, workspace_id: WORKSPACE_ID, status: 'completed', version: 3, items: orderItems },
+                inventory: [{
+                    id: INVENTORY_ID, workspace_id: WORKSPACE_ID, product_id: PRODUCT_ID,
+                    storage_id: STORAGE_ID, quantity: 3, version: 8, is_deleted: false
+                }],
+                inventory_transactions: [{
+                    id: INVENTORY_TRANSACTION_ID, workspace_id: WORKSPACE_ID,
+                    product_id: PRODUCT_ID, storage_id: STORAGE_ID, transaction_type: 'sale',
+                    quantity_delta: -1, previous_quantity: 4, new_quantity: 3,
+                    reference_id: orderId, reference_type: 'sales_order', version: 1, is_deleted: false
+                }],
+                already_applied: false
+            },
+            error: null
+        })
+
+        const result = await syncInventoryRowsBestEffort(
+            [inventoryRow(8)],
+            WORKSPACE_ID,
+            {
+                operationId: COMPLETION_OPERATION_ID,
+                operationKind: 'sales_order_completion',
+                expectedVersions: [{ productId: PRODUCT_ID, storageId: STORAGE_ID, version: 7 }],
+                salesOrderCompletion: {
+                    orderId,
+                    expectedOrderVersion: 2,
+                    items: orderItems,
+                    actualDeliveryDate
+                }
+            }
+        )
+
+        expect(supabaseMock.rpc).toHaveBeenCalledWith('complete_sales_order_with_inventory', {
+            p_order_id: orderId,
+            p_workspace_id: WORKSPACE_ID,
+            p_expected_order_version: 2,
+            p_operation_id: COMPLETION_OPERATION_ID,
+            p_items: orderItems,
+            p_actual_delivery_date: actualDeliveryDate,
+            p_changes: [{
+                id: INVENTORY_ID,
+                product_id: PRODUCT_ID,
+                storage_id: STORAGE_ID,
+                quantity: 3,
+                expected_version: 7
+            }]
+        })
+        expect(result?.order).toMatchObject({ id: orderId, status: 'completed' })
+        expect(await db.inventory_transactions.get(INVENTORY_TRANSACTION_ID)).toMatchObject({
+            transactionType: 'sale',
+            quantityDelta: -1,
+            previousQuantity: 4,
+            newQuantity: 3,
+            referenceId: orderId,
+            syncStatus: 'synced'
+        })
+    })
+
+    it('surfaces an order-version conflict from atomic completion for refresh and retry', async () => {
+        const orderId = '20000000-0000-4000-8000-000000000011'
+        supabaseMock.rpc.mockResolvedValue({
+            data: null,
+            error: { code: '40001', message: 'Sales order changed on another device; refresh and retry' }
+        })
+
+        await expect(syncInventoryRowsBestEffort(
+            [inventoryRow(8)],
+            WORKSPACE_ID,
+            {
+                operationId: COMPLETION_CONFLICT_OPERATION_ID,
+                operationKind: 'sales_order_completion',
+                expectedVersions: [{ productId: PRODUCT_ID, storageId: STORAGE_ID, version: 7 }],
+                salesOrderCompletion: {
+                    orderId,
+                    expectedOrderVersion: 2,
+                    items: [{ id: 'line-1', productId: PRODUCT_ID, storageId: STORAGE_ID, quantity: 1 }],
+                    actualDeliveryDate: '2026-09-18T09:00:00.000Z'
+                }
+            }
+        )).rejects.toBeInstanceOf(InventorySnapshotConflictError)
+
+        expect(supabaseMock.rpc).toHaveBeenCalledWith('complete_sales_order_with_inventory', expect.objectContaining({
+            p_order_id: orderId,
+            p_expected_order_version: 2,
+            p_operation_id: COMPLETION_CONFLICT_OPERATION_ID
+        }))
     })
 
     it('fails closed for a required authoritative read and leaves the cached position untouched', async () => {
