@@ -142,6 +142,14 @@ async function readHeader(file: Blob): Promise<Uint8Array> {
     return new Uint8Array(await file.slice(0, HEADER_READ_BYTES).arrayBuffer())
 }
 
+async function canvasSupportsWebpEncoding(): Promise<boolean> {
+    const canvas = document.createElement('canvas')
+    canvas.width = 1
+    canvas.height = 1
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.8))
+    return blob?.type.toLowerCase() === 'image/webp'
+}
+
 export async function isImageUploadCandidate(file: File): Promise<boolean> {
     const bytes = await readHeader(file)
     return Boolean(detectSupportedImageMime(bytes) || looksLikeUnsupportedImage(bytes, file.type, file.name))
@@ -165,7 +173,13 @@ async function decodeImage(file: File): Promise<HTMLImageElement> {
     }
 }
 
-async function encodeWebp(image: CanvasImageSource, width: number, height: number, quality: number): Promise<Blob> {
+async function encodeWebp(
+    image: CanvasImageSource,
+    width: number,
+    height: number,
+    quality: number,
+    nativeWebpSupported: boolean,
+): Promise<Blob> {
     const canvas = document.createElement('canvas')
     canvas.width = width
     canvas.height = height
@@ -174,9 +188,22 @@ async function encodeWebp(image: CanvasImageSource, width: number, height: numbe
     context.imageSmoothingEnabled = true
     context.imageSmoothingQuality = 'high'
     context.drawImage(image, 0, 0, width, height)
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', quality))
-    if (!blob || blob.type !== 'image/webp') throw new ImageCompressionError('image_processing_failed')
-    return blob
+    if (nativeWebpSupported) {
+        try {
+            const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', quality))
+            if (blob?.type.toLowerCase() === 'image/webp') return blob
+        } catch {
+            // Fall back to WebAssembly if native encoding fails for this image.
+        }
+    }
+
+    try {
+        const { default: encode } = await import('@jsquash/webp/encode')
+        const encoded = await encode(context.getImageData(0, 0, width, height), { quality: quality * 100 })
+        return new Blob([encoded], { type: 'image/webp' })
+    } catch {
+        throw new ImageCompressionError('image_processing_failed')
+    }
 }
 
 function nextQuality(current: number, profile: ImageUploadProfile): number | null {
@@ -202,6 +229,13 @@ export async function compressImage(file: File, source: ImageUploadSource): Prom
         throw new ImageCompressionError('image_too_large')
     }
 
+    let nativeWebpSupported = false
+    try {
+        nativeWebpSupported = await canvasSupportsWebpEncoding()
+    } catch {
+        // Use the browser-side encoder when the canvas capability probe fails.
+    }
+
     let dimensions = calculateConstrainedDimensions(image.naturalWidth, image.naturalHeight, profile.maxDimension)
     let quality = profile.startQuality
     let output: Blob | null = null
@@ -210,7 +244,7 @@ export async function compressImage(file: File, source: ImageUploadSource): Prom
     for (let resizePass = 0; resizePass < 4; resizePass += 1) {
         quality = profile.startQuality
         while (true) {
-            output = await encodeWebp(image, dimensions.width, dimensions.height, quality)
+            output = await encodeWebp(image, dimensions.width, dimensions.height, quality, nativeWebpSupported)
             attempts += 1
             if (output.size <= profile.softTargetBytes) break
             const reducedQuality = nextQuality(quality, profile)

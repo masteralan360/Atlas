@@ -1,8 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const { wasmEncode } = vi.hoisted(() => ({ wasmEncode: vi.fn() }))
+
+vi.mock('@jsquash/webp/encode', () => ({ default: wasmEncode }))
 
 import {
     calculateConstrainedDimensions,
     calculateReducedDimensions,
+    compressImage,
     detectSupportedImageMime,
     ImageCompressionError,
     isAnimatedImage,
@@ -10,7 +15,86 @@ import {
 } from '@/lib/imageCompression'
 import { IMAGE_UPLOAD_PROFILES } from '@/lib/imageUploadProfiles'
 
+function stubImageCanvas(nativeWebpSupported: boolean) {
+    const canvas = {
+        width: 0,
+        height: 0,
+        getContext: vi.fn(() => ({
+            imageSmoothingEnabled: false,
+            imageSmoothingQuality: 'low',
+            drawImage: vi.fn(),
+            getImageData: vi.fn(() => ({
+                data: new Uint8ClampedArray([255, 0, 0, 255]),
+                width: canvas.width,
+                height: canvas.height,
+            })),
+        })),
+        toBlob: vi.fn((callback: BlobCallback) => {
+            callback(new Blob(['encoded'], { type: nativeWebpSupported ? 'image/webp' : 'image/png' }))
+        }),
+    }
+    vi.stubGlobal('document', { createElement: vi.fn(() => canvas) })
+    vi.stubGlobal('Image', class {
+        decoding = ''
+        naturalWidth = 64
+        naturalHeight = 48
+        onload: (() => void) | null = null
+        onerror: (() => void) | null = null
+
+        set src(_value: string) {
+            queueMicrotask(() => this.onload?.())
+        }
+    })
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:product-image')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+}
+
+function pngFile() {
+    return new File([
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    ], 'product.png', { type: 'image/png' })
+}
+
+afterEach(() => {
+    wasmEncode.mockReset()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+})
+
 describe('central image compression policy', () => {
+    it('uses native canvas WebP encoding when the browser supports it', async () => {
+        stubImageCanvas(true)
+        wasmEncode.mockResolvedValue(new ArrayBuffer(0))
+
+        const compressed = await compressImage(pngFile(), 'product-primary')
+
+        expect(compressed.file.type).toBe('image/webp')
+        expect(compressed.file.size).toBe('encoded'.length)
+        expect(wasmEncode).not.toHaveBeenCalled()
+    })
+
+    it('falls back to the WebAssembly encoder when canvas silently returns PNG', async () => {
+        stubImageCanvas(false)
+        wasmEncode.mockResolvedValue(new Uint8Array([1, 2, 3]).buffer)
+
+        const compressed = await compressImage(pngFile(), 'product-primary')
+
+        expect(compressed.file.type).toBe('image/webp')
+        expect(compressed.file.size).toBe(3)
+        expect(wasmEncode).toHaveBeenCalledWith(
+            expect.objectContaining({ width: 64, height: 48 }),
+            expect.objectContaining({ quality: IMAGE_UPLOAD_PROFILES['product-primary'].startQuality * 100 }),
+        )
+    })
+
+    it('reports image processing failure when native and WebAssembly encoding both fail', async () => {
+        stubImageCanvas(false)
+        wasmEncode.mockRejectedValue(new Error('encoder unavailable'))
+
+        await expect(compressImage(pngFile(), 'product-primary'))
+            .rejects.toMatchObject({ code: 'image_processing_failed' })
+    })
+
     it('uses source-specific quality and size targets', () => {
         expect(IMAGE_UPLOAD_PROFILES['product-primary']).toMatchObject({
             maxDimension: 2048,

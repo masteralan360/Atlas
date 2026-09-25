@@ -59,6 +59,7 @@
     "@emotion/styled": "^11.14.1",
     "@fontsource-variable/geist": "^5.2.8",
     "@hello-pangea/dnd": "^18.0.1",
+    "@jsquash/webp": "^1.5.0",
     "@lglab/react-qr-code": "^1.4.9",
     "@lyfie/luthor": "^2.3.6",
     "@mediabunny/flac-encoder": "1.55.2",
