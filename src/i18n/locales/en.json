@@ -107,7 +107,7 @@
       "live_preflight_failed": "Could not verify the hosted test workspace. No scenario started."
     },
     "businessPartnersSamplesHelp": "Runs fixed privacy, visibility, offline-sync, and safe-discard recovery scenarios.",
-    "businessPartnersCoverageHelp": "Checks the local business-partner privacy rules, Cloud / Hybrid write-RPC routing, revoked-access error classification, and safe removal of an inaccessible cached partner. It uses disposable IndexedDB and mocked remote contracts; a real Supabase permission test remains unavailable in this developer suite. Order-save coverage verifies Cloud / Hybrid saves complete after authoritative confirmation while derived customer and partner summaries refresh in the background, including paid/unpaid records, ledger and stock effects, customer changes, queued sync failures, serialized refreshes, and unchanged Local-mode completion. Recovery checks cover persisted refresh jobs before save success, database reopen, unchanged cached totals with interrupted uploads, reconnect and wake retries, workspace isolation, newer saves during refresh, and failure to store a recovery job without duplicate payment. Statement-template checks cover legacy defaults, valid and invalid HEX colors, positive/negative/zero balance rendering in A4 output, and Cloud / Hybrid save requests, results, and friendly failure messages. Statement checks also cover same-day sale and purchase payments in one order row on screen and in A4 output, unchanged totals, later payments, reversals, and itemized sales.",
+    "businessPartnersCoverageHelp": "Checks the local business-partner privacy rules, Cloud / Hybrid write-RPC routing, revoked-access error classification, and removing an inaccessible cached partner and its queued edits while preserving other queued records. It uses disposable IndexedDB and mocked remote contracts; a real Supabase permission test remains unavailable in this developer suite. Order-save coverage verifies Cloud / Hybrid saves complete after authoritative confirmation while derived customer and partner summaries refresh in the background, including paid/unpaid records, ledger and stock effects, customer changes, queued sync failures, serialized refreshes, and unchanged Local-mode completion. Recovery checks cover persisted refresh jobs before save success, database reopen, unchanged cached totals with interrupted uploads, reconnect and wake retries, workspace isolation, newer saves during refresh, and failure to store a recovery job without duplicate payment. Statement-template checks cover legacy defaults, valid and invalid HEX colors, positive/negative/zero balance rendering in A4 output, and Cloud / Hybrid save requests, results, and friendly failure messages. Statement checks also cover same-day sale and purchase payments in one order row on screen and in A4 output, unchanged totals, later payments, reversals, and itemized sales.",
     "businessPartnersGroups": {
       "accountStatementTemplates": "Account statement and templates",
       "orderSummaries": "Order summary refresh",
@@ -4251,11 +4251,14 @@
       "action": "Discard and restore",
       "confirmTitle": "Discard queued change?",
       "confirmDescription": "Discard this queued {{entity}} change and restore the local record from current cloud data. This cannot be undone.",
+      "accessRevokedAction": "Discard partner edits",
+      "accessRevokedConfirmTitle": "Discard inaccessible partner edits?",
+      "accessRevokedConfirmDescription": "This removes the inaccessible partner from this device and discards all queued edits to that same partner. Other queued records stay untouched.",
       "successTitle": "Queued change discarded",
       "successDescription": {
         "restored": "The local record now matches the current cloud data.",
         "removed": "The local-only record was removed because it does not exist in cloud data.",
-        "removed_access_revoked": "The inaccessible local business partner and its queued change were removed."
+        "removed_access_revoked": "The inaccessible local business partner and all of its queued edits were removed."
       },
       "failureTitle": "Could not discard queued change",
       "unavailable": "This selected change affects linked records and needs a targeted recovery. Retry it or resolve the original issue.",

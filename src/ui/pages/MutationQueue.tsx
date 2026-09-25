@@ -24,6 +24,7 @@ import {
 } from '@/local-db/offlineMutationRecovery'
 import { formatDateTime } from '@/lib/utils'
 import { useSyncStatus } from '@/sync'
+import { isBusinessPartnerAccessChangedError } from '@/sync/syncErrors'
 import {
     Button,
     Card,
@@ -154,13 +155,14 @@ export function MutationQueue() {
             )
 
             if (result.status === 'discarded') {
+                const successDescriptionKey = result.action === 'restored'
+                    ? 'mutationQueue.discardedRestored'
+                    : result.action === 'removed_access_revoked'
+                        ? 'sync.recovery.successDescription.removed_access_revoked'
+                        : 'mutationQueue.discardedRemoved'
                 toast({
                     title: t('mutationQueue.discardSuccessTitle'),
-                    description: t(
-                        result.action === 'restored'
-                            ? 'mutationQueue.discardedRestored'
-                            : 'mutationQueue.discardedRemoved'
-                    ),
+                    description: t(successDescriptionKey),
                 })
                 if (selectedMutation?.id === discardTarget.id) setSelectedMutation(null)
                 setDiscardTarget(null)
@@ -416,9 +418,15 @@ export function MutationQueue() {
                 onConfirm={() => void discardMutation()}
                 isLoading={isDiscarding}
                 simpleConfirmation
-                confirmLabel={t('mutationQueue.discardAndRestore')}
-                title={t('mutationQueue.discardTitle')}
-                description={t('mutationQueue.discardDescription')}
+                confirmLabel={isBusinessPartnerAccessChangedError(discardTarget?.error)
+                    ? t('sync.recovery.accessRevokedAction')
+                    : t('mutationQueue.discardAndRestore')}
+                title={isBusinessPartnerAccessChangedError(discardTarget?.error)
+                    ? t('sync.recovery.accessRevokedConfirmTitle')
+                    : t('mutationQueue.discardTitle')}
+                description={isBusinessPartnerAccessChangedError(discardTarget?.error)
+                    ? t('sync.recovery.accessRevokedConfirmDescription')
+                    : t('mutationQueue.discardDescription')}
                 itemName={discardTarget
                     ? t('mutationQueue.discardTarget', { entityType: discardTarget.entityType, entityId: discardTarget.entityId })
                     : ''}

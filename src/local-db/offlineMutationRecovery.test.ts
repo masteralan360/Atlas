@@ -304,6 +304,58 @@ describe('discardAndRestoreOfflineMutation', () => {
         })
     })
 
+    it('discards queued edits to the same inaccessible partner without blocking on dependent records', async () => {
+        recoveryState.mutations.push(
+            {
+                id: 'partner-access-mutation',
+                workspaceId: 'workspace-1',
+                entityType: 'business_partners',
+                entityId: 'partner-1',
+                operation: 'update',
+                payload: { id: 'partner-1', partnerName: 'Private partner' },
+                createdAt: '2026-09-21T14:45:00.000Z',
+                status: 'failed',
+                error: 'Business partner access changed: access was revoked before sync'
+            },
+            {
+                id: 'newer-partner-edit',
+                workspaceId: 'workspace-1',
+                entityType: 'business_partners',
+                entityId: 'partner-1',
+                operation: 'update',
+                payload: { id: 'partner-1', phone: 'new local phone' },
+                createdAt: '2026-09-21T14:46:00.000Z',
+                status: 'pending'
+            },
+            {
+                id: 'dependent-order-update',
+                workspaceId: 'workspace-1',
+                entityType: 'sales_orders',
+                entityId: 'order-1',
+                operation: 'update',
+                payload: { id: 'order-1', business_partner_id: 'partner-1' },
+                createdAt: '2026-09-21T14:47:00.000Z',
+                status: 'pending'
+            }
+        )
+        recoveryState.businessPartners.push({
+            id: 'partner-1', workspaceId: 'workspace-1', partnerName: 'Private partner', syncStatus: 'conflict'
+        })
+        recoveryState.setCloudAuthority(false)
+
+        const result = await discardAndRestoreOfflineMutation('workspace-1', 'partner-access-mutation', 'user-1')
+
+        expect(result).toMatchObject({ status: 'discarded', action: 'removed_access_revoked' })
+        expect(recoveryState.businessPartners).toEqual([])
+        expect(recoveryState.mutations).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'partner-access-mutation', status: 'discarded', discardedBy: 'user-1' }),
+            expect.objectContaining({ id: 'newer-partner-edit', status: 'discarded', discardedBy: 'user-1' }),
+            expect.objectContaining({ id: 'dependent-order-update', status: 'pending' })
+        ]))
+        expect(recoveryState.client.from).not.toHaveBeenCalled()
+        expect(recoveryState.client.rpc).not.toHaveBeenCalled()
+    })
+
     it('never enables generic recovery for payment transactions', () => {
         expect(canRecoverOfflineMutation({
             ...failedProductMutation(),

@@ -117,6 +117,25 @@ async function hasDependentQueuedChanges(mutation: OfflineMutation): Promise<boo
         ))
 }
 
+async function getQueuedBusinessPartnerEdits(
+    workspaceId: string,
+    businessPartnerId: string
+): Promise<OfflineMutation[]> {
+    const groups = await Promise.all(
+        [...RECOVERABLE_STATUSES].map((status) =>
+            db.offline_mutations.where('status').equals(status).toArray()
+        )
+    )
+
+    return groups
+        .flat()
+        .filter((mutation) => (
+            mutation.workspaceId === workspaceId
+            && mutation.entityType === 'business_partners'
+            && mutation.entityId === businessPartnerId
+        ))
+}
+
 function isAccessRevokedBusinessPartnerMutation(mutation: OfflineMutation): boolean {
     return mutation.entityType === 'business_partners'
         && isBusinessPartnerAccessChangedError(mutation.error)
@@ -167,7 +186,8 @@ export async function discardAndRestoreOfflineMutation(
         return { status: 'not_discarded', reason: 'not_recoverable' }
     }
 
-    if (await hasDependentQueuedChanges(mutation)) {
+    const isRevokedPartnerMutation = isAccessRevokedBusinessPartnerMutation(mutation)
+    if (!isRevokedPartnerMutation && await hasDependentQueuedChanges(mutation)) {
         return { status: 'not_discarded', reason: 'dependent_changes' }
     }
 
@@ -179,9 +199,9 @@ export async function discardAndRestoreOfflineMutation(
     const recoveredAt = new Date().toISOString()
 
     // An access-revoked partner cannot be fetched through the normal
-    // visibility-scoped RPC. Retire only that mutation and local row so a
-    // private record is not retained or retried after access was removed.
-    if (isAccessRevokedBusinessPartnerMutation(mutation)) {
+    // visibility-scoped RPC. Retire edits to that partner and remove its local
+    // row so private data is neither retained nor retried after access changes.
+    if (isRevokedPartnerMutation) {
         try {
             await db.transaction('rw', db.offline_mutations, table as any, async () => {
                 const currentMutation = await db.offline_mutations.get(mutationId)
@@ -194,13 +214,20 @@ export async function discardAndRestoreOfflineMutation(
                     throw new Error('mutation_changed_during_recovery')
                 }
 
+                // A permission-revoked partner cannot be reconciled from the
+                // server. Retire every queued edit to this same partner so a
+                // newer pending copy cannot recreate the same integrity issue.
+                // Other queued entities that reference the partner stay intact.
+                const partnerEdits = await getQueuedBusinessPartnerEdits(workspaceId, mutation.entityId)
                 await table.delete(mutation.entityId)
-                await db.offline_mutations.update(mutationId, {
-                    status: 'discarded',
-                    error: undefined,
-                    discardedAt: recoveredAt,
-                    discardedBy: userId
-                })
+                for (const partnerEdit of partnerEdits) {
+                    await db.offline_mutations.update(partnerEdit.id, {
+                        status: 'discarded',
+                        error: undefined,
+                        discardedAt: recoveredAt,
+                        discardedBy: userId
+                    })
+                }
             })
         } catch (error) {
             if (error instanceof Error && error.message === 'mutation_changed_during_recovery') {

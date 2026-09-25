@@ -408,10 +408,17 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                 }}
                 onConfirm={() => void handleDiscard()}
                 isLoading={isDiscarding}
-                title={t('sync.recovery.confirmTitle')}
-                description={t('sync.recovery.confirmDescription', {
-                    entity: mutationToDiscard ? getEntityLabel(mutationToDiscard.entityType) : ''
-                })}
+                confirmLabel={isBusinessPartnerAccessChangedError(mutationToDiscard?.error)
+                    ? t('sync.recovery.accessRevokedAction')
+                    : t('sync.recovery.action')}
+                title={isBusinessPartnerAccessChangedError(mutationToDiscard?.error)
+                    ? t('sync.recovery.accessRevokedConfirmTitle')
+                    : t('sync.recovery.confirmTitle')}
+                description={isBusinessPartnerAccessChangedError(mutationToDiscard?.error)
+                    ? t('sync.recovery.accessRevokedConfirmDescription')
+                    : t('sync.recovery.confirmDescription', {
+                        entity: mutationToDiscard ? getEntityLabel(mutationToDiscard.entityType) : ''
+                    })}
                 itemName={mutationToDiscard ? getEntityLabel(mutationToDiscard.entityType) : ''}
                 contentClassName={cn(contentClassName, 'z-[10030]')}
                 overlayClassName="z-[10025]"
