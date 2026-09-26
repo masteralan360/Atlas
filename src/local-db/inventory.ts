@@ -269,7 +269,7 @@ export async function syncInventoryRowsBestEffort(
         ])).values()
     )
 
-    if (dedupedRows.length === 0 || !shouldUseCloudBusinessData(workspaceId)) {
+    if ((dedupedRows.length === 0 && !options.salesOrderCompletion) || !shouldUseCloudBusinessData(workspaceId)) {
         return
     }
 

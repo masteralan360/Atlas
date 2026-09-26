@@ -267,6 +267,71 @@ describe('authoritative inventory snapshot sync', () => {
         })
     })
 
+    it('completes a cloud order with an empty inventory delta through the atomic RPC', async () => {
+        const orderId = '20000000-0000-4000-8000-000000000014'
+        const orderItems = [{ id: 'service-line', productId: PRODUCT_ID, quantity: 1 }]
+        const actualDeliveryDate = '2026-09-18T09:00:00.000Z'
+        supabaseMock.rpc.mockResolvedValue({
+            data: {
+                order: {
+                    id: orderId,
+                    workspace_id: WORKSPACE_ID,
+                    status: 'completed',
+                    version: 3,
+                    items: orderItems
+                },
+                inventory: [],
+                inventory_transactions: [],
+                already_applied: false
+            },
+            error: null
+        })
+
+        const result = await syncInventoryRowsBestEffort([], WORKSPACE_ID, {
+            operationId: COMPLETION_OPERATION_ID,
+            operationKind: 'sales_order_completion',
+            salesOrderCompletion: {
+                orderId,
+                expectedOrderVersion: 2,
+                items: orderItems,
+                actualDeliveryDate
+            }
+        })
+
+        expect(supabaseMock.rpc).toHaveBeenCalledWith('complete_sales_order_with_inventory', {
+            p_order_id: orderId,
+            p_workspace_id: WORKSPACE_ID,
+            p_expected_order_version: 2,
+            p_operation_id: COMPLETION_OPERATION_ID,
+            p_items: orderItems,
+            p_actual_delivery_date: actualDeliveryDate,
+            p_changes: []
+        })
+        expect(result?.order).toMatchObject({ id: orderId, status: 'completed' })
+    })
+
+    it('keeps an empty ordinary inventory sync as a no-op', async () => {
+        await expect(syncInventoryRowsBestEffort([], WORKSPACE_ID)).resolves.toBeUndefined()
+        expect(supabaseMock.rpc).not.toHaveBeenCalled()
+    })
+
+    it('rejects a service-only completion response that omits the order', async () => {
+        supabaseMock.rpc.mockResolvedValue({
+            data: { inventory: [], inventory_transactions: [] },
+            error: null
+        })
+
+        await expect(syncInventoryRowsBestEffort([], WORKSPACE_ID, {
+            operationId: COMPLETION_OPERATION_ID,
+            salesOrderCompletion: {
+                orderId: '20000000-0000-4000-8000-000000000015',
+                expectedOrderVersion: 2,
+                items: [{ id: 'service-line', productId: PRODUCT_ID, quantity: 1 }],
+                actualDeliveryDate: '2026-09-18T09:00:00.000Z'
+            }
+        })).rejects.toThrow('The server did not return the updated stock. Refresh and try again.')
+    })
+
     it('surfaces an order-version conflict from atomic completion for refresh and retry', async () => {
         const orderId = '20000000-0000-4000-8000-000000000011'
         supabaseMock.rpc.mockResolvedValue({
