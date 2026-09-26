@@ -2,7 +2,7 @@
 
 ## Scope and entry point
 
-V1 audits **completed Sales Orders**. On Sales Order Details, select **Run Integrity Audit** to inspect the order's transaction chain. The result dialog groups checks by order, items, inventory, payments, loan, relationships, and (in Hybrid mode) SQLite mirror. Expand **Audit Model JSON** to inspect the normalized snapshot used for that run.
+V1 audits **completed Sales Orders**. On Sales Order Details, select the small audit icon beside the order number in the breadcrumb to inspect the order's transaction chain. The icon's accessible name and tooltip are **Run Integrity Audit**. The result dialog groups checks by order, items, inventory, payments, loan, relationships, and (in Hybrid mode) SQLite mirror. Expand **Audit Model JSON** to inspect the normalized snapshot used for that run.
 
 The audit is read-only. It does not save an audit result, repair data, change stock or balances, create payments, or start synchronization. A result describes records observed at `auditedAt`; a later run may differ if the transaction changes.
 

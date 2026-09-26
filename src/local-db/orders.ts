@@ -1392,6 +1392,7 @@ async function deductInventoryForSalesOrder(
         }
         if (
             error instanceof InventorySnapshotConflictError
+            && error.conflictReason !== 'sales_order_version'
             && conflictRetryCount < SALES_ORDER_INVENTORY_CONFLICT_RETRY_LIMIT
         ) {
             await waitForInventoryConflictRetry(error.retryAfterMs)

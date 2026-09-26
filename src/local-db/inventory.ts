@@ -94,7 +94,12 @@ const INVENTORY_FETCH_PAGE_SIZE = 1000
 const INVENTORY_PRODUCT_FETCH_CHUNK_SIZE = 500
 const INVENTORY_CONFLICT_COOLDOWN_MS = 5000
 const inventoryWorkspaceFetchesInFlight = new Map<string, Promise<boolean>>()
-const inventorySnapshotConflictCooldowns = new Map<string, number>()
+type InventorySnapshotConflictReason = 'inventory_version' | 'sales_order_version'
+type InventorySnapshotConflictCooldown = {
+    until: number
+    reason: InventorySnapshotConflictReason
+}
+const inventorySnapshotConflictCooldowns = new Map<string, InventorySnapshotConflictCooldown>()
 
 export interface InventoryWorkspaceFetchOptions {
     storageId?: string
@@ -134,11 +139,20 @@ export interface InventoryPositionHydrationOptions {
 
 export class InventorySnapshotConflictError extends Error {
     readonly retryAfterMs: number
+    readonly conflictReason: InventorySnapshotConflictReason
 
-    constructor(retryAfterMs = INVENTORY_CONFLICT_COOLDOWN_MS) {
-        super(i18n.t('inventory.errors.stockChanged'))
+    constructor(
+        retryAfterMs = INVENTORY_CONFLICT_COOLDOWN_MS,
+        conflictReason: InventorySnapshotConflictReason = 'inventory_version'
+    ) {
+        super(i18n.t(
+            conflictReason === 'sales_order_version'
+                ? 'inventory.errors.orderChanged'
+                : 'inventory.errors.stockChanged'
+        ))
         this.name = 'InventorySnapshotConflictError'
         this.retryAfterMs = Math.max(0, Math.trunc(Number(retryAfterMs) || 0))
+        this.conflictReason = conflictReason
     }
 }
 
@@ -333,9 +347,12 @@ export async function syncInventoryRowsBestEffort(
     const operationId = options.operationId ?? generateId()
     const operationKind = options.operationKind ?? 'client_snapshot_cas'
     const conflictKey = `${workspaceId}:${operationKind}:${operationId}`
-    const conflictCooldownUntil = inventorySnapshotConflictCooldowns.get(conflictKey) ?? 0
-    if (conflictCooldownUntil > Date.now()) {
-        throw new InventorySnapshotConflictError(conflictCooldownUntil - Date.now())
+    const conflictCooldown = inventorySnapshotConflictCooldowns.get(conflictKey)
+    if (conflictCooldown && conflictCooldown.until > Date.now()) {
+        throw new InventorySnapshotConflictError(
+            conflictCooldown.until - Date.now(),
+            conflictCooldown.reason
+        )
     }
     inventorySnapshotConflictCooldowns.delete(conflictKey)
     const movementsByPosition = new Map(
@@ -395,11 +412,16 @@ export async function syncInventoryRowsBestEffort(
 
     if (response.error) {
         if ((response.error as { code?: string }).code === '40001') {
-            inventorySnapshotConflictCooldowns.set(
-                conflictKey,
-                Date.now() + INVENTORY_CONFLICT_COOLDOWN_MS
-            )
-            throw new InventorySnapshotConflictError(INVENTORY_CONFLICT_COOLDOWN_MS)
+            const conflictReason: InventorySnapshotConflictReason = (
+                (response.error as { message?: string }).message ?? ''
+            ).includes('Sales order changed on another device')
+                ? 'sales_order_version'
+                : 'inventory_version'
+            inventorySnapshotConflictCooldowns.set(conflictKey, {
+                until: Date.now() + INVENTORY_CONFLICT_COOLDOWN_MS,
+                reason: conflictReason
+            })
+            throw new InventorySnapshotConflictError(INVENTORY_CONFLICT_COOLDOWN_MS, conflictReason)
         }
         throw normalizeSupabaseActionError(response.error)
     }
@@ -409,6 +431,7 @@ export async function syncInventoryRowsBestEffort(
         inventory_transactions?: Record<string, unknown>[] | null
         order?: Record<string, unknown> | null
         conflict?: boolean
+        conflict_reason?: string
         retry_after_ms?: number
     } | null
     if (result?.conflict) {
@@ -416,11 +439,14 @@ export async function syncInventoryRowsBestEffort(
         const retryAfterMs = Number.isFinite(parsedRetryAfterMs)
             ? Math.max(0, Math.trunc(parsedRetryAfterMs))
             : INVENTORY_CONFLICT_COOLDOWN_MS
-        inventorySnapshotConflictCooldowns.set(
-            conflictKey,
-            Date.now() + retryAfterMs
-        )
-        throw new InventorySnapshotConflictError(retryAfterMs)
+        const conflictReason: InventorySnapshotConflictReason = result.conflict_reason === 'sales_order_version'
+            ? 'sales_order_version'
+            : 'inventory_version'
+        inventorySnapshotConflictCooldowns.set(conflictKey, {
+            until: Date.now() + retryAfterMs,
+            reason: conflictReason
+        })
+        throw new InventorySnapshotConflictError(retryAfterMs, conflictReason)
     }
 
     const remoteRows = result?.inventory

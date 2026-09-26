@@ -30,6 +30,12 @@
         "titleKey": "devTesting.groups.liveTransactions",
         "layer": "live",
         "files": ["src/dev/testing/suites/saleOrdersLive.test.ts"]
+      },
+      {
+        "id": "completion-integrity",
+        "titleKey": "devTesting.groups.completionIntegrity",
+        "layer": "live",
+        "files": ["src/dev/testing/suites/saleOrdersCompletionLive.test.ts"]
       }
     ],
     "groups": [

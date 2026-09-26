@@ -96,6 +96,7 @@ const OPERATION_ID = '20000000-0000-5000-8000-000000000005'
 const CONFLICT_OPERATION_ID = '20000000-0000-5000-8000-000000000006'
 const COMPLETION_OPERATION_ID = '20000000-0000-5000-8000-000000000009'
 const COMPLETION_CONFLICT_OPERATION_ID = '20000000-0000-5000-8000-000000000010'
+const COMPLETION_ORDER_CONFLICT_OPERATION_ID = '20000000-0000-5000-8000-000000000011'
 
 function inventoryRow(version: number): Inventory {
     return {
@@ -422,13 +423,51 @@ describe('authoritative inventory snapshot sync', () => {
                     actualDeliveryDate: '2026-09-18T09:00:00.000Z'
                 }
             }
-        )).rejects.toBeInstanceOf(InventorySnapshotConflictError)
+        )).rejects.toMatchObject({
+            name: 'InventorySnapshotConflictError',
+            conflictReason: 'sales_order_version'
+        })
 
+        expect(supabaseMock.rpc).toHaveBeenCalledTimes(1)
         expect(supabaseMock.rpc).toHaveBeenCalledWith('complete_sales_order_with_inventory', expect.objectContaining({
             p_order_id: orderId,
             p_expected_order_version: 2,
             p_operation_id: COMPLETION_CONFLICT_OPERATION_ID
         }))
+    })
+
+    it('surfaces a sales-order version conflict envelope and suppresses an immediate replay', async () => {
+        const orderId = '20000000-0000-4000-8000-000000000016'
+        supabaseMock.rpc.mockResolvedValue({
+            data: {
+                conflict: true,
+                conflict_reason: 'sales_order_version',
+                retry_after_ms: 5000,
+                current_order_version: 3
+            },
+            error: null
+        })
+        const run = () => syncInventoryRowsBestEffort([inventoryRow(8)], WORKSPACE_ID, {
+            operationId: COMPLETION_ORDER_CONFLICT_OPERATION_ID,
+            operationKind: 'sales_order_completion',
+            expectedVersions: [{ productId: PRODUCT_ID, storageId: STORAGE_ID, version: 7 }],
+            salesOrderCompletion: {
+                orderId,
+                expectedOrderVersion: 2,
+                items: [{ id: 'line-1', productId: PRODUCT_ID, storageId: STORAGE_ID, quantity: 1 }],
+                actualDeliveryDate: '2026-09-18T09:00:00.000Z'
+            }
+        })
+
+        await expect(run()).rejects.toMatchObject({
+            name: 'InventorySnapshotConflictError',
+            conflictReason: 'sales_order_version'
+        })
+        await expect(run()).rejects.toMatchObject({
+            name: 'InventorySnapshotConflictError',
+            conflictReason: 'sales_order_version'
+        })
+        expect(supabaseMock.rpc).toHaveBeenCalledTimes(1)
     })
 
     it('sends source-linked movement metadata and caches the canonical server transaction', async () => {

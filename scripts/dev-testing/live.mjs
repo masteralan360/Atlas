@@ -48,7 +48,7 @@ export function liveTarget(config) {
   return { host: new URL(config.origin).host, workspaceId: config.ATLAS_LIVE_WORKSPACE_ID, workspaceName: config.ATLAS_LIVE_WORKSPACE_NAME }
 }
 
-export function liveChildEnv(config, baseEnv, runId) {
+export function liveChildEnv(config, baseEnv, runId, capabilities = {}) {
   return {
     ...baseEnv,
     ATLAS_LIVE_SUPABASE_URL: config.origin,
@@ -57,7 +57,8 @@ export function liveChildEnv(config, baseEnv, runId) {
     ATLAS_LIVE_TEST_PASSWORD: config.ATLAS_LIVE_TEST_PASSWORD,
     ATLAS_LIVE_WORKSPACE_ID: config.ATLAS_LIVE_WORKSPACE_ID,
     ATLAS_LIVE_WORKSPACE_NAME: config.ATLAS_LIVE_WORKSPACE_NAME,
-    ATLAS_LIVE_RUN_ID: runId
+    ATLAS_LIVE_RUN_ID: runId,
+    ATLAS_LIVE_SERVICES_ENABLED: String(capabilities.servicesEnabled === true)
   }
 }
 
@@ -108,6 +109,14 @@ export async function preflightLive(config, { fetchImpl = globalThis.fetch, suit
       const { error } = await client.schema('crm').from('sales_orders')
         .select('id').eq('workspace_id', config.ATLAS_LIVE_WORKSPACE_ID).limit(1)
       if (error) throw new Error('live_schema_unavailable')
+      const { data: servicesEnabled, error: servicesError } = await client.rpc('services_module_allowed', {
+        p_workspace_id: config.ATLAS_LIVE_WORKSPACE_ID
+      })
+      if (servicesError || typeof servicesEnabled !== 'boolean') throw new Error('live_services_capability_unavailable')
+      return {
+        target: liveTarget(config), mode: workspace.data_mode, userId: signIn.user.id,
+        servicesEnabled
+      }
     } else if (suiteId === 'pos') {
       for (const table of ['sales', 'sale_items', 'inventory', 'stock_batches', 'payment_transactions']) {
         const { error } = await client.from(table).select('id')

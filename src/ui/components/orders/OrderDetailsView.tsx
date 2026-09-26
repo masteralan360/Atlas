@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import { ArrowLeft, BadgeCheck, BadgeDollarSign, CalendarDays, CircleAlert, CircleCheck, ClipboardCheck, Clock3, CreditCard, Eye, LayoutGrid, List, Loader2, Lock, Package, PackageCheck, Pencil, Plus, Printer, Receipt, RotateCcw, ShoppingCart, Trash2, TrendingUp, Truck, UsersRound, Warehouse, XCircle } from 'lucide-react'
+import { ArrowLeft, BadgeCheck, BadgeDollarSign, CalendarDays, CircleAlert, CircleCheck, Clock3, CreditCard, Eye, LayoutGrid, List, Loader2, Lock, Package, PackageCheck, Pencil, Plus, Printer, Receipt, RotateCcw, ShoppingCart, Trash2, TrendingUp, Truck, UsersRound, Warehouse, XCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLocalizedOrderError } from '@/lib/orderErrors'
 import { ORDER_STATUS_ADVANCE_HOLD_DURATION_MS } from '@/lib/pressAndHold'
@@ -107,6 +107,7 @@ import { r2Service } from '@/services/r2Service'
 import { getWorkspaceUsageLimitMessage, isWorkspaceUsageLimitError } from '@/lib/workspaceUsage'
 import { getWorkspaceDataMode } from '@/workspace/workspaceMode'
 import { SalesOrderIntegrityAuditDialog } from './SalesOrderIntegrityAuditDialog'
+import { SalesOrderAuditBreadcrumbAction } from './SalesOrderAuditBreadcrumbAction'
 import {
     ORDER_PRINT_COMMON_FIELD_KEYS,
     ORDER_RECEIPT_TEMPLATE_FIELD_KEYS,
@@ -1365,7 +1366,12 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                         {t('nav.orders') || 'Orders'}
                     </Link>
                     <span>/</span>
-                    <span className="font-semibold text-foreground">{order.orderNumber}</span>
+                    <span className="inline-flex items-center gap-1 text-foreground">
+                        <span className="font-semibold">{order.orderNumber}</span>
+                        {isSales && order.status === 'completed' && (
+                            <SalesOrderAuditBreadcrumbAction onClick={() => setAuditOpen(true)} />
+                        )}
+                    </span>
                     {isSales && (order as SalesOrder).sourceChannel === 'marketplace' ? (
                         <span className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-sky-700 dark:text-sky-300">
                             {t('ecommerce.title', { defaultValue: 'E-Commerce' })}
@@ -1441,9 +1447,6 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             </Button>
                         )
                     })}
-                    {isSales && order.status === 'completed' && <Button variant="outline" onClick={() => setAuditOpen(true)}>
-                        <ClipboardCheck className="mr-2 h-4 w-4" />{t('transactionAudit.run')}
-                    </Button>}
                     {!isApprovalRequested && canManageOrder && isFinanced && linkedLoanRoute ? (
                         <Button variant="outline" onClick={() => navigate(linkedLoanRoute)}>
                             <CreditCard className="mr-2 h-4 w-4" />

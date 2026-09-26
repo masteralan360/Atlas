@@ -49,10 +49,10 @@ describe('developer runner boundaries', () => {
       expect(() => validateRunOptions(options)).toThrow()
     }
     expect(validateRunOptions({ suiteId: 'sale-orders' }).groups.length).toBe(suites['sale-orders'].groups.length)
-    expect(validateRunOptions({ suiteId: 'business-partners', groupIds: ['privacy-and-sync'] }).groups).toEqual([
+    expect(validateRunOptions({ suiteId: 'business-partners', groupIds: ['workspace-access-and-sync'] }).groups).toEqual([
       expect.objectContaining({
-        id: 'privacy-and-sync',
-        titleKey: 'devTesting.businessPartnersGroups.privacyAndSync',
+        id: 'workspace-access-and-sync',
+        titleKey: 'devTesting.businessPartnersGroups.workspaceAccessAndSync',
         files: expect.arrayContaining([
           'src/local-db/offlineMutationRecovery.test.ts',
           'src/sync/syncErrors.test.ts'

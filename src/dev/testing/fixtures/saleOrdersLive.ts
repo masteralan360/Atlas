@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import { afterAll, beforeAll, vi } from 'vitest'
 import { createClient } from '@supabase/supabase-js'
 import { db } from '@/local-db/database'
-import type { BusinessPartner, Product, Storage } from '@/local-db/models'
+import type { BusinessPartner, CurrencyCode, Product, Storage } from '@/local-db/models'
 import { setActiveBusinessUser, setActiveBusinessWorkspace } from '@/lib/network'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 import { liveSupabase } from '../liveSupabase'
@@ -83,7 +83,7 @@ export type LiveSaleOrderFixture = {
 
 export async function withLiveSaleOrderFixture<T>(
     scenario: (fixture: LiveSaleOrderFixture) => Promise<T>,
-    options: { stock?: number; currency?: 'usd' | 'iqd'; price?: number; costPrice?: number; unit?: string } = {}
+    options: { stock?: number; currency?: CurrencyCode; price?: number; costPrice?: number; unit?: string } = {}
 ): Promise<T> {
     const hooks = await import('@/local-db/hooks')
     const partners = await import('@/local-db/businessPartners')

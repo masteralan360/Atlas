@@ -26,9 +26,10 @@ describe('hosted Supabase test boundary', () => {
 
   it('passes only the dedicated credentials to a live child and redacts diagnostics', () => {
     const config = parseLiveConfig(source)
-    const env = liveChildEnv(config, { NODE_ENV: 'test' }, 'run-1')
+    const env = liveChildEnv(config, { NODE_ENV: 'test' }, 'run-1', { servicesEnabled: true })
     expect(env.ATLAS_LIVE_RUN_ID).toBe('run-1')
     expect(env.ATLAS_LIVE_SUPABASE_URL).toBe('https://project.supabase.co')
+    expect(env.ATLAS_LIVE_SERVICES_ENABLED).toBe('true')
     expect(redactLiveText(`${anon} example-password dev-test@example.com Bearer eyJ.eyJ.abc`, config)).not.toMatch(/example-password|dev-test@example.com|header\.|eyJ\.eyJ/)
   })
 
@@ -48,10 +49,12 @@ describe('hosted Supabase test boundary', () => {
     const hosted = validateRunOptions({ suiteId: 'sale-orders', environment: 'hosted-supabase' }).groups
     expect(hosted.map((group) => group.id)).toEqual([
       'matrix', 'printing', 'account-statement', 'lifecycle', 'pricing', 'related-units',
-      'payments', 'ui-access', 'live-transactions'
+      'payments', 'ui-access', 'live-transactions', 'completion-integrity'
     ])
-    expect(hosted.filter((group) => group.isolatedGroupId).map((group) => group.isolatedGroupId))
-      .toEqual(validateRunOptions({ suiteId: 'sale-orders' }).groups.map((group) => group.id))
+    const mappedIsolatedGroups = hosted.filter((group) => group.isolatedGroupId).map((group) => group.isolatedGroupId)
+    const isolatedGroups = validateRunOptions({ suiteId: 'sale-orders' }).groups.map((group) => group.id)
+    expect(mappedIsolatedGroups.every((groupId) => isolatedGroups.includes(groupId))).toBe(true)
+    expect(new Set(mappedIsolatedGroups).size).toBe(mappedIsolatedGroups.length)
     const posIsolated = validateRunOptions({ suiteId: 'pos' }).groups.map((group) => group.id)
     const posHosted = validateRunOptions({ suiteId: 'pos', environment: 'hosted-supabase' }).groups
     expect(posHosted.map((group) => group.id)).toEqual(posIsolated)
@@ -100,5 +103,28 @@ describe('hosted Supabase test boundary', () => {
     expect(paths).not.toContain('/rest/v1/sales_orders')
     expect(paths).toContain('/rest/v1/sales')
     expect(paths).toContain('/rest/v1/payment_transactions')
+    expect(paths).not.toContain('/rest/v1/rpc/services_module_allowed')
+  })
+
+  it('reports the verified Services module capability for Sale Order live tests', async () => {
+    const paths = []
+    const fetchImpl = vi.fn(async (input) => {
+      const target = new URL(typeof input === 'string' ? input : input.url)
+      paths.push(target.pathname)
+      if (target.pathname === '/auth/v1/token') return Response.json({
+        access_token: 'test-access', refresh_token: 'test-refresh', token_type: 'bearer', expires_in: 3600,
+        user: { id, email: 'dev-test@example.com', aud: 'authenticated', role: 'authenticated' }
+      })
+      if (target.pathname === '/rest/v1/profiles') return Response.json({ id, current_workspace: id, role: 'admin' })
+      if (target.pathname === '/rest/v1/workspaces') return Response.json(target.searchParams.get('select') === 'id'
+        ? [{ id }] : { id, name: 'DEV TEST Atlas', data_mode: 'cloud' })
+      if (target.pathname === '/rest/v1/rpc/services_module_allowed') return Response.json(true)
+      if (target.pathname === '/auth/v1/logout') return new Response(null, { status: 204 })
+      if (target.pathname === '/rest/v1/sales_orders') return Response.json([])
+      throw new Error(`unexpected request: ${target.pathname}`)
+    })
+    const result = await preflightLive(parseLiveConfig(source), { fetchImpl, suiteId: 'sale-orders' })
+    expect(result.servicesEnabled).toBe(true)
+    expect(paths).toContain('/rest/v1/rpc/services_module_allowed')
   })
 })

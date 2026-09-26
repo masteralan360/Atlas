@@ -113,8 +113,8 @@ two transitions competing on the same order. The runner refreshes the
 workspace's storages into its local cache before creating test storages, so
 existing primary or marketplace locations remain respected.
 The target project must have the app's current Sale Orders migrations deployed,
-including `cancel_order_with_financing` and
-`complete_sales_order_with_inventory`.
+including `cancel_order_with_financing`, `complete_sales_order_with_inventory`,
+and `contain_sales_order_completion_conflicts`.
 The report records run and fixture IDs to aid investigation. A failed fixture
 is retained for inspection; the test may retire a successful catalog item.
 The hosted related-units group follows the supported Sale Order lifecycle for
@@ -140,7 +140,7 @@ but only hosted cases prove their selected server effects.
 ## Sale Orders V1 coverage
 
 The selectable **Integrity Audit** group runs isolated Sales Order graph,
-reconciliation, Audit Model JSON, and request-contract checks. It does not use
+reconciliation, breadcrumb action, Audit Model JSON, and request-contract checks. It does not use
 a business workspace or write transaction records. Native SQLite execution,
 live Supabase permissions, and Hybrid mirror parity require separate environment
 checks. The feature's behavior, transaction graph, database modes, and evidence

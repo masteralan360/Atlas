@@ -226,7 +226,7 @@ export class TestController {
           '--reporter', join(this.root, 'scripts/dev-testing/reporter.mjs'),
           '--maxWorkers', '1', ...group.files
         ], { cwd: this.root, env: live
-          ? liveChildEnv(live.config, isolatedChildEnv(run.seed, run.samples), run.id)
+          ? liveChildEnv(live.config, isolatedChildEnv(run.seed, run.samples), run.id, live.readiness)
           : isolatedChildEnv(run.seed, run.samples), shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
         this.child = child
         createInterface({ input: child.stdout }).on('line', (line) => {
