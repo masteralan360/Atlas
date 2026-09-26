@@ -44,6 +44,8 @@ const PRODUCT_ID = 'local-sale-return-product'
 const STORAGE_ID = 'local-sale-return-storage'
 const EXCLUDED_STORAGE_ID = 'local-sale-return-excluded-storage'
 const INVENTORY_ID = 'local-sale-return-inventory'
+const RETURN_ID = 'local-sale-return-header'
+const SALE_ID = 'local-sale-return-sale'
 const TIMESTAMP = '2026-09-16T10:00:00.000Z'
 const base = {
     workspaceId: WORKSPACE_ID,
@@ -83,7 +85,14 @@ async function restoreReturnInventory(quantityDelta: number) {
     // The same inventory operation used by Sales.restoreInventoryForReturn.
     return adjustInventoryQuantity({
         workspaceId: WORKSPACE_ID, productId: PRODUCT_ID, storageId: storageId!,
-        quantityDelta, timestamp: TIMESTAMP
+        quantityDelta, timestamp: TIMESTAMP,
+        movement: {
+            productId: PRODUCT_ID,
+            storageId: storageId!,
+            transactionType: 'return',
+            referenceId: RETURN_ID,
+            referenceType: 'pos_return'
+        }
     })
 }
 
@@ -131,6 +140,18 @@ describe('Local mode sale return inventory for staff', () => {
         })
         expect(await db.inventory.get(INVENTORY_ID)).toMatchObject({ quantity, isDeleted: false })
         expect(await db.products.get(PRODUCT_ID)).toMatchObject({ quantity, storageId: STORAGE_ID })
+        expect(await db.inventory_transactions.toArray()).toEqual([
+            expect.objectContaining({
+                productId: PRODUCT_ID,
+                storageId: STORAGE_ID,
+                transactionType: 'return',
+                quantityDelta: quantity,
+                previousQuantity: 0,
+                newQuantity: quantity,
+                referenceId: RETURN_ID,
+                referenceType: 'pos_return'
+            })
+        ])
         expect(await db.storage_member_exclusions.get('staff-exclusion')).toEqual(exclusion)
         expect(fromSpy).not.toHaveBeenCalled()
         expect(rpcSpy).not.toHaveBeenCalled()
@@ -151,7 +172,7 @@ describe('Local mode sale return inventory for staff', () => {
 
         await expect(adjustInventoryQuantity({
             workspaceId: WORKSPACE_ID, productId: PRODUCT_ID, storageId: EXCLUDED_STORAGE_ID,
-            quantityDelta: 1, skipReorderCheck: true
+            quantityDelta: 1, skipReorderCheck: true, movement: null
         })).rejects.toThrow(i18n.t('storages.permissions.errors.accessDenied'))
         expect(await db.products.get(PRODUCT_ID)).toEqual(product)
         expect(await db.inventory.get(INVENTORY_ID)).toEqual(inventory)
@@ -162,7 +183,7 @@ describe('Local mode sale return inventory for staff', () => {
         await db.users.delete(STAFF_ID)
         await expect(adjustInventoryQuantity({
             workspaceId: WORKSPACE_ID, productId: PRODUCT_ID, storageId: STORAGE_ID,
-            quantityDelta: 1, skipReorderCheck: true
+            quantityDelta: 1, skipReorderCheck: true, movement: null
         })).rejects.toThrow(i18n.t('storages.permissions.errors.accessDenied'))
         expect(await db.inventory.get(INVENTORY_ID)).toMatchObject({ quantity: 0, isDeleted: true })
         expect(await db.products.get(PRODUCT_ID)).toMatchObject({ quantity: 0 })
@@ -173,7 +194,7 @@ describe('Local mode sale return inventory for staff', () => {
 
         await expect(adjustInventoryQuantity({
             workspaceId: WORKSPACE_ID, productId: PRODUCT_ID, storageId: EXCLUDED_STORAGE_ID,
-            quantityDelta: 1, skipReorderCheck: true
+            quantityDelta: 1, skipReorderCheck: true, movement: null
         })).resolves.toMatchObject({ quantity: 1, storageId: EXCLUDED_STORAGE_ID })
     })
 
@@ -191,6 +212,7 @@ describe('Local mode sale return inventory for staff', () => {
 
         await applyOfflinePosStockEffects({
             workspaceId: WORKSPACE_ID,
+            saleId: SALE_ID,
             items: [{ productId: PRODUCT_ID, storageId: STORAGE_ID, quantity: 1 }],
             batchPlans: [],
             timestamp: TIMESTAMP

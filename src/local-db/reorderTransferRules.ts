@@ -289,6 +289,8 @@ export async function evaluateReorderTransferRule(ruleId: string) {
             targetStorageId: rule.destinationStorageId,
             quantity: rule.transferQuantity,
             timestamp: now,
+            referenceType: 'reorder_transfer',
+            notes: `Automatic reorder transfer rule ${rule.id}.`,
             skipReorderCheck: true
         })
 
@@ -296,6 +298,7 @@ export async function evaluateReorderTransferRule(ruleId: string) {
             await createInventoryTransferTransactions(
                 rule.workspaceId,
                 [{
+                    id: transferResult.referenceId,
                     productId: rule.productId,
                     sourceStorageId: rule.sourceStorageId,
                     destinationStorageId: rule.destinationStorageId,

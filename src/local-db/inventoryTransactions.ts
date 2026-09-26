@@ -1,4 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks";
+import { v5 as uuidv5 } from "uuid";
 
 import i18n from "@/i18n/config";
 import {
@@ -23,13 +24,14 @@ import type {
 } from "./models";
 
 const TABLE_NAME = "inventory_transactions";
+const INVENTORY_MOVEMENT_TRANSACTION_NAMESPACE = "8e2e489b-fb4a-48af-8b2a-9e1b0ab8690a";
 const CLOUD_TRANSACTION_TYPES = new Set<InventoryTransactionType>([
   "stock_adjustment",
 ]);
 
-// Purchase receipts are written to the cloud ledger by the authoritative
-// receive_purchase_order RPC. Manual stock adjustments use their own RPC.
-// Other transaction types remain local mirrors of their source documents.
+// Cloud movements other than manual stock adjustments are written atomically
+// with the authoritative inventory update. This set is only for the dedicated
+// stock-adjustment RPC; it is not a restriction on inventory audit coverage.
 export interface InventoryTransactionInput {
   productId: string;
   storageId: string;
@@ -79,6 +81,7 @@ function normalizeTransactionInput(input: InventoryTransactionInput) {
     "return",
     "purchase",
     "initial_stock",
+    "inventory_change",
   ];
   const allowedAdjustmentReasons: StockAdjustmentReason[] = [
     "purchase",
@@ -161,6 +164,24 @@ function toRemoteInventoryTransactionPayload(transaction: InventoryTransaction) 
     syncStatus: undefined,
     lastSyncedAt: undefined,
   });
+}
+
+/**
+ * Gives each committed inventory-position version one stable movement id.
+ * The database uses the same namespace and input when its inventory trigger
+ * writes the authoritative ledger row, so retries replace the local pending
+ * projection instead of creating a second event.
+ */
+export function buildInventoryMovementTransactionId(
+  workspaceId: string,
+  productId: string,
+  storageId: string,
+  inventoryVersion: number,
+) {
+  return uuidv5(
+    `${workspaceId}:${productId}:${storageId}:${Math.max(1, Math.trunc(inventoryVersion))}`,
+    INVENTORY_MOVEMENT_TRANSACTION_NAMESPACE,
+  );
 }
 
 type ApplyStockAdjustmentResult = {
@@ -359,6 +380,56 @@ export async function hydrateInventoryTransactionsFromSupabase(
   if (remoteTransactions.length > 0) {
     await db.inventory_transactions.bulkPut(remoteTransactions);
   }
+}
+
+/** Fetch newly committed source movements without reloading the full ledger. */
+export async function hydrateInventoryTransactionsForReferences(
+  workspaceId: string,
+  referenceIds: ReadonlyArray<string | null | undefined>,
+) {
+  const ids = Array.from(new Set(referenceIds.filter((value): value is string => Boolean(value?.trim()))));
+  if (ids.length === 0 || isLocalWorkspaceMode(workspaceId) || !isOnline(workspaceId)) {
+    return [] as InventoryTransaction[];
+  }
+
+  const client = getSupabaseClientForTable(TABLE_NAME);
+  let data: Record<string, unknown>[] | null;
+  let error: unknown;
+  try {
+    ({ data, error } = await runSupabaseAction(
+      `${TABLE_NAME}.hydrateReferences`,
+      () => client
+        .from(TABLE_NAME)
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .in("reference_id", ids),
+    ));
+  } catch (requestError) {
+    console.error("[InventoryTransactions] Failed to hydrate source movements:", requestError);
+    return [] as InventoryTransaction[];
+  }
+  if (error) {
+    // The authoritative transaction already committed. Keep the UI usable and
+    // let the normal workspace ledger hydration reconcile on its next refresh.
+    console.error("[InventoryTransactions] Failed to hydrate source movements:", error);
+    return [] as InventoryTransaction[];
+  }
+
+  const syncedAt = new Date().toISOString();
+  const transactions = (data ?? []).map((row) => ({
+    ...(toCamelCase(row as Record<string, unknown>) as unknown as InventoryTransaction),
+    syncStatus: "synced" as const,
+    lastSyncedAt: syncedAt,
+  }));
+  if (transactions.length > 0) {
+    try {
+      await db.inventory_transactions.bulkPut(transactions);
+    } catch (cacheError) {
+      console.error("[InventoryTransactions] Failed to cache source movements:", cacheError);
+      return [] as InventoryTransaction[];
+    }
+  }
+  return transactions;
 }
 
 export function filterInventoryTransactions(

@@ -20,6 +20,7 @@ export interface OfflinePosBatchPlan {
 
 export async function applyOfflinePosStockEffects(input: {
   workspaceId: string;
+  saleId: string;
   items: OfflinePosStockItem[];
   batchPlans: OfflinePosBatchPlan[];
   timestamp: string;
@@ -34,6 +35,7 @@ export async function applyOfflinePosStockEffects(input: {
     "rw",
     [
       db.inventory, db.products, db.storages, db.stock_batches,
+      db.inventory_transactions,
       db.users, db.profiles, db.storage_member_exclusions,
     ],
     async () => {
@@ -47,6 +49,13 @@ export async function applyOfflinePosStockEffects(input: {
           skipRemoteHydration: true,
           skipRemoteSync: true,
           skipReorderCheck: true,
+          movement: {
+            productId: item.productId,
+            storageId: item.storageId,
+            transactionType: "sale",
+            referenceId: input.saleId,
+            referenceType: "pos_sale",
+          },
         });
       }
 

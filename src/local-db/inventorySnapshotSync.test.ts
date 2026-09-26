@@ -79,11 +79,12 @@ import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/worksp
 
 import { db } from './database'
 import {
-    getInventoryVersionForProductStorage,
-    hydrateInventoryProductStoragesFromSupabase,
+  getInventoryVersionForProductStorage,
+  hydrateInventoryProductStoragesFromSupabase,
     InventorySnapshotConflictError,
     syncInventoryRowsBestEffort
 } from './inventory'
+import { hydrateInventoryTransactionsForReferences } from './inventoryTransactions'
 import type { Inventory } from './models'
 
 const WORKSPACE_ID = '20000000-0000-4000-8000-000000000001'
@@ -161,7 +162,12 @@ describe('authoritative inventory snapshot sync', () => {
                 product_id: PRODUCT_ID,
                 storage_id: STORAGE_ID,
                 quantity: 3,
-                expected_version: 5
+                expected_version: 5,
+                audit_transaction_type: null,
+                audit_reference_id: null,
+                audit_reference_type: null,
+                audit_notes: null,
+                audit_created_by: null,
             }]
         })
     })
@@ -201,6 +207,64 @@ describe('authoritative inventory snapshot sync', () => {
         })
         expect(await getInventoryVersionForProductStorage(PRODUCT_ID, STORAGE_ID)).toBe(8)
         expect(supabaseMock.filters).not.toContainEqual(['is_deleted', false])
+    })
+
+    it('hydrates newly committed inventory movements by source reference', async () => {
+        supabaseMock.setQueryResult({
+            data: [{
+                id: INVENTORY_TRANSACTION_ID,
+                workspace_id: WORKSPACE_ID,
+                product_id: PRODUCT_ID,
+                storage_id: STORAGE_ID,
+                transaction_type: 'sale',
+                quantity_delta: -1,
+                previous_quantity: 4,
+                new_quantity: 3,
+                reference_id: OPERATION_ID,
+                reference_type: 'pos_sale',
+                version: 1,
+                is_deleted: false,
+            }],
+            error: null,
+        })
+
+        const movements = await hydrateInventoryTransactionsForReferences(
+            WORKSPACE_ID,
+            [OPERATION_ID, null, ''],
+        )
+
+        expect(supabaseMock.from).toHaveBeenCalledWith('inventory_transactions')
+        expect(supabaseMock.filters).toEqual([
+            ['workspace_id', WORKSPACE_ID],
+            ['reference_id', [OPERATION_ID]],
+        ])
+        expect(movements).toMatchObject([{
+            id: INVENTORY_TRANSACTION_ID,
+            transactionType: 'sale',
+            quantityDelta: -1,
+            previousQuantity: 4,
+            newQuantity: 3,
+            referenceId: OPERATION_ID,
+            referenceType: 'pos_sale',
+            syncStatus: 'synced',
+        }])
+        expect(await db.inventory_transactions.get(INVENTORY_TRANSACTION_ID)).toMatchObject({
+            referenceId: OPERATION_ID,
+            quantityDelta: -1,
+            syncStatus: 'synced',
+        })
+    })
+
+    it('keeps a committed inventory operation usable when reference hydration fails', async () => {
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        supabaseMock.setQueryResult({ data: null, error: { message: 'network unavailable' } })
+
+        try {
+            await expect(hydrateInventoryTransactionsForReferences(WORKSPACE_ID, [OPERATION_ID])).resolves.toEqual([])
+            expect(await db.inventory_transactions.count()).toBe(0)
+        } finally {
+            consoleError.mockRestore()
+        }
     })
 
     it('completes an existing cloud order through the atomic order and inventory RPC', async () => {
@@ -253,7 +317,12 @@ describe('authoritative inventory snapshot sync', () => {
                 product_id: PRODUCT_ID,
                 storage_id: STORAGE_ID,
                 quantity: 3,
-                expected_version: 7
+                expected_version: 7,
+                audit_transaction_type: null,
+                audit_reference_id: null,
+                audit_reference_type: null,
+                audit_notes: null,
+                audit_created_by: null,
             }]
         })
         expect(result?.order).toMatchObject({ id: orderId, status: 'completed' })
@@ -360,6 +429,87 @@ describe('authoritative inventory snapshot sync', () => {
             p_expected_order_version: 2,
             p_operation_id: COMPLETION_CONFLICT_OPERATION_ID
         }))
+    })
+
+    it('sends source-linked movement metadata and caches the canonical server transaction', async () => {
+        const transactionId = '20000000-0000-4000-8000-000000000012'
+        const movement = {
+            id: transactionId,
+            workspaceId: WORKSPACE_ID,
+            productId: PRODUCT_ID,
+            storageId: STORAGE_ID,
+            transactionType: 'sale' as const,
+            quantityDelta: -1,
+            previousQuantity: 4,
+            newQuantity: 3,
+            referenceId: '20000000-0000-4000-8000-000000000013',
+            referenceType: 'pos_sale',
+            notes: 'POS checkout',
+            createdBy: 'cashier-1',
+            createdAt: '2026-09-18T09:00:00.000Z',
+            updatedAt: '2026-09-18T09:00:00.000Z',
+            version: 1,
+            isDeleted: false,
+            syncStatus: 'pending' as const,
+            lastSyncedAt: null,
+        }
+        supabaseMock.rpc.mockResolvedValue({
+            data: {
+                inventory: [{
+                    id: INVENTORY_ID,
+                    workspace_id: WORKSPACE_ID,
+                    product_id: PRODUCT_ID,
+                    storage_id: STORAGE_ID,
+                    quantity: 3,
+                    created_at: '2026-09-18T09:00:00.000Z',
+                    updated_at: '2026-09-18T09:00:00.000Z',
+                    version: 8,
+                    is_deleted: false,
+                }],
+                inventory_transactions: [{
+                    ...movement,
+                    workspace_id: WORKSPACE_ID,
+                    product_id: PRODUCT_ID,
+                    storage_id: STORAGE_ID,
+                    transaction_type: 'sale',
+                    quantity_delta: -1,
+                    previous_quantity: 4,
+                    new_quantity: 3,
+                    reference_id: movement.referenceId,
+                    reference_type: 'pos_sale',
+                    created_by: 'cashier-1',
+                    created_at: movement.createdAt,
+                    updated_at: movement.updatedAt,
+                    is_deleted: false,
+                }],
+            },
+            error: null,
+        })
+
+        await syncInventoryRowsBestEffort([inventoryRow(8)], WORKSPACE_ID, {
+            operationId: OPERATION_ID,
+            operationKind: 'inventory_movement',
+            expectedVersions: [{ productId: PRODUCT_ID, storageId: STORAGE_ID, version: 7 }],
+            inventoryTransactions: [movement],
+        })
+
+        expect(supabaseMock.rpc).toHaveBeenCalledWith('apply_inventory_snapshot_changes', expect.objectContaining({
+            p_operation_id: OPERATION_ID,
+            p_changes: [expect.objectContaining({
+                audit_transaction_type: 'sale',
+                audit_reference_id: movement.referenceId,
+                audit_reference_type: 'pos_sale',
+            })],
+        }))
+        expect(await db.inventory_transactions.get(transactionId)).toMatchObject({
+            transactionType: 'sale',
+            quantityDelta: -1,
+            previousQuantity: 4,
+            newQuantity: 3,
+            referenceId: movement.referenceId,
+            referenceType: 'pos_sale',
+            syncStatus: 'synced',
+        })
     })
 
     it('fails closed for a required authoritative read and leaves the cached position untouched', async () => {

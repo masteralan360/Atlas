@@ -201,6 +201,15 @@ persistence/restart, and scanner/camera/printer hardware remain unavailable.
 Read [the POS implementation and agent handoff](./developer-testing-pos.md) before
 expanding the suite or changing its production transaction boundaries.
 
+The `inventory` group verifies Local POS sale and product-archive movement rows,
+Cloud/Hybrid authoritative inventory request metadata and returned movement
+records, plus Local atomic stock adjustments and the Cloud stock-adjustment RPC. `returns-exchanges` checks
+Local POS return and exchange movements; the Sale Orders `related-units` group
+checks Local order fulfillment, return and unit-conversion movements. These isolated tests
+verify client behavior, not the hosted database trigger. The migration must be
+deployed before direct Cloud/Hybrid inventory writers receive the database
+capture safeguard. No historical inventory rows are backfilled.
+
 ## Independent Post Service coverage
 
 The `post-service` suite has 13 groups covering merchant profiles, shipment

@@ -77,13 +77,21 @@ Check statuses are `PASS`, `WARNING`, `FAIL`, and `NOT_APPLICABLE`; severities a
 
 ## Historical evidence limits
 
-The audit reports a warning when the existing transaction design does not retain enough historical evidence to prove an effect:
+The inventory ledger now records stock position changes made after the inventory movement audit migration and application changes are deployed. The migration does not backfill earlier movements, so historical evidence remains incomplete and the audit reports a warning when the transaction design did not retain enough evidence to prove an effect:
 
-- Older sales and Local-mode sales may have changed stock without a transaction-specific sale movement. A missing movement is reported as a warning for those paths; for newer Supabase completions that should write a movement, it fails.
-- Posted returns restore stock but do not retain a transaction-specific restoration movement. The audit reconstructs the expected net stock effect from return items and warns that the restoration itself cannot be independently verified from a movement row.
+- Sales and returns completed before audit coverage was deployed may have changed stock without transaction-specific movement rows. Those historical movements are not reconstructed or inserted; a missing row remains an evidence warning.
+- New Local, Cloud, and Hybrid sales and returns record their stock movement with the inventory update. Cloud/Hybrid direct writers also have a database trigger as a capture safeguard. A missing movement for a newly committed, covered path is an integrity failure.
 - A return can rescale order-level discount or tax without preserving the original components. When those components are unavailable, the audit warns instead of claiming that the original total was independently reconstructed.
 
 These warnings are evidence limits, not automatic repairs or proof that the underlying transaction is correct.
+
+## Server-side inventory submission check
+
+For each new `inventory_transactions` insert, and each update that changes its movement fields, a deferred database trigger compares the submitted workspace/product/storage position and quantity delta/snapshots with the inventory movement captured in the same database transaction. Exact parity passes silently. A row with a mismatched snapshot or no corresponding inventory change is preserved and recorded in `private.inventory_transaction_integrity_mismatches` with expected and submitted JSON snapshots for review. The check does not block or rewrite the submitted row.
+
+If stock changes without an explicit transaction row, the existing inventory audit fallback writes one canonical transaction row from the authoritative stock transition. That generated row is not treated as a malformed submission. Admin services can read mismatch records through the service-role-only `public.admin_list_inventory_transaction_integrity_mismatches` RPC; workspace clients cannot read the private table or call the RPC.
+
+This check is forward-only. It does not scan or backfill transactions that predate deployment, and no periodic reconciliation job is included.
 
 ## Implementation and extension points
 

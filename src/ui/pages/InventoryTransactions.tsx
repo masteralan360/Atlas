@@ -16,21 +16,19 @@ import { useTranslation } from "react-i18next";
 import { useLocation } from "wouter";
 
 import {
-  useInventoryTransferTransactions,
   useInventoryTransactions,
   usePurchaseOrders,
   useProducts,
   useSales,
   useSalesOrderReturnItemsForWorkspace,
   useSalesOrders,
-  useStockAdjustments,
   useStorages,
   type InventoryTransferBatchAllocation,
+  type InventoryTransactionType,
   type Storage,
 } from "@/local-db";
 import { hydrateInventoryTransactionsFromSupabase } from "@/local-db/inventoryTransactions";
 import { isDateInDateRange } from "@/lib/dateRangeFilters";
-import { getOrderLineInventoryQuantity } from "@/lib/orderLineItems";
 import { setPendingSaleDetailsId } from "@/lib/saleNavigation";
 import { formatDateTime } from "@/lib/utils";
 import { ProductAutocompleteInput } from "@/ui/components/orders/ProductAutocompleteInput";
@@ -111,13 +109,20 @@ type InventoryActivityRecord =
       storageId: string;
       sourceRecordId: string;
       referenceLabel: string;
-      transactionType: "sale" | "return" | "purchase";
+      transactionType: InventoryTransactionType;
       movementSource:
         | "pos-sale"
         | "pos-return"
         | "sales-order"
         | "sales-order-return"
-        | "purchase-order";
+        | "purchase-order"
+        | "transfer"
+        | "stock-adjustment"
+        | "initial-stock"
+        | "inventory-change"
+        | "sale-product-exchange"
+        | "sale-product-exchange-return";
+      sourceKind?: "manual" | "automation";
       quantityDelta: number;
       previousQuantity: number | null;
       newQuantity: number | null;
@@ -132,7 +137,12 @@ type InventoryMovementSourceFilter =
   | "pos-return"
   | "sales-order"
   | "sales-order-return"
-  | "purchase-order";
+  | "purchase-order"
+  | "initial-stock"
+  | "inventory-change"
+  | "sale-product-exchange"
+  | "sale-product-exchange-return";
+type InventoryMovementSource = Exclude<InventoryMovementSourceFilter, "all">;
 type InventorySnapshotFilter = "all" | "recorded" | "not-recorded";
 
 type InventoryTransactionFilters = {
@@ -174,8 +184,52 @@ type MirroredSale = {
   createdAt: string;
   sequenceId?: number;
   _enrichedItems?: MirroredSaleItem[];
-  _returns?: Array<{ items?: MirroredSaleReturnItem[] }>;
+  _returns?: Array<{ id?: string; items?: MirroredSaleReturnItem[] }>;
 };
+
+function getInventoryTransactionMovementSource(
+  transactionType: InventoryTransactionType,
+  referenceType?: string | null,
+): InventoryMovementSource {
+  switch (referenceType) {
+    case "pos_sale":
+      return "pos-sale";
+    case "pos_return":
+      return "pos-return";
+    case "sales_order":
+      return "sales-order";
+    case "sales_order_return":
+      return "sales-order-return";
+    case "purchase_order":
+    case "purchase_order_repair":
+      return "purchase-order";
+    case "inventory_transfer":
+    case "inventory_transfer_rollback":
+    case "reorder_transfer":
+      return "transfer";
+    case "sale_product_exchange":
+      return "sale-product-exchange";
+    case "sale_product_exchange_return":
+      return "sale-product-exchange-return";
+  }
+
+  switch (transactionType) {
+    case "stock_adjustment":
+      return "stock-adjustment";
+    case "transfer_in":
+    case "transfer_out":
+      return "transfer";
+    case "purchase":
+      return "purchase-order";
+    case "initial_stock":
+      return "initial-stock";
+    case "sale":
+    case "return":
+      return "inventory-change";
+    default:
+      return "inventory-change";
+  }
+}
 
 function formatPosSaleReference(sale: MirroredSale) {
   return sale.sequenceId
@@ -309,10 +363,6 @@ export function InventoryTransactionsPage() {
       ? i18n.dir(i18n.resolvedLanguage || i18n.language)
       : document.documentElement.dir || document.dir || "ltr";
   const isRtl = pageDirection === "rtl";
-  const transferTransactions = useInventoryTransferTransactions(
-    activeWorkspace?.id,
-  );
-  const stockAdjustments = useStockAdjustments(activeWorkspace?.id);
   const inventoryTransactions = useInventoryTransactions(activeWorkspace?.id);
   const sales = useSales(activeWorkspace?.id);
   const salesOrders = useSalesOrders(activeWorkspace?.id);
@@ -350,241 +400,81 @@ export function InventoryTransactionsPage() {
   }, [activeWorkspace?.id]);
 
   const activityRecords = useMemo(() => {
-    const transferRecords: InventoryActivityRecord[] = transferTransactions.map(
-      (transaction) => ({
-        id: transaction.id,
-        kind: "transfer",
-        createdAt: transaction.createdAt,
-        productId: transaction.productId,
-        quantity: transaction.quantity,
-        sourceStorageId: transaction.sourceStorageId,
-        destinationStorageId: transaction.destinationStorageId,
-        sourceWorkspaceId: transaction.sourceWorkspaceId,
-        destinationWorkspaceId: transaction.destinationWorkspaceId,
-        sourceWorkspaceName: transaction.sourceWorkspaceName,
-        destinationWorkspaceName: transaction.destinationWorkspaceName,
-        sourceStorageName: transaction.sourceStorageName,
-        destinationStorageName: transaction.destinationStorageName,
-        sourceKind: transaction.transferType,
-        batchAllocations: transaction.batchAllocations,
-      }),
+    const typedSales = sales as MirroredSale[];
+    const salesById = new Map(typedSales.map((sale) => [sale.id, sale] as const));
+    const saleByReturnId = new Map(
+      typedSales.flatMap((sale) =>
+        (sale._returns ?? [])
+          .filter((saleReturn) => Boolean(saleReturn.id))
+          .map((saleReturn) => [saleReturn.id as string, sale] as const),
+      ),
     );
-
-    const adjustmentRecords: InventoryActivityRecord[] = stockAdjustments.map(
-      (adjustment) => ({
-        id: adjustment.id,
-        kind: "adjustment",
-        createdAt: adjustment.createdAt,
-        productId: adjustment.productId,
-        quantity: adjustment.quantity,
-        storageId: adjustment.storageId,
-        adjustmentType: adjustment.adjustmentType,
-        previousQuantity: adjustment.previousQuantity,
-        newQuantity: adjustment.newQuantity,
-      }),
+    const salesOrdersById = new Map(salesOrders.map((order) => [order.id, order] as const));
+    const salesOrderReturnsById = new Map(
+      salesOrderReturnItems.map((returnItem) => [returnItem.returnId, returnItem] as const),
     );
+    const purchaseOrdersById = new Map(purchaseOrders.map((order) => [order.id, order] as const));
 
-    const mirroredPosRecords: InventoryActivityRecord[] = [];
-    for (const sale of sales as MirroredSale[]) {
-      for (const item of sale._enrichedItems ?? []) {
-        const quantity = Number(item.quantity || 0);
-        if (!Number.isFinite(quantity) || quantity <= 0 || !item.product_id) {
-          continue;
-        }
+    return inventoryTransactions
+      .map((transaction): InventoryActivityRecord => {
+        const movementSource = getInventoryTransactionMovementSource(
+          transaction.transactionType,
+          transaction.referenceType,
+        );
+        const referenceId = transaction.referenceId || transaction.id;
+        const sale = movementSource === "pos-sale"
+          ? salesById.get(referenceId)
+          : movementSource === "pos-return"
+            ? saleByReturnId.get(referenceId)
+            : undefined;
+        const salesOrderId = movementSource === "sales-order"
+          ? referenceId
+          : movementSource === "sales-order-return"
+            ? salesOrderReturnsById.get(referenceId)?.orderId
+            : undefined;
+        const purchaseOrder = movementSource === "purchase-order"
+          ? purchaseOrdersById.get(referenceId)
+          : undefined;
+        const salesOrder = salesOrderId ? salesOrdersById.get(salesOrderId) : undefined;
+        const sourceRecordId = sale?.id || salesOrderId || referenceId;
+        const referenceLabel = sale
+          ? formatPosSaleReference(sale)
+          : salesOrder?.orderNumber || purchaseOrder?.orderNumber
+            || ("#" + referenceId.slice(0, 8));
 
-        const previousQuantity = Number(item.inventory_snapshot);
-        const hasSnapshot = Number.isFinite(previousQuantity);
-        mirroredPosRecords.push({
-          id: `pos-sale:${item.id}`,
+        return {
+          id: transaction.id,
           kind: "ledger",
-          createdAt: sale.createdAt,
-          productId: item.product_id,
-          storageId: item.storage_id || "",
-          sourceRecordId: sale.id,
-          referenceLabel: formatPosSaleReference(sale),
-          transactionType: "sale",
-          movementSource: "pos-sale",
-          quantityDelta: -quantity,
-          previousQuantity: hasSnapshot ? previousQuantity : null,
-          newQuantity: hasSnapshot ? Math.max(0, previousQuantity - quantity) : null,
-        });
-      }
-
-      for (const saleReturn of sale._returns ?? []) {
-        for (const item of saleReturn.items ?? []) {
-          const saleItem = sale._enrichedItems?.find(
-            (candidate) => candidate.id === item.sale_item_id,
-          );
-          const quantity = Number(item.quantity || 0);
-          if (!saleItem?.product_id || !Number.isFinite(quantity) || quantity <= 0) {
-            continue;
-          }
-
-          mirroredPosRecords.push({
-            id: `pos-return:${item.id}`,
-            kind: "ledger",
-            createdAt: item.created_at || sale.createdAt,
-            productId: saleItem.product_id,
-            storageId: item.restored_storage_id || saleItem.storage_id || "",
-            sourceRecordId: sale.id,
-            referenceLabel: formatPosSaleReference(sale),
-            transactionType: "return",
-            movementSource: "pos-return",
-            quantityDelta: quantity,
-            previousQuantity: null,
-            newQuantity: null,
-          });
-        }
-      }
-    }
-
-    const mirroredSalesOrderRecords: InventoryActivityRecord[] = salesOrders.flatMap(
-      (order) =>
-        order.status !== "completed"
-          ? []
-          : order.items.flatMap((item) => {
-            const quantity = Number(
-              item.fulfilledQuantity ?? getOrderLineInventoryQuantity(item),
-            );
-            if (!Number.isFinite(quantity) || quantity <= 0) {
-              return [];
-            }
-
-            return [{
-              id: `sales-order:${order.id}:${item.id}`,
-              kind: "ledger" as const,
-              createdAt: order.actualDeliveryDate || order.updatedAt,
-              productId: item.productId,
-              storageId: item.storageId || order.sourceStorageId || "",
-              sourceRecordId: order.id,
-              referenceLabel: order.orderNumber || `#${order.id.slice(0, 8)}`,
-              transactionType: "sale" as const,
-              movementSource: "sales-order" as const,
-              quantityDelta: -quantity,
-              previousQuantity: null,
-              newQuantity: null,
-            }];
-          }),
-    );
-
-    const purchaseOrdersById = new Map(
-      purchaseOrders.map((order) => [order.id, order] as const),
-    );
-    const persistedPurchaseRecords: InventoryActivityRecord[] =
-      inventoryTransactions.flatMap((transaction) => {
-        if (
-          transaction.transactionType !== "purchase" ||
-          !transaction.referenceId ||
-          (transaction.referenceType !== "purchase_order" &&
-            transaction.referenceType !== "purchase_order_repair")
-        ) {
-          return [];
-        }
-
-        const order = purchaseOrdersById.get(transaction.referenceId);
-        return [{
-          id: `purchase-ledger:${transaction.id}`,
-          kind: "ledger" as const,
           createdAt: transaction.createdAt,
           productId: transaction.productId,
           storageId: transaction.storageId,
-          sourceRecordId: transaction.referenceId,
-          referenceLabel:
-            order?.orderNumber || `#${transaction.referenceId.slice(0, 8)}`,
-          transactionType: "purchase" as const,
-          movementSource: "purchase-order" as const,
+          sourceRecordId,
+          referenceLabel,
+          transactionType: transaction.transactionType,
+          movementSource,
+          sourceKind: movementSource === "transfer" && transaction.referenceType === "reorder_transfer"
+            ? "automation"
+            : movementSource === "transfer"
+              ? "manual"
+              : undefined,
           quantityDelta: transaction.quantityDelta,
           previousQuantity: transaction.previousQuantity,
           newQuantity: transaction.newQuantity,
-        }];
-      });
-    const persistedPurchaseOrderIds = new Set(
-      persistedPurchaseRecords.map((record) =>
-        record.kind === "ledger" ? record.sourceRecordId : "",
-      ),
-    );
-    const mirroredPurchaseRecords: InventoryActivityRecord[] = purchaseOrders.flatMap(
-      (order) =>
-        (order.status !== "received" && order.status !== "completed") ||
-        persistedPurchaseOrderIds.has(order.id)
-          ? []
-          : order.items.flatMap((item) => {
-            const quantity = Number(
-              item.receivedQuantity ?? getOrderLineInventoryQuantity(item),
-            );
-            if (!Number.isFinite(quantity) || quantity <= 0) {
-              return [];
-            }
-
-            return [{
-              id: `purchase-order:${order.id}:${item.id}`,
-              kind: "ledger" as const,
-              createdAt: order.actualDeliveryDate || order.updatedAt,
-              productId: item.productId,
-              storageId: item.storageId || order.destinationStorageId || "",
-              sourceRecordId: order.id,
-              referenceLabel: order.orderNumber || `#${order.id.slice(0, 8)}`,
-              transactionType: "purchase" as const,
-              movementSource: "purchase-order" as const,
-              quantityDelta: quantity,
-              previousQuantity: null,
-              newQuantity: null,
-            }];
-          }),
-    );
-
-    const ordersById = new Map(salesOrders.map((order) => [order.id, order]));
-    const mirroredSalesOrderReturnRecords: InventoryActivityRecord[] =
-      salesOrderReturnItems.flatMap((returnItem) => {
-        const order = ordersById.get(returnItem.orderId);
-        const orderItem = order?.items.find(
-          (item) => item.id === returnItem.orderItemId,
-        );
-        if (!orderItem || !returnItem.restoredStorageId || returnItem.quantity <= 0) {
-          return [];
-        }
-
-        return [{
-          id: `sales-order-return:${returnItem.id}`,
-          kind: "ledger" as const,
-          createdAt: returnItem.createdAt,
-          productId: orderItem.productId,
-          storageId: returnItem.restoredStorageId,
-          sourceRecordId: returnItem.orderId,
-          referenceLabel:
-            order?.orderNumber || `#${returnItem.orderId.slice(0, 8)}`,
-          transactionType: "return" as const,
-          movementSource: "sales-order-return" as const,
-          quantityDelta: returnItem.quantity,
-          previousQuantity: null,
-          newQuantity: null,
-        }];
-      });
-
-    return [
-      ...transferRecords,
-      ...adjustmentRecords,
-      ...mirroredPosRecords,
-      ...mirroredSalesOrderRecords,
-      ...persistedPurchaseRecords,
-      ...mirroredPurchaseRecords,
-      ...mirroredSalesOrderReturnRecords,
-    ].filter((record) => !productsById.get(record.productId)?.isService).sort(
-      (left, right) =>
+        };
+      })
+      .filter((record) => !productsById.get(record.productId)?.isService)
+      .sort((left, right) =>
         right.createdAt.localeCompare(left.createdAt) ||
         right.id.localeCompare(left.id),
-    );
+      );
   }, [
-    purchaseOrders,
     inventoryTransactions,
     productsById,
+    purchaseOrders,
     sales,
     salesOrderReturnItems,
     salesOrders,
-    stockAdjustments,
-    transferTransactions,
   ]);
-
   const dateScopedActivityRecords = useMemo(
     () =>
       activityRecords.filter((record) =>
@@ -733,6 +623,18 @@ export function InventoryTransactionsPage() {
           "inventoryTransactions.purchaseOrderReceiptLabel",
           "Purchase Order Receipt",
         );
+      case "transfer":
+        return t("inventoryTransactions.transferLabel", "Inventory Transfer");
+      case "stock-adjustment":
+        return t("inventoryTransactions.adjustmentLabel", "Stock Adjustment");
+      case "initial-stock":
+        return t("inventoryTransactions.initialStockLabel", "Initial Stock");
+      case "inventory-change":
+        return t("inventoryTransactions.inventoryChangeLabel", "Inventory Change");
+      case "sale-product-exchange":
+        return t("inventoryTransactions.exchangeOutLabel", "Exchange Replacement");
+      case "sale-product-exchange-return":
+        return t("inventoryTransactions.exchangeReturnLabel", "Exchange Return");
     }
   };
 
@@ -758,6 +660,14 @@ export function InventoryTransactionsPage() {
           "inventoryTransactions.purchaseOrderReceiptLabel",
           "Purchase Order Receipt",
         );
+      case "initial-stock":
+        return t("inventoryTransactions.initialStockLabel", "Initial Stock");
+      case "inventory-change":
+        return t("inventoryTransactions.inventoryChangeLabel", "Inventory Change");
+      case "sale-product-exchange":
+        return t("inventoryTransactions.exchangeOutLabel", "Exchange Replacement");
+      case "sale-product-exchange-return":
+        return t("inventoryTransactions.exchangeReturnLabel", "Exchange Return");
       case "all":
         return t("inventoryTransactions.filters.allSources", "All sources");
     }
@@ -809,10 +719,15 @@ export function InventoryTransactionsPage() {
     const manualCount = filteredActivityRecords.filter(
       (record) =>
         record.kind === "adjustment" ||
-        (record.kind === "transfer" && record.sourceKind === "manual"),
+        (record.kind === "transfer" && record.sourceKind === "manual") ||
+        (record.kind === "ledger" && (
+          record.movementSource === "stock-adjustment" ||
+          (record.movementSource === "transfer" && record.sourceKind === "manual")
+        )),
     ).length;
     const automationCount = filteredActivityRecords.filter(
-      (record) => record.kind === "transfer" && record.sourceKind === "automation",
+      (record) => (record.kind === "transfer" && record.sourceKind === "automation")
+        || (record.kind === "ledger" && record.movementSource === "transfer" && record.sourceKind === "automation"),
     ).length;
     const totalUnits = filteredActivityRecords.reduce(
       (sum, record) =>
@@ -1152,7 +1067,7 @@ export function InventoryTransactionsPage() {
                             </>
                           ) : (
                             <>
-                              {record.transactionType === "sale" ? (
+                              {record.quantityDelta < 0 ? (
                                 <>
                                   <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wide">
                                     {getStorageDisplayName(
@@ -1736,6 +1651,10 @@ export function InventoryTransactionsPage() {
                         "sales-order",
                         "sales-order-return",
                         "purchase-order",
+                        "initial-stock",
+                        "inventory-change",
+                        "sale-product-exchange",
+                        "sale-product-exchange-return",
                       ] as InventoryMovementSourceFilter[]
                     ).map((source) => (
                       <SelectItem key={source} value={source}>

@@ -51,7 +51,7 @@ async function readCloud(table: string, workspaceId: string, column: string, val
 async function readSqliteWorkspace(workspaceId: string): Promise<Map<string, Row[]>> {
   const connection = await getExistingLocalModeSqliteConnectionForAudit()
   if (!connection) throw new Error('The local SQLite database is unavailable for this audit.')
-  const rows = await connection.select<Array<{ entity_type: string; payload: string }>[number]>(
+  const rows = await connection.select<Array<{ entity_type: string; payload: string }>>(
     'SELECT entity_type, payload FROM local_entities WHERE workspace_id = $1', [workspaceId]
   )
   const result = new Map<string, Row[]>()

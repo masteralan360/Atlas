@@ -18,6 +18,7 @@ import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseA
 import { adjustInventoryQuantity, applySalesOrderReturnQuantities, commitStockBatchAllocations, db, getActiveTravelBookingPayments, markPosLoanCancelledForFullSaleReturn, processSaleProductExchange, recordLoanPayment, resolveReturnStorageId, restoreStockBatchAllocations, splitStockBatchAllocationsForReturn, useLoanBySaleId, useLoanInstallments, useLoanPayments, useLoans, usePriceBookCatalogState, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useInventory, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useDeliveryMerchantProfiles, useDeliveryShipments, useRentalContracts, useRentalVehicles, toUISale, toUISaleFromOrder, toUISaleFromExchangeTransaction, toUISaleFromRealEstateCommissionTransaction, toUISaleFromPaidClinicalAppointment, toUISaleFromActivityTransaction, toUISaleFromDeliveryShipment, toUISaleFromRentalContract, toUISaleFromTravelBookingPayment, type Loan, type PaymentAccount, type StockBatchAllocation } from '@/local-db'
 import { persistSaleReturnLedger, commitLocalSaleReturn, calculateSaleReturnAmount } from '@/local-db/posSaleReturns'
 import { persistLoanAggregateRpcResult } from '@/local-db/loanTransactions'
+import { hydrateInventoryTransactionsForReferences } from '@/local-db/inventoryTransactions'
 import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
 import { useWorkspace } from '@/workspace'
 import { isMobile } from '@/lib/platform'
@@ -1450,6 +1451,7 @@ export function Sales() {
 
     const restoreInventoryForReturn = useCallback(async (input: {
         workspaceId: string
+        returnId: string
         items: SaleItem[]
         quantities: number[]
         timestamp: string
@@ -1502,7 +1504,14 @@ export function Sales() {
                     timestamp: input.timestamp,
                     syncSource: input.syncSource === 'remote' ? 'remote' : undefined,
                     skipRemoteSync: input.syncSource === 'remote',
-                    skipReorderCheck: input.syncSource === 'local'
+                    skipReorderCheck: input.syncSource === 'local',
+                    movement: {
+                        productId: plan.item.product_id,
+                        storageId: plan.storageId,
+                        transactionType: 'return',
+                        referenceId: input.returnId,
+                        referenceType: 'pos_return'
+                    }
                 })
 
                 if (plan.restoredAllocations.length > 0) {
@@ -1550,7 +1559,8 @@ export function Sales() {
                         timestamp: input.timestamp,
                         syncSource: input.syncSource === 'remote' ? 'remote' : undefined,
                         skipRemoteSync: input.syncSource === 'remote',
-                        skipReorderCheck: input.syncSource === 'local'
+                        skipReorderCheck: input.syncSource === 'local',
+                        movement: null
                     })
                 } catch (rollbackError) {
                     console.error('[Sales] Failed to rollback local return inventory:', rollbackError)
@@ -1662,6 +1672,7 @@ export function Sales() {
                     const returnTimestamp = new Date().toISOString()
                     const restoredPlans = await restoreInventoryForReturn({
                         workspaceId: saleToReturn.workspace_id,
+                        returnId,
                         items: itemsToReturn,
                         quantities,
                         timestamp: returnTimestamp,
@@ -1783,6 +1794,7 @@ export function Sales() {
                     const returnTimestamp = new Date().toISOString()
                     const restoredPlans = await restoreInventoryForReturn({
                         workspaceId: saleToReturn.workspace_id,
+                        returnId,
                         items: itemsToReturn,
                         quantities,
                         timestamp: returnTimestamp,
@@ -1940,6 +1952,7 @@ export function Sales() {
                 error = itemError
 
                 if (!error && data?.success) {
+                    await hydrateInventoryTransactionsForReferences(saleToReturn.workspace_id, [returnId])
                     if (data.loan_aggregate) {
                         await persistLoanAggregateRpcResult(data.loan_aggregate)
                     }
@@ -1947,6 +1960,7 @@ export function Sales() {
                     const returnTimestamp = new Date().toISOString()
                     const restoredPlans = await restoreInventoryForReturn({
                         workspaceId: saleToReturn.workspace_id,
+                        returnId,
                         items: itemsToReturn,
                         quantities,
                         timestamp: returnTimestamp,
@@ -2059,12 +2073,14 @@ export function Sales() {
                 error = saleError
 
                 if (!error && data?.success) {
+                    await hydrateInventoryTransactionsForReferences(saleToReturn.workspace_id, [returnId])
                     if (data.loan_aggregate) {
                         await persistLoanAggregateRpcResult(data.loan_aggregate)
                     }
                     const returnTimestamp = new Date().toISOString()
                     const restoredPlans = await restoreInventoryForReturn({
                         workspaceId: saleToReturn.workspace_id,
+                        returnId,
                         items: itemsToReturn,
                         quantities,
                         timestamp: returnTimestamp,

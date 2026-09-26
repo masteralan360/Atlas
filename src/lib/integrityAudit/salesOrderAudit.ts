@@ -36,8 +36,10 @@ export interface IntegrityAuditResult {
 export class IntegrityAuditReadError extends Error {
   readonly code = 'AUDIT_SOURCE_READ_FAILED'
   readonly messageKey = 'transactionAudit.loadFailed'
+  readonly cause: unknown
   constructor(readonly source: 'supabase' | 'sqlite', cause: unknown) {
-    super(`Unable to read the ${source} audit graph`, { cause })
+    super(`Unable to read the ${source} audit graph`)
+    this.cause = cause
   }
 }
 

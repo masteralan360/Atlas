@@ -115,8 +115,16 @@ describe('stock adjustments', () => {
         expect(adjustment).toMatchObject({ previousQuantity: 4, newQuantity: 11, quantity: 7 })
         expect(await db.inventory.where('[productId+storageId]').equals([PRODUCT_ID, STORAGE_ID]).first())
             .toMatchObject({ quantity: 11 })
-        expect(await db.inventory_transactions.where('referenceId').equals(adjustment.id).first())
-            .toMatchObject({ quantityDelta: 7, previousQuantity: 4, newQuantity: 11 })
+        expect(await db.inventory_transactions.get(adjustment.id))
+            .toMatchObject({
+                id: adjustment.id,
+                quantityDelta: 7,
+                previousQuantity: 4,
+                newQuantity: 11,
+                transactionType: 'stock_adjustment',
+                adjustmentReason: 'purchase',
+            })
+        expect(await db.inventory_transactions.where('referenceId').equals(adjustment.id).count()).toBe(1)
     })
 
     it('rejects an offline stock adjustment in cloud mode without changing stock', async () => {

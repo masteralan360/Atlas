@@ -120,6 +120,13 @@ describe('related units in order transactions', () => {
       freeBonusInventoryQuantity: 20,
     })
     await assertStock(product.id, storage.id, 40)
+    expect(await db.inventory_transactions.where('referenceId').equals(completed.id).first()).toMatchObject({
+      transactionType: 'sale',
+      quantityDelta: -60,
+      previousQuantity: 100,
+      newQuantity: 40,
+      referenceType: 'sales_order',
+    })
 
     const firstReturn = await orders.returnSalesOrder({
       orderId: completed.id,
@@ -145,8 +152,15 @@ describe('related units in order transactions', () => {
     })
     await assertOrderFinancialEffects(completed.id, 40_000, 0)
     await assertStock(product.id, storage.id, 80)
+    expect(await db.inventory_transactions.where('referenceId').equals(firstReturn.return.id).first()).toMatchObject({
+      transactionType: 'return',
+      quantityDelta: 40,
+      previousQuantity: 40,
+      newQuantity: 80,
+      referenceType: 'sales_order_return',
+    })
 
-    await orders.returnSalesOrder({
+    const finalReturn = await orders.returnSalesOrder({
       orderId: completed.id,
       items: [{ orderItemId: completed.items[0].id, paidQuantity: 1, freeQuantity: 0 }],
       reason: 'customer_returned',
@@ -154,6 +168,13 @@ describe('related units in order transactions', () => {
     })
     await assertOrderFinancialEffects(completed.id, 0, 0)
     await assertStock(product.id, storage.id, 100)
+    expect(await db.inventory_transactions.where('referenceId').equals(finalReturn.return.id).first()).toMatchObject({
+      transactionType: 'return',
+      quantityDelta: 20,
+      previousQuantity: 80,
+      newQuantity: 100,
+      referenceType: 'sales_order_return',
+    })
   })
 
   it('reports the reserving order in canonical inventory units when a carton reservation blocks another order', async () => {

@@ -129,6 +129,26 @@ describe('sale product exchanges', () => {
         expect(await db.sale_returns.get(result.returnId)).toMatchObject({ source: 'exchange', refundAmount: 10 })
         expect(await db.inventory.where('[productId+storageId]').equals([RETURNED_PRODUCT_ID, STORAGE_ID]).first()).toMatchObject({ quantity: 1 })
         expect(await db.inventory.where('[productId+storageId]').equals([REPLACEMENT_PRODUCT_ID, STORAGE_ID]).first()).toMatchObject({ quantity: 2 })
+        expect(await db.inventory_transactions.toArray()).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                productId: RETURNED_PRODUCT_ID,
+                transactionType: 'return',
+                quantityDelta: 1,
+                previousQuantity: 0,
+                newQuantity: 1,
+                referenceId: result.returnId,
+                referenceType: 'sale_product_exchange_return',
+            }),
+            expect.objectContaining({
+                productId: REPLACEMENT_PRODUCT_ID,
+                transactionType: 'sale',
+                quantityDelta: -1,
+                previousQuantity: 3,
+                newQuantity: 2,
+                referenceId: result.exchangeId,
+                referenceType: 'sale_product_exchange',
+            }),
+        ]))
         expect(await db.payment_transactions.where('sourceRecordId').equals(result.exchangeId).first()).toMatchObject({
             sourceType: 'sale_exchange', direction: 'incoming', amount: 5, paymentMethod: 'cash',
         })

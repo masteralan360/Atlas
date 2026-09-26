@@ -1,5 +1,6 @@
 import { useLiveQuery } from "dexie-react-hooks";
 
+import i18n from "@/i18n/config";
 import { isPositiveQuantity, roundQuantity } from "@/lib/quantity";
 import { generateId } from "@/lib/utils";
 import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
@@ -158,6 +159,13 @@ export async function createStockAdjustment(
 ) {
   const timestamp = options?.timestamp || new Date().toISOString();
   const normalized = normalizeAdjustmentInput(input);
+  const transactionId = options?.id || generateId();
+  if (isLocalWorkspaceMode(workspaceId)) {
+    const existingTransaction = await db.inventory_transactions.get(transactionId);
+    if (existingTransaction) {
+      return mapTransactionToStockAdjustment(existingTransaction) as StockAdjustment;
+    }
+  }
   // Refresh the position before calculating the delta. This makes a final
   // quantity entered immediately after a fresh app load apply to the real
   // stock level, rather than to a stale local snapshot.
@@ -178,7 +186,6 @@ export async function createStockAdjustment(
     )
     : roundQuantity(normalized.targetQuantity - previousQuantity);
   const newQuantity = roundQuantity(previousQuantity + quantityDelta);
-  const transactionId = options?.id || generateId();
 
   if (quantityDelta === 0) {
     throw new Error("Stock is already at the requested quantity");
@@ -222,33 +229,25 @@ export async function createStockAdjustment(
       quantityDelta,
       timestamp,
       skipRemoteHydration: true,
-      // The stock-adjustment transaction is the cloud operation. Uploading
-      // this local projection as well would apply the same change twice when
-      // the transaction is replayed after an offline session.
+      // Local adjustments write their ledger row in the same Dexie
+      // transaction as stock, so the SQLite mirror commits both together.
       skipRemoteSync: true,
-    });
-    inventoryAdjusted = true;
-
-    const transaction = await createInventoryTransaction(
-      workspaceId,
-      {
+      movementTransactionId: transactionId,
+      movement: {
         productId: normalized.productId,
         storageId: normalized.storageId,
         transactionType: STOCK_ADJUSTMENT_TRANSACTION_TYPE,
-        quantityDelta,
-        previousQuantity,
-        newQuantity,
         adjustmentReason: normalized.reason,
         referenceId: transactionId,
         referenceType: STOCK_ADJUSTMENT_TRANSACTION_TYPE,
         notes: normalized.notes,
         createdBy: normalized.createdBy,
       },
-      {
-        id: transactionId,
-        timestamp,
-      },
-    );
+    });
+    inventoryAdjusted = true;
+
+    const transaction = await db.inventory_transactions.get(transactionId);
+    if (!transaction) throw new Error(i18n.t("inventory.errors.authoritativeResultMissing"));
 
     return mapTransactionToStockAdjustment(transaction) as StockAdjustment;
   } catch (error) {
@@ -261,7 +260,9 @@ export async function createStockAdjustment(
           quantityDelta: -quantityDelta,
           skipRemoteHydration: true,
           skipRemoteSync: true,
+          movement: null,
         });
+        await db.inventory_transactions.delete(transactionId);
       } catch (rollbackError) {
         console.error(
           "[StockAdjustments] Failed to roll back inventory after adjustment error:",

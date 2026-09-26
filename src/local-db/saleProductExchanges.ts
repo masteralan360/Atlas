@@ -7,6 +7,8 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { db } from './database'
 import { assertInventoryMutationConnectivity, getInventoryQuantityForProductStorage, putInventoryQuantity, syncProductStockSnapshot } from './inventory'
 import { fetchTableFromSupabase, syncSalesFromSupabase } from './hooks'
+import { buildInventoryMovementTransactionId, createInventoryTransaction } from './inventoryTransactions'
+import { hydrateInventoryTransactionsForReferences } from './inventoryTransactions'
 import { refreshStockBatchesFromSupabase, getStockBatchSalePlan, splitStockBatchAllocationsForReturn } from './stockBatches'
 import { resolveReturnStorageId } from './storageUtils'
 import {
@@ -243,7 +245,7 @@ async function applyLocalSaleProductExchange(input: ProcessSaleProductExchangeIn
 
     await db.transaction('rw', [
         db.sales, db.sale_items, db.sale_returns, db.sale_return_items,
-        db.sale_product_exchanges, db.inventory, db.products, db.stock_batches,
+        db.sale_product_exchanges, db.inventory, db.inventory_transactions, db.products, db.stock_batches,
         db.storages, db.loans, db.loan_installments, db.loan_payments, db.payment_transactions,
     ], async () => {
         const existingExchange = await db.sale_product_exchanges.get(ids.exchangeId)
@@ -266,20 +268,60 @@ async function applyLocalSaleProductExchange(input: ProcessSaleProductExchangeIn
             throw new Error('Insufficient inventory in the selected replacement storage')
         }
 
-        await putInventoryQuantity(
+        const returnPreviousQuantity = await getInventoryQuantityForProductStorage(returnItem.productId, returnStorageId)
+        const returnNewQuantity = roundQuantity(returnPreviousQuantity + returnQuantity)
+        const returnInventoryRow = await putInventoryQuantity(
             input.workspaceId,
             returnItem.productId,
             returnStorageId,
-            roundQuantity(await getInventoryQuantityForProductStorage(returnItem.productId, returnStorageId) + returnQuantity),
+            returnNewQuantity,
             timestamp,
         )
-        await putInventoryQuantity(
+        const replacementPreviousQuantity = await getInventoryQuantityForProductStorage(input.replacementProductId, input.replacementStorageId)
+        const replacementNewQuantity = roundQuantity(replacementPreviousQuantity - replacementQuantity)
+        const replacementInventoryRow = await putInventoryQuantity(
             input.workspaceId,
             input.replacementProductId,
             input.replacementStorageId,
-            roundQuantity(currentReplacementQuantity - replacementQuantity),
+            replacementNewQuantity,
             timestamp,
         )
+        if (returnInventoryRow) {
+            await createInventoryTransaction(input.workspaceId, {
+                productId: returnItem.productId,
+                storageId: returnStorageId,
+                transactionType: 'return',
+                quantityDelta: returnQuantity,
+                previousQuantity: returnPreviousQuantity,
+                newQuantity: returnNewQuantity,
+                referenceId: ids.returnId,
+                referenceType: 'sale_product_exchange_return',
+                notes: reason,
+                createdBy: input.createdBy ?? null,
+            }, {
+                id: buildInventoryMovementTransactionId(input.workspaceId, returnItem.productId, returnStorageId, returnInventoryRow.version),
+                timestamp,
+                skipRemoteSync: true,
+            })
+        }
+        if (replacementInventoryRow) {
+            await createInventoryTransaction(input.workspaceId, {
+                productId: input.replacementProductId,
+                storageId: input.replacementStorageId,
+                transactionType: 'sale',
+                quantityDelta: -replacementQuantity,
+                previousQuantity: replacementPreviousQuantity,
+                newQuantity: replacementNewQuantity,
+                referenceId: ids.exchangeId,
+                referenceType: 'sale_product_exchange',
+                notes: reason,
+                createdBy: input.createdBy ?? null,
+            }, {
+                id: buildInventoryMovementTransactionId(input.workspaceId, input.replacementProductId, input.replacementStorageId, replacementInventoryRow.version),
+                timestamp,
+                skipRemoteSync: true,
+            })
+        }
         await restoreReturnedBatchAllocations({
             workspaceId: input.workspaceId,
             productId: returnItem.productId,
@@ -503,7 +545,7 @@ async function applyLocalSaleProductExchange(input: ProcessSaleProductExchangeIn
     return result
 }
 
-async function refreshAfterCloudExchange(workspaceId: string) {
+async function refreshAfterCloudExchange(workspaceId: string, exchangeId: string, returnId: string) {
     await Promise.all([
         syncSalesFromSupabase(workspaceId),
         fetchTableFromSupabase('inventory', db.inventory, workspaceId, { includeDeleted: true, force: true }),
@@ -512,6 +554,7 @@ async function refreshAfterCloudExchange(workspaceId: string) {
         fetchTableFromSupabase('loan_payments', db.loan_payments, workspaceId, { includeDeleted: true, force: true }),
         fetchTableFromSupabase('payment_transactions', db.payment_transactions, workspaceId, { includeDeleted: true, force: true }),
         refreshStockBatchesFromSupabase(workspaceId),
+        hydrateInventoryTransactionsForReferences(workspaceId, [exchangeId, returnId]),
     ])
 }
 
@@ -538,7 +581,7 @@ export async function processSaleProductExchange(input: ProcessSaleProductExchan
             p_return_reason: input.returnReason?.trim() || 'Product exchange',
         })
         if (!error && data) {
-            await refreshAfterCloudExchange(input.workspaceId)
+            await refreshAfterCloudExchange(input.workspaceId, ids.exchangeId, ids.returnId)
             return {
                 exchangeId: data.exchange_id, returnId: data.return_id,
                 returnAmount: Number(data.return_amount || 0), replacementAmount: Number(data.replacement_amount || 0),

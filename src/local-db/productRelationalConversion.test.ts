@@ -24,12 +24,24 @@ const remote = vi.hoisted(() => ({
 vi.mock('@/auth/supabase', () => ({
   isSupabaseConfigured: true,
   isBackendConfigurationRequired: false,
-  supabase: {
-    rpc: async (name: string, args: Record<string, unknown>) => {
-      remote.calls.push({ name, args })
-      return { data: remote.data, error: remote.error }
-    },
-  },
+  supabase: (() => {
+    const query: any = {
+      select: () => query,
+      eq: () => query,
+      in: () => query,
+      then: (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
+        Promise.resolve({ data: [], error: null }).then(resolve),
+    }
+    const client: any = {
+      rpc: async (name: string, args: Record<string, unknown>) => {
+        remote.calls.push({ name, args })
+        return { data: remote.data, error: remote.error }
+      },
+      from: () => query,
+      schema: () => client,
+    }
+    return client
+  })(),
 }))
 
 let conversionModule: typeof import('./productRelationalConversion')
@@ -241,6 +253,26 @@ describe('single-unit to relational-unit persistence', () => {
     expect(await db.price_book_unit_prices.where('productId').equals(PRODUCT_ID).first()).toMatchObject({
       unitRef: 'builtin:carton', price: 38_000,
     })
+    expect(await db.inventory_transactions.toArray()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        storageId: STORAGE_A,
+        transactionType: 'inventory_change',
+        quantityDelta: -10,
+        previousQuantity: 10,
+        newQuantity: 0,
+        referenceId: PRODUCT_ID,
+        referenceType: 'product_unit_conversion',
+      }),
+      expect.objectContaining({
+        storageId: STORAGE_B,
+        transactionType: 'inventory_change',
+        quantityDelta: 15,
+        previousQuantity: 5,
+        newQuantity: 20,
+        referenceId: PRODUCT_ID,
+        referenceType: 'product_unit_conversion',
+      }),
+    ]))
     expect(remote.calls).toHaveLength(0)
   })
 
@@ -259,6 +291,7 @@ describe('single-unit to relational-unit persistence', () => {
     expect(await db.inventory.where('productId').equals(PRODUCT_ID).toArray()).toEqual(originalInventory)
     expect(await db.stock_batches.where('productId').equals(PRODUCT_ID).toArray()).toEqual(originalBatches)
     expect(await db.product_unit_conversions.where('productId').equals(PRODUCT_ID).count()).toBe(0)
+    expect(await db.inventory_transactions.where('productId').equals(PRODUCT_ID).count()).toBe(0)
   })
 
   it.each(['cloud', 'hybrid'] as const)('uses one authoritative RPC and caches its returned %s records', async (mode) => {
@@ -335,4 +368,3 @@ describe('single-unit to relational-unit persistence', () => {
     expect(remote.calls).toHaveLength(0)
   })
 })
-

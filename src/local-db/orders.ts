@@ -111,7 +111,7 @@ import type {
     StockBatchAllocation,
     Supplier
 } from './models'
-import { createInventoryTransaction } from './inventoryTransactions'
+import { buildInventoryMovementTransactionId, createInventoryTransaction, hydrateInventoryTransactionsForReferences } from './inventoryTransactions'
 import { appendPaymentTransaction, synchronizeOrderPaymentReferences } from './payments'
 import { mirrorPaymentAccountTransactionLocally } from './paymentAccounts'
 
@@ -1229,7 +1229,7 @@ async function deductInventoryForSalesOrder(
 
     await db.transaction(
         'rw',
-        [db.inventory, db.products, db.storages, db.stock_batches],
+        [db.inventory, db.inventory_transactions, db.products, db.storages, db.stock_batches],
         async () => {
             for (const [physicalItemIndex, { item, index: itemIndex }] of physicalItems.entries()) {
                 const product = productMap.get(item.productId)
@@ -1305,6 +1305,29 @@ async function deductInventoryForSalesOrder(
                 )
                 if (changedInventoryRow) {
                     changedInventoryRows.push(changedInventoryRow)
+                    if (isLocalWorkspaceMode(order.workspaceId)) {
+                        await createInventoryTransaction(order.workspaceId, {
+                            productId: deduction.productId,
+                            storageId: deduction.storageId,
+                            transactionType: 'sale',
+                            quantityDelta: -deduction.quantity,
+                            previousQuantity: currentInventoryQuantity,
+                            newQuantity: roundQuantity(currentInventoryQuantity - deduction.quantity),
+                            referenceId: order.id,
+                            referenceType: 'sales_order',
+                            notes: order.orderNumber ? `Fulfilled sales order ${order.orderNumber}.` : null,
+                            createdBy: order.createdBy ?? null,
+                        }, {
+                            id: buildInventoryMovementTransactionId(
+                                order.workspaceId,
+                                deduction.productId,
+                                deduction.storageId,
+                                changedInventoryRow.version,
+                            ),
+                            timestamp: now,
+                            skipRemoteSync: true,
+                        })
+                    }
                 }
             }
 
@@ -3052,6 +3075,7 @@ async function applyCompletedQuickOrderRpcResult(
     await Promise.all(Array.from(new Set(inventoryRows.map((row) => row.productId))).map((productId) =>
         syncProductStockSnapshot(productId, syncedAt, 'remote')
     ))
+    await hydrateInventoryTransactionsForReferences(workspaceId, [order.id])
     if (payment) {
         await mirrorPaymentAccountTransactionLocally(payment)
     }
@@ -4022,7 +4046,8 @@ async function appendOrderReturnPaymentReversal(input: {
 async function restoreInventoryForSalesOrderReturn(
     order: SalesOrder,
     lines: PreparedSalesOrderReturnLine[],
-    timestamp: string
+    timestamp: string,
+    returnId: string
 ): Promise<RestoredOrderReturnLine[]> {
     const plans = await Promise.all(lines.map(async (line) => {
         const restoredStorageId = await resolveReturnStorageId({
@@ -4056,7 +4081,14 @@ async function restoreInventoryForSalesOrderReturn(
                 productId: plan.item.productId,
                 storageId: plan.restoredStorageId,
                 quantityDelta: plan.quantity,
-                timestamp
+                timestamp,
+                movement: {
+                    productId: plan.item.productId,
+                    storageId: plan.restoredStorageId,
+                    transactionType: 'return',
+                    referenceId: returnId,
+                    referenceType: 'sales_order_return'
+                }
             })
             if (plan.restoredAllocations.length > 0) {
                 plan.restoredBatchAllocations = await restoreStockBatchAllocations(
@@ -4086,7 +4118,8 @@ async function restoreInventoryForSalesOrderReturn(
                     productId: plan.item.productId,
                     storageId: plan.restoredStorageId,
                     quantityDelta: -plan.quantity,
-                    timestamp
+                    timestamp,
+                    movement: null
                 })
             } catch (rollbackError) {
                 console.error('[Orders] Failed to roll back order-return inventory:', rollbackError)
@@ -4575,7 +4608,7 @@ async function returnUnpaidEcommerceOrder(order: SalesOrder, input: ReturnSalesO
     const returnId = generateId()
     const timestamp = new Date().toISOString()
 
-    const restoredLines = await restoreInventoryForSalesOrderReturn(order, preparedLines, timestamp)
+    const restoredLines = await restoreInventoryForSalesOrderReturn(order, preparedLines, timestamp, returnId)
     const newReturnedAmount = roundAmount(returnedAmount + returnAmount, order.currency)
     const nextTotal = roundAmount(Math.max(0, Number(order.total || 0) - returnAmount), order.currency)
     const nextBalance = roundAmount(Math.max(0, Number(order.balanceAmount || 0) - returnAmount), order.currency)
@@ -4766,7 +4799,7 @@ export async function returnSalesOrder(input: ReturnSalesOrderInput) {
         }
     }
 
-    const restoredLines = await restoreInventoryForSalesOrderReturn(order, preparedLines, timestamp)
+    const restoredLines = await restoreInventoryForSalesOrderReturn(order, preparedLines, timestamp, returnId)
     const financingResult = isFinanced
         ? await applySalesOrderReturnToFinancing({
             order,

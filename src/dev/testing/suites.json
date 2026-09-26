@@ -277,7 +277,10 @@
         "layer": "business",
         "files": [
           "src/local-db/stockBatches.test.ts",
+          "src/local-db/stockAdjustments.test.ts",
           "src/local-db/offlinePosStock.test.ts",
+          "src/local-db/inventorySnapshotSync.test.ts",
+          "src/local-db/inventoryTransactionsCloud.test.ts",
           "src/local-db/storagePermissions.test.ts"
         ]
       },

@@ -3564,6 +3564,7 @@ export async function transferInventoryBetweenStorages(
     }>
 ): Promise<{ movedCount: number }> {
     const completedTransfers: Array<{
+        id: string
         productId: string
         quantity: number
         batchAllocations: Awaited<ReturnType<typeof transferInventoryQuantityWithBatches>>['batchAllocations']
@@ -3599,6 +3600,7 @@ export async function transferInventoryBetweenStorages(
             })
 
             completedTransfers.push({
+                id: transferResult.referenceId,
                 productId: item.productId,
                 quantity: roundQuantity(quantity),
                 batchAllocations: transferResult.batchAllocations,
@@ -3617,6 +3619,7 @@ export async function transferInventoryBetweenStorages(
         await createInventoryTransferTransactions(
             workspaceId,
             completedTransfers.map((transfer) => ({
+                id: transfer.id,
                 productId: transfer.productId,
                 sourceStorageId,
                 destinationStorageId: targetStorageId,

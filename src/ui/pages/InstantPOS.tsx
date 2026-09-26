@@ -4,6 +4,7 @@ import { useLocation, useRoute } from 'wouter'
 import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
 import { addToOfflineMutations, adjustInventoryQuantity, calculateStockBatchUnitCost, commitStockBatchAllocations, generateLocalSaleSequenceId, getPrimaryStorageFromList, getStockBatchSalePlans, refreshStockBatchesFromSupabase, useActiveDiscountMap, useBatchAwareInventoryProducts, useCategories, useProductSelectionAccess, useProducts, useProductUnitConversions, useStorages } from '@/local-db'
+import { hydrateInventoryTransactionsForReferences } from '@/local-db/inventoryTransactions'
 import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { db } from '@/local-db/database'
 import type { CurrencyCode } from '@/local-db/models'
@@ -1876,6 +1877,8 @@ export function InstantPOS() {
 
             if (error) throw normalizeSupabaseActionError(error)
 
+            await hydrateInventoryTransactionsForReferences(user.workspaceId, [saleId])
+
             const serverResult = data as any
             const sequenceId = serverResult?.sequence_id
             const formattedInvoiceId = sequenceId ? `#${String(sequenceId).padStart(5, '0')}` : `#${saleId.slice(0, 8)}`
@@ -1890,7 +1893,8 @@ export function InstantPOS() {
                         quantityDelta: -item.quantity,
                         timestamp: snapshotTimestamp,
                         syncSource: 'remote',
-                        skipRemoteSync: true
+                        skipRemoteSync: true,
+                        movement: null
                     })
                 }
             }))
@@ -2036,7 +2040,14 @@ export function InstantPOS() {
                                 productId: item.productId,
                                 storageId: resolvedStorageId,
                                 quantityDelta: -item.quantity,
-                                timestamp: snapshotTimestamp
+                                timestamp: snapshotTimestamp,
+                                movement: {
+                                    productId: item.productId,
+                                    storageId: resolvedStorageId,
+                                    transactionType: 'sale',
+                                    referenceId: saleId,
+                                    referenceType: 'pos_sale'
+                                }
                             })
                         }
                     }))

@@ -1,11 +1,16 @@
 import { supabase } from '@/auth/supabase'
 import { getActiveBusinessUserId, getActiveBusinessUserRole, isOnline } from '@/lib/network'
-import { roundQuantity } from '@/lib/quantity'
+import { QUANTITY_EPSILON, roundQuantity } from '@/lib/quantity'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { generateId, toCamelCase } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
+import {
+  buildInventoryMovementTransactionId,
+  createInventoryTransaction,
+  hydrateInventoryTransactionsForReferences,
+} from './inventoryTransactions'
 import type {
   CurrencyCode,
   Inventory,
@@ -322,6 +327,7 @@ async function convertLocal(input: ConvertSingleUnitProductInput): Promise<Conve
   return db.transaction('rw', [
     db.products,
     db.inventory,
+    db.inventory_transactions,
     db.stock_batches,
     db.product_unit_conversions,
     db.price_books,
@@ -457,6 +463,30 @@ async function convertLocal(input: ConvertSingleUnitProductInput): Promise<Conve
 
     await db.products.put(productRow)
     if (nextInventory.length) await db.inventory.bulkPut(nextInventory)
+    for (const row of nextInventory) {
+      const previous = allInventoryRows.find((candidate) => candidate.storageId === row.storageId)
+      const previousQuantity = previous && !previous.isDeleted ? Math.max(0, previous.quantity) : 0
+      const newQuantity = row.isDeleted ? 0 : Math.max(0, row.quantity)
+      const quantityDelta = roundQuantity(newQuantity - previousQuantity)
+      if (Math.abs(quantityDelta) <= QUANTITY_EPSILON) continue
+
+      await createInventoryTransaction(input.workspaceId, {
+        productId: input.productId,
+        storageId: row.storageId,
+        transactionType: 'inventory_change',
+        quantityDelta,
+        previousQuantity,
+        newQuantity,
+        referenceId: input.productId,
+        referenceType: 'product_unit_conversion',
+        notes: null,
+        createdBy,
+      }, {
+        id: buildInventoryMovementTransactionId(input.workspaceId, input.productId, row.storageId, row.version),
+        timestamp: now,
+        skipRemoteSync: true,
+      })
+    }
     if (nextBatches.length) await db.stock_batches.bulkPut(nextBatches)
     await db.product_unit_conversions.put(conversion)
     if (nextPriceRows.length) await db.price_book_items.bulkPut(nextPriceRows)
@@ -498,7 +528,9 @@ export async function convertSingleUnitProductToRelationship(
     ))
     if (error) throw error
     const state = parseRemoteState(data, input)
-    return await cacheRemoteState(state, input.productId, input.storageId)
+    const cachedState = await cacheRemoteState(state, input.productId, input.storageId)
+    await hydrateInventoryTransactionsForReferences(input.workspaceId, [input.productId])
+    return cachedState
   } catch (error) {
     throw normalizeConversionError(error)
   }

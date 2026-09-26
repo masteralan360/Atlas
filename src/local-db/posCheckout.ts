@@ -14,6 +14,7 @@ import { appendPaymentTransaction } from './payments'
 import { adjustInventoryQuantity } from './inventory'
 import { commitStockBatchAllocations, refreshStockBatchesFromSupabase } from './stockBatches'
 import { applyOfflinePosStockEffects } from './offlinePosStock'
+import { hydrateInventoryTransactionsForReferences } from './inventoryTransactions'
 import { persistLoanAggregateRpcResult } from './loanTransactions'
 
 export interface PosCheckoutItem {
@@ -251,6 +252,7 @@ async function saveLocal(input: PosCheckoutInput) {
         })))
         await applyOfflinePosStockEffects({
             workspaceId: p.workspace_id,
+            saleId: p.id,
             items: p.items.flatMap(item => item.storage_id ? [{ productId: item.product_id, storageId: item.storage_id, quantity: item.inventory_quantity ?? item.quantity }] : []),
             batchPlans: input.batchPlans, timestamp: input.timestamp, skipReorderCheck: true
         })
@@ -292,6 +294,7 @@ export async function commitPosCheckout(input: PosCheckoutInput) {
         const result = response.data as { sequence_id?: number; loan_aggregate?: unknown } | null
         if (!result || !Number.isInteger(result.sequence_id) || Number(result.sequence_id) < 1
             || (p.payment_method === 'loan' && !result.loan_aggregate)) throw new Error('Invalid checkout result')
+        await hydrateInventoryTransactionsForReferences(p.workspace_id, [p.id])
         // A completed projection is safe to reattach after an idempotent replay.
         const existingInvoice = await db.invoices.get(p.id)
         if (existingInvoice?.workspaceId === p.workspace_id) {
@@ -304,7 +307,8 @@ export async function commitPosCheckout(input: PosCheckoutInput) {
             if (await db.invoices.get(p.id)) return
             for (const item of p.items) if (item.storage_id) await adjustInventoryQuantity({
                 workspaceId: p.workspace_id, productId: item.product_id, storageId: item.storage_id,
-                quantityDelta: -(item.inventory_quantity ?? item.quantity), timestamp: input.timestamp, syncSource: 'remote', skipRemoteSync: true
+                quantityDelta: -(item.inventory_quantity ?? item.quantity), timestamp: input.timestamp, syncSource: 'remote', skipRemoteSync: true,
+                movement: null
             })
             for (const plan of input.batchPlans) await commitStockBatchAllocations(
                 p.workspace_id, plan.productId, plan.storageId, plan.allocations,

@@ -13,6 +13,7 @@ import type {
 
 // Transfer activity is intentionally device-local in every workspace mode.
 export interface InventoryTransferTransactionInput {
+    id?: string
     productId: string
     sourceStorageId: string
     destinationStorageId: string
@@ -129,7 +130,7 @@ export async function createInventoryTransferTransactions(
         const normalized = normalizeTransactionInput(input)
 
         return {
-            id: generateId(),
+            id: input.id || generateId(),
             workspaceId,
             ...normalized,
             createdAt: timestamp,

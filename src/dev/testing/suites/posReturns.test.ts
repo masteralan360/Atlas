@@ -127,7 +127,7 @@ describe('POS return records and refund audit entries used by Sales', () => {
         const evaluate = vi.spyOn(reorderRules, 'evaluateReorderTransferRulesForProduct')
         await expect(returns.commitLocalSaleReturn(POS_WORKSPACE, async () => {
             await adjustInventoryQuantity({ workspaceId: POS_WORKSPACE, productId: POS_PRODUCT, storageId: POS_STORAGE,
-                quantityDelta: 2, timestamp: POS_TIME, skipRemoteSync: true, skipReorderCheck: true })
+                quantityDelta: 2, timestamp: POS_TIME, skipRemoteSync: true, skipReorderCheck: true, movement: null })
             await returns.persistSaleReturnLedger(refund(200, 2))
             await db.sales.update(input.payload.id, { totalAmount: 0, returnedAmount: 200, returnStatus: 'full' })
             throw new Error('Injected return failure')
@@ -144,7 +144,7 @@ describe('POS return records and refund audit entries used by Sales', () => {
         const { adjustInventoryQuantity } = await import('@/local-db/inventory')
         await returns.commitLocalSaleReturn(POS_WORKSPACE, async () => {
             await adjustInventoryQuantity({ workspaceId: POS_WORKSPACE, productId: POS_PRODUCT, storageId: POS_STORAGE,
-                quantityDelta: 2, timestamp: POS_TIME, skipRemoteSync: true, skipReorderCheck: true })
+                quantityDelta: 2, timestamp: POS_TIME, skipRemoteSync: true, skipReorderCheck: true, movement: null })
             await returns.persistSaleReturnLedger(refund(200, 2))
             await db.sales.update(input.payload.id, { totalAmount: 0, returnedAmount: 200, returnStatus: 'full' })
         })
@@ -170,7 +170,7 @@ describe('POS return records and refund audit entries used by Sales', () => {
         })
         await returns.commitLocalSaleReturn(POS_WORKSPACE, async () => {
             await adjustInventoryQuantity({ workspaceId: POS_WORKSPACE, productId: POS_PRODUCT, storageId: POS_STORAGE,
-                quantityDelta: 2, timestamp: POS_TIME, skipRemoteSync: true, skipReorderCheck: true })
+                quantityDelta: 2, timestamp: POS_TIME, skipRemoteSync: true, skipReorderCheck: true, movement: null })
             await returns.persistSaleReturnLedger(full)
             await db.sales.update(input.payload.id, { totalAmount: 0, returnedAmount: 200, returnStatus: 'full' })
         }, { reorderProductIds: [POS_PRODUCT, POS_PRODUCT] })

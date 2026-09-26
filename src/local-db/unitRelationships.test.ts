@@ -361,6 +361,19 @@ describe('hierarchical unit persistence', () => {
     expect(await db.stock_batches.get('00000000-0000-4000-8000-000000000806')).toMatchObject({
       quantity: 0.3, price: 10, costPrice: 3,
     })
+    expect(await db.inventory_transactions.toArray()).toEqual([
+      expect.objectContaining({
+        workspaceId: WORKSPACE_ID,
+        productId: PRODUCT_ID,
+        storageId: '00000000-0000-4000-8000-000000000805',
+        transactionType: 'inventory_change',
+        quantityDelta: 0.2,
+        previousQuantity: 0.1,
+        newQuantity: 0.3,
+        referenceId: PRODUCT_ID,
+        referenceType: 'product_unit_conversion',
+      }),
+    ])
     expect(remote.calls).toHaveLength(0)
   })
 })

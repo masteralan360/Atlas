@@ -4,7 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { supabase } from '@/auth/supabase'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { isOnline, getActiveBusinessUserId } from '@/lib/network'
-import { roundQuantity } from '@/lib/quantity'
+import { QUANTITY_EPSILON, roundQuantity } from '@/lib/quantity'
 import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
 import {
   assertValidProductUnitFactor,
@@ -14,6 +14,7 @@ import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseR
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
+import { buildInventoryMovementTransactionId, createInventoryTransaction, hydrateInventoryTransactionsForReferences } from './inventoryTransactions'
 import { fetchTableFromSupabase } from './hooks'
 import type {
   CurrencyCode,
@@ -403,20 +404,46 @@ export async function convertProductInventoryToChildUnit(input: {
       fetchTableFromSupabase('products', db.products, input.workspaceId, { force: true }),
       fetchTableFromSupabase('inventory', db.inventory, input.workspaceId, { force: true }),
       fetchTableFromSupabase('stock_batches', db.stock_batches, input.workspaceId, { force: true }),
+      hydrateInventoryTransactionsForReferences(input.workspaceId, [input.productId]),
     ])
     return
   }
 
   const now = new Date().toISOString()
-  await db.transaction('rw', [db.products, db.inventory, db.stock_batches], async () => {
+  await db.transaction('rw', [db.products, db.inventory, db.inventory_transactions, db.stock_batches], async () => {
     const inventoryRows = await db.inventory.where('productId').equals(input.productId).toArray()
     const batches = await db.stock_batches.where('productId').equals(input.productId).toArray()
-    await db.inventory.bulkPut(inventoryRows.map((row) => ({
+    const nextInventoryRows = inventoryRows.map((row) => ({
       ...row,
       quantity: roundQuantity(row.quantity * input.factor),
       updatedAt: now,
       version: row.version + 1,
-    })))
+    }))
+    await db.inventory.bulkPut(nextInventoryRows)
+    for (const row of nextInventoryRows) {
+      const previous = inventoryRows.find((candidate) => candidate.id === row.id)
+      const previousQuantity = previous && !previous.isDeleted ? Math.max(0, previous.quantity) : 0
+      const newQuantity = row.isDeleted ? 0 : Math.max(0, row.quantity)
+      const quantityDelta = roundQuantity(newQuantity - previousQuantity)
+      if (Math.abs(quantityDelta) <= QUANTITY_EPSILON) continue
+
+      await createInventoryTransaction(input.workspaceId, {
+        productId: input.productId,
+        storageId: row.storageId,
+        transactionType: 'inventory_change',
+        quantityDelta,
+        previousQuantity,
+        newQuantity,
+        referenceId: input.productId,
+        referenceType: 'product_unit_conversion',
+        notes: null,
+        createdBy: getActiveBusinessUserId() ?? null,
+      }, {
+        id: buildInventoryMovementTransactionId(input.workspaceId, input.productId, row.storageId, row.version),
+        timestamp: now,
+        skipRemoteSync: true,
+      })
+    }
     await db.stock_batches.bulkPut(batches.map((row) => ({
       ...row,
       quantity: roundQuantity(row.quantity * input.factor),
