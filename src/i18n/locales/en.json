@@ -1,4 +1,43 @@
 {
+  "transactionAudit": {
+    "run": "Run Integrity Audit",
+    "title": "Transaction Integrity Audit",
+    "running": "Inspecting transaction records…",
+    "loadFailed": "The audit could not read all required records. Please try again when the database is available.",
+    "transactionStatus": "Transaction integrity",
+    "mirrorStatus": "SQLite mirror integrity",
+    "orderNumber": "Sales Order #{{number}}",
+    "source": "Source of truth",
+    "summary": "{{passed}} passed · {{warnings}} warnings · {{failed}} failed",
+    "entity": "Record",
+    "expected": "Expected",
+    "actual": "Recorded",
+    "mismatch": "This record does not agree with the reconstructed transaction.",
+    "auditModelJson": "Audit Model JSON",
+    "auditModelDescription": "Snapshot of the transaction, expected effects, persisted records, checks, and summary observed during this audit.",
+    "codes": {
+      "ORDER_TOTAL_MISMATCH": "The order total does not match its items, adjustments, and returns.",
+      "ORDER_CURRENCY_MISSING": "The order has no settlement currency.",
+      "ITEM_TOTAL_MISMATCH": "The line total does not match the historical quantity and unit price.",
+      "INVENTORY_QUANTITY_MISMATCH": "The recorded stock movement differs from the sold and free quantities.",
+      "INVENTORY_MOVEMENT_MISSING": "No transaction-specific stock movement was found for this product and storage.",
+      "LOAN_BALANCE_MISMATCH": "The loan balance does not match principal minus recorded repayments.",
+      "LOAN_PRINCIPAL_MISMATCH": "The loan principal does not match the order financing terms.",
+      "LOAN_PAID_MISMATCH": "The loan's paid total does not match its repayment history.",
+      "INITIAL_PAYMENT_HISTORY_MISSING": "No payment transaction was found for the recorded initial payment.",
+      "INITIAL_PAYMENT_MISMATCH": "The initial payment does not match its payment transactions.",
+      "PAYMENTS_EXCEED_ORDER_TOTAL": "Recorded payments exceed the current order total.",
+      "ORDER_PAID_MISMATCH": "The order's paid amount does not match payment records.",
+      "ORDER_BALANCE_MISMATCH": "The order balance does not match its total and payments.",
+      "WRONG_LOAN_REFERENCE": "The linked loan points to a different order or source.",
+      "SQLITE_MIRROR_FIELD_MISMATCH": "The local SQLite value differs from Supabase.",
+      "RETURN_INVENTORY_HISTORY_UNAVAILABLE": "Return stock restoration has no transaction-specific movement record to verify.",
+      "ORIGINAL_DISCOUNT_TAX_HISTORY_UNAVAILABLE": "The original discount and tax were not retained after the return."
+    },
+    "close": "Close",
+    "status": { "PASS": "Passed", "WARNING": "Warnings", "FAIL": "Failed", "NOT_APPLICABLE": "Not applicable" },
+    "categories": { "order": "Order integrity", "items": "Item calculations", "inventory": "Inventory integrity", "payments": "Payment integrity", "loan": "Loan and receivable integrity", "relationships": "Relationship integrity", "mirror": "Cloud / local mirror" }
+  },
   "devTesting": {
     "button": "Developer tests",
     "accountSwitcher": "Account switching",
@@ -33,7 +72,7 @@
     "liveChecking": "Checking test workspace, sign-in, and database access…",
     "liveReady": "Ready: {{name}} ({{id}}) · {{mode}} · {{host}}",
     "liveFixtureCount": "{{count}} fixture checkpoints recorded in the report",
-    "saleOrdersIsolatedCoverageHelp": "Runs Sale Orders calculations, Local business flows, UI contracts and regression checks with disposable IndexedDB. Backend request contract unit tests are kept outside this selectable suite. Select Hosted Supabase for these same isolated groups plus focused real-database scenarios.",
+    "saleOrdersIsolatedCoverageHelp": "Runs Sale Orders calculations, Local business flows, UI contracts and regression checks with disposable IndexedDB. The Integrity Audit group tests historical item, inventory, payment, loan, return and relationship reconciliation, unpaid-order derived outstanding amounts, the displayed Audit Model JSON, and read-only Supabase request contracts. Native SQLite and live parity remain separate checks. Select Hosted Supabase for these same isolated groups plus focused real-database scenarios.",
     "saleOrdersLiveCoverageHelp": "Each regular group runs its complete isolated checks, labeled separately, then a focused live scenario in the verified DEV TEST workspace. Live cases check orders, payments, returns, stock, pricing, related units, statement data, print inputs, and admin workspace access. The independent transaction group covers atomic regular Sale Order completion, financed cancellation, and a cancellation/completion race with the resulting stock and sale-ledger entries. Browser UI, other roles, and native SQLite need separate checks. The related-units group checks the regular Sale Order stock and return path and rejects related-unit Quick Orders before any writes.",
     "coverageHelp": "Financed sale and purchase cancellation checks cover loans and installments, linked payment reversals, offline replay, and rejected server results. V1 checks production business functions with disposable IndexedDB and mocked remote contracts, including financing-return and loan-integrity sync contracts. It verifies staff sales-order return authorization for Sales Order Access, the request restriction, and View Own ownership. Reservation coverage verifies that insufficient-stock errors identify every pending sales order consuming the product's available stock, including canonical related-unit quantities. Related Units covers explicit selling/buying-unit selection, ordinary-product quantity labels that do not imply a selectable unit, immutable conversion snapshots, canonical stock quantities, independent sales prices, purchase-cost allocation across free stock, return-unit preservation, and responsive line-item layouts on wide and narrow screens. It also covers saved custom Atlas Standard order layouts and the shared role-based sales-account selector visibility. It does not yet execute the real Supabase or native SQLite stacks. The Payments group also checks direct-transaction voucher numbering, linked reversals, A4 pagination, signatures, and mocked Cloud / Hybrid request contracts. A passing run applies only to the selected checks. Order-save coverage verifies Cloud / Hybrid saves complete after authoritative confirmation while derived customer and partner summaries refresh in the background, including paid/unpaid records, ledger and stock effects, customer changes, queued sync failures, serialized refreshes, and unchanged Local-mode completion. Recovery checks cover persisted refresh jobs before save success, database reopen, unchanged cached totals with interrupted uploads, reconnect and wake retries, workspace isolation, newer saves during refresh, and failure to store a recovery job without duplicate payment. Statement printing also checks same-day sale and purchase payments in one order row, unchanged ledger totals, later payments, reversals, and itemized sales.",
     "results": "Test results",
@@ -57,7 +96,8 @@
       "pricing": "Pricing, currency, rounding, and line storage",
       "relatedUnits": "Related selling and buying units",
       "payments": "Payments, reversals, ledger, and direct-transaction vouchers",
-      "uiAccess": "Role-based UI access"
+      "uiAccess": "Role-based UI access",
+      "integrityAudit": "Transaction integrity audit"
     },
     "layers": {
       "business": "Production functions · isolated IndexedDB",

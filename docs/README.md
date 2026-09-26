@@ -12,6 +12,7 @@
 | [SYNC_ENGINE.md](./SYNC_ENGINE.md) | Offline sync and conflict resolution |
 | [AUTHENTICATION.md](./AUTHENTICATION.md) | Auth system, roles, and workspace management |
 | [FEATURES.md](./FEATURES.md) | Feature modules and their implementation |
+| [transaction-reconciliation-integrity-audit.md](./transaction-reconciliation-integrity-audit.md) | Sales Order integrity audit behavior, transaction graph, and Audit Model JSON |
 | [developer-testing.md](./developer-testing.md) | Developer runner quick start and independent Sale Orders V1, POS and Post Service coverage |
 | [developer-testing-agent-guide.md](./developer-testing-agent-guide.md) | Agent handoff for extending shared infrastructure and independent module suites |
 | [developer-testing-pos.md](./developer-testing-pos.md) | Regular POS suite, production transaction boundaries and extension handoff |

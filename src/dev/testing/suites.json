@@ -125,6 +125,16 @@
         "files": [
           "src/ui/components/commissions/oldSalesAgentConfiguration.test.ts"
         ]
+      },
+      {
+        "id": "integrity-audit",
+        "titleKey": "devTesting.groups.integrityAudit",
+        "layer": "contract",
+        "files": [
+          "src/lib/integrityAudit/salesOrderAudit.test.ts",
+          "src/lib/integrityAudit/salesOrderGraph.test.ts",
+          "src/ui/components/orders/SalesOrderIntegrityAuditDialog.test.tsx"
+        ]
       }
     ],
     "unavailable": [

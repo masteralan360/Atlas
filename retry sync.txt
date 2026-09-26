@@ -7,22 +7,18 @@ account switch
 Price books selector order form and quick order
 ##
 
-Remake Dashboard for desktop and mobile
+Admin Added to group for business partner creation and not limitation
 
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide,
 
 Simple Loan Final Localize
 
-Create Product register movement
+Create Product initial quantity movement register
 
 Retry Sync Test The wind
 
-Jumla-Khaleej App
-
 Revenue Analytics and accounting
 
-Multi-Color Partner
-Balance Color Settings
 Context-menu partner account statement & invoice redirect
 Accumilated account statement rows by types and for one day
 Same day order payment one-row

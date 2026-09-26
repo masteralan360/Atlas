@@ -695,6 +695,11 @@ export async function getLocalModeSqliteConnection() {
   return ensureConnection();
 }
 
+/** Audit reads must never initialize, seed, purge, or synchronize SQLite. */
+export async function getExistingLocalModeSqliteConnectionForAudit() {
+  return testConnectionOverride ?? (sqlitePromise ? await sqlitePromise : null);
+}
+
 function isSqliteLockedError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return /database is locked|code:\s*5/i.test(message);

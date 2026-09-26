@@ -139,6 +139,13 @@ but only hosted cases prove their selected server effects.
 
 ## Sale Orders V1 coverage
 
+The selectable **Integrity Audit** group runs isolated Sales Order graph,
+reconciliation, Audit Model JSON, and request-contract checks. It does not use
+a business workspace or write transaction records. Native SQLite execution,
+live Supabase permissions, and Hybrid mirror parity require separate environment
+checks. The feature's behavior, transaction graph, database modes, and evidence
+limits are documented in [Transaction Reconciliation & Integrity Audit](./transaction-reconciliation-integrity-audit.md).
+
 The generated matrix calls the production order, payment, return, and financing
 functions against disposable fake IndexedDB, with fresh data for every case.
 Payment methods come from the app's shared registries rather than a separate
