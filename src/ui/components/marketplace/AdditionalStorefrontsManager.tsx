@@ -54,7 +54,7 @@ const storefrontSlugPattern = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/
 
 function isStorefrontLimitError(error: unknown) {
     const normalized = normalizeSupabaseActionError(error)
-    return normalized.message.toLowerCase().includes('two additional storefronts')
+    return normalized.message.toLowerCase().includes('five additional storefronts')
 }
 
 function AdditionalStorefrontCard({
@@ -451,7 +451,7 @@ export function AdditionalStorefrontsManager({
                 toast({
                     title: t('common.error') || 'Error',
                     description: t('settings.marketplace.secondaryStorefrontLimitReached', {
-                        defaultValue: 'This workspace already has the maximum of two additional storefronts.'
+                        defaultValue: 'This workspace already has the maximum of five additional storefronts.'
                     }),
                     variant: 'destructive'
                 })
@@ -487,7 +487,7 @@ export function AdditionalStorefrontsManager({
                 </Label>
                 <p className="text-xs text-muted-foreground">
                     {t('settings.marketplace.secondaryStorefrontDesc', {
-                        defaultValue: 'Add up to two additional storefronts, each with its own URL, visibility, description, and catalog.'
+                        defaultValue: 'Add up to five additional storefronts, each with its own URL, visibility, description, and catalog.'
                     })}
                 </p>
                 <p className="text-xs text-muted-foreground">
@@ -541,7 +541,7 @@ export function AdditionalStorefrontsManager({
             {limitReached && (
                 <p className="text-xs text-muted-foreground">
                     {t('settings.marketplace.secondaryStorefrontLimitReached', {
-                        defaultValue: 'This workspace already has the maximum of two additional storefronts.'
+                        defaultValue: 'This workspace already has the maximum of five additional storefronts.'
                     })}
                 </p>
             )}

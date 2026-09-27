@@ -46,7 +46,7 @@
     "saleOrders": "Sale Orders",
     "businessPartners": "Business Partners",
     "ecommerce": "E-Commerce",
-    "ecommerceCoverageHelp": "Checks storefront storage-rule targeting and composition, the two-additional-storefront workspace limit, workspace/storefront-scoped Supabase requests, migration constraints, and the authenticated Jumla Khaleej inquiry snapshot contract. Live Supabase permissions, Edge Function deployment, order delivery, rate limits, and storefront browser flows require separate integration checks.",
+    "ecommerceCoverageHelp": "Checks storefront storage-rule targeting and composition, the five-additional-storefront workspace limit, workspace/storefront-scoped Supabase requests, migration constraints, and the authenticated Jumla Khaleej inquiry snapshot contract. Live Supabase permissions, Edge Function deployment, order delivery, rate limits, and storefront browser flows require separate integration checks.",
     "ecommerceGroups": {
       "storefrontConfiguration": "Storefront configuration",
       "jumlaTrackingContract": "Jumla Khaleej tracking and PDF contract"
@@ -4172,10 +4172,10 @@
       "catalogRuleOverrideDisabled": "Price override disabled.",
       "catalogRuleOverrideError": "Failed to update the price override.",
       "secondaryStorefront": "Additional Storefronts",
-      "secondaryStorefrontDesc": "Add up to two additional storefronts, each with its own URL, visibility, description, and catalog.",
+      "secondaryStorefrontDesc": "Add up to five additional storefronts, each with its own URL, visibility, description, and catalog.",
       "secondaryStorefrontNumbered": "Additional Storefront {{count}}",
       "secondaryStorefrontCount": "{{count}} of {{maximum}} additional storefronts in use",
-      "secondaryStorefrontLimitReached": "This workspace already has the maximum of two additional storefronts.",
+      "secondaryStorefrontLimitReached": "This workspace already has the maximum of five additional storefronts.",
       "secondaryStorefrontLoadError": "Failed to load additional storefronts.",
       "secondaryStorefrontAdd": "Add Storefront",
       "secondaryStorefrontAdded": "Additional storefront created.",

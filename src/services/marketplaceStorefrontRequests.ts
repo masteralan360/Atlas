@@ -1,6 +1,6 @@
 import type { supabase as SupabaseClientValue } from '@/auth/supabase'
 
-export const MAX_ADDITIONAL_STOREFRONTS = 2
+export const MAX_ADDITIONAL_STOREFRONTS = 5
 
 export function canAddAdditionalMarketplaceStorefront(currentCount: number) {
     return Number.isFinite(currentCount)

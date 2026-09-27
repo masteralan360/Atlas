@@ -41,12 +41,13 @@ function createRequestClient(result: MockResult) {
 }
 
 describe('additional marketplace storefront request contract', () => {
-    it('permits up to two additional storefronts and rejects counts at or above the limit', () => {
-        expect(MAX_ADDITIONAL_STOREFRONTS).toBe(2)
+    it('permits up to five additional storefronts and rejects counts at or above the limit', () => {
+        expect(MAX_ADDITIONAL_STOREFRONTS).toBe(5)
         expect(canAddAdditionalMarketplaceStorefront(0)).toBe(true)
         expect(canAddAdditionalMarketplaceStorefront(1)).toBe(true)
-        expect(canAddAdditionalMarketplaceStorefront(2)).toBe(false)
-        expect(canAddAdditionalMarketplaceStorefront(3)).toBe(false)
+        expect(canAddAdditionalMarketplaceStorefront(4)).toBe(true)
+        expect(canAddAdditionalMarketplaceStorefront(5)).toBe(false)
+        expect(canAddAdditionalMarketplaceStorefront(6)).toBe(false)
         expect(canAddAdditionalMarketplaceStorefront(-1)).toBe(false)
     })
 

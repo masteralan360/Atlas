@@ -192,7 +192,7 @@ copy. Run it with `node scripts/dev-testing/cli.mjs --suite business-partners --
 ## E-Commerce coverage
 
 The `ecommerce` suite's **Storefront configuration** group checks storage-rule
-composition and source selection, the two-additional-storefront workspace cap,
+composition and source selection, the five-additional-storefront workspace cap,
 workspace/storefront-scoped Supabase request contracts and failure propagation,
 and migration constraints. Run it with
 `node scripts/dev-testing/cli.mjs --suite ecommerce --groups storefront-configuration`.
