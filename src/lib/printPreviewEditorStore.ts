@@ -1,13 +1,12 @@
 import { getPdfShapeBottom, type PdfShape, type UniversalInvoice } from '@/types'
 import type { ReactElement } from 'react'
-import type { BarcodeLabelPrintFormat } from '@/lib/barcodeLabel'
 import type { PartnerAccountStatementClosingBalance } from '@/lib/partnerAccountStatement'
 import type { PartnerAccountStatementLiveDataProgress } from '@/lib/partnerAccountStatementLiveData'
 import type { OrderPartnerBalanceAtPosting } from '@/lib/orderPartnerBalance'
 import type { OrderPartnerBalancePrintFieldKeys } from '@/lib/orderPartnerBalancePrintDemand'
 import type { PurchaseOrder, SalesOrder } from '@/local-db'
 
-export type PrintFormat = 'a4' | 'receipt' | BarcodeLabelPrintFormat
+export type PrintFormat = 'a4' | 'receipt' | 'label'
 export type CustomTemplatePrintLanguage = 'en' | 'ar' | 'ku'
 
 export type TemplatePreviewField = {

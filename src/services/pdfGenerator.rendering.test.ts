@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
     render: vi.fn(), unmount: vi.fn(), toCanvas: vi.fn(), addPage: vi.fn(), addImage: vi.fn(),
+    pdfConstructor: vi.fn(), viewerPreferences: vi.fn(),
     output: vi.fn(), prepare: vi.fn(), restore: vi.fn(), progress: vi.fn(),
     statementPages: vi.fn(), tables: vi.fn(), centers: vi.fn(),
     settleLayout: vi.fn(),
@@ -25,8 +26,10 @@ vi.mock('@/services/pdfImageCapture', () => ({ waitForPdfImages: async () => {},
 vi.mock('@/services/pdfPageCapture', () => ({ preparePdfPageCapture: mocks.prepare }))
 vi.mock('html-to-image', () => ({ toCanvas: mocks.toCanvas }))
 vi.mock('jspdf', () => ({ jsPDF: class {
+    constructor(options: unknown) { mocks.pdfConstructor(options) }
     addPage = mocks.addPage
     addImage = mocks.addImage
+    viewerPreferences = mocks.viewerPreferences
     output = mocks.output
 } }))
 
@@ -103,5 +106,44 @@ describe('final template PDF rendering', () => {
         expect(canvases[0].width).toBe(0)
         expect(canvases[0].height).toBe(0)
         expect(mocks.unmount).toHaveBeenCalledOnce()
+    })
+
+    it('renders custom label pages at the exact entered physical dimensions', async () => {
+        const first = createElement('div', null, 'first label')
+        const second = createElement('div', null, 'second label')
+        const pending = generateTemplatePdf({
+            pages: [first, second],
+            format: 'label',
+            pageSizeMm: { widthMm: 70, heightMm: 40 }
+        })
+        await vi.runAllTimersAsync()
+
+        expect(await pending).toBe(blob)
+        expect(mocks.pdfConstructor).toHaveBeenCalledWith({
+            orientation: 'landscape', unit: 'mm', format: [70, 40]
+        })
+        expect(mocks.viewerPreferences).toHaveBeenCalledWith({
+            PrintScaling: 'None',
+            PrintArea: 'MediaBox',
+            PrintClip: 'MediaBox',
+            PickTrayByPDFSize: true
+        })
+        expect(mocks.addPage).toHaveBeenCalledWith([70, 40], 'landscape')
+        expect(mocks.addImage).toHaveBeenCalledTimes(2)
+        expect(mocks.addImage.mock.calls[0].slice(2, 6)).toEqual([0, 0, 70, 40])
+        expect(mocks.addImage.mock.calls[1].slice(2, 6)).toEqual([0, 0, 70, 40])
+        expect(mocks.render.mock.calls.map(([element]) => element.props.children)).toEqual([first, second])
+        expect(mocks.unmount).toHaveBeenCalledOnce()
+        expect(container.remove).toHaveBeenCalledOnce()
+    })
+
+    it('rejects label PDF generation when dimensions are missing or invalid', async () => {
+        await expect(generateTemplatePdf({ element: createElement('div'), format: 'label' }))
+            .rejects.toThrow('Label page dimensions are required')
+        await expect(generateTemplatePdf({
+            element: createElement('div'), format: 'label', pageSizeMm: { widthMm: 70, heightMm: 0 }
+        })).rejects.toThrow('Label width and height must be greater than zero')
+        expect(mocks.pdfConstructor).not.toHaveBeenCalled()
+        expect(mocks.render).not.toHaveBeenCalled()
     })
 })

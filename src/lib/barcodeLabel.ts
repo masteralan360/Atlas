@@ -11,41 +11,6 @@ export type BarcodeLabelData = {
     iqdDisplayPreference: IQDDisplayPreference
 }
 
-export type BarcodeLabelPrintFormat = 'barcode_35x15' | 'barcode_108x50'
-
-export type BarcodeLabelProfile = {
-    id: BarcodeLabelPrintFormat
-    widthMm: number
-    heightMm: number
-    safeMarginMm: number
-    layout: 'compact' | 'wide'
-}
-
-export const BARCODE_LABEL_PROFILES: Record<BarcodeLabelPrintFormat, BarcodeLabelProfile> = {
-    barcode_35x15: {
-        id: 'barcode_35x15',
-        widthMm: 35,
-        heightMm: 15,
-        safeMarginMm: 1.4,
-        layout: 'compact'
-    },
-    barcode_108x50: {
-        id: 'barcode_108x50',
-        widthMm: 108,
-        heightMm: 50,
-        safeMarginMm: 3,
-        layout: 'wide'
-    }
-}
-
-export function isBarcodeLabelPrintFormat(format: string): format is BarcodeLabelPrintFormat {
-    return Object.prototype.hasOwnProperty.call(BARCODE_LABEL_PROFILES, format)
-}
-
-export function getBarcodeLabelProfile(format: BarcodeLabelPrintFormat): BarcodeLabelProfile {
-    return BARCODE_LABEL_PROFILES[format]
-}
-
 export type BarcodeLabelPriceUnitTranslations = {
     perSquareMeter: string
     perDynamicKilogram: string

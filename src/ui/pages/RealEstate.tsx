@@ -645,7 +645,7 @@ function RealEstateDetails({
             label: t('realEstate.nativeA4Template', { defaultValue: 'Real Estate Contract A4' }),
             moduleTypeKey: selectedPrintTarget.moduleTypeKey,
             nativeTemplateKey: selectedPrintTarget.nativeTemplateKey,
-            page: selectedPrintTarget.page,
+            page: selectedPrintTarget.page!,
             fields: {},
             annotations: [],
             texts: [],

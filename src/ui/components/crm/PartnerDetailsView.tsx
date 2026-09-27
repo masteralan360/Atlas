@@ -1733,7 +1733,7 @@ export function PartnerDetailsView({
                 : t('businessPartners.nativeA4Template', { defaultValue: 'Partner Details A4' }),
             moduleTypeKey: selectedPartnerPrintTemplateKey,
             nativeTemplateKey: partnerPrintTarget.nativeTemplateKey,
-            page: partnerPrintTarget.page,
+            page: partnerPrintTarget.page!,
             fields: {},
             annotations: [],
             texts: [],

@@ -36,6 +36,7 @@ import {
 } from '@/ui/components'
 import {
     CUSTOM_TEMPLATE_TARGETS,
+    buildCustomTemplateLayoutPdf,
     cloneAtlasStandardOrderLayoutForReturn,
     createCustomTemplatePreview,
     getCustomTemplatePrintLanguageWarning,
@@ -64,6 +65,8 @@ import {
     type LocalCustomTemplateRow as CustomTemplateRow
 } from '@/local-db'
 import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
+import { printPdfBlob } from '@/services/pdfPrintService'
+import { LABEL_PRINT_TEMPLATE_KEY } from '@/lib/labelPrint'
 
 function readStoredLayout(row?: CustomTemplateRow | null): CustomTemplateLayout | null {
     return readCustomTemplateLayout(row)
@@ -357,6 +360,16 @@ export function CustomTemplates() {
         const target = availableTargets.find((item) => item.moduleTypeKey === moduleTypeKey)
         if (!target || !workspaceId) return
         const resolvedInitialLayout = initialTemplateLayout || readStoredLayout(template)
+        const templatePreviewOptions = {
+            workspaceId,
+            workspaceName,
+            features,
+            workspaceFooterContacts,
+            labelPageSizeMm: moduleTypeKey === LABEL_PRINT_TEMPLATE_KEY ? resolvedInitialLayout?.page : undefined,
+            printLang: features.print_lang && features.print_lang !== 'auto'
+                ? features.print_lang
+                : i18n.language
+        }
 
         setPrintPreviewEditorSource({
             title: t('customTemplates.previewTitle', {
@@ -365,15 +378,7 @@ export function CustomTemplates() {
             }),
             printFormat: target.printFormat,
             workspaceId,
-            templatePreview: createCustomTemplatePreview(target, {
-                workspaceId,
-                workspaceName,
-                features,
-                workspaceFooterContacts,
-                printLang: features.print_lang && features.print_lang !== 'auto'
-                    ? features.print_lang
-                    : i18n.language
-            }),
+            templatePreview: createCustomTemplatePreview(target, templatePreviewOptions),
             customTemplate: {
                 moduleTypeKey,
                 nativeTemplateKey: target.nativeTemplateKey,
@@ -382,7 +387,23 @@ export function CustomTemplates() {
             },
             effectiveId: template?.id || `custom-template-${moduleTypeKey}`,
             initialTemplateLayout: resolvedInitialLayout,
-            onSaveTemplateLayout: (layout, options) => saveTemplateLayout(layout, options, template?.id)
+            onSaveTemplateLayout: (layout, options) => saveTemplateLayout(layout, options, template?.id),
+            ...(moduleTypeKey === LABEL_PRINT_TEMPLATE_KEY ? {
+                onPrint: (blob: Blob) => printPdfBlob(blob, { title: target.typeLabel }),
+                generateTemplateLayoutBlob: (layout: CustomTemplateLayout, printLangOverride?: string, effectiveId?: string) =>
+                    buildCustomTemplateLayoutPdf({
+                        target,
+                        layout,
+                        values: layout.fields || {},
+                        options: {
+                            ...templatePreviewOptions,
+                            printLang: printLangOverride || templatePreviewOptions.printLang,
+                            labelPageSizeMm: layout.page
+                        },
+                        effectiveId,
+                        fieldMode: 'layoutOverrides'
+                    })
+            } : {})
         })
 
         setIsAddOpen(false)

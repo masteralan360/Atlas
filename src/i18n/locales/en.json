@@ -1289,16 +1289,16 @@
     "barcodePrint": {
       "action": "Print barcodes",
       "selectedCount": "{{count}} products selected",
-      "selectHint": "Select products, then choose a compact or wide barcode label.",
+      "selectHint": "Select products, then choose one of your saved Label Print layouts.",
       "printSelected": "Print selected barcodes",
       "title": "Product barcode labels",
-      "compactLabel": "35 × 15 mm",
-      "compactDescription": "Compact product barcode label. One label per selected product.",
-      "wideLabel": "Wide thermal · 108 mm (EML-400I)",
-      "wideDescription": "Product name, price, and a large barcode on one 108 × 50 mm label.",
+      "labelTemplateDescription": "Custom label · {{width}} × {{height}} mm",
+      "templateLoadErrorTitle": "Saved label templates unavailable",
+      "templateLoadErrorDescription": "Your saved label layouts could not be loaded. Try again before printing.",
       "showPrice": "Show price",
       "price": "Price",
       "barcode": "Barcode",
+      "barcodeValue": "Barcode {{value}}",
       "perSquareMeter": "per 1m²",
       "perDynamicKilogram": "per 1 Kg",
       "perMeter": "per 1 Meter"
@@ -4348,6 +4348,11 @@
   },
   "customTemplates": {
     "title": "Custom Templates",
+    "labelPrint": {
+      "title": "Label Print",
+      "description": "Design a product label using a custom width and height in millimeters.",
+      "sampleProduct": "Sample Product"
+    },
     "subtitle": "Manage workspace print layout customizations by module and print type.",
     "addNew": "Add New Template",
     "existingTitle": "Existing Custom Templates",
@@ -5252,6 +5257,10 @@
   },
   "printPreviewEditor": {
     "title": "Print Preview Editor",
+    "labelWidth": "Width",
+    "labelHeight": "Height / Length",
+    "enterLabelSize": "Enter a label width and height to start designing.",
+    "testPrint": "Test Print",
     "showAtlasStandardFooter": "Show Made by, page, and print date",
     "enableTextPositionAnchor": "Enable invisible text-position anchor",
     "fitPage": "Fit",

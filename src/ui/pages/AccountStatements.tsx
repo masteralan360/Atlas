@@ -557,7 +557,7 @@ export function AccountStatements() {
             label: t('businessPartners.accountStatementA4Template', { defaultValue: 'Partner Account Statement A4' }),
             moduleTypeKey: PARTNER_ACCOUNT_STATEMENT_TEMPLATE_KEY,
             nativeTemplateKey: printTarget.nativeTemplateKey,
-            page: printTarget.page,
+            page: printTarget.page!,
             fields: {},
             fieldOrders: {},
             fieldLabelOverrides: {},

@@ -57,7 +57,7 @@ function PrintOptionIcon({ format, custom = false }: { format: PrintFormat; cust
     if (format === 'receipt') {
         return <Receipt className={`h-6 w-6 ${custom ? 'text-primary' : 'text-foreground'}`} />
     }
-    if (format.startsWith('barcode_')) {
+    if (format === 'label') {
         return <Barcode className={`h-6 w-6 ${custom ? 'text-primary' : 'text-foreground'}`} />
     }
 
@@ -274,7 +274,11 @@ export function PrintSelectionModal({
                                 </div>
                                 <div className="line-clamp-2 break-words text-center text-xs leading-4 text-muted-foreground">
                                     {description || t('customTemplates.customPrint', {
-                                        defaultValue: format === 'receipt' ? 'Custom Receipt' : 'Custom A4 Print'
+                                        defaultValue: format === 'receipt'
+                                            ? 'Custom Receipt'
+                                            : format === 'label'
+                                                ? 'Custom Label Print'
+                                                : 'Custom A4 Print'
                                     })}
                                 </div>
                                 {warning ? (

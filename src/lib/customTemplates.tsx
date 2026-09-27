@@ -91,6 +91,9 @@ import {
 } from '@/lib/orderReturnPrintData'
 import type { OrderPrintVersion } from '@/lib/orderPrintReturnState'
 import type { ProductPrintImageUrls } from '@/ui/components/print/ProductPrintImage'
+import { LabelPrintTemplate } from '@/ui/components/LabelPrintTemplate'
+import type { BarcodeLabelData } from '@/lib/barcodeLabel'
+import { LABEL_PRINT_TEMPLATE_KEY, type LabelPrintPageSize } from '@/lib/labelPrint'
 import { ModernA4InvoiceTemplate, MODERN_A4_MOVABLE_COMPONENT_KEYS } from '@/ui/components/ModernA4InvoiceTemplate'
 import {
     ProfessionalA4InvoiceTemplate,
@@ -138,14 +141,14 @@ export const PARTNER_ORDER_ITEMS_TEMPLATE_FIELD_KEYS = {
 
 export type CustomTemplateTarget = {
     moduleTypeKey: string
-    workspaceModuleKey: 'instant_pos' | 'real_estate' | 'sales_history' | 'crm' | 'loans'
+    workspaceModuleKey: 'instant_pos' | 'real_estate' | 'sales_history' | 'crm' | 'loans' | 'products'
     moduleLabel: string
     typeLabel: string
     description: string
     nativeTemplateKey: string
     nativeTemplateAvailable: boolean
-    printFormat: 'a4' | 'receipt'
-    page: {
+    printFormat: 'a4' | 'receipt' | 'label'
+    page?: {
         widthMm: number
         heightMm: number
     }
@@ -369,6 +372,20 @@ export const CUSTOM_TEMPLATE_TARGETS: CustomTemplateTarget[] = [
         printFormat: 'receipt',
         page: { widthMm: 80, heightMm: 200 }
     },
+    {
+        moduleTypeKey: LABEL_PRINT_TEMPLATE_KEY,
+        workspaceModuleKey: 'products',
+        get moduleLabel() { return i18n.t('products.title', { defaultValue: 'Products' }) },
+        get typeLabel() { return i18n.t('customTemplates.labelPrint.title', { defaultValue: 'Label Print' }) },
+        get description() {
+            return i18n.t('customTemplates.labelPrint.description', {
+                defaultValue: 'Design a product label using a custom width and height in millimeters.'
+            })
+        },
+        nativeTemplateKey: LABEL_PRINT_TEMPLATE_KEY,
+        nativeTemplateAvailable: true,
+        printFormat: 'label'
+    },
     ...REAL_ESTATE_CONTRACT_TARGETS.map((target) => ({
         ...target,
         workspaceModuleKey: 'real_estate' as const,
@@ -383,6 +400,9 @@ export function getCustomTemplateTarget(moduleTypeKey: string) {
 export function getCustomTemplateDisplayName(moduleTypeKey: string) {
     const target = getCustomTemplateTarget(moduleTypeKey)
     if (target) {
+        if (moduleTypeKey === LABEL_PRINT_TEMPLATE_KEY) {
+            return target.typeLabel
+        }
         if (moduleTypeKey === ORDER_ATLAS_STANDARD_TEMPLATE_KEY
             || moduleTypeKey === ORDER_ATLAS_STANDARD_RETURN_TEMPLATE_KEY
             || moduleTypeKey === ORDER_DETAILS_TEMPLATE_KEY) {
@@ -497,8 +517,8 @@ export function readCustomTemplateLayout(row?: StoredCustomTemplateRow | null): 
             ? layout.printLanguage
             : undefined,
         page: {
-            widthMm: targetPage?.widthMm || layout.page?.widthMm || 210,
-            heightMm: targetPage?.heightMm || layout.page?.heightMm || 297
+            widthMm: targetPage?.widthMm || layout.page?.widthMm || (row.module_type_key === LABEL_PRINT_TEMPLATE_KEY ? 0 : 210),
+            heightMm: targetPage?.heightMm || layout.page?.heightMm || (row.module_type_key === LABEL_PRINT_TEMPLATE_KEY ? 0 : 297)
         },
         fields: layout.fields || {},
         hiddenFields,
@@ -641,6 +661,8 @@ export type CustomTemplatePreviewOptions = {
     counterpartyAddress?: string
     printedBy?: string | null
     printLang?: string
+    barcodeLabel?: BarcodeLabelData
+    labelPageSizeMm?: LabelPrintPageSize
 }
 
 const SAMPLE_RECEIPT_DATA: UniversalInvoice = {
@@ -2115,6 +2137,36 @@ export function createCustomTemplatePreview(
     target: CustomTemplateTarget,
     options: CustomTemplatePreviewOptions = {}
 ): TemplatePreview {
+    if (target.moduleTypeKey === LABEL_PRINT_TEMPLATE_KEY) {
+        const configuredLanguage = options.printLang
+            || (options.features?.print_lang && options.features.print_lang !== 'auto'
+                ? options.features.print_lang
+                : 'en')
+        const fixedPrintLang: TemplatePreview['fixedPrintLang'] = configuredLanguage.startsWith('ar')
+            ? 'ar'
+            : configuredLanguage.startsWith('ku')
+                ? 'ku'
+                : 'en'
+
+        return {
+            fields: [],
+            page: options.labelPageSizeMm,
+            fixedPrintLang,
+            createElement: () => <LabelPrintTemplate label={options.barcodeLabel} />,
+            buildPdf: (element, printLangOverride) => {
+                if (!options.labelPageSizeMm) {
+                    return Promise.reject(new Error('Enter the label width and height before printing.'))
+                }
+                return generateTemplatePdf({
+                    element,
+                    format: 'label',
+                    pageSizeMm: options.labelPageSizeMm,
+                    printLang: printLangOverride || fixedPrintLang
+                })
+            }
+        }
+    }
+
     if (target.moduleTypeKey === SALES_HISTORY_RECEIPT_TEMPLATE_KEY) {
         return createSalesHistoryReceiptPreview(options)
     }
@@ -2226,8 +2278,8 @@ function CustomTemplateLayoutOverlay({
     heightMm: number
     reflowLowerPageText?: boolean
 }) {
-    const pageWidth = layout.page.widthMm || 210
-    const pageHeight = layout.page.heightMm || 297
+    const pageWidth = layout.page.widthMm
+    const pageHeight = layout.page.heightMm
 
     return (
         <div
@@ -2334,12 +2386,15 @@ export function renderCustomTemplateLayoutElement({
         ...values,
         ...(fieldMode === 'layoutOverrides' ? layout.fields || {} : nonBlankFields(layout.fields || {}))
     }
-    const pageHeight = layout.page.heightMm || 297
     const isReceiptTemplate = target.printFormat === 'receipt'
-    const layoutPageCount = isReceiptTemplate ? 1 : getCustomTemplateLayoutPageCount(layout)
+    const isFixedLabelTemplate = target.printFormat === 'label'
+    const pageHeight = isFixedLabelTemplate ? layout.page.heightMm : layout.page.heightMm || 297
+    const layoutPageCount = isReceiptTemplate || isFixedLabelTemplate ? 1 : getCustomTemplateLayoutPageCount(layout)
     const layoutOverflowHeight = getCustomTemplateLayoutOverflowHeightMm(layout)
     const layoutHeight = isReceiptTemplate
         ? Math.max(1, layoutOverflowHeight)
+        : isFixedLabelTemplate
+            ? pageHeight
         : layoutPageCount * pageHeight
 
     return (
@@ -2348,8 +2403,10 @@ export function renderCustomTemplateLayoutElement({
             data-template-layout-root=""
             className="relative mx-auto overflow-visible bg-white text-black"
             style={{
-                width: `${layout.page.widthMm || 210}mm`,
-                minHeight: `${layoutHeight}mm`
+                width: `${isFixedLabelTemplate ? layout.page.widthMm : layout.page.widthMm || 210}mm`,
+                height: isFixedLabelTemplate ? `${layoutHeight}mm` : undefined,
+                minHeight: `${layoutHeight}mm`,
+                overflow: isFixedLabelTemplate ? 'hidden' : 'visible'
             }}
         >
             <style
@@ -2373,7 +2430,7 @@ export function renderCustomTemplateLayoutElement({
                     }}
                 />
             ))}
-            <div className="relative">
+            <div className="relative" style={isFixedLabelTemplate ? { height: `${layoutHeight}mm` } : undefined}>
                 {preview.createElement(fieldValues, effectiveId, preview.fixedPrintLang, {
                     tokenFieldTemplates: layout.fieldTokenTemplates,
                     componentPositions: layout.componentPositions,
@@ -2389,6 +2446,8 @@ export function renderCustomTemplateLayoutElement({
                 layout={layout}
                 heightMm={isReceiptTemplate
                     ? layoutHeight
+                    : isFixedLabelTemplate
+                        ? pageHeight
                     : Math.max(layoutHeight, getCustomTemplateLayoutHeightMm(layout))}
                 reflowLowerPageText={isTemplateTextFlowEnabled(preview, fieldValues)}
             />
@@ -2402,6 +2461,7 @@ export async function buildCustomTemplateLayoutPdf({
     values,
     options,
     effectiveId,
+    barcodeLabels,
     fieldMode = 'nonBlankLayoutOverrides'
 }: {
     target: CustomTemplateTarget
@@ -2409,6 +2469,7 @@ export async function buildCustomTemplateLayoutPdf({
     values: Record<string, string>
     options?: CustomTemplatePreviewOptions
     effectiveId?: string
+    barcodeLabels?: BarcodeLabelData[]
     fieldMode?: 'nonBlankLayoutOverrides' | 'layoutOverrides'
 }) {
     const preview = createCustomTemplatePreview(target, options)
@@ -2418,18 +2479,28 @@ export async function buildCustomTemplateLayoutPdf({
             ...layout,
             fields: nonBlankFields(layout.fields || {})
         }
-    const element = renderCustomTemplateLayoutElement({
-        target,
-        layout: printableLayout,
-        values,
-        options,
-        effectiveId,
-        fieldMode
-    })
+    const pages = target.printFormat === 'label' && barcodeLabels?.length
+        ? barcodeLabels.map((barcodeLabel) => renderCustomTemplateLayoutElement({
+            target,
+            layout: printableLayout,
+            values,
+            options: { ...options, barcodeLabel, labelPageSizeMm: printableLayout.page },
+            effectiveId,
+            fieldMode
+        }))
+        : [renderCustomTemplateLayoutElement({
+            target,
+            layout: printableLayout,
+            values,
+            options: { ...options, labelPageSizeMm: target.printFormat === 'label' ? printableLayout.page : options?.labelPageSizeMm },
+            effectiveId,
+            fieldMode
+        })]
 
     return generateTemplatePdf({
-        element,
+        pages,
         format: target.printFormat,
         printLang: preview.fixedPrintLang,
+        pageSizeMm: target.printFormat === 'label' ? printableLayout.page : undefined
     })
 }

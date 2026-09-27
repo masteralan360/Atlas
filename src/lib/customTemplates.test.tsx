@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { generateTemplatePdf } from '@/services/pdfGenerator'
 
 vi.mock('@/services/pdfGenerator', () => ({
     generateTemplatePdf: vi.fn()
@@ -118,6 +119,77 @@ beforeAll(async () => {
     ;({ PartnerOrderItemsPrintTemplate } = await import('@/ui/components/crm/PartnerOrderItemsPrintTemplate'))
     ;({ OrderDetailsPrintTemplate, OrderReceiptPrintTemplate } = await import('@/ui/components/orders/OrderPrintTemplates'))
 }, 30_000)
+
+describe('dynamic Label Print custom templates', () => {
+    it('registers an un-sized Products template and restores a saved custom page size', () => {
+        const target = customTemplates.getCustomTemplateTarget('products.LabelPrint')
+        expect(target).toMatchObject({
+            moduleTypeKey: 'products.LabelPrint',
+            workspaceModuleKey: 'products',
+            printFormat: 'label'
+        })
+        expect(target?.page).toBeUndefined()
+
+        const stored = customTemplates.readCustomTemplateLayout({
+            id: 'label-layout',
+            module_type_key: 'products.LabelPrint',
+            layout_json: {
+                version: 1,
+                moduleTypeKey: 'products.LabelPrint',
+                page: { widthMm: 70, heightMm: 40 },
+                fields: {},
+                annotations: [],
+                texts: [],
+                images: [],
+                shapes: [],
+                updatedAt: '2026-09-27T00:00:00.000Z'
+            }
+        })
+        expect(stored?.page).toEqual({ widthMm: 70, heightMm: 40 })
+        expect(customTemplates.readCustomTemplateLayout({
+            id: 'new-label-layout',
+            module_type_key: 'products.LabelPrint',
+            layout_json: { version: 1 }
+        })?.page).toEqual({ widthMm: 0, heightMm: 0 })
+    })
+
+    it('builds one exact-size PDF page per selected product barcode', async () => {
+        vi.mocked(generateTemplatePdf).mockResolvedValue(new Blob(['label-pdf'], { type: 'application/pdf' }))
+        const target = customTemplates.getCustomTemplateTarget('products.LabelPrint')!
+        const layout = {
+            version: 1 as const,
+            moduleTypeKey: 'products.LabelPrint',
+            page: { widthMm: 70, heightMm: 40 },
+            fields: {},
+            annotations: [],
+            texts: [],
+            images: [],
+            shapes: [],
+            updatedAt: '2026-09-27T00:00:00.000Z'
+        }
+        const labels = [
+            { id: 'p1', productName: 'First product', barcode: 'BC-1', displayValue: 'BC-1', price: 10, currency: 'IQD', unit: '', iqdDisplayPreference: 'IQD' as const },
+            { id: 'p2', productName: 'Second product', barcode: 'BC-2', displayValue: 'BC-2', price: 20, currency: 'IQD', unit: '', iqdDisplayPreference: 'IQD' as const }
+        ]
+
+        await customTemplates.buildCustomTemplateLayoutPdf({
+            target,
+            layout,
+            values: {},
+            barcodeLabels: labels,
+            options: { barcodeLabel: labels[0], labelPageSizeMm: layout.page },
+            fieldMode: 'layoutOverrides'
+        })
+
+        const calls = vi.mocked(generateTemplatePdf).mock.calls
+        const pdfOptions = calls[calls.length - 1]?.[0]
+        expect(pdfOptions).toMatchObject({
+            format: 'label',
+            pageSizeMm: { widthMm: 70, heightMm: 40 }
+        })
+        expect(pdfOptions?.pages).toHaveLength(2)
+    })
+})
 
 describe('Sales History custom A4 templates', () => {
     it('registers every native A4 sales history target, including Atlas Standard and its return version', () => {

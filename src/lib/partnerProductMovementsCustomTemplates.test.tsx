@@ -35,7 +35,7 @@ describe('product movement module integration', () => {
   it('builds the final PDF using the current edited layout and print language', async () => {
     const target = getCustomTemplateTarget(PARTNER_PRODUCT_MOVEMENTS_TEMPLATE_KEY)!
     const layout: CustomTemplateLayout = { version: 1, label: 'Edited statement', moduleTypeKey: target.moduleTypeKey, nativeTemplateKey: target.nativeTemplateKey,
-      page: target.page, fields: {}, fieldOrders: {}, fieldLabelOverrides: {}, annotations: [], images: [], shapes: [],
+      page: target.page!, fields: {}, fieldOrders: {}, fieldLabelOverrides: {}, annotations: [], images: [], shapes: [],
       texts: [{ id: 'edit', text: 'Current edited footer', x: 10, y: 230, width: 150, rotation: 0 }], updatedAt: '2026-09-16T10:00:00Z' }
     const blob = await buildCustomTemplateLayoutPdf({ target, layout, values: {}, options: { printLang: 'en' }, fieldMode: 'layoutOverrides' })
     expect(blob.type).toBe('application/pdf')

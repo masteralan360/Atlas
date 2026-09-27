@@ -1280,16 +1280,16 @@
     "barcodePrint": {
       "action": "طباعة الباركود",
       "selectedCount": "المنتجات المحددة: {{count}}",
-      "selectHint": "اختر المنتجات، ثم حدد ملصق باركود صغيراً أو عريضاً.",
+      "selectHint": "اختر المنتجات، ثم حدد أحد تخطيطات طباعة الملصقات المحفوظة.",
       "printSelected": "طباعة الباركود المحدد",
       "title": "ملصقات باركود المنتجات",
-      "compactLabel": "35 × 15 مم",
-      "compactDescription": "ملصق باركود صغير للمنتج. ملصق واحد لكل منتج محدد.",
-      "wideLabel": "حراري عريض · 108 مم (EML-400I)",
-      "wideDescription": "اسم المنتج وسعره وباركود كبير على ملصق واحد بمقاس 108 × 50 مم.",
+      "labelTemplateDescription": "ملصق مخصص · {{width}} × {{height}} مم",
+      "templateLoadErrorTitle": "قوالب الملصقات المحفوظة غير متاحة",
+      "templateLoadErrorDescription": "تعذر تحميل تخطيطات الملصقات المحفوظة. حاول مرة أخرى قبل الطباعة.",
       "showPrice": "إظهار السعر",
       "price": "السعر",
       "barcode": "الباركود",
+      "barcodeValue": "الباركود {{value}}",
       "perSquareMeter": "لكل 1 م²",
       "perDynamicKilogram": "لكل 1 كغم",
       "perMeter": "لكل 1 متر"
@@ -3489,6 +3489,10 @@
   },
   "printPreviewEditor": {
     "title": "محرر معاينة الطباعة",
+    "labelWidth": "العرض",
+    "labelHeight": "الارتفاع / الطول",
+    "enterLabelSize": "أدخل عرض الملصق وارتفاعه لبدء التصميم.",
+    "testPrint": "طباعة تجريبية",
     "showAtlasStandardFooter": "إظهار تم الإنشاء بواسطة والصفحة وتاريخ الطباعة",
     "enableTextPositionAnchor": "تفعيل نقطة تثبيت موضع النص غير المرئية",
     "fitPage": "ملائمة",
@@ -6536,6 +6540,11 @@
   },
   "customTemplates": {
     "title": "القوالب المخصصة",
+    "labelPrint": {
+      "title": "طباعة الملصقات",
+      "description": "صمم ملصق منتج بعرض وارتفاع مخصصين بالملليمتر.",
+      "sampleProduct": "منتج تجريبي"
+    },
     "subtitle": "إدارة تخصيصات تخطيط الطباعة لمساحة العمل حسب الوحدة ونوع الطباعة.",
     "addNew": "إضافة قالب جديد",
     "existingTitle": "القوالب المخصصة الموجودة",

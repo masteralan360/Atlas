@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-    BARCODE_LABEL_PROFILES,
     formatBarcodeLabelPrice,
     getBarcodeLabelData,
     getBarcodeLabelPricePerUnit,
@@ -73,20 +72,5 @@ describe('barcode label data', () => {
         expect(getBarcodeLabelPricePerUnit('m²', { perSquareMeter: 'لكل 1 م²' })).toBe('لكل 1 م²')
         expect(formatBarcodeLabelPrice(12, 'usd', 'IQD', 'Meter', { perMeter: 'لكل 1 متر' }))
             .toBe('12 USD لكل 1 متر')
-    })
-
-    it('defines compact and EML-400I wide label page profiles', () => {
-        expect(BARCODE_LABEL_PROFILES.barcode_35x15).toMatchObject({
-            widthMm: 35,
-            heightMm: 15,
-            safeMarginMm: 1.4,
-            layout: 'compact'
-        })
-        expect(BARCODE_LABEL_PROFILES.barcode_108x50).toMatchObject({
-            widthMm: 108,
-            heightMm: 50,
-            safeMarginMm: 3,
-            layout: 'wide'
-        })
     })
 })

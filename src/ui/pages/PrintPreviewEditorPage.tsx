@@ -62,6 +62,11 @@ import { useToast } from '@/ui/components/use-toast'
 import { ProgressToast } from '@/ui/components/ProgressToast'
 import { subscribePdfProgress } from '@/services/pdfProgress'
 import type { PdfShapeKind } from '@/types'
+import {
+    isValidLabelPrintPageSize,
+    LABEL_PRINT_TEMPLATE_KEY,
+    parseLabelDimensionMm
+} from '@/lib/labelPrint'
 
 const PREVIEW_PAGE_BREAK_SELECTOR = [
     '[data-pdf-keep-together]',
@@ -273,7 +278,7 @@ const LanguageSelector = ({ value, onChange }: { value: string, onChange: (val: 
     );
 };
 
-const ShapeToolbarButton = ({ onAdd }: { onAdd: (kind: PdfShapeKind) => void }) => {
+const ShapeToolbarButton = ({ onAdd, disabled = false }: { onAdd: (kind: PdfShapeKind) => void; disabled?: boolean }) => {
     const [isOpen, setIsOpen] = useState(false)
 
     return (
@@ -281,6 +286,7 @@ const ShapeToolbarButton = ({ onAdd }: { onAdd: (kind: PdfShapeKind) => void }) 
             <button
                 type="button"
                 onClick={() => setIsOpen((current) => !current)}
+                disabled={disabled}
                 className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent text-primary md:w-auto md:gap-1.5 md:px-2 md:text-[11px] md:font-bold"
                 title="Add Shape"
                 aria-label="Add Shape"
@@ -592,6 +598,25 @@ export function PrintPreviewEditorPage() {
     // Template preview mode (loans, orders, budget)
     const templatePreview = source?.templatePreview
     const initialTemplateLayout = source?.initialTemplateLayout
+    const isLabelPrintTemplate = source?.customTemplate?.moduleTypeKey === LABEL_PRINT_TEMPLATE_KEY
+    const [labelWidthInput, setLabelWidthInput] = useState(() => (
+        isLabelPrintTemplate && initialTemplateLayout?.page.widthMm
+            ? String(initialTemplateLayout.page.widthMm)
+            : ''
+    ))
+    const [labelHeightInput, setLabelHeightInput] = useState(() => (
+        isLabelPrintTemplate && initialTemplateLayout?.page.heightMm
+            ? String(initialTemplateLayout.page.heightMm)
+            : ''
+    ))
+    const labelWidthMm = parseLabelDimensionMm(labelWidthInput)
+    const labelHeightMm = parseLabelDimensionMm(labelHeightInput)
+    const labelPageSize = {
+        widthMm: labelWidthMm ?? Number.NaN,
+        heightMm: labelHeightMm ?? Number.NaN
+    }
+    const isLabelPageSizeValid = isValidLabelPrintPageSize(labelPageSize)
+    const isTemplatePageSizeValid = !isLabelPrintTemplate || isLabelPageSizeValid
     const [templateHiddenFields, setTemplateHiddenFields] = useState<Record<string, boolean>>(
         () => initialTemplateLayout?.hiddenFields || {}
     )
@@ -664,12 +689,15 @@ export function PrintPreviewEditorPage() {
     const isTemplatePrintReady = !requiresFreshPartnerBalance
         || freshPartnerBalanceState === 'ready'
     const fixedTemplatePrintLang = templatePreview?.fixedPrintLang
-    const templatePage = initialTemplateLayout?.page || templatePreview?.page || {
-        widthMm: 210,
-        heightMm: 297
-    }
-    const templatePageWidth = templatePage.widthMm
-    const templatePageHeight = templatePage.heightMm
+    const templatePage = initialTemplateLayout?.page
+        || templatePreview?.page
+        || (isLabelPrintTemplate ? undefined : { widthMm: 210, heightMm: 297 })
+    const templatePageWidth = isLabelPrintTemplate
+        ? labelWidthMm ?? 1
+        : templatePage?.widthMm || 210
+    const templatePageHeight = isLabelPrintTemplate
+        ? labelHeightMm ?? 1
+        : templatePage?.heightMm || 297
     const canEditTemplateFields = Boolean(source?.allowTemplateFieldEditing || isAdmin)
     const sourceWorkspaceFooterContacts = source?.workspaceFooterContacts
     const [fieldValues, setFieldValues] = useState<Record<string, string>>(
@@ -773,7 +801,8 @@ export function PrintPreviewEditorPage() {
     }, [drawingMode, selectedTemplateObjectId])
     // Thermal receipts grow with their content; they do not have fixed page breaks.
     // The width fallback keeps older saved receipt templates free of A4-style guides.
-    const isFixedPageTemplatePreview = source?.printFormat !== 'receipt' && templatePageWidth > 80
+    const isFixedPageTemplatePreview = source?.printFormat !== 'receipt'
+        && (isLabelPrintTemplate || templatePageWidth > 80)
     const templateLayoutForMeasurement = {
         page: {
             widthMm: templatePageWidth,
@@ -1132,6 +1161,7 @@ export function PrintPreviewEditorPage() {
         if (!source || !templatePreview || !fieldValues || !source.customTemplate?.moduleTypeKey) {
             return null
         }
+        if (isLabelPrintTemplate && !isLabelPageSizeValid) return null
 
         return {
             version: 1,
@@ -1157,10 +1187,10 @@ export function PrintPreviewEditorPage() {
             shapes: templateShapes,
             updatedAt: new Date().toISOString()
         }
-    }, [source, templatePreview, fieldValues, initialTemplateLayout?.label, templateAnnotations, templateComponentPositions, templateHiddenFields, templateFieldOrders, templateFieldLabelOverrides, templateFieldValueOverrides, templateFieldDisplayModes, templateBackground, templateTexts, templateImages, templateShapes, templatePageHeight, templatePageWidth])
+    }, [source, templatePreview, fieldValues, initialTemplateLayout?.label, templateAnnotations, templateComponentPositions, templateHiddenFields, templateFieldOrders, templateFieldLabelOverrides, templateFieldValueOverrides, templateFieldDisplayModes, templateBackground, templateTexts, templateImages, templateShapes, templatePageHeight, templatePageWidth, isLabelPrintTemplate, isLabelPageSizeValid])
 
     const saveTemplatePreview = useCallback(async (layout?: CustomTemplateLayout, label?: string, action: 'primary' | 'print' = 'primary') => {
-        if (!source || !templatePreview || !fieldValues || isSaving || !isTemplatePrintReady) return
+        if (!source || !templatePreview || !fieldValues || isSaving || !isTemplatePrintReady || !isTemplatePageSizeValid) return
         beginProgressToast(title || t('print.progressTitle', { defaultValue: 'Saving & Printing' }))
         let shouldCloseAfterAction = true
         setIsSaving(true)
@@ -1169,7 +1199,9 @@ export function PrintPreviewEditorPage() {
                 await source.onSaveTemplateLayout(layout, { label })
             }
 
-            const shouldBuildPrintBlob = source.onSave || source.onPrint || source.generateTemplateLayoutBlob
+            const shouldBuildPrintBlob = action === 'print'
+                || Boolean(source.onSave)
+                || (!source.onSaveTemplateLayout && Boolean(source.onPrint || source.generateTemplateLayoutBlob))
             if (shouldBuildPrintBlob) {
                 const overrideLang = fixedTemplatePrintLang || (tempPrintLang !== 'auto' ? tempPrintLang : undefined)
                 const layoutForBlob = source.generateTemplateLayoutBlob
@@ -1237,10 +1269,10 @@ export function PrintPreviewEditorPage() {
                 window.history.back()
             }
         }
-    }, [source, templatePreview, fieldValues, isSaving, isTemplatePrintReady, fixedTemplatePrintLang, tempPrintLang, buildTemplateLayout, sourceWorkspaceFooterContacts, templateHiddenFields, templateFieldOrders, templateFieldLabelOverrides, templateFieldValueOverrides, templateFieldDisplayModes, templateBackground, requiresFreshPartnerBalance, nextFreshPartnerBalanceState, freshPartnerBalanceProgress, beginProgressToast, finishProgressToast, title, t])
+    }, [source, templatePreview, fieldValues, isSaving, isTemplatePrintReady, isTemplatePageSizeValid, fixedTemplatePrintLang, tempPrintLang, buildTemplateLayout, sourceWorkspaceFooterContacts, templateHiddenFields, templateFieldOrders, templateFieldLabelOverrides, templateFieldValueOverrides, templateFieldDisplayModes, templateBackground, requiresFreshPartnerBalance, nextFreshPartnerBalanceState, freshPartnerBalanceProgress, beginProgressToast, finishProgressToast, title, t])
 
     const handleTemplatePreviewSave = useCallback(async () => {
-        if (!source || !templatePreview || !fieldValues || isSaving || !isTemplatePrintReady) return
+        if (!source || !templatePreview || !fieldValues || isSaving || !isTemplatePrintReady || !isTemplatePageSizeValid) return
 
         if (source.onSaveTemplateLayout) {
             const layout = buildTemplateLayout()
@@ -1259,7 +1291,7 @@ export function PrintPreviewEditorPage() {
         }
 
         await saveTemplatePreview()
-    }, [source, templatePreview, fieldValues, isSaving, isTemplatePrintReady, buildTemplateLayout, saveTemplatePreview, title])
+    }, [source, templatePreview, fieldValues, isSaving, isTemplatePrintReady, isTemplatePageSizeValid, buildTemplateLayout, saveTemplatePreview, title])
 
     const handleConfirmTemplateLayoutSave = useCallback(async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault()
@@ -1632,6 +1664,7 @@ export function PrintPreviewEditorPage() {
                                 )}
                                 <button
                                     onClick={handleAddTemplateImage}
+                                    disabled={!isTemplatePageSizeValid}
                                     className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent text-primary md:w-auto md:gap-1.5 md:px-2 md:text-[11px] md:font-bold"
                                     title="Add Picture"
                                     aria-label="Add Picture"
@@ -1639,10 +1672,11 @@ export function PrintPreviewEditorPage() {
                                     <ImagePlus className="h-3.5 w-3.5" />
                                     <span className="hidden md:inline">Add Photo</span>
                                 </button>
-                                <ShapeToolbarButton onAdd={handleAddTemplateShape} />
+                                <ShapeToolbarButton onAdd={handleAddTemplateShape} disabled={!isTemplatePageSizeValid} />
                                 <div className="w-px h-4 bg-border mx-0.5" />
                                 <button
                                     onClick={handleAddTemplateText}
+                                    disabled={!isTemplatePageSizeValid}
                                     className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent text-primary md:w-auto md:gap-1.5 md:px-2 md:text-[11px] md:font-bold"
                                     title="Add Text Field"
                                     aria-label="Add Text Field"
@@ -1653,6 +1687,45 @@ export function PrintPreviewEditorPage() {
                                 <div className="w-px h-4 bg-border mx-0.5" />
                             </>
                         )}
+                        {isLabelPrintTemplate ? (
+                            <div className="flex shrink-0 items-center gap-1.5 rounded border border-border/70 bg-background px-1.5 py-0.5 text-[10px]">
+                                <label htmlFor="label-print-width-mm" className="font-medium text-muted-foreground">
+                                    {t('printPreviewEditor.labelWidth', { defaultValue: 'Width' })}*
+                                </label>
+                                <Input
+                                    id="label-print-width-mm"
+                                    type="number"
+                                    step="any"
+                                    min="0"
+                                    inputMode="decimal"
+                                    value={labelWidthInput}
+                                    onChange={(event) => setLabelWidthInput(event.target.value)}
+                                    placeholder="0"
+                                    required
+                                    aria-invalid={labelWidthInput.length > 0 && labelWidthMm === null}
+                                    className="h-7 w-[4.25rem] px-1.5 py-1 text-[11px] tabular-nums"
+                                />
+                                <span className="text-muted-foreground">mm</span>
+                                <span aria-hidden="true" className="px-0.5 text-muted-foreground">×</span>
+                                <label htmlFor="label-print-height-mm" className="font-medium text-muted-foreground">
+                                    {t('printPreviewEditor.labelHeight', { defaultValue: 'Height / Length' })}*
+                                </label>
+                                <Input
+                                    id="label-print-height-mm"
+                                    type="number"
+                                    step="any"
+                                    min="0"
+                                    inputMode="decimal"
+                                    value={labelHeightInput}
+                                    onChange={(event) => setLabelHeightInput(event.target.value)}
+                                    placeholder="0"
+                                    required
+                                    aria-invalid={labelHeightInput.length > 0 && labelHeightMm === null}
+                                    className="h-7 w-[4.25rem] px-1.5 py-1 text-[11px] tabular-nums"
+                                />
+                                <span className="text-muted-foreground">mm</span>
+                            </div>
+                        ) : null}
                         <button
                             onClick={handleZoomOut}
                             className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent text-muted-foreground"
@@ -1846,6 +1919,18 @@ export function PrintPreviewEditorPage() {
                                 </button>
                             ) : null
                         )}
+                        {isLabelPrintTemplate && source.onSaveTemplateLayout && source.onPrint ? (
+                            <button
+                                type="button"
+                                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs font-medium hover:bg-accent disabled:opacity-50 md:px-3"
+                                onClick={() => void saveTemplatePreview(undefined, undefined, 'print')}
+                                disabled={isSaving || !isTemplatePrintReady || !isTemplatePageSizeValid}
+                                aria-label={t('printPreviewEditor.testPrint', { defaultValue: 'Test Print' })}
+                            >
+                                {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
+                                <span>{t('printPreviewEditor.testPrint', { defaultValue: 'Test Print' })}</span>
+                            </button>
+                        ) : null}
                         {hasTemplatePrimaryAction && (
                             <button
                                 className={cn(
@@ -1853,7 +1938,7 @@ export function PrintPreviewEditorPage() {
                                     isFreshPartnerBalanceLoading ? 'w-auto px-2' : 'w-8 px-0'
                                 )}
                                 onClick={handleTemplatePreviewSave}
-                                disabled={isSaving || !isTemplatePrintReady}
+                                disabled={isSaving || !isTemplatePrintReady || !isTemplatePageSizeValid}
                                 aria-label={templatePrimaryActionDisplayLabel}
                             >
                                 {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : source.onSaveTemplateLayout ? <Check className="h-3.5 w-3.5" /> : <Printer className="h-3.5 w-3.5" />}
@@ -1866,6 +1951,14 @@ export function PrintPreviewEditorPage() {
                 </header>
                 <div className="flex flex-1 overflow-hidden">
                     <div className="flex-1 overflow-hidden light" style={{ colorScheme: 'light' }}>
+                        {isLabelPrintTemplate && !isLabelPageSizeValid ? (
+                            <div className="flex h-full w-full flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground">
+                                <Scaling className="h-8 w-8" aria-hidden="true" />
+                                <p className="text-sm font-medium">
+                                    {t('printPreviewEditor.enterLabelSize', { defaultValue: 'Enter a label width and height to start designing.' })}
+                                </p>
+                            </div>
+                        ) : (
                         <div className="h-full w-full overflow-auto p-6 bg-slate-100/50 flex flex-col items-center">
                             <div
                                 className={cn(
@@ -2273,7 +2366,14 @@ export function PrintPreviewEditorPage() {
                                     )
                                 })}
 
-                                <div ref={templateContentLayerRef} className="relative">
+                                <div
+                                    ref={templateContentLayerRef}
+                                    className="relative"
+                                    style={isLabelPrintTemplate ? {
+                                        width: `${templatePageWidth}mm`,
+                                        height: `${templatePageHeight}mm`
+                                    } : undefined}
+                                >
                                     {templatePreview.createElement(
                                         fieldValues,
                                         source.effectiveId,
@@ -2320,6 +2420,7 @@ export function PrintPreviewEditorPage() {
                                 </div>
                             </div>
                         </div>
+                        )}
                     </div>
                     {editPanelOpen && canEditTemplateFields && (
                         <div className="w-72 shrink-0 border-l bg-card overflow-y-auto p-4 space-y-4">

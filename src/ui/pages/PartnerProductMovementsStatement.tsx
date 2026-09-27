@@ -239,7 +239,7 @@ export function PartnerProductMovementsStatement() {
             label: t('businessPartners.productMovements.accountStatementA4Template'),
             moduleTypeKey: PARTNER_PRODUCT_MOVEMENTS_TEMPLATE_KEY,
             nativeTemplateKey: printTarget.nativeTemplateKey,
-            page: printTarget.page,
+            page: printTarget.page!,
             fields: {},
             fieldOrders: {},
             fieldLabelOverrides: {},

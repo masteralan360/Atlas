@@ -1,5 +1,4 @@
 import { createElement, type ReactElement } from 'react'
-import type { BarcodeLabelPrintFormat } from '@/lib/barcodeLabel'
 import { createRoot } from 'react-dom/client'
 import i18n from '@/i18n/config'
 import { I18nextProvider } from 'react-i18next'
@@ -22,11 +21,8 @@ import { resolvePdfPageRenderScale, streamPdfPages } from '@/services/pdfPageStr
 /** Formats that can be stored as invoice versions. */
 export type InvoicePrintFormat = 'a4' | 'receipt'
 
-/**
- * Formats available from the common print selector. Barcode labels are
- * printable documents, but never invoice versions.
- */
-export type PrintFormat = InvoicePrintFormat | BarcodeLabelPrintFormat
+/** Formats available from the common print selector. Only invoice formats are versioned as invoices. */
+export type PrintFormat = InvoicePrintFormat | 'label'
 
 export function isInvoicePrintFormat(format: PrintFormat): format is InvoicePrintFormat {
     return format === 'a4' || format === 'receipt'
@@ -67,9 +63,12 @@ interface PDFGeneratorOptions {
 }
 
 interface TemplatePdfOptions {
-    element: ReactElement
+    element?: ReactElement
+    pages?: ReactElement[]
     format?: PrintFormat
     printLang?: string
+    /** Exact physical page size for custom label output. */
+    pageSizeMm?: { widthMm: number; heightMm: number }
 }
 
 const A4_WIDTH_MM = 210
@@ -450,6 +449,94 @@ async function renderTemplateToPdf(element: ReturnType<typeof createElement>, wi
     }
 }
 
+async function renderFixedSizeTemplatePagesToPdf(
+    elements: ReactElement[],
+    widthMm: number,
+    heightMm: number
+): Promise<Blob> {
+    const { jsPDF } = await import('jspdf')
+    const orientation = widthMm >= heightMm ? 'landscape' : 'portrait'
+    const pdf = new jsPDF({ orientation, unit: 'mm', format: [widthMm, heightMm] })
+    pdf.viewerPreferences({
+        PrintScaling: 'None',
+        PrintArea: 'MediaBox',
+        PrintClip: 'MediaBox',
+        PickTrayByPDFSize: true
+    })
+    const container = document.createElement('div')
+    container.id = 'pdf-render-container'
+    container.style.position = 'absolute'
+    container.style.left = '0'
+    container.style.top = '0'
+    container.style.width = `${widthMm}mm`
+    container.style.height = `${heightMm}mm`
+    container.style.overflow = 'hidden'
+    container.style.background = '#ffffff'
+    container.style.zIndex = '-9999'
+    container.style.pointerEvents = 'none'
+    container.style.opacity = '0'
+    container.classList.add('no-print')
+    document.body.appendChild(container)
+
+    const root = createRoot(container)
+    try {
+        const { toCanvas } = await import('html-to-image')
+        for (const [index, element] of elements.entries()) {
+            root.render(element)
+            await new Promise(requestAnimationFrame)
+            await new Promise(requestAnimationFrame)
+            if (document.fonts?.ready) await document.fonts.ready
+            await waitForPdfImages(container)
+            await inlineCaptureableImages(container)
+            await settleAtlasStandardOrderLayouts(container)
+
+            const containerPixelWidth = container.offsetWidth
+            const containerPixelHeight = container.offsetHeight
+            const largestPageDimensionPx = Math.max(containerPixelWidth, containerPixelHeight)
+            const boundedRenderScale = Math.max(0.01, Math.min(
+                resolveRenderScale(containerPixelWidth),
+                MAX_CANVAS_DIMENSION_PX / Math.max(1, largestPageDimensionPx)
+            ))
+            const canvas = await toCanvas(container, {
+                width: containerPixelWidth,
+                height: containerPixelHeight,
+                pixelRatio: boundedRenderScale,
+                backgroundColor: '#ffffff',
+                includeQueryParams: true,
+                imagePlaceholder: TRANSPARENT_IMAGE_PLACEHOLDER,
+                skipAutoScale: false,
+                style: { opacity: '1' }
+            })
+
+            try {
+                if (index > 0) pdf.addPage([widthMm, heightMm], orientation)
+                pdf.addImage(
+                    canvas.toDataURL('image/jpeg', 0.95),
+                    'JPEG',
+                    0,
+                    0,
+                    widthMm,
+                    heightMm,
+                    undefined,
+                    'FAST'
+                )
+                reportPdfProgress((index + 1) / elements.length, 'print.progressBuildingPdf', {
+                    page: index + 1,
+                    total: elements.length
+                })
+            } finally {
+                canvas.width = 0
+                canvas.height = 0
+            }
+        }
+
+        return pdf.output('blob') as Blob
+    } finally {
+        root.unmount()
+        container.remove()
+    }
+}
+
 function canvasToReceiptPdf(renderResult: RenderResult, PdfDocument: JsPDFConstructor) {
     const pdf = new PdfDocument({
         orientation: 'p',
@@ -601,8 +688,10 @@ export async function generateInvoicePdf(options: PDFGeneratorOptions): Promise<
  */
 export async function generateTemplatePdf({
     element,
+    pages,
     format = 'a4',
     printLang,
+    pageSizeMm
 }: TemplatePdfOptions): Promise<Blob> {
     if (!i18n.isInitialized) {
         await new Promise(resolve => i18n.on('initialized', resolve))
@@ -612,10 +701,25 @@ export async function generateTemplatePdf({
     const pdfI18n = i18n.cloneInstance({ lng: targetLang })
     await pdfI18n.changeLanguage(targetLang)
 
-    const wrappedElement = createElement(I18nextProvider, { i18n: pdfI18n }, element)
+    const elements = pages?.length ? pages : element ? [element] : []
+    if (elements.length === 0) {
+        throw new Error('A template page is required to generate a PDF.')
+    }
+
+    const wrappedElements = elements.map((page) => createElement(I18nextProvider, { i18n: pdfI18n }, page))
+    if (pageSizeMm) {
+        if (!Number.isFinite(pageSizeMm.widthMm) || pageSizeMm.widthMm <= 0
+            || !Number.isFinite(pageSizeMm.heightMm) || pageSizeMm.heightMm <= 0) {
+            throw new Error('Label width and height must be greater than zero millimeters.')
+        }
+        return renderFixedSizeTemplatePagesToPdf(wrappedElements, pageSizeMm.widthMm, pageSizeMm.heightMm)
+    }
+    if (format === 'label') {
+        throw new Error('Label page dimensions are required to generate a PDF.')
+    }
 
     const widthMm = format === 'receipt' ? RECEIPT_WIDTH_MM : A4_WIDTH_MM
-    return renderTemplateToPdf(wrappedElement, widthMm)
+    return renderTemplateToPdf(wrappedElements[0], widthMm)
 }
 
 /**
