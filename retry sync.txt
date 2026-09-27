@@ -11,11 +11,11 @@ Maintenence Mode Local Mode Enabled
 
 Edit Modal Pending Changes
 
+Delete Sales order that has been paid
+
+Balance Payments on row account statement
+
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide,
-
-Simple Loan Final Localize
-
-Create Product initial quantity movement register
 
 Retry Sync Test The wind
 

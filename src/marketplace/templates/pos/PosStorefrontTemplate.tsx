@@ -16,6 +16,7 @@ import { useStoreCatalog } from '../../hooks/useStoreCatalog'
 import { getMarketplaceAssetUrl, getMarketplaceProductImageUrl } from '../../lib/assets'
 import { getEffectiveStorefrontRules } from '../rules'
 import {
+    MarketplaceApiError,
     placeInquiryOrder,
     type MarketplaceCategory,
     type MarketplaceProduct,
@@ -622,7 +623,8 @@ function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
                 customer,
                 items: cart.items.map((item) => ({
                     product_id: item.product_id,
-                    quantity: item.quantity
+                    quantity: item.quantity,
+                    storage_id: item.storage_id
                 })),
                 lang: (i18n.language || 'en') as 'en' | 'ar' | 'ku'
             })
@@ -639,9 +641,14 @@ function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
                 description: response.message
             })
         } catch (submitError) {
+            const description = submitError instanceof MarketplaceApiError && submitError.status === 409
+                ? t('marketplace.orderStorageChanged', { defaultValue: 'Some products are no longer available from this store. Refresh the catalog and try again.' })
+                : submitError instanceof Error
+                    ? submitError.message
+                    : t('marketplace.orderSubmitFailed', { defaultValue: 'Failed to submit order' })
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: submitError instanceof Error ? submitError.message : 'Failed to submit order',
+                description,
                 variant: 'destructive'
             })
         } finally {

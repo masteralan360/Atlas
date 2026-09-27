@@ -15,6 +15,7 @@ export interface MarketplaceCartItem {
     discount_type: string | null
     discount_value: number | null
     discount_ends_at: string | null
+    storage_id?: string
 }
 
 function readCart(storageKey: string) {
@@ -52,7 +53,8 @@ export function mergeCartWithCatalog(
             unit: latest.unit,
             discount_type: latest.discount_type,
             discount_value: latest.discount_value,
-            discount_ends_at: latest.discount_ends_at
+            discount_ends_at: latest.discount_ends_at,
+            storage_id: latest.source_storage_id
         }
     })
 }
@@ -114,7 +116,8 @@ export function useCart(storeSlug: string) {
                     quantity: 1,
                     discount_type: product.discount_type,
                     discount_value: product.discount_value,
-                    discount_ends_at: product.discount_ends_at
+                    discount_ends_at: product.discount_ends_at,
+                    storage_id: product.source_storage_id
                 }
             ]
         })

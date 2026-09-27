@@ -2,12 +2,15 @@ import { createAdminClient } from '../_shared/supabase.ts'
 import { computeDiscountPrice, type ResolvedWorkspaceDiscountRow } from '../_shared/discounts.ts'
 import { corsHeaders, errorResponse, jsonResponse } from '../_shared/http.ts'
 import {
+    fetchStorefrontCatalogRules,
     fetchStorefrontPriceOverride,
     listMarketplaceAssetUrls,
     resolvePublicAssetUrl,
+    resolveStorefrontStorageIds,
     resolveStorefrontVisibleProductIds,
     sanitizeMarketplaceText
 } from '../_shared/marketplace.ts'
+import { selectStorefrontInventorySources } from '../_shared/storefrontCatalogRules.ts'
 
 const PRODUCT_PAGE_SIZE = 48
 
@@ -33,7 +36,7 @@ type ProductRow = {
 }
 type CategoryRow = { id: string; name: string }
 type ContactRow = { type: string; value: string; label: string | null; is_primary: boolean | null }
-type InventoryRow = { product_id: string; created_at: string | null }
+type InventoryRow = { product_id: string; storage_id: string; created_at: string | null }
 type StorefrontRow = { id: string; workspace_id: string; slug: string; description: string | null; visibility: string }
 type CatalogSort = 'featured' | 'newest'
 type ProductCursor = { sort: CatalogSort; name: string; id: string; addedAt: number }
@@ -53,6 +56,7 @@ type MappedProduct = {
     discount_value: number | null
     discount_ends_at: string | null
     marketplace_added_at: string | null
+    source_storage_id: string
     addedAt: number
 }
 
@@ -175,12 +179,11 @@ Deno.serve(async (req) => {
         const resolved = await resolveStorefront(adminClient, slug)
         if ('error' in resolved) return errorResponse(resolved.error, resolved.status)
 
-        const [{ data: contacts, error: contactsError }, { data: marketplaceStorageId, error: marketplaceStorageError }] = await Promise.all([
+        const [{ data: contacts, error: contactsError }, storefrontRules] = await Promise.all([
             adminClient.from('workspace_contacts').select('type, value, label, is_primary').eq('workspace_id', resolved.workspace.id).order('is_primary', { ascending: false }).order('created_at', { ascending: true }),
-            adminClient.rpc('ensure_marketplace_storage', { p_workspace_id: resolved.workspace.id })
+            fetchStorefrontCatalogRules(adminClient, resolved.workspace.id, resolved.storefrontId)
         ])
         if (contactsError) return errorResponse(contactsError.message, 500)
-        if (marketplaceStorageError) return errorResponse(marketplaceStorageError.message, 500)
 
         const storeContacts = (contacts ?? []) as ContactRow[]
         const logoUrl = resolvePublicAssetUrl(resolved.workspace.logo_url)
@@ -188,19 +191,37 @@ Deno.serve(async (req) => {
             ?? null
         const store = buildStorePayload(resolved.workspace, resolved.description, logoUrl, storeContacts)
         const emptyPayload = { store, categories: [], products: [], total_products: 0, has_more: false, next_cursor: null }
-        if (!includeProducts || !marketplaceStorageId) {
+        if (!includeProducts) {
             return jsonResponse(emptyPayload, { headers: { 'Cache-Control': 'public, max-age=30, s-maxage=120' } })
         }
 
-        const [{ data: inventoryRows, error: inventoryError }, { data: activeDiscounts, error: discountsError }] = await Promise.all([
-            adminClient.from('inventory').select('product_id, created_at').eq('workspace_id', resolved.workspace.id).eq('storage_id', marketplaceStorageId).eq('is_deleted', false),
-            adminClient.rpc('get_active_discounts_for_marketplace_storage', { p_workspace_id: resolved.workspace.id, p_storage_id: marketplaceStorageId })
+        const storefrontStorageIds = await resolveStorefrontStorageIds(
+            adminClient,
+            resolved.workspace.id,
+            { storefrontId: resolved.storefrontId, rules: storefrontRules }
+        )
+        if (storefrontStorageIds.length === 0) {
+            return jsonResponse(emptyPayload, { headers: { 'Cache-Control': 'public, max-age=30, s-maxage=120' } })
+        }
+
+        const [{ data: inventoryRows, error: inventoryError }, discountResults] = await Promise.all([
+            adminClient.from('inventory').select('product_id, storage_id, created_at').eq('workspace_id', resolved.workspace.id).in('storage_id', storefrontStorageIds).eq('is_deleted', false),
+            Promise.all(storefrontStorageIds.map((storageId) => adminClient.rpc('get_active_discounts_for_marketplace_storage', {
+                p_workspace_id: resolved.workspace.id,
+                p_storage_id: storageId
+            })))
         ])
         if (inventoryError) return errorResponse(inventoryError.message, 500)
-        if (discountsError) return errorResponse(discountsError.message, 500)
+        for (const result of discountResults) {
+            if (result.error) return errorResponse(result.error.message, 500)
+        }
 
-        let visibleProductIds = Array.from(new Set(((inventoryRows ?? []) as InventoryRow[]).map((row) => row.product_id).filter(Boolean)))
-        const storefrontVisibility = await resolveStorefrontVisibleProductIds(adminClient, resolved.workspace.id, visibleProductIds, { storefrontId: resolved.storefrontId })
+        const inventorySources = selectStorefrontInventorySources(storefrontStorageIds, (inventoryRows ?? []) as InventoryRow[])
+        let visibleProductIds = Array.from(inventorySources.sourceStorageIdByProductId.keys())
+        const storefrontVisibility = await resolveStorefrontVisibleProductIds(adminClient, resolved.workspace.id, visibleProductIds, {
+            storefrontId: resolved.storefrontId,
+            rules: storefrontRules
+        })
         if (storefrontVisibility) visibleProductIds = visibleProductIds.filter((productId) => storefrontVisibility.has(productId))
         if (visibleProductIds.length === 0) {
             return jsonResponse(emptyPayload, { headers: { 'Cache-Control': 'public, max-age=30, s-maxage=120' } })
@@ -220,7 +241,7 @@ Deno.serve(async (req) => {
             categoryIds.length > 0
                 ? adminClient.from('categories').select('id, name').in('id', categoryIds).eq('is_deleted', false).order('name', { ascending: true })
                 : Promise.resolve({ data: [], error: null }),
-            fetchStorefrontPriceOverride(adminClient, resolved.workspace.id, resolved.storefrontId)
+            fetchStorefrontPriceOverride(adminClient, resolved.workspace.id, resolved.storefrontId, storefrontRules)
         ])
         if (categoryError) return errorResponse(categoryError.message, 500)
 
@@ -232,17 +253,25 @@ Deno.serve(async (req) => {
                 if (imageUrl) categoryCoverUrlById.set(product.category_id, imageUrl)
             }
         }
-        const marketplaceAddedAtByProductId = new Map(((inventoryRows ?? []) as InventoryRow[]).map((row) => [row.product_id, row.created_at] as const))
-        const discountByProductId = new Map<string, ResolvedWorkspaceDiscountRow>()
-        for (const discount of (activeDiscounts ?? []) as ResolvedWorkspaceDiscountRow[]) {
-            if (discount.is_stock_ok) discountByProductId.set(discount.product_id, { ...discount, discount_value: Number(discount.discount_value ?? 0) })
+        const discountBySourceAndProductId = new Map<string, ResolvedWorkspaceDiscountRow>()
+        for (let index = 0; index < discountResults.length; index += 1) {
+            const storageId = storefrontStorageIds[index]
+            for (const discount of (discountResults[index].data ?? []) as ResolvedWorkspaceDiscountRow[]) {
+                if (discount.is_stock_ok) {
+                    discountBySourceAndProductId.set(`${storageId}:${discount.product_id}`, {
+                        ...discount,
+                        discount_value: Number(discount.discount_value ?? 0)
+                    })
+                }
+            }
         }
 
         const mappedProducts: MappedProduct[] = productRows.map((product) => {
             const overrideItem = priceOverride?.items.get(product.id)
             const basePrice = overrideItem?.price ?? Number(product.price ?? 0)
-            const resolvedDiscount = discountByProductId.get(product.id)
-            const marketplaceAddedAt = marketplaceAddedAtByProductId.get(product.id) ?? product.created_at ?? null
+            const sourceStorageId = inventorySources.sourceStorageIdByProductId.get(product.id)!
+            const resolvedDiscount = discountBySourceAndProductId.get(`${sourceStorageId}:${product.id}`)
+            const marketplaceAddedAt = inventorySources.marketplaceAddedAtByProductId.get(product.id) ?? product.created_at ?? null
             return {
                 id: product.id,
                 name: product.name,
@@ -259,6 +288,7 @@ Deno.serve(async (req) => {
                 discount_value: resolvedDiscount?.discount_value ?? null,
                 discount_ends_at: resolvedDiscount?.ends_at ?? null,
                 marketplace_added_at: marketplaceAddedAt,
+                source_storage_id: sourceStorageId,
                 addedAt: getTimestamp(marketplaceAddedAt)
             }
         })

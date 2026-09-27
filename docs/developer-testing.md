@@ -189,6 +189,17 @@ group. It checks legacy template defaults, HEX validation, balance signs and zer
 A4 rendering, and the Cloud / Hybrid client save contract with friendly failure
 copy. Run it with `node scripts/dev-testing/cli.mjs --suite business-partners --groups account-statement-templates`.
 
+## E-Commerce coverage
+
+The `ecommerce` suite's **Storefront configuration** group checks storage-rule
+composition and source selection, the two-additional-storefront workspace cap,
+workspace/storefront-scoped Supabase request contracts and failure propagation,
+and migration constraints. Run it with
+`node scripts/dev-testing/cli.mjs --suite ecommerce --groups storefront-configuration`.
+These checks use a mocked Supabase client and inspect migration source; they do
+not exercise live RLS, deployed Edge Functions, order delivery, or the public
+storefront in a browser.
+
 ## Regular POS coverage
 
 The independent `pos` suite covers production checkout for cash and all four

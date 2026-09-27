@@ -7,6 +7,7 @@ import {
     sanitizeMarketplaceText,
     type StorefrontCatalogRule
 } from '../_shared/marketplace.ts'
+import { getStorefrontStorageIds } from '../_shared/storefrontCatalogRules.ts'
 
 const STORE_PAGE_SIZE = 30
 
@@ -30,7 +31,7 @@ type StorefrontEntry = {
     default_currency: string | null
     storefrontId: string | null
 }
-type MarketplaceStorageRow = { id: string; workspace_id: string }
+type WorkspaceStorageRow = { id: string; workspace_id: string; is_marketplace: boolean | null }
 type ProductSummaryRow = { id: string; workspace_id: string; category_id: string | null }
 type InventoryRow = { workspace_id: string; storage_id: string; product_id: string }
 type StoreCursor = { name: string; slug: string }
@@ -126,58 +127,83 @@ Deno.serve(async (req) => {
         }
 
         const workspaceIds = Array.from(new Set(pageEntries.map((entry) => entry.workspaceId)))
-        const [{ data: marketplaceStorages, error: marketplaceStorageError }, { data: products, error: productError }, { data: ruleRows, error: rulesError }] = await Promise.all([
-            adminClient.from('storages').select('id, workspace_id').in('workspace_id', workspaceIds).eq('is_deleted', false).eq('is_marketplace', true),
+        const [{ data: storageRows, error: storageError }, { data: products, error: productError }, { data: ruleRows, error: rulesError }] = await Promise.all([
+            adminClient.from('storages').select('id, workspace_id, is_marketplace').in('workspace_id', workspaceIds).eq('is_deleted', false),
             adminClient.from('products').select('id, workspace_id, category_id').in('workspace_id', workspaceIds).eq('is_deleted', false),
-            adminClient.from('workspace_storefront_catalog_rules').select('workspace_id, storefront_id, rule_type, price_book_id, override_prices').in('workspace_id', workspaceIds)
+            adminClient.from('workspace_storefront_catalog_rules').select('workspace_id, storefront_id, rule_type, target_type, price_book_id, storage_id, override_prices').in('workspace_id', workspaceIds)
         ])
-        if (marketplaceStorageError) return errorResponse(marketplaceStorageError.message, 500)
+        if (storageError) return errorResponse(storageError.message, 500)
         if (productError) return errorResponse(productError.message, 500)
         if (rulesError) return errorResponse(rulesError.message, 500)
 
-        const marketplaceStorageIdByWorkspace = new Map<string, string>()
-        for (const row of (marketplaceStorages ?? []) as MarketplaceStorageRow[]) {
-            if (!marketplaceStorageIdByWorkspace.has(row.workspace_id)) marketplaceStorageIdByWorkspace.set(row.workspace_id, row.id)
-        }
-        const productById = new Map(((products ?? []) as ProductSummaryRow[]).map((product) => [product.id, product] as const))
-        const marketplaceStorageIds = Array.from(new Set(marketplaceStorageIdByWorkspace.values()))
-        const countsByWorkspace = new Map<string, { productIds: Set<string>; categoryIds: Set<string> }>()
-        if (marketplaceStorageIds.length > 0) {
-            const { data: inventoryRows, error: inventoryError } = await adminClient
-                .from('inventory')
-                .select('workspace_id, storage_id, product_id')
-                .in('workspace_id', workspaceIds)
-                .in('storage_id', marketplaceStorageIds)
-                .eq('is_deleted', false)
-                .gt('quantity', 0)
-            if (inventoryError) return errorResponse(inventoryError.message, 500)
-            for (const row of (inventoryRows ?? []) as InventoryRow[]) {
-                if (marketplaceStorageIdByWorkspace.get(row.workspace_id) !== row.storage_id) continue
-                const product = productById.get(row.product_id)
-                if (!product || product.workspace_id !== row.workspace_id) continue
-                const current = countsByWorkspace.get(row.workspace_id) ?? { productIds: new Set<string>(), categoryIds: new Set<string>() }
-                current.productIds.add(product.id)
-                if (product.category_id) current.categoryIds.add(product.category_id)
-                countsByWorkspace.set(row.workspace_id, current)
+        const activeStorageIdsByWorkspace = new Map<string, string[]>()
+        const defaultStorageIdsByWorkspace = new Map<string, string[]>()
+        for (const row of (storageRows ?? []) as WorkspaceStorageRow[]) {
+            const activeStorageIds = activeStorageIdsByWorkspace.get(row.workspace_id) ?? []
+            activeStorageIds.push(row.id)
+            activeStorageIdsByWorkspace.set(row.workspace_id, activeStorageIds)
+            if (row.is_marketplace) {
+                const defaultStorageIds = defaultStorageIdsByWorkspace.get(row.workspace_id) ?? []
+                defaultStorageIds.push(row.id)
+                defaultStorageIdsByWorkspace.set(row.workspace_id, defaultStorageIds)
             }
         }
-
+        const productById = new Map(((products ?? []) as ProductSummaryRow[]).map((product) => [product.id, product] as const))
         const rulesByKey = new Map<string, StorefrontCatalogRule[]>()
         for (const row of (ruleRows ?? []) as {
             workspace_id: string
             storefront_id: string | null
             rule_type: string
+            target_type: string | null
             price_book_id: string | null
+            storage_id: string | null
             override_prices: boolean | null
         }[]) {
             const key = `${row.workspace_id}:${row.storefront_id ?? ''}`
             const rules = rulesByKey.get(key) ?? []
             rules.push({
                 rule_type: row.rule_type === 'exclusion' ? 'exclusion' : 'inclusion',
+                target_type: row.target_type === 'storage'
+                    ? 'storage'
+                    : row.target_type === 'price_book' || row.price_book_id
+                        ? 'price_book'
+                        : 'native',
                 price_book_id: row.price_book_id,
+                storage_id: row.storage_id,
                 override_prices: Boolean(row.override_prices)
             })
             rulesByKey.set(key, rules)
+        }
+
+        const storageIdsByStorefrontKey = new Map<string, string[]>()
+        for (const entry of pageEntries) {
+            const key = `${entry.workspaceId}:${entry.storefrontId ?? ''}`
+            const rules = rulesByKey.get(key) ?? []
+            const activeIds = new Set(activeStorageIdsByWorkspace.get(entry.workspaceId) ?? [])
+            const storageIds = getStorefrontStorageIds(defaultStorageIdsByWorkspace.get(entry.workspaceId) ?? [], rules)
+                .filter((storageId) => activeIds.has(storageId))
+            storageIdsByStorefrontKey.set(key, storageIds)
+        }
+
+        const sourceStorageIds = Array.from(new Set(Array.from(storageIdsByStorefrontKey.values()).flat()))
+        const productIdsByStorageId = new Map<string, Set<string>>()
+        if (sourceStorageIds.length > 0) {
+            const { data: inventoryRows, error: inventoryError } = await adminClient
+                .from('inventory')
+                .select('workspace_id, storage_id, product_id')
+                .in('workspace_id', workspaceIds)
+                .in('storage_id', sourceStorageIds)
+                .eq('is_deleted', false)
+                .gt('quantity', 0)
+            if (inventoryError) return errorResponse(inventoryError.message, 500)
+            for (const row of (inventoryRows ?? []) as InventoryRow[]) {
+                if (!(activeStorageIdsByWorkspace.get(row.workspace_id) ?? []).includes(row.storage_id)) continue
+                const product = productById.get(row.product_id)
+                if (!product || product.workspace_id !== row.workspace_id) continue
+                const current = productIdsByStorageId.get(row.storage_id) ?? new Set<string>()
+                current.add(product.id)
+                productIdsByStorageId.set(row.storage_id, current)
+            }
         }
 
         const logoUrlByWorkspace = new Map<string, string | null>()
@@ -191,18 +217,21 @@ Deno.serve(async (req) => {
         }
 
         const stores = await Promise.all(pageEntries.map(async (entry) => {
-            const counts = countsByWorkspace.get(entry.workspaceId) ?? { productIds: new Set<string>(), categoryIds: new Set<string>() }
-            const rules = rulesByKey.get(`${entry.workspaceId}:${entry.storefrontId ?? ''}`)
-            let productCount = counts.productIds.size
-            let categoryCount = counts.categoryIds.size
-            if (rules && rules.length > 0 && counts.productIds.size > 0) {
-                const visibleProductIds = await resolveStorefrontVisibleProductIds(adminClient, entry.workspaceId, Array.from(counts.productIds), { storefrontId: entry.storefrontId, rules })
-                if (visibleProductIds) {
-                    const visibleIds = Array.from(counts.productIds).filter((productId) => visibleProductIds.has(productId))
-                    productCount = visibleIds.length
-                    categoryCount = new Set(visibleIds.map((productId) => productById.get(productId)?.category_id).filter(Boolean)).size
-                }
-            }
+            const key = `${entry.workspaceId}:${entry.storefrontId ?? ''}`
+            const rules = rulesByKey.get(key) ?? []
+            const sourceStorageIds = storageIdsByStorefrontKey.get(key) ?? []
+            const candidateProductIds = new Set(sourceStorageIds.flatMap((storageId) => Array.from(productIdsByStorageId.get(storageId) ?? [])))
+            const visibleProductIds = await resolveStorefrontVisibleProductIds(
+                adminClient,
+                entry.workspaceId,
+                Array.from(candidateProductIds),
+                { storefrontId: entry.storefrontId, rules }
+            )
+            const visibleIds = visibleProductIds
+                ? Array.from(candidateProductIds).filter((productId) => visibleProductIds.has(productId))
+                : Array.from(candidateProductIds)
+            const productCount = visibleIds.length
+            const categoryCount = new Set(visibleIds.map((productId) => productById.get(productId)?.category_id).filter(Boolean)).size
             return {
                 name: entry.name,
                 slug: entry.slug,

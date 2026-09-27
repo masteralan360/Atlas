@@ -33,7 +33,8 @@ const catalogProduct: MarketplaceProduct = {
     discount_type: 'percentage',
     discount_value: 20,
     discount_ends_at: '2026-10-01T00:00:00.000Z',
-    marketplace_added_at: null
+    marketplace_added_at: null,
+    source_storage_id: 'storage-a'
 }
 
 describe('mergeCartWithCatalog', () => {
@@ -52,7 +53,8 @@ describe('mergeCartWithCatalog', () => {
                 unit_price: 20,
                 original_unit_price: 25,
                 unit: 'box',
-                image_url: 'https://example.com/product.png'
+                image_url: 'https://example.com/product.png',
+                storage_id: 'storage-a'
             })
         ])
     })

@@ -2,14 +2,15 @@ import { useAuth } from '@/auth'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { isBackendConfigurationRequired, supabase } from '@/auth/supabase'
 import { useSyncStatus, clearQueue } from '@/sync'
-import { db, hasCurrencyExchangeAccountingData, listLocalCustomTemplates, saveRestaurantTableSettings, usePriceBookCatalogState, useRestaurantPosTickets, useRestaurantTableSettings } from '@/local-db'
+import { db, hasCurrencyExchangeAccountingData, listLocalCustomTemplates, saveRestaurantTableSettings, usePriceBookCatalogState, useRestaurantPosTickets, useRestaurantTableSettings, useStorages } from '@/local-db'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button, Label, LanguageSwitcher, Input, CurrencySelector, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tabs, TabsList, TabsTrigger, TabsContent, Switch, Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, AppDialog, AppDialogBody, AppDialogContent, AppDialogDescription, AppDialogFooter, AppDialogHeader, AppDialogTitle, Textarea, useToast, RegisterWorkspaceContactsModal } from '@/ui/components'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'wouter'
+import { AdditionalStorefrontsManager } from '@/ui/components/marketplace/AdditionalStorefrontsManager'
 import { useWorkspace } from '@/workspace'
 import { Coins } from 'lucide-react'
 import type { IQDDisplayPreference, CurrencyCode } from '@/local-db/models'
-import { Settings as SettingsIcon, Database, Cloud, Trash2, RefreshCw, User, Copy, Check, CreditCard, Globe, Download, Upload, AlertCircle, Printer, Contact, Fingerprint, Store, ExternalLink, Usb, Bluetooth, CalendarClock, Plus, Menu, Table2, Crown } from 'lucide-react'
+import { Settings as SettingsIcon, Database, Cloud, Trash2, RefreshCw, User, Copy, Check, CreditCard, Globe, Download, Upload, AlertCircle, Printer, Contact, Fingerprint, Store, ExternalLink, Usb, Bluetooth, CalendarClock, Menu, Table2, Crown } from 'lucide-react'
 import { formatDate, formatDateTime, formatTime, cn, generateId, getHourDisplayPreference, setHourDisplayPreference, type HourDisplayPreference } from '@/lib/utils'
 import { useTheme } from '@/ui/components/theme-provider'
 import { Moon, Sun, Monitor, Unlock, Server, MessageSquare, Bell, MonitorPlay, Wifi } from 'lucide-react'
@@ -253,14 +254,6 @@ export function Settings() {
     const [marketplaceDescription, setMarketplaceDescription] = useState(features.store_description || '')
     const [marketplaceSlugStatus, setMarketplaceSlugStatus] = useState<'idle' | 'checking' | 'available' | 'taken' | 'invalid'>('idle')
     const [isSavingMarketplace, setIsSavingMarketplace] = useState(false)
-    const [secondaryStorefront, setSecondaryStorefront] = useState<{ id: string; visibility: 'private' | 'public' | 'link_only'; slug: string; description: string | null } | null>(null)
-    const [isSecondaryStorefrontLoading, setIsSecondaryStorefrontLoading] = useState(false)
-    const [isSecondaryStorefrontActionPending, setIsSecondaryStorefrontActionPending] = useState(false)
-    const [isSecondaryStorefrontRemoveConfirmOpen, setIsSecondaryStorefrontRemoveConfirmOpen] = useState(false)
-    const [secondaryStorefrontVisibility, setSecondaryStorefrontVisibility] = useState<'private' | 'public' | 'link_only'>('private')
-    const [secondaryStorefrontSlug, setSecondaryStorefrontSlug] = useState('')
-    const [secondaryStorefrontDescription, setSecondaryStorefrontDescription] = useState('')
-    const [secondaryStorefrontSlugStatus, setSecondaryStorefrontSlugStatus] = useState<'idle' | 'checking' | 'available' | 'taken' | 'invalid'>('idle')
     const canUseBarcodeScanner = hasCapability('barcodeScanner')
     const canUseThermalPrinter = hasCapability('thermalPrinter')
     const isAndroidDirectThermalPwa = isAndroidPwa()
@@ -271,6 +264,7 @@ export function Settings() {
     const canUseMultiCurrency = features.allowed_currencies.length > 1
     const canUseMarketplace = hasCapability('marketplaceStorefronts')
     const canUsePriceBooks = hasCapability('priceBooks')
+    const marketplaceStorages = useStorages(user?.workspaceId)
     const priceBookCatalog = usePriceBookCatalogState(user?.workspaceId, {
         enabled: Boolean(user?.workspaceId) && canUseMarketplace && canUsePriceBooks
     })
@@ -636,16 +630,6 @@ export function Settings() {
     const marketplacePreviewUrl = normalizedMarketplaceSlug && marketplaceBaseOrigin
         ? `${marketplaceBaseOrigin}/s/${normalizedMarketplaceSlug}`
         : ''
-    const normalizedSecondaryStorefrontSlug = secondaryStorefrontSlug
-        .toLowerCase()
-        .replace(/[\s_]+/g, '-')
-        .replace(/[^a-z0-9-]/g, '')
-        .replace(/-+/g, '-')
-        .slice(0, 40)
-    const secondaryStorefrontPreviewUrl = normalizedSecondaryStorefrontSlug && marketplaceBaseOrigin
-        ? `${marketplaceBaseOrigin}/s/${normalizedSecondaryStorefrontSlug}`
-        : ''
-
     useEffect(() => {
         if (workspaceName !== null) {
             setLocalWorkspaceName(workspaceName)
@@ -708,110 +692,6 @@ export function Settings() {
             clearTimeout(timer)
         }
     }, [features.store_slug, isLocalMode, isSupabaseConfigured, normalizedMarketplaceSlug, user?.role])
-
-    useEffect(() => {
-        if (user?.role !== 'admin' || isLocalMode || !isSupabaseConfigured || !secondaryStorefront) {
-            setSecondaryStorefrontSlugStatus('idle')
-            return
-        }
-
-        if (!normalizedSecondaryStorefrontSlug) {
-            setSecondaryStorefrontSlugStatus('idle')
-            return
-        }
-
-        if (!marketplaceSlugPattern.test(normalizedSecondaryStorefrontSlug)) {
-            setSecondaryStorefrontSlugStatus('invalid')
-            return
-        }
-
-        if (normalizedSecondaryStorefrontSlug === (secondaryStorefront.slug || '')) {
-            setSecondaryStorefrontSlugStatus('available')
-            return
-        }
-
-        let isCancelled = false
-        setSecondaryStorefrontSlugStatus('checking')
-
-        const timer = setTimeout(async () => {
-            try {
-                const { data, error } = await runSupabaseAction('settings.checkStorefrontSlug', () =>
-                    supabase.rpc('check_storefront_slug_available', {
-                        p_slug: normalizedSecondaryStorefrontSlug,
-                        p_exclude_storefront_id: secondaryStorefront.id
-                    }),
-                    { timeoutMs: 12000, platform: 'all' }
-                ) as { data: boolean | null; error: Error | null }
-
-                if (isCancelled) return
-
-                if (error) {
-                    throw error
-                }
-
-                setSecondaryStorefrontSlugStatus(data ? 'available' : 'taken')
-            } catch {
-                if (!isCancelled) {
-                    setSecondaryStorefrontSlugStatus('idle')
-                }
-            }
-        }, 350)
-
-        return () => {
-            isCancelled = true
-            clearTimeout(timer)
-        }
-    }, [isLocalMode, isSupabaseConfigured, normalizedSecondaryStorefrontSlug, secondaryStorefront, user?.role])
-
-    useEffect(() => {
-        if (user?.role !== 'admin' || isLocalMode || !isSupabaseConfigured || !user?.workspaceId) {
-            setSecondaryStorefront(null)
-            return
-        }
-
-        let isCancelled = false
-
-        const load = async () => {
-            setIsSecondaryStorefrontLoading(true)
-            try {
-                const { data, error } = await runSupabaseAction('settings.fetchSecondaryStorefront', () =>
-                    supabase
-                        .from('workspace_storefronts')
-                        .select('id, visibility, slug, description')
-                        .eq('workspace_id', user.workspaceId!)
-                        .limit(1)
-                        .maybeSingle(),
-                    { timeoutMs: 12000, platform: 'all' }
-                ) as { data: { id: string; visibility: 'private' | 'public' | 'link_only'; slug: string; description: string | null } | null; error: Error | null }
-
-                if (isCancelled) return
-
-                if (error) {
-                    throw error
-                }
-
-                setSecondaryStorefront(data)
-            } catch (error) {
-                console.error('[Settings] Failed to load the additional storefront:', error)
-            } finally {
-                if (!isCancelled) {
-                    setIsSecondaryStorefrontLoading(false)
-                }
-            }
-        }
-
-        void load()
-
-        return () => {
-            isCancelled = true
-        }
-    }, [isLocalMode, isSupabaseConfigured, user?.role, user?.workspaceId])
-
-    useEffect(() => {
-        setSecondaryStorefrontVisibility(secondaryStorefront?.visibility ?? 'private')
-        setSecondaryStorefrontSlug(secondaryStorefront?.slug ?? '')
-        setSecondaryStorefrontDescription(secondaryStorefront?.description ?? '')
-    }, [secondaryStorefront])
 
     useEffect(() => {
         const syncUpdatePreference = () => setUpdatesDisabled(areApplicationUpdatesDisabled())
@@ -1906,175 +1786,6 @@ export function Settings() {
         window.open(marketplacePreviewUrl, '_blank', 'noopener,noreferrer')
     }
 
-    const handleAddSecondaryStorefront = async () => {
-        if (!user?.workspaceId) return
-
-        setIsSecondaryStorefrontActionPending(true)
-        try {
-            const { data, error } = await runSupabaseAction('settings.addSecondaryStorefront', () =>
-                supabase
-                    .from('workspace_storefronts')
-                    .insert({
-                        workspace_id: user.workspaceId!,
-                        visibility: 'private',
-                        slug: '',
-                        description: null
-                    })
-                    .select('id, visibility, slug, description')
-                    .maybeSingle(),
-                { timeoutMs: 12000, platform: 'all' }
-            ) as { data: { id: string; visibility: 'private' | 'public' | 'link_only'; slug: string; description: string | null } | null; error: Error | null }
-
-            if (error) {
-                throw error
-            }
-
-            setSecondaryStorefront(data)
-            toast({
-                title: t('common.success') || 'Success',
-                description: t('settings.marketplace.secondaryStorefrontAdded', {
-                    defaultValue: 'Additional storefront created.'
-                })
-            })
-        } catch (error) {
-            showActionError(error, t('settings.marketplace.secondaryStorefrontAddError', {
-                defaultValue: 'Failed to add the additional storefront.'
-            }))
-        } finally {
-            setIsSecondaryStorefrontActionPending(false)
-        }
-    }
-
-    const handleSaveSecondaryStorefront = async () => {
-        if (!user?.workspaceId || !secondaryStorefront) return
-
-        if (isLocalMode) {
-            toast({
-                title: t('common.error') || 'Error',
-                description: t('settings.marketplace.localUnsupported', {
-                    defaultValue: 'Marketplace publishing is available only for cloud and hybrid workspaces.'
-                }),
-                variant: 'destructive'
-            })
-            return
-        }
-
-        if ((secondaryStorefrontVisibility === 'public' || secondaryStorefrontVisibility === 'link_only')
-            && !normalizedSecondaryStorefrontSlug) {
-            toast({
-                title: t('common.error') || 'Error',
-                description: t('settings.marketplace.secondaryStorefrontSlugRequired', {
-                    defaultValue: 'Set a store slug before publishing this storefront'
-                }),
-                variant: 'destructive'
-            })
-            return
-        }
-
-        if (normalizedSecondaryStorefrontSlug && !marketplaceSlugPattern.test(normalizedSecondaryStorefrontSlug)) {
-            toast({
-                title: t('common.error') || 'Error',
-                description: t('settings.marketplace.slugInvalid', {
-                    defaultValue: 'Only lowercase letters, numbers, and hyphens allowed'
-                }),
-                variant: 'destructive'
-            })
-            return
-        }
-
-        if (normalizedSecondaryStorefrontSlug && secondaryStorefrontSlugStatus === 'taken') {
-            toast({
-                title: t('common.error') || 'Error',
-                description: t('settings.marketplace.slugTaken', {
-                    defaultValue: 'This slug is already taken'
-                }),
-                variant: 'destructive'
-            })
-            return
-        }
-
-        setIsSecondaryStorefrontActionPending(true)
-        try {
-            const { error } = await runSupabaseAction('settings.saveSecondaryStorefront', () =>
-                supabase
-                    .from('workspace_storefronts')
-                    .update({
-                        visibility: secondaryStorefrontVisibility,
-                        slug: normalizedSecondaryStorefrontSlug,
-                        description: secondaryStorefrontDescription.trim() || null
-                    })
-                    .eq('id', secondaryStorefront.id)
-                    .eq('workspace_id', user.workspaceId!),
-                { timeoutMs: 12000, platform: 'all' }
-            ) as { error: Error | null }
-
-            if (error) {
-                throw error
-            }
-
-            setSecondaryStorefront((current) => current
-                ? {
-                    ...current,
-                    visibility: secondaryStorefrontVisibility,
-                    slug: normalizedSecondaryStorefrontSlug,
-                    description: secondaryStorefrontDescription.trim() || null
-                }
-                : current)
-
-            toast({
-                title: t('common.success') || 'Success',
-                description: t('settings.marketplace.secondaryStorefrontSaved', {
-                    defaultValue: 'Storefront updated successfully.'
-                })
-            })
-        } catch (error) {
-            showActionError(error, t('settings.marketplace.secondaryStorefrontSaveError', {
-                defaultValue: 'Failed to update the additional storefront.'
-            }))
-        } finally {
-            setIsSecondaryStorefrontActionPending(false)
-        }
-    }
-
-    const handleRemoveSecondaryStorefront = () => {
-        setIsSecondaryStorefrontRemoveConfirmOpen(true)
-    }
-
-    const handleConfirmRemoveSecondaryStorefront = async () => {
-        if (!user?.workspaceId || !secondaryStorefront) return
-
-        setIsSecondaryStorefrontActionPending(true)
-        try {
-            const { error } = await runSupabaseAction('settings.removeSecondaryStorefront', () =>
-                supabase
-                    .from('workspace_storefronts')
-                    .delete()
-                    .eq('id', secondaryStorefront.id)
-                    .eq('workspace_id', user.workspaceId!),
-                { timeoutMs: 12000, platform: 'all' }
-            ) as { error: Error | null }
-
-            if (error) {
-                throw error
-            }
-
-            setIsSecondaryStorefrontRemoveConfirmOpen(false)
-            setSecondaryStorefront(null)
-            toast({
-                title: t('common.success') || 'Success',
-                description: t('settings.marketplace.secondaryStorefrontRemoved', {
-                    defaultValue: 'Storefront removed.'
-                })
-            })
-        } catch (error) {
-            showActionError(error, t('settings.marketplace.secondaryStorefrontRemoveError', {
-                defaultValue: 'Failed to remove the additional storefront.'
-            }))
-        } finally {
-            setIsSecondaryStorefrontActionPending(false)
-        }
-    }
-
     return (
         <div className="space-y-6 max-w-3xl">
             {/* Header */}
@@ -2982,160 +2693,26 @@ export function Settings() {
                                             />
                                         </div>
 
-                                        {canUsePriceBooks && priceBookCatalog.isReady
-                                            && priceBookCatalog.priceBooks.length > 0
-                                            && (
-                                                <div className="space-y-3 rounded-2xl border border-border/60 bg-muted/20 p-4">
-                                                    <StorefrontCatalogRulesEditor
-                                                        workspaceId={user?.workspaceId ?? null}
-                                                        storefrontId={null}
-                                                        priceBooks={priceBookCatalog.priceBooks}
-                                                                                                                disabled={isLocalMode}
-                                                    />
-                                                </div>
-                                            )}
-
-                                        <div className="space-y-4 rounded-2xl border border-border/60 bg-muted/20 p-4">
-                                            <div className="flex flex-col gap-1">
-                                                <Label className="text-sm font-semibold">
-                                                    {t('settings.marketplace.secondaryStorefront', { defaultValue: 'Additional Storefront' })}
-                                                </Label>
-                                                <p className="text-xs text-muted-foreground">
-                                                    {t('settings.marketplace.secondaryStorefrontDesc', {
-                                                        defaultValue: 'Add a second storefront with its own URL, visibility, description, and catalog.'
-                                                    })}
-                                                </p>
-                                            </div>
-
-                                            {isSecondaryStorefrontLoading ? (
-                                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                                    <RefreshCw className="h-3 w-3 animate-spin" />
-                                                    {t('common.loading', { defaultValue: 'Loading...' })}
-                                                </div>
-                                            ) : !secondaryStorefront ? (
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    onClick={handleAddSecondaryStorefront}
-                                                    disabled={isLocalMode || isSecondaryStorefrontActionPending}
-                                                    className="gap-2"
-                                                >
-                                                    <Plus className="h-4 w-4" />
-                                                    {t('settings.marketplace.secondaryStorefrontAdd', { defaultValue: 'Add Storefront' })}
-                                                </Button>
-                                            ) : (
-                                                <div className="space-y-4">
-                                                    <div className="grid gap-4 lg:grid-cols-2">
-                                                        <div className="space-y-2">
-                                                            <Label>{t('settings.marketplace.visibility', { defaultValue: 'Store Visibility' })}</Label>
-                                                            <Select
-                                                                value={secondaryStorefrontVisibility}
-                                                                onValueChange={(value: 'private' | 'public' | 'link_only') => setSecondaryStorefrontVisibility(value)}
-                                                                disabled={isLocalMode || isSecondaryStorefrontActionPending}
-                                                            >
-                                                                <SelectTrigger>
-                                                                    <SelectValue />
-                                                                </SelectTrigger>
-                                                                <SelectContent>
-                                                                    <SelectItem value="private">
-                                                                        {t('settings.marketplace.private', { defaultValue: 'Private' })}
-                                                                    </SelectItem>
-                                                                    <SelectItem value="public">
-                                                                        {t('settings.marketplace.public', { defaultValue: 'Public' })}
-                                                                    </SelectItem>
-                                                                    <SelectItem value="link_only">
-                                                                        {t('settings.marketplace.linkOnly', { defaultValue: 'Public (By link)' })}
-                                                                    </SelectItem>
-                                                                </SelectContent>
-                                                            </Select>
-                                                        </div>
-
-                                                        <div className="space-y-2">
-                                                            <Label>{t('settings.marketplace.slug', { defaultValue: 'Store URL Slug' })}</Label>
-                                                            <Input
-                                                                value={secondaryStorefrontSlug}
-                                                                onChange={(event) => setSecondaryStorefrontSlug(event.target.value)}
-                                                                placeholder="baghdad-tools"
-                                                                disabled={isLocalMode || isSecondaryStorefrontActionPending}
-                                                            />
-                                                            <div className="text-xs text-muted-foreground">
-                                                                {secondaryStorefrontPreviewUrl
-                                                                    ? secondaryStorefrontPreviewUrl
-                                                                    : t('settings.marketplace.slugDesc', { defaultValue: 'Your store will be available at /s/your-slug' })}
-                                                            </div>
-                                                            {!isLocalMode && normalizedSecondaryStorefrontSlug && (
-                                                                <div className={cn(
-                                                                    'text-xs',
-                                                                    secondaryStorefrontSlugStatus === 'taken' && 'text-destructive',
-                                                                    secondaryStorefrontSlugStatus === 'invalid' && 'text-destructive',
-                                                                    secondaryStorefrontSlugStatus === 'available' && 'text-emerald-600 dark:text-emerald-300',
-                                                                    secondaryStorefrontSlugStatus === 'checking' && 'text-muted-foreground'
-                                                                )}>
-                                                                    {secondaryStorefrontSlugStatus === 'checking' && (
-                                                                        <span className="inline-flex items-center gap-2">
-                                                                            <RefreshCw className="h-3 w-3 animate-spin" />
-                                                                            {t('settings.marketplace.slugChecking', { defaultValue: 'Checking availability...' })}
-                                                                        </span>
-                                                                    )}
-                                                                    {secondaryStorefrontSlugStatus === 'taken' && t('settings.marketplace.slugTaken', { defaultValue: 'This slug is already taken' })}
-                                                                    {secondaryStorefrontSlugStatus === 'invalid' && t('settings.marketplace.slugInvalid', { defaultValue: 'Only lowercase letters, numbers, and hyphens allowed' })}
-                                                                    {secondaryStorefrontSlugStatus === 'available' && t('settings.marketplace.slugAvailable', { defaultValue: 'This slug is available' })}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="space-y-2">
-                                                        <Label>{t('settings.marketplace.description', { defaultValue: 'Store Description' })}</Label>
-                                                        <Textarea
-                                                            value={secondaryStorefrontDescription}
-                                                            onChange={(event) => setSecondaryStorefrontDescription(event.target.value)}
-                                                            placeholder={t('settings.marketplace.descriptionDesc', {
-                                                                defaultValue: 'Shown on the marketplace gallery page.'
-                                                            })}
-                                                            rows={3}
-                                                            disabled={isLocalMode || isSecondaryStorefrontActionPending}
-                                                        />
-                                                    </div>
-
-                                                    <div className="flex flex-wrap gap-2">
-                                                        <Button
-                                                            type="button"
-                                                            onClick={handleSaveSecondaryStorefront}
-                                                            disabled={isLocalMode || isSecondaryStorefrontActionPending || secondaryStorefrontSlugStatus === 'checking'}
-                                                            className="gap-2"
-                                                        >
-                                                            <Store className="h-4 w-4" />
-                                                            {isSecondaryStorefrontActionPending
-                                                                ? (t('common.loading') || 'Loading...')
-                                                                : (t('common.save') || 'Save')}
-                                                        </Button>
-                                                        <Button
-                                                            type="button"
-                                                            variant="destructive"
-                                                            onClick={handleRemoveSecondaryStorefront}
-                                                            disabled={isLocalMode || isSecondaryStorefrontActionPending}
-                                                            className="gap-2"
-                                                        >
-                                                            <Trash2 className="h-4 w-4" />
-                                                            {t('settings.marketplace.secondaryStorefrontRemove', { defaultValue: 'Remove Storefront' })}
-                                                        </Button>
-                                                    </div>
-
-                                                    {canUsePriceBooks && (
-                                                        <div className="border-t border-border/50 pt-4">
-                                                            <StorefrontCatalogRulesEditor
-                                                                workspaceId={user?.workspaceId ?? null}
-                                                                storefrontId={secondaryStorefront.id}
-                                                                priceBooks={priceBookCatalog.priceBooks}
-                                                                                                                                disabled={isLocalMode}
-                                                            />
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
+                                        <div className="space-y-3 rounded-2xl border border-border/60 bg-muted/20 p-4">
+                                            <StorefrontCatalogRulesEditor
+                                                workspaceId={user?.workspaceId ?? null}
+                                                storefrontId={null}
+                                                priceBooks={canUsePriceBooks && priceBookCatalog.isReady ? priceBookCatalog.priceBooks : []}
+                                                storages={marketplaceStorages}
+                                                disabled={isLocalMode}
+                                            />
                                         </div>
 
+                                        <div className="space-y-4 rounded-2xl border border-border/60 bg-muted/20 p-4">
+                                            <AdditionalStorefrontsManager
+                                                workspaceId={user?.workspaceId ?? null}
+                                                marketplaceBaseOrigin={marketplaceBaseOrigin}
+                                                canManage={user?.role === 'admin'}
+                                                priceBooks={canUsePriceBooks && priceBookCatalog.isReady ? priceBookCatalog.priceBooks : []}
+                                                storages={marketplaceStorages}
+                                                disabled={isLocalMode}
+                                            />
+                                        </div>
                                         <div className="flex flex-wrap gap-2">
                                             <Button
                                                 type="button"
@@ -3170,42 +2747,7 @@ export function Settings() {
                         <BranchManager />
                     )}
 
-                    <Dialog open={isSecondaryStorefrontRemoveConfirmOpen} onOpenChange={setIsSecondaryStorefrontRemoveConfirmOpen}>
-                        <DialogContent>
-                            <DialogHeader>
-                                <DialogTitle>
-                                    {t('settings.marketplace.secondaryStorefrontRemove', { defaultValue: 'Remove Storefront' })}
-                                </DialogTitle>
-                                <DialogDescription>
-                                    {t('settings.marketplace.secondaryStorefrontRemoveConfirm', {
-                                        defaultValue: 'Remove this storefront? Its URL, visibility, and catalog rules will be deleted as well.'
-                                    })}
-                                </DialogDescription>
-                            </DialogHeader>
-                            <DialogFooter>
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={() => setIsSecondaryStorefrontRemoveConfirmOpen(false)}
-                                    disabled={isSecondaryStorefrontActionPending}
-                                >
-                                    {t('common.cancel') || 'Cancel'}
-                                </Button>
-                                <Button
-                                    type="button"
-                                    variant="destructive"
-                                    onClick={handleConfirmRemoveSecondaryStorefront}
-                                    disabled={isSecondaryStorefrontActionPending}
-                                    className="gap-2"
-                                >
-                                    <Trash2 className="h-4 w-4" />
-                                    {isSecondaryStorefrontActionPending
-                                        ? (t('common.loading') || 'Loading...')
-                                        : (t('settings.marketplace.secondaryStorefrontRemove', { defaultValue: 'Remove Storefront' }))}
-                                </Button>
-                            </DialogFooter>
-                        </DialogContent>
-                    </Dialog>
+
 
                     {/* Contact Modal (rendered outside card but inside profile tab) */}
                     {user?.role === 'admin' && (

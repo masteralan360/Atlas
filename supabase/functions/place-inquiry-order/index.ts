@@ -2,16 +2,19 @@ import { createAdminClient } from '../_shared/supabase.ts'
 import { computeDiscountPrice, type ResolvedWorkspaceDiscountRow } from '../_shared/discounts.ts'
 import { corsHeaders, errorResponse, jsonResponse, readJson } from '../_shared/http.ts'
 import {
+    fetchStorefrontCatalogRules,
     fetchStorefrontPriceOverride,
     getLocalizedMarketplaceOrderMessage,
     getRequesterIp,
     hashMarketplaceValue,
     isMarketplaceOriginAllowed,
     normalizeMarketplaceLanguage,
+    resolveStorefrontStorageIds,
     resolveStorefrontVisibleProductIds,
     sanitizeMarketplaceText,
     sanitizeNullableMarketplaceText
 } from '../_shared/marketplace.ts'
+import { selectStorefrontProductSources } from '../_shared/storefrontCatalogRules.ts'
 import { getCanonicalProductImagePath } from '../_shared/productImagePath.ts'
 
 type PlaceInquiryOrderRequest = {
@@ -27,6 +30,7 @@ type PlaceInquiryOrderRequest = {
     items?: Array<{
         product_id?: string
         quantity?: number
+        storage_id?: string
     }>
     lang?: string
 }
@@ -47,10 +51,7 @@ type ProductRow = {
     image_url: string | null
 }
 
-type InventoryRow = {
-    product_id: string
-    quantity: number | null
-}
+type InventoryRow = { product_id: string; storage_id: string; quantity: number | null }
 
 const WORKSPACE_WITHOUT_MARKETPLACE_EMAIL = '0b342f6c-bcdc-45a9-bcda-9d21360ff3c9'
 
@@ -151,16 +152,24 @@ Deno.serve(async (req) => {
             return errorResponse('Customer phone is required')
         }
 
-        const normalizedItems = new Map<string, number>()
+        const normalizedItems = new Map<string, { quantity: number; storageId?: string }>()
         for (const item of body.items ?? []) {
             const productId = sanitizeMarketplaceText(item.product_id, 80)
             const quantity = Number(item.quantity)
+            const storageId = sanitizeMarketplaceText(item.storage_id, 80) || undefined
 
             if (!productId || !Number.isFinite(quantity) || quantity <= 0) {
                 return errorResponse('Order items are invalid')
             }
 
-            normalizedItems.set(productId, roundQuantity((normalizedItems.get(productId) ?? 0) + quantity))
+            const existing = normalizedItems.get(productId)
+            if (existing?.storageId && storageId && existing.storageId !== storageId) {
+                return errorResponse('Order items are invalid')
+            }
+            normalizedItems.set(productId, {
+                quantity: roundQuantity((existing?.quantity ?? 0) + quantity),
+                storageId: storageId ?? existing?.storageId
+            })
         }
 
         if (normalizedItems.size === 0) {
@@ -245,29 +254,25 @@ Deno.serve(async (req) => {
             return errorResponse('Too many orders from this IP address. Please try again later.', 429)
         }
 
-        const { data: marketplaceStorageId, error: marketplaceStorageError } = await adminClient.rpc('ensure_marketplace_storage', {
-            p_workspace_id: resolvedWorkspace.id
+        const storefrontRules = await fetchStorefrontCatalogRules(adminClient, resolvedWorkspace.id, storefrontId)
+        const storefrontStorageIds = await resolveStorefrontStorageIds(adminClient, resolvedWorkspace.id, {
+            storefrontId,
+            rules: storefrontRules
         })
-
-        if (marketplaceStorageError) {
-            return errorResponse(marketplaceStorageError.message, 500)
-        }
-
-        if (!marketplaceStorageId) {
-            return errorResponse('Marketplace storage is not configured for this store', 409)
+        if (storefrontStorageIds.length === 0) {
+            return errorResponse('This store has no eligible storage configured for marketplace orders', 409)
         }
 
         const productIds = Array.from(normalizedItems.keys())
         const [
             { data: inventoryRows, error: inventoryError },
-            { data: products, error: productsError },
-            { data: activeDiscounts, error: discountsError }
+            { data: products, error: productsError }
         ] = await Promise.all([
             adminClient
                 .from('inventory')
-                .select('product_id, quantity')
+                .select('product_id, storage_id, quantity')
                 .eq('workspace_id', resolvedWorkspace.id)
-                .eq('storage_id', marketplaceStorageId)
+                .in('storage_id', storefrontStorageIds)
                 .eq('is_deleted', false)
                 .in('product_id', productIds),
             adminClient
@@ -275,11 +280,7 @@ Deno.serve(async (req) => {
                 .select('id, name, sku, price, cost_price, currency, image_url')
                 .eq('workspace_id', resolvedWorkspace.id)
                 .eq('is_deleted', false)
-                .in('id', productIds),
-            adminClient.rpc('get_active_discounts_for_marketplace_storage', {
-                p_workspace_id: resolvedWorkspace.id,
-                p_storage_id: marketplaceStorageId
-            })
+                .in('id', productIds)
         ])
 
         if (inventoryError) {
@@ -290,50 +291,62 @@ Deno.serve(async (req) => {
             return errorResponse(productsError.message, 500)
         }
 
-        if (discountsError) {
-            return errorResponse(discountsError.message, 500)
-        }
-
-        const inventoryProductIds = new Set(
-            ((inventoryRows ?? []) as InventoryRow[])
-                .map((row) => row.product_id)
-                .filter(Boolean)
+        const requestedStorageIds = new Map(
+            Array.from(normalizedItems.entries())
+                .filter((entry): entry is [string, { quantity: number; storageId: string }] => Boolean(entry[1].storageId))
+                .map(([productId, item]) => [productId, item.storageId] as const)
         )
-        if (inventoryProductIds.size !== productIds.length) {
-            return errorResponse('Some products could not be found for this store')
+        const sourceStorageIdByProductId = selectStorefrontProductSources(
+            productIds,
+            storefrontStorageIds,
+            (inventoryRows ?? []) as InventoryRow[],
+            requestedStorageIds
+        )
+        if (!sourceStorageIdByProductId) {
+            return errorResponse('Some products are no longer available in this store', 409)
         }
 
         const productsById = new Map<string, ProductRow>()
         for (const product of (products ?? []) as ProductRow[]) {
-            if (inventoryProductIds.has(product.id)) {
-                productsById.set(product.id, product)
-            }
+            productsById.set(product.id, product)
         }
 
         if (productsById.size !== productIds.length) {
-            return errorResponse('Some products could not be found for this store')
+            return errorResponse('Some products are no longer available in this store', 409)
         }
 
         const storefrontVisibility = await resolveStorefrontVisibleProductIds(
             adminClient,
             resolvedWorkspace.id,
             productIds,
-            { storefrontId }
+            { storefrontId, rules: storefrontRules }
         )
         if (storefrontVisibility) {
             const hiddenProductIds = productIds.filter((productId) => !storefrontVisibility.has(productId))
             if (hiddenProductIds.length > 0) {
-                return errorResponse('Some products are no longer available in this store')
+                return errorResponse('Some products are no longer available in this store', 409)
             }
         }
 
-        const discountByProductId = new Map<string, ResolvedWorkspaceDiscountRow>()
-        for (const discount of (activeDiscounts ?? []) as ResolvedWorkspaceDiscountRow[]) {
-            if (discount.is_stock_ok) {
-                discountByProductId.set(discount.product_id, {
-                    ...discount,
-                    discount_value: Number(discount.discount_value ?? 0)
-                })
+        const sourceStorageIds = Array.from(new Set(sourceStorageIdByProductId.values()))
+        const discountResults = await Promise.all(sourceStorageIds.map((storageId) => adminClient.rpc(
+            'get_active_discounts_for_marketplace_storage',
+            { p_workspace_id: resolvedWorkspace.id, p_storage_id: storageId }
+        )))
+        for (const result of discountResults) {
+            if (result.error) return errorResponse(result.error.message, 500)
+        }
+
+        const discountBySourceAndProductId = new Map<string, ResolvedWorkspaceDiscountRow>()
+        for (let index = 0; index < discountResults.length; index += 1) {
+            const storageId = sourceStorageIds[index]
+            for (const discount of (discountResults[index].data ?? []) as ResolvedWorkspaceDiscountRow[]) {
+                if (discount.is_stock_ok) {
+                    discountBySourceAndProductId.set(`${storageId}:${discount.product_id}`, {
+                        ...discount,
+                        discount_value: Number(discount.discount_value ?? 0)
+                    })
+                }
             }
         }
 
@@ -345,12 +358,14 @@ Deno.serve(async (req) => {
             return errorResponse('Marketplace orders currently require all products in the cart to use the same currency.')
         }
 
-        const priceOverride = await fetchStorefrontPriceOverride(adminClient, resolvedWorkspace.id, storefrontId)
+        const priceOverride = await fetchStorefrontPriceOverride(adminClient, resolvedWorkspace.id, storefrontId, storefrontRules)
 
         let subtotal = 0
         const orderItems = productIds.map((productId) => {
             const product = productsById.get(productId)!
-            const quantity = normalizedItems.get(productId) ?? 0
+            const orderItem = normalizedItems.get(productId)!
+            const quantity = orderItem.quantity
+            const sourceStorageId = sourceStorageIdByProductId.get(productId)!
             const overrideItem = priceOverride?.items.get(product.id)
             const originalUnitPrice = overrideItem?.price ?? Number(product.price ?? 0)
             const orderCurrency = (overrideItem?.currency
@@ -360,7 +375,7 @@ Deno.serve(async (req) => {
             const resolvedCostPrice = overrideItem?.cost_price != null
                 ? overrideItem.cost_price
                 : (product.cost_price != null ? Number(product.cost_price) : null)
-            const resolvedDiscount = discountByProductId.get(product.id)
+            const resolvedDiscount = discountBySourceAndProductId.get(`${sourceStorageId}:${product.id}`)
             const unitPrice = resolvedDiscount
                 ? computeDiscountPrice(originalUnitPrice, resolvedDiscount.discount_type, resolvedDiscount.discount_value)
                 : originalUnitPrice
@@ -378,7 +393,7 @@ Deno.serve(async (req) => {
                 line_total: lineTotal,
                 cost_price: resolvedCostPrice,
                 image_url: getCanonicalProductImagePath(product.image_url),
-                storage_id: marketplaceStorageId,
+                storage_id: sourceStorageId,
                 discount_type: resolvedDiscount?.discount_type ?? null,
                 discount_value: resolvedDiscount?.discount_value ?? null,
                 discount_ends_at: resolvedDiscount?.ends_at ?? null,

@@ -41,6 +41,7 @@ export interface MarketplaceProduct {
     discount_value: number | null
     discount_ends_at: string | null
     marketplace_added_at: string | null
+    source_storage_id?: string
 }
 
 export interface MarketplaceStoreCatalog {
@@ -87,6 +88,7 @@ export interface MarketplaceOrderCustomer {
 export interface MarketplaceOrderItemInput {
     product_id: string
     quantity: number
+    storage_id?: string
 }
 
 export interface MarketplaceOrderResponse {

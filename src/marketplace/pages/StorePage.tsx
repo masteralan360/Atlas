@@ -30,7 +30,7 @@ import { useCart } from '../hooks/useCart'
 import { usePageMeta } from '../hooks/usePageMeta'
 import { useStoreCatalog } from '../hooks/useStoreCatalog'
 import { getMarketplaceProductImageUrl } from '../lib/assets'
-import { placeInquiryOrder, type MarketplaceProduct } from '../lib/marketplaceApi'
+import { MarketplaceApiError, placeInquiryOrder, type MarketplaceProduct } from '../lib/marketplaceApi'
 import { getEffectiveStorefrontRules } from '../templates/rules'
 import type { StorefrontRules } from '../templates/types'
 
@@ -170,7 +170,8 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
                 customer,
                 items: cart.items.map((item) => ({
                     product_id: item.product_id,
-                    quantity: item.quantity
+                    quantity: item.quantity,
+                    storage_id: item.storage_id
                 })),
                 lang: (i18n.language || 'en') as 'en' | 'ar' | 'ku'
             })
@@ -187,9 +188,14 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
                 description: response.message
             })
         } catch (submitError) {
+            const description = submitError instanceof MarketplaceApiError && submitError.status === 409
+                ? t('marketplace.orderStorageChanged', { defaultValue: 'Some products are no longer available from this store. Refresh the catalog and try again.' })
+                : submitError instanceof Error
+                    ? submitError.message
+                    : t('marketplace.orderSubmitFailed', { defaultValue: 'Failed to submit order' })
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: submitError instanceof Error ? submitError.message : 'Failed to submit order',
+                description,
                 variant: 'destructive'
             })
         } finally {

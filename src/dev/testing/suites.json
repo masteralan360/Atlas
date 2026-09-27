@@ -519,6 +519,19 @@
     "coverageHelpKey": "devTesting.ecommerceCoverageHelp",
     "groups": [
       {
+        "id": "storefront-configuration",
+        "titleKey": "devTesting.ecommerceGroups.storefrontConfiguration",
+        "layer": "contract",
+        "files": [
+          "src/marketplace/lib/marketplaceApi.test.ts",
+          "src/lib/storefrontCatalogRules.test.ts",
+          "src/lib/storefrontCatalogRulesMigration.test.ts",
+          "src/services/storefrontCatalogRuleRequests.test.ts",
+          "src/lib/additionalStorefrontLimitMigration.test.ts",
+          "src/services/marketplaceStorefrontRequests.test.ts"
+        ]
+      },
+      {
         "id": "jumla-tracking-contract",
         "titleKey": "devTesting.ecommerceGroups.jumlaTrackingContract",
         "layer": "contract",

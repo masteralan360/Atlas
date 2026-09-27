@@ -1,4 +1,10 @@
 import { createAdminClient } from './supabase.ts'
+import {
+    getStorefrontStorageIds,
+    type StorefrontCatalogRule
+} from './storefrontCatalogRules.ts'
+
+export type { StorefrontCatalogRule } from './storefrontCatalogRules.ts'
 
 const PUBLIC_ASSET_FOLDERS = new Set([
     'product-images',
@@ -279,12 +285,6 @@ export function isMarketplaceOriginAllowed(origin: string | null) {
     return allowlist.includes(origin)
 }
 
-export type StorefrontCatalogRule = {
-    rule_type: 'inclusion' | 'exclusion'
-    price_book_id: string | null
-    override_prices: boolean
-}
-
 export async function fetchStorefrontCatalogRules(
     adminClient: ReturnType<typeof createAdminClient>,
     workspaceId: string,
@@ -292,7 +292,7 @@ export async function fetchStorefrontCatalogRules(
 ): Promise<StorefrontCatalogRule[]> {
     let query = adminClient
         .from('workspace_storefront_catalog_rules')
-        .select('rule_type, price_book_id, override_prices')
+        .select('rule_type, target_type, price_book_id, storage_id, override_prices')
         .eq('workspace_id', workspaceId)
 
     query = storefrontId
@@ -305,11 +305,64 @@ export async function fetchStorefrontCatalogRules(
         throw error
     }
 
-    return ((data ?? []) as { rule_type: string; price_book_id: string | null; override_prices: boolean | null }[]).map((row) => ({
+    return ((data ?? []) as {
+        rule_type: string
+        target_type: string | null
+        price_book_id: string | null
+        storage_id: string | null
+        override_prices: boolean | null
+    }[]).map((row) => ({
         rule_type: row.rule_type === 'exclusion' ? 'exclusion' : 'inclusion',
+        target_type: row.target_type === 'storage'
+            ? 'storage'
+            : row.target_type === 'price_book' || row.price_book_id
+                ? 'price_book'
+                : 'native',
         price_book_id: row.price_book_id,
+        storage_id: row.storage_id,
         override_prices: Boolean(row.override_prices)
     }))
+}
+
+/**
+ * Resolves this storefront's inventory sources. Explicit storage inclusion
+ * rules replace the workspace's designated Marketplace storage; exclusion-only
+ * rules filter that default source list. Only active storages in this workspace
+ * can be returned.
+ */
+export async function resolveStorefrontStorageIds(
+    adminClient: ReturnType<typeof createAdminClient>,
+    workspaceId: string,
+    options?: {
+        storefrontId?: string | null
+        rules?: StorefrontCatalogRule[]
+        defaultStorageIds?: string[]
+    }
+) {
+    const rules = options?.rules ?? await fetchStorefrontCatalogRules(adminClient, workspaceId, options?.storefrontId)
+    const hasStorageInclusions = rules.some((rule) => rule.target_type === 'storage' && rule.rule_type === 'inclusion')
+    let defaultStorageIds = options?.defaultStorageIds
+
+    if (!hasStorageInclusions && !defaultStorageIds) {
+        const { data, error } = await adminClient.rpc('ensure_marketplace_storage', { p_workspace_id: workspaceId })
+        if (error) throw error
+        defaultStorageIds = typeof data === 'string' && data ? [data] : []
+    }
+
+    const configuredStorageIds = getStorefrontStorageIds(defaultStorageIds ?? [], rules)
+    if (configuredStorageIds.length === 0) return []
+
+    const { data, error } = await adminClient
+        .from('storages')
+        .select('id')
+        .eq('workspace_id', workspaceId)
+        .eq('is_deleted', false)
+        .in('id', configuredStorageIds)
+
+    if (error) throw error
+
+    const activeStorageIds = new Set(((data ?? []) as { id: string }[]).map((storage) => storage.id))
+    return configuredStorageIds.filter((storageId) => activeStorageIds.has(storageId))
 }
 
 export type StorefrontPriceOverrideItem = {
@@ -326,10 +379,11 @@ export type StorefrontPriceOverrideItem = {
 export async function fetchStorefrontPriceOverride(
     adminClient: ReturnType<typeof createAdminClient>,
     workspaceId: string,
-    storefrontId?: string | null
+    storefrontId?: string | null,
+    rules?: StorefrontCatalogRule[]
 ): Promise<{ priceBookId: string; items: Map<string, StorefrontPriceOverrideItem> } | null> {
-    const rules = await fetchStorefrontCatalogRules(adminClient, workspaceId, storefrontId)
-    const overrideRule = rules.find((rule) => rule.override_prices && rule.price_book_id)
+    const resolvedRules = rules ?? await fetchStorefrontCatalogRules(adminClient, workspaceId, storefrontId)
+    const overrideRule = resolvedRules.find((rule) => rule.target_type === 'price_book' && rule.override_prices && rule.price_book_id)
     if (!overrideRule?.price_book_id) {
         return null
     }
@@ -385,20 +439,21 @@ export async function resolveStorefrontVisibleProductIds(
         return null
     }
 
+    const productRules = resolvedRules.filter((rule) => rule.target_type !== 'storage')
     const includedBookIds = new Set<string>()
     const excludedBookIds = new Set<string>()
     let includeNative = false
     let excludeNative = false
-    for (const rule of resolvedRules) {
+    for (const rule of productRules) {
         if (rule.rule_type === 'inclusion') {
-            if (rule.price_book_id) {
+            if (rule.target_type === 'price_book' && rule.price_book_id) {
                 includedBookIds.add(rule.price_book_id)
-            } else {
+            } else if (rule.target_type === 'native') {
                 includeNative = true
             }
-        } else if (rule.price_book_id) {
+        } else if (rule.target_type === 'price_book' && rule.price_book_id) {
             excludedBookIds.add(rule.price_book_id)
-        } else {
+        } else if (rule.target_type === 'native') {
             excludeNative = true
         }
     }
