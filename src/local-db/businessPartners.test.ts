@@ -1,10 +1,29 @@
 import 'fake-indexeddb/auto'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { setActiveBusinessUser, setNetworkStatus } from '@/lib/network'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 
 import { db } from './database'
+
+const remote = vi.hoisted(() => ({
+    calls: [] as Array<{ name: string; args: Record<string, unknown> }>,
+    failures: [] as Array<{ message: string; code?: string }>
+}))
+
+vi.mock('@/lib/supabaseSchema', () => ({
+    getPartnerSyncWriteRpc: (tableName: string) => ({
+        business_partners: 'sync_business_partner',
+        customers: 'sync_customer',
+        suppliers: 'sync_supplier'
+    }[tableName]),
+    getSupabaseClientForTable: () => ({
+        rpc: async (name: string, args: Record<string, unknown>) => {
+            remote.calls.push({ name, args })
+            return { error: remote.failures.shift() ?? null }
+        }
+    })
+}))
 
 const WORKSPACE_ID = '00000000-0000-4000-8000-000000000001'
 let createBusinessPartner: typeof import('./businessPartners').createBusinessPartner
@@ -152,17 +171,20 @@ describe('business partner agent facets', () => {
         updateBusinessPartner = businessPartners.updateBusinessPartner
         const access = await import('./businessPartnerAccess')
         canAccessBusinessPartnerInLocalCache = access.canAccessBusinessPartnerInLocalCache
-    })
+    }, 60_000)
 
     beforeEach(async () => {
         await db.delete()
         await db.open()
+        remote.calls = []
+        remote.failures = []
         setActiveBusinessUser(null)
         setNetworkStatus(true)
         writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'local' })
     })
 
     afterEach(async () => {
+        vi.restoreAllMocks()
         setActiveBusinessUser(null)
         clearWorkspaceModeSnapshot(WORKSPACE_ID)
         setNetworkStatus(true)
@@ -209,6 +231,102 @@ describe('business partner agent facets', () => {
         await updateBusinessPartner(partner.id, { partnerName: 'Northwind Group' })
         expect((await db.customers.get(partner.customerFacetId!))?.partnerName).toBe('Northwind Group')
         expect((await db.suppliers.get(partner.supplierFacetId!))?.partnerName).toBe('Northwind Group')
+    })
+
+    it('retires a removed supplier facet before syncing the customer-only partner in Cloud', async () => {
+        const partner = await createBusinessPartner(WORKSPACE_ID, {
+            partnerName: 'Role change supplier',
+            phone: '07500000030',
+            defaultCurrency: 'iqd',
+            creditLimit: 0,
+            role: 'both'
+        })
+        const supplierId = partner.supplierFacetId!
+
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
+        setNetworkStatus(true)
+        await updateBusinessPartner(partner.id, { role: 'customer' })
+
+        const supplierDeleteIndex = remote.calls.findIndex((call) => call.name === 'sync_supplier')
+        const partnerUpdateIndex = remote.calls.findIndex((call) => call.name === 'sync_business_partner')
+        const supplierDelete = remote.calls[supplierDeleteIndex]
+        const partnerUpdate = remote.calls[partnerUpdateIndex]
+
+        expect(supplierDelete).toMatchObject({
+            args: {
+                p_operation: 'soft_delete',
+                p_entity_id: supplierId,
+                p_workspace_id: WORKSPACE_ID
+            }
+        })
+        expect(supplierDeleteIndex).toBeGreaterThanOrEqual(0)
+        expect(partnerUpdateIndex).toBeGreaterThan(supplierDeleteIndex)
+        expect(partnerUpdate?.args.p_payload).toMatchObject({
+            role: 'customer',
+            supplier_facet_id: null
+        })
+        expect(await db.suppliers.get(supplierId)).toMatchObject({ isDeleted: true })
+        expect(await db.business_partners.get(partner.id)).toMatchObject({
+            role: 'customer',
+            supplierFacetId: null
+        })
+    })
+
+    it('keeps a supplier tombstone queued when Supabase temporarily rejects facet retirement', async () => {
+        const partner = await createBusinessPartner(WORKSPACE_ID, {
+            partnerName: 'Retry role change supplier',
+            phone: '07500000031',
+            defaultCurrency: 'iqd',
+            creditLimit: 0,
+            role: 'both'
+        })
+        const supplierId = partner.supplierFacetId!
+        remote.failures.push({ code: '42501', message: 'Supplier access denied' })
+
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
+        setNetworkStatus(true)
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        await updateBusinessPartner(partner.id, { role: 'customer' })
+
+        expect(await db.offline_mutations
+            .where('[entityType+entityId+status]')
+            .equals(['suppliers', supplierId, 'pending'])
+            .first())
+            .toMatchObject({
+                operation: 'delete',
+                payload: { id: supplierId, businessPartnerId: partner.id }
+            })
+        expect(await db.business_partners.get(partner.id)).toMatchObject({
+            role: 'customer',
+            supplierFacetId: null
+        })
+        errorSpy.mockRestore()
+    })
+
+    it('cleans up an old supplier facet when a customer-only partner is edited again', async () => {
+        const partner = await createBusinessPartner(WORKSPACE_ID, {
+            partnerName: 'Stale role change supplier',
+            phone: '07500000032',
+            defaultCurrency: 'iqd',
+            creditLimit: 0,
+            role: 'both'
+        })
+        const staleCustomer = { ...partner, role: 'customer' as const }
+        await db.business_partners.put(staleCustomer)
+
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
+        setNetworkStatus(false)
+        await updateBusinessPartner(partner.id, { notes: 'Clean up legacy supplier facet' })
+
+        const queued = (await db.offline_mutations.where('workspaceId').equals(WORKSPACE_ID).toArray())
+            .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+        expect(queued.map((mutation) => [mutation.entityType, mutation.operation])).toEqual([
+            ['suppliers', 'delete'],
+            ['business_partners', 'update'],
+            ['customers', 'update']
+        ])
+        expect(await db.suppliers.get(partner.supplierFacetId!)).toMatchObject({ isDeleted: true })
+        expect(await db.business_partners.get(partner.id)).toMatchObject({ supplierFacetId: null })
     })
 
     it('removes retired email and country values from legacy partner input', async () => {

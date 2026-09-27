@@ -332,6 +332,30 @@ async function syncSoftDelete(
   }
 }
 
+async function retireSupplierFacet(partner: BusinessPartner, timestamp: string) {
+  const supplierId = partner.supplierFacetId
+  if (!supplierId) return
+
+  const supplier = await db.suppliers.get(supplierId)
+  if (supplier && !supplier.isDeleted) {
+    await db.suppliers.put({
+      ...supplier,
+      isDeleted: true,
+      updatedAt: timestamp,
+      version: supplier.version + 1,
+      ...getSyncMetadata(partner.workspaceId, timestamp)
+    })
+  }
+
+  // A failed update from an older client must not replay after the supplier
+  // facet is retired. Replacing it with a tombstone also repairs stale role
+  // changes that have already reached the server.
+  await removeOfflineMutationsForEntityIds('suppliers', [supplierId])
+  await syncSoftDelete('suppliers', supplierId, partner.workspaceId, {
+    businessPartnerId: partner.id
+  })
+}
+
 async function syncHardDelete(tableName: PartnerTableName, entityId: string, workspaceId: string) {
   if (!shouldUseCloudBusinessData(workspaceId)) {
     return
@@ -528,7 +552,7 @@ async function mirrorPartnerToFacets(partner: BusinessPartner) {
     }
   }
 
-  if (partner.supplierFacetId) {
+  if (roleIncludesSupplier(partner.role) && partner.supplierFacetId) {
     const supplier = await db.suppliers.get(partner.supplierFacetId)
     if (supplier && !supplier.isDeleted) {
       const mirroredSupplier: Supplier = {
@@ -1743,6 +1767,9 @@ export async function updateBusinessPartner(
     ...activeExisting,
     ...partnerChanges,
     role: nextRole,
+    supplierFacetId: roleIncludesSupplier(nextRole)
+      ? (partnerChanges.supplierFacetId ?? existing.supplierFacetId)
+      : null,
     receivableCreditLimit:
       partnerChanges.receivableCreditLimit !== undefined
         ? partnerChanges.receivableCreditLimit
@@ -1756,6 +1783,10 @@ export async function updateBusinessPartner(
     updatedAt: now,
     version: existing.version + 1,
     ...getSyncMetadata(existing.workspaceId, now)
+  }
+
+  if (!roleIncludesSupplier(nextRole) && existing.supplierFacetId) {
+    await retireSupplierFacet(existing, now)
   }
 
   await db.business_partners.put(updated)
