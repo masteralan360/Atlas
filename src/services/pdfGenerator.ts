@@ -1,4 +1,5 @@
 import { createElement, type ReactElement } from 'react'
+import type { BarcodeLabelPrintFormat } from '@/lib/barcodeLabel'
 import { createRoot } from 'react-dom/client'
 import i18n from '@/i18n/config'
 import { I18nextProvider } from 'react-i18next'
@@ -25,7 +26,7 @@ export type InvoicePrintFormat = 'a4' | 'receipt'
  * Formats available from the common print selector. Barcode labels are
  * printable documents, but never invoice versions.
  */
-export type PrintFormat = InvoicePrintFormat | 'barcode_35x15'
+export type PrintFormat = InvoicePrintFormat | BarcodeLabelPrintFormat
 
 export function isInvoicePrintFormat(format: PrintFormat): format is InvoicePrintFormat {
     return format === 'a4' || format === 'receipt'

@@ -1,4 +1,4 @@
-import { AlertTriangle, FileText, Printer, Receipt } from 'lucide-react'
+import { AlertTriangle, Barcode, FileText, Printer, Receipt } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -56,6 +56,9 @@ interface PrintSelectionModalProps {
 function PrintOptionIcon({ format, custom = false }: { format: PrintFormat; custom?: boolean }) {
     if (format === 'receipt') {
         return <Receipt className={`h-6 w-6 ${custom ? 'text-primary' : 'text-foreground'}`} />
+    }
+    if (format.startsWith('barcode_')) {
+        return <Barcode className={`h-6 w-6 ${custom ? 'text-primary' : 'text-foreground'}`} />
     }
 
     return <FileText className={`h-6 w-6 ${custom ? 'text-primary' : 'text-foreground'}`} />

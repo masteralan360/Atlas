@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatBarcodeLabelPrice, getBarcodeLabelData, getBarcodeLabelPricePerUnit, getCode128BBarWidths } from './barcodeLabel'
+import {
+    BARCODE_LABEL_PROFILES,
+    formatBarcodeLabelPrice,
+    getBarcodeLabelData,
+    getBarcodeLabelPricePerUnit,
+    getCode128BBarWidths
+} from './barcodeLabel'
 import type { Product } from '@/local-db'
 
 function product(id: string, sku: string, barcode?: string): Product {
@@ -36,6 +42,7 @@ describe('barcode label data', () => {
         ])
 
         expect(labels.map((label) => label.id)).toEqual(['second', 'first'])
+        expect(labels.map((label) => label.productName)).toEqual(['SKU-2', 'SKU-1'])
         expect(labels.map((label) => label.displayValue)).toEqual(['BC-2', 'BC-1'])
         expect(labels.every((label) => label.iqdDisplayPreference === 'IQD')).toBe(true)
     })
@@ -60,5 +67,26 @@ describe('barcode label data', () => {
         expect(getBarcodeLabelPricePerUnit('kg')).toBe('')
         expect(formatBarcodeLabelPrice(12, 'usd', 'IQD', 'm²')).toBe('12 USD per 1m²')
         expect(formatBarcodeLabelPrice(12, 'usd', 'IQD', 'Meter')).toBe('12 USD per 1 Meter')
+    })
+
+    it('supports localized dynamic-unit suffixes on printed labels', () => {
+        expect(getBarcodeLabelPricePerUnit('m²', { perSquareMeter: 'لكل 1 م²' })).toBe('لكل 1 م²')
+        expect(formatBarcodeLabelPrice(12, 'usd', 'IQD', 'Meter', { perMeter: 'لكل 1 متر' }))
+            .toBe('12 USD لكل 1 متر')
+    })
+
+    it('defines compact and EML-400I wide label page profiles', () => {
+        expect(BARCODE_LABEL_PROFILES.barcode_35x15).toMatchObject({
+            widthMm: 35,
+            heightMm: 15,
+            safeMarginMm: 1.4,
+            layout: 'compact'
+        })
+        expect(BARCODE_LABEL_PROFILES.barcode_108x50).toMatchObject({
+            widthMm: 108,
+            heightMm: 50,
+            safeMarginMm: 3,
+            layout: 'wide'
+        })
     })
 })

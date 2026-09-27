@@ -1277,6 +1277,23 @@
       "switchChildBlocked": "يمكن لهذا المنتج التبديل فقط إلى علاقة أخرى لها وحدة المخزون الأصغر نفسها."
     },
     "title": "المنتجات",
+    "barcodePrint": {
+      "action": "طباعة الباركود",
+      "selectedCount": "المنتجات المحددة: {{count}}",
+      "selectHint": "اختر المنتجات، ثم حدد ملصق باركود صغيراً أو عريضاً.",
+      "printSelected": "طباعة الباركود المحدد",
+      "title": "ملصقات باركود المنتجات",
+      "compactLabel": "35 × 15 مم",
+      "compactDescription": "ملصق باركود صغير للمنتج. ملصق واحد لكل منتج محدد.",
+      "wideLabel": "حراري عريض · 108 مم (EML-400I)",
+      "wideDescription": "اسم المنتج وسعره وباركود كبير على ملصق واحد بمقاس 108 × 50 مم.",
+      "showPrice": "إظهار السعر",
+      "price": "السعر",
+      "barcode": "الباركود",
+      "perSquareMeter": "لكل 1 م²",
+      "perDynamicKilogram": "لكل 1 كغم",
+      "perMeter": "لكل 1 متر"
+    },
     "addCategory": "إضافة فئة",
     "subtitle": "إدارة المخزون الخاص بك",
     "addProduct": "إضافة منتج",

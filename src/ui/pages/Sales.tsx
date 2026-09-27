@@ -81,7 +81,7 @@ import {
 import { LoanDetailsPrintTemplate, LoanReceiptPrintTemplate } from '@/ui/components/loans/LoanPrintTemplates'
 import { WhatsAppNumberInputModal } from '@/ui/components/modals/WhatsAppNumberInputModal'
 import { SaleItem } from '@/types'
-import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
+import { generateTemplatePdf, isInvoicePrintFormat, type PrintFormat } from '@/services/pdfGenerator'
 import {
     SALES_HISTORY_RECEIPT_TEMPLATE_KEY,
     SALES_HISTORY_A4_TEMPLATE_KEYS,
@@ -957,7 +957,7 @@ export function Sales() {
             return
         }
         // Sales invoices support only the two persisted invoice formats.
-        if (format === 'barcode_35x15') return
+        if (!isInvoicePrintFormat(format)) return
         setPrintFormat(format)
         setSelectedCustomReceiptTemplate(format === 'receipt' ? template || null : null)
         setSelectedCustomA4Template(format === 'a4' ? template || null : null)

@@ -1286,6 +1286,23 @@
       "switchChildBlocked": "This product can only switch to another relationship with the same smaller inventory unit."
     },
     "title": "Products",
+    "barcodePrint": {
+      "action": "Print barcodes",
+      "selectedCount": "{{count}} products selected",
+      "selectHint": "Select products, then choose a compact or wide barcode label.",
+      "printSelected": "Print selected barcodes",
+      "title": "Product barcode labels",
+      "compactLabel": "35 × 15 mm",
+      "compactDescription": "Compact product barcode label. One label per selected product.",
+      "wideLabel": "Wide thermal · 108 mm (EML-400I)",
+      "wideDescription": "Product name, price, and a large barcode on one 108 × 50 mm label.",
+      "showPrice": "Show price",
+      "price": "Price",
+      "barcode": "Barcode",
+      "perSquareMeter": "per 1m²",
+      "perDynamicKilogram": "per 1 Kg",
+      "perMeter": "per 1 Meter"
+    },
     "addCategory": "Add Category",
     "subtitle": "Manage your inventory",
     "addProduct": "Add Product",

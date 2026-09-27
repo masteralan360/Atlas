@@ -102,6 +102,25 @@ describe('PrintSelectionModal', () => {
         expect(html).toContain('Primary')
     })
 
+    it('shows the wide thermal barcode option with a barcode icon', () => {
+        const html = renderToStaticMarkup(
+            <PrintSelectionModal
+                isOpen
+                onClose={() => undefined}
+                onSelect={() => undefined}
+                nativeOptions={[{
+                    format: 'barcode_108x50',
+                    label: 'Wide thermal · 108 mm (EML-400I)',
+                    description: 'One wide label per product.'
+                }]}
+            />
+        )
+
+        expect(html).toContain('Wide thermal · 108 mm (EML-400I)')
+        expect(html).toContain('One wide label per product.')
+        expect(html).toContain('lucide-barcode')
+    })
+
     it('expands a single option and allows its description to wrap', () => {
         const html = renderToStaticMarkup(
             <PrintSelectionModal

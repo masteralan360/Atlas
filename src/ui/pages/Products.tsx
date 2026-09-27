@@ -39,7 +39,12 @@ import { useHideCosts } from '@/permissions'
 import { hasValidProductCost } from '@/lib/productCost'
 import { isService } from '@/lib/catalogItem'
 import { UiAccessGate, useUiAccess } from '@/context/UiAccessContext'
-import { getBarcodeLabelData } from '@/lib/barcodeLabel'
+import {
+    getBarcodeLabelData,
+    getBarcodeLabelProfile,
+    isBarcodeLabelPrintFormat,
+    type BarcodeLabelPrintFormat
+} from '@/lib/barcodeLabel'
 import { type TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { generateBarcodeLabelsPdf } from '@/services/barcodeLabelPdf'
 import { printPdfBlob } from '@/services/pdfPrintService'
@@ -164,7 +169,7 @@ export function Products() {
     const { user, session } = useAuth()
     const hideCosts = useHideCosts()
     const { features, branchInfo, hasCapability, hasFeature } = useWorkspace()
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const { toast } = useToast()
     const { isAccessKeyHeld } = useUiAccess()
     const [, navigate] = useLocation()
@@ -329,6 +334,7 @@ export function Products() {
     const [isBarcodeSelectionMode, setIsBarcodeSelectionMode] = useState(false)
     const [isBarcodePrintOpen, setIsBarcodePrintOpen] = useState(false)
     const [barcodePrintProducts, setBarcodePrintProducts] = useState<Product[]>([])
+    const [barcodeLabelPrintFormat, setBarcodeLabelPrintFormat] = useState<BarcodeLabelPrintFormat>('barcode_35x15')
     const [branchCloneDialogOpen, setBranchCloneDialogOpen] = useState(false)
     const [cloneTargets, setCloneTargets] = useState<ProductCloneTarget[]>([])
     const [selectedCloneTargetWorkspaceId, setSelectedCloneTargetWorkspaceId] = useState('')
@@ -721,28 +727,58 @@ export function Products() {
         () => getBarcodeLabelData(barcodePrintProducts, features.iqd_display_preference),
         [barcodePrintProducts, features.iqd_display_preference]
     )
+    const barcodeLabelProfile = getBarcodeLabelProfile(barcodeLabelPrintFormat)
+    const defaultBarcodePrintLanguage = features.print_lang && features.print_lang !== 'auto'
+        ? features.print_lang
+        : i18n.language
+    const getBarcodePrintText = useCallback((printLangOverride?: string) => {
+        const printT = i18n.getFixedT(
+            printLangOverride && printLangOverride !== 'auto' ? printLangOverride : defaultBarcodePrintLanguage
+        )
+        return {
+            priceLabel: printT('products.barcodePrint.price', { defaultValue: 'Price' }),
+            barcodeLabel: printT('products.barcodePrint.barcode', { defaultValue: 'Barcode' }),
+            pricePerUnitTranslations: {
+                perSquareMeter: printT('products.barcodePrint.perSquareMeter', { defaultValue: 'per 1m²' }),
+                perDynamicKilogram: printT('products.barcodePrint.perDynamicKilogram', { defaultValue: 'per 1 Kg' }),
+                perMeter: printT('products.barcodePrint.perMeter', { defaultValue: 'per 1 Meter' })
+            }
+        }
+    }, [defaultBarcodePrintLanguage, i18n])
     const barcodeTemplatePreview = useMemo<TemplatePreview>(() => ({
         fields: [{
             key: 'showPrice',
-            label: 'Show Price',
+            label: t('products.barcodePrint.showPrice', { defaultValue: 'Show price' }),
             value: 'true',
             type: 'boolean'
         }],
         page: {
-            widthMm: 35,
-            heightMm: 15
+            widthMm: barcodeLabelProfile.widthMm,
+            heightMm: barcodeLabelProfile.heightMm
         },
-        createElement: (fieldValues) => (
-            <BarcodeLabelTemplate
-                labels={barcodeLabels}
-                showPrice={fieldValues.showPrice !== 'false'}
-            />
-        ),
-        buildPdf: async (_element, _printLangOverride, fieldValues) => generateBarcodeLabelsPdf({
-            labels: barcodeLabels,
-            showPrice: fieldValues?.showPrice !== 'false'
-        })
-    }), [barcodeLabels])
+        createElement: (fieldValues, _effectiveId, printLangOverride) => {
+            const printText = getBarcodePrintText(printLangOverride)
+            return (
+                <BarcodeLabelTemplate
+                    labels={barcodeLabels.slice(0, 1)}
+                    profile={barcodeLabelProfile}
+                    showPrice={fieldValues.showPrice !== 'false'}
+                    priceLabel={printText.priceLabel}
+                    barcodeLabel={printText.barcodeLabel}
+                    pricePerUnitTranslations={printText.pricePerUnitTranslations}
+                />
+            )
+        },
+        buildPdf: async (_element, printLangOverride, fieldValues) => {
+            const printText = getBarcodePrintText(printLangOverride)
+            return generateBarcodeLabelsPdf({
+                labels: barcodeLabels,
+                profile: barcodeLabelProfile,
+                showPrice: fieldValues?.showPrice !== 'false',
+                ...printText
+            })
+        }
+    }), [barcodeLabelProfile, barcodeLabels, getBarcodePrintText, t])
     const selectedCloneTarget = cloneTargets.find((target) => target.workspaceId === selectedCloneTargetWorkspaceId)
     const branchCloneActionLabel = isBranchWorkspace
         ? t('products.branchClone.actionWorkspace', { defaultValue: 'Clone to Workspace' })
@@ -1237,7 +1273,7 @@ export function Products() {
                                     disabled={products.length === 0}
                                 >
                                     <Barcode className="h-4 w-4" />
-                                    Print Barcodes
+                                    {t('products.barcodePrint.action', { defaultValue: 'Print barcodes' })}
                                 </Button>
                             )}
                             <Button variant="outline" onClick={() => setIsProductCategoryManagerOpen(true)}>
@@ -1327,7 +1363,10 @@ export function Products() {
                             </div>
                             <p className="text-sm text-muted-foreground">
                                 {isBarcodeSelectionMode
-                                    ? `${selectedProductsCount} product${selectedProductsCount === 1 ? '' : 's'} selected`
+                                    ? t('products.barcodePrint.selectedCount', {
+                                        defaultValue: '{{count}} products selected',
+                                        count: selectedProductsCount
+                                    })
                                     : t('products.branchClone.selectedCount', {
                                         defaultValue: '{{count}} products selected',
                                         count: selectedProductsCount
@@ -1335,7 +1374,9 @@ export function Products() {
                             </p>
                             <p className="text-sm text-muted-foreground">
                                 {isBarcodeSelectionMode
-                                    ? 'Select the products to print as 35 × 15 mm barcode labels.'
+                                    ? t('products.barcodePrint.selectHint', {
+                                        defaultValue: 'Select products, then choose a label size to print.'
+                                    })
                                     : t('products.branchClone.selectionHint', {
                                         defaultValue: 'Select the products you want to copy, then choose the destination workspace and storage.'
                                     })}
@@ -1347,7 +1388,7 @@ export function Products() {
                                 variant="ghost"
                                 onClick={isBarcodeSelectionMode ? exitBarcodeSelectionMode : exitBranchCloneSelectionMode}
                             >
-                                {isBarcodeSelectionMode ? 'Cancel' : t('products.branchClone.cancelSelection', { defaultValue: 'Cancel' })}
+                                {t('products.branchClone.cancelSelection', { defaultValue: 'Cancel' })}
                             </Button>
                             <Button
                                 type="button"
@@ -1356,7 +1397,9 @@ export function Products() {
                                 disabled={selectedProductsCount === 0}
                             >
                                 {isBarcodeSelectionMode ? <Barcode className="h-4 w-4" /> : <GitBranch className="h-4 w-4" />}
-                                {isBarcodeSelectionMode ? 'Print Barcode' : t('products.branchClone.chooseDestination', { defaultValue: 'Choose Destination' })}
+                                {isBarcodeSelectionMode
+                                    ? t('products.barcodePrint.printSelected', { defaultValue: 'Print selected barcodes' })
+                                    : t('products.branchClone.chooseDestination', { defaultValue: 'Choose Destination' })}
                             </Button>
                         </div>
                     </CardContent>
@@ -1907,19 +1950,46 @@ export function Products() {
                 onClose={() => {
                     setIsBarcodePrintOpen(false)
                     setBarcodePrintProducts([])
+                    setBarcodeLabelPrintFormat('barcode_35x15')
                 }}
-                title="Barcode Labels"
+                title={t('products.barcodePrint.title', { defaultValue: 'Product barcode labels' })}
                 showSaveButton={false}
-                pdfBuilder={async () => generateBarcodeLabelsPdf({ labels: barcodeLabels })}
-                printSelectionOptions={[{
-                    format: 'barcode_35x15',
-                    label: '35 × 15 mm',
-                    description: 'One barcode label for each selected product.'
-                }]}
+                pdfBuilder={async ({ format, printLangOverride }) => {
+                    if (!isBarcodeLabelPrintFormat(format)) {
+                        throw new Error('Unsupported product barcode label format')
+                    }
+                    const printText = getBarcodePrintText(printLangOverride)
+                    return generateBarcodeLabelsPdf({
+                        labels: barcodeLabels,
+                        profile: getBarcodeLabelProfile(format),
+                        ...printText
+                    })
+                }}
+                printSelectionOptions={[
+                    {
+                        format: 'barcode_35x15',
+                        label: t('products.barcodePrint.compactLabel', { defaultValue: '35 × 15 mm' }),
+                        description: t('products.barcodePrint.compactDescription', {
+                            defaultValue: 'Compact product barcode label. One label per selected product.'
+                        })
+                    },
+                    {
+                        format: 'barcode_108x50',
+                        label: t('products.barcodePrint.wideLabel', { defaultValue: 'Wide thermal · 108 mm (EML-400I)' }),
+                        description: t('products.barcodePrint.wideDescription', {
+                            defaultValue: 'Large product name, price, and barcode on a 108 × 50 mm label. One label per selected product.'
+                        })
+                    }
+                ]}
                 templatePreview={barcodeTemplatePreview}
                 allowTemplateFieldEditing={true}
-                onPreviewPrint={(blob) => printPdfBlob(blob, { title: 'Barcode Labels' })}
-                previewPrintActionLabel="Print"
+                onPrintSelection={(format) => {
+                    if (isBarcodeLabelPrintFormat(format)) setBarcodeLabelPrintFormat(format)
+                }}
+                onPreviewPrint={(blob) => printPdfBlob(blob, {
+                    title: t('products.barcodePrint.title', { defaultValue: 'Product barcode labels' })
+                })}
+                previewPrintActionLabel={t('common.print', { defaultValue: 'Print' })}
             />
 
             <ProductCategoryManagerDialog

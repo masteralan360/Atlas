@@ -2,12 +2,54 @@ import type { IQDDisplayPreference, Product } from '@/local-db'
 
 export type BarcodeLabelData = {
     id: string
+    productName: string
     barcode: string
     displayValue: string
     price: number
     currency: string
     unit: string
     iqdDisplayPreference: IQDDisplayPreference
+}
+
+export type BarcodeLabelPrintFormat = 'barcode_35x15' | 'barcode_108x50'
+
+export type BarcodeLabelProfile = {
+    id: BarcodeLabelPrintFormat
+    widthMm: number
+    heightMm: number
+    safeMarginMm: number
+    layout: 'compact' | 'wide'
+}
+
+export const BARCODE_LABEL_PROFILES: Record<BarcodeLabelPrintFormat, BarcodeLabelProfile> = {
+    barcode_35x15: {
+        id: 'barcode_35x15',
+        widthMm: 35,
+        heightMm: 15,
+        safeMarginMm: 1.4,
+        layout: 'compact'
+    },
+    barcode_108x50: {
+        id: 'barcode_108x50',
+        widthMm: 108,
+        heightMm: 50,
+        safeMarginMm: 3,
+        layout: 'wide'
+    }
+}
+
+export function isBarcodeLabelPrintFormat(format: string): format is BarcodeLabelPrintFormat {
+    return Object.prototype.hasOwnProperty.call(BARCODE_LABEL_PROFILES, format)
+}
+
+export function getBarcodeLabelProfile(format: BarcodeLabelPrintFormat): BarcodeLabelProfile {
+    return BARCODE_LABEL_PROFILES[format]
+}
+
+export type BarcodeLabelPriceUnitTranslations = {
+    perSquareMeter: string
+    perDynamicKilogram: string
+    perMeter: string
 }
 
 // Code 128 character-set B patterns. Each digit describes the width of an
@@ -53,7 +95,8 @@ export function formatBarcodeLabelPrice(
     price: number,
     currency: string,
     iqdDisplayPreference: IQDDisplayPreference = 'IQD',
-    unit?: string
+    unit?: string,
+    pricePerUnitTranslations?: Partial<BarcodeLabelPriceUnitTranslations>
 ) {
     const normalizedCurrency = currency.toUpperCase()
     const maximumFractionDigits = normalizedCurrency === 'IQD' ? 0 : 2
@@ -63,27 +106,27 @@ export function formatBarcodeLabelPrice(
     }).format(Number.isFinite(price) ? price : 0)
 
     const currencyLabel = normalizedCurrency === 'IQD' ? iqdDisplayPreference : normalizedCurrency
-    const pricePerUnitLabel = getBarcodeLabelPricePerUnit(unit)
+    const pricePerUnitLabel = getBarcodeLabelPricePerUnit(unit, pricePerUnitTranslations)
 
     return `${formattedPrice} ${currencyLabel}${pricePerUnitLabel ? ` ${pricePerUnitLabel}` : ''}`
 }
 
-export function getBarcodeLabelPricePerUnit(unit?: string) {
+export function getBarcodeLabelPricePerUnit(unit?: string, translations?: Partial<BarcodeLabelPriceUnitTranslations>) {
     const trimmedUnit = unit?.trim()
     const normalizedUnit = trimmedUnit?.toLowerCase().replace(/\s/g, '')
 
     if (normalizedUnit === 'm²' || normalizedUnit === 'm2') {
-        return 'per 1m²'
+        return translations?.perSquareMeter || 'per 1m²'
     }
 
     // `Kg` is the dynamic-weight unit in the product form. Lowercase `kg`
     // is the regular/static unit and must remain a plain item price.
     if (trimmedUnit === 'Kg') {
-        return 'per 1 Kg'
+        return translations?.perDynamicKilogram || 'per 1 Kg'
     }
 
     if (trimmedUnit === 'Meter') {
-        return 'per 1 Meter'
+        return translations?.perMeter || 'per 1 Meter'
     }
 
     return ''
@@ -98,6 +141,7 @@ export function getBarcodeLabelData(
 
         return {
             id: product.id,
+            productName: product.name,
             barcode,
             displayValue: barcode || product.sku,
             price: product.price,
