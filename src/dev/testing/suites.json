@@ -108,6 +108,7 @@
         "layer": "business",
         "files": [
           "src/local-db/paymentAccounts.test.ts",
+          "src/local-db/paymentAccountTransfersRemote.test.ts",
           "src/local-db/paymentAccountAccess.test.ts",
           "src/local-db/payments.test.ts",
           "src/local-db/directTransactionVoucher.test.tsx",
@@ -245,6 +246,7 @@
           "src/local-db/partnerSummaryRecovery.test.ts",
           "src/local-db/payments.test.ts",
           "src/local-db/paymentAccounts.test.ts",
+          "src/local-db/paymentAccountTransfersRemote.test.ts",
           "src/local-db/paymentAccountAccess.test.ts",
           "src/lib/ledgerPaymentTransactions.test.ts",
           "src/lib/ledgerCashSummary.test.ts",

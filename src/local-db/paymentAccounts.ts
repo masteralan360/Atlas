@@ -6,6 +6,7 @@ import i18n from '@/i18n/config'
 import { formatCurrency, generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
 import { getSupabaseClientForTable, getSupabaseRemoteTableName } from '@/lib/supabaseSchema'
 import { isOnline } from '@/lib/network'
+import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
@@ -35,6 +36,7 @@ import type {
   PaymentAccountIconKey,
   PaymentAccountBalance,
   PaymentAccountMovement,
+  PaymentAccountTransfer,
   PaymentAccountType,
   PaymentAccountAdjustmentReason,
   PaymentAccountManualOperationKind,
@@ -48,6 +50,7 @@ const _PAYMENT_ACCOUNT_TABLES = [
   'payment_account_member_restrictions',
   'payment_account_balances',
   'payment_account_movements',
+  'payment_account_transfers',
   'cashier_shifts',
   'cashier_shift_currency_counts',
   'cashier_shift_templates',
@@ -261,7 +264,11 @@ export function usePaymentAccountsState(workspaceId?: string, userId?: string | 
     [accountRows, restrictions, userId, workspaceId],
   )
 
-  return { accounts, isReady: areAccountsReady && areRestrictionsReady }
+  return {
+    accounts,
+    allAccounts: normalizePaymentAccounts(accountRows),
+    isReady: areAccountsReady && areRestrictionsReady
+  }
 }
 
 export function usePaymentAccounts(workspaceId?: string, userId?: string | null) {
@@ -375,6 +382,14 @@ export function usePaymentAccountMovements(workspaceId?: string) {
   const rows = usePaymentAccountTable<PaymentAccountMovement>('payment_account_movements', workspaceId)
   return useMemo(
     () => rows.filter((row) => !row.isDeleted && !row.voidId).sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)),
+    [rows]
+  )
+}
+
+export function usePaymentAccountTransfers(workspaceId?: string) {
+  const rows = usePaymentAccountTable<PaymentAccountTransfer>('payment_account_transfers', workspaceId)
+  return useMemo(
+    () => rows.filter((row) => !row.isDeleted).sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)),
     [rows]
   )
 }
@@ -918,6 +933,314 @@ export async function recordPaymentAccountManualOperation(
         : {})
     }
   })
+}
+
+export interface RecordPaymentAccountTransferInput {
+  transferId: string
+  fromAccountId: string
+  toAccountId: string
+  currency: CurrencyCode
+  amount: number
+  occurredAt: string
+  reason: string
+  createdBy: string
+  canPost: boolean
+}
+
+function paymentAccountTransferInsufficientFundsError(balance: number, currency: CurrencyCode) {
+  const error = new Error(i18n.t('paymentAccounts.errors.insufficientFundsTransfer', {
+    balance: formatCurrency(balance, currency, 'د.ع'),
+    defaultValue: 'There are not enough available funds in the source account for this transfer. Current balance: {{balance}}.'
+  }))
+  error.name = 'PaymentAccountInsufficientFundsError'
+  return error
+}
+
+function samePaymentAccountTransfer(
+  left: PaymentAccountTransfer,
+  right: Pick<PaymentAccountTransfer, 'workspaceId' | 'fromAccountId' | 'toAccountId' | 'amount' | 'currency' | 'occurredAt' | 'reason' | 'createdBy'>
+) {
+  return left.workspaceId === right.workspaceId
+    && left.fromAccountId === right.fromAccountId
+    && left.toAccountId === right.toAccountId
+    && left.amount === right.amount
+    && left.currency === right.currency
+    && left.occurredAt === right.occurredAt
+    && left.reason === right.reason
+    && left.createdBy === right.createdBy
+}
+
+async function persistPaymentAccountTransferLocally(
+  transfer: PaymentAccountTransfer,
+  options: { validateFunds: boolean; queueForSync: boolean }
+) {
+  const localOnly = isLocalWorkspaceMode(transfer.workspaceId)
+  const now = new Date().toISOString()
+  const projectionMeta = localOnly
+    ? { syncStatus: 'synced' as const, lastSyncedAt: now }
+    : options.queueForSync
+      ? syncMeta(transfer.workspaceId, now)
+      : { syncStatus: 'synced' as const, lastSyncedAt: now }
+
+  await db.transaction(
+    'rw',
+    [
+      db.payment_accounts,
+      db.payment_account_member_restrictions,
+      db.payment_account_transfers,
+      db.payment_account_movements,
+      db.payment_account_balances,
+      db.offline_mutations
+    ],
+    async () => {
+      const existingTransfer = await db.payment_account_transfers.get(transfer.id)
+      if (existingTransfer && !existingTransfer.isDeleted) {
+        if (!samePaymentAccountTransfer(existingTransfer, transfer)) {
+          throw new Error('This transfer request was already used for different transfer details.')
+        }
+        if (!options.queueForSync && existingTransfer.syncStatus !== 'synced') {
+          await db.payment_account_transfers.put({
+            ...existingTransfer,
+            syncStatus: 'synced',
+            lastSyncedAt: now,
+            updatedAt: now,
+            version: existingTransfer.version + 1
+          })
+        }
+        return
+      }
+
+      const [fromAccount, toAccount] = await Promise.all([
+        db.payment_accounts.get(transfer.fromAccountId),
+        db.payment_accounts.get(transfer.toAccountId)
+      ])
+      if (
+        !fromAccount || fromAccount.workspaceId !== transfer.workspaceId || fromAccount.isDeleted || !fromAccount.isActive
+        || !toAccount || toAccount.workspaceId !== transfer.workspaceId || toAccount.isDeleted || !toAccount.isActive
+      ) {
+        throw new Error('The source or destination payment account is unavailable.')
+      }
+      if (fromAccount.id === toAccount.id) throw new Error('Choose a different destination account.')
+
+      const sourceRestriction = await db.payment_account_member_restrictions
+        .where('workspaceId')
+        .equals(transfer.workspaceId)
+        .filter((row) => row.accountId === fromAccount.id && row.userId === transfer.createdBy && !row.isDeleted)
+        .first()
+      if (sourceRestriction) throw new Error('You do not have access to the source payment account.')
+
+      const fromBalance = await db.payment_account_balances
+        .where('[accountId+currency]')
+        .equals([fromAccount.id, transfer.currency])
+        .first()
+      const toBalance = await db.payment_account_balances
+        .where('[accountId+currency]')
+        .equals([toAccount.id, transfer.currency])
+        .first()
+      const availableBalance = Number(fromBalance?.balanceAmount || 0)
+      if (
+        options.validateFunds
+        && availableBalance - transfer.amount < -PAYMENT_ACCOUNT_BALANCE_EPSILON
+      ) {
+        throw paymentAccountTransferInsufficientFundsError(availableBalance, transfer.currency)
+      }
+
+      const savedTransfer: PaymentAccountTransfer = {
+        ...transfer,
+        fromAccountNameSnapshot: fromAccount.name,
+        toAccountNameSnapshot: toAccount.name,
+        createdAt: transfer.createdAt || now,
+        updatedAt: now,
+        version: transfer.version || 1,
+        isDeleted: false,
+        ...projectionMeta
+      }
+      const outgoingMovement: PaymentAccountMovement = {
+        id: savedTransfer.outgoingMovementId,
+        workspaceId: transfer.workspaceId,
+        accountId: fromAccount.id,
+        paymentTransactionId: null,
+        transferId: transfer.id,
+        accountNameSnapshot: fromAccount.name,
+        direction: 'outgoing',
+        amount: transfer.amount,
+        deltaAmount: -transfer.amount,
+        currency: transfer.currency,
+        occurredAt: transfer.occurredAt,
+        createdAt: savedTransfer.createdAt,
+        updatedAt: now,
+        version: 1,
+        isDeleted: false,
+        ...projectionMeta
+      }
+      const incomingMovement: PaymentAccountMovement = {
+        id: savedTransfer.incomingMovementId,
+        workspaceId: transfer.workspaceId,
+        accountId: toAccount.id,
+        paymentTransactionId: null,
+        transferId: transfer.id,
+        accountNameSnapshot: toAccount.name,
+        direction: 'incoming',
+        amount: transfer.amount,
+        deltaAmount: transfer.amount,
+        currency: transfer.currency,
+        occurredAt: transfer.occurredAt,
+        createdAt: savedTransfer.createdAt,
+        updatedAt: now,
+        version: 1,
+        isDeleted: false,
+        ...projectionMeta
+      }
+      const balanceFor = (accountId: string, balance: PaymentAccountBalance | undefined, delta: number): PaymentAccountBalance => ({
+        id: balance?.id ?? generateId(),
+        workspaceId: transfer.workspaceId,
+        accountId,
+        currency: transfer.currency,
+        balanceAmount: Number(balance?.balanceAmount || 0) + delta,
+        createdAt: balance?.createdAt ?? now,
+        updatedAt: now,
+        version: (balance?.version ?? 0) + 1,
+        isDeleted: false,
+        ...projectionMeta
+      })
+
+      await db.payment_account_transfers.add(savedTransfer)
+      await db.payment_account_movements.bulkPut([outgoingMovement, incomingMovement])
+      await db.payment_account_balances.bulkPut([
+        balanceFor(fromAccount.id, fromBalance, -transfer.amount),
+        balanceFor(toAccount.id, toBalance, transfer.amount)
+      ])
+      if (options.queueForSync) {
+        await addToOfflineMutations(
+          'payment_account_transfers',
+          transfer.id,
+          'create',
+          savedTransfer as unknown as Record<string, unknown>,
+          transfer.workspaceId
+        )
+      }
+    }
+  )
+}
+
+/**
+ * Record one immutable transfer header. Server and Local-mode posting both
+ * create the paired account movements and balance effects atomically; the
+ * transfer never becomes a payment transaction or ledger entry.
+ */
+export async function recordPaymentAccountTransfer(
+  workspaceId: string,
+  input: RecordPaymentAccountTransferInput
+): Promise<PaymentAccountTransfer> {
+  if (!input.canPost) throw new Error('You are not allowed to transfer payment-account funds.')
+  if (!input.createdBy?.trim()) throw new Error('The transferring user could not be identified.')
+  if (!input.transferId?.trim()) throw new Error('A transfer request identifier is required.')
+  const reason = input.reason?.trim()
+  if (!reason) throw new Error('Enter a reason for this transfer.')
+
+  const amount = Number(input.amount)
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a positive transfer amount.')
+  if (input.fromAccountId === input.toAccountId) throw new Error('Choose a different destination account.')
+  const occurredAt = new Date(input.occurredAt)
+  if (!Number.isFinite(occurredAt.getTime())) throw new Error('Choose a valid transfer date.')
+
+  const existing = await db.payment_account_transfers.get(input.transferId)
+  const fromAccount = await db.payment_accounts.get(input.fromAccountId)
+  const toAccount = await db.payment_accounts.get(input.toAccountId)
+  if (
+    !fromAccount || fromAccount.workspaceId !== workspaceId || fromAccount.isDeleted || !fromAccount.isActive
+    || !toAccount || toAccount.workspaceId !== workspaceId || toAccount.isDeleted || !toAccount.isActive
+  ) {
+    throw new Error('The source or destination payment account is unavailable.')
+  }
+  const restriction = await db.payment_account_member_restrictions
+    .where('workspaceId')
+    .equals(workspaceId)
+    .filter((row) => row.accountId === fromAccount.id && row.userId === input.createdBy && !row.isDeleted)
+    .first()
+  if (restriction) throw new Error('You do not have access to the source payment account.')
+
+  const now = new Date().toISOString()
+  const candidate: PaymentAccountTransfer = existing ?? {
+    id: input.transferId,
+    workspaceId,
+    fromAccountId: fromAccount.id,
+    fromAccountNameSnapshot: fromAccount.name,
+    toAccountId: toAccount.id,
+    toAccountNameSnapshot: toAccount.name,
+    amount,
+    currency: input.currency,
+    occurredAt: occurredAt.toISOString(),
+    reason,
+    createdBy: input.createdBy,
+    outgoingMovementId: generateId(),
+    incomingMovementId: generateId(),
+    createdAt: now,
+    updatedAt: now,
+    version: 1,
+    isDeleted: false,
+    ...syncMeta(workspaceId, now)
+  }
+  if (!samePaymentAccountTransfer(candidate, {
+    workspaceId,
+    fromAccountId: fromAccount.id,
+    toAccountId: toAccount.id,
+    amount,
+    currency: input.currency,
+    occurredAt: occurredAt.toISOString(),
+    reason,
+    createdBy: input.createdBy
+  })) {
+    throw new Error('This transfer request was already used for different transfer details.')
+  }
+
+  if (isLocalWorkspaceMode(workspaceId)) {
+    await persistPaymentAccountTransferLocally(candidate, { validateFunds: true, queueForSync: false })
+    return (await db.payment_account_transfers.get(candidate.id))!
+  }
+
+  if (isOnline(workspaceId)) {
+    try {
+      const client = getSupabaseClientForTable('payment_account_transfers')
+      const { data, error } = await runSupabaseAction('payment_account_transfers.create', () =>
+        client.from(getSupabaseRemoteTableName('payment_account_transfers'))
+          .upsert(payload(candidate as unknown as Record<string, unknown>), { onConflict: 'id' })
+          .select('*')
+          .single()
+      )
+      if (error) {
+        if (String((error as { message?: unknown }).message || '').includes('payment_account_transfer_insufficient_funds')) {
+          const balance = Number((await db.payment_account_balances
+            .where('[accountId+currency]')
+            .equals([fromAccount.id, input.currency])
+            .first())?.balanceAmount || 0)
+          throw paymentAccountTransferInsufficientFundsError(balance, input.currency)
+        }
+        throw error
+      }
+      const remoteTransfer = data && typeof data === 'object'
+        ? toCamelCase(data as Record<string, unknown>) as unknown as PaymentAccountTransfer
+        : candidate
+      const savedTransfer: PaymentAccountTransfer = {
+        ...candidate,
+        ...remoteTransfer,
+        syncStatus: 'synced',
+        lastSyncedAt: new Date().toISOString()
+      }
+      await persistPaymentAccountTransferLocally(savedTransfer, { validateFunds: false, queueForSync: false })
+      await Promise.all([
+        fetchTableFromSupabase('payment_account_transfers', db.payment_account_transfers, workspaceId, { force: true }),
+        fetchTableFromSupabase('payment_account_movements', db.payment_account_movements, workspaceId, { force: true }),
+        fetchTableFromSupabase('payment_account_balances', db.payment_account_balances, workspaceId, { force: true })
+      ]).catch(() => undefined)
+      return (await db.payment_account_transfers.get(candidate.id)) ?? savedTransfer
+    } catch (error) {
+      if (!isRetriableWebRequestError(error)) throw normalizeSupabaseActionError(error)
+    }
+  }
+
+  await persistPaymentAccountTransferLocally(candidate, { validateFunds: true, queueForSync: true })
+  return (await db.payment_account_transfers.get(candidate.id))!
 }
 
 export interface CreateCashierShiftInput {

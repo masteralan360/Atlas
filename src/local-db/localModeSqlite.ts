@@ -98,6 +98,7 @@ export const LOCAL_MODE_SQLITE_TABLES = [
   "capital_pools",
   "payment_account_balances",
   "payment_account_movements",
+  "payment_account_transfers",
   "cashier_shifts",
   "cashier_shift_currency_counts",
   "cashier_shift_templates",

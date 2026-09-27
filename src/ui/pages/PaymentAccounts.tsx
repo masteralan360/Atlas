@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowDownLeft, ArrowUpRight, BarChart3, DollarSign, Landmark, Loader2, LockKeyhole, Package, Plus, RotateCcw, Search, ShieldAlert, SlidersHorizontal, TrendingDown, TrendingUp, Trash2, UserRound, UsersRound, Wallet, WalletCards, X } from 'lucide-react'
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, BarChart3, DollarSign, Landmark, Loader2, LockKeyhole, Package, Plus, RotateCcw, Search, ShieldAlert, SlidersHorizontal, TrendingDown, TrendingUp, Trash2, UserRound, UsersRound, Wallet, WalletCards, X } from 'lucide-react'
 import { Area, AreaChart, ResponsiveContainer } from 'recharts'
 
 import { useAuth } from '@/auth'
@@ -19,19 +19,22 @@ import {
   deletePaymentAccount,
   getPaymentAccountBalanceSummary,
   recordPaymentAccountManualOperation,
+  recordPaymentAccountTransfer,
   savePaymentAccount,
   setPaymentAccountMemberAccess,
   useCapitalPools,
   usePaymentAccountMemberRestrictions,
   usePaymentAccountBalances,
   usePaymentAccountMovements,
-  usePaymentAccounts,
+  usePaymentAccountTransfers,
+  usePaymentAccountsState,
   DIGITAL_WALLET_PAYMENT_METHODS,
   type CurrencyCode,
   type DigitalWalletPaymentMethod,
   type PaymentAccount,
   type PaymentAccountMemberRestriction,
   type PaymentAccountMovement,
+  type PaymentAccountTransfer,
   type PaymentAccountIconKey,
   type PaymentAccountType,
   type PaymentAccountAdjustmentReason,
@@ -43,7 +46,7 @@ import {
   usePaymentTransactions,
   useWorkspaceUsers,
 } from '@/local-db'
-import { cn, formatCurrency, formatDateTime, formatNumericInput, parseFormattedNumber, sanitizeNumericInput } from '@/lib/utils'
+import { cn, formatCurrency, formatDateTime, formatNumericInput, generateId, parseFormattedNumber, sanitizeNumericInput } from '@/lib/utils'
 import { getDateRangeBounds, isDateInDateRange } from '@/lib/dateRangeFilters'
 import {
   AppDialog,
@@ -165,6 +168,7 @@ interface AccountMovementEntry {
   id: string
   movement: PaymentAccountMovement
   transaction: PaymentTransaction | null
+  transfer: PaymentAccountTransfer | null
   presentation: PaymentAccountMovementPresentation
   relationKey: string | null
   relationRole: AccountMovementRelationRole | null
@@ -218,7 +222,7 @@ function sourceModuleLabel(transaction: PaymentTransaction | null, t: ReturnType
   }
 }
 
-function movementTypeLabel(transaction: PaymentTransaction | null, t: ReturnType<typeof useTranslation>['t']) {
+function movementTypeLabel(transaction: Pick<PaymentTransaction, 'sourceType' | 'direction'> | null, t: ReturnType<typeof useTranslation>['t']) {
   if (!transaction) return t('paymentAccounts.unknownMovement', { defaultValue: 'Recorded movement' })
 
   switch (transaction.sourceType) {
@@ -370,7 +374,7 @@ function applyMovementFilters(entries: AccountMovementEntry[], filters: AccountM
   const minimum = filters.minAmount ? parseFormattedNumber(filters.minAmount) : null
   const maximum = filters.maxAmount ? parseFormattedNumber(filters.maxAmount) : null
   const matching = entries.filter((entry) => {
-    const { movement, presentation, transaction } = entry
+    const { movement, presentation, transaction, transfer } = entry
     const effectiveDirection = presentation.deltaAmount > PAYMENT_ACCOUNT_REVERSAL_EPSILON
       ? 'incoming'
       : presentation.deltaAmount < -PAYMENT_ACCOUNT_REVERSAL_EPSILON
@@ -384,6 +388,11 @@ function applyMovementFilters(entries: AccountMovementEntry[], filters: AccountM
 
     return [
       movement.paymentTransactionId,
+      movement.transferId,
+      transfer?.id,
+      transfer?.fromAccountNameSnapshot,
+      transfer?.toAccountNameSnapshot,
+      transfer?.reason,
       transaction?.referenceLabel,
       transaction?.counterpartyName,
       transaction?.note,
@@ -401,6 +410,36 @@ function applyMovementFilters(entries: AccountMovementEntry[], filters: AccountM
   })
 }
 
+function TransferReasonReference({ reason }: { reason: string }) {
+  const textRef = useRef<HTMLSpanElement>(null)
+  const [isTruncated, setIsTruncated] = useState(false)
+  const [tooltipOpen, setTooltipOpen] = useState(false)
+
+  useEffect(() => {
+    const element = textRef.current
+    if (!element) return
+
+    const updateTruncation = () => setIsTruncated(element.scrollWidth > element.clientWidth)
+    updateTruncation()
+
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(updateTruncation)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [reason])
+
+  return (
+    <Tooltip open={isTruncated && tooltipOpen} onOpenChange={setTooltipOpen}>
+      <TooltipTrigger asChild>
+        <span ref={textRef} className={cn('block max-w-[160px] truncate', isTruncated && 'cursor-help')}>
+          {reason}
+        </span>
+      </TooltipTrigger>
+      {isTruncated ? <TooltipContent side="bottom" align="start" className="max-w-sm break-words">{reason}</TooltipContent> : null}
+    </Tooltip>
+  )
+}
+
 export function PaymentAccounts() {
   const { t, i18n } = useTranslation()
   const { toast } = useToast()
@@ -410,11 +449,12 @@ export function PaymentAccounts() {
   const { exchangeData, eurRates, tryRates } = useExchangeRate()
   const workspaceId = user?.workspaceId
   const baseCurrency = features.default_currency
-  const accounts = usePaymentAccounts(workspaceId, user?.id)
+  const { accounts, allAccounts: transferDestinationAccounts } = usePaymentAccountsState(workspaceId, user?.id)
   const workspaceUsers = useWorkspaceUsers(workspaceId)
   const capitalPools = useCapitalPools(workspaceId)
   const balances = usePaymentAccountBalances(workspaceId)
   const movements = usePaymentAccountMovements(workspaceId)
+  const paymentAccountTransfers = usePaymentAccountTransfers(workspaceId)
   const paymentTransactions = usePaymentTransactions(workspaceId, { includeReversals: true })
 
   const [accountDialogOpen, setAccountDialogOpen] = useState(false)
@@ -453,10 +493,27 @@ export function PaymentAccounts() {
   const [accountOperationNotes, setAccountOperationNotes] = useState('')
   const [accountOperationDate, setAccountOperationDate] = useState<Date | undefined>(new Date())
   const [postingAccountOperation, setPostingAccountOperation] = useState(false)
+  const [transferDialogOpen, setTransferDialogOpen] = useState(false)
+  const [transferFromAccountId, setTransferFromAccountId] = useState<string | null>(null)
+  const [transferDestinationAccountId, setTransferDestinationAccountId] = useState('')
+  const [transferCurrency, setTransferCurrency] = useState<CurrencyCode>('iqd')
+  const [transferAmount, setTransferAmount] = useState('')
+  const [transferReason, setTransferReason] = useState('')
+  const [transferDate, setTransferDate] = useState<Date | undefined>(new Date())
+  const [transferId, setTransferId] = useState('')
+  const [postingTransfer, setPostingTransfer] = useState(false)
 
   const selectedAccount = useMemo(
     () => accounts.find((account) => account.id === selectedAccountId) ?? null,
     [accounts, selectedAccountId],
+  )
+  const transferFromAccount = useMemo(
+    () => transferDestinationAccounts.find((account) => account.id === transferFromAccountId) ?? null,
+    [transferDestinationAccounts, transferFromAccountId],
+  )
+  const transferDestinations = useMemo(
+    () => transferDestinationAccounts.filter((account) => account.isActive && account.id !== transferFromAccountId),
+    [transferDestinationAccounts, transferFromAccountId],
   )
   const restrictedMemberIds = useMemo(
     () => new Set(accountMemberRestrictions.map((restriction: PaymentAccountMemberRestriction) => restriction.userId)),
@@ -520,6 +577,26 @@ export function PaymentAccounts() {
     && !withdrawalExceedsPostedBalance
     && !!accountOperationReason.trim()
     && !!accountOperationDate
+  const parsedTransferAmount = parseFormattedNumber(transferAmount)
+  const transferSourceBalance = balances.find(
+    (balance) => balance.accountId === transferFromAccountId && balance.currency === transferCurrency,
+  )?.balanceAmount ?? 0
+  const transferAmountExceedsBalance = !!transferFromAccount
+    && parsedTransferAmount - transferSourceBalance > PAYMENT_ACCOUNT_REVERSAL_EPSILON
+  const canSubmitTransfer = !!workspaceId
+    && !!transferId
+    && !!transferFromAccount
+    && !!transferDestinationAccountId
+    && transferDestinationAccountId !== transferFromAccount.id
+    && transferDestinations.some((account) => account.id === transferDestinationAccountId)
+    && canPostAccountOperations
+    && openingBalanceCurrencies.includes(transferCurrency)
+    && transferAmount.trim() !== ''
+    && Number.isFinite(parsedTransferAmount)
+    && parsedTransferAmount > 0
+    && !!transferReason.trim()
+    && !transferAmountExceedsBalance
+    && !!transferDate
   const transactionById = useMemo(
     () => new Map(paymentTransactions.map((transaction) => [transaction.id, transaction])),
     [paymentTransactions],
@@ -528,18 +605,25 @@ export function PaymentAccounts() {
     () => getPaymentTransactionReversalAmounts(paymentTransactions),
     [paymentTransactions],
   )
+  const transferById = useMemo(
+    () => new Map(paymentAccountTransfers.map((transfer) => [transfer.id, transfer])),
+    [paymentAccountTransfers],
+  )
   const selectedAccountMovements = useMemo(
     () => selectedAccountId ? movements.filter((movement) => movement.accountId === selectedAccountId) : [],
     [movements, selectedAccountId],
   )
   const allMovementEntries = useMemo<AccountMovementEntry[]>(
     () => selectedAccountMovements.flatMap((movement) => {
-      const transaction = transactionById.get(movement.paymentTransactionId) ?? null
+      const transaction = movement.paymentTransactionId ? transactionById.get(movement.paymentTransactionId) ?? null : null
+      const transfer = movement.transferId ? transferById.get(movement.transferId) ?? null : null
       // Keep reversal movements on the account and date where they were
       // actually posted. Same-account rows net naturally; cross-account
       // reversals must not rewrite the original account's history.
       const presentation = getPaymentAccountMovementPresentation(movement, transaction, transactionReversalAmounts)
-      const relationKey = paymentAccountMovementRelationKey(transaction)
+      const relationKey = transfer
+        ? `payment-account-transfer:${transfer.id}`
+        : paymentAccountMovementRelationKey(transaction)
       const relationRole: AccountMovementRelationRole | null = transaction
         ? transaction.sourceType === 'loan_origination'
           ? 'origin'
@@ -548,9 +632,9 @@ export function PaymentAccounts() {
             : 'settlement'
         : null
 
-      return [{ id: movement.id, movement, transaction, presentation, relationKey, relationRole }]
+      return [{ id: movement.id, movement, transaction, transfer, presentation, relationKey, relationRole }]
     }),
-    [selectedAccountMovements, transactionById, transactionReversalAmounts],
+    [selectedAccountMovements, transactionById, transactionReversalAmounts, transferById],
   )
   const movementEntries = useMemo(
     () => allMovementEntries.filter(({ movement }) => isDateInDateRange(movement.occurredAt, dateRange, customDates)),
@@ -851,6 +935,59 @@ export function PaymentAccounts() {
     setAccountOperationKind(null)
   }
 
+  const openTransferFunds = (account: PaymentAccount) => {
+    const preferredCurrency = getPaymentAccountBalanceSummary(balances, account.id)[0]?.currency
+      ?? openingBalanceCurrencies[0]
+      ?? 'iqd'
+    setTransferFromAccountId(account.id)
+    setTransferDestinationAccountId('')
+    setTransferCurrency(preferredCurrency)
+    setTransferAmount('')
+    setTransferReason('')
+    setTransferDate(new Date())
+    setTransferId(generateId())
+    setTransferDialogOpen(true)
+  }
+
+  const closeTransferDialog = () => {
+    if (postingTransfer) return
+    setTransferDialogOpen(false)
+  }
+
+  const postTransfer = async () => {
+    if (!workspaceId || !transferFromAccount || !transferDestinationAccountId || !transferDate || !user?.id || !canSubmitTransfer || postingTransfer) return
+    setPostingTransfer(true)
+    try {
+      const transfer = await recordPaymentAccountTransfer(workspaceId, {
+        transferId,
+        fromAccountId: transferFromAccount.id,
+        toAccountId: transferDestinationAccountId,
+        currency: transferCurrency,
+        amount: parsedTransferAmount,
+        occurredAt: transferDate.toISOString(),
+        reason: transferReason.trim(),
+        createdBy: user.id,
+        canPost: canPostAccountOperations,
+      })
+      toast({
+        title: t('paymentAccounts.transferRecorded', { defaultValue: 'Payment account transfer recorded' }),
+        description: `${formatCurrency(transfer.amount, transfer.currency, features.iqd_display_preference)} · ${transfer.fromAccountNameSnapshot} → ${transfer.toAccountNameSnapshot}`
+      })
+      setTransferDialogOpen(false)
+    } catch (error: any) {
+      const description = error?.name === 'PaymentAccountInsufficientFundsError'
+        ? error.message
+        : t('paymentAccounts.transferFailed', { defaultValue: 'The transfer could not be completed. Review the accounts and try again.' })
+      toast({
+        title: t('common.error'),
+        description,
+        variant: 'destructive'
+      })
+    } finally {
+      setPostingTransfer(false)
+    }
+  }
+
   const postAccountOperation = async () => {
     if (!workspaceId || !selectedAccount || !accountOperationKind || !accountOperationDirection || !canSubmitAccountOperation) return
     setPostingAccountOperation(true)
@@ -1054,6 +1191,10 @@ export function PaymentAccounts() {
                     <ArrowDownLeft className="mr-2 h-4 w-4" />
                     {t('paymentAccounts.deposit')}
                   </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => openTransferFunds(selectedAccount)}>
+                    <ArrowLeftRight className="mr-2 h-4 w-4" />
+                    {t('paymentAccounts.transferFunds', { defaultValue: 'Transfer Funds' })}
+                  </Button>
                   <Button type="button" size="sm" variant="outline" onClick={() => openAccountOperation('withdrawal')}>
                     <ArrowUpRight className="mr-2 h-4 w-4" />
                     {t('paymentAccounts.withdraw')}
@@ -1194,6 +1335,7 @@ export function PaymentAccounts() {
               <span className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">{filteredMovementEntries.length}</span>
             </CardHeader>
             <CardContent className="overflow-x-auto">
+              <TooltipProvider delayDuration={120}>
               <Table className="ms-6 w-[calc(100%-1.5rem)] min-w-[1220px]">
                 <TableHeader><TableRow>
                   <TableHead>{t('ledger.table.transactionId', { defaultValue: 'Transaction ID' })}</TableHead>
@@ -1222,7 +1364,12 @@ export function PaymentAccounts() {
                       : entry.relationRole === 'repayment'
                         ? t('ledger.relationRole.repayment', { defaultValue: 'Repayment' })
                         : t('ledger.relationRole.settlement', { defaultValue: 'Settlement' })
-                    const transactionId = entry.transaction?.id || entry.movement.paymentTransactionId
+                    const transactionId = entry.transfer?.id || entry.transaction?.id || entry.movement.paymentTransactionId
+                    const oppositeTransferAccount = entry.transfer
+                      ? entry.movement.accountId === entry.transfer.fromAccountId
+                        ? entry.transfer.toAccountNameSnapshot
+                        : entry.transfer.fromAccountNameSnapshot
+                      : null
                     const isNetIncoming = entry.presentation.deltaAmount > PAYMENT_ACCOUNT_REVERSAL_EPSILON
                     const isNetOutgoing = entry.presentation.deltaAmount < -PAYMENT_ACCOUNT_REVERSAL_EPSILON
                     const isReversalMovement = Boolean(entry.transaction?.reversalOfTransactionId)
@@ -1248,21 +1395,28 @@ export function PaymentAccounts() {
                     >
                       <TableCell className="relative max-w-[150px] font-mono text-xs text-muted-foreground">
                         {showHierarchyLine ? <div className="pointer-events-none absolute inset-y-0 -start-6 w-5"><span className={cn('absolute start-1.5 w-px', relationLineClass, verticalClass)} />{showHierarchyTurn ? <span className={cn('absolute start-1.5 top-1/2 h-px w-3 -translate-y-1/2', relationLineClass)} /> : null}</div> : null}
-                        <span className="block truncate" title={transactionId}>{transactionId}</span>
+                        <span className="block truncate" title={transactionId ?? undefined}>{transactionId ?? '—'}</span>
                       </TableCell>
                       <TableCell>{formatDateTime(entry.movement.occurredAt)}</TableCell>
-                      <TableCell className="font-medium"><div className="inline-flex max-w-[220px] items-center gap-2"><span className="truncate">{movementTypeLabel(entry.transaction, t)}</span>{entry.relationRole ? <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide', entry.relationRole === 'origin' ? 'border-sky-200 bg-sky-50 text-sky-700' : entry.relationRole === 'repayment' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-primary/20 bg-primary/10 text-primary')}>{roleLabel}</span> : null}</div></TableCell>
+                      <TableCell className="font-medium"><div className="inline-flex max-w-[260px] flex-wrap items-center gap-2"><span className="truncate">{entry.transfer ? t('paymentAccounts.transferAuditType', { defaultValue: 'Payment Account Transfer' }) : movementTypeLabel(entry.transaction, t)}</span>{entry.transfer ? <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">{entry.movement.direction === 'outgoing' ? t('paymentAccounts.transferOut', { defaultValue: 'Transfer Out' }) : t('paymentAccounts.transferIn', { defaultValue: 'Transfer In' })}</span> : null}{entry.relationRole ? <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide', entry.relationRole === 'origin' ? 'border-sky-200 bg-sky-50 text-sky-700' : entry.relationRole === 'repayment' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-primary/20 bg-primary/10 text-primary')}>{roleLabel}</span> : null}</div></TableCell>
                       <TableCell><span className={cn('inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide', statusClass)}>{statusLabel}</span>{entry.presentation.reversalStatus === 'partially_reversed' ? <p className="mt-1 text-xs text-muted-foreground">{t('paymentAccounts.movementStatus.reversedAmount', { amount: formatCurrency(entry.presentation.reversedAmount, entry.movement.currency, features.iqd_display_preference), defaultValue: '{{amount}} reversed' })}</p> : null}</TableCell>
                       <TableCell>{isNetIncoming || isNetOutgoing ? <span className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide', isNetIncoming ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700')}>{isNetIncoming ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}{isNetIncoming ? t('ledger.direction.in', { defaultValue: 'IN' }) : t('ledger.direction.out', { defaultValue: 'OUT' })}</span> : <span className="text-muted-foreground">—</span>}</TableCell>
                       <TableCell className="font-semibold">{formatCurrency(Math.abs(entry.presentation.amount), entry.movement.currency, features.iqd_display_preference)}</TableCell>
-                      <TableCell>{sourceModuleLabel(entry.transaction, t)}</TableCell>
-                      <TableCell className="max-w-[160px] font-medium"><span className="block truncate" title={entry.transaction?.referenceLabel || undefined}>{entry.transaction?.referenceLabel || '—'}</span></TableCell>
-                      <TableCell className="max-w-[160px]"><span className="block truncate" title={entry.transaction?.counterpartyName || undefined}>{entry.transaction?.counterpartyName || '—'}</span></TableCell>
-                      <TableCell>{paymentMethodLabel(entry.transaction?.paymentMethod, t)}</TableCell>
+                      <TableCell>{entry.transfer ? t('paymentAccounts.title', { defaultValue: 'Payment Accounts' }) : sourceModuleLabel(entry.transaction, t)}</TableCell>
+                      <TableCell className="max-w-[160px] font-medium">
+                        {entry.transfer
+                          ? entry.transfer.reason
+                            ? <TransferReasonReference reason={entry.transfer.reason} />
+                            : <span className="text-muted-foreground">—</span>
+                          : <span className="block truncate" title={entry.transaction?.referenceLabel || undefined}>{entry.transaction?.referenceLabel || '—'}</span>}
+                      </TableCell>
+                      <TableCell className="max-w-[160px]"><span className="block truncate" title={oppositeTransferAccount || entry.transaction?.counterpartyName || undefined}>{oppositeTransferAccount || entry.transaction?.counterpartyName || '—'}</span></TableCell>
+                      <TableCell>{entry.transfer ? t('paymentAccounts.internalTransfer', { defaultValue: 'Internal transfer' }) : paymentMethodLabel(entry.transaction?.paymentMethod, t)}</TableCell>
                     </TableRow>
                   })}
                 </TableBody>
               </Table>
+              </TooltipProvider>
             </CardContent>
           </Card>
         </>
@@ -1498,6 +1652,105 @@ export function PaymentAccounts() {
                 {accountOperationKind === 'withdrawal' ? t('paymentAccounts.recordWithdrawal') : t('paymentAccounts.recordDeposit')}
               </Button>
             )}
+          </AppDialogFooter>
+        </AppDialogContent>
+      </AppDialog>
+
+      <AppDialog open={transferDialogOpen} onOpenChange={(next) => { if (!next) closeTransferDialog() }}>
+        <AppDialogContent
+          className="max-w-2xl"
+          showCloseButton={!postingTransfer}
+          onPointerDownOutside={(event) => postingTransfer && event.preventDefault()}
+          onEscapeKeyDown={(event) => postingTransfer && event.preventDefault()}
+        >
+          <AppDialogHeader>
+            <AppDialogTitle className="flex items-center gap-3">
+              <span className="rounded-xl bg-primary/10 p-2 text-primary"><ArrowLeftRight className="h-5 w-5" /></span>
+              {t('paymentAccounts.transferFunds', { defaultValue: 'Transfer Funds' })}
+            </AppDialogTitle>
+            <AppDialogDescription>{t('paymentAccounts.transferDescription', { defaultValue: 'Move funds between payment accounts in the same currency. This internal transfer does not affect the ledger.' })}</AppDialogDescription>
+          </AppDialogHeader>
+          <AppDialogBody>
+            <div className="grid gap-5">
+              <div className="grid gap-2">
+                <Label htmlFor="payment-account-transfer-from">{t('paymentAccounts.fromAccount', { defaultValue: 'From Account' })} *</Label>
+                <div className="relative">
+                  <Input id="payment-account-transfer-from" value={transferFromAccount?.name ?? ''} readOnly disabled className="pe-10" />
+                  <LockKeyhole className="absolute end-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="payment-account-transfer-to">{t('paymentAccounts.toAccount', { defaultValue: 'To Account' })} *</Label>
+                <Select value={transferDestinationAccountId} onValueChange={setTransferDestinationAccountId} disabled={postingTransfer || transferDestinations.length === 0}>
+                  <SelectTrigger id="payment-account-transfer-to"><SelectValue placeholder={t('paymentAccounts.selectDestinationAccount', { defaultValue: 'Select a destination account' })} /></SelectTrigger>
+                  <SelectContent>
+                    {transferDestinations.map((account) => (
+                      <SelectItem key={account.id} value={account.id}>
+                        <span className="inline-flex items-center gap-2"><PaymentAccountIcon iconKey={account.iconKey} accountType={account.accountType} className="h-4 w-4" />{account.name}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {transferDestinations.length === 0 ? <p className="text-xs text-muted-foreground">{t('paymentAccounts.noTransferDestination', { defaultValue: 'No other active payment accounts are available.' })}</p> : null}
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <CurrencySelector
+                  value={transferCurrency}
+                  onChange={setTransferCurrency}
+                  label={`${t('common.currency')} *`}
+                  iqdDisplayPreference={features.iqd_display_preference}
+                  allowedCurrencies={openingBalanceCurrencies}
+                  disabled={postingTransfer}
+                />
+                <div className="grid gap-2">
+                  <Label htmlFor="payment-account-transfer-amount">{t('paymentAccounts.amount')} *</Label>
+                  <Input
+                    id="payment-account-transfer-amount"
+                    inputMode="decimal"
+                    placeholder="0"
+                    disabled={postingTransfer}
+                    value={formatNumericInput(transferAmount)}
+                    onChange={(event) => setTransferAmount(sanitizeNumericInput(event.target.value, { allowDecimal: true }))}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-2 rounded-xl border border-border/60 bg-secondary/10 p-3 sm:grid-cols-[1fr_auto] sm:items-center">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{t('paymentAccounts.currentPostedBalance', { defaultValue: 'Current posted balance' })}</p>
+                  <p className="mt-1 font-bold tabular-nums">{formatCurrency(transferSourceBalance, transferCurrency, features.iqd_display_preference)}</p>
+                </div>
+                {transferDestinationAccountId ? <ArrowLeftRight className="hidden h-5 w-5 text-primary sm:block" /> : null}
+                {transferDestinationAccountId ? <p className="truncate text-sm font-medium sm:text-end">{transferFromAccount?.name} → {transferDestinations.find((account) => account.id === transferDestinationAccountId)?.name}</p> : null}
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="payment-account-transfer-reason">{t('paymentAccounts.transferReason', { defaultValue: 'Reason' })} *</Label>
+                <Textarea id="payment-account-transfer-reason" value={transferReason} disabled={postingTransfer} onChange={(event) => setTransferReason(event.target.value)} />
+              </div>
+
+              <div className="grid gap-2">
+                <Label>{t('paymentAccounts.transferDate', { defaultValue: 'Transfer Date' })} *</Label>
+                <DateTimePicker
+                  date={transferDate}
+                  setDate={setTransferDate}
+                  mode="date-time"
+                  placeholder={t('paymentAccounts.selectRecordedAt')}
+                  disabled={postingTransfer}
+                />
+              </div>
+
+              {transferAmountExceedsBalance ? <p className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm font-medium text-destructive">{t('paymentAccounts.transferExceedsBalance', { defaultValue: 'This account does not have enough available funds for this transfer.' })}</p> : null}
+            </div>
+          </AppDialogBody>
+          <AppDialogFooter>
+            <Button type="button" variant="outline" onClick={closeTransferDialog} disabled={postingTransfer}>{t('common.cancel')}</Button>
+            <Button type="button" onClick={postTransfer} disabled={!canSubmitTransfer || postingTransfer}>
+              {postingTransfer ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowLeftRight className="mr-2 h-4 w-4" />}
+              {postingTransfer ? t('paymentAccounts.transferring', { defaultValue: 'Transferring…' }) : t('paymentAccounts.confirmTransfer', { defaultValue: 'Transfer Funds' })}
+            </Button>
           </AppDialogFooter>
         </AppDialogContent>
       </AppDialog>

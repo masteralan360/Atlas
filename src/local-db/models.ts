@@ -2379,7 +2379,8 @@ export interface PaymentAccountBalance extends BaseEntity {
 
 export interface PaymentAccountMovement extends BaseEntity {
   accountId: string
-  paymentTransactionId: string
+  paymentTransactionId?: string | null
+  transferId?: string | null
   accountNameSnapshot: string
   direction: PaymentTransactionDirection
   amount: number
@@ -2388,6 +2389,21 @@ export interface PaymentAccountMovement extends BaseEntity {
   occurredAt: string
   /** Mirrors the immutable correction audit on its source payment. */
   voidId?: string | null
+}
+
+/** Immutable audit record for a paired internal movement between payment accounts. */
+export interface PaymentAccountTransfer extends BaseEntity {
+  fromAccountId: string
+  fromAccountNameSnapshot: string
+  toAccountId: string
+  toAccountNameSnapshot: string
+  amount: number
+  currency: CurrencyCode
+  occurredAt: string
+  reason: string
+  createdBy?: string | null
+  outgoingMovementId: string
+  incomingMovementId: string
 }
 
 /**
@@ -2671,6 +2687,7 @@ export interface SyncQueueItem {
     | 'capital_pools'
     | 'payment_account_balances'
     | 'payment_account_movements'
+    | 'payment_account_transfers'
     | 'cashier_shifts'
     | 'cashier_shift_currency_counts'
     | 'cashier_shift_templates'
@@ -2907,6 +2924,7 @@ export interface OfflineMutation {
     | 'capital_pools'
     | 'payment_account_balances'
     | 'payment_account_movements'
+    | 'payment_account_transfers'
     | 'cashier_shifts'
     | 'cashier_shift_currency_counts'
     | 'cashier_shift_templates'

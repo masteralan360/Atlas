@@ -596,7 +596,7 @@ export function buildCapitalPoolAccountCashFlows(
   for (const accountId of pool.accountIds) pointsByAccount.set(accountId, new Map())
 
   for (const movement of relevantMovements) {
-    const transaction = transactionById.get(movement.paymentTransactionId) ?? null
+    const transaction = movement.paymentTransactionId ? transactionById.get(movement.paymentTransactionId) ?? null : null
     if (transaction?.reversalOfTransactionId) continue
     const presentation = getPaymentAccountMovementPresentation(movement, transaction, reversalAmounts)
     if (Math.abs(presentation.deltaAmount) <= PAYMENT_ACCOUNT_REVERSAL_EPSILON) continue

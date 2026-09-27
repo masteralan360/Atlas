@@ -57,7 +57,7 @@ describe('direct transaction vouchers in Local mode', () => {
     expect(getLedgerPaymentTransactions(saved).map(row => row.id)).toContain(reversal.id)
     expect(getLedgerPaymentTransactionEffect(reversal)).toEqual({ direction: 'outgoing', amount: 33.34 })
     const movements = await db.payment_account_movements.where('accountId').equals(account.id).toArray()
-    expect(movements.filter(row => [original.id, reversal.id].includes(row.paymentTransactionId))
+    expect(movements.filter(row => row.paymentTransactionId != null && [original.id, reversal.id].includes(row.paymentTransactionId))
       .map(row => row.deltaAmount).sort((a, b) => a - b)).toEqual([-33.34, 100.01])
     const balance = await db.payment_account_balances.where('accountId').equals(account.id).first()
     expect(balance?.balanceAmount).toBeCloseTo(1066.67, 6)

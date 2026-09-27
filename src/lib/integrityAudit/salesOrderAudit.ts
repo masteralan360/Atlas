@@ -235,7 +235,11 @@ export function auditSalesOrderGraph(graph: SalesOrderTransactionGraph, workspac
       }
     }
   }
-  for (const movement of graph.accountMovements) add('relationships', 'ORPHAN_ACCOUNT_MOVEMENT', paymentMap.has(movement.paymentTransactionId), 'payment_account_movement', movement.id)
+  for (const movement of graph.accountMovements) {
+    if (movement.paymentTransactionId) {
+      add('relationships', 'ORPHAN_ACCOUNT_MOVEMENT', paymentMap.has(movement.paymentTransactionId), 'payment_account_movement', movement.id)
+    }
+  }
   for (const original of paymentRows.filter(row => !row.reversalOfTransactionId)) {
     const reversed = paymentRows.filter(row => row.reversalOfTransactionId === original.id).reduce((sum, row) => sum + Math.abs(amount(row.amount)), 0)
     add('payments', 'PAYMENT_REVERSALS_EXCEED_ORIGINAL', reversed <= amount(original.amount) + ORDER_AMOUNT_EPSILON, 'payment_transaction', original.id, original.amount, reversed)

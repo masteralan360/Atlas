@@ -79,6 +79,7 @@ const paymentAccountTables = new Set([
     'capital_pools',
     'payment_account_balances',
     'payment_account_movements',
+    'payment_account_transfers',
     'cashier_shifts',
     'cashier_shift_currency_counts',
     'cashier_shift_templates',
@@ -100,6 +101,7 @@ const paymentAccountRemoteTableNames: Record<string, string> = {
     payment_account_member_restrictions: 'account_member_restrictions',
     payment_account_balances: 'account_balances',
     payment_account_movements: 'account_movements',
+    payment_account_transfers: 'transfers',
 }
 
 const deliveryTables = new Set([

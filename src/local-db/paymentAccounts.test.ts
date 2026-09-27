@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
+import { setNetworkStatus } from '@/lib/network'
 
 import { db } from './database'
 import type { PaymentTransaction } from './models'
@@ -16,6 +17,8 @@ let createManualLoan: typeof import('./hooks').createManualLoan
 let recordLoanPayment: typeof import('./hooks').recordLoanPayment
 let savePaymentAccount: typeof import('./paymentAccounts').savePaymentAccount
 let recordPaymentAccountManualOperation: typeof import('./paymentAccounts').recordPaymentAccountManualOperation
+let recordPaymentAccountTransfer: typeof import('./paymentAccounts').recordPaymentAccountTransfer
+let setPaymentAccountMemberAccess: typeof import('./paymentAccounts').setPaymentAccountMemberAccess
 let assertPaymentAccountTransactionCanBeAppliedLocally: typeof import('./paymentAccounts').assertPaymentAccountTransactionCanBeAppliedLocally
 let mirrorPaymentAccountTransactionLocally: typeof import('./paymentAccounts').mirrorPaymentAccountTransactionLocally
 
@@ -100,6 +103,8 @@ describe('payment-account availability', () => {
     ;({
       savePaymentAccount,
       recordPaymentAccountManualOperation,
+      recordPaymentAccountTransfer,
+      setPaymentAccountMemberAccess,
       assertPaymentAccountTransactionCanBeAppliedLocally,
       mirrorPaymentAccountTransactionLocally,
     } = await import('./paymentAccounts'))
@@ -112,7 +117,7 @@ describe('payment-account availability', () => {
     writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'local' })
   })
 
-  afterEach(() => clearWorkspaceModeSnapshot(WORKSPACE_ID))
+  afterEach(() => { clearWorkspaceModeSnapshot(WORKSPACE_ID); setNetworkStatus(true) })
   afterAll(async () => { await db.delete() })
 
   it('rejects an outgoing payment that exceeds the selected account balance while preserving ledger-only payments', async () => {
@@ -518,5 +523,173 @@ describe('payment-account availability', () => {
     } finally {
       await i18n.changeLanguage('en')
     }
+  })
+
+  it('posts one auditable transfer with paired movements and unchanged workspace funds', async () => {
+    const from = await createFundedAccount(500_000)
+    const to = await savePaymentAccount(WORKSPACE_ID, {
+      name: 'Transfer Destination',
+      accountType: 'cash_drawer',
+      openingBalances: [{ currency: 'iqd', amount: 125_000 }],
+    })
+    const initialTransactions = await db.payment_transactions.where('workspaceId').equals(WORKSPACE_ID).count()
+    const initialFunds = (await db.payment_account_balances.where('workspaceId').equals(WORKSPACE_ID).toArray())
+      .filter((balance) => balance.currency === 'iqd' && !balance.isDeleted)
+      .reduce((total, balance) => total + balance.balanceAmount, 0)
+
+    const transfer = await recordPaymentAccountTransfer(WORKSPACE_ID, {
+      transferId: '00000000-0000-4000-8000-000000000591',
+      fromAccountId: from.id,
+      toAccountId: to.id,
+      currency: 'iqd',
+      amount: 200_000,
+      occurredAt: '2026-08-28T14:30:00.000Z',
+      reason: 'Move funds to the main drawer',
+      createdBy: '00000000-0000-4000-8000-000000000592',
+      canPost: true,
+    })
+
+    const movements = await db.payment_account_movements.where('transferId').equals(transfer.id).toArray()
+    const fromBalance = await db.payment_account_balances.where('[accountId+currency]').equals([from.id, 'iqd']).first()
+    const toBalance = await db.payment_account_balances.where('[accountId+currency]').equals([to.id, 'iqd']).first()
+    const finalFunds = (await db.payment_account_balances.where('workspaceId').equals(WORKSPACE_ID).toArray())
+      .filter((balance) => balance.currency === 'iqd' && !balance.isDeleted)
+      .reduce((total, balance) => total + balance.balanceAmount, 0)
+
+    expect(transfer).toMatchObject({
+      fromAccountId: from.id,
+      toAccountId: to.id,
+      amount: 200_000,
+      currency: 'iqd',
+      reason: 'Move funds to the main drawer',
+      createdBy: '00000000-0000-4000-8000-000000000592',
+      occurredAt: '2026-08-28T14:30:00.000Z',
+      syncStatus: 'synced',
+    })
+    expect(movements).toHaveLength(2)
+    expect(movements).toEqual(expect.arrayContaining([
+      expect.objectContaining({ accountId: from.id, transferId: transfer.id, direction: 'outgoing', deltaAmount: -200_000 }),
+      expect.objectContaining({ accountId: to.id, transferId: transfer.id, direction: 'incoming', deltaAmount: 200_000 }),
+    ]))
+    expect(fromBalance?.balanceAmount).toBe(300_000)
+    expect(toBalance?.balanceAmount).toBe(325_000)
+    expect(finalFunds).toBe(initialFunds)
+    expect(await db.payment_transactions.where('workspaceId').equals(WORKSPACE_ID).count()).toBe(initialTransactions)
+  })
+
+  it('rejects invalid, same-account, unauthorized, restricted-source, and insufficient-funds transfers without partial effects', async () => {
+    const from = await createFundedAccount(50_000)
+    const to = await savePaymentAccount(WORKSPACE_ID, {
+      name: 'Transfer Destination',
+      accountType: 'cash_drawer',
+      openingBalances: [],
+    })
+    const base = {
+      transferId: '00000000-0000-4000-8000-000000000593',
+      fromAccountId: from.id,
+      toAccountId: to.id,
+      currency: 'iqd' as const,
+      amount: 1,
+      occurredAt: '2026-08-28T14:30:00.000Z',
+      reason: 'Cash consolidation',
+      createdBy: '00000000-0000-4000-8000-000000000594',
+      canPost: true,
+    }
+    const originalMovementCount = await db.payment_account_movements.count()
+    const originalTransferCount = await db.payment_account_transfers.count()
+
+    await expect(recordPaymentAccountTransfer(WORKSPACE_ID, { ...base, amount: 0 })).rejects.toThrow('positive transfer amount')
+    await expect(recordPaymentAccountTransfer(WORKSPACE_ID, { ...base, reason: '   ' })).rejects.toThrow('reason for this transfer')
+    await expect(recordPaymentAccountTransfer(WORKSPACE_ID, { ...base, toAccountId: from.id })).rejects.toThrow('different destination')
+    await expect(recordPaymentAccountTransfer(WORKSPACE_ID, { ...base, canPost: false })).rejects.toThrow('not allowed')
+    await expect(recordPaymentAccountTransfer(WORKSPACE_ID, { ...base, amount: 60_000 }))
+      .rejects.toThrow('50,000 د.ع')
+
+    await setPaymentAccountMemberAccess(WORKSPACE_ID, from.id, base.createdBy, false)
+    await expect(recordPaymentAccountTransfer(WORKSPACE_ID, base)).rejects.toThrow('access to the source payment account')
+
+    expect(await db.payment_account_transfers.count()).toBe(originalTransferCount)
+    expect(await db.payment_account_movements.count()).toBe(originalMovementCount)
+    expect((await db.payment_account_balances.where('[accountId+currency]').equals([from.id, 'iqd']).first())?.balanceAmount).toBe(50_000)
+  })
+
+  it('permits a hidden destination, and duplicate retries with the same transfer ID do not apply twice', async () => {
+    const from = await createFundedAccount(80_000)
+    const to = await savePaymentAccount(WORKSPACE_ID, {
+      name: 'Hidden Destination',
+      accountType: 'cash_drawer',
+      openingBalances: [],
+    })
+    const userId = '00000000-0000-4000-8000-000000000595'
+    await setPaymentAccountMemberAccess(WORKSPACE_ID, to.id, userId, false)
+    const input = {
+      transferId: '00000000-0000-4000-8000-000000000596',
+      fromAccountId: from.id,
+      toAccountId: to.id,
+      currency: 'iqd' as const,
+      amount: 30_000,
+      occurredAt: '2026-08-28T14:30:00.000Z',
+      reason: 'Cash consolidation',
+      createdBy: userId,
+      canPost: true,
+    }
+
+    const first = await recordPaymentAccountTransfer(WORKSPACE_ID, input)
+    const retry = await recordPaymentAccountTransfer(WORKSPACE_ID, input)
+
+    expect(retry.id).toBe(first.id)
+    expect(await db.payment_account_transfers.where('workspaceId').equals(WORKSPACE_ID).count()).toBe(1)
+    expect(await db.payment_account_movements.where('transferId').equals(first.id).count()).toBe(2)
+    expect((await db.payment_account_balances.where('[accountId+currency]').equals([from.id, 'iqd']).first())?.balanceAmount).toBe(50_000)
+    expect((await db.payment_account_balances.where('[accountId+currency]').equals([to.id, 'iqd']).first())?.balanceAmount).toBe(30_000)
+  })
+
+  it('keeps an offline Cloud transfer atomic locally and queues only its shared transfer record', async () => {
+    const from = await createFundedAccount(45_000)
+    const to = await savePaymentAccount(WORKSPACE_ID, { name: 'Offline Destination', accountType: 'cash_drawer', openingBalances: [] })
+    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
+    setNetworkStatus(false)
+
+    const transfer = await recordPaymentAccountTransfer(WORKSPACE_ID, {
+      transferId: '00000000-0000-4000-8000-000000000599',
+      fromAccountId: from.id,
+      toAccountId: to.id,
+      currency: 'iqd',
+      amount: 15_000,
+      occurredAt: '2026-08-28T14:30:00.000Z',
+      reason: 'Cash consolidation',
+      createdBy: '00000000-0000-4000-8000-000000000600',
+      canPost: true,
+    })
+
+    const queued = await db.offline_mutations.where('entityType').equals('payment_account_transfers').toArray()
+    expect(transfer.syncStatus).toBe('pending')
+    expect(queued).toHaveLength(1)
+    expect(queued[0]).toMatchObject({ entityId: transfer.id, operation: 'create', status: 'pending' })
+    expect(await db.payment_account_movements.where('transferId').equals(transfer.id).count()).toBe(2)
+    expect((await db.payment_account_balances.where('[accountId+currency]').equals([from.id, 'iqd']).first())?.balanceAmount).toBe(30_000)
+    expect((await db.payment_account_balances.where('[accountId+currency]').equals([to.id, 'iqd']).first())?.balanceAmount).toBe(15_000)
+    expect(await db.payment_transactions.where('workspaceId').equals(WORKSPACE_ID).count()).toBe(1)
+  })
+
+  it('rejects a bank-account overdraft just like the existing withdrawal workflow', async () => {
+    const bank = await savePaymentAccount(WORKSPACE_ID, { name: 'Bank Account', accountType: 'bank_account', openingBalances: [] })
+    const destination = await savePaymentAccount(WORKSPACE_ID, { name: 'Cash Destination', accountType: 'cash_drawer', openingBalances: [] })
+
+    await expect(recordPaymentAccountTransfer(WORKSPACE_ID, {
+      transferId: '00000000-0000-4000-8000-000000000597',
+      fromAccountId: bank.id,
+      toAccountId: destination.id,
+      currency: 'iqd',
+      amount: 15_000,
+      occurredAt: '2026-08-28T14:30:00.000Z',
+      reason: 'Cash consolidation',
+      createdBy: '00000000-0000-4000-8000-000000000598',
+      canPost: true,
+    })).rejects.toThrow('not enough available funds')
+    expect(await db.payment_account_transfers.count()).toBe(0)
+    expect(await db.payment_account_movements.count()).toBe(0)
+    expect((await db.payment_account_balances.where('[accountId+currency]').equals([bank.id, 'iqd']).first())?.balanceAmount ?? 0).toBe(0)
+    expect((await db.payment_account_balances.where('[accountId+currency]').equals([destination.id, 'iqd']).first())?.balanceAmount ?? 0).toBe(0)
   })
 })

@@ -88,6 +88,7 @@ import type {
   CapitalPool,
   PaymentAccountBalance,
   PaymentAccountMovement,
+  PaymentAccountTransfer,
   CashierShift,
   CashierShiftCurrencyCount,
   CashierShiftTemplate,
@@ -501,6 +502,7 @@ export class AtlasDatabase extends Dexie {
   capital_pools!: EntityTable<CapitalPool, 'id'>
   payment_account_balances!: EntityTable<PaymentAccountBalance, 'id'>
   payment_account_movements!: EntityTable<PaymentAccountMovement, 'id'>
+  payment_account_transfers!: EntityTable<PaymentAccountTransfer, 'id'>
   cashier_shifts!: EntityTable<CashierShift, 'id'>
   cashier_shift_currency_counts!: EntityTable<CashierShiftCurrencyCount, 'id'>
   cashier_shift_templates!: EntityTable<CashierShiftTemplate, 'id'>
@@ -3277,7 +3279,7 @@ export class AtlasDatabase extends Dexie {
           .table('payment_account_movements')
           .toArray()) as PaymentAccountMovement[]
         const retiredMovements = paymentAccountMovements.filter((movement) =>
-          retiredPaymentIds.has(movement.paymentTransactionId)
+          !!movement.paymentTransactionId && retiredPaymentIds.has(movement.paymentTransactionId)
         )
         const balanceDeltas = new Map<string, number>()
         for (const movement of retiredMovements) {
@@ -3569,6 +3571,13 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, accountId, userId, updatedAt, isDeleted, syncStatus, [workspaceId+accountId], [workspaceId+userId], [workspaceId+accountId+userId], [accountId+userId]'
     })
 
+    this.version(138).stores({
+      payment_account_movements:
+        'id, workspaceId, accountId, paymentTransactionId, transferId, currency, occurredAt, voidId, updatedAt, isDeleted, syncStatus, [workspaceId+accountId], [accountId+occurredAt], [workspaceId+occurredAt], [workspaceId+voidId], [transferId+accountId]',
+      payment_account_transfers:
+        'id, workspaceId, fromAccountId, toAccountId, currency, occurredAt, createdBy, updatedAt, isDeleted, syncStatus, [workspaceId+occurredAt], [workspaceId+fromAccountId], [workspaceId+toAccountId]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
@@ -3809,6 +3818,7 @@ export class AtlasDatabase extends Dexie {
       'capital_pools',
       'payment_account_balances',
       'payment_account_movements',
+      'payment_account_transfers',
       'cashier_shifts',
       'cashier_shift_currency_counts',
       'cashier_shift_templates',
@@ -4000,6 +4010,7 @@ export async function clearDatabase(): Promise<void> {
       db.capital_pools,
       db.payment_account_balances,
       db.payment_account_movements,
+      db.payment_account_transfers,
       db.cashier_shifts,
       db.cashier_shift_currency_counts,
       db.cashier_shift_templates,
@@ -4076,6 +4087,7 @@ export async function clearDatabase(): Promise<void> {
       await db.capital_pools.clear()
       await db.payment_account_balances.clear()
       await db.payment_account_movements.clear()
+      await db.payment_account_transfers.clear()
       await db.cashier_shifts.clear()
       await db.cashier_shift_currency_counts.clear()
       await db.cashier_shift_templates.clear()
