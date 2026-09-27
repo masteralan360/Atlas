@@ -193,8 +193,8 @@ copy. Run it with `node scripts/dev-testing/cli.mjs --suite business-partners --
 
 The `ecommerce` suite's **Storefront configuration** group checks storage-rule
 composition and source selection, the five-additional-storefront workspace cap,
-workspace/storefront-scoped Supabase request contracts and failure propagation,
-and migration constraints. Run it with
+optional catalog price-filter parsing, workspace/storefront-scoped Supabase
+request contracts and failure propagation, and migration constraints. Run it with
 `node scripts/dev-testing/cli.mjs --suite ecommerce --groups storefront-configuration`.
 These checks use a mocked Supabase client and inspect migration source; they do
 not exercise live RLS, deployed Edge Functions, order delivery, or the public

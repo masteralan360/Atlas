@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
     getStorefrontStorageIds,
+    parseOptionalCatalogPriceMax,
     selectStorefrontInventorySources,
     selectStorefrontProductSources,
     type StorefrontCatalogRule
@@ -22,6 +23,20 @@ function rule(
 }
 
 describe('storefront storage catalog rules', () => {
+    it('leaves the catalog price ceiling unset when the query parameter is omitted', () => {
+        expect(parseOptionalCatalogPriceMax(null)).toBeNull()
+        expect(parseOptionalCatalogPriceMax('')).toBeNull()
+        expect(parseOptionalCatalogPriceMax('   ')).toBeNull()
+    })
+
+    it('accepts zero and valid nonnegative catalog price ceilings only', () => {
+        expect(parseOptionalCatalogPriceMax('0')).toBe(0)
+        expect(parseOptionalCatalogPriceMax('1250.5')).toBe(1250.5)
+        expect(parseOptionalCatalogPriceMax('-1')).toBeNull()
+        expect(parseOptionalCatalogPriceMax('not-a-number')).toBeNull()
+        expect(parseOptionalCatalogPriceMax('Infinity')).toBeNull()
+    })
+
     it('keeps the designated Marketplace storage when no storage rule exists', () => {
         expect(getStorefrontStorageIds(['marketplace', 'marketplace'], [rule('inclusion', 'native')]))
             .toEqual(['marketplace'])

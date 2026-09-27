@@ -15,6 +15,13 @@ export type StorefrontInventorySourceRow = {
     created_at?: string | null
 }
 
+export function parseOptionalCatalogPriceMax(value: string | null) {
+    if (value === null || value.trim() === '') return null
+
+    const priceMax = Number(value)
+    return Number.isFinite(priceMax) && priceMax >= 0 ? priceMax : null
+}
+
 /**
  * Resolves storage rules without changing the existing default source policy:
  * explicit storage inclusions replace the default Marketplace storages, while

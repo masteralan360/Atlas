@@ -10,7 +10,10 @@ import {
     resolveStorefrontVisibleProductIds,
     sanitizeMarketplaceText
 } from '../_shared/marketplace.ts'
-import { selectStorefrontInventorySources } from '../_shared/storefrontCatalogRules.ts'
+import {
+    parseOptionalCatalogPriceMax,
+    selectStorefrontInventorySources
+} from '../_shared/storefrontCatalogRules.ts'
 
 const PRODUCT_PAGE_SIZE = 48
 
@@ -167,8 +170,7 @@ Deno.serve(async (req) => {
         const sort: CatalogSort = url.searchParams.get('sort') === 'newest' ? 'newest' : 'featured'
         const search = sanitizeMarketplaceText(url.searchParams.get('q'), 120).toLocaleLowerCase()
         const categoryId = sanitizeMarketplaceText(url.searchParams.get('category_id'), 80) || null
-        const priceMaxInput = Number(url.searchParams.get('price_max'))
-        const priceMax = Number.isFinite(priceMaxInput) && priceMaxInput >= 0 ? priceMaxInput : null
+        const priceMax = parseOptionalCatalogPriceMax(url.searchParams.get('price_max'))
         const currency = sanitizeMarketplaceText(url.searchParams.get('currency'), 16).toLowerCase() || null
         const includeProducts = url.searchParams.get('include_products') !== 'false'
         const rawCursor = url.searchParams.get('cursor')

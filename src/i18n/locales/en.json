@@ -46,7 +46,7 @@
     "saleOrders": "Sale Orders",
     "businessPartners": "Business Partners",
     "ecommerce": "E-Commerce",
-    "ecommerceCoverageHelp": "Checks storefront storage-rule targeting and composition, the five-additional-storefront workspace limit, workspace/storefront-scoped Supabase requests, migration constraints, and the authenticated Jumla Khaleej inquiry snapshot contract. Live Supabase permissions, Edge Function deployment, order delivery, rate limits, and storefront browser flows require separate integration checks.",
+    "ecommerceCoverageHelp": "Checks storefront storage-rule targeting and composition, optional catalog price-filter parsing, the five-additional-storefront workspace limit, workspace/storefront-scoped Supabase requests, migration constraints, and the authenticated Jumla Khaleej inquiry snapshot contract. Live Supabase permissions, Edge Function deployment, order delivery, rate limits, and storefront browser flows require separate integration checks.",
     "ecommerceGroups": {
       "storefrontConfiguration": "Storefront configuration",
       "jumlaTrackingContract": "Jumla Khaleej tracking and PDF contract"
