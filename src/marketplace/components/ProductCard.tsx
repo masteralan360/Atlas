@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Package2, Plus } from 'lucide-react'
 
 import { Button, Card, CardContent } from '@/ui/components'
+import { formatProductQuantity } from '@/lib/productUnitPresentation'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import type { MarketplaceProduct } from '../lib/marketplaceApi'
 import { getMarketplaceProductImageUrl } from '../lib/assets'
+import type { MarketplaceProduct } from '../lib/marketplaceApi'
 
 type ProductCardProps = {
     product: MarketplaceProduct
@@ -13,6 +15,7 @@ type ProductCardProps = {
     onAdd?: (product: MarketplaceProduct) => void
     showPrice?: boolean
     showAddToCart?: boolean
+    showStockInsteadOfAddToCart?: boolean
 }
 
 export function ProductCard({
@@ -21,8 +24,10 @@ export function ProductCard({
     addToCartLabel,
     onAdd,
     showPrice = true,
-    showAddToCart = true
+    showAddToCart = true,
+    showStockInsteadOfAddToCart = false
 }: ProductCardProps) {
+    const { t, i18n } = useTranslation()
     const resolvedImageUrl = getMarketplaceProductImageUrl(product.image_url)
     const [hasImageError, setHasImageError] = useState(false)
     const hasDiscount = typeof product.discount_price === 'number' && product.discount_price < product.price
@@ -36,6 +41,12 @@ export function ProductCard({
             ? `-${Number(product.discount_value ?? 0)}%`
             : `-${formatCurrency(Number(product.discount_value ?? 0), product.currency, iqdPreference)}`)
         : null
+    const formattedStockQuantity = formatProductQuantity(
+        product.stock_quantity,
+        product.unit,
+        i18n.language || 'en',
+        t
+    )
 
     useEffect(() => {
         setHasImageError(false)
@@ -75,40 +86,51 @@ export function ProductCard({
                         {product.name}
                     </h3>
 
-                    {(showPrice || (showAddToCart && onAdd && addToCartLabel)) && (
+                    {(showPrice || (showAddToCart && onAdd && addToCartLabel) || showStockInsteadOfAddToCart) && (
                         <div className="mt-auto flex items-end justify-between gap-3 pt-8">
-                        {showPrice ? (
-                            <div>
-                            {hasDiscount ? (
-                                <>
-                                    <div className="text-xs font-semibold text-muted-foreground line-through">
-                                        {formatCurrency(product.price, product.currency, iqdPreference)}
-                                    </div>
-                                    <div className="text-lg font-black text-emerald-600">
-                                        {formatCurrency(product.discount_price!, product.currency, iqdPreference)}
-                                    </div>
-                                </>
-                            ) : (
-                                <div className="text-lg font-black text-[#151b28]">
-                                    {formatCurrency(product.price, product.currency, iqdPreference)}
+                            {showPrice ? (
+                                <div>
+                                    {hasDiscount ? (
+                                        <>
+                                            <div className="text-xs font-semibold text-muted-foreground line-through">
+                                                {formatCurrency(product.price, product.currency, iqdPreference)}
+                                            </div>
+                                            <div className="text-lg font-black text-emerald-600">
+                                                {formatCurrency(product.discount_price!, product.currency, iqdPreference)}
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div className="text-lg font-black text-[#151b28]">
+                                            {formatCurrency(product.price, product.currency, iqdPreference)}
+                                        </div>
+                                    )}
+                                    {endsSoon && endsAt && (
+                                        <div className="mt-1 text-[11px] font-medium text-amber-600">
+                                            Ends {formatDate(endsAt)}
+                                        </div>
+                                    )}
                                 </div>
+                            ) : <span />}
+                            {showStockInsteadOfAddToCart ? (
+                                <span
+                                    aria-label={t('marketplace.stockQuantity', {
+                                        quantity: formattedStockQuantity,
+                                        defaultValue: 'Stock quantity: {{quantity}}'
+                                    })}
+                                    className="inline-flex min-h-9 max-w-[58%] shrink-0 items-center gap-1.5 rounded-full bg-[#d3e7e1] px-3 text-xs font-black text-[#00756f]"
+                                >
+                                    <Package2 className="h-4 w-4 shrink-0" />
+                                    <span className="truncate">{formattedStockQuantity}</span>
+                                </span>
+                            ) : showAddToCart && onAdd && addToCartLabel && (
+                                <Button
+                                    className="h-9 rounded-full bg-[#d3e7e1] px-5 text-sm font-black text-[#00756f] shadow-none hover:bg-[#c4ded7]"
+                                    onClick={() => onAdd(product)}
+                                >
+                                    <Plus className="h-4 w-4" />
+                                    {addToCartLabel}
+                                </Button>
                             )}
-                                {endsSoon && endsAt && (
-                                    <div className="mt-1 text-[11px] font-medium text-amber-600">
-                                        Ends {formatDate(endsAt)}
-                                    </div>
-                                )}
-                            </div>
-                        ) : <span />}
-                        {showAddToCart && onAdd && addToCartLabel && (
-                            <Button
-                            className="h-9 rounded-full bg-[#d3e7e1] px-5 text-sm font-black text-[#00756f] shadow-none hover:bg-[#c4ded7]"
-                                onClick={() => onAdd(product)}
-                        >
-                            <Plus className="h-4 w-4" />
-                            {addToCartLabel}
-                            </Button>
-                        )}
                         </div>
                     )}
                 </div>

@@ -81,6 +81,13 @@ describe('getStorefrontTemplateForSlug', () => {
         expect(resolved.rules).toEqual({ hidePrice: true, hideAddToCart: true })
     })
 
+    it.each(['khalid', 'ibrahim'])('shows stock instead of cart actions only for the %s slug', (slug) => {
+        const resolved = getStorefrontTemplateForSlug(` ${slug.toUpperCase()} `)
+
+        expect(resolved.template.id).toBe('generic')
+        expect(resolved.rules).toEqual({ showStockInsteadOfAddToCart: true })
+    })
+
     it('applies the custom checkout and layout rules only to the configured workspace', () => {
         expect(getWorkspaceStorefrontRules('0B342F6C-BCDC-45A9-BCDA-9D21360FF3C9')).toEqual({
             hideCheckoutEmail: true,

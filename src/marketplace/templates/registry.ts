@@ -41,6 +41,14 @@ export type StorefrontTemplateAssignment = {
  * 
  */
 export const storefrontTemplateAssignments: Readonly<Record<string, StorefrontTemplateAssignment>> = {
+    khalid: {
+        templateId: 'generic',
+        rules: { showStockInsteadOfAddToCart: true }
+    },
+    ibrahim: {
+        templateId: 'generic',
+        rules: { showStockInsteadOfAddToCart: true }
+    },
     'k1-paint': {
         templateId: 'generic',
         rules: { hidePrice: true, hideAddToCart: true }

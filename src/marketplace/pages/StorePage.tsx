@@ -94,7 +94,8 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
     const underPriceLabel = formatThresholdLabel(underPriceThreshold, storeCurrency)
     const effectiveRules = getEffectiveStorefrontRules(rules, catalog?.store.workspace_id)
     const hidePrice = effectiveRules.hidePrice === true
-    const hideAddToCart = effectiveRules.hideAddToCart === true
+    const showStockInsteadOfAddToCart = effectiveRules.showStockInsteadOfAddToCart === true
+    const hideAddToCart = effectiveRules.hideAddToCart === true || showStockInsteadOfAddToCart
     const hideCheckoutEmail = effectiveRules.hideCheckoutEmail === true
     const hideFilters = effectiveRules.hideFilters === true
 
@@ -394,6 +395,7 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
                                             iqdPreference={iqdPreference}
                                             showPrice={!hidePrice}
                                             showAddToCart={!hideAddToCart}
+                                            showStockInsteadOfAddToCart={showStockInsteadOfAddToCart}
                                             addToCartLabel={hideAddToCart ? undefined : t('marketplace.addToCart', { defaultValue: 'Add to Cart' })}
                                             onAdd={hideAddToCart ? undefined : handleAddToCart}
                                         />

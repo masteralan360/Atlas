@@ -5,11 +5,73 @@ vi.mock('@/auth/supabase', () => ({
     resolvedSupabaseUrl: 'https://test-project.supabase.co'
 }))
 
-const { placeInquiryOrder } = await import('./marketplaceApi')
+const { getStoreCatalog, placeInquiryOrder } = await import('./marketplaceApi')
 
 afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+})
+
+describe('marketplace catalog request contract', () => {
+    it('returns source-storage stock quantities with the storefront product unit', async () => {
+        const catalog = {
+            store: {
+                workspace_id: 'workspace-a',
+                name: 'Khalid Store',
+                slug: 'khalid',
+                description: null,
+                logo_url: null,
+                currency: 'iqd',
+                contacts: []
+            },
+            categories: [],
+            products: [{
+                id: 'product-a',
+                name: 'Water Bottle',
+                sku: 'WB-1',
+                description: '',
+                price: 1500,
+                currency: 'iqd',
+                unit: 'Box',
+                category_id: null,
+                category_name: null,
+                image_url: null,
+                discount_price: null,
+                discount_type: null,
+                discount_value: null,
+                discount_ends_at: null,
+                marketplace_added_at: null,
+                source_storage_id: 'storage-a',
+                stock_quantity: 12
+            }],
+            total_products: 1,
+            has_more: false,
+            next_cursor: null
+        }
+        const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(catalog), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+        }))
+        vi.stubGlobal('fetch', fetchMock)
+
+        await expect(getStoreCatalog({ slug: 'khalid', language: 'en' })).resolves.toEqual(catalog)
+        expect(fetchMock).toHaveBeenCalledWith(
+            'https://test-project.supabase.co/functions/v1/get-store-catalog?slug=khalid&lang=en',
+            expect.objectContaining({ signal: undefined })
+        )
+    })
+
+    it('returns a storefront-friendly message when catalog loading fails', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+            error: 'This storefront is temporarily unavailable'
+        }), { status: 503, headers: { 'Content-Type': 'application/json' } })))
+
+        await expect(getStoreCatalog({ slug: 'ibrahim', language: 'ku' })).rejects.toMatchObject({
+            name: 'MarketplaceApiError',
+            status: 503,
+            message: 'This storefront is temporarily unavailable'
+        })
+    })
 })
 
 describe('marketplace inquiry order request contract', () => {

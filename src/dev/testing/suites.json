@@ -524,6 +524,8 @@
         "layer": "contract",
         "files": [
           "src/marketplace/lib/marketplaceApi.test.ts",
+          "src/marketplace/templates/registry.test.ts",
+          "src/lib/productUnitPresentation.test.ts",
           "src/lib/storefrontCatalogRules.test.ts",
           "src/lib/storefrontCatalogRulesMigration.test.ts",
           "src/services/storefrontCatalogRuleRequests.test.ts",

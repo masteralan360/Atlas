@@ -12,6 +12,7 @@ export type StorefrontCatalogRule = {
 export type StorefrontInventorySourceRow = {
     product_id: string
     storage_id: string
+    quantity?: number | string | null
     created_at?: string | null
 }
 
@@ -106,6 +107,7 @@ export function selectStorefrontInventorySources(
     const storageRank = new Map(storageIds.map((storageId, index) => [storageId, index] as const))
     const sourceStorageIdByProductId = new Map<string, string>()
     const marketplaceAddedAtByProductId = new Map<string, string | null>()
+    const stockQuantityByProductId = new Map<string, number>()
 
     for (const row of inventoryRows) {
         if (!storageRank.has(row.storage_id)) continue
@@ -113,6 +115,8 @@ export function selectStorefrontInventorySources(
         const currentStorageId = sourceStorageIdByProductId.get(row.product_id)
         if (!currentStorageId || storageRank.get(row.storage_id)! < storageRank.get(currentStorageId)!) {
             sourceStorageIdByProductId.set(row.product_id, row.storage_id)
+            const quantity = Number(row.quantity ?? 0)
+            stockQuantityByProductId.set(row.product_id, Number.isFinite(quantity) ? quantity : 0)
         }
 
         const currentAddedAt = marketplaceAddedAtByProductId.get(row.product_id)
@@ -121,5 +125,5 @@ export function selectStorefrontInventorySources(
         }
     }
 
-    return { sourceStorageIdByProductId, marketplaceAddedAtByProductId }
+    return { sourceStorageIdByProductId, marketplaceAddedAtByProductId, stockQuantityByProductId }
 }

@@ -14,6 +14,7 @@ export type StorefrontTemplateOptions = Readonly<Record<string, string | number 
 export const storefrontRuleKeys = [
     'hidePrice',
     'hideAddToCart',
+    'showStockInsteadOfAddToCart',
     'hideCheckoutEmail',
     'hideFilters'
 ] as const

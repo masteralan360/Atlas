@@ -114,7 +114,7 @@ export function StoreContactPage({ storeSlug, rules = {} }: StoreContactPageProp
             storeSlug={storeSlug}
             activeItem="contact"
             cartCount={cart.itemCount}
-            showCart={!rules.hideAddToCart}
+            showCart={!rules.hideAddToCart && !rules.showStockInsteadOfAddToCart}
             onCartClick={() => {
                 window.location.href = `/s/${storeSlug}`
             }}

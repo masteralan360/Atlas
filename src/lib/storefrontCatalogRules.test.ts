@@ -94,12 +94,20 @@ describe('storefront storage catalog rules', () => {
     it('keeps source selection deterministic and tracks the earliest marketplace-added date', () => {
         expect(selectStorefrontInventorySources(['east', 'west'], [
             { product_id: 'p1', storage_id: 'west', created_at: '2026-02-03T00:00:00Z' },
-            { product_id: 'p1', storage_id: 'east', created_at: '2026-02-05T00:00:00Z' },
-            { product_id: 'p1', storage_id: 'east', created_at: '2026-02-01T00:00:00Z' },
+            { product_id: 'p1', storage_id: 'east', quantity: 12, created_at: '2026-02-05T00:00:00Z' },
+            { product_id: 'p1', storage_id: 'east', quantity: 12, created_at: '2026-02-01T00:00:00Z' },
             { product_id: 'p2', storage_id: 'unused', created_at: '2026-01-01T00:00:00Z' }
         ])).toEqual({
             sourceStorageIdByProductId: new Map([['p1', 'east']]),
-            marketplaceAddedAtByProductId: new Map([['p1', '2026-02-01T00:00:00Z']])
+            marketplaceAddedAtByProductId: new Map([['p1', '2026-02-01T00:00:00Z']]),
+            stockQuantityByProductId: new Map([['p1', 12]])
         })
+    })
+
+    it('uses the selected source storage quantity for each product', () => {
+        expect(selectStorefrontInventorySources(['east', 'west'], [
+            { product_id: 'p1', storage_id: 'west', quantity: 25 },
+            { product_id: 'p1', storage_id: 'east', quantity: 8 }
+        ]).stockQuantityByProductId).toEqual(new Map([['p1', 8]]))
     })
 })

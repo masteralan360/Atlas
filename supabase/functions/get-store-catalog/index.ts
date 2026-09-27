@@ -39,7 +39,7 @@ type ProductRow = {
 }
 type CategoryRow = { id: string; name: string }
 type ContactRow = { type: string; value: string; label: string | null; is_primary: boolean | null }
-type InventoryRow = { product_id: string; storage_id: string; created_at: string | null }
+type InventoryRow = { product_id: string; storage_id: string; quantity: number | string | null; created_at: string | null }
 type StorefrontRow = { id: string; workspace_id: string; slug: string; description: string | null; visibility: string }
 type CatalogSort = 'featured' | 'newest'
 type ProductCursor = { sort: CatalogSort; name: string; id: string; addedAt: number }
@@ -60,6 +60,7 @@ type MappedProduct = {
     discount_ends_at: string | null
     marketplace_added_at: string | null
     source_storage_id: string
+    stock_quantity: number
     addedAt: number
 }
 
@@ -207,7 +208,7 @@ Deno.serve(async (req) => {
         }
 
         const [{ data: inventoryRows, error: inventoryError }, discountResults] = await Promise.all([
-            adminClient.from('inventory').select('product_id, storage_id, created_at').eq('workspace_id', resolved.workspace.id).in('storage_id', storefrontStorageIds).eq('is_deleted', false),
+            adminClient.from('inventory').select('product_id, storage_id, quantity, created_at').eq('workspace_id', resolved.workspace.id).in('storage_id', storefrontStorageIds).eq('is_deleted', false),
             Promise.all(storefrontStorageIds.map((storageId) => adminClient.rpc('get_active_discounts_for_marketplace_storage', {
                 p_workspace_id: resolved.workspace.id,
                 p_storage_id: storageId
@@ -291,6 +292,7 @@ Deno.serve(async (req) => {
                 discount_ends_at: resolvedDiscount?.ends_at ?? null,
                 marketplace_added_at: marketplaceAddedAt,
                 source_storage_id: sourceStorageId,
+                stock_quantity: inventorySources.stockQuantityByProductId.get(product.id) ?? 0,
                 addedAt: getTimestamp(marketplaceAddedAt)
             }
         })
