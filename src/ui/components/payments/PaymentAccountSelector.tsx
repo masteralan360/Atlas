@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ShieldAlert } from 'lucide-react'
 
+import { useAuth } from '@/auth'
 import { usePaymentAccountBalancesState, usePaymentAccountsState, type PaymentAccount } from '@/local-db'
 import { formatCurrency } from '@/lib/utils'
 import { Label } from '@/ui/components/label'
@@ -40,8 +41,9 @@ export function PaymentAccountSelector({
   originAccountId,
 }: PaymentAccountSelectorProps) {
   const { t } = useTranslation()
+  const { user } = useAuth()
   const { features } = useWorkspace()
-  const { accounts, isReady: areAccountsReady } = usePaymentAccountsState(workspaceId)
+  const { accounts, isReady: areAccountsReady } = usePaymentAccountsState(workspaceId, user?.id)
   // Balance data is deliberately non-blocking. The account/preselection state
   // determines when the selector is ready; balances enrich it afterward.
   const { balances, isReady: areBalancesReady } = usePaymentAccountBalancesState(workspaceId)

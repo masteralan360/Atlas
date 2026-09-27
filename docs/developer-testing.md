@@ -24,6 +24,13 @@ the transaction. Clearing application storage removes these device-local jobs.
 Local-mode saves still await their summaries. These are disposable IndexedDB and mocked request checks, not native
 SQLite or live Supabase integration tests.
 
+The Sale Orders **Payments** and POS **Checkout** groups also run payment-account
+member-visibility checks. They verify workspace/member filtering, the
+`payment_accounts.account_member_restrictions` Cloud / Hybrid request contract,
+offline retry handoff, and hard deletion when access is restored. This is an
+application visibility preference; it does not replace or change the existing
+workspace-scoped account RLS policy.
+
 Start the development server with `npm run dev`, open its localhost URL, and go
 to **Orders → Sale Orders → Developer tests**, **POS → Developer tests**, or **Post Service → Developer tests**. The button and runner are enabled
 automatically during development and excluded from production builds.

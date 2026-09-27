@@ -84,6 +84,7 @@ import type {
   PaymentTransaction,
   FinancialTransactionVoid,
   PaymentAccount,
+  PaymentAccountMemberRestriction,
   CapitalPool,
   PaymentAccountBalance,
   PaymentAccountMovement,
@@ -496,6 +497,7 @@ export class AtlasDatabase extends Dexie {
   payment_transactions!: EntityTable<PaymentTransaction, 'id'>
   financial_transaction_voids!: EntityTable<FinancialTransactionVoid, 'id'>
   payment_accounts!: EntityTable<PaymentAccount, 'id'>
+  payment_account_member_restrictions!: EntityTable<PaymentAccountMemberRestriction, 'id'>
   capital_pools!: EntityTable<CapitalPool, 'id'>
   payment_account_balances!: EntityTable<PaymentAccountBalance, 'id'>
   payment_account_movements!: EntityTable<PaymentAccountMovement, 'id'>
@@ -3562,6 +3564,11 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, groupId, businessPartnerId, updatedAt, isDeleted, syncStatus, [workspaceId+groupId], [workspaceId+businessPartnerId], [groupId+businessPartnerId]'
     })
 
+    this.version(137).stores({
+      payment_account_member_restrictions:
+        'id, workspaceId, accountId, userId, updatedAt, isDeleted, syncStatus, [workspaceId+accountId], [workspaceId+userId], [workspaceId+accountId+userId], [accountId+userId]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
@@ -3798,6 +3805,7 @@ export class AtlasDatabase extends Dexie {
       'payment_transactions',
       'financial_transaction_voids',
       'payment_accounts',
+      'payment_account_member_restrictions',
       'capital_pools',
       'payment_account_balances',
       'payment_account_movements',
@@ -3988,6 +3996,7 @@ export async function clearDatabase(): Promise<void> {
       db.payment_transactions,
       db.financial_transaction_voids,
       db.payment_accounts,
+      db.payment_account_member_restrictions,
       db.capital_pools,
       db.payment_account_balances,
       db.payment_account_movements,
@@ -4063,6 +4072,7 @@ export async function clearDatabase(): Promise<void> {
       await db.payment_transactions.clear()
       await db.financial_transaction_voids.clear()
       await db.payment_accounts.clear()
+      await db.payment_account_member_restrictions.clear()
       await db.capital_pools.clear()
       await db.payment_account_balances.clear()
       await db.payment_account_movements.clear()

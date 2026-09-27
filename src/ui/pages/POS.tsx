@@ -967,7 +967,7 @@ export function POS() {
     const isTutorialPosTask = demoTutorial.isCurrentTask('pos-sale')
     const [digitalProvider, setDigitalProvider] = useState<'fib' | 'qicard' | 'zaincash' | 'fastpay'>('fib')
     const [paymentAccount, setPaymentAccount] = useState<PaymentAccount | null>(null)
-    const paymentAccounts = usePaymentAccounts(user?.workspaceId)
+    const paymentAccounts = usePaymentAccounts(user?.workspaceId, user?.id)
     const selectDigitalProvider = useCallback((provider: 'fib' | 'qicard' | 'zaincash' | 'fastpay') => {
         setDigitalProvider(provider)
         const linkedWallet = paymentAccounts.find((account) => (

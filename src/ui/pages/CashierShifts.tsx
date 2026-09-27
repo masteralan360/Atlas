@@ -158,7 +158,7 @@ export function CashierShifts() {
   const templates = useCashierShiftTemplates(workspaceId)
   const assignments = useCashierShiftAssignments(workspaceId)
   const occurrences = useCashierShiftOccurrences(workspaceId)
-  const paymentAccounts = usePaymentAccounts(workspaceId)
+  const paymentAccounts = usePaymentAccounts(workspaceId, user?.id)
   const paymentTransactions = usePaymentTransactions(workspaceId, {}, { hydrateSourceTables: false })
   const enabled =
     hasFeature('payment_accounts') && hasFeature('cashier_shift_control') && hasPermission('cashierShiftControl.access')

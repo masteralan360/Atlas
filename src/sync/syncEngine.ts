@@ -131,6 +131,7 @@ const SYNC_PULL_TABLES = [
   "loan_installments",
   "loan_payments",
   "payment_accounts",
+  "payment_account_member_restrictions",
   "capital_pools",
   "payment_account_balances",
   "payment_account_movements",
@@ -445,6 +446,9 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
     case "payment_transactions":
       addParent("payment_accounts", "accountId", "account_id");
       addParent("payment_transactions", "reversalOfTransactionId", "reversal_of_transaction_id");
+      break;
+    case "payment_account_member_restrictions":
+      addParent("payment_accounts", "accountId", "account_id");
       break;
     case "loan_installments":
       addParent("loans", "loanId", "loan_id");
@@ -1253,7 +1257,7 @@ export async function processMutationQueue(
       let entityHandledInline = false;
       const shouldHardDelete =
         operation === "delete" &&
-        (entityType === "loans" || payload.hardDelete === true);
+        (entityType === "loans" || entityType === "payment_account_member_restrictions" || payload.hardDelete === true);
 
       if (entityType === "loans" && operation === "delete") {
         const loan = await db.loans.get(entityId);

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowDownLeft, ArrowUpRight, BarChart3, DollarSign, Landmark, LockKeyhole, Package, Plus, RotateCcw, Search, ShieldAlert, SlidersHorizontal, TrendingDown, TrendingUp, Trash2, Wallet, WalletCards, X } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, BarChart3, DollarSign, Landmark, Loader2, LockKeyhole, Package, Plus, RotateCcw, Search, ShieldAlert, SlidersHorizontal, TrendingDown, TrendingUp, Trash2, UserRound, UsersRound, Wallet, WalletCards, X } from 'lucide-react'
 import { Area, AreaChart, ResponsiveContainer } from 'recharts'
 
 import { useAuth } from '@/auth'
@@ -20,7 +20,9 @@ import {
   getPaymentAccountBalanceSummary,
   recordPaymentAccountManualOperation,
   savePaymentAccount,
+  setPaymentAccountMemberAccess,
   useCapitalPools,
+  usePaymentAccountMemberRestrictions,
   usePaymentAccountBalances,
   usePaymentAccountMovements,
   usePaymentAccounts,
@@ -28,6 +30,7 @@ import {
   type CurrencyCode,
   type DigitalWalletPaymentMethod,
   type PaymentAccount,
+  type PaymentAccountMemberRestriction,
   type PaymentAccountMovement,
   type PaymentAccountIconKey,
   type PaymentAccountType,
@@ -38,6 +41,7 @@ import {
   type WorkspacePaymentMethod,
   getPaymentTransactionReversalAmounts,
   usePaymentTransactions,
+  useWorkspaceUsers,
 } from '@/local-db'
 import { cn, formatCurrency, formatDateTime, formatNumericInput, parseFormattedNumber, sanitizeNumericInput } from '@/lib/utils'
 import { getDateRangeBounds, isDateInDateRange } from '@/lib/dateRangeFilters'
@@ -64,6 +68,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -405,13 +410,16 @@ export function PaymentAccounts() {
   const { exchangeData, eurRates, tryRates } = useExchangeRate()
   const workspaceId = user?.workspaceId
   const baseCurrency = features.default_currency
-  const accounts = usePaymentAccounts(workspaceId)
+  const accounts = usePaymentAccounts(workspaceId, user?.id)
+  const workspaceUsers = useWorkspaceUsers(workspaceId)
   const capitalPools = useCapitalPools(workspaceId)
   const balances = usePaymentAccountBalances(workspaceId)
   const movements = usePaymentAccountMovements(workspaceId)
   const paymentTransactions = usePaymentTransactions(workspaceId, { includeReversals: true })
 
   const [accountDialogOpen, setAccountDialogOpen] = useState(false)
+  const [accountAccessDialogOpen, setAccountAccessDialogOpen] = useState(false)
+  const [accountAccessMutationUserId, setAccountAccessMutationUserId] = useState<string | null>(null)
   const [activeModuleTab, setActiveModuleTab] = useState<'accounts' | 'capital-pools'>('accounts')
   const [editingAccount, setEditingAccount] = useState<PaymentAccount | null>(null)
   const [accountName, setAccountName] = useState('')
@@ -425,6 +433,10 @@ export function PaymentAccounts() {
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
   const [accountPendingDeletion, setAccountPendingDeletion] = useState<PaymentAccount | null>(null)
   const [saving, setSaving] = useState(false)
+  const { restrictions: accountMemberRestrictions, isReady: areAccountRestrictionsReady } = usePaymentAccountMemberRestrictions(
+    workspaceId,
+    editingAccount?.id,
+  )
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
   const [hoveredRelationKey, setHoveredRelationKey] = useState<string | null>(null)
   const [movementFilters, setMovementFilters] = useState<AccountMovementFilters>(DEFAULT_MOVEMENT_FILTERS)
@@ -445,6 +457,10 @@ export function PaymentAccounts() {
   const selectedAccount = useMemo(
     () => accounts.find((account) => account.id === selectedAccountId) ?? null,
     [accounts, selectedAccountId],
+  )
+  const restrictedMemberIds = useMemo(
+    () => new Set(accountMemberRestrictions.map((restriction: PaymentAccountMemberRestriction) => restriction.userId)),
+    [accountMemberRestrictions],
   )
   const adjustmentWarningLanguages = adjustmentWarningLanguageOrder(i18n.language)
   const activeAccountCount = useMemo(
@@ -755,7 +771,35 @@ export function PaymentAccounts() {
 
   const openAccountDialog = (account?: PaymentAccount) => {
     resetAccountForm(account)
+    setAccountAccessDialogOpen(false)
     setAccountDialogOpen(true)
+  }
+
+  const toggleMemberAccountAccess = async (member: { id: string; name: string }, hasAccess: boolean) => {
+    if (!workspaceId || !editingAccount || accountAccessMutationUserId) return
+    setAccountAccessMutationUserId(member.id)
+    try {
+      const result = await setPaymentAccountMemberAccess(workspaceId, editingAccount.id, member.id, hasAccess)
+      toast({
+        title: result.synced
+          ? t('paymentAccounts.memberAccess.updated', { defaultValue: 'Member access updated' })
+          : t('paymentAccounts.memberAccess.queued', { defaultValue: 'Access change saved and will sync when the connection returns' }),
+        description: t('paymentAccounts.memberAccess.memberUpdated', {
+          name: member.name,
+          defaultValue: 'Access for {{name}} was updated.',
+        }),
+      })
+    } catch {
+      toast({
+        title: t('paymentAccounts.memberAccess.updateFailed', { defaultValue: 'Could not update member access' }),
+        description: t('paymentAccounts.memberAccess.updateFailedDescription', {
+          defaultValue: 'Check your connection and try again.',
+        }),
+        variant: 'destructive',
+      })
+    } finally {
+      setAccountAccessMutationUserId(null)
+    }
   }
 
   const updateOpeningBalanceRow = (index: number, next: Partial<OpeningBalanceRow>) => {
@@ -1515,6 +1559,24 @@ export function PaymentAccounts() {
                 </div>
               ) : null}
 
+              {editingAccount && isAdmin ? (
+                <section className="rounded-2xl border border-border/60 bg-secondary/10 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-start gap-3">
+                      <span className="rounded-xl bg-primary/10 p-2 text-primary"><UsersRound className="h-5 w-5" /></span>
+                      <div className="grid gap-1">
+                        <h3 className="font-semibold">{t('paymentAccounts.memberAccess.title', { defaultValue: 'Member access' })}</h3>
+                        <p className="text-sm text-muted-foreground">{t('paymentAccounts.memberAccess.description', { defaultValue: 'Choose which workspace members can see and select this account.' })}</p>
+                      </div>
+                    </div>
+                    <Button type="button" variant="outline" className="w-full shrink-0 sm:w-auto" onClick={() => setAccountAccessDialogOpen(true)} disabled={saving}>
+                      <UsersRound className="mr-2 h-4 w-4" />
+                      {t('paymentAccounts.memberAccess.manage', { defaultValue: 'Manage members' })}
+                    </Button>
+                  </div>
+                </section>
+              ) : null}
+
               {!editingAccount ? (
                 <section className="space-y-4 rounded-2xl border border-border/60 bg-secondary/10 p-4" aria-label={t('paymentAccounts.openingBalances', { defaultValue: 'Opening balances (optional)' })}>
                   <div>
@@ -1621,6 +1683,84 @@ export function PaymentAccounts() {
               <Button type="button" variant="outline" onClick={() => setAccountDialogOpen(false)} disabled={saving}>{t('common.cancel', { defaultValue: 'Cancel' })}</Button>
               <Button type="button" onClick={saveAccount} disabled={saving || !accountName.trim()}>{t('common.save', { defaultValue: 'Save' })}</Button>
             </div>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </AppDialog>
+
+      <AppDialog
+        open={accountAccessDialogOpen}
+        onOpenChange={(next) => !accountAccessMutationUserId && setAccountAccessDialogOpen(next)}
+      >
+        <AppDialogContent
+          className="max-w-xl"
+          showCloseButton={!accountAccessMutationUserId}
+          onPointerDownOutside={(event) => accountAccessMutationUserId && event.preventDefault()}
+          onEscapeKeyDown={(event) => accountAccessMutationUserId && event.preventDefault()}
+        >
+          <AppDialogHeader>
+            <AppDialogTitle className="flex items-center gap-2">
+              <UsersRound className="h-5 w-5 text-primary" />
+              {t('paymentAccounts.memberAccess.dialogTitle', { defaultValue: 'Payment account access' })}
+            </AppDialogTitle>
+            <AppDialogDescription>
+              {t('paymentAccounts.memberAccess.dialogDescription', {
+                account: editingAccount?.name ?? '',
+                defaultValue: 'Turn access on to show {{account}} to a member. Turn it off to hide it from their account lists and payment selectors.',
+              })}
+            </AppDialogDescription>
+          </AppDialogHeader>
+          <AppDialogBody>
+            <div className="mb-4 flex items-start gap-2 rounded-xl border border-primary/20 bg-primary/[0.04] p-3 text-sm text-muted-foreground">
+              <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <p>{t('paymentAccounts.memberAccess.note', { defaultValue: 'This is an application visibility setting. It does not change workspace security policies.' })}</p>
+            </div>
+            {workspaceUsers.length > 0 ? (
+              <div className="divide-y divide-border/60 rounded-xl border border-border/60">
+                {workspaceUsers
+                  .slice()
+                  .sort((left, right) => left.name.localeCompare(right.name))
+                  .map((member) => {
+                    const hasAccess = !restrictedMemberIds.has(member.id)
+                    const isUpdating = accountAccessMutationUserId === member.id
+                    return (
+                      <div key={member.id} className="flex min-w-0 items-center gap-3 p-3 sm:p-4">
+                        <span className="rounded-full bg-muted p-2 text-muted-foreground"><UserRound className="h-4 w-4" /></span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium">{member.name || member.email}</p>
+                          <p className="text-xs capitalize text-muted-foreground">{member.role}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {isUpdating ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
+                          <span className="hidden text-xs text-muted-foreground sm:inline">
+                            {hasAccess
+                              ? t('paymentAccounts.memberAccess.allowed', { defaultValue: 'Access allowed' })
+                              : t('paymentAccounts.memberAccess.hidden', { defaultValue: 'Account hidden' })}
+                          </span>
+                          <Switch
+                            checked={hasAccess}
+                            disabled={!areAccountRestrictionsReady || !!accountAccessMutationUserId}
+                            onCheckedChange={(checked) => void toggleMemberAccountAccess(member, checked)}
+                            aria-label={t('paymentAccounts.memberAccess.toggle', {
+                              name: member.name || member.email,
+                              defaultValue: 'Allow {{name}} to access this account',
+                            })}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
+                <UsersRound className="mx-auto mb-2 h-5 w-5" />
+                {t('paymentAccounts.memberAccess.noMembers', { defaultValue: 'No workspace members are available.' })}
+              </div>
+            )}
+          </AppDialogBody>
+          <AppDialogFooter>
+            <Button type="button" variant="outline" onClick={() => setAccountAccessDialogOpen(false)} disabled={!!accountAccessMutationUserId}>
+              {t('common.done', { defaultValue: 'Done' })}
+            </Button>
           </AppDialogFooter>
         </AppDialogContent>
       </AppDialog>

@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, ArrowDownLeft, ArrowUpRight, CalendarClock, CreditCard, Loader2, RotateCcw, WalletCards } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { useAuth } from '@/auth'
 import {
   getPaymentTransactionReversalState,
   usePaymentAccountsState,
@@ -63,8 +64,9 @@ export function PaymentReversalDialog({
   iqdPreference = 'IQD',
 }: PaymentReversalDialogProps) {
   const { t } = useTranslation()
+  const { user } = useAuth()
   const transactions = usePaymentTransactions(workspaceId, { includeReversals: true }, { hydrateSourceTables: false })
-  const { accounts } = usePaymentAccountsState(workspaceId)
+  const { accounts } = usePaymentAccountsState(workspaceId, user?.id)
   const reversalState = useMemo(
     () => transaction ? getPaymentTransactionReversalState(transaction, transactions) : null,
     [transaction, transactions],

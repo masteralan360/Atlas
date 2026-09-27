@@ -2365,6 +2365,12 @@ export interface PaymentAccount extends BaseEntity {
   createdBy?: string | null
 }
 
+/** A UI-level account visibility restriction for one workspace member. */
+export interface PaymentAccountMemberRestriction extends BaseEntity {
+  accountId: string
+  userId: string
+}
+
 export interface PaymentAccountBalance extends BaseEntity {
   accountId: string
   currency: CurrencyCode
@@ -2661,6 +2667,7 @@ export interface SyncQueueItem {
     | 'payment_transactions'
     | 'financial_transaction_voids'
     | 'payment_accounts'
+    | 'payment_account_member_restrictions'
     | 'capital_pools'
     | 'payment_account_balances'
     | 'payment_account_movements'
@@ -2896,6 +2903,7 @@ export interface OfflineMutation {
     | 'payment_transactions'
     | 'financial_transaction_voids'
     | 'payment_accounts'
+    | 'payment_account_member_restrictions'
     | 'capital_pools'
     | 'payment_account_balances'
     | 'payment_account_movements'

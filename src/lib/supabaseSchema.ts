@@ -75,6 +75,7 @@ const rentalTables = new Set([
 
 const paymentAccountTables = new Set([
     'payment_accounts',
+    'payment_account_member_restrictions',
     'capital_pools',
     'payment_account_balances',
     'payment_account_movements',
@@ -96,6 +97,7 @@ const travelTransportationTables = new Set([
 // table names inside the isolated payment_accounts schema are shorter.
 const paymentAccountRemoteTableNames: Record<string, string> = {
     payment_accounts: 'accounts',
+    payment_account_member_restrictions: 'account_member_restrictions',
     payment_account_balances: 'account_balances',
     payment_account_movements: 'account_movements',
 }

@@ -2,6 +2,7 @@ import { useMemo, type PointerEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Banknote, CalendarClock, CircleHelp, CreditCard, HandCoins, Landmark, SlidersHorizontal } from 'lucide-react'
 
+import { useAuth } from '@/auth'
 import { DIGITAL_WALLET_PAYMENT_METHODS, usePaymentAccounts, type PaymentAccount } from '@/local-db'
 
 import {
@@ -107,7 +108,8 @@ export function PaymentMethodSelect({
     noneLabel,
 }: PaymentMethodSelectProps) {
     const { t } = useTranslation()
-    const accounts = usePaymentAccounts(workspaceId)
+    const { user } = useAuth()
+    const accounts = usePaymentAccounts(workspaceId, user?.id)
     const linkedWalletByMethod = useMemo(
         () => new Map(
             accounts

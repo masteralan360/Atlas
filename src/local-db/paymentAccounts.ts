@@ -31,6 +31,7 @@ import type {
   CurrencyCode,
   DigitalWalletPaymentMethod,
   PaymentAccount,
+  PaymentAccountMemberRestriction,
   PaymentAccountIconKey,
   PaymentAccountBalance,
   PaymentAccountMovement,
@@ -44,6 +45,7 @@ import type {
 
 const _PAYMENT_ACCOUNT_TABLES = [
   'payment_accounts',
+  'payment_account_member_restrictions',
   'payment_account_balances',
   'payment_account_movements',
   'cashier_shifts',
@@ -228,16 +230,134 @@ function normalizePaymentAccounts(rows: PaymentAccount[]) {
     .sort((a, b) => Number(!!b.isPrimary) - Number(!!a.isPrimary) || a.name.localeCompare(b.name))
 }
 
-/** Payment forms use this to wait for the local account configuration to resolve. */
-export function usePaymentAccountsState(workspaceId?: string) {
-  const { rows, isReady } = usePaymentAccountTableState<PaymentAccount>('payment_accounts', workspaceId)
-  const accounts = useMemo(() => normalizePaymentAccounts(rows), [rows])
-
-  return { accounts, isReady }
+export function filterPaymentAccountsForUser(
+  accounts: PaymentAccount[],
+  restrictions: PaymentAccountMemberRestriction[],
+  workspaceId?: string,
+  userId?: string | null,
+) {
+  if (!workspaceId || !userId) return normalizePaymentAccounts(accounts)
+  const restrictedAccountIds = new Set(
+    restrictions
+      .filter((restriction) => (
+        !restriction.isDeleted
+        && restriction.workspaceId === workspaceId
+        && restriction.userId === userId
+      ))
+      .map((restriction) => restriction.accountId),
+  )
+  return normalizePaymentAccounts(accounts).filter((account) => !restrictedAccountIds.has(account.id))
 }
 
-export function usePaymentAccounts(workspaceId?: string) {
-  return usePaymentAccountsState(workspaceId).accounts
+/** Payment forms wait for both account and visibility settings to resolve. */
+export function usePaymentAccountsState(workspaceId?: string, userId?: string | null) {
+  const { rows: accountRows, isReady: areAccountsReady } = usePaymentAccountTableState<PaymentAccount>('payment_accounts', workspaceId)
+  const { rows: restrictions, isReady: areRestrictionsReady } = usePaymentAccountTableState<PaymentAccountMemberRestriction>(
+    'payment_account_member_restrictions',
+    workspaceId,
+  )
+  const accounts = useMemo(
+    () => filterPaymentAccountsForUser(accountRows, restrictions, workspaceId, userId),
+    [accountRows, restrictions, userId, workspaceId],
+  )
+
+  return { accounts, isReady: areAccountsReady && areRestrictionsReady }
+}
+
+export function usePaymentAccounts(workspaceId?: string, userId?: string | null) {
+  return usePaymentAccountsState(workspaceId, userId).accounts
+}
+
+export function usePaymentAccountMemberRestrictions(workspaceId?: string, accountId?: string | null) {
+  const { rows, isReady } = usePaymentAccountTableState<PaymentAccountMemberRestriction>(
+    'payment_account_member_restrictions',
+    workspaceId,
+  )
+  const restrictions = useMemo(
+    () => rows.filter((row) => !row.isDeleted && (!accountId || row.accountId === accountId)),
+    [accountId, rows],
+  )
+  return { restrictions, isReady }
+}
+
+export async function setPaymentAccountMemberAccess(
+  workspaceId: string,
+  accountId: string,
+  userId: string,
+  hasAccess: boolean,
+): Promise<{ hasAccess: boolean; synced: boolean }> {
+  const account = await db.payment_accounts.get(accountId)
+  if (!account || account.workspaceId !== workspaceId || account.isDeleted) {
+    throw new Error('Payment account was not found.')
+  }
+  if (!userId.trim()) throw new Error('Workspace member was not found.')
+
+  const existingRows = await db.payment_account_member_restrictions
+    .where('[workspaceId+accountId+userId]')
+    .equals([workspaceId, accountId, userId])
+    .toArray()
+  const activeRows = existingRows.filter((row) => !row.isDeleted)
+
+  if (!hasAccess) {
+    if (activeRows.length > 0) {
+      return { hasAccess: false, synced: activeRows.every((row) => row.syncStatus === 'synced') }
+    }
+    const now = new Date().toISOString()
+    const restriction: PaymentAccountMemberRestriction = {
+      id: generateId(),
+      workspaceId,
+      accountId,
+      userId,
+      createdAt: now,
+      updatedAt: now,
+      version: 1,
+      isDeleted: false,
+      ...syncMeta(workspaceId, now),
+    }
+    const saved = await persist('payment_account_member_restrictions', restriction, 'create')
+    return { hasAccess: false, synced: saved.syncStatus === 'synced' }
+  }
+
+  if (activeRows.length === 0) return { hasAccess: true, synced: true }
+
+  await db.payment_account_member_restrictions.bulkDelete(activeRows.map((row) => row.id))
+  if (!cloudWorkspace(workspaceId)) return { hasAccess: true, synced: true }
+
+  let synced = true
+  for (const restriction of activeRows) {
+    if (!isOnline()) {
+      synced = false
+      await addToOfflineMutations(
+        'payment_account_member_restrictions',
+        restriction.id,
+        'delete',
+        { id: restriction.id, hardDelete: true },
+        workspaceId,
+      )
+      continue
+    }
+
+    try {
+      const client = getSupabaseClientForTable('payment_account_member_restrictions')
+      const { error } = await client
+        .from(getSupabaseRemoteTableName('payment_account_member_restrictions'))
+        .delete()
+        .eq('id', restriction.id)
+        .eq('workspace_id', workspaceId)
+      if (error) throw error
+    } catch {
+      synced = false
+      await addToOfflineMutations(
+        'payment_account_member_restrictions',
+        restriction.id,
+        'delete',
+        { id: restriction.id, hardDelete: true },
+        workspaceId,
+      )
+    }
+  }
+
+  return { hasAccess: true, synced }
 }
 
 export function usePaymentAccountBalancesState(workspaceId?: string) {
