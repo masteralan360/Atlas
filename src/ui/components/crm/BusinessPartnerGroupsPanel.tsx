@@ -41,7 +41,10 @@ import {
 } from '@/ui/components'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
-import { getActiveAssignedBusinessPartners } from '@/lib/businessPartnerGroupPrivacy'
+import {
+  getActiveAssignedBusinessPartners,
+  getEligibleBusinessPartnerGroupUsers,
+} from '@/lib/businessPartnerGroupPrivacy'
 
 interface BusinessPartnerGroupsPanelProps {
   workspaceId: string
@@ -55,9 +58,7 @@ export function BusinessPartnerGroupsPanel({ workspaceId, featureEnabled }: Busi
   const workspaceUsers = useWorkspaceUsers(workspaceId)
   const partnersState = useBusinessPartners(workspaceId, { includeAgentRoles: true, includeRealEstateRoles: true })
   const eligibleUsers = useMemo(
-    () => workspaceUsers
-      .filter((workspaceUser) => !workspaceUser.isDeleted && workspaceUser.role !== 'admin')
-      .sort((left, right) => left.name.localeCompare(right.name)),
+    () => getEligibleBusinessPartnerGroupUsers(workspaceUsers),
     [workspaceUsers],
   )
 

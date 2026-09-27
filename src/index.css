@@ -419,6 +419,34 @@ html[lang] pre {
   background: hsl(var(--muted-foreground)/0.5);
 }
 
+/* Keep the main module content scrollbar aligned with the primary theme color. */
+.module-content-surface {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--primary)) transparent;
+}
+
+.module-content-surface::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.module-content-surface::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.module-content-surface::-webkit-scrollbar-thumb {
+  background: hsl(var(--primary));
+  border: 3px solid hsl(var(--background));
+  background-clip: padding-box;
+  border-radius: 9999px;
+}
+
+.module-content-surface::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--primary));
+}
+
 /* Premium Utilities */
 .glass {
   @apply bg-background/60 backdrop-blur-xl border-border/50;

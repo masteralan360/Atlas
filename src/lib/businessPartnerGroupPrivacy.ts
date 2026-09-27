@@ -3,12 +3,21 @@ import type {
   BusinessPartnerGroup,
   BusinessPartnerGroupPartner,
   BusinessPartnerGroupUser,
+  User,
   UserRole,
 } from '@/local-db/models'
 
 type GroupRow = Pick<BusinessPartnerGroup, 'id' | 'accessType' | 'isDeleted'>
 type GroupUserRow = Pick<BusinessPartnerGroupUser, 'groupId' | 'userId' | 'isDeleted' | 'autoAssignOnCreate'>
 type GroupPartnerRow = Pick<BusinessPartnerGroupPartner, 'groupId' | 'businessPartnerId' | 'isDeleted'>
+
+export function getEligibleBusinessPartnerGroupUsers<T extends Pick<User, 'id' | 'name' | 'role' | 'isDeleted'>>(
+  users: readonly T[],
+): T[] {
+  return users
+    .filter((user) => !user.isDeleted)
+    .sort((left, right) => left.name.localeCompare(right.name))
+}
 
 export interface BusinessPartnerGroupPrivacyViewer {
   userId: string | null | undefined
@@ -75,7 +84,7 @@ export function getCreatorBusinessPartnerGroupIds(
   groupUsers: readonly GroupUserRow[],
   viewer: BusinessPartnerGroupPrivacyViewer,
 ): string[] {
-  if (!viewer.featureEnabled || viewer.role === 'admin' || !viewer.userId) return []
+  if (!viewer.featureEnabled || !viewer.userId) return []
   const activeGroupIds = new Set(groups.filter((group) => !group.isDeleted).map((group) => group.id))
   const userMemberships = groupUsers
     .filter((membership) => !membership.isDeleted && membership.userId === viewer.userId)
@@ -87,6 +96,7 @@ export function getCreatorBusinessPartnerGroupIds(
         .map((membership) => membership.groupId),
     )]
   }
+  if (viewer.role === 'admin') return []
   return groups
     .filter((group) => !group.isDeleted && group.accessType === 'non_grouped')
     .map((group) => group.id)

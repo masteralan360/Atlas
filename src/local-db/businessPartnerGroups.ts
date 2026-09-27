@@ -290,7 +290,7 @@ export async function assignNewBusinessPartnerToCreatorGroups(workspaceId: strin
   if (!hasBusinessPartnerGroupPrivacyAccess(workspaceId)) return
   const role = getActiveBusinessUserRole(workspaceId)
   const userId = getActiveBusinessUserId()
-  if (!userId || role === 'admin') return
+  if (!userId) return
 
   const [groups, memberships] = await Promise.all([
     db.business_partner_groups.where('workspaceId').equals(workspaceId).and((row) => !row.isDeleted).toArray(),

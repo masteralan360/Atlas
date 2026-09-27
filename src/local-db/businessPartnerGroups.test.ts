@@ -66,9 +66,15 @@ describe('Cloud group privacy management request contract', () => {
 
   it('persists groups and many-to-many user and partner assignments to workspace-scoped CRM tables', async () => {
     const group = await createBusinessPartnerGroup(WORKSPACE_ID, 'North region', 'protected')
-    await saveBusinessPartnerGroupMembers(WORKSPACE_ID, group.id, ['member-1', 'member-2'], ['partner-1'], ['member-2'])
+    await saveBusinessPartnerGroupMembers(
+      WORKSPACE_ID,
+      group.id,
+      ['member-1', 'member-2', 'workspace-admin'],
+      ['partner-1'],
+      ['member-2', 'workspace-admin'],
+    )
 
-    expect(remote.upserts).toHaveLength(4)
+    expect(remote.upserts).toHaveLength(5)
     expect(remote.upserts[0]).toMatchObject({
       table: 'business_partner_groups',
       payload: {
@@ -82,6 +88,7 @@ describe('Cloud group privacy management request contract', () => {
       .toEqual(expect.arrayContaining([
         expect.objectContaining({ workspace_id: WORKSPACE_ID, group_id: group.id, user_id: 'member-1', auto_assign_on_create: false }),
         expect.objectContaining({ workspace_id: WORKSPACE_ID, group_id: group.id, user_id: 'member-2', auto_assign_on_create: true }),
+        expect.objectContaining({ workspace_id: WORKSPACE_ID, group_id: group.id, user_id: 'workspace-admin', auto_assign_on_create: true }),
       ]))
     expect(remote.upserts.find((entry) => entry.table === 'business_partner_group_partners')?.payload).toMatchObject({
       id: `${group.id}:partner-1`,
@@ -89,7 +96,7 @@ describe('Cloud group privacy management request contract', () => {
       group_id: group.id,
       business_partner_id: 'partner-1',
     })
-    expect((await db.business_partner_group_users.where('workspaceId').equals(WORKSPACE_ID).toArray())).toHaveLength(2)
+    expect((await db.business_partner_group_users.where('workspaceId').equals(WORKSPACE_ID).toArray())).toHaveLength(3)
     expect((await db.business_partner_group_partners.where('workspaceId').equals(WORKSPACE_ID).first())?.isDeleted).toBe(false)
   })
 
@@ -120,6 +127,58 @@ describe('Cloud group privacy management request contract', () => {
     const assignments = await db.business_partner_group_partners.where('workspaceId').equals(WORKSPACE_ID).toArray()
     expect(assignments.filter((assignment) => !assignment.isDeleted).map((assignment) => assignment.groupId))
       .toEqual(['group-enabled'])
+  })
+
+  it('assigns admin-created partners only to explicitly opted-in memberships', async () => {
+    const createdAt = new Date().toISOString()
+    const base = {
+      workspaceId: WORKSPACE_ID,
+      createdAt,
+      updatedAt: createdAt,
+      version: 1,
+      isDeleted: false,
+      syncStatus: 'synced' as const,
+      lastSyncedAt: createdAt,
+    }
+    await db.business_partner_groups.bulkPut([
+      { ...base, id: 'group-admin-opted-out', name: 'Admin opted out', accessType: 'protected' },
+      { ...base, id: 'group-admin-enabled', name: 'Admin enabled', accessType: 'protected' },
+      { ...base, id: 'group-admin-default', name: 'Default access', accessType: 'non_grouped' },
+    ] as never[])
+    await db.business_partner_group_users.bulkPut([
+      { ...base, id: 'membership-admin-opted-out', groupId: 'group-admin-opted-out', userId: 'workspace-admin', autoAssignOnCreate: false },
+      { ...base, id: 'membership-admin-enabled', groupId: 'group-admin-enabled', userId: 'workspace-admin', autoAssignOnCreate: true },
+    ])
+    await db.business_partners.put({ id: 'partner-created-by-admin', workspaceId: WORKSPACE_ID, createdAt } as never)
+
+    setActiveBusinessUser('workspace-admin', 'admin', WORKSPACE_ID)
+    await assignNewBusinessPartnerToCreatorGroups(WORKSPACE_ID, 'partner-created-by-admin')
+
+    const assignments = await db.business_partner_group_partners.where('workspaceId').equals(WORKSPACE_ID).toArray()
+    expect(assignments.filter((assignment) => !assignment.isDeleted).map((assignment) => assignment.groupId))
+      .toEqual(['group-admin-enabled'])
+  })
+
+  it('does not apply Non-Grouped Access auto-assignment to an ungrouped admin', async () => {
+    const createdAt = new Date().toISOString()
+    await db.business_partner_groups.put({
+      id: 'group-admin-default',
+      workspaceId: WORKSPACE_ID,
+      name: 'Default access',
+      accessType: 'non_grouped',
+      createdAt,
+      updatedAt: createdAt,
+      version: 1,
+      isDeleted: false,
+      syncStatus: 'synced',
+      lastSyncedAt: createdAt,
+    })
+    await db.business_partners.put({ id: 'partner-created-by-ungrouped-admin', workspaceId: WORKSPACE_ID, createdAt } as never)
+
+    setActiveBusinessUser('workspace-admin', 'admin', WORKSPACE_ID)
+    await assignNewBusinessPartnerToCreatorGroups(WORKSPACE_ID, 'partner-created-by-ungrouped-admin')
+
+    expect(await db.business_partner_group_partners.where('workspaceId').equals(WORKSPACE_ID).toArray()).toEqual([])
   })
 
   it('queues failed Cloud writes locally and rejects group management by non-admins', async () => {

@@ -4,6 +4,7 @@ import {
   filterBusinessPartnersByGroup,
   getActiveAssignedBusinessPartners,
   getCreatorBusinessPartnerGroupIds,
+  getEligibleBusinessPartnerGroupUsers,
   getVisibleBusinessPartnerIdsByGroup,
 } from './businessPartnerGroupPrivacy'
 
@@ -45,10 +46,20 @@ describe('group-based business partner visibility', () => {
     })).toEqual(new Set(['partner-b']))
   })
 
-  it('lets admins and workspaces without the granted feature bypass group filtering', () => {
+  it('lets admins bypass group filtering even when they are group members', () => {
+    const adminMemberships = [
+      ...memberships,
+      { groupId: 'group-a', userId: 'admin', isDeleted: false },
+    ]
     expect(getVisibleBusinessPartnerIdsByGroup(groups, memberships, assignments, {
       userId: 'admin', role: 'admin', featureEnabled: true,
     })).toBeNull()
+    expect(getVisibleBusinessPartnerIdsByGroup(groups, adminMemberships, assignments, {
+      userId: 'admin', role: 'admin', featureEnabled: true,
+    })).toBeNull()
+  })
+
+  it('lets workspaces without the granted feature bypass group filtering', () => {
     expect(getVisibleBusinessPartnerIdsByGroup(groups, memberships, assignments, {
       userId: 'user-1', role: 'staff', featureEnabled: false,
     })).toBeNull()
@@ -68,11 +79,22 @@ describe('group-based business partner visibility', () => {
       userId: 'user-2', role: 'staff', featureEnabled: true,
     })).toEqual(['group-a', 'group-c'])
     expect(getCreatorBusinessPartnerGroupIds(groups, memberships, {
-      userId: 'user-2', role: 'admin', featureEnabled: true,
+      userId: 'unassigned-admin', role: 'admin', featureEnabled: true,
     })).toEqual([])
+    const adminMemberships = [
+      ...memberships,
+      { groupId: 'group-a', userId: 'user-2-admin', isDeleted: false },
+      { groupId: 'group-c', userId: 'user-2-admin', isDeleted: false },
+    ]
+    expect(getCreatorBusinessPartnerGroupIds(groups, adminMemberships, {
+      userId: 'user-2-admin', role: 'admin', featureEnabled: true,
+    })).toEqual(['group-a', 'group-c'])
     expect(getCreatorBusinessPartnerGroupIds(groups, memberships, {
       userId: 'unassigned-user', role: 'staff', featureEnabled: true,
     })).toEqual(['group-b'])
+    expect(getCreatorBusinessPartnerGroupIds(groups, memberships, {
+      userId: 'unassigned-admin', role: 'admin', featureEnabled: true,
+    })).toEqual([])
   })
 
   it('honors per-group creator assignment opt-outs without changing group visibility', () => {
@@ -93,6 +115,23 @@ describe('group-based business partner visibility', () => {
     expect(getCreatorBusinessPartnerGroupIds(groups, allOptedOut, {
       userId: 'user-2', role: 'staff', featureEnabled: true,
     })).toEqual([])
+
+    const adminMemberships = [
+      ...memberships,
+      { groupId: 'group-a', userId: 'admin', isDeleted: false, autoAssignOnCreate: false },
+      { groupId: 'group-c', userId: 'admin', isDeleted: false, autoAssignOnCreate: true },
+    ]
+    expect(getCreatorBusinessPartnerGroupIds(groups, adminMemberships, {
+      userId: 'admin', role: 'admin', featureEnabled: true,
+    })).toEqual(['group-c'])
+  })
+
+  it('includes active admins in the existing group-member picker', () => {
+    expect(getEligibleBusinessPartnerGroupUsers([
+      { id: 'staff', name: 'Staff User', role: 'staff' as const, isDeleted: false },
+      { id: 'admin', name: 'Admin User', role: 'admin' as const, isDeleted: false },
+      { id: 'deleted-admin', name: 'Deleted Admin', role: 'admin' as const, isDeleted: true },
+    ]).map(({ id }) => id)).toEqual(['admin', 'staff'])
   })
 
   it('filters the actual partner list with the same reusable visibility result', () => {
