@@ -9,10 +9,6 @@ Price books selector order form and quick order
 
 Maintenence Mode Local Mode Enabled
 
-ScrollBar Primary color
-
-Admin Added to group for business partner creation and not limitation
-
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide,
 
 Simple Loan Final Localize

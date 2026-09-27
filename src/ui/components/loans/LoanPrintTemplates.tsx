@@ -656,7 +656,9 @@ export function LoanDetailsPrintTemplate({
                                 <tr key={payment.id} data-pdf-keep-together style={{ height: `${LOAN_DETAILS_TABLE_ROW_HEIGHT_MM}mm` }}>
                                     <td className="border border-slate-300 p-2 whitespace-nowrap">{formatDateTime(payment.paidAt)}</td>
                                     <td className="border border-slate-300 p-2">
-                                        {getLoanPaymentActivityLabel(loan, t)}{index === 0 && loan.balanceAmount <= 0 ? ' (Final)' : ''}
+                                        {getLoanPaymentActivityLabel(loan, t)}{index === 0 && loan.balanceAmount <= 0
+                                            ? ` (${t('loans.finalPaymentMarker', { defaultValue: 'Final' })})`
+                                            : ''}
                                     </td>
                                     <td className="border border-slate-300 p-2">
                                         {t(`pos.${payment.paymentMethod}`) || payment.paymentMethod}

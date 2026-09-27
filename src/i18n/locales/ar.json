@@ -3922,6 +3922,7 @@
     "cancelledLoanDescription": "تم إلغاء هذا القرض لأن عملية البيع المرتبطة به أُعيدت بالكامل. لم يكتمل أي سداد.",
     "cancelledRepaymentMessage": "تم الإلغاء — لم يكتمل أي سداد",
     "recentActivity": "النشاط الأخير",
+    "finalPaymentMarker": "النهائية",
     "currencyHint": "عملة التسوية",
     "pay": "دفع",
     "reverseRepayment": "عكس السداد",

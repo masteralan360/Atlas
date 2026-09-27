@@ -3919,6 +3919,7 @@
     "cancelledLoanDescription": "ئەم قەرزە هەڵوەشاوە چونکە فرۆشتنە پەیوەستکراوەکە بە تەواوی گەڕێندراوەتەوە. هیچ پارەدانەوەیەک تەواو نەبوو.",
     "cancelledRepaymentMessage": "هەڵوەشاوە — هیچ پارەدانەوەیەک تەواو نەبوو",
     "recentActivity": "کۆتا چالاکی",
+    "finalPaymentMarker": "کۆتایی",
     "currencyHint": "دراوی یەکلاکردنەوە",
     "pay": "پارەدان",
     "reverseRepayment": "پێچەوانەکردنی پارەدانەوە",

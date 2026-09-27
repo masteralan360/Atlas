@@ -5696,6 +5696,7 @@
     "cancelledLoanDescription": "This loan was cancelled because its linked sale was fully returned. No repayment was completed.",
     "cancelledRepaymentMessage": "Cancelled — no repayment was completed",
     "recentActivity": "Recent Activity",
+    "finalPaymentMarker": "Final",
     "currencyHint": "Settlement Currency",
     "pay": "Pay",
     "reverseRepayment": "Reverse Repayment",
