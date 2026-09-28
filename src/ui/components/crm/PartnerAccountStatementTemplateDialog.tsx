@@ -436,6 +436,26 @@ export function PartnerAccountStatementTemplateDialog({
                         />
                       </div>
                     </div>
+                    <div className="rounded-xl bg-muted/30 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <label htmlFor="partner-template-group-settlement-operations" className="text-sm font-medium">
+                            {t('businessPartners.accountStatement.groupSettlementOperations', { defaultValue: 'Group settlement operations' })}
+                          </label>
+                          <p className="text-xs text-muted-foreground">
+                            {t('businessPartners.accountStatement.groupSettlementOperationsDescription', {
+                              defaultValue: 'Show transactions from one Settle Balance action as a single row in the statement and printout.'
+                            })}
+                          </p>
+                        </div>
+                        <Switch
+                          id="partner-template-group-settlement-operations"
+                          checked={draftConfiguration.groupSettlementOperations}
+                          onCheckedChange={(groupSettlementOperations) => setDraftConfiguration((current) => ({ ...current, groupSettlementOperations }))}
+                          disabled={isProcessing}
+                        />
+                      </div>
+                    </div>
                   </div>
                 </section>
 

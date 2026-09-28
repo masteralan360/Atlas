@@ -19,6 +19,7 @@ describe('Partner Account Statement templates', () => {
     expect(DEFAULT_PARTNER_ACCOUNT_STATEMENT_TEMPLATE_CONFIGURATION).toMatchObject({
       showOrderItems: false,
       showPosSaleItems: false,
+      groupSettlementOperations: false,
       hiddenColumns: [],
       ...DEFAULT_PARTNER_ACCOUNT_STATEMENT_BALANCE_COLORS
     })
@@ -126,7 +127,7 @@ describe('Partner Account Statement templates', () => {
       id: 'template-1',
       label: 'Collections',
       primary: true,
-      configuration: { showPosSaleItems: true, hiddenColumns: ['reference'] }
+      configuration: { showPosSaleItems: true, groupSettlementOperations: false, hiddenColumns: ['reference'] }
     })
     expect(readPartnerAccountStatementTemplate({
       id: 'not-a-statement-template',
@@ -136,6 +137,20 @@ describe('Partner Account Statement templates', () => {
       primary: true,
       version: 1
     })).toBeNull()
+  })
+
+  it('preserves opt-in settlement grouping while legacy template configurations default to separate transactions', () => {
+    const legacy = readPartnerAccountStatementTemplate({
+      id: 'legacy-settlement-setting',
+      layout_json: { kind: 'partner-account-statement-template', configuration: { version: 1 } }
+    })
+    expect(legacy?.configuration.groupSettlementOperations).toBe(false)
+
+    const saved = serializePartnerAccountStatementTemplate(
+      createPartnerAccountStatementTemplateConfiguration({ groupSettlementOperations: true })
+    )
+    expect(readPartnerAccountStatementTemplate({ id: 'grouped', layout_json: saved })?.configuration.groupSettlementOperations)
+      .toBe(true)
   })
 
   it('puts the total label in a descriptive column before an amount when possible', () => {

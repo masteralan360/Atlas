@@ -178,6 +178,7 @@ function LedgerCard({
     language,
     columns,
     balanceColors,
+    groupSettlementOperations,
     onNavigate
 }: {
     ledger: PartnerAccountStatementCurrencyLedger
@@ -187,14 +188,18 @@ function LedgerCard({
     language: string
     columns: PartnerAccountStatementColumnId[]
     balanceColors: PartnerAccountStatementBalanceColors
+    groupSettlementOperations: boolean
     onNavigate: (path: string) => void
 }) {
     const [expandedSettlementIds, setExpandedSettlementIds] = useState<Set<string>>(() => new Set())
     const display = (amount: number) => formatCurrency(Math.abs(amount), ledger.currency, iqdPreference)
     const canShowBothAmounts = columns.includes('debit') && columns.includes('credit')
     const entries = useMemo(
-        () => buildPartnerAccountStatementDisplayEntries(ledger, { combineOrderPayments: canShowBothAmounts }),
-        [canShowBothAmounts, ledger]
+        () => buildPartnerAccountStatementDisplayEntries(ledger, {
+            combineOrderPayments: canShowBothAmounts,
+            groupSettlementOperations
+        }),
+        [canShowBothAmounts, groupSettlementOperations, ledger]
     )
     const summaryLabelColumn = getPartnerAccountStatementSummaryLabelColumn(columns)
     const summaryValue = (columnId: PartnerAccountStatementColumnId, kind: 'opening' | 'total') => {
@@ -583,6 +588,7 @@ export function AccountStatements() {
         return {
             ...statementDataForDisplay,
             tableColumns: statementColumns,
+            groupSettlementOperations: activeStatementTemplate.configuration.groupSettlementOperations,
             balanceColors: {
                 dueFromBalanceColor: activeStatementTemplate.configuration.dueFromBalanceColor,
                 dueToBalanceColor: activeStatementTemplate.configuration.dueToBalanceColor
@@ -991,6 +997,7 @@ export function AccountStatements() {
                                 language={i18n.language}
                                 columns={statementColumns}
                                 balanceColors={activeStatementTemplate.configuration}
+                                groupSettlementOperations={activeStatementTemplate.configuration.groupSettlementOperations}
                                 onNavigate={navigate}
                             />
                         ))}

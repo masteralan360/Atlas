@@ -833,7 +833,7 @@ describe('buildPartnerAccountStatementLedger', () => {
         }] as any
 
         const html = renderToStaticMarkup(createElement(PartnerAccountStatementPrintTemplate, {
-            printLang: 'en', data: data as any
+            printLang: 'en', data: { ...data, groupSettlementOperations: true } as any
         }))
         const rows = [...html.matchAll(/<tr\b[^>]*>[\s\S]*?<\/tr>/g)].map((match) => match[0])
         const settlementRow = rows.find((row) => row.includes('SET-OPERATIO'))
@@ -848,6 +848,15 @@ describe('buildPartnerAccountStatementLedger', () => {
         expect(buildPartnerAccountStatementLedger(data)[0]).toMatchObject({
             debitTotal: 500, creditTotal: 150, closingBalance: 350
         })
+
+        const individualHtml = renderToStaticMarkup(createElement(PartnerAccountStatementPrintTemplate, {
+            printLang: 'en',
+            data: { ...data, tableColumns: ['date', 'reference', 'type', 'description', 'debit', 'balance'] } as any
+        }))
+        expect(individualHtml).not.toContain('SET-OPERATIO')
+        expect(individualHtml).toContain('PAYMENT-ONE')
+        expect(individualHtml).toContain('PAYMENT-TWO')
+        expect(individualHtml).not.toContain('Cash Collection')
     })
 
     it('includes every merchant-facing Post Service movement once with the inverse delivery-ledger sign', () => {

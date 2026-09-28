@@ -111,7 +111,14 @@ describe('partner account statement display entries', () => {
     }
 
     const [ledger] = buildPartnerAccountStatementLedger(data)
-    const rows = buildPartnerAccountStatementDisplayEntries(ledger)
+    const normalRows = buildPartnerAccountStatementDisplayEntries(ledger, { combineOrderPayments: false })
+    expect(normalRows).toHaveLength(4)
+    expect(normalRows.every((row) => row.kind !== 'partner_settlement')).toBe(true)
+    expect(normalRows.map((row) => row.id)).toEqual(expect.arrayContaining([
+      'sales-order:sale-1', 'loan:loan-1', 'loan-payment:loan-payment-1', 'payment:sale-tx-1'
+    ]))
+
+    const rows = buildPartnerAccountStatementDisplayEntries(ledger, { groupSettlementOperations: true })
     const settlementRows = rows.filter((row) => row.kind === 'partner_settlement')
 
     expect(settlementRows).toHaveLength(1)
@@ -164,7 +171,7 @@ describe('partner account statement display entries', () => {
           status: 'completed'
         }
       }]
-    } as any)
+    } as any, { groupSettlementOperations: true })
 
     expect(rows[0]).toMatchObject({ description: 'Cash Paid', descriptionKey: 'cashPaid' })
   })

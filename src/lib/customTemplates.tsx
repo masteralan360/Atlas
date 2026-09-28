@@ -376,6 +376,7 @@ export const CUSTOM_TEMPLATE_TARGETS: CustomTemplateTarget[] = [
         moduleTypeKey: LABEL_PRINT_TEMPLATE_KEY,
         workspaceModuleKey: 'products',
         get moduleLabel() { return i18n.t('products.title', { defaultValue: 'Products' }) },
+        // Keep this non-technical label in English; do not translate it into other languages.
         get typeLabel() { return i18n.t('customTemplates.labelPrint.title', { defaultValue: 'Label Print' }) },
         get description() {
             return i18n.t('customTemplates.labelPrint.description', {

@@ -40,6 +40,7 @@ export {
 export type PartnerAccountStatementPrintData = PartnerAccountStatementData & {
     tableColumns?: PartnerAccountStatementColumnId[]
     balanceColors?: PartnerAccountStatementBalanceColors
+    groupSettlementOperations?: boolean
     workspace?: {
         phone?: string
         address?: string
@@ -311,6 +312,7 @@ function LedgerTableChunk({
 function LedgerTable({
     ledger,
     isFirstLedger,
+    groupSettlementOperations,
     t,
     i18n,
     language,
@@ -320,6 +322,7 @@ function LedgerTable({
 }: {
     ledger: PartnerAccountStatementCurrencyLedger
     isFirstLedger: boolean
+    groupSettlementOperations: boolean
     t: (key: string, options?: Record<string, unknown>) => string
     i18n: I18n
     language: string
@@ -329,7 +332,8 @@ function LedgerTable({
 }) {
     const displayAmount = (amount: number) => formatCurrency(Math.abs(amount), ledger.currency, iqdPreference)
     const entryChunks = chunkLedgerEntries(buildPartnerAccountStatementDisplayEntries(ledger, {
-        combineOrderPayments: columns.includes('debit') && columns.includes('credit')
+        combineOrderPayments: columns.includes('debit') && columns.includes('credit'),
+        groupSettlementOperations
     }))
 
     return (
@@ -454,6 +458,7 @@ export function PartnerAccountStatementPrintTemplate({
                         key={ledger.currency}
                         ledger={ledger}
                         isFirstLedger={index === 0}
+                        groupSettlementOperations={data.groupSettlementOperations === true}
                         t={t}
                         i18n={i18n}
                         language={printLang}

@@ -56,14 +56,17 @@ function paymentOrderKey(entry: LedgerEntry): string | null {
  */
 export function buildPartnerAccountStatementDisplayEntries(
   ledger: PartnerAccountStatementCurrencyLedger,
-  options: { combineOrderPayments?: boolean } = {}
+  options: { combineOrderPayments?: boolean; groupSettlementOperations?: boolean } = {}
 ): PartnerAccountStatementDisplayEntry[] {
   const settlementGroups = new Map<string, LedgerEntry[]>()
-  for (const entry of ledger.entries) {
-    if (!entry.settlementOperationId) continue
-    const members = settlementGroups.get(entry.settlementOperationId) || []
-    members.push(entry)
-    settlementGroups.set(entry.settlementOperationId, members)
+  const shouldGroupSettlementOperations = options.groupSettlementOperations === true
+  if (shouldGroupSettlementOperations) {
+    for (const entry of ledger.entries) {
+      if (!entry.settlementOperationId) continue
+      const members = settlementGroups.get(entry.settlementOperationId) || []
+      members.push(entry)
+      settlementGroups.set(entry.settlementOperationId, members)
+    }
   }
   const settlementMemberIds = new Set(
     Array.from(settlementGroups.values()).flatMap((members) => members.map((member) => member.id))
@@ -94,7 +97,7 @@ export function buildPartnerAccountStatementDisplayEntries(
   let runningBalance = ledger.openingBalance
   const displayedSettlementIds = new Set<string>()
   return ledger.entries.flatMap((entry) => {
-    const settlementOperationId = entry.settlementOperationId
+    const settlementOperationId = shouldGroupSettlementOperations ? entry.settlementOperationId : null
     if (settlementOperationId) {
       if (displayedSettlementIds.has(settlementOperationId)) return []
       displayedSettlementIds.add(settlementOperationId)
