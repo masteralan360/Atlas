@@ -729,14 +729,17 @@ describe('buildPartnerAccountStatementLedger', () => {
             ['SO-0002', 120],
             ['PO-0001', 100],
             ['sales-in-period', 90],
-            ['Cash advance', 95],
+            ['period-direct-payment', 95],
             ['sales-in-period', 97]
         ])
         expect(ledger.entries.find((entry) => entry.reference === 'SO-0002')?.source).toEqual({
             recordType: 'order',
             recordId: 'sales-in-period'
         })
-        expect(ledger.entries.find((entry) => entry.reference === 'Cash advance')?.source).toEqual({
+        const directStatementEntry = ledger.entries.find((entry) => entry.reference === 'period-direct-payment')
+        expect(directStatementEntry?.description).toBe('Cash advance')
+        expect(directStatementEntry?.descriptionKey).toBeUndefined()
+        expect(ledger.entries.find((entry) => entry.reference === 'period-direct-payment')?.source).toEqual({
             recordType: 'payment_transaction',
             recordId: 'period-direct-payment'
         })
@@ -797,6 +800,54 @@ describe('buildPartnerAccountStatementLedger', () => {
         }))
         expect(withoutCreditColumn).toContain('SALE-RECEIPT')
         expect(withoutCreditColumn).toContain('PURCHASE-PAYMENT')
+    })
+
+    it('prints one grouped settlement row without listing individual allocations', () => {
+        const data = statementData()
+        data.period = { type: 'allTime' }
+        data.statementOrders = [{
+            id: 'settlement-sale', orderNumber: 'SO-SETTLE', customerId: 'partner-1', total: 500,
+            currency: 'usd', status: 'completed', createdAt: '2026-01-04T10:00:00',
+            isDeleted: false, linkedLoanId: null
+        }] as any
+        data.settlementTransactions = [
+            {
+                id: 'allocation-one', sourceType: 'sales_order', sourceRecordId: 'settlement-sale',
+                referenceLabel: 'PAYMENT-ONE', direction: 'incoming', amount: 100, currency: 'usd',
+                paidAt: '2026-01-04T11:00:00', createdAt: '2026-01-04T11:00:00', isDeleted: false,
+                settlementOperationId: 'operation-12345678'
+            },
+            {
+                id: 'allocation-two', sourceType: 'sales_order', sourceRecordId: 'settlement-sale',
+                referenceLabel: 'PAYMENT-TWO', direction: 'incoming', amount: 50, currency: 'usd',
+                paidAt: '2026-01-04T11:00:00', createdAt: '2026-01-04T11:00:00', isDeleted: false,
+                settlementOperationId: 'operation-12345678'
+            }
+        ] as any
+        data.settlementOperations = [{
+            id: 'operation-12345678', workspaceId: 'workspace-1', partnerId: 'partner-1',
+            partnerNameSnapshot: 'Sample Partner', direction: 'incoming', paidAt: '2026-01-04T11:00:00',
+            paymentMethod: 'cash', note: 'One collection action', status: 'completed',
+            createdAt: '2026-01-04T11:00:00', updatedAt: '2026-01-04T11:00:00', version: 2,
+            isDeleted: false, syncStatus: 'synced', lastSyncedAt: '2026-01-04T11:00:00'
+        }] as any
+
+        const html = renderToStaticMarkup(createElement(PartnerAccountStatementPrintTemplate, {
+            printLang: 'en', data: data as any
+        }))
+        const rows = [...html.matchAll(/<tr\b[^>]*>[\s\S]*?<\/tr>/g)].map((match) => match[0])
+        const settlementRow = rows.find((row) => row.includes('SET-OPERATIO'))
+
+        expect(settlementRow).toContain('One collection action')
+        expect(settlementRow).toContain('Cash Collection')
+        expect(settlementRow).not.toContain('allocations')
+        expect(settlementRow).not.toContain('PAYMENT-ONE')
+        expect(settlementRow).not.toContain('PAYMENT-TWO')
+        expect(settlementRow).toContain('150 usd')
+        expect(html.match(/SET-OPERATIO/g)).toHaveLength(1)
+        expect(buildPartnerAccountStatementLedger(data)[0]).toMatchObject({
+            debitTotal: 500, creditTotal: 150, closingBalance: 350
+        })
     })
 
     it('includes every merchant-facing Post Service movement once with the inverse delivery-ledger sign', () => {

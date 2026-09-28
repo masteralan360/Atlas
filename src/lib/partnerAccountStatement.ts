@@ -6,12 +6,14 @@ import type {
   Loan,
   LoanPayment,
   OrderPaymentMethod,
+  PartnerSettlementOperation,
   OrderReturn,
   OrderReturnItem,
   PaymentTransaction,
   PurchaseOrder,
   SalesOrder
 } from '@/local-db'
+import { formatDirectTransactionVoucherNumber } from '@/lib/directTransactionVoucher'
 import { isPayableCommissionEntry } from '@/local-db/commissionMode'
 
 type StatementOrder = SalesOrder | PurchaseOrder
@@ -63,6 +65,10 @@ export type PartnerAccountStatementData = {
   /** Original POS sale lines, keyed by POS sale ID. */
   posSaleItemsBySaleId?: Record<string, PartnerAccountStatementPosSaleItem[]>
   settlementTransactions?: PaymentTransaction[]
+  /** All payment rows linked to loan repayments, used to group their separate statement projection. */
+  loanPaymentTransactions?: PaymentTransaction[]
+  /** User action headers paired with grouped payment transaction members. */
+  settlementOperations?: PartnerSettlementOperation[]
   /** Commission activity is included only for a sales-account agent's own statement. */
   agentCommissionEntries?: AgentCommissionEntry[]
   /** Historical product-line snapshots for an eligible agent statement. */
@@ -94,6 +100,7 @@ export type PartnerAccountStatementEntryKind =
   | 'installment_sale'
   | 'agent_commission'
   | 'delivery_post'
+  | 'partner_settlement'
 
 export type PartnerAccountStatementEntryDescriptionKey =
   | 'salesOrder'
@@ -134,6 +141,9 @@ export type PartnerAccountStatementEntryDescriptionKey =
   | 'deliveryMerchantPayout'
   | 'deliveryMerchantRepayment'
   | 'deliveryAdjustment'
+  | 'cashCollection'
+  | 'cashPaid'
+  | 'partnerSettlement'
 
 export type PartnerAccountStatementEntrySource =
   | { recordType: 'order'; recordId: string }
@@ -166,6 +176,11 @@ export type PartnerAccountStatementEntry = {
   delta: number
   /** The underlying document, when this statement row originates from one. */
   source?: PartnerAccountStatementEntrySource
+  settlementOperationId?: string | null
+  settlementOperation?: Pick<
+    PartnerSettlementOperation,
+    'id' | 'partnerNameSnapshot' | 'direction' | 'paidAt' | 'paymentMethod' | 'note' | 'status'
+  >
 }
 
 export type PartnerAccountStatementCurrencyLedger = {
@@ -242,9 +257,12 @@ function paymentKind(transaction: PaymentTransaction): PartnerAccountStatementEn
 
 function paymentDescription(transaction: PaymentTransaction): {
   description: string
-  descriptionKey: PartnerAccountStatementEntryDescriptionKey
+  descriptionKey?: PartnerAccountStatementEntryDescriptionKey
 } {
   if (transaction.sourceType === 'direct_transaction') {
+    const reason = metadataText(transaction.metadata, 'reason') || transaction.referenceLabel?.trim()
+    if (reason) return { description: reason }
+
     return transaction.direction === 'incoming'
       ? { description: 'Direct receipt', descriptionKey: 'directReceipt' }
       : { description: 'Direct payment', descriptionKey: 'directPayment' }
@@ -303,7 +321,7 @@ function paymentStatementPresentation(
   salesOrder?: SalesOrder
 ): {
   description: string
-  descriptionKey: PartnerAccountStatementEntryDescriptionKey
+  descriptionKey?: PartnerAccountStatementEntryDescriptionKey
   note: string | null
   returnReason: string | null
 } {
@@ -699,6 +717,9 @@ function getAutomaticCommissionSettlements(data: PartnerAccountStatementData): A
 function createPaymentEntries(data: PartnerAccountStatementData): PartnerAccountStatementEntry[] {
   const sourceOrders = data.statementOrders || data.salesOrders
   const salesOrdersById = new Map(sourceOrders.filter(isSalesOrder).map((order) => [order.id, order]))
+  const settlementOperationsById = new Map(
+    (data.settlementOperations || []).filter((operation) => !operation.isDeleted).map((operation) => [operation.id, operation])
+  )
 
   const collapsedPayoutIds = new Set(
     getAutomaticCommissionSettlements(data).map((settlement) => settlement.payoutEntryId)
@@ -713,11 +734,16 @@ function createPaymentEntries(data: PartnerAccountStatementData): PartnerAccount
         transaction,
         transaction.sourceType === 'sales_order' ? salesOrdersById.get(transaction.sourceRecordId) : undefined
       )
+      const settlementOperationId = transaction.settlementOperationId || null
+      const settlementOperation = settlementOperationId
+        ? settlementOperationsById.get(settlementOperationId)
+        : undefined
       return {
         id: `payment:${transaction.id}`,
         date: transaction.paidAt || transaction.createdAt,
-        reference:
-          (transaction.sourceType === 'agent_commission_payout' || transaction.sourceType === 'agent_commission_recovery')
+        reference: transaction.sourceType === 'direct_transaction'
+          ? formatDirectTransactionVoucherNumber(transaction)
+          : (transaction.sourceType === 'agent_commission_payout' || transaction.sourceType === 'agent_commission_recovery')
             ? data.linkedOrderCodes?.[metadataText(transaction.metadata, 'orderId') || ''] ||
               transaction.referenceLabel ||
               transaction.sourceRecordId
@@ -730,7 +756,9 @@ function createPaymentEntries(data: PartnerAccountStatementData): PartnerAccount
         source:
           transaction.sourceType === 'sales_order' || transaction.sourceType === 'purchase_order'
             ? { recordType: 'order', recordId: transaction.sourceRecordId }
-            : { recordType: 'payment_transaction', recordId: transaction.id }
+            : { recordType: 'payment_transaction', recordId: transaction.id },
+        settlementOperationId,
+        ...(settlementOperation ? { settlementOperation } : {})
       }
     })
 }
@@ -822,6 +850,12 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
   const loans = data.loans || []
   const payments = data.loanPayments || []
   const loanById = new Map(loans.map((loan) => [loan.id, loan]))
+  const paymentTransactionsById = new Map(
+    (data.loanPaymentTransactions || []).map((transaction) => [transaction.id, transaction])
+  )
+  const settlementOperationsById = new Map(
+    (data.settlementOperations || []).filter((operation) => !operation.isDeleted).map((operation) => [operation.id, operation])
+  )
   const salesOrderById = new Map(
     (data.statementOrders || data.salesOrders)
       .filter(isSalesOrder)
@@ -1035,6 +1069,13 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
     const linkedDocumentCode = linkedOrderCode || linkedPosSaleCode
     const reference = linkedDocumentCode ? `${linkedDocumentCode} · ${loan.loanNo}` : loan.loanNo
     const presentation = loanPaymentStatementPresentation(payment, lent)
+    const paymentTransaction = payment.paymentTransactionId
+      ? paymentTransactionsById.get(payment.paymentTransactionId)
+      : undefined
+    const settlementOperationId = paymentTransaction?.settlementOperationId || null
+    const settlementOperation = settlementOperationId
+      ? settlementOperationsById.get(settlementOperationId)
+      : undefined
     entries.push({
       id: `loan-payment:${payment.id}`,
       date: payment.paidAt || payment.createdAt,
@@ -1047,7 +1088,9 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
         recordType: 'loan',
         recordId: loan.id,
         loanCategory: loan.loanCategory
-      }
+      },
+      settlementOperationId,
+      ...(settlementOperation ? { settlementOperation } : {})
     })
   }
 

@@ -7,6 +7,8 @@ export type PartnerAccountStatementDisplayEntry = LedgerEntry & {
   credit: number
   /** The original ledger movements represented by this printed/screen row. */
   sourceEntryIds: string[]
+  /** Individual audited movements represented by a settlement summary row. */
+  childEntries?: LedgerEntry[]
 }
 
 function localStatementDay(value: string): string | null {
@@ -56,6 +58,17 @@ export function buildPartnerAccountStatementDisplayEntries(
   ledger: PartnerAccountStatementCurrencyLedger,
   options: { combineOrderPayments?: boolean } = {}
 ): PartnerAccountStatementDisplayEntry[] {
+  const settlementGroups = new Map<string, LedgerEntry[]>()
+  for (const entry of ledger.entries) {
+    if (!entry.settlementOperationId) continue
+    const members = settlementGroups.get(entry.settlementOperationId) || []
+    members.push(entry)
+    settlementGroups.set(entry.settlementOperationId, members)
+  }
+  const settlementMemberIds = new Set(
+    Array.from(settlementGroups.values()).flatMap((members) => members.map((member) => member.id))
+  )
+
   const orders = new Map<string, LedgerEntry>()
   if (options.combineOrderPayments !== false) {
     for (const entry of ledger.entries) {
@@ -67,6 +80,7 @@ export function buildPartnerAccountStatementDisplayEntries(
   const paymentsByOrder = new Map<string, LedgerEntry[]>()
   const combinedPaymentIds = new Set<string>()
   for (const entry of ledger.entries) {
+    if (settlementMemberIds.has(entry.id)) continue
     const key = paymentOrderKey(entry)
     const order = key ? orders.get(key) : undefined
     const orderDay = order && localStatementDay(order.date)
@@ -78,7 +92,40 @@ export function buildPartnerAccountStatementDisplayEntries(
   }
 
   let runningBalance = ledger.openingBalance
+  const displayedSettlementIds = new Set<string>()
   return ledger.entries.flatMap((entry) => {
+    const settlementOperationId = entry.settlementOperationId
+    if (settlementOperationId) {
+      if (displayedSettlementIds.has(settlementOperationId)) return []
+      displayedSettlementIds.add(settlementOperationId)
+      const children = settlementGroups.get(settlementOperationId) || [entry]
+      const delta = children.reduce((sum, child) => sum + child.delta, 0)
+      const debit = children.reduce((sum, child) => sum + Math.max(child.delta, 0), 0)
+      const credit = children.reduce((sum, child) => sum + Math.max(-child.delta, 0), 0)
+      const operation = entry.settlementOperation || children.find((child) => child.settlementOperation)?.settlementOperation
+      const firstNonZeroDelta = children.find((child) => Math.abs(child.delta) > 0.000001)?.delta ?? delta
+      const isCollection = operation?.direction
+        ? operation.direction === 'incoming'
+        : firstNonZeroDelta < 0
+      runningBalance += delta
+      return [{
+        ...entry,
+        id: `settlement:${settlementOperationId}`,
+        date: operation?.paidAt || children[0]?.date || entry.date,
+        reference: `SET-${settlementOperationId.slice(0, 8).toUpperCase()}`,
+        kind: 'partner_settlement' as const,
+        description: isCollection ? 'Cash Collection' : 'Cash Paid',
+        descriptionKey: isCollection ? 'cashCollection' as const : 'cashPaid' as const,
+        note: operation?.note || entry.note || null,
+        source: undefined,
+        delta,
+        debit,
+        credit,
+        runningBalance,
+        sourceEntryIds: children.map((child) => child.id),
+        childEntries: children
+      }]
+    }
     if (combinedPaymentIds.has(entry.id)) return []
 
     const key = orderKey(entry)

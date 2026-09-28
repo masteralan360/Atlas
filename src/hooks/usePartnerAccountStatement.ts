@@ -153,6 +153,21 @@ export function usePartnerAccountStatement(
   const loans = useLoans(workspaceId)
   const installmentSales = useInstallmentSales(workspaceId)
   const paymentTransactions = usePaymentTransactions(workspaceId)
+  const queriedSettlementOperations = useLiveQuery(
+    () => workspaceId && partnerId
+      ? db.partner_settlement_operations
+          .where('workspaceId')
+          .equals(workspaceId)
+          .and((operation) => !operation.isDeleted && operation.partnerId === partnerId)
+          .toArray()
+      : [],
+    [partnerId, workspaceId]
+  )
+  const settlementOperations = useMemo(() => queriedSettlementOperations ?? [], [queriedSettlementOperations])
+  const settlementOperationIds = useMemo(
+    () => new Set(settlementOperations.map((operation) => operation.id)),
+    [settlementOperations]
+  )
   const deliveryMerchantProfiles = useDeliveryMerchantProfiles(workspaceId)
   const deliveryLedgerEntries = useDeliveryLedgerEntries(workspaceId)
   const deliveryShipments = useDeliveryShipments(workspaceId)
@@ -309,6 +324,14 @@ export function usePartnerAccountStatement(
     [loanIdKey]
   )
   const loanPayments = useMemo(() => queriedLoanPayments ?? EMPTY_LOAN_PAYMENTS, [queriedLoanPayments])
+  const loanPaymentTransactionIds = useMemo(
+    () => new Set(loanPayments.map((payment) => payment.paymentTransactionId).filter((id): id is string => !!id)),
+    [loanPayments]
+  )
+  const loanPaymentTransactions = useMemo(
+    () => paymentTransactions.filter((transaction) => !transaction.isDeleted && loanPaymentTransactionIds.has(transaction.id)),
+    [loanPaymentTransactionIds, paymentTransactions]
+  )
   const salesAccountCommissionEntries = useMemo(
     () => commissionEntries.filter((entry) => commissionAgentIds.has(entry.agentId) && isPayableCommissionEntry(entry)),
     [commissionAgentIds, commissionEntries]
@@ -359,6 +382,11 @@ export function usePartnerAccountStatement(
 
     return paymentTransactions.filter((transaction) => {
       if (transaction.isDeleted) return false
+      if (
+        transaction.settlementOperationId
+        && settlementOperationIds.has(transaction.settlementOperationId)
+        && transaction.sourceModule !== 'loans'
+      ) return true
       if (transaction.sourceType === 'sales_order') return salesOrderIds.has(transaction.sourceRecordId)
       if (transaction.sourceType === 'purchase_order') return purchaseOrderIds.has(transaction.sourceRecordId)
       if (
@@ -377,7 +405,7 @@ export function usePartnerAccountStatement(
         isDirectTransactionPartnerAccountEffect(transaction.metadata?.partnerAccountEffect)
       )
     })
-  }, [commissionAgentIds, partnerId, partnerPurchaseOrders, partnerSalesOrders, paymentTransactions])
+  }, [commissionAgentIds, partnerId, partnerPurchaseOrders, partnerSalesOrders, paymentTransactions, settlementOperationIds])
 
   const merchantDeliveryEntries = useMemo(() => {
     if (!partnerId) return []
@@ -442,6 +470,7 @@ export function usePartnerAccountStatement(
       statementOrders: allOrders,
       loans: partnerLoans,
       loanPayments,
+      loanPaymentTransactions,
       installmentSales: partnerInstallmentSales,
       linkedOrderCodes: Object.fromEntries(
         [...allOrders, ...marketplaceDeliveryOrders]
@@ -460,6 +489,7 @@ export function usePartnerAccountStatement(
       ),
       posSaleItemsBySaleId,
       settlementTransactions,
+      settlementOperations,
       agentCommissionEntries: salesAccountCommissionEntries,
       agentProductCommissionEntries: salesAccountProductCommissionEntries,
       marketplaceDeliveryProductCommissionOrderIds,
@@ -471,6 +501,7 @@ export function usePartnerAccountStatement(
     deliverySettlementReferences,
     deliveryShipmentReferences,
     loanPayments,
+    loanPaymentTransactions,
     merchantDeliveryEntries,
     commissionAgents,
     partner,
@@ -487,6 +518,7 @@ export function usePartnerAccountStatement(
     salesAccountProductCommissionEntries,
     salesOrders,
     sales,
+    settlementOperations,
     settlementTransactions
   ])
 

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, CircleAlert, FileText, Loader2, Printer, RefreshCw, Settings, TrendingDown, TrendingUp } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { ArrowLeft, ChevronDown, ChevronRight, CircleAlert, FileText, Loader2, Printer, RefreshCw, Settings, TrendingDown, TrendingUp } from 'lucide-react'
 import { Link, useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 import type { i18n as I18n } from 'i18next'
@@ -110,14 +110,15 @@ function entryLabel(
         purchase_order: t('orders.tabs.purchase', { defaultValue: 'Purchase Order' }),
         incoming_payment: t('businessPartners.accountStatement.paymentReceived', { defaultValue: 'Payment received' }),
         outgoing_payment: t('businessPartners.accountStatement.paymentMade', { defaultValue: 'Payment made' }),
-        direct_transaction: t('ledger.type.direct_transaction', { defaultValue: 'Direct Transaction' }),
+        direct_transaction: t('payments.sourceType.directTransaction', { defaultValue: 'Direct Transaction' }),
         loan_disbursal: t('businessPartners.accountStatement.loanMovement', { defaultValue: 'Loan movement' }),
         loan_repayment: t('businessPartners.accountStatement.loanRepayment', { defaultValue: 'Loan repayment' }),
         pos_sale_loan: t('loans.posSaleLoan', { defaultValue: 'POS Sale Loan' }),
         pos_sale_installment_loan: t('loans.posSaleInstallmentLoan', { defaultValue: 'POS Sale Installment Loan' }),
         installment_sale: t('businessPartners.accountStatement.installmentSale', { defaultValue: 'Installment sale' }),
         agent_commission: t('salesAgentCommissions.title', { defaultValue: 'Sales agent commission' }),
-        delivery_post: t('postService.title', { defaultValue: 'Post Service' })
+        delivery_post: t('postService.title', { defaultValue: 'Post Service' }),
+        partner_settlement: t('businessPartners.accountStatement.descriptions.partnerSettlement', { defaultValue: 'Partner settlement' })
     }
     return labels[kind]
 }
@@ -188,6 +189,7 @@ function LedgerCard({
     balanceColors: PartnerAccountStatementBalanceColors
     onNavigate: (path: string) => void
 }) {
+    const [expandedSettlementIds, setExpandedSettlementIds] = useState<Set<string>>(() => new Set())
     const display = (amount: number) => formatCurrency(Math.abs(amount), ledger.currency, iqdPreference)
     const canShowBothAmounts = columns.includes('debit') && columns.includes('credit')
     const entries = useMemo(
@@ -298,7 +300,35 @@ function LedgerCard({
                                                 case 'date':
                                                     return <TableCell key={columnId} className="whitespace-nowrap">{formatDate(entry.date)}</TableCell>
                                                 case 'reference':
-                                                    return <TableCell key={columnId} className="max-w-40 font-medium break-words">{entry.reference}</TableCell>
+                                                    return <TableCell key={columnId} className="max-w-48 font-medium break-words">
+                                                        {entry.childEntries?.length ? (
+                                                            <div className="flex flex-col items-start gap-1">
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    className="h-auto gap-1 p-0 text-start font-medium"
+                                                                    aria-expanded={expandedSettlementIds.has(entry.id)}
+                                                                    onClick={() => setExpandedSettlementIds((current) => {
+                                                                        const next = new Set(current)
+                                                                        if (next.has(entry.id)) next.delete(entry.id)
+                                                                        else next.add(entry.id)
+                                                                        return next
+                                                                    })}
+                                                                >
+                                                                    {expandedSettlementIds.has(entry.id)
+                                                                        ? <ChevronDown className="h-4 w-4 shrink-0" />
+                                                                        : <ChevronRight className="h-4 w-4 shrink-0" />}
+                                                                    <span>{entry.reference}</span>
+                                                                </Button>
+                                                                <span className="text-xs text-muted-foreground">
+                                                                    {t('businessPartners.accountStatement.settlementAllocations', {
+                                                                        count: entry.childEntries.length,
+                                                                        defaultValue: '{{count}} allocations'
+                                                                    })}
+                                                                </span>
+                                                            </div>
+                                                        ) : entry.reference}</TableCell>
                                                 case 'type':
                                                     return <TableCell key={columnId} className="whitespace-nowrap text-muted-foreground">{entryLabel(entry.kind, t)}</TableCell>
                                                 case 'description':
@@ -322,18 +352,53 @@ function LedgerCard({
                                     </TableRow>
                                 )
 
+                                const isExpanded = expandedSettlementIds.has(entry.id)
                                 return (
-                                    <ContextMenu key={entry.id}>
-                                        <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-                                        <ContextMenuContent className="w-52">
-                                            <ContextMenuItem className="gap-2" disabled={!sourcePath} onSelect={() => { if (sourcePath) onNavigate(sourcePath) }}>
-                                                <FileText className="h-4 w-4" />
-                                                {sourcePath
-                                                    ? t('common.view', { defaultValue: 'View' })
-                                                    : t('businessPartners.accountStatement.sourceViewUnavailable', { defaultValue: 'No source view is available' })}
-                                            </ContextMenuItem>
-                                        </ContextMenuContent>
-                                    </ContextMenu>
+                                    <Fragment key={entry.id}>
+                                        <ContextMenu>
+                                            <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+                                            <ContextMenuContent className="w-52">
+                                                <ContextMenuItem className="gap-2" disabled={!sourcePath} onSelect={() => { if (sourcePath) onNavigate(sourcePath) }}>
+                                                    <FileText className="h-4 w-4" />
+                                                    {sourcePath
+                                                        ? t('common.view', { defaultValue: 'View' })
+                                                        : t('businessPartners.accountStatement.sourceViewUnavailable', { defaultValue: 'No source view is available' })}
+                                                </ContextMenuItem>
+                                            </ContextMenuContent>
+                                        </ContextMenu>
+                                        {isExpanded && entry.childEntries?.length ? (
+                                            <TableRow className="bg-muted/10 hover:bg-muted/10">
+                                                <TableCell colSpan={columns.length} className="p-3">
+                                                    <div className="space-y-2 border-s-2 ps-3">
+                                                        {entry.childEntries.map((child) => {
+                                                            const childSourcePath = entrySourcePath(child)
+                                                            const childDescription = getPartnerAccountStatementEntryDescription(child, t)
+                                                            const childDetail = getPartnerAccountStatementEntryDetail(child, { t, i18n, language })
+                                                            return (
+                                                                <div key={child.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs">
+                                                                    <div className="min-w-0">
+                                                                        <span className="font-semibold">{child.reference}</span>
+                                                                        <span className="mx-2 text-muted-foreground">{formatDate(child.date)}</span>
+                                                                        <span>{childDescription}</span>
+                                                                        {childDetail ? <span className="ms-2 text-muted-foreground">{childDetail}</span> : null}
+                                                                    </div>
+                                                                    <div className="flex items-center gap-3 whitespace-nowrap font-medium tabular-nums">
+                                                                        {child.delta > 0 ? <span>{t('businessPartners.accountStatement.debit', { defaultValue: 'Debit' })}: {display(child.delta)}</span> : null}
+                                                                        {child.delta < 0 ? <span>{t('businessPartners.accountStatement.credit', { defaultValue: 'Credit' })}: {display(child.delta)}</span> : null}
+                                                                        {childSourcePath ? (
+                                                                            <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => onNavigate(childSourcePath)}>
+                                                                                {t('common.view', { defaultValue: 'View' })}
+                                                                            </Button>
+                                                                        ) : null}
+                                                                    </div>
+                                                                </div>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                </TableCell>
+                                            </TableRow>
+                                        ) : null}
+                                    </Fragment>
                                 )
                             })}
                             <TableRow className="bg-muted/30 font-bold hover:bg-muted/30">

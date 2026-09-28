@@ -15,6 +15,7 @@ import {
     getRemainingPaymentTransactions,
     isReversiblePaymentSourceType,
     isFinancialVoidSourceSupported,
+    isPartnerSettlementPartialError,
     recordObligationSettlement,
     reversePaymentTransaction,
     settlePartnerBalance,
@@ -172,6 +173,11 @@ function paymentMethodLabel(value: PaymentTransaction['paymentMethod'], t: any) 
 }
 
 function partnerSettlementErrorMessage(t: any, error: unknown) {
+    if (isPartnerSettlementPartialError(error)) {
+        return t('partnerSettlement.partialFailure', {
+            defaultValue: 'Some payments were recorded before another item failed. Review the Account Statement before trying again.'
+        })
+    }
     const message = error instanceof Error ? error.message : ''
     if (message.includes('Commission payout cannot exceed the outstanding balance')) {
         return t('settlementModal.amountExceedsBalance', { defaultValue: 'The amount cannot exceed the remaining balance.' })

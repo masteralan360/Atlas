@@ -200,7 +200,7 @@ const DialogContent = React.forwardRef<
         setPendingCount(0)
         let hasUserInteracted = false
         let frame = 0
-        let baselineInterval: ReturnType<typeof window.setInterval> | undefined
+        let baselineInterval: number | undefined
 
         const updateCount = () => {
             const current = readFields()

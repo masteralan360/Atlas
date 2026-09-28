@@ -2279,6 +2279,8 @@ export interface PaymentTransaction extends BaseEntity {
   /** Optional payment-account context. Undefined/null preserves legacy flows. */
   accountId?: string | null
   accountNameSnapshot?: string | null
+  /** Nullable association to one user-initiated Settle Balance action. */
+  settlementOperationId?: string | null
   /** The active cashier-shift occurrence that owned this payment when it was posted. */
   cashierShiftOccurrenceId?: string | null
   reversalOfTransactionId?: string | null
@@ -2363,6 +2365,20 @@ export interface PaymentAccount extends BaseEntity {
   /** Whether a new payment form should start with this account selected. */
   isDefaultForPaymentSelector?: boolean
   createdBy?: string | null
+}
+
+/** User-visible parent for the payment rows produced by one Settle Balance action. */
+export interface PartnerSettlementOperation extends BaseEntity {
+  partnerId: string
+  partnerNameSnapshot: string
+  direction: PaymentTransactionDirection
+  paidAt: string
+  paymentMethod: WorkspacePaymentMethod
+  note?: string | null
+  createdBy?: string | null
+  accountId?: string | null
+  accountNameSnapshot?: string | null
+  status: 'in_progress' | 'completed' | 'partial' | 'failed'
 }
 
 /** A UI-level account visibility restriction for one workspace member. */
@@ -2681,6 +2697,7 @@ export interface SyncQueueItem {
     | 'installment_sale_installments'
     | 'installment_sale_payments'
     | 'payment_transactions'
+    | 'partner_settlement_operations'
     | 'financial_transaction_voids'
     | 'payment_accounts'
     | 'payment_account_member_restrictions'
@@ -2918,6 +2935,7 @@ export interface OfflineMutation {
     | 'installment_sale_installments'
     | 'installment_sale_payments'
     | 'payment_transactions'
+    | 'partner_settlement_operations'
     | 'financial_transaction_voids'
     | 'payment_accounts'
     | 'payment_account_member_restrictions'

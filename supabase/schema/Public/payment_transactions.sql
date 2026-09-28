@@ -17,6 +17,7 @@ CREATE TABLE public.payment_transactions (
   cashier_shift_occurrence_id uuid NULL REFERENCES payment_accounts.cashier_shift_occurrences(id) ON DELETE RESTRICT,
   account_id uuid NULL REFERENCES payment_accounts.accounts(id) ON DELETE RESTRICT,
   account_name_snapshot text NULL,
+  settlement_operation_id uuid NULL,
   reversal_of_transaction_id uuid NULL,
   voucher_number bigint NULL,
   metadata jsonb NULL DEFAULT '{}'::jsonb,
@@ -39,6 +40,10 @@ CREATE INDEX IF NOT EXISTS idx_payment_transactions_workspace_source
 
 CREATE INDEX IF NOT EXISTS idx_payment_transactions_reversal
   ON public.payment_transactions (reversal_of_transaction_id);
+
+CREATE INDEX IF NOT EXISTS payment_transactions_workspace_settlement_operation_idx
+  ON public.payment_transactions (workspace_id, settlement_operation_id)
+  WHERE settlement_operation_id IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS payment_transactions_direct_voucher_unique
   ON public.payment_transactions (workspace_id, voucher_number)

@@ -94,14 +94,15 @@ function entryLabel(kind: PartnerAccountStatementEntryKind, t: (key: string, opt
         purchase_order: t('orders.tabs.purchase', { defaultValue: 'Purchase Order' }),
         incoming_payment: t('businessPartners.accountStatement.paymentReceived', { defaultValue: 'Payment received' }),
         outgoing_payment: t('businessPartners.accountStatement.paymentMade', { defaultValue: 'Payment made' }),
-        direct_transaction: t('ledger.type.direct_transaction', { defaultValue: 'Direct Transaction' }),
+        direct_transaction: t('payments.sourceType.directTransaction', { defaultValue: 'Direct Transaction' }),
         loan_disbursal: t('businessPartners.accountStatement.loanMovement', { defaultValue: 'Loan movement' }),
         loan_repayment: t('businessPartners.accountStatement.loanRepayment', { defaultValue: 'Loan repayment' }),
         pos_sale_loan: t('loans.posSaleLoan', { defaultValue: 'POS Sale Loan' }),
         pos_sale_installment_loan: t('loans.posSaleInstallmentLoan', { defaultValue: 'POS Sale Installment Loan' }),
         agent_commission: t('salesAgentCommissions.title', { defaultValue: 'Sales agent commission' }),
         delivery_post: t('postService.title', { defaultValue: 'Post Service' }),
-        installment_sale: t('businessPartners.accountStatement.installmentSale', { defaultValue: 'Installment sale' })
+        installment_sale: t('businessPartners.accountStatement.installmentSale', { defaultValue: 'Installment sale' }),
+        partner_settlement: t('businessPartners.accountStatement.descriptions.partnerSettlement', { defaultValue: 'Partner settlement' })
     }
     return labels[kind]
 }
@@ -263,7 +264,12 @@ function LedgerTableChunk({
                                     case 'type':
                                         return <td key={columnId} className="border border-slate-300 px-1.5 py-1 align-top">{entryLabel(entry.kind, t)}</td>
                                     case 'description':
-                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 align-top whitespace-pre-wrap"><div>{description}</div>{detail ? <div className="mt-0.5 text-[8px] text-slate-600">{detail}</div> : null}</td>
+                                        return (
+                                            <td key={columnId} className="border border-slate-300 px-1.5 py-1 align-top whitespace-pre-wrap">
+                                                <div>{description}</div>
+                                                {detail ? <div className="mt-0.5 text-[8px] text-slate-600">{detail}</div> : null}
+                                            </td>
+                                        )
                                     case 'item':
                                         return <td key={columnId} className="border border-slate-300 px-1.5 py-1 align-top whitespace-pre-wrap">{entry.itemName || '—'}</td>
                                     case 'quantity':

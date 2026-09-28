@@ -31,6 +31,11 @@ export {
   type PaymentTransactionReversalState,
 } from '@/lib/paymentReversals'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import {
+  createPartnerSettlementOperation,
+  finishPartnerSettlementOperation,
+  linkPaymentTransactionToSettlement
+} from './partnerSettlementOperations'
 
 import { db } from './database'
 import { persistLocalDirectTransactionWithVoucher } from './localModeSqlite'
@@ -193,6 +198,7 @@ export interface SettlePartnerBalanceInput {
 }
 
 export interface SettlePartnerBalanceResult {
+    settlementOperationId: string
     partnerId: string
     partnerName: string
     direction: PaymentTransactionDirection
@@ -225,6 +231,7 @@ export interface AppendPaymentTransactionInput {
     createdBy?: string | null
     accountId?: string | null
     accountNameSnapshot?: string | null
+    settlementOperationId?: string | null
     reversalOfTransactionId?: string | null
     metadata?: Record<string, unknown> | null
 }
@@ -570,6 +577,47 @@ function getActivePaymentTransactionAmount(rows: PaymentTransaction[]) {
 type PaymentSourceHydrationLease = {
   promise: Promise<void>
   release: () => void
+}
+
+export class PartnerSettlementPartialError extends Error {
+    settlementOperationId: string
+    originalError: unknown
+
+    constructor(settlementOperationId: string, originalError: unknown) {
+        super('partner_settlement_partially_applied')
+        this.name = 'PartnerSettlementPartialError'
+        this.settlementOperationId = settlementOperationId
+        this.originalError = originalError
+    }
+}
+
+export function isPartnerSettlementPartialError(error: unknown): error is PartnerSettlementPartialError {
+    return error instanceof PartnerSettlementPartialError
+}
+
+async function findSettlementPaymentTransaction(
+  workspaceId: string,
+  sourceType: PaymentTransactionSourceType,
+  sourceRecordId: string,
+  sourceSubrecordId: string
+) {
+  const rows = await db.payment_transactions
+    .where('[workspaceId+sourceType+sourceRecordId]')
+    .equals([workspaceId, sourceType, sourceRecordId])
+    .and((transaction) => !transaction.isDeleted && transaction.sourceSubrecordId === sourceSubrecordId)
+    .toArray()
+  return rows.sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0] || null
+}
+
+async function attachSettlementPayment(
+  workspaceId: string,
+  operationId: string,
+  transactionId: string | null | undefined
+) {
+  if (!transactionId) throw new Error('Settlement payment could not be linked to its operation')
+  const transaction = await linkPaymentTransactionToSettlement(workspaceId, transactionId, operationId)
+  if (!transaction) throw new Error('Settlement payment could not be linked to its operation')
+  return transaction
 }
 
 type ActivePaymentSourceHydration = {
@@ -1604,6 +1652,7 @@ export async function appendPaymentTransaction(
     accountId,
     accountNameSnapshot,
     cashierShiftOccurrenceId,
+    settlementOperationId: input.settlementOperationId ?? null,
     reversalOfTransactionId: input.reversalOfTransactionId ?? null,
     metadata: input.metadata ?? null,
     createdAt: now,
@@ -2710,165 +2759,216 @@ export async function settlePartnerBalance(
 
   let settledItems = 0
   input.onProgress?.({ settledItems: 0, totalItems: touchedItems })
+  const settlementOperationId = generateId()
+  await createPartnerSettlementOperation({
+    id: settlementOperationId,
+    workspaceId,
+    partnerId: partner.id,
+    partnerNameSnapshot: partner.partnerName,
+    direction: input.direction,
+    paidAt,
+    paymentMethod,
+    note,
+    createdBy,
+    accountId: input.accountId ?? null,
+    accountNameSnapshot: input.accountNameSnapshot ?? null,
+    status: 'in_progress'
+  })
 
-  for (const obligation of balance.eligibleObligations) {
-    const cap = useScalarRemaining ? remaining : (remainingByCurrency.get(obligation.currency) ?? 0)
-    if (useScalarRemaining) {
-      if (remaining <= PAYMENT_AMOUNT_EPSILON) {
-        break
-      }
-    } else if (cap <= PAYMENT_AMOUNT_EPSILON) {
-      continue
-    }
-
-    const applied = Math.min(obligation.amount, cap)
-    if (applied <= PAYMENT_AMOUNT_EPSILON) {
-      continue
-    }
-
-    switch (obligation.sourceType) {
-      case 'loan_installment':
-      case 'simple_loan': {
-        const { recordLoanPayment } = await import('./hooks')
-        await recordLoanPayment(workspaceId, {
-          loanId: obligation.sourceRecordId,
-          installmentId:
-            obligation.sourceType === 'loan_installment' ? obligation.sourceSubrecordId || undefined : undefined,
-          amount: applied,
-          paymentMethod,
-          note: note || undefined,
-          paidAt,
-          createdBy: createdBy || undefined,
-          accountId: input.accountId ?? null,
-          accountNameSnapshot: input.accountNameSnapshot ?? null
-        })
-        break
-      }
-
-      case 'installment_sale_installment': {
-        const { recordInstallmentSaleCustomerPayment } = await import('./installmentSales')
-        await recordInstallmentSaleCustomerPayment(workspaceId, {
-          installmentSaleId: obligation.sourceRecordId,
-          installmentId: obligation.sourceSubrecordId || null,
-          amount: applied,
-          paymentMethod,
-          note,
-          paidAt,
-          createdBy,
-          accountId: input.accountId ?? null,
-          accountNameSnapshot: input.accountNameSnapshot ?? null
-        })
-        break
-      }
-
-      case 'sales_order':
-      case 'purchase_order': {
-        const { recordOrderPayment } = await import('./orders')
-        await recordOrderPayment(workspaceId, {
-          orderType: obligation.sourceType === 'sales_order' ? 'sales' : 'purchase',
-          orderId: obligation.sourceRecordId,
-          installmentId: obligation.sourceSubrecordId,
-          amount: applied,
-          paymentMethod,
-          paidAt,
-          note,
-          createdBy,
-          accountId: input.accountId ?? null,
-          accountNameSnapshot: input.accountNameSnapshot ?? null
-        })
-        break
-      }
-
-      case 'real_estate_commission': {
-        const { recordRealEstateCommissionPayment } = await import('./realEstate')
-        await recordRealEstateCommissionPayment(workspaceId, {
-          transactionId: obligation.sourceRecordId,
-          amount: applied,
-          paymentMethod,
-          counterpartyName: obligation.counterpartyName || partner.partnerName,
-          businessPartnerId: partner.id,
-          note,
-          paidAt,
-          createdBy,
-          accountId: input.accountId ?? null,
-          accountNameSnapshot: input.accountNameSnapshot ?? null
-        })
-        break
-      }
-
-      case 'agent_commission_payout': {
-        const agentId = getMetadataString(obligation.metadata, 'agentId')
-        const assignmentId = getMetadataString(obligation.metadata, 'commissionAssignmentId')
-        if (!agentId || !assignmentId) {
-          throw new Error('Sales agent commission settlement metadata is incomplete')
+  try {
+    for (const obligation of balance.eligibleObligations) {
+      const cap = useScalarRemaining ? remaining : (remainingByCurrency.get(obligation.currency) ?? 0)
+      if (useScalarRemaining) {
+        if (remaining <= PAYMENT_AMOUNT_EPSILON) {
+          break
         }
-
-        const { recordAgentCommissionPayout } = await import('./agentCommissions')
-        await recordAgentCommissionPayout(workspaceId, {
-          agentId,
-          assignmentId,
-          orderId: obligation.sourceRecordId,
-          amount: applied,
-          currency: obligation.currency,
-          paymentMethod,
-          paidAt,
-          note,
-          createdBy,
-          accountId: input.accountId ?? null,
-          accountNameSnapshot: input.accountNameSnapshot ?? null
-        })
-        break
-      }
-
-      case 'agent_commission_recovery': {
-        const agentId = getMetadataString(obligation.metadata, 'agentId')
-        const assignmentId = getMetadataString(obligation.metadata, 'commissionAssignmentId')
-        if (!agentId || !assignmentId) {
-          throw new Error('Sales agent commission settlement metadata is incomplete')
-        }
-
-        const { recordAgentCommissionRecovery } = await import('./agentCommissions')
-        await recordAgentCommissionRecovery(workspaceId, {
-          agentId,
-          assignmentId,
-          orderId: obligation.sourceRecordId,
-          amount: applied,
-          currency: obligation.currency,
-          paymentMethod,
-          paidAt,
-          note,
-          createdBy,
-          accountId: input.accountId ?? null,
-          accountNameSnapshot: input.accountNameSnapshot ?? null
-        })
-        break
-      }
-
-      default:
+      } else if (cap <= PAYMENT_AMOUNT_EPSILON) {
         continue
+      }
+
+      const applied = Math.min(obligation.amount, cap)
+      if (applied <= PAYMENT_AMOUNT_EPSILON) {
+        continue
+      }
+
+      switch (obligation.sourceType) {
+        case 'loan_installment':
+        case 'simple_loan': {
+          const { recordLoanPayment } = await import('./hooks')
+          const result = await recordLoanPayment(workspaceId, {
+            loanId: obligation.sourceRecordId,
+            installmentId:
+              obligation.sourceType === 'loan_installment' ? obligation.sourceSubrecordId || undefined : undefined,
+            amount: applied,
+            paymentMethod,
+            note: note || undefined,
+            paidAt,
+            createdBy: createdBy || undefined,
+            accountId: input.accountId ?? null,
+            accountNameSnapshot: input.accountNameSnapshot ?? null,
+            settlementOperationId
+          })
+          await attachSettlementPayment(workspaceId, settlementOperationId, result.payment.paymentTransactionId)
+          break
+        }
+
+        case 'installment_sale_installment': {
+          const { recordInstallmentSaleCustomerPayment } = await import('./installmentSales')
+          const result = await recordInstallmentSaleCustomerPayment(workspaceId, {
+            installmentSaleId: obligation.sourceRecordId,
+            installmentId: obligation.sourceSubrecordId || null,
+            amount: applied,
+            paymentMethod,
+            note,
+            paidAt,
+            createdBy,
+            accountId: input.accountId ?? null,
+            accountNameSnapshot: input.accountNameSnapshot ?? null
+          })
+          const paymentTransaction = await findSettlementPaymentTransaction(
+            workspaceId,
+            'installment_sale_installment',
+            obligation.sourceRecordId,
+            result.payment.id
+          )
+          await attachSettlementPayment(workspaceId, settlementOperationId, paymentTransaction?.id)
+          break
+        }
+
+        case 'sales_order':
+        case 'purchase_order': {
+          const { recordOrderPayment } = await import('./orders')
+          const result = await recordOrderPayment(workspaceId, {
+            orderType: obligation.sourceType === 'sales_order' ? 'sales' : 'purchase',
+            orderId: obligation.sourceRecordId,
+            installmentId: obligation.sourceSubrecordId,
+            amount: applied,
+            paymentMethod,
+            paidAt,
+            note,
+            createdBy,
+            accountId: input.accountId ?? null,
+            accountNameSnapshot: input.accountNameSnapshot ?? null
+          })
+          await attachSettlementPayment(workspaceId, settlementOperationId, result.transaction.id)
+          break
+        }
+
+        case 'real_estate_commission': {
+          const { recordRealEstateCommissionPayment } = await import('./realEstate')
+          const result = await recordRealEstateCommissionPayment(workspaceId, {
+            transactionId: obligation.sourceRecordId,
+            amount: applied,
+            paymentMethod,
+            counterpartyName: obligation.counterpartyName || partner.partnerName,
+            businessPartnerId: partner.id,
+            note,
+            paidAt,
+            createdBy,
+            accountId: input.accountId ?? null,
+            accountNameSnapshot: input.accountNameSnapshot ?? null
+          })
+          await attachSettlementPayment(workspaceId, settlementOperationId, result.id)
+          break
+        }
+
+        case 'agent_commission_payout': {
+          const agentId = getMetadataString(obligation.metadata, 'agentId')
+          const assignmentId = getMetadataString(obligation.metadata, 'commissionAssignmentId')
+          if (!agentId || !assignmentId) {
+            throw new Error('Sales agent commission settlement metadata is incomplete')
+          }
+
+          const { recordAgentCommissionPayout } = await import('./agentCommissions')
+          const result = await recordAgentCommissionPayout(workspaceId, {
+            agentId,
+            assignmentId,
+            orderId: obligation.sourceRecordId,
+            amount: applied,
+            currency: obligation.currency,
+            paymentMethod,
+            paidAt,
+            note,
+            createdBy,
+            accountId: input.accountId ?? null,
+            accountNameSnapshot: input.accountNameSnapshot ?? null
+          })
+          const paymentTransaction = result
+            ? await findSettlementPaymentTransaction(workspaceId, 'agent_commission_payout', agentId, result.id)
+            : null
+          await attachSettlementPayment(workspaceId, settlementOperationId, paymentTransaction?.id)
+          break
+        }
+
+        case 'agent_commission_recovery': {
+          const agentId = getMetadataString(obligation.metadata, 'agentId')
+          const assignmentId = getMetadataString(obligation.metadata, 'commissionAssignmentId')
+          if (!agentId || !assignmentId) {
+            throw new Error('Sales agent commission settlement metadata is incomplete')
+          }
+
+          const { recordAgentCommissionRecovery } = await import('./agentCommissions')
+          const result = await recordAgentCommissionRecovery(workspaceId, {
+            agentId,
+            assignmentId,
+            orderId: obligation.sourceRecordId,
+            amount: applied,
+            currency: obligation.currency,
+            paymentMethod,
+            paidAt,
+            note,
+            createdBy,
+            accountId: input.accountId ?? null,
+            accountNameSnapshot: input.accountNameSnapshot ?? null
+          })
+          const paymentTransaction = result
+            ? await findSettlementPaymentTransaction(workspaceId, 'agent_commission_recovery', agentId, result.id)
+            : null
+          await attachSettlementPayment(workspaceId, settlementOperationId, paymentTransaction?.id)
+          break
+        }
+
+        default:
+          continue
+      }
+
+      const currencyTotal = appliedByCurrency.get(obligation.currency) || {
+        total: 0,
+        items: 0
+      }
+      currencyTotal.total += applied
+      currencyTotal.items += 1
+      appliedByCurrency.set(obligation.currency, currencyTotal)
+      settledObligationCount.set(obligation.id, applied)
+      if (useScalarRemaining) {
+        remaining = Math.max(remaining - applied, 0)
+      } else {
+        remainingByCurrency.set(obligation.currency, cap - applied)
+      }
+      settledItems += 1
+      input.onProgress?.({ settledItems, totalItems: touchedItems })
     }
 
-    const currencyTotal = appliedByCurrency.get(obligation.currency) || {
-      total: 0,
-      items: 0
+    const totalSettled = Array.from(appliedByCurrency.values()).reduce((sum, group) => sum + group.total, 0)
+    if (totalSettled <= PAYMENT_AMOUNT_EPSILON) {
+      throw new Error('Settlement could not be allocated to any open obligation')
     }
-    currencyTotal.total += applied
-    currencyTotal.items += 1
-    appliedByCurrency.set(obligation.currency, currencyTotal)
-    settledObligationCount.set(obligation.id, applied)
-    if (useScalarRemaining) {
-      remaining = Math.max(remaining - applied, 0)
-    } else {
-      remainingByCurrency.set(obligation.currency, cap - applied)
+
+    await finishPartnerSettlementOperation(settlementOperationId, 'completed')
+  } catch (error) {
+    await finishPartnerSettlementOperation(
+      settlementOperationId,
+      settledObligationCount.size > 0 ? 'partial' : 'failed'
+    ).catch((operationError) => {
+      console.warn('[Payments] Could not update settlement operation status:', operationError)
+    })
+    if (settledObligationCount.size > 0) {
+      throw new PartnerSettlementPartialError(settlementOperationId, error)
     }
-    settledItems += 1
-    input.onProgress?.({ settledItems, totalItems: touchedItems })
+    throw error
   }
 
   const totalSettled = Array.from(appliedByCurrency.values()).reduce((sum, group) => sum + group.total, 0)
-  if (totalSettled <= PAYMENT_AMOUNT_EPSILON) {
-    throw new Error('Settlement could not be allocated to any open obligation')
-  }
 
   try {
     const { recalculateBusinessPartnerSummary } = await import('./businessPartners')
@@ -2878,6 +2978,7 @@ export async function settlePartnerBalance(
   }
 
   return {
+    settlementOperationId,
     partnerId: partner.id,
     partnerName: partner.partnerName,
     direction: input.direction,

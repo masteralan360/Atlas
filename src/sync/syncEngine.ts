@@ -21,6 +21,7 @@ import {
 import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 import { recordWorkspaceDataFetch } from "@/workspace/workspaceDataFreshness";
 import { getPostponedVoiceReasonCleanupPaths } from "@/lib/deliveryVoiceReasonPaths";
+import { linkPaymentTransactionToSettlement } from "@/local-db/partnerSettlementOperations";
 // import { getPendingItems, removeFromQueue, incrementRetry } from './syncQueue'
 
 export type SyncState = "idle" | "syncing" | "error" | "offline";
@@ -143,6 +144,7 @@ const SYNC_PULL_TABLES = [
   "cashier_shift_pause_requests",
   "cashier_shift_pause_periods",
   "payment_transactions",
+  "partner_settlement_operations",
   "financial_transaction_voids",
   "clinical_presets",
   "manual_entry_templates",
@@ -1166,16 +1168,22 @@ export async function processMutationQueue(
         ) {
           throw new Error("Loan replay command is invalid");
         }
+        const loanPayload = commandPayload as Record<string, unknown>;
 
         const rpcName = action === "create"
           ? "create_loan"
           : action === "payment" ? "post_loan_payment" : "reverse_loan_payment";
         const { data, error } = await supabase.rpc(rpcName, {
-          p_payload: commandPayload as Record<string, unknown>,
+          p_payload: loanPayload,
         });
         if (error) throw error;
         const { persistLoanAggregateRpcResult } = await import("@/local-db/loanTransactions");
         await persistLoanAggregateRpcResult(data);
+        const settlementOperationId = loanPayload.settlement_operation_id;
+        const paymentTransactionId = loanPayload.payment_transaction_id;
+        if (typeof settlementOperationId === "string" && typeof paymentTransactionId === "string") {
+          await linkPaymentTransactionToSettlement(workspaceId, paymentTransactionId, settlementOperationId);
+        }
         await db.offline_mutations.update(id, { status: "synced", error: undefined });
         successCount++;
         reportCompleted();

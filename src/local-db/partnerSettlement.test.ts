@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { setNetworkStatus } from '@/lib/network'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
@@ -113,7 +113,7 @@ describe('partner settlement', () => {
         createManualLoan = hookModule.createManualLoan
         getPartnerSettlementBalance = payments.getPartnerSettlementBalance
         settlePartnerBalance = payments.settlePartnerBalance
-    })
+    }, 30_000)
 
     beforeEach(async () => {
         await db.delete()
@@ -123,6 +123,7 @@ describe('partner settlement', () => {
     })
 
     afterEach(async () => {
+        vi.restoreAllMocks()
         clearWorkspaceModeSnapshot(WORKSPACE_ID)
         setNetworkStatus(true)
     })
@@ -204,6 +205,7 @@ describe('partner settlement', () => {
             totalSettled: 65000,
             items: 2
         })
+        expect(result.settlementOperationId).toBeTruthy()
         expect(result.groups).toEqual([{ currency: 'iqd', total: 65000, items: 2 }])
 
         const transactions = await db.payment_transactions
@@ -217,6 +219,12 @@ describe('partner settlement', () => {
         expect(transactions.every((item) => item.direction === 'incoming')).toBe(true)
         expect(transactions.every((item) => item.metadata?.businessPartnerId === partner.id)).toBe(true)
         expect(transactions.every((item) => item.paidAt === '2026-08-01T12:00:00.000Z')).toBe(true)
+        expect(transactions.every((item) => item.settlementOperationId === result.settlementOperationId)).toBe(true)
+        await expect(db.partner_settlement_operations.get(result.settlementOperationId)).resolves.toMatchObject({
+            partnerId: partner.id,
+            direction: 'incoming',
+            status: 'completed'
+        })
 
         const remaining = await getPartnerSettlementBalance(WORKSPACE_ID, partner.id, 'incoming')
         expect(remaining.total).toBe(0)
@@ -248,13 +256,58 @@ describe('partner settlement', () => {
             .toArray()
 
         expect(payments).toHaveLength(1)
-        expect(payments[0]).toMatchObject({ sourceRecordId: 'commission-old', amount: 30000 })
+        expect(payments[0]).toMatchObject({
+            sourceRecordId: 'commission-old',
+            amount: 30000,
+            settlementOperationId: result.settlementOperationId
+        })
+        await expect(db.partner_settlement_operations.get(result.settlementOperationId)).resolves.toMatchObject({
+            status: 'completed'
+        })
 
         const remaining = await getPartnerSettlementBalance(WORKSPACE_ID, partner.id, 'incoming')
         expect(remaining.total).toBeCloseTo(35000, 6)
         expect(remaining.items).toBe(2)
         expect(remaining.eligibleObligations.map((item) => item.sourceRecordId)).toEqual(['commission-old', 'commission-new'])
         expect(remaining.eligibleObligations[0].amount).toBeCloseTo(10000, 6)
+    })
+
+    it('records partial operation status and warns when a later allocation fails', async () => {
+        const partner = await seedPartnerWithCommissions()
+        const realEstate = await import('./realEstate')
+        const recordPayment = realEstate.recordRealEstateCommissionPayment
+        let calls = 0
+        vi.spyOn(realEstate, 'recordRealEstateCommissionPayment').mockImplementation(async (...args) => {
+            calls += 1
+            if (calls === 2) throw new Error('injected second-item failure')
+            return recordPayment(...args)
+        })
+
+        let settlementError: unknown
+        try {
+            await settlePartnerBalance(WORKSPACE_ID, {
+                partnerId: partner.id,
+                direction: 'incoming',
+                paymentMethod: 'cash',
+                paidAt: '2026-08-04T12:00:00.000Z'
+            })
+        } catch (error) {
+            settlementError = error
+        }
+
+        expect(settlementError).toMatchObject({
+            name: 'PartnerSettlementPartialError',
+            message: 'partner_settlement_partially_applied'
+        })
+        const operationId = (settlementError as { settlementOperationId: string }).settlementOperationId
+        await expect(db.partner_settlement_operations.get(operationId)).resolves.toMatchObject({ status: 'partial' })
+        const linkedPayments = await db.payment_transactions
+            .where('workspaceId')
+            .equals(WORKSPACE_ID)
+            .and((item) => item.settlementOperationId === operationId && !item.isDeleted)
+            .toArray()
+        expect(linkedPayments).toHaveLength(1)
+        expect(linkedPayments[0]).toMatchObject({ sourceRecordId: 'commission-old', amount: 40000 })
     })
 
     it('rejects settling a partner with no eligible balance', async () => {

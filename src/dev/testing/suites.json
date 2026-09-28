@@ -107,6 +107,8 @@
         "titleKey": "devTesting.groups.payments",
         "layer": "business",
         "files": [
+          "src/local-db/partnerSettlement.test.ts",
+          "src/local-db/partnerSettlementOperations.test.ts",
           "src/local-db/paymentAccounts.test.ts",
           "src/local-db/paymentAccountTransfersRemote.test.ts",
           "src/local-db/paymentAccountAccess.test.ts",

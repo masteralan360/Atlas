@@ -82,6 +82,7 @@ import type {
   InstallmentSaleInstallment,
   InstallmentSalePayment,
   PaymentTransaction,
+  PartnerSettlementOperation,
   FinancialTransactionVoid,
   PaymentAccount,
   PaymentAccountMemberRestriction,
@@ -496,6 +497,7 @@ export class AtlasDatabase extends Dexie {
   installment_sale_installments!: EntityTable<InstallmentSaleInstallment, 'id'>
   installment_sale_payments!: EntityTable<InstallmentSalePayment, 'id'>
   payment_transactions!: EntityTable<PaymentTransaction, 'id'>
+  partner_settlement_operations!: EntityTable<PartnerSettlementOperation, 'id'>
   financial_transaction_voids!: EntityTable<FinancialTransactionVoid, 'id'>
   payment_accounts!: EntityTable<PaymentAccount, 'id'>
   payment_account_member_restrictions!: EntityTable<PaymentAccountMemberRestriction, 'id'>
@@ -3578,6 +3580,13 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, fromAccountId, toAccountId, currency, occurredAt, createdBy, updatedAt, isDeleted, syncStatus, [workspaceId+occurredAt], [workspaceId+fromAccountId], [workspaceId+toAccountId]'
     })
 
+    this.version(139).stores({
+      payment_transactions:
+        'id, workspaceId, paidAt, accountId, cashierShiftOccurrenceId, sourceModule, sourceType, sourceRecordId, sourceSubrecordId, direction, reversalOfTransactionId, voidId, settlementOperationId, updatedAt, isDeleted, syncStatus, [workspaceId+paidAt], [workspaceId+accountId], [workspaceId+cashierShiftOccurrenceId], [workspaceId+sourceType+sourceRecordId], [workspaceId+settlementOperationId], [workspaceId+voidId]',
+      partner_settlement_operations:
+        'id, workspaceId, partnerId, direction, paidAt, status, updatedAt, isDeleted, syncStatus, [workspaceId+partnerId], [workspaceId+paidAt], [workspaceId+status]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
@@ -3812,6 +3821,7 @@ export class AtlasDatabase extends Dexie {
       'installment_sale_installments',
       'installment_sale_payments',
       'payment_transactions',
+      'partner_settlement_operations',
       'financial_transaction_voids',
       'payment_accounts',
       'payment_account_member_restrictions',

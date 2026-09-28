@@ -46,6 +46,7 @@ const MAX_CONCURRENT_REMOTE_TABLE_READS = 3
 const TRANSACTIONAL_TABLES = new Set([
   'inventory',
   'payment_transactions',
+  'partner_settlement_operations',
   'sales_orders',
   'purchase_orders',
   'sales',

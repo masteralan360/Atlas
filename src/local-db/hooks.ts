@@ -6464,6 +6464,7 @@ interface LoanPaymentInput {
     createdBy?: string
     accountId?: string | null
     accountNameSnapshot?: string | null
+    settlementOperationId?: string | null
     isOrderLoanInitialRepayment?: boolean
 }
 
@@ -6620,6 +6621,7 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
             createdBy: input.createdBy || null,
             accountId: input.accountId ?? null,
             accountNameSnapshot: input.accountNameSnapshot ?? null,
+            settlementOperationId: input.settlementOperationId ?? null,
             metadata: {
                 loanPaymentId: payment.id,
                 loanCategory: loan.loanCategory || 'standard',
@@ -6648,6 +6650,7 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
         created_by: input.createdBy ?? null,
         account_id: input.accountId ?? null,
         account_name_snapshot: input.accountNameSnapshot ?? null,
+        settlement_operation_id: input.settlementOperationId ?? null,
         is_order_loan_initial_repayment: input.isOrderLoanInitialRepayment === true
     }
 
