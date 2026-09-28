@@ -13,6 +13,8 @@ Edit Modal Pending Changes
 
 Delete Sales order that has been paid
 
+Deduct Product to 0 check is_deleted
+
 Balance Payments on row account statement
 
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide,

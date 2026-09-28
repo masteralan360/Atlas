@@ -457,6 +457,8 @@
       "discard": "تجاهل التغييرات",
       "continue": "متابعة التعديل"
     },
+    "pendingChangeSingular": "تغيير واحد معلق",
+    "pendingChangePlural": "{{count}} تغييرات معلقة",
     "exchangeRates": "أسعار الصرف المباشرة",
     "sales": "المبيعات",
     "manual": "يدوي",

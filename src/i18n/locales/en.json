@@ -439,6 +439,8 @@
       "discard": "Discard Changes",
       "continue": "Continue Editing"
     },
+    "pendingChangeSingular": "1 Pending Change",
+    "pendingChangePlural": "{{count}} Pending Changes",
     "exchangeRates": "Live Exchange Rates",
     "sales": "Sales",
     "revenue": "Revenue",
