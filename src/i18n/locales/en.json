@@ -45,6 +45,19 @@
     "accountSwitcherGroups": { "cloudHybrid": "Cloud / Hybrid account switching" },
     "saleOrders": "Sale Orders",
     "businessPartners": "Business Partners",
+    "products": "Products",
+    "productsSamplesHelp": "Generated catalog cases use the configured sample count and seed. All other checks use fixed scenarios.",
+    "productsCoverageHelp": "Covers product create, edit, archive, category cleanup, SKU and barcode rules, variants, units and stock movements, pricing, discounts, commissions, imports/exports, labels, images, and product consumers in disposable IndexedDB. Cloud and Hybrid request contracts verify scoped payloads, successful acknowledgement, and friendly failure handling. Hosted Supabase adds verified-workspace checks for catalog lifecycle, variants/barcodes, unit conversion and inventory, and price rules. Browser workflows, native SQLite, real Storage uploads, and broader role/RLS checks remain separate coverage gaps.",
+    "productsLiveCoverageHelp": "Catalog lifecycle, identifiers/variants, units/stock, and pricing run their paired isolated groups first, then focused scenarios against the verified DEV TEST workspace. Import/export/assets, product consumers, and Cloud/Hybrid contracts are isolated-only in hosted mode. Live checks persist product edits and archive state, duplicate SKU rejection, variant and barcode changes, unit-conversion records, opening and archive stock movements, and price-book, discount, and commission rules. Product fixture IDs are included in reports; failed cases are retained for inspection and successful cases are retired where possible. Import/export rendering, consumer workflows, real image uploads, other workspace roles, and Hybrid native SQLite parity still require separate checks.",
+    "productsGroups": {
+      "catalogLifecycle": "Catalog fields, categories, and product lifecycle",
+      "identifiersVariants": "SKU, barcode, and product variants",
+      "unitsStock": "Units, inventory, and stock movements",
+      "pricingRules": "Prices, discounts, price books, and commissions",
+      "importExportAssets": "Import, export, labels, templates, and images",
+      "productConsumers": "Orders, POS, agents, and storefront consumers",
+      "cloudHybridContracts": "Cloud / Hybrid product request contracts"
+    },
     "ecommerce": "E-Commerce",
     "ecommerceCoverageHelp": "Checks storefront storage-rule targeting and composition, slug-specific stock display and source-storage quantities, optional catalog price-filter parsing, the five-additional-storefront workspace limit, workspace/storefront-scoped Supabase requests, migration constraints, and the authenticated Jumla Khaleej inquiry snapshot contract. Live Supabase permissions, Edge Function deployment, order delivery, rate limits, and storefront browser flows require separate integration checks.",
     "ecommerceGroups": {
@@ -101,7 +114,14 @@
       "relatedUnits": "Related selling and buying units",
       "payments": "Payments, reversals, ledger, direct-transaction vouchers, and account transfers",
       "uiAccess": "Role-based UI access",
-      "integrityAudit": "Transaction integrity audit"
+      "integrityAudit": "Transaction integrity audit",
+      "catalogLifecycle": "Catalog fields, categories, and product lifecycle",
+      "identifiersVariants": "SKU, barcode, and product variants",
+      "unitsStock": "Units, inventory, and stock movements",
+      "pricingRules": "Prices, discounts, price books, and commissions",
+      "importExportAssets": "Import, export, labels, templates, and images",
+      "productConsumers": "Orders, POS, agents, and storefront consumers",
+      "cloudHybridContracts": "Cloud / Hybrid product request contracts"
     },
     "layers": {
       "business": "Production functions · isolated IndexedDB",
@@ -116,7 +136,8 @@
       "hybrid-native": "Hybrid · Supabase and native SQLite mirror",
       "local-native": "Local · native SQLite persistence and restart",
       "hardware": "Barcode scanner, camera and printer hardware",
-      "voice-storage-hardware": "Microphone, actual voice recording and real private Storage"
+      "voice-storage-hardware": "Microphone, actual voice recording and real private Storage",
+      "external-asset-storage": "Real product image and asset Storage uploads"
     },
     "status": {
       "pending": "Waiting",

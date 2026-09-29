@@ -61,6 +61,14 @@ describe('hosted Supabase test boundary', () => {
     expect(posHosted.filter((group) => group.isolatedOnly).map((group) => group.id))
       .toEqual(['cart', 'media-uploads', 'ui-access'])
     expect(posHosted.filter((group) => !group.isolatedOnly).every((group) => group.files.length > 0)).toBe(true)
+
+    const productsIsolated = validateRunOptions({ suiteId: 'products' }).groups
+    const productsHosted = validateRunOptions({ suiteId: 'products', environment: 'hosted-supabase' }).groups
+    expect(productsHosted.map((group) => group.id)).toEqual(productsIsolated.map((group) => group.id))
+    expect(productsHosted.filter((group) => group.isolatedOnly).map((group) => group.id))
+      .toEqual(['import-export-assets', 'product-consumers', 'cloud-hybrid-contracts'])
+    expect(productsHosted.filter((group) => !group.isolatedOnly).every((group) => group.files.length > 0)).toBe(true)
+    expect(productsIsolated.every((group) => group.files.length > 0)).toBe(true)
   })
 
   it('blocks a workspace mismatch before any scenario write', async () => {
@@ -104,6 +112,37 @@ describe('hosted Supabase test boundary', () => {
     expect(paths).toContain('/rest/v1/sales')
     expect(paths).toContain('/rest/v1/payment_transactions')
     expect(paths).not.toContain('/rest/v1/rpc/services_module_allowed')
+  })
+
+  it('preflights the product catalog and related table contracts without requiring order schemas', async () => {
+    const paths = []
+    const fetchImpl = vi.fn(async (input) => {
+      const target = new URL(typeof input === 'string' ? input : input.url)
+      paths.push(target.pathname)
+      if (target.pathname === '/auth/v1/token') return Response.json({
+        access_token: 'test-access', refresh_token: 'test-refresh', token_type: 'bearer', expires_in: 3600,
+        user: { id, email: 'dev-test@example.com', aud: 'authenticated', role: 'authenticated' }
+      })
+      if (target.pathname === '/rest/v1/profiles') return Response.json({ id, current_workspace: id, role: 'admin' })
+      if (target.pathname === '/rest/v1/workspaces') return Response.json(target.searchParams.get('select') === 'id'
+        ? [{ id }] : { id, name: 'DEV TEST Atlas', data_mode: 'cloud' })
+      if (target.pathname === '/auth/v1/logout') return new Response(null, { status: 204 })
+      if ([
+        'products', 'categories', 'product_barcodes', 'inventory', 'inventory_transactions', 'storages', 'units',
+        'unit_relationships', 'product_unit_conversions', 'price_books', 'price_book_items',
+        'product_discounts'
+      ].some((table) => target.pathname === `/rest/v1/${table}`)) return Response.json([])
+      if (target.pathname === '/rest/v1/product_commission_rules') return Response.json([])
+      throw new Error(`unexpected request: ${target.pathname}`)
+    })
+    const result = await preflightLive(parseLiveConfig(source), { fetchImpl, suiteId: 'products' })
+    expect(result.mode).toBe('cloud')
+    expect(paths).toContain('/rest/v1/products')
+    expect(paths).toContain('/rest/v1/product_barcodes')
+    expect(paths).toContain('/rest/v1/inventory_transactions')
+    expect(paths).toContain('/rest/v1/product_unit_conversions')
+    expect(paths).toContain('/rest/v1/product_commission_rules')
+    expect(paths).not.toContain('/rest/v1/sales_orders')
   })
 
   it('reports the verified Services module capability for Sale Order live tests', async () => {

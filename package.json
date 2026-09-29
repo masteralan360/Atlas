@@ -36,6 +36,8 @@
     "dev:testing": "node scripts/dev-testing/dev.mjs",
     "test:sale-orders": "node scripts/dev-testing/cli.mjs",
     "test:sale-orders:live": "node scripts/dev-testing/cli.mjs --suite sale-orders --environment hosted-supabase",
+    "test:products": "node scripts/dev-testing/cli.mjs --suite products",
+    "test:products:live": "node scripts/dev-testing/cli.mjs --suite products --environment hosted-supabase",
     "test:pos": "node scripts/dev-testing/cli.mjs --suite pos",
     "test:pos:live": "node scripts/dev-testing/cli.mjs --suite pos --environment hosted-supabase",
     "test:post-service": "node scripts/dev-testing/cli.mjs --suite post-service",

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
@@ -97,6 +97,10 @@ import {
     PrintPreviewModal,
     useToast
 } from '@/ui/components'
+
+const DeveloperTestButton = import.meta.env.DEV && __ATLAS_DEV_TESTING__
+    ? lazy(() => import('@/dev/testing/DeveloperTestButton'))
+    : null
 
 type ProductCloneTargetStorage = {
     id: string
@@ -1461,6 +1465,9 @@ export function Products() {
                         )}
                     </div>
                     <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+                        {DeveloperTestButton && <Suspense fallback={null}>
+                            <DeveloperTestButton suiteId="products" />
+                        </Suspense>}
                         <AppPagination
                             currentPage={currentPage}
                             totalCount={paginationCount}

@@ -33,9 +33,23 @@ function installBrowserGlobals() {
     })
     Object.defineProperty(globalThis, 'document', {
         configurable: true,
-        value: { visibilityState: 'visible', dir: 'ltr', documentElement: { lang: 'en', dir: 'ltr' }, addEventListener: () => undefined, removeEventListener: () => undefined },
+        value: {
+            visibilityState: 'visible', dir: 'ltr', documentElement: { lang: 'en', dir: 'ltr' },
+            head: { appendChild: () => undefined },
+            getElementsByTagName: () => [{ appendChild: () => undefined }],
+            createElement: () => ({ appendChild: () => undefined, setAttribute: () => undefined, style: {} }),
+            createTextNode: () => ({}),
+            addEventListener: () => undefined, removeEventListener: () => undefined
+        },
     })
     Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { onLine: false } })
+    Object.defineProperty(globalThis.URL, 'createObjectURL', { configurable: true, value: () => 'blob:test' })
+    Object.defineProperty(globalThis.window, 'URL', { configurable: true, value: globalThis.URL })
+    Object.defineProperty(globalThis, 'Element', { configurable: true, value: class Element {} })
+    Object.defineProperty(globalThis, 'HTMLElement', { configurable: true, value: class HTMLElement {} })
+    for (const name of ['DOMMatrix', 'ImageData', 'Path2D']) {
+        Object.defineProperty(globalThis, name, { configurable: true, value: class {} })
+    }
 }
 
 describe('service catalog items', () => {

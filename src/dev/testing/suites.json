@@ -568,5 +568,176 @@
       "browser-workflow",
       "local-native"
     ]
+  },
+  "products": {
+    "titleKey": "devTesting.products",
+    "samplesHelpKey": "devTesting.productsSamplesHelp",
+    "coverageHelpKey": "devTesting.productsCoverageHelp",
+    "liveCoverageHelpKey": "devTesting.productsLiveCoverageHelp",
+    "groups": [
+      {
+        "id": "catalog-lifecycle",
+        "titleKey": "devTesting.productsGroups.catalogLifecycle",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/products.test.ts",
+          "src/local-db/productSku.test.ts",
+          "src/local-db/services.test.ts"
+        ]
+      },
+      {
+        "id": "identifiers-variants",
+        "titleKey": "devTesting.productsGroups.identifiersVariants",
+        "layer": "business",
+        "files": [
+          "src/local-db/productBarcodes.test.ts",
+          "src/local-db/productSku.test.ts",
+          "src/local-db/productVariants.test.ts"
+        ]
+      },
+      {
+        "id": "units-stock",
+        "titleKey": "devTesting.productsGroups.unitsStock",
+        "layer": "business",
+        "files": [
+          "src/lib/productRelationalConversion.test.ts",
+          "src/lib/productStockPresentation.test.ts",
+          "src/lib/productUnitPresentation.test.ts",
+          "src/local-db/inventorySnapshotSync.test.ts",
+          "src/local-db/productRelationalConversion.test.ts",
+          "src/local-db/unitRelationships.test.ts",
+          "src/local-db/units.test.ts",
+          "src/lib/unitRelationships.test.ts"
+        ]
+      },
+      {
+        "id": "pricing-rules",
+        "titleKey": "devTesting.productsGroups.pricingRules",
+        "layer": "calculation",
+        "files": [
+          "src/lib/discounts.test.ts",
+          "src/lib/productCost.test.ts",
+          "src/lib/priceBooks.test.ts",
+          "src/lib/marketplaceDeliveryProductCommissionMigration.test.ts",
+          "src/local-db/agentCommissions.test.ts",
+          "src/local-db/agentCommissions.creatorRecoveryCloud.test.ts",
+          "src/local-db/orderPriceBooks.test.ts",
+          "src/local-db/priceBooks.test.ts",
+          "src/ui/components/commissions/ProductCommissionPreview.test.ts"
+        ]
+      },
+      {
+        "id": "import-export-assets",
+        "titleKey": "devTesting.productsGroups.importExportAssets",
+        "layer": "contract",
+        "files": [
+          "src/lib/barcodeLabel.test.ts",
+          "src/lib/customTemplates.test.tsx",
+          "src/lib/marketplaceProductImages.test.ts",
+          "src/__tests__/marketplaceProductImagePath.test.ts",
+          "src/lib/productExportPrintTable.test.ts",
+          "src/lib/productImageStorage.test.ts",
+          "src/lib/productAdditionalImages.test.ts",
+          "src/lib/productImport.test.ts",
+          "src/lib/productLabelPrintTemplates.test.ts"
+        ]
+      },
+      {
+        "id": "product-consumers",
+        "titleKey": "devTesting.productsGroups.productConsumers",
+        "layer": "business",
+        "files": [
+          "src/__tests__/workspaceAccessDestinationProductMatching.test.ts",
+          "src/local-db/saleProductExchanges.test.ts",
+          "src/lib/partnerProductMovements.test.ts",
+          "src/lib/partnerProductMovementsLiveData.test.ts",
+          "src/lib/partnerProductMovementsTemplateStorage.test.ts",
+          "src/lib/partnerProductMovementsTemplates.test.ts",
+          "src/lib/partnerProductMovementsCustomTemplates.test.tsx",
+          "src/ui/components/crm/PartnerProductMovementsPrintTemplate.test.tsx",
+          "src/dev/testing/suites/orderRelatedUnits.test.ts",
+          "src/dev/testing/suites/orderRelatedUnitsTransactions.test.ts",
+          "src/dev/testing/suites/posCart.test.ts",
+          "src/dev/testing/suites/posPricing.test.ts",
+          "src/dev/testing/suites/posRouting.test.ts",
+          "src/lib/agentProductSelection.test.ts",
+          "src/lib/catalogItem.test.ts",
+          "src/lib/storefrontCatalogRules.test.ts"
+        ]
+      },
+      {
+        "id": "cloud-hybrid-contracts",
+        "titleKey": "devTesting.productsGroups.cloudHybridContracts",
+        "layer": "contract",
+        "files": [
+          "src/dev/testing/suites/productsRemote.test.ts",
+          "src/local-db/inventoryTransactionsCloud.test.ts",
+          "src/local-db/productRelationalConversion.test.ts",
+          "src/local-db/unitRelationships.test.ts"
+        ]
+      }
+    ],
+    "liveGroups": [
+      {
+        "id": "catalog-lifecycle",
+        "titleKey": "devTesting.productsGroups.catalogLifecycle",
+        "layer": "live",
+        "isolatedGroupId": "catalog-lifecycle",
+        "files": ["src/dev/testing/suites/productsCatalogLive.test.ts"]
+      },
+      {
+        "id": "identifiers-variants",
+        "titleKey": "devTesting.productsGroups.identifiersVariants",
+        "layer": "live",
+        "isolatedGroupId": "identifiers-variants",
+        "files": ["src/dev/testing/suites/productsIdentifiersLive.test.ts"]
+      },
+      {
+        "id": "units-stock",
+        "titleKey": "devTesting.productsGroups.unitsStock",
+        "layer": "live",
+        "isolatedGroupId": "units-stock",
+        "files": ["src/dev/testing/suites/productsInventoryLive.test.ts"]
+      },
+      {
+        "id": "pricing-rules",
+        "titleKey": "devTesting.productsGroups.pricingRules",
+        "layer": "live",
+        "isolatedGroupId": "pricing-rules",
+        "files": ["src/dev/testing/suites/productsPricingLive.test.ts"]
+      },
+      {
+        "id": "import-export-assets",
+        "titleKey": "devTesting.productsGroups.importExportAssets",
+        "layer": "live",
+        "isolatedGroupId": "import-export-assets",
+        "isolatedOnly": true,
+        "files": []
+      },
+      {
+        "id": "product-consumers",
+        "titleKey": "devTesting.productsGroups.productConsumers",
+        "layer": "live",
+        "isolatedGroupId": "product-consumers",
+        "isolatedOnly": true,
+        "files": []
+      },
+      {
+        "id": "cloud-hybrid-contracts",
+        "titleKey": "devTesting.productsGroups.cloudHybridContracts",
+        "layer": "live",
+        "isolatedGroupId": "cloud-hybrid-contracts",
+        "isolatedOnly": true,
+        "files": []
+      }
+    ],
+    "unavailable": [
+      "browser-workflow",
+      "cloud-database-broad",
+      "hybrid-native",
+      "local-native",
+      "hardware",
+      "external-asset-storage"
+    ]
   }
 }

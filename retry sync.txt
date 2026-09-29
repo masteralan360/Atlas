@@ -1,39 +1,38 @@
-Post Service Archiver
-icon
+lowest price for staff
+
+Service optional Barcode
+Allow Storage and Services in POS cart
+Barcode Camera in Phone
+
 remove R2 Print only
-account switch
 
+Fix the Error in Supabase Logs
 
-Price books selector order form and quick order
-##
+My Orders with unqiue tracked number and search by my phone number
+Shipped Point Makes Sale Order
+Allow Shipped to be cancelled
+Make Maintenence Mode servier-side
 
 Maintenence Mode Local Mode Enabled
 
-Edit Modal Pending Changes
+Check relational-Unit bigger unit cost price
 
-Delete Sales order that has been paid
+Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide
+
+Context-menu partner account statement & invoice redirect
+
+Price books selector order form and quick order
+
+##
+
+Post Service Archiver
 
 Deduct Product to 0 check is_deleted
-
-Balance Payments on row account statement
-
-Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide,
 
 Retry Sync Test The wind
 
 Revenue Analytics and accounting
 
-Context-menu partner account statement & invoice redirect
-Accumilated account statement rows by types and for one day
-Same day order payment one-row
-
-
-##
-
 Fix Destructive Mutation queues like sales order and compare them with non-destructive mutation queues
 
 Purchase Order Return
-
-My Orders with unqiue tracked number and search by my phone number
-Allow Shipped to be cancelled
-Make Maintenence Mode servier-side

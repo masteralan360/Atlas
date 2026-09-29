@@ -117,6 +117,22 @@ export async function preflightLive(config, { fetchImpl = globalThis.fetch, suit
         target: liveTarget(config), mode: workspace.data_mode, userId: signIn.user.id,
         servicesEnabled
       }
+    } else if (suiteId === 'products') {
+      for (const table of [
+        'products', 'categories', 'product_barcodes', 'inventory', 'inventory_transactions', 'storages', 'units',
+        'unit_relationships', 'product_unit_conversions', 'price_books', 'price_book_items',
+        'product_discounts'
+      ]) {
+        const { error } = await client.from(table).select('id')
+          .eq('workspace_id', config.ATLAS_LIVE_WORKSPACE_ID).limit(1)
+        if (error) throw new Error('live_schema_unavailable')
+      }
+      const { error: commissionRulesError } = await client.schema('crm').from('product_commission_rules')
+        .select('id').eq('workspace_id', config.ATLAS_LIVE_WORKSPACE_ID).limit(1)
+      if (commissionRulesError) throw new Error('live_schema_unavailable')
+      const { error: variantsError } = await client.from('products')
+        .select('id,parent_product_id').eq('workspace_id', config.ATLAS_LIVE_WORKSPACE_ID).limit(1)
+      if (variantsError) throw new Error('live_schema_unavailable')
     } else if (suiteId === 'pos') {
       for (const table of ['sales', 'sale_items', 'inventory', 'stock_batches', 'payment_transactions']) {
         const { error } = await client.from(table).select('id')

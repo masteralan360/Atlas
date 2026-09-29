@@ -32,7 +32,7 @@ application visibility preference; it does not replace or change the existing
 workspace-scoped account RLS policy.
 
 Start the development server with `npm run dev`, open its localhost URL, and go
-to **Orders → Sale Orders → Developer tests**, **POS → Developer tests**, or **Post Service → Developer tests**. The button and runner are enabled
+to **Products → Developer tests**, **Orders → Sale Orders → Developer tests**, **POS → Developer tests**, or **Post Service → Developer tests**. The button and runner are enabled
 automatically during development and excluded from production builds.
 
 If another development server occupies port 1420, use
@@ -41,6 +41,7 @@ works and binds the server to localhost. For reviewing the modal without logging
 into Atlas, open `/__atlas-dev-testing/preview` for Sale Orders or
 `/__atlas-dev-testing/preview?suite=pos` for regular POS on the local development server.
 Use `/__atlas-dev-testing/preview?suite=post-service` for Post Service.
+Use `/__atlas-dev-testing/preview?suite=products` for Products.
 
 The modal selects test groups, accepts a reproducible unsigned 32-bit seed and
 1–100 generated cases, streams individual results, retains failed diagnostics,
@@ -61,6 +62,9 @@ npm run test:pos -- --groups checkout,remote-contract,failure-recovery --seed 42
 npm run test:pos:live
 npm run test:post-service
 npm run test:post-service -- --groups remote-contract,failure-recovery --seed 42 --samples 16
+npm run test:products
+npm run test:products -- --groups catalog-lifecycle,units-stock --seed 42 --samples 16
+npm run test:products:live
 ```
 
 The CLI exits nonzero for failed, skipped, empty, timed-out, or cancelled runs.
@@ -69,7 +73,7 @@ checks passed; the report also records environment coverage gaps.
 
 ## Hosted Supabase checks
 
-Sale Orders and regular POS have a separate **Hosted Supabase** environment in
+Sale Orders, Products, and regular POS have a separate **Hosted Supabase** environment in
 their Developer Test dialogs. It signs in as a dedicated admin test user and
 runs production functions against a dedicated Cloud or Hybrid `DEV TEST`
 workspace. Sale Orders creates real partner, storage, product, financed order,
@@ -78,6 +82,9 @@ payment, loan and return records. Some
 financial history remains for audit; use an empty test workspace, never a
 business workspace. A Hybrid selection checks its Supabase source of truth,
 but does not exercise the desktop SQLite mirror.
+
+For the Products group map, hosted scenarios, fixture cleanup, and known
+coverage gaps, see [Products V1 coverage](./developer-testing-products.md).
 
 Copy [the configuration example](./developer-testing-live.env.example) to
 `.env.atlas-live-tests.local` in the Atlas root, then set the project URL,
