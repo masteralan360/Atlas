@@ -28,6 +28,7 @@ import {
     TableHead,
     TableHeader,
     TableRow,
+    PrintFlow,
     Button,
     Input,
     Dialog,
@@ -58,7 +59,6 @@ import {
     Cell,
     Legend
 } from 'recharts'
-import { useReactToPrint } from 'react-to-print'
 
 interface StaffPerformance {
     id: string
@@ -85,13 +85,15 @@ export function TeamPerformance() {
     const [isTargetDialogOpen, setIsTargetDialogOpen] = useState(false)
     const [selectedMember, setSelectedMember] = useState<User | null>(null)
     const [newTarget, setNewTarget] = useState('')
+    const [isPrintFlowOpen, setIsPrintFlowOpen] = useState(false)
+    const [printMarkup, setPrintMarkup] = useState('')
 
     const reportRef = useRef<HTMLDivElement>(null)
 
-    const handlePrint = useReactToPrint({
-        contentRef: reportRef,
-        documentTitle: `Team_Performance_Report_${new Date().toISOString().split('T')[0]}`,
-    })
+    const handlePrint = () => {
+        setPrintMarkup(reportRef.current?.outerHTML || '')
+        setIsPrintFlowOpen(true)
+    }
 
     const fetchData = async () => {
         setIsLoading(true)
@@ -886,6 +888,15 @@ export function TeamPerformance() {
                     </div>
                 </div>
             </div>
+            <PrintFlow
+                isOpen={isPrintFlowOpen}
+                onClose={() => setIsPrintFlowOpen(false)}
+                title={t('performance.report.title', { defaultValue: 'Performance Report' })}
+                showSaveButton={false}
+                allowA4Document
+            >
+                <div dangerouslySetInnerHTML={{ __html: printMarkup }} />
+            </PrintFlow>
         </div>
     )
 }

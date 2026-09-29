@@ -102,7 +102,7 @@ export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from './ui/t
 export { SelectionCards, type SelectionCardOption } from './ui/selection-cards'
 export { MetricDetailModal } from './MetricDetailModal'
 export { TopProductsModal, ProductSalesSummaryModal, SalesOverviewModal, PeakTradingModal, ReturnsAnalysisModal } from './revenue'
-export { PrintPreviewModal } from './PrintPreviewModal'
+export { PrintFlow } from './PrintFlow'
 export { ExportPreviewModal } from './ExportPreviewModal'
 export { ProductImportPreviewModal } from './ProductImportPreviewModal'
 export { ProductsViewModal, ProductsViewModalTrigger } from './ProductsViewModal'

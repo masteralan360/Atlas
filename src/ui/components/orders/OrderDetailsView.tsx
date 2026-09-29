@@ -87,7 +87,7 @@ import {
     DialogFooter,
     DialogHeader,
     DialogTitle,
-    PrintPreviewModal,
+    PrintFlow,
     ReturnConfirmationModal,
     SettlementDialog,
     Table,
@@ -2507,7 +2507,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
 
             {isSales && <SalesOrderIntegrityAuditDialog open={auditOpen} onOpenChange={setAuditOpen}
                 workspaceId={workspaceId} orderId={order.id} mode={getWorkspaceDataMode(workspaceId)} />}
-            <PrintPreviewModal
+            <PrintFlow
                 isOpen={showPrintPreview}
                 onClose={() => {
                     setShowPrintPreview(false)

@@ -45,7 +45,7 @@ import {
     Card,
     CardContent,
     DateRangeFilters,
-    PrintPreviewModal,
+    PrintFlow,
     Progress,
 } from '@/ui/components'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
@@ -549,7 +549,7 @@ export function PartnerProductMovementsStatement() {
             />
 
             {printPreview && printTarget && activePrintLayout && partner && printData ? (
-                <PrintPreviewModal
+                <PrintFlow
                     isOpen={isPrintPreviewOpen}
                     onClose={() => {
                         setIsPrintPreviewOpen(false)

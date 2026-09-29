@@ -70,7 +70,7 @@ import {
     TableRow,
     AppPagination,
     DeleteConfirmationModal,
-    PrintPreviewModal,
+    PrintFlow,
     useToast,
     ContextMenu,
     ContextMenuTrigger,
@@ -921,7 +921,7 @@ function LoanListView({
                 title={t('loans.confirmDelete')}
                 description={t('loans.deleteWarning')}
             />
-            <PrintPreviewModal module="loans"
+            <PrintFlow module="loans"
                 isOpen={showPrintPreview}
                 onClose={() => setShowPrintPreview(false)}
                 onConfirm={() => setShowPrintPreview(false)}
@@ -934,7 +934,7 @@ function LoanListView({
                 printTemplate={({ effectiveId }) => renderLoanListTemplate(effectiveId)}
                 templatePreview={loanListPreview}
             />
-            <PrintPreviewModal module="loans"
+            <PrintFlow module="loans"
                 isOpen={showLoanPrintPreview}
                 onClose={() => {
                     setShowLoanPrintPreview(false)
@@ -1864,7 +1864,7 @@ function LoanDetailsView({
                 workspaceId={workspaceId}
                 iqdPreference={features.iqd_display_preference}
             />
-            <PrintPreviewModal module="loans"
+            <PrintFlow module="loans"
                 isOpen={showPrintPreview}
                 onClose={() => setShowPrintPreview(false)}
                 onConfirm={() => setShowPrintPreview(false)}

@@ -53,7 +53,7 @@ import {
     SalesOverviewModal,
     PeakTradingModal,
     ReturnsAnalysisModal,
-    PrintPreviewModal,
+    PrintFlow,
     AppPagination
 } from '@/ui/components'
 import { MiniHeatmap } from '@/ui/components/revenue/MiniHeatmap'
@@ -2278,7 +2278,7 @@ export function Revenue() {
                     />
 
                     {/* Print Preview Modal */}
-                    <PrintPreviewModal
+                    <PrintFlow
                         isOpen={showPrintPreview}
                         onClose={() => setShowPrintPreview(false)}
                         module="revenue"
@@ -2332,7 +2332,7 @@ export function Revenue() {
                                 </TableBody>
                             </Table>
                         </div>
-                    </PrintPreviewModal>
+                    </PrintFlow>
 
                     <Dialog open={isFilterDialogOpen} onOpenChange={setIsFilterDialogOpen}>
                         <DialogContent className={cn("top-[calc(50%+var(--titlebar-height)/2+var(--safe-area-top)/2)] w-[calc(100vw-0.75rem)] max-w-7xl overflow-hidden p-0 sm:w-[calc(100vw-2rem)]", style === 'neo-orange' ? "rounded-none border-2 border-black dark:border-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]" : "rounded-[2rem] border-border/60")}>

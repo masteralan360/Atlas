@@ -56,7 +56,7 @@ import {
     Input,
     Label,
     NumericInput,
-    PrintPreviewModal,
+    PrintFlow,
     Select,
     SelectContent,
     SelectItem,
@@ -194,7 +194,7 @@ function resolveWorkspaceLogoSrc(logoUrl?: string | null) {
     return /^(https?:|data:|blob:)/i.test(logoUrl) ? logoUrl : platformService.convertFileSrc(logoUrl)
 }
 
-/** @deprecated Activities now print through PrintPreviewModal and /print-preview-editor. */
+/** @deprecated Activities now open PrintPreviewEditorPage after print selection. */
 export function printActivityReceipt(
     transaction: ActivityTransaction,
     lines: ActivityTransactionLine[],
@@ -885,7 +885,7 @@ export function Activities() {
                 </DialogContent>
             </Dialog>
 
-            <PrintPreviewModal
+            <PrintFlow
                 isOpen={activityPrintOpen}
                 onClose={() => setActivityPrintOpen(false)}
                 onConfirm={() => setActivityPrintOpen(false)}

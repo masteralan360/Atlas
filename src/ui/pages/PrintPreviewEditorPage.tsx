@@ -18,6 +18,8 @@ import {
     type CustomTemplateText
 } from '@/lib/printPreviewEditorStore'
 import { setPendingPDFPreview } from '@/lib/pdfPreviewStore'
+import { PdfJsViewer } from '@/ui/components/PdfJsViewer'
+import { printPdfBlob } from '@/services/pdfPrintService'
 import { platformService } from '@/services/platformService'
 import { getMediaUploadErrorCode } from '@/services/mediaUploadService'
 import { paginateOrderItemsStatementPages, paginateOrderItemsTables } from '@/lib/orderItemsTablePagination'
@@ -513,6 +515,8 @@ export function PrintPreviewEditorPage() {
 
     const sourceRef = useRef(getPrintPreviewEditorSource())
     const source = sourceRef.current
+    const [generatedPreviewPdf, setGeneratedPreviewPdf] = useState<{ url: string; blob: Blob } | null>(null)
+    const [previewPdfFailed, setPreviewPdfFailed] = useState(false)
     const templateStageRef = useRef<HTMLDivElement>(null)
     const templateContentLayerRef = useRef<HTMLDivElement>(null)
     const [editableData, setEditableData] = useState<UniversalInvoice | null>(null)
@@ -529,6 +533,53 @@ export function PrintPreviewEditorPage() {
     const [pendingTemplateLayout, setPendingTemplateLayout] = useState<CustomTemplateLayout | null>(null)
     const [measuredTemplateHeightMm, setMeasuredTemplateHeightMm] = useState(0)
     const title = source?.title || t('printPreviewEditor.title') || 'Print Preview Editor'
+
+    useEffect(() => {
+        const generatePreviewPdfBlob = source?.generatePreviewPdfBlob
+        if (!generatePreviewPdfBlob || source?.templatePreview || source?.data) return
+
+        let active = true
+        let objectUrl: string | null = null
+        setGeneratedPreviewPdf(null)
+        setPreviewPdfFailed(false)
+
+        void generatePreviewPdfBlob().then((blob) => {
+            const url = URL.createObjectURL(blob)
+            if (!active) {
+                URL.revokeObjectURL(url)
+                return
+            }
+            objectUrl = url
+            setGeneratedPreviewPdf({ url, blob })
+        }).catch((error) => {
+            console.error('Failed to generate print preview PDF:', error)
+            if (active) setPreviewPdfFailed(true)
+        })
+
+        return () => {
+            active = false
+            if (objectUrl) URL.revokeObjectURL(objectUrl)
+        }
+    }, [source])
+
+    const handlePrintGeneratedPreview = useCallback(async () => {
+        if (!source?.generatePreviewPdfBlob || isSaving) return
+        setIsSaving(true)
+        try {
+            const blob = generatedPreviewPdf?.blob || await source.generatePreviewPdfBlob()
+            if (source.onPrint) await source.onPrint(blob)
+            else await printPdfBlob(blob, { title })
+        } catch (error) {
+            console.error('Failed to print preview PDF:', error)
+            toast({
+                title: t('pdfPreview.printErrorTitle', { defaultValue: 'Could not print the PDF' }),
+                description: t('pdfPreview.printErrorDescription', { defaultValue: 'Try again to print this preview.' }),
+                variant: 'destructive'
+            })
+        } finally {
+            setIsSaving(false)
+        }
+    }, [generatedPreviewPdf?.blob, isSaving, source, t, title, toast])
 
     const handleZoomIn = useCallback(() => {
         setZoom(prev => Math.min(prev + 10, 200))
@@ -1635,9 +1686,52 @@ export function PrintPreviewEditorPage() {
         setCurrentPath(null)
     }, [isDrawing, currentPath, drawingMode, brushColor, brushSize])
 
+    if (source.generatePreviewPdfBlob && !templatePreview && !source.data) {
+        return (
+            <div className="flex h-screen w-screen flex-col overflow-hidden bg-background animate-in fade-in slide-in-from-right-4 duration-300 motion-reduce:animate-none"
+                style={{ marginTop: 'var(--titlebar-height)', height: 'calc(100vh - var(--titlebar-height))' }}>
+                <header className="flex shrink-0 items-center justify-between gap-3 border-b bg-card px-3 py-2 md:px-4">
+                    <div className="flex min-w-0 items-center gap-2">
+                        <button
+                            type="button"
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent"
+                            onClick={handleBack}
+                            aria-label={t('pdfPreview.back', { defaultValue: 'Back' })}
+                        >
+                            <ArrowLeft className="h-4 w-4" />
+                        </button>
+                        <h1 className="truncate text-sm font-semibold">{title}</h1>
+                    </div>
+                    <Button
+                        type="button"
+                        onClick={handlePrintGeneratedPreview}
+                        disabled={!generatedPreviewPdf || isSaving}
+                    >
+                        {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
+                        {source.printActionLabel || t('pdfPreview.print', { defaultValue: 'Print' })}
+                    </Button>
+                </header>
+                <div className="min-h-0 flex-1">
+                    {generatedPreviewPdf ? (
+                        <PdfJsViewer url={generatedPreviewPdf.url} title={title} allowPrint={false} showZoom />
+                    ) : previewPdfFailed ? (
+                        <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
+                            {t('printPreviewEditor.pdfUnavailable', { defaultValue: 'This PDF preview is unavailable.' })}
+                        </div>
+                    ) : (
+                        <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            {t('printPreviewEditor.loadingPdf', { defaultValue: 'Loading PDF…' })}
+                        </div>
+                    )}
+                </div>
+            </div>
+        )
+    }
+
     if (templatePreview && fieldValues) {
     return (
-        <div className="flex h-screen w-screen flex-col bg-gray-50 overflow-hidden"
+        <div className="flex h-screen w-screen flex-col bg-gray-50 overflow-hidden animate-in fade-in slide-in-from-right-4 duration-300 motion-reduce:animate-none"
             style={{ marginTop: 'var(--titlebar-height)', height: 'calc(100vh - var(--titlebar-height))' }}>
                 <header className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-2 py-1.5 shrink-0 bg-card z-20 md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-4 md:py-2">
                     <div className="order-1 flex min-w-0 flex-1 items-center gap-2 md:order-none md:justify-self-start md:gap-3">
@@ -2667,7 +2761,7 @@ export function PrintPreviewEditorPage() {
     }
 
     return (
-            <div className="flex h-screen w-screen flex-col bg-gray-50 overflow-hidden"
+            <div className="flex h-screen w-screen flex-col bg-gray-50 overflow-hidden animate-in fade-in slide-in-from-right-4 duration-300 motion-reduce:animate-none"
                 style={{ marginTop: 'var(--titlebar-height)', height: 'calc(100vh - var(--titlebar-height))' }}>
             <header className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-2 py-1.5 shrink-0 bg-card z-10 md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-4 md:py-2">
                 <div className="order-1 flex min-w-0 flex-1 items-center gap-2 md:order-none md:justify-self-start md:gap-3">

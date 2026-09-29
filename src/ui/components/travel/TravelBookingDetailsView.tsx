@@ -34,7 +34,7 @@ import {
     CardHeader,
     CardTitle,
     DeleteConfirmationModal,
-    PrintPreviewModal,
+    PrintFlow,
     Table,
     TableBody,
     TableCell,
@@ -321,7 +321,7 @@ export function TravelBookingDetailsView({ booking, passengers, payments, onBack
                 </div>
             </div>
 
-            <PrintPreviewModal
+            <PrintFlow
                 isOpen={isPrintOpen}
                 onClose={() => setIsPrintOpen(false)}
                 onConfirm={() => setIsPrintOpen(false)}

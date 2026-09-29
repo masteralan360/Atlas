@@ -73,7 +73,7 @@ import {
     ContextMenuItem,
     ContextMenuTrigger,
     DateRangeFilters,
-    PrintPreviewModal,
+    PrintFlow,
     Progress,
     Table,
     TableBody,
@@ -1019,7 +1019,7 @@ export function AccountStatements() {
             />
 
             {printPreview && printTarget && activePrintLayout && partner && printData ? (
-                <PrintPreviewModal
+                <PrintFlow
                     isOpen={isPrintPreviewOpen}
                     onClose={() => {
                         setIsPrintPreviewOpen(false)

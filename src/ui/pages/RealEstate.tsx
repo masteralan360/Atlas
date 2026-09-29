@@ -32,7 +32,7 @@ import {
     CardTitle,
     DeleteConfirmationModal,
     Input,
-    PrintPreviewModal,
+    PrintFlow,
     Table,
     TableBody,
     TableCell,
@@ -1123,7 +1123,7 @@ function RealEstateDetails({
                 })}
             />
             {selectedRuntimePrintLayout && selectedPrintTarget && selectedPrintPreview ? (
-                <PrintPreviewModal
+                <PrintFlow
                     isOpen={isPrintPreviewOpen}
                     onClose={() => {
                         setIsPrintPreviewOpen(false)

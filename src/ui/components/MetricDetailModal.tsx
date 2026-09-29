@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
     Dialog,
@@ -17,6 +17,7 @@ import {
     TableHeader,
     TableRow,
     Button,
+    PrintFlow,
 } from '@/ui/components'
 import {
     AreaChart,
@@ -33,7 +34,6 @@ import {
 } from 'recharts'
 import { formatCurrency, formatDate, cn } from '@/lib/utils'
 import { DollarSign, TrendingUp, BarChart3, PieChart as PieChartIcon, Printer } from 'lucide-react'
-import { useReactToPrint } from 'react-to-print'
 
 export type MetricType = 'grossRevenue' | 'totalCost' | 'grossProfit' | 'profitMargin'
 
@@ -69,6 +69,8 @@ export function MetricDetailModal({ isOpen, onClose, metricType, currency, iqdPr
     const { t, i18n } = useTranslation()
     const isRtl = i18n.dir() === 'rtl'
     const printRef = useRef<HTMLDivElement>(null)
+    const [isPrintFlowOpen, setIsPrintFlowOpen] = useState(false)
+    const [printMarkup, setPrintMarkup] = useState('')
 
     const getMetricTitle = () => {
         switch (metricType) {
@@ -89,10 +91,17 @@ export function MetricDetailModal({ isOpen, onClose, metricType, currency, iqdPr
         }
     }
 
-    const handlePrint = useReactToPrint({
-        contentRef: printRef,
-        documentTitle: `${getMetricTitle()}_Report_${new Date().toISOString().split('T')[0]}`,
-    })
+    const handlePrint = () => {
+        const printableContent = printRef.current?.cloneNode(true)
+        if (printableContent instanceof HTMLElement) {
+            printableContent.querySelectorAll('button').forEach((button) => button.remove())
+            printableContent.classList.remove('max-h-[90vh]', 'overflow-y-auto', 'custom-scrollbar')
+            setPrintMarkup(printableContent.outerHTML)
+        } else {
+            setPrintMarkup('')
+        }
+        setIsPrintFlowOpen(true)
+    }
 
     const activeCurrencies = useMemo(() => data ? Object.keys(data) : [], [data])
 
@@ -207,6 +216,7 @@ export function MetricDetailModal({ isOpen, onClose, metricType, currency, iqdPr
     }
 
     return (
+        <>
         <Dialog open={isOpen} onOpenChange={onClose}>
             <DialogContent className={cn(
                 "max-w-5xl p-0 bg-background/95 backdrop-blur-3xl overflow-hidden rounded-[2.5rem] shadow-2xl transition-all duration-500",
@@ -476,5 +486,16 @@ export function MetricDetailModal({ isOpen, onClose, metricType, currency, iqdPr
                 </div>
             </DialogContent>
         </Dialog>
+        <PrintFlow
+            module="revenue"
+            isOpen={isPrintFlowOpen}
+            onClose={() => setIsPrintFlowOpen(false)}
+            title={getMetricTitle()}
+            showSaveButton={false}
+            allowA4Document
+        >
+            <div dangerouslySetInnerHTML={{ __html: printMarkup }} />
+        </PrintFlow>
+        </>
     )
 }

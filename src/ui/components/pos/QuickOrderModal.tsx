@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { BadgeDollarSign, BadgePercent, CircleDollarSign, ClipboardList, Link2, Loader2, ShoppingCart, UserRound, X } from 'lucide-react'
+import { BadgeDollarSign, BadgePercent, CircleDollarSign, ClipboardList, Link2, Loader2, ShoppingCart, UserRound, Warehouse, X } from 'lucide-react'
 
 import { useAuth } from '@/auth'
 import type { CartItem } from '@/types'
@@ -182,6 +182,9 @@ interface QuickOrderModalProps {
     onOpenChange: (open: boolean) => void
     workspaceId: string
     cart: CartItem[]
+    showStorageLabels: boolean
+    getStorageName: (storageId?: string | null) => string
+    fallbackStorageId: string
     totalAmount: number
     settlementCurrency: CurrencyCode
     defaultCurrency: CurrencyCode
@@ -208,6 +211,9 @@ export function QuickOrderModal({
     onOpenChange,
     workspaceId,
     cart,
+    showStorageLabels,
+    getStorageName,
+    fallbackStorageId,
     totalAmount,
     settlementCurrency,
     defaultCurrency,
@@ -844,8 +850,16 @@ export function QuickOrderModal({
                         {cart.map((item) => {
                             const freeBonusQuantity = getOrderLineFreeBonusQuantity(item)
                             return (
-                                <div key={`${item.product_id}:${item.storageId || ''}`} className="flex justify-between gap-3 text-sm">
-                                    <span className="min-w-0 truncate">{item.name}</span>
+                                <div key={`${item.product_id}:${item.storageId || ''}:${item.selling_unit_ref || ''}`} className="flex justify-between gap-3 text-sm">
+                                    <span className="flex min-w-0 flex-col">
+                                        <span className="truncate">{item.name}</span>
+                                        {showStorageLabels && (
+                                            <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                                                <Warehouse className="h-3 w-3 shrink-0" />
+                                                <span className="truncate">{getStorageName(item.storageId || fallbackStorageId)}</span>
+                                            </span>
+                                        )}
+                                    </span>
                                     <span className="shrink-0 text-muted-foreground">
                                         × {item.quantity}{freeBonusQuantity > 0 ? ` · ${t('orders.form.freeBonus')}: ${freeBonusQuantity}` : ''}
                                     </span>

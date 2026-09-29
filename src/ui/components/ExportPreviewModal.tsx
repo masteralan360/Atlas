@@ -20,11 +20,11 @@ import {
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/ui/components/ui/context-menu'
 import { generateTemplatePdf } from '@/services/pdfGenerator'
 import { printPdfBlob } from '@/services/pdfPrintService'
-import { setPrintPreviewEditorSource, type TemplatePreview } from '@/lib/printPreviewEditorStore'
+import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { supabase } from '@/auth/supabase'
 import { useHideCosts, useViewOwnRecordScope } from '@/permissions'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
-import { useLocation } from 'wouter'
+import { PrintFlow } from '@/ui/components/PrintFlow'
 
 const SpreadsheetPreview = lazy(() =>
     import('react-spreadsheet').then((module) => ({ default: module.default }))
@@ -196,7 +196,6 @@ export function ExportPreviewModal({
 }: ExportPreviewModalProps) {
     const { t, i18n } = useTranslation()
     const { activeWorkspace, isLocalMode, features, workspaceName } = useWorkspace()
-    const [, setLocation] = useLocation()
     const hideCosts = useHideCosts()
     const salesViewOwnScope = useViewOwnRecordScope('sales.view_own')
     const [isExporting, setIsExporting] = useState(false)
@@ -205,6 +204,8 @@ export function ExportPreviewModal({
     const [previewData, setPreviewData] = useState<PreviewMatrix>([])
     const [selectedPreviewCells, setSelectedPreviewCells] = useState<Selection | null>(null)
     const [selectedProductPrintColumns, setSelectedProductPrintColumns] = useState<Set<number>>(() => new Set())
+    const [isProductPrintSelectionOpen, setIsProductPrintSelectionOpen] = useState(false)
+    const [productPrintTemplatePreview, setProductPrintTemplatePreview] = useState<TemplatePreview | null>(null)
     const hasCapturedProductSourceRef = useRef(false)
     const hasSeededPreviewRef = useRef(false)
 
@@ -563,16 +564,9 @@ export function ExportPreviewModal({
             })
         }
 
-        setPrintPreviewEditorSource({
-            title: productPrintTitle,
-            printFormat: 'a4',
-            workspaceName: workspaceName || undefined,
-            templatePreview: printTemplate,
-            onPrint: (blob) => printPdfBlob(blob, { title: productPrintTitle }),
-            printActionLabel: productPrintButtonLabel
-        })
-        setLocation('/print-preview-editor')
-    }, [printLang, productPrintButtonLabel, productPrintTitle, selectedProductPrintTable, setLocation, workspaceName])
+        setProductPrintTemplatePreview(printTemplate)
+        setIsProductPrintSelectionOpen(true)
+    }, [printLang, selectedProductPrintTable, workspaceName])
 
     const handleExport = async () => {
         setIsExporting(true)
@@ -601,6 +595,7 @@ export function ExportPreviewModal({
     if (!isOpen) return null
 
     return (
+        <>
         <div className="space-y-6 min-h-screen">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
@@ -722,5 +717,23 @@ export function ExportPreviewModal({
             )}
 
         </div>
+        <PrintFlow
+            isOpen={isProductPrintSelectionOpen}
+            onClose={() => setIsProductPrintSelectionOpen(false)}
+            title={productPrintTitle}
+            showSaveButton={false}
+            features={features}
+            workspaceName={workspaceName}
+            allowA4Document
+            templatePreview={productPrintTemplatePreview || undefined}
+            printSelectionOptions={[{
+                format: 'a4',
+                label: productPrintButtonLabel,
+                description: productPrintTitle
+            }]}
+            onPreviewPrint={(blob) => printPdfBlob(blob, { title: productPrintTitle })}
+            previewPrintActionLabel={productPrintButtonLabel}
+        />
+        </>
     )
 }

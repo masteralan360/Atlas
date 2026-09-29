@@ -48,7 +48,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  PrintPreviewModal,
+  PrintFlow,
   Table,
   TableBody,
   TableCell,
@@ -808,7 +808,7 @@ export function InstallmentSaleDetailsView({
         workspaceId={workspaceId}
         iqdPreference={features.iqd_display_preference}
       />
-      <PrintPreviewModal
+      <PrintFlow
         module="installment_sales"
         isOpen={printOpen}
         onClose={() => setPrintOpen(false)}

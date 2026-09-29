@@ -115,7 +115,7 @@ Do not introduce alternate Kurdish or Arabic terms for an existing app concept u
 Message toasts must also be localized and shown a User-Friendly message and not technical.
 
 ## Printing
-All print workflows MUST follow `PrintSelectionModal` → `PrintPreviewModal` → `PrintPreviewEditorPage` → final print/save action; modules must not bypass these stages with custom preview or direct-print flows.
+Every user-initiated print entry point MUST first open `PrintSelectionModal`. After the user selects a print format or template, open `PrintPreviewEditorPage` directly; there is no intermediate preview modal in the flow.
 `PrintPreviewEditorPage` MUST generate the final PDF blob from the user's current edits or layout, then pass it to the configured `onPrint` or `onSave` callback; print-only workflows use `onPrint`.
 For invoice saves, `onSave` MUST use the standard invoice snapshot and PDF-version persistence flow, after which the saved document is exposed through `PostSaveInvoiceDialog`.
 

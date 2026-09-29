@@ -72,6 +72,86 @@ describe('POS checkout scenarios (independent of Instant POS)', () => {
         await assertPosPayment(input.payload.id, 100)
     })
 
+    it('deducts a mixed-storage cart from each line source and records both inventory movements', async () => {
+        await seedPosStock('usd')
+        const secondStorageId = 'a7200000-0000-4000-8000-000000000013'
+        const secondInventoryId = 'a7200000-0000-4000-8000-000000000014'
+        const secondBatchId = 'a7200000-0000-4000-8000-000000000015'
+        const timestamp = new Date().toISOString()
+        const base = { workspaceId: POS_WORKSPACE, createdAt: timestamp, updatedAt: timestamp,
+            version: 1, isDeleted: false, syncStatus: 'synced' as const, lastSyncedAt: timestamp }
+        await db.storages.put({ id: secondStorageId, ...base, name: 'POS second storage',
+            isSystem: false, isProtected: false, isPrimary: false, isMarketplace: false })
+        await db.inventory.put({ id: secondInventoryId, ...base, productId: POS_PRODUCT, storageId: secondStorageId, quantity: 5 })
+        await db.stock_batches.put({ id: secondBatchId, ...base, productId: POS_PRODUCT, storageId: secondStorageId,
+            batchNumber: 'POS-2', quantity: 5, price: 100, costPrice: 40, currency: 'usd',
+            expiryDate: null, manufacturingDate: null, notes: null, sourcePurchaseOrderId: null, sourcePurchaseOrderItemId: null })
+        const serviceProductId = 'a7200000-0000-4000-8000-000000000016'
+        await db.products.put({ id: serviceProductId, ...base, sku: '', name: 'POS mixed service',
+            description: '', categoryId: null, price: 50, costPrice: 0, quantity: 0,
+            minStockLevel: 0, unit: 'service', currency: 'usd', canBeReturned: true, isService: true } as never)
+        await db.products.update(POS_PRODUCT, { quantity: 25 })
+
+        const input = posCheckoutInput({ quantity: 1 })
+        const firstLine = input.payload.items[0]
+        const secondLine = {
+            ...firstLine,
+            storage_id: secondStorageId,
+            quantity: 2,
+            total_price: 200,
+            total: 200,
+            inventory_snapshot: 5,
+            batch_allocations: [{
+                batch_id: secondBatchId, batch_number: 'POS-2', quantity: 2,
+                price: 100, cost_price: 40, currency: 'usd', expiry_date: null, manufacturing_date: null
+            }]
+        }
+        const serviceLine = {
+            ...firstLine,
+            product_id: serviceProductId,
+            storage_id: null,
+            product_name: 'POS mixed service',
+            product_sku: '',
+            unit_price: 50,
+            total_price: 50,
+            cost_price: 0,
+            converted_cost_price: 0,
+            original_unit_price: 50,
+            converted_unit_price: 50,
+            total: 50,
+            inventory_snapshot: null,
+            batch_allocations: null
+        }
+        input.payload.items = [firstLine, secondLine, serviceLine]
+        input.payload.total_amount = 350
+        input.batchPlans = [
+            { productId: POS_PRODUCT, storageId: POS_STORAGE, allocations: [{ batchId: POS_BATCH, batchNumber: 'POS-1', quantity: 1, price: 100, costPrice: 40, currency: 'usd' }] },
+            { productId: POS_PRODUCT, storageId: secondStorageId, allocations: [{ batchId: secondBatchId, batchNumber: 'POS-2', quantity: 2, price: 100, costPrice: 40, currency: 'usd' }] }
+        ]
+
+        await checkout.commitPosCheckout(input)
+
+        const saleItems = await db.sale_items.where('saleId').equals(input.payload.id).toArray()
+        expect(saleItems.filter((saleItem) => saleItem.productId === POS_PRODUCT)
+            .map((saleItem) => [saleItem.storageId, saleItem.quantity])).toEqual([
+            [POS_STORAGE, 1], [secondStorageId, 2]
+        ])
+        expect(saleItems.find((saleItem) => saleItem.productId === serviceProductId)).toMatchObject({
+            storageId: null, inventorySnapshot: null, unitPrice: 50
+        })
+        expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 19 })
+        expect(await db.inventory.get(secondInventoryId)).toMatchObject({ quantity: 3 })
+        expect(await db.stock_batches.get(POS_BATCH)).toMatchObject({ quantity: 19 })
+        expect(await db.stock_batches.get(secondBatchId)).toMatchObject({ quantity: 3 })
+        expect(await db.products.get(POS_PRODUCT)).toMatchObject({ quantity: 22 })
+        expect((await db.inventory_transactions.toArray()).filter((row) => row.referenceId === input.payload.id))
+            .toEqual(expect.arrayContaining([
+                expect.objectContaining({ storageId: POS_STORAGE, quantityDelta: -1 }),
+                expect.objectContaining({ storageId: secondStorageId, quantityDelta: -2 })
+            ]))
+        await assertPosPayment(input.payload.id, 350)
+    })
+
     it('blocks a Staff checkout below the minimum before sale, payment, ledger, or inventory writes', async () => {
         await seedPosStock('usd')
         await db.products.update(POS_PRODUCT, { minimumSellingPrice: 12 })

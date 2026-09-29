@@ -1,14 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createElement, Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useLocation } from 'wouter'
-import { useReactToPrint } from 'react-to-print'
 import { useTranslation } from 'react-i18next'
 import {
-    SmallDialog,
-    SmallDialogContent,
-    SmallDialogHeader,
-    SmallDialogTitle,
-    SmallDialogFooter,
-    Button,
     useToast,
     A4InvoiceTemplate,
     ModernA4InvoiceTemplate,
@@ -17,17 +10,18 @@ import {
     RefundPrimaryA4InvoiceTemplate,
     SaleReceiptBase
 } from '@/ui/components'
-import { Printer, X, ExternalLink } from 'lucide-react'
 import { saveInvoiceFromSnapshot, useWorkspaceContacts } from '@/local-db/hooks'
 import { useAuth } from '@/auth'
 import { db, type Invoice } from '@/local-db'
-import { generateInvoicePdf, isInvoicePrintFormat, type InvoicePrintFormat, type PrintFormat } from '@/services/pdfGenerator'
+import { generateInvoicePdf, generateTemplatePdf, isInvoicePrintFormat, type InvoicePrintFormat, type PrintFormat } from '@/services/pdfGenerator'
+import { printPdfBlob } from '@/services/pdfPrintService'
 import { reportPdfProgress } from '@/services/pdfProgress'
 import {
     disableInvoiceQrInLocalMode
 } from '@/services/localInvoiceStorage'
 import { persistInvoiceVersion } from '@/services/invoiceVersionService'
 import { useWorkspace, type WorkspaceFeatures } from '@/workspace'
+import { useWorkspacePermissions } from '@/permissions/WorkspacePermissionsContext'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError } from '@/lib/supabaseRequest'
 import {
     setPrintPreviewEditorSource,
@@ -35,8 +29,7 @@ import {
     type CustomTemplatePreviewTarget,
     type TemplatePreview
 } from '@/lib/printPreviewEditorStore'
-import { setPDFPreviewSource } from '@/lib/pdfPreviewStore'
-import { useWorkspacePermissions } from '@/permissions/WorkspacePermissionsContext'
+import { PRINT_PREVIEW_EDITOR_PATH, shouldOpenPrintPreviewEditor } from '@/lib/printFlow'
 import {
     PrintSelectionModal,
     type PrintSelectionNativeOption,
@@ -45,14 +38,13 @@ import {
 import type { OrderPrintVersion } from '@/lib/orderPrintReturnState'
 import type { StoredCustomTemplateRow } from '@/lib/customTemplates'
 
-interface PrintPreviewModalProps {
+interface PrintFlowProps {
     isOpen: boolean
     onClose: () => void
     onConfirm?: () => void
     title?: string
     children?: ReactNode
     showSaveButton?: boolean
-    saveButtonText?: string
     invoiceData?: Omit<Invoice, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted' | 'invoiceid'> & { invoiceid?: string }
     pdfData?: any // UniversalInvoice
     pdfBuilder?: (options: { format: PrintFormat; effectiveId: string; printLangOverride?: string }) => Promise<Blob>
@@ -71,7 +63,6 @@ interface PrintPreviewModalProps {
     features?: WorkspaceFeatures
     workspaceName?: string | null
     module?: string
-    skipPrintSelection?: boolean
     printSelectionOptions?: PrintSelectionNativeOption[]
     printSelectionTemplates?: PrintSelectionTemplateOption[]
     onPrintSelection?: (format: PrintFormat, template?: StoredCustomTemplateRow, nativeTemplateKey?: string, printVersion?: OrderPrintVersion) => void
@@ -95,7 +86,7 @@ type WorkspaceFooterContacts = {
     phone?: WorkspaceContactPair
 }
 
-export function PrintPreviewModal({
+export function PrintFlow({
     isOpen,
     onClose,
     onConfirm,
@@ -119,7 +110,6 @@ export function PrintPreviewModal({
     features,
     workspaceName,
     module,
-    skipPrintSelection = false,
     printSelectionOptions,
     printSelectionTemplates,
     onPrintSelection,
@@ -129,7 +119,7 @@ export function PrintPreviewModal({
     savedDocumentKind,
     previewPrintActionLabel,
     allowA4Document = false
-}: PrintPreviewModalProps) {
+}: PrintFlowProps) {
     const { t, i18n } = useTranslation()
     const { toast } = useToast()
     const { user } = useAuth()
@@ -139,10 +129,16 @@ export function PrintPreviewModal({
     const workspaceId = user?.workspaceId
     const workspaceContacts = useWorkspaceContacts(workspaceId)
     const [selectedPrintFormat, setSelectedPrintFormat] = useState<PrintFormat | null>(null)
+    const previewOpenedRef = useRef(false)
+    const canPrint = useMemo(() => {
+        const permissionKey = `${module || 'global'}.print` as any
+        return hasPermission(permissionKey)
+    }, [hasPermission, module])
 
     useEffect(() => {
         if (!isOpen) {
             setSelectedPrintFormat(null)
+            previewOpenedRef.current = false
         }
     }, [isOpen])
 
@@ -163,31 +159,12 @@ export function PrintPreviewModal({
     }, [isOpen, originId, pdfData?.id, documentId])
 
     const [isSaving, setIsSaving] = useState(false)
-    const htmlPrintRef = useRef<HTMLDivElement>(null)
-    const templatePrintRef = useRef<HTMLDivElement>(null)
-
-    useEffect(() => {
-        if (!isOpen) return
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
-                e.preventDefault()
-                e.stopPropagation()
-            }
-        }
-        window.addEventListener('keydown', handleKeyDown, { capture: true })
-        return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
-    }, [isOpen])
 
     const hasPdfData = !!pdfBuilder || !!(pdfData && features)
     const requestedPrintFormat: PrintFormat = (invoiceData?.printFormat || 'a4') as PrintFormat
     const defaultPrintFormat: PrintFormat = requestedPrintFormat === 'a4' && !allowA4Document && !hasCapability('a4PdfInvoices')
         ? 'receipt'
         : requestedPrintFormat
-    useLayoutEffect(() => {
-        if (isOpen && skipPrintSelection) {
-            setSelectedPrintFormat(defaultPrintFormat)
-        }
-    }, [defaultPrintFormat, isOpen, skipPrintSelection])
     const printFormat = selectedPrintFormat || defaultPrintFormat
     const resolvedPrintSelectionOptions = useMemo<PrintSelectionNativeOption[]>(
         () => printSelectionOptions || [{
@@ -207,21 +184,16 @@ export function PrintPreviewModal({
         nativeTemplateKey?: string,
         printVersion?: OrderPrintVersion
     ) => {
+        if (!canPrint) return
         onPrintSelection?.(format, template, nativeTemplateKey, printVersion)
         setSelectedPrintFormat(format)
-    }, [onPrintSelection])
+    }, [canPrint, onPrintSelection])
     const printableFeatures = useMemo(
         () => disableInvoiceQrInLocalMode(workspaceId, features),
         [features, workspaceId]
     )
     const printLang = printableFeatures?.print_lang && printableFeatures.print_lang !== 'auto' ? printableFeatures.print_lang : i18n.language
     const t_print = useMemo(() => i18n.getFixedT(printLang), [i18n, printLang])
-
-    const canPrint = useMemo(() => {
-        // Use module specific print permission or fallback to global logic handled by hasPermission
-        const permissionKey = `${module || 'global'}.print` as any
-        return hasPermission(permissionKey)
-    }, [hasPermission, module])
 
     const translations = useMemo(() => ({
         date: t_print('sales.print.date') || 'Date',
@@ -345,55 +317,6 @@ export function PrintPreviewModal({
 
 
 
-    const handleHtmlPrint = useReactToPrint({
-        contentRef: htmlPrintRef,
-        documentTitle: title || 'Print_Preview',
-        onAfterPrint: () => {
-            if (onConfirm) onConfirm()
-        }
-    })
-
-
-
-    const buildPdfBlobs = useCallback(async (requestedFormat?: PrintFormat, printLangOverride?: string): Promise<Partial<Record<PrintFormat, Blob>>> => {
-        const format = requestedFormat || printFormat
-        const effectiveLang = printLangOverride || printLang
-
-        if (pdfBuilder) {
-            const blob = await pdfBuilder({ format, effectiveId, printLangOverride })
-            return { [format]: blob }
-        }
-
-        if (!pdfData || !printableFeatures) {
-            throw new Error('Missing PDF data or features')
-        }
-
-        const blob = await generateInvoicePdf({
-            data: { ...pdfData, id: effectiveId },
-            format: format,
-            workspaceId: workspaceId || '',
-            features: {
-                ...printableFeatures,
-                logo_url: printableFeatures.logo_url || undefined,
-                print_lang: effectiveLang
-            },
-            workspaceName: workspaceName || workspaceId || '',
-            translations,
-            workspaceFooterContacts
-        })
-
-        return { [format]: blob }
-    }, [printableFeatures, pdfData, pdfBuilder, translations, workspaceId, workspaceName, effectiveId, printFormat, printLang, workspaceFooterContacts])
-
-    const blobToDataUrl = useCallback((blob: Blob): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader()
-            reader.onload = () => resolve(reader.result as string)
-            reader.onerror = reject
-            reader.readAsDataURL(blob)
-        })
-    }, [])
-
     const ensureSaveBlob = useCallback(async (printLangOverride?: string): Promise<Blob> => {
         const effectiveLang = printLangOverride || printLang
         if (pdfBuilder) {
@@ -417,7 +340,7 @@ export function PrintPreviewModal({
 
     const handleSave = useCallback(async (preGeneratedBlob?: Blob) => {
         if (isSaving) return
-        if (!hasPdfData) { handleHtmlPrint(); return }
+        if (!hasPdfData) return
 
         // Barcode labels deliberately never create or update invoice records.
         if (!isInvoicePrintFormat(printFormat)) {
@@ -498,7 +421,6 @@ export function PrintPreviewModal({
     }, [
         effectiveId,
         ensureSaveBlob,
-        handleHtmlPrint,
         hasPdfData,
         customTemplate,
         invoiceData,
@@ -522,10 +444,10 @@ export function PrintPreviewModal({
 
     const handleOpenPreview = useCallback(async () => {
         try {
-            let previewPath = '/print-preview-editor'
             templatePreviewProp?.resetFreshPartnerBalance?.()
             const hasPdfDataForPreview = !!pdfData
             const hasPdfBuilder = !!pdfBuilder
+            const previewTitle = title || t('print.previewTitle') || 'Print Preview'
 
             if (hasPdfDataForPreview) {
                 const generatePdfBlob = async (editedData: any, printLangOverride?: string): Promise<Blob> => {
@@ -557,52 +479,99 @@ export function PrintPreviewModal({
                     workspaceName: workspaceName || undefined,
                     workspaceFooterContacts,
                     printFormat,
-                    title: title || t('print.previewTitle') || 'Print Preview',
+                    title: previewTitle,
                     onSave: showSaveButton ? handleSave : undefined,
                     invoiceData,
                     effectiveId,
                     generatePdfBlob,
                 })
-            } else if (hasPdfBuilder) {
-                if (templatePreviewProp) {
-                    setPrintPreviewEditorSource({
-                        title: title || t('print.previewTitle') || 'Print Preview',
-                        onSave: onPreviewSave || (!onPreviewPrint && (showSaveButton || enableTemplatePreviewSave) ? handleSave : undefined),
-                        onPrint: onPreviewPrint,
-                        savedDocumentKind,
-                        printActionLabel: previewPrintActionLabel,
+            } else if (templatePreviewProp) {
+                setPrintPreviewEditorSource({
+                    title: previewTitle,
+                    onSave: onPreviewSave || (!onPreviewPrint && hasPdfData && (showSaveButton || enableTemplatePreviewSave) ? handleSave : undefined),
+                    onPrint: onPreviewPrint,
+                    savedDocumentKind,
+                    printActionLabel: previewPrintActionLabel,
+                    effectiveId,
+                    printFormat,
+                    workspaceId,
+                    templatePreview: templatePreviewProp,
+                    customTemplate,
+                    templateFieldValues,
+                    initialTemplateLayout,
+                    allowTemplateFieldEditing,
+                    templatePrimaryActionLabel,
+                    generateTemplateLayoutBlob,
+                    workspaceFooterContacts,
+                })
+            } else if (hasPdfBuilder && !templateContent) {
+                setPrintPreviewEditorSource({
+                    title: previewTitle,
+                    effectiveId,
+                    printFormat,
+                    workspaceId,
+                    generatePreviewPdfBlob: (printLangOverride) => pdfBuilder({
+                        format: printFormat,
                         effectiveId,
-                        printFormat,
-                        workspaceId,
-                        templatePreview: templatePreviewProp,
-                        customTemplate,
-                        templateFieldValues,
-                        initialTemplateLayout,
-                        allowTemplateFieldEditing,
-                        templatePrimaryActionLabel,
-                        generateTemplateLayoutBlob,
-                        workspaceFooterContacts,
-                    })
-                } else {
-                    const blobs = await buildPdfBlobs(printFormat)
-                    const blob = printFormat === 'receipt' ? blobs.receipt : blobs.a4
-                    if (!blob) throw new Error('Failed to generate PDF')
-                    const url = await blobToDataUrl(blob)
-                    setPDFPreviewSource({
-                        url,
-                        title: title || t('print.previewTitle') || 'Print Preview',
-                        onPrint: onPreviewPrint,
-                        printActionLabel: previewPrintActionLabel,
-                    })
-                    previewPath = '/pdf-preview'
+                        printLangOverride
+                    }),
+                    onPrint: onPreviewPrint || ((blob) => printPdfBlob(blob, { title: previewTitle })),
+                    printActionLabel: previewPrintActionLabel || t('pdfPreview.print', { defaultValue: 'Print' })
+                })
+            } else if (templateContent) {
+                const genericTemplatePreview: TemplatePreview = {
+                    fields: [],
+                    page: {
+                        widthMm: printFormat === 'receipt' ? 80 : 210,
+                        heightMm: 297
+                    },
+                    createElement: () => createElement(Fragment, null, templateContent),
+                    buildPdf: (element, printLangOverride) => pdfBuilder
+                        ? pdfBuilder({ format: printFormat, effectiveId, printLangOverride })
+                        : generateTemplatePdf({
+                            element,
+                            format: printFormat,
+                            printLang: printLangOverride || printLang
+                        })
                 }
+
+                setPrintPreviewEditorSource({
+                    title: previewTitle,
+                    effectiveId,
+                    printFormat,
+                    workspaceId,
+                    workspaceName: workspaceName || undefined,
+                    workspaceFooterContacts,
+                    templatePreview: genericTemplatePreview,
+                    onSave: onPreviewSave,
+                    onPrint: onPreviewPrint || ((blob) => printPdfBlob(blob, { title: previewTitle })),
+                    printActionLabel: previewPrintActionLabel || t('pdfPreview.print', { defaultValue: 'Print' })
+                })
+            } else {
+                throw new Error('No printable content is available.')
             }
 
-            setLocation(previewPath)
+            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                await new Promise<void>((resolve) => window.setTimeout(resolve, 200))
+            }
+            setLocation(PRINT_PREVIEW_EDITOR_PATH)
         } catch (err) {
             console.error('Failed to open preview:', err)
+            previewOpenedRef.current = false
+            setSelectedPrintFormat(null)
+            toast({
+                title: t('print.previewErrorTitle', { defaultValue: 'Could not open print preview' }),
+                description: t('print.previewErrorDescription', { defaultValue: 'Please try again.' }),
+                variant: 'destructive'
+            })
         }
-    }, [printFormat, printLang, title, t, setLocation, handleSave, pdfData, printableFeatures, workspaceId, workspaceName, workspaceFooterContacts, invoiceData, effectiveId, pdfBuilder, translations, buildPdfBlobs, blobToDataUrl, templatePreviewProp, customTemplate, templateFieldValues, initialTemplateLayout, allowTemplateFieldEditing, enableTemplatePreviewSave, templatePrimaryActionLabel, generateTemplateLayoutBlob, onPreviewPrint, onPreviewSave, savedDocumentKind, previewPrintActionLabel, showSaveButton])
+    }, [printFormat, printLang, title, t, setLocation, handleSave, pdfData, hasPdfData, printableFeatures, workspaceId, workspaceName, workspaceFooterContacts, invoiceData, effectiveId, pdfBuilder, translations, templateContent, templatePreviewProp, customTemplate, templateFieldValues, initialTemplateLayout, allowTemplateFieldEditing, enableTemplatePreviewSave, templatePrimaryActionLabel, generateTemplateLayoutBlob, onPreviewPrint, onPreviewSave, savedDocumentKind, previewPrintActionLabel, showSaveButton, toast])
+
+    useEffect(() => {
+        if (!shouldOpenPrintPreviewEditor(isOpen, selectedPrintFormat, previewOpenedRef.current)) return
+        previewOpenedRef.current = true
+        void handleOpenPreview()
+    }, [handleOpenPreview, isOpen, selectedPrintFormat])
 
     return (
         <>
@@ -610,64 +579,17 @@ export function PrintPreviewModal({
                 isOpen={isOpen && selectedPrintFormat === null}
                 onClose={onClose}
                 onSelect={handlePrintSelection}
-                nativeOptions={resolvedPrintSelectionOptions}
-                templateOptions={printSelectionTemplates}
-                onCreateReturnTemplate={onCreateReturnTemplate}
+                nativeOptions={resolvedPrintSelectionOptions.map((option) => ({
+                    ...option,
+                    disabled: option.disabled || !canPrint
+                }))}
+                templateOptions={printSelectionTemplates?.map((option) => ({
+                    ...option,
+                    disabled: option.disabled || !canPrint
+                }))}
+                onCreateReturnTemplate={canPrint ? onCreateReturnTemplate : undefined}
                 allowA4Document={allowA4Document}
             />
-            <SmallDialog
-                open={isOpen && selectedPrintFormat !== null}
-                onOpenChange={(open) => !open && onClose()}
-            >
-                <SmallDialogContent className="flex flex-col max-w-lg sm:max-w-lg">
-                <SmallDialogHeader>
-                    <SmallDialogTitle className="flex items-center gap-2">
-                        <Printer className="w-5 h-5 text-primary" />
-                        {title || t('print.previewTitle') || 'Print Preview'}
-                    </SmallDialogTitle>
-                </SmallDialogHeader>
-
-                <div className="space-y-4 py-2">
-                    {hasPdfData ? (
-                        <div className="border rounded-lg bg-muted/30 p-6 text-center space-y-3">
-                            <p className="text-sm text-muted-foreground">
-                                {t('print.openFullPreview') || 'Open the full PDF viewer to preview, zoom, and navigate the document.'}
-                            </p>
-                            <Button 
-                                onClick={handleOpenPreview} 
-                                className="w-full"
-                                disabled={!canPrint}
-                            >
-                                <ExternalLink className="w-4 h-4 mr-2" />
-                                {t('print.openPreview') || 'Open Full Preview'}
-                            </Button>
-                        </div>
-                    ) : (
-                        <div
-                            ref={htmlPrintRef}
-                            className="border rounded-lg bg-white dark:bg-zinc-900 p-4 max-h-60 overflow-auto"
-                        >
-                            {children}
-                        </div>
-                    )}
-                </div>
-
-                <SmallDialogFooter className="shrink-0 pt-2">
-                    <Button variant="outline" onClick={onClose}>
-                        <X className="w-4 h-4 mr-2" />
-                        {t('common.cancel')}
-                    </Button>
-                </SmallDialogFooter>
-
-                {hasPdfData && templateContent && (
-                    <div className="fixed left-[-10000px] top-0">
-                        <div ref={templatePrintRef} className="bg-white text-black">
-                            {templateContent}
-                        </div>
-                    </div>
-                )}
-                </SmallDialogContent>
-            </SmallDialog>
         </>
     )
 }

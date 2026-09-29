@@ -48,6 +48,31 @@ export function getCartBasePrice(item: CartItem) { return item.discounted_price 
 export function getCartEffectivePrice(item: CartItem) { return item.negotiated_price ?? getCartBasePrice(item) }
 export function snapshotPosCart(items: CartItem[]) { return items.map(item => ({ ...item })) }
 
+/** Storage labels appear only while the cart contains lines from multiple source locations. */
+export function getPosCartStorageIds(items: readonly CartItem[], fallbackStorageId?: string | null) {
+    return Array.from(new Set(items
+        .map((item) => item.storageId || fallbackStorageId || '')
+        .map((storageId) => storageId.trim())
+        .filter(Boolean)))
+}
+
+export function shouldShowPosCartStorageLabels(items: readonly CartItem[], fallbackStorageId?: string | null) {
+    return getPosCartStorageIds(items, fallbackStorageId).length > 1
+}
+
+/** Activity transactions have a separate checkout and payment path from sales. */
+export function canAddPosCartItemFromStorage(
+    items: readonly CartItem[],
+    nextStorageId: string | null | undefined,
+    activitiesStorageId: string
+) {
+    if (items.length === 0) return true
+    const cartUsesActivities = items.some((item) => item.storageId === activitiesStorageId)
+    const cartUsesOtherStorage = items.some((item) => item.storageId !== activitiesStorageId)
+    if (cartUsesActivities && cartUsesOtherStorage) return false
+    return cartUsesActivities === (nextStorageId === activitiesStorageId)
+}
+
 /**
  * Quick Orders cannot persist the selling-unit conversion snapshot required by
  * products with related selling units. Keep those products out of an Order

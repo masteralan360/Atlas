@@ -2,9 +2,15 @@ Service optional Barcode
 Allow Storage and Services in POS cart
 Barcode Camera in Phone
 
+Maintenence Mode Local Mode Enabled
+
+Make Workspace Payment Invoices
+
+PAYG-Control
+
 Force Update Action in admin dashboard
 
-remove R2 Print only
+remove R2 Print Blob, only keep Manual Entry 
 
 Fix the Error in Supabase Logs
 
@@ -13,13 +19,16 @@ Shipped Point Makes Sale Order
 Allow Shipped to be cancelled
 Make Maintenence Mode servier-side
 
-Maintenence Mode Local Mode Enabled
+Remake PrintPreviewEditorPage
+
 
 Check relational-Unit bigger unit cost price
 
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide
 
 Context-menu partner account statement & invoice redirect
+
+Remake 
 
 Price books selector order form and quick order
 

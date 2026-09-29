@@ -303,6 +303,8 @@ export type PrintPreviewEditorSource = {
     invoiceData?: any
     effectiveId?: string
     generatePdfBlob?: (editedData: UniversalInvoice, printLangOverride?: string) => Promise<Blob>
+    /** Builds a static PDF document for the editor's read-only PDF preview mode. */
+    generatePreviewPdfBlob?: (printLangOverride?: string) => Promise<Blob>
     /** Template preview mode for editable inline preview of custom templates (loans, orders, budget) */
     templatePreview?: TemplatePreview
     customTemplate?: CustomTemplatePreviewTarget

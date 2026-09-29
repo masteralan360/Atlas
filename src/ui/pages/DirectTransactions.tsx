@@ -45,7 +45,7 @@ import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { DirectTransactionDialog } from '@/ui/components/payments/DirectTransactionDialog'
 import { DirectTransactionVoucherPrintTemplate, type DirectTransactionVoucherData } from '@/ui/components/payments/DirectTransactionVoucherPrintTemplate'
 import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
-import { PrintPreviewModal } from '@/ui/components/PrintPreviewModal'
+import { PrintFlow } from '@/ui/components/PrintFlow'
 import { formatDirectTransactionVoucherNumber } from '@/lib/directTransactionVoucher'
 import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { generateTemplatePdf } from '@/services/pdfGenerator'
@@ -476,7 +476,7 @@ export function DirectTransactions() {
                 workspaceId={workspaceId}
                 iqdPreference={features.iqd_display_preference}
             />
-            {voucherData && voucherPreview ? <PrintPreviewModal
+            {voucherData && voucherPreview ? <PrintFlow
                 module="directTransaction"
                 isOpen
                 onClose={() => setVoucherData(null)}

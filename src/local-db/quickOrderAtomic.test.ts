@@ -148,6 +148,8 @@ const PRODUCT_ID = '10000000-0000-4000-8000-000000000005'
 const SERVICE_ID = '10000000-0000-4000-8000-000000000008'
 const STORAGE_ID = '10000000-0000-4000-8000-000000000006'
 const INVENTORY_ID = '10000000-0000-4000-8000-000000000007'
+const SECOND_STORAGE_ID = '10000000-0000-4000-8000-000000000010'
+const SECOND_INVENTORY_ID = '10000000-0000-4000-8000-000000000011'
 const PAYMENT_ACCOUNT_ID = '10000000-0000-4000-8000-000000000009'
 
 type SalesOrderCreateInput = Parameters<typeof createCompletedSalesOrder>[1]
@@ -1002,6 +1004,76 @@ describe('atomic POS Quick Order completion', () => {
         expect(completed.status).toBe('completed')
         expect(await db.payment_transactions.where('sourceRecordId').equals(completed.id).count()).toBe(1)
         expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(4)
+    })
+
+    it('completes a Quick Order with per-line source storages and updates each stock position', async () => {
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'local' })
+        await db.storages.put({
+            ...baseEntity(SECOND_STORAGE_ID), name: 'Second Quick Order storage',
+            isSystem: false, isProtected: false, isPrimary: false, isMarketplace: false
+        } as never)
+        await db.inventory.put({
+            ...baseEntity(SECOND_INVENTORY_ID), productId: PRODUCT_ID, storageId: SECOND_STORAGE_ID, quantity: 5
+        })
+        await db.products.update(PRODUCT_ID, { quantity: 10 })
+
+        await db.products.put({
+            ...baseEntity(SERVICE_ID),
+            sku: '',
+            name: 'Fast Checkout Service',
+            unit: 'service',
+            currency: 'usd',
+            price: 50,
+            costPrice: 0,
+            quantity: 0,
+            minStockLevel: 0,
+            storageId: null,
+            isService: true
+        } as never)
+
+        const input = quickOrderInput(350)
+        input.sourceStorageId = null
+        const serviceItem = {
+            ...serviceQuickOrderInput().items[0],
+            lineTotal: 50,
+            originalUnitPrice: 50,
+            convertedUnitPrice: 50,
+            costPrice: 0,
+            convertedCostPrice: 0
+        }
+        input.items = [
+            input.items[0],
+            {
+                ...input.items[0],
+                id: crypto.randomUUID(),
+                storageId: SECOND_STORAGE_ID,
+                quantity: 2,
+                lineTotal: 200
+            },
+            serviceItem
+        ]
+        input.subtotal = 350
+        input.total = 350
+
+        const completed = await createCompletedSalesOrder(WORKSPACE_ID, input, USER_ID)
+
+        expect(completed.items.filter((item) => item.productId === PRODUCT_ID)
+            .map((item) => [item.storageId, item.quantity, item.fulfilledQuantity])).toEqual([
+            [STORAGE_ID, 1, 1], [SECOND_STORAGE_ID, 2, 2]
+        ])
+        expect(completed.items.find((item) => item.productId === SERVICE_ID)).toMatchObject({
+            storageId: SERVICES_VIRTUAL_STORAGE_ID, quantity: 1
+        })
+        expect((await db.sales_orders.get(completed.id))?.sourceStorageId).toBeNull()
+        expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(4)
+        expect((await db.inventory.get(SECOND_INVENTORY_ID))?.quantity).toBe(3)
+        expect((await db.products.get(PRODUCT_ID))?.quantity).toBe(7)
+        expect(await db.inventory_transactions.where('referenceId').equals(completed.id).toArray())
+            .toEqual(expect.arrayContaining([
+                expect.objectContaining({ storageId: STORAGE_ID, quantityDelta: -1, referenceType: 'sales_order' }),
+                expect.objectContaining({ storageId: SECOND_STORAGE_ID, quantityDelta: -2, referenceType: 'sales_order' })
+            ]))
+        expect(await assertOrderFinancialEffects(completed.id, 350, 0)).toHaveLength(1)
     })
 
     it('completes a free-only Quick Order without a payment transaction while deducting its free stock', async () => {

@@ -104,7 +104,7 @@ import {
     DateTimePicker,
     DeleteConfirmationModal,
     SettlementDialog,
-    PrintPreviewModal,
+    PrintFlow,
     SelectionCards
 } from '@/ui/components'
 import { BudgetSnoozeModal, type BudgetSnoozeOption } from '@/ui/components/budget/BudgetSnoozeModal'
@@ -1906,7 +1906,7 @@ export function Budget() {
                 itemName={deleteTarget?.series?.name || deleteTarget?.item?.id || ''}
             />
 
-            <PrintPreviewModal
+            <PrintFlow
                 isOpen={showPrintPreview}
                 onClose={() => setShowPrintPreview(false)}
                 onConfirm={() => setShowPrintPreview(false)}

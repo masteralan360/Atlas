@@ -35,16 +35,18 @@ import {
     type SalesOrder,
     type SalesOrderItem
 } from '@/local-db'
-import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
+import { ACTIVITIES_VIRTUAL_STORAGE_ID, isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { isBelowMinimumSellingPrice } from '@/lib/minimumSellingPrice'
 import { isPosPaymentTypeAllowed, getPosCheckoutRoute, type PosPaymentType } from '@/lib/posPaymentPolicy'
 import {
     canOfferMobileFreeOnlyOrderHold,
+    canAddPosCartItemFromStorage,
     canAddProductToPosCart,
     canSetPosPaidQuantity,
     convertPosPrice,
     getCartBasePrice,
     getCartEffectivePrice,
+    shouldShowPosCartStorageLabels,
     hasPosOrderFreeBonus,
     isFreeOnlyPosQuickOrder,
     restorePosCart,
@@ -112,6 +114,7 @@ import {
     Popover,
     PopoverTrigger,
     PopoverContent,
+    PrintFlow,
 } from '@/ui/components'
 import { UiAccessGate } from '@/context/UiAccessContext'
 import {
@@ -203,7 +206,7 @@ const POS_TABLET_MAX_WIDTH = 1366
 const POS_WIDE_TABLET_CATALOG_BREAKPOINT = 1180
 const POS_EXTRA_WIDE_TABLET_CATALOG_BREAKPOINT = 1600
 
-const ACTIVITIES_STORAGE_ID = '__atlas_activities__'
+const ACTIVITIES_STORAGE_ID = ACTIVITIES_VIRTUAL_STORAGE_ID
 const ACTIVITY_POS_QUANTITY_LIMIT = Number.MAX_SAFE_INTEGER
 
 type PosCatalogProduct = BatchAwareInventoryProduct & {
@@ -236,7 +239,6 @@ function isLoanRegistrationData(value: unknown): value is LoanRegistrationData {
         (payload.firstDueDate === null || typeof payload.firstDueDate === 'string')
     )
 }
-
 function buildCartItemKey(productId: string, storageId?: string | null, sellingUnitRef?: string | null) {
     return `${productId}:${storageId ?? ''}:${sellingUnitRef ?? ''}`
 }
@@ -482,7 +484,7 @@ export function POS() {
         && hasFeature('sales_agent_commissions')
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.assignOrders')
     const priceBookCatalog = usePriceBookCatalogState(user?.workspaceId, {
-        enabled: priceBooksEnabled && !!selectedStorageId && !isActivitiesStorage && !isServicesStorage && !isLocalMode
+        enabled: priceBooksEnabled && !!selectedStorageId && !isLocalMode
     })
     const unitRelationships = useUnitRelationships(user?.workspaceId)
     const productUnitConversions = useProductUnitConversions(user?.workspaceId)
@@ -525,8 +527,7 @@ export function POS() {
         return map
     }, [priceBookCatalog.priceBookItems, priceBookById, selectedPriceBookId])
     const products = useBatchAwareInventoryProducts(user?.workspaceId, {
-        enabled: !!selectedStorageId && !isActivitiesStorage && !isServicesStorage,
-        storageId: !isActivitiesStorage && !isServicesStorage ? selectedStorageId || undefined : undefined
+        enabled: !!user?.workspaceId
     })
     const catalogProducts = useProducts(user?.workspaceId, { syncBarcodeCache: false })
     const { canSelectProduct, filterProducts: filterSelectableProducts } = useProductSelectionAccess(user?.workspaceId, user?.id)
@@ -549,6 +550,8 @@ export function POS() {
     } | null>(null)
     const [search, setSearch] = useState('')
     const [cart, setCart] = useState<CartItem[]>([])
+    const isActivitiesCart = cart.some((item) => item.storageId === ACTIVITIES_STORAGE_ID)
+    const isActivitiesCheckout = cart.length > 0 ? isActivitiesCart : isActivitiesStorage
     const [unitSelectionProduct, setUnitSelectionProduct] = useState<PosCatalogProduct | null>(null)
     const [dynamicUnitModal, setDynamicUnitModal] = useState<{ type: string; itemKey: string } | null>(null)
     const [dynamicInputBuffer, setDynamicInputBuffer] = useState<Record<string, string>>({})
@@ -564,7 +567,7 @@ export function POS() {
     // start separate checkout transactions in that interval.
     const checkoutSubmissionInProgress = useRef(false)
     const posCheckoutAttempt = useRef(new PosCheckoutAttempt())
-    const [isPreprinting, setIsPreprinting] = useState(false)
+    const [isPreprintFlowOpen, setIsPreprintFlowOpen] = useState(false)
     const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false)
     const [isPosAdjustOpen, setIsPosAdjustOpen] = useState(false)
     const [isCameraScannerAutoEnabled, setIsCameraScannerAutoEnabled] = useState(() => {
@@ -678,6 +681,24 @@ export function POS() {
         return [...storages, ...virtualStorages]
     }, [canSellActivities, hasFeature, storages, t])
 
+    const showCartStorageLabels = useMemo(
+        () => shouldShowPosCartStorageLabels(cart, selectedStorageId),
+        [cart, selectedStorageId]
+    )
+    const getCartStorageName = useCallback((storageId?: string | null) => {
+        if (storageId === SERVICES_VIRTUAL_STORAGE_ID) {
+            return t('services.title', { defaultValue: 'Services' })
+        }
+        if (storageId === ACTIVITIES_STORAGE_ID) {
+            return t('activities.title', { defaultValue: 'Activities' })
+        }
+        const storage = posStorages.find((entry) => entry.id === storageId)
+        if (!storage) return t('pos.unknownStorage', { defaultValue: 'Unknown storage' })
+        return storage.isSystem
+            ? t(`storages.${storage.name.toLowerCase()}`, { defaultValue: storage.name })
+            : storage.name
+    }, [posStorages, t])
+
     const activityProducts = useMemo<PosCatalogProduct[]>(() => activityCatalog
         .filter((activity) => activity.isActive && !activity.isDeleted && activity.currency === features.default_currency)
         .map((activity) => {
@@ -745,6 +766,10 @@ export function POS() {
         : isServicesStorage
             ? serviceProducts
             : selectableInventoryProducts
+    const cartLookupProducts = useMemo<PosCatalogProduct[]>(
+        () => [...selectableInventoryProducts, ...serviceProducts, ...activityProducts],
+        [activityProducts, selectableInventoryProducts, serviceProducts]
+    )
 
     useEffect(() => {
         const excludedProductIds = new Set(
@@ -792,17 +817,8 @@ export function POS() {
     }, [arePermissionsLoading, canSellActivities, isWorkspaceLoading, posStorages, selectedStorageId, storages])
 
     const handleStorageSelect = useCallback((storageId: string) => {
-        if (cart.length > 0 && storageId !== selectedStorageId) {
-            toast({
-                variant: 'destructive',
-                title: t('messages.error'),
-                description: t('pos.switchStorageBlocked') || 'Finish or clear the current cart before changing storage.'
-            })
-            return
-        }
-
         setSelectedStorageId(storageId)
-    }, [cart.length, selectedStorageId, t, toast])
+    }, [])
 
     const handlePriceBookSelect = useCallback((priceBookId: string) => {
         if (cart.length > 0 && priceBookId !== selectedPriceBookId) {
@@ -841,13 +857,19 @@ export function POS() {
 
     const findStockProduct = useCallback((productId: string, storageId?: string) => {
         const resolvedStorageId = storageId || selectedStorageId
+        if (resolvedStorageId === SERVICES_VIRTUAL_STORAGE_ID) {
+            return serviceProducts.find((product) => product.id === productId)
+        }
+        if (resolvedStorageId === ACTIVITIES_STORAGE_ID) {
+            return activityProducts.find((product) => product.id === productId)
+        }
         if (resolvedStorageId) {
-            return sellableProducts.find((product) => product.id === productId && product.storageId === resolvedStorageId)
+            return products.find((product) => product.id === productId && product.storageId === resolvedStorageId)
         }
 
-        const matches = sellableProducts.filter((product) => product.id === productId)
+        const matches = products.filter((product) => product.id === productId)
         return matches.length === 1 ? matches[0] : undefined
-    }, [selectedStorageId, sellableProducts])
+    }, [activityProducts, products, selectedStorageId, serviceProducts])
 
     const getCartItemKey = useCallback((item: Pick<CartItem, 'product_id' | 'storageId' | 'selling_unit_ref'>) => {
         return buildCartItemKey(item.product_id, item.storageId, item.selling_unit_ref)
@@ -999,11 +1021,12 @@ export function POS() {
 
     useEffect(() => {
         setPaymentType((current) => {
+            if (isActivitiesCheckout) return current === 'order' || current === 'loan' ? 'cash' : current
             if (!quickOrderEnabled && current === 'order') return 'cash'
             if (quickOrderEnabled && current === 'cash') return 'order'
             return current
         })
-    }, [quickOrderEnabled])
+    }, [isActivitiesCheckout, quickOrderEnabled])
 
     useEffect(() => {
         if (isTutorialPosTask && paymentType === 'loan') {
@@ -1018,13 +1041,13 @@ export function POS() {
         }
 
         if (!isPosPaymentTypeAllowed(paymentType, {
-            isActivitiesStorage,
+            isActivitiesStorage: isActivitiesCheckout,
             isServicesStorage,
             quickOrderEnabled
         })) {
             setPaymentType('cash')
         }
-    }, [isActivitiesStorage, isServicesStorage, paymentType, quickOrderEnabled])
+    }, [isActivitiesCheckout, isActivitiesStorage, isServicesStorage, paymentType, quickOrderEnabled])
 
     useEffect(() => {
         if (!showOrderFreeBonus) {
@@ -1033,10 +1056,10 @@ export function POS() {
     }, [showOrderFreeBonus])
 
     useEffect(() => {
-        if (!hasFreeOrderBonus || !quickOrderEnabled || isActivitiesStorage || paymentType === 'order') return
+        if (!hasFreeOrderBonus || !quickOrderEnabled || isActivitiesCheckout || paymentType === 'order') return
         setPaymentType('order')
         setPaymentAccount(null)
-    }, [hasFreeOrderBonus, isActivitiesStorage, paymentType, quickOrderEnabled])
+    }, [hasFreeOrderBonus, isActivitiesCheckout, paymentType, quickOrderEnabled])
 
     const resetCheckoutPaymentType = useCallback(() => {
         setPaymentType(quickOrderEnabled ? 'order' : 'cash')
@@ -1306,10 +1329,10 @@ export function POS() {
         : cartCurrencies[0]) as CurrencyCode
 
     const openCurrencyConversionSettings = useCallback(() => {
-        if (!isAdmin || isActivitiesStorage || isServicesStorage) return
+        if (!isAdmin || isActivitiesCheckout || isServicesStorage) return
         setCurrencyConversionDraft(features.pos_convert_to_workspace_currency)
         setIsCurrencyConversionDialogOpen(true)
-    }, [features.pos_convert_to_workspace_currency, isActivitiesStorage, isServicesStorage, isAdmin])
+    }, [features.pos_convert_to_workspace_currency, isActivitiesCheckout, isActivitiesStorage, isServicesStorage, isAdmin])
 
     const saveCurrencyConversionSettings = useCallback(async () => {
         if (!isAdmin || !user) return
@@ -1472,7 +1495,7 @@ export function POS() {
     // A pre-print is a receipt-only snapshot. It deliberately does not call
     // checkout, reserve inventory, or create a sales-history record.
     const preprintReceiptData = useMemo(() => {
-        if (!user || cart.length === 0 || isActivitiesStorage || paymentType === 'order') {
+        if (!user || cart.length === 0 || isActivitiesCheckout || paymentType === 'order') {
             return null
         }
 
@@ -1550,7 +1573,7 @@ export function POS() {
         exchangeData,
         findStockProduct,
         getEffectiveProductCurrency,
-        isActivitiesStorage,
+        isActivitiesCheckout,
         paymentType,
         selectedStorageId,
         settlementCurrency,
@@ -1560,6 +1583,7 @@ export function POS() {
     ])
     const canPreprintReceipt = showPreprintReceipt && !!preprintReceiptData
     const {
+        buildReceiptPdf: buildPreprintReceiptPdf,
         isLoadingPrimaryReceiptTemplate: isLoadingPreprintTemplate,
         printReceipt: printPreprintReceipt,
     } = usePosReceiptPrinter({
@@ -1568,24 +1592,9 @@ export function POS() {
         enabled: canPreprintReceipt,
     })
     const handlePreprintReceipt = useCallback(async () => {
-        if (!preprintReceiptData || isPreprinting) return
-
-        setIsPreprinting(true)
-        try {
-            await printPreprintReceipt({
-                title: `Receipt_${preprintReceiptData.invoiceid || preprintReceiptData.id}`
-            })
-        } catch (error) {
-            console.error('[POS] Failed to print receipt pre-print:', error)
-            toast({
-                variant: 'destructive',
-                title: t('messages.error'),
-                description: t('pos.preprintReceiptFailed', { defaultValue: 'Could not print the receipt pre-print.' })
-            })
-        } finally {
-            setIsPreprinting(false)
-        }
-    }, [isPreprinting, preprintReceiptData, printPreprintReceipt, t, toast])
+        if (!preprintReceiptData || isPreprintFlowOpen) return
+        setIsPreprintFlowOpen(true)
+    }, [isPreprintFlowOpen, preprintReceiptData])
 
     // Track originalSubtotal in a ref so the bulk discount effect doesn't
     // re-run (and wipe per-item negotiated prices) when the cart changes.
@@ -1816,6 +1825,16 @@ export function POS() {
     const addSelectedUnitToCart = useCallback((product: PosCatalogProduct, unitSelection?: PosUnitSelection) => {
         const isInfiniteActivity = product.isInfiniteActivity === true
         const isNonInventoryService = isService(product)
+        if (!canAddPosCartItemFromStorage(cart, product.storageId, ACTIVITIES_STORAGE_ID)) {
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: t('pos.activitiesSeparateCart', {
+                    defaultValue: 'Activities must be checked out separately from products and services.'
+                })
+            })
+            return
+        }
         const priceBookPricing = isInfiniteActivity ? null : getPriceBookPricing(product)
         const effectivePrice = unitSelection?.price ?? priceBookPricing?.price ?? product.price
         const effectiveCurrency = (unitSelection?.currency ?? priceBookPricing?.currency ?? product.currency) as CurrencyCode
@@ -1925,10 +1944,20 @@ export function POS() {
             ]
         })
         hapticTrigger('selection')
-    }, [canSelectProduct, cartCurrencies, currencyConversionEnabled, features, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, t, toast, hapticTrigger])
+    }, [canSelectProduct, cart, cartCurrencies, currencyConversionEnabled, features, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, t, toast, hapticTrigger])
 
     const addFreeOnlyProductToCart = useCallback((product: PosCatalogProduct) => {
         if (!canUseOrderFreeBonus || !quickOrderEnabled || isActivitiesStorage || product.isInfiniteActivity) return false
+        if (!canAddPosCartItemFromStorage(cart, product.storageId, ACTIVITIES_STORAGE_ID)) {
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: t('pos.activitiesSeparateCart', {
+                    defaultValue: 'Activities must be checked out separately from products and services.'
+                })
+            })
+            return false
+        }
         const isNonInventoryService = isService(product)
         const hasRelatedSellingUnit = !isNonInventoryService && unitContextsByProductId.has(product.id)
         if (!canAddProductToPosCart('order', hasRelatedSellingUnit)) {
@@ -2724,7 +2753,7 @@ export function POS() {
         try {
         if (cart.length === 0 || !user) return
 
-        const checkoutRoute = getPosCheckoutRoute(paymentType, { isActivitiesStorage, isServicesStorage, quickOrderEnabled })
+        const checkoutRoute = getPosCheckoutRoute(paymentType, { isActivitiesStorage: isActivitiesCheckout, isServicesStorage, quickOrderEnabled })
         if (checkoutRoute === 'blocked') { setPaymentType('cash'); return }
         if (checkoutRoute === 'quick-order') {
             if (cart.some((item) => item.selling_unit_ref && item.base_unit_ref)) {
@@ -3411,10 +3440,10 @@ export function POS() {
                                 isLoading={isLoading}
                                 canPreprintReceipt={canPreprintReceipt}
                                 handlePreprintReceipt={handlePreprintReceipt}
-                                isPreprinting={isPreprinting}
+                                isPreprintFlowOpen={isPreprintFlowOpen}
                                 isLoadingPreprintTemplate={isLoadingPreprintTemplate}
                                 getDisplayImageUrl={getDisplayImageUrl}
-                                products={sellableProducts}
+                                products={cartLookupProducts}
                                 getCartMinimumPriceViolation={getCartMinimumPriceViolation}
                                 hasMinimumSellingPriceViolation={hasMinimumSellingPriceViolation}
                                 convertPrice={convertPrice}
@@ -3431,7 +3460,10 @@ export function POS() {
                                 setDynamicUnitModal={setDynamicUnitModal}
                                 setExactQuantity={setExactQuantity}
                                 unitRegistry={unitRegistry}
-                                isActivitiesStorage={isActivitiesStorage}
+                                isActivitiesCheckout={isActivitiesCheckout}
+                                showCartStorageLabels={showCartStorageLabels}
+                                getCartStorageName={getCartStorageName}
+                                fallbackStorageId={selectedStorageId}
                                 showOrderFreeBonus={showOrderFreeBonus}
                                 onOpenFreeBonusEditor={openFreeBonusEditor}
                             />
@@ -3799,7 +3831,15 @@ export function POS() {
                                                     )}
 
                                                     <div className="flex-1 min-w-0">
-                                                        <div className="font-medium truncate">{item.name}</div>
+                                                        <div className="min-w-0">
+                                                            <div className="font-medium truncate">{item.name}</div>
+                                                            {showCartStorageLabels && (
+                                                                <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                                                                    <Warehouse className="h-3 w-3 shrink-0" />
+                                                                    <span className="truncate">{getCartStorageName(item.storageId || selectedStorageId)}</span>
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                         <div className="flex flex-col gap-0.5">
                                                             {/* Show original price (grayed out if discounted or negotiated) */}
                                                             <div className={cn(
@@ -4114,7 +4154,7 @@ export function POS() {
                                             <Banknote className={cn("w-3 h-3 transition-colors", paymentType === 'cash' ? "text-emerald-600 dark:text-emerald-400" : "text-emerald-600/80")} />
                                             {t('pos.cash') || 'Cash'}
                                         </button>
-                                        {quickOrderEnabled && !isActivitiesStorage ? <button
+                                        {quickOrderEnabled && !isActivitiesCheckout ? <button
                                             onClick={() => setPaymentType('order')}
                                             className={cn(
                                                 "px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 border transition-all",
@@ -4145,7 +4185,7 @@ export function POS() {
                                             <Zap className={cn("w-3 h-3 transition-colors", paymentType === 'digital' ? "text-blue-600 dark:text-blue-400" : "text-blue-600/80")} />
                                             {t('pos.digital') || 'Digital'}
                                         </button>
-                                        {!isActivitiesStorage && <button
+                                        {!isActivitiesCheckout && <button
                                             data-tour-id="tutorial-pos-payment-loan"
                                             onClick={() => {
                                                 if (!isTutorialPosTask && !hasFreeOrderBonus) setPaymentType('loan')
@@ -4298,11 +4338,11 @@ export function POS() {
                                         size="lg"
                                         className="w-14 h-14 rounded-2xl border-2 hover:bg-primary/5 hover:text-primary transition-all group flex-none px-0"
                                         onClick={handlePreprintReceipt}
-                                        disabled={cart.length === 0 || isLoading || isPreprinting || isLoadingPreprintTemplate}
+                                        disabled={cart.length === 0 || isLoading || isPreprintFlowOpen || isLoadingPreprintTemplate}
                                         title={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
                                         aria-label={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
                                     >
-                                        {isPreprinting || isLoadingPreprintTemplate
+                                        {isPreprintFlowOpen || isLoadingPreprintTemplate
                                             ? <Loader2 className="w-5 h-5 animate-spin" />
                                             : <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />}
                                     </Button>
@@ -4373,6 +4413,24 @@ export function POS() {
                 onShowCategoriesChange={setShowCategories}
                 showPreprintReceipt={showPreprintReceipt}
                 onShowPreprintReceiptChange={setShowPreprintReceipt}
+            />
+
+            <PrintFlow
+                isOpen={isPreprintFlowOpen}
+                onClose={() => setIsPreprintFlowOpen(false)}
+                title={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
+                showSaveButton={false}
+                features={features}
+                printSelectionOptions={[{
+                    format: 'receipt',
+                    label: t('pos.printReceipt', { defaultValue: 'Print Receipt' }),
+                    description: t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })
+                }]}
+                pdfBuilder={async () => buildPreprintReceiptPdf()}
+                onPreviewPrint={(blob) => printPreprintReceipt({
+                    pdfBuilder: async () => blob,
+                    title: `Receipt_${preprintReceiptData?.invoiceid || preprintReceiptData?.id || 'Sale'}`
+                })}
             />
 
             <Dialog
@@ -4918,6 +4976,9 @@ export function POS() {
                 }}
                 workspaceId={user?.workspaceId ?? ''}
                 cart={cart}
+                showStorageLabels={showCartStorageLabels}
+                getStorageName={getCartStorageName}
+                fallbackStorageId={selectedStorageId}
                 totalAmount={totalAmount}
                 settlementCurrency={settlementCurrency as CurrencyCode}
                 defaultCurrency={features.default_currency}
@@ -4998,7 +5059,6 @@ export function POS() {
         </div>
     )
 }
-
 // --- Shared Components ---
 
 const ExchangeTicker = ({
@@ -5796,10 +5856,13 @@ interface MobileCartProps {
     isLoading: boolean
     canPreprintReceipt: boolean
     handlePreprintReceipt: () => Promise<void>
-    isPreprinting: boolean
+    isPreprintFlowOpen: boolean
     isLoadingPreprintTemplate: boolean
     getDisplayImageUrl: (url?: string) => string
-    products: InventoryProduct[]
+    products: PosCatalogProduct[]
+    showCartStorageLabels: boolean
+    getCartStorageName: (storageId?: string | null) => string
+    fallbackStorageId: string
     getCartMinimumPriceViolation: (item: CartItem) => PosMinimumPriceViolation | null
     hasMinimumSellingPriceViolation: boolean
     convertPrice: (amount: number, from: CurrencyCode, to: CurrencyCode) => number
@@ -5812,7 +5875,7 @@ interface MobileCartProps {
     setDiscountType: (type: 'percent' | 'amount') => void
     hasTrulyMissingRates: boolean
     hasLoadingRates: boolean
-    isActivitiesStorage: boolean
+    isActivitiesCheckout: boolean
     t: any
     setDynamicUnitModal: (modal: { type: string; itemKey: string } | null) => void
     setExactQuantity: (itemKey: string, quantity: number) => void
@@ -5825,11 +5888,12 @@ function MobileCart({
     cart, removeFromCart, updateQuantity, features, totalAmount,
     settlementCurrency, paymentType, setPaymentType, isOrderPaymentLocked, isTutorialPosTask, tutorialProductId, digitalProvider,
     setDigitalProvider, workspaceId, paymentAccount, setPaymentAccount, quickOrderEnabled, handleCheckout, handleHoldSale, isLoading,
-    canPreprintReceipt, handlePreprintReceipt, isPreprinting, isLoadingPreprintTemplate,
-    getDisplayImageUrl, products, getCartMinimumPriceViolation, hasMinimumSellingPriceViolation, convertPrice, openPriceEdit,
+    canPreprintReceipt, handlePreprintReceipt, isPreprintFlowOpen, isLoadingPreprintTemplate,
+    getDisplayImageUrl, products, showCartStorageLabels, getCartStorageName, fallbackStorageId,
+    getCartMinimumPriceViolation, hasMinimumSellingPriceViolation, convertPrice, openPriceEdit,
     clearNegotiatedPrice, isAdmin,
     discountValue, setDiscountValue, discountType, setDiscountType,
-    hasTrulyMissingRates, hasLoadingRates, isActivitiesStorage, t,
+    hasTrulyMissingRates, hasLoadingRates, isActivitiesCheckout, t,
     setDynamicUnitModal, setExactQuantity, unitRegistry,
     showOrderFreeBonus, onOpenFreeBonusEditor
 }: MobileCartProps) {
@@ -5974,7 +6038,15 @@ function MobileCart({
                                     <div className="flex justify-between items-start gap-2">
                                         <div className="flex flex-col min-w-0 flex-1">
                                             <div className="flex items-center justify-between gap-2">
-                                                <h3 className="font-bold text-sm truncate flex-1">{item.name}</h3>
+                                                <div className="min-w-0 flex-1">
+                                                    <h3 className="font-bold text-sm truncate">{item.name}</h3>
+                                                    {showCartStorageLabels && (
+                                                        <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                                                            <Warehouse className="h-3 w-3 shrink-0" />
+                                                            <span className="truncate">{getCartStorageName(item.storageId || fallbackStorageId)}</span>
+                                                        </div>
+                                                    )}
+                                                </div>
                                                 <div className="text-primary font-black text-sm whitespace-nowrap flex items-center gap-1">
                                                     {formatCurrency(convertedUnitPrice * item.quantity, settlementCurr, features.iqd_display_preference)}
                                                     {isAdmin && (
@@ -6173,11 +6245,11 @@ function MobileCart({
                                         event.stopPropagation()
                                         void handlePreprintReceipt()
                                     }}
-                                    disabled={cart.length === 0 || isLoading || isPreprinting || isLoadingPreprintTemplate}
+                                    disabled={cart.length === 0 || isLoading || isPreprintFlowOpen || isLoadingPreprintTemplate}
                                     title={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
                                     aria-label={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
                                 >
-                                    {isPreprinting || isLoadingPreprintTemplate
+                                    {isPreprintFlowOpen || isLoadingPreprintTemplate
                                         ? <Loader2 className="w-5 h-5 animate-spin" />
                                         : <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />}
                                 </Button>
@@ -6251,7 +6323,7 @@ function MobileCart({
                             >
                                 <Banknote className={cn("w-4 h-4 transition-colors", paymentType === 'cash' ? "text-emerald-600 dark:text-emerald-400" : "text-emerald-600/80")} /> {t('pos.cash') || 'Cash'}
                             </button>
-                            {quickOrderEnabled && !isActivitiesStorage ? <button
+                            {quickOrderEnabled && !isActivitiesCheckout ? <button
                                 onClick={() => setPaymentType('order')}
                                 className={cn(
                                     "flex-1 py-3.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all border",
@@ -6280,7 +6352,7 @@ function MobileCart({
                             >
                                 <Zap className={cn("w-4 h-4 transition-colors", paymentType === 'digital' ? "text-blue-600 dark:text-blue-400" : "text-blue-600/80")} /> {t('pos.digital') || 'Digital'}
                             </button>
-                            {!isActivitiesStorage && <button
+                            {!isActivitiesCheckout && <button
                                 data-tour-id="tutorial-pos-payment-loan"
                                 onClick={() => {
                                     if (!isTutorialPosTask && !isOrderPaymentLocked) setPaymentType('loan')
@@ -6433,11 +6505,11 @@ function MobileCart({
                                         variant="outline"
                                         className="h-14 w-14 rounded-2xl border-2 hover:bg-primary/5 hover:text-primary transition-all group flex-none px-0"
                                         onClick={handlePreprintReceipt}
-                                        disabled={cart.length === 0 || isLoading || isPreprinting || isLoadingPreprintTemplate}
+                                        disabled={cart.length === 0 || isLoading || isPreprintFlowOpen || isLoadingPreprintTemplate}
                                         title={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
                                         aria-label={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
                                     >
-                                        {isPreprinting || isLoadingPreprintTemplate
+                                        {isPreprintFlowOpen || isLoadingPreprintTemplate
                                             ? <Loader2 className="w-5 h-5 animate-spin" />
                                             : <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />}
                                     </Button>

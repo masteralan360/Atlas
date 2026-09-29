@@ -94,7 +94,7 @@ import {
     TooltipProvider,
     TooltipTrigger,
     AppPagination,
-    PrintPreviewModal,
+    PrintFlow,
     useToast
 } from '@/ui/components'
 
@@ -1996,7 +1996,7 @@ export function Products() {
                 </CardContent>
             </Card>
 
-            <PrintPreviewModal
+            <PrintFlow
                 isOpen={isBarcodePrintOpen}
                 onClose={() => {
                     setIsBarcodePrintOpen(false)

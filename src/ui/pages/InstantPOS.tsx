@@ -11,7 +11,7 @@ import type { CurrencyCode } from '@/local-db/models'
 import { useWorkspace } from '@/workspace'
 import { formatCompactDateTime, formatCurrency, generateId, cn, stylizeText } from '@/lib/utils'
 import { readInstantPosProductsPerRow, saveInstantPosProductsPerRow } from '@/lib/instantPosLayout'
-import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle, Button, Input, useToast, Textarea, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, StorageSelector } from '@/ui/components'
+import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle, Button, Input, useToast, Textarea, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, StorageSelector, PrintFlow } from '@/ui/components'
 import { AlertCircle, CheckCircle2, ChefHat, ChevronDown, ChevronRight, ChevronUp, Loader2, Menu, Minus, Package, Plus, Receipt, Search, ShoppingCart, StickyNote, Table2, Trash2 } from 'lucide-react'
 import { UiAccessGate } from '@/context/UiAccessContext'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
@@ -1343,6 +1343,7 @@ export function InstantPOS() {
 
     const canPreprintReceipt = !!preprintReceiptData
     const {
+        buildReceiptPdf: buildPreprintReceiptPdf,
         isLoadingPrimaryReceiptTemplate: isLoadingPreprintTemplate,
         printReceipt: printPreprintReceipt,
     } = usePosReceiptPrinter({
@@ -1352,25 +1353,10 @@ export function InstantPOS() {
         receiptTemplateKey: INSTANT_HISTORY_RECEIPT_TEMPLATE_KEY,
     })
 
-    const handlePreprintReceipt = useCallback(async () => {
+    const handlePreprintReceipt = useCallback(() => {
         if (!preprintReceiptData || isPreprinting) return
-
         setIsPreprinting(true)
-        try {
-            await printPreprintReceipt({
-                title: `Receipt_${preprintReceiptData.invoiceid || preprintReceiptData.id}`
-            })
-        } catch (error) {
-            console.error('[Instant POS] Failed to print receipt pre-print:', error)
-            toast({
-                variant: 'destructive',
-                title: t('messages.error'),
-                description: t('pos.preprintReceiptFailed', { defaultValue: 'Could not print the receipt pre-print.' })
-            })
-        } finally {
-            setIsPreprinting(false)
-        }
-    }, [isPreprinting, preprintReceiptData, printPreprintReceipt, t, toast])
+    }, [isPreprinting, preprintReceiptData])
 
     const canCookOrderTicket = !!activeTicket && activeTicket.items.length > 0
     const cookTicketLocale = useMemo(() => (
@@ -2284,6 +2270,26 @@ export function InstantPOS() {
         />
     )
 
+    const preprintFlow = (
+        <PrintFlow
+            isOpen={isPreprinting}
+            onClose={() => setIsPreprinting(false)}
+            title={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
+            showSaveButton={false}
+            features={features}
+            printSelectionOptions={[{
+                format: 'receipt',
+                label: t('pos.printReceipt', { defaultValue: 'Print Receipt' }),
+                description: t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })
+            }]}
+            pdfBuilder={async () => buildPreprintReceiptPdf()}
+            onPreviewPrint={(blob) => printPreprintReceipt({
+                pdfBuilder: async () => blob,
+                title: `Receipt_${preprintReceiptData?.invoiceid || preprintReceiptData?.id || 'Sale'}`
+            })}
+        />
+    )
+
     if (restaurantMode && restaurantTableNumber === null) {
         return (
             <>
@@ -2303,6 +2309,7 @@ export function InstantPOS() {
                     onSaveActionVisibility={saveRestaurantActionVisibility}
                 />
                 {checkoutSuccessModal}
+                {preprintFlow}
             </>
         )
     }
@@ -3017,6 +3024,7 @@ export function InstantPOS() {
             />
 
             {checkoutSuccessModal}
+            {preprintFlow}
         </div>
     )
 }

@@ -26,7 +26,7 @@ import {
     CardContent,
     DeleteConfirmationModal,
     Input,
-    PrintPreviewModal,
+    PrintFlow,
     Table,
     TableBody,
     TableCell,
@@ -898,7 +898,7 @@ export function SimpleLoanListView({
                 isReadOnly={isReadOnly}
             />
 
-            <PrintPreviewModal
+            <PrintFlow
                 isOpen={showPrintPreview}
                 onClose={() => setShowPrintPreview(false)}
                 onConfirm={() => setShowPrintPreview(false)}
@@ -925,7 +925,7 @@ export function SimpleLoanListView({
                 title={t('loans.confirmDelete') || 'Delete Loan'}
                 description={getLoanDeleteWarning(loanToDelete, t)}
             />
-            <PrintPreviewModal
+            <PrintFlow
                 isOpen={showLoanPrintPreview}
                 onClose={() => {
                     setShowLoanPrintPreview(false)

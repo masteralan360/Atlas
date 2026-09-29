@@ -16,7 +16,7 @@ import type { PartnerAccountStatementPeriod } from '@/lib/partnerAccountStatemen
 import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
 import type { PrintFormat } from '@/services/pdfGenerator'
 import type { WorkspaceFeatures } from '@/workspace'
-import { PrintPreviewModal } from '@/ui/components'
+import { PrintFlow } from '@/ui/components'
 import { LoanAccountStatementPaymentPickerDialog } from './LoanAccountStatementPaymentPickerDialog'
 
 const ALL_TIME_PERIOD: PartnerAccountStatementPeriod = { type: 'allTime' }
@@ -99,10 +99,9 @@ export function LoanAccountStatementPrintFlow({
                 onConfirm={handlePaymentConfirmed}
             />
             {statement && templatePreview && LOAN_ACCOUNT_STATEMENT_TARGET ? (
-                <PrintPreviewModal
+                <PrintFlow
                     module="loans"
                     isOpen={previewOpen}
-                    skipPrintSelection
                     onClose={() => setPreviewOpen(false)}
                     onConfirm={() => setPreviewOpen(false)}
                     title={t('loans.accountStatement.title')}

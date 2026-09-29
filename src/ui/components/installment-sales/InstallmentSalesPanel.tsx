@@ -73,7 +73,7 @@ import {
   DateTimePicker,
   Input,
   Label,
-  PrintPreviewModal,
+  PrintFlow,
   Select,
   SelectContent,
   SelectItem,
@@ -1289,7 +1289,7 @@ export function InstallmentSaleDetailsDialog({
         onOpenChange={setCancelOpen}
       />
       {sale ? (
-        <PrintPreviewModal
+        <PrintFlow
           module="installment_sales"
           isOpen={printOpen}
           onClose={() => setPrintOpen(false)}

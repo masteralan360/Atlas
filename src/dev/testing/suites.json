@@ -12,6 +12,21 @@
     ],
     "unavailable": ["hosted-supabase", "browser-workflow", "native-session-storage"]
   },
+  "printing-workflow": {
+    "titleKey": "devTesting.printingWorkflow",
+    "coverageHelpKey": "devTesting.printingWorkflowCoverageHelp",
+    "groups": [
+      {
+        "id": "print-flow",
+        "titleKey": "devTesting.printingWorkflowGroup",
+        "layer": "contract",
+        "files": [
+          "src/lib/printFlow.test.ts"
+        ]
+      }
+    ],
+    "unavailable": ["browser-workflow"]
+  },
   "sale-orders": {
     "titleKey": "devTesting.saleOrders",
     "coverageHelpKey": "devTesting.saleOrdersIsolatedCoverageHelp",
@@ -72,7 +87,8 @@
         "files": [
           "src/local-db/orderFinancing.test.ts",
           "src/local-db/orderInstallments.test.ts",
-          "src/local-db/inventorySnapshotSync.test.ts"
+          "src/local-db/inventorySnapshotSync.test.ts",
+          "src/local-db/quickOrderAtomic.test.ts"
         ]
       },
       {
@@ -264,6 +280,15 @@
         "layer": "calculation",
         "files": [
           "src/dev/testing/suites/posCart.test.ts"
+        ]
+      },
+      {
+        "id": "printing",
+        "titleKey": "devTesting.printingWorkflowGroup",
+        "layer": "contract",
+        "coverageHelpKey": "devTesting.printingWorkflowCoverageHelp",
+        "files": [
+          "src/lib/printFlow.test.ts"
         ]
       },
       {
@@ -646,6 +671,15 @@
           "src/lib/productAdditionalImages.test.ts",
           "src/lib/productImport.test.ts",
           "src/lib/productLabelPrintTemplates.test.ts"
+        ]
+      },
+      {
+        "id": "printing",
+        "titleKey": "devTesting.printingWorkflowGroup",
+        "layer": "contract",
+        "coverageHelpKey": "devTesting.printingWorkflowCoverageHelp",
+        "files": [
+          "src/lib/printFlow.test.ts"
         ]
       },
       {

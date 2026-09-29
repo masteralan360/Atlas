@@ -62,7 +62,7 @@ import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
 import { Button } from '@/ui/components/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/ui/components/card'
 import { PartnerBalanceSummary, MultiCurrencyDisplay, formatMultiCurrencySummarySentence, type CurrencyAmountItem } from '@/ui/components/crm/PartnerBalanceSummary'
-import { PrintPreviewModal } from '@/ui/components/PrintPreviewModal'
+import { PrintFlow } from '@/ui/components/PrintFlow'
 import {
     Table,
     TableBody,
@@ -2964,7 +2964,7 @@ export function PartnerDetailsView({
             </div>
 
             {partnerPrintPreview && partnerPrintTarget && activePrintLayout && partnerPrintData ? (
-                <PrintPreviewModal
+                <PrintFlow
                     isOpen={isPrintPreviewOpen}
                     onClose={() => {
                         setIsPrintPreviewOpen(false)

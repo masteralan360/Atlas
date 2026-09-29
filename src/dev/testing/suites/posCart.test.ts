@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { CartItem } from '@/types'
+import { ACTIVITIES_VIRTUAL_STORAGE_ID, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import {
+    canAddPosCartItemFromStorage,
     canAddProductToPosCart,
     canOfferMobileFreeOnlyOrderHold,
     canSetPosPaidQuantity,
     hasPosOrderFreeBonus,
     isFreeOnlyPosQuickOrder,
+    shouldShowPosCartStorageLabels,
     restorePosCart,
     shouldRemovePosCartItem,
     snapshotPosCart
@@ -16,6 +19,29 @@ const item: CartItem = { product_id: 'p', storageId: 's', sku: 'SKU', name: 'Ite
     quantity: 2.25, max_stock: 20, negotiated_price: 90, price_book_id: 'book' }
 
 describe('POS held-cart snapshots and restoration', () => {
+    it('shows storage labels only while multiple source locations remain in the cart', () => {
+        const otherStorageItem = { ...item, product_id: 'other', storageId: 'storage-2' }
+        expect(shouldShowPosCartStorageLabels([item])).toBe(false)
+        expect(shouldShowPosCartStorageLabels([item, otherStorageItem])).toBe(true)
+        expect(shouldShowPosCartStorageLabels([item])).toBe(false)
+    })
+
+    it('counts the Services virtual location as a distinct cart source', () => {
+        const service = { ...item, product_id: 'service', storageId: SERVICES_VIRTUAL_STORAGE_ID, is_service: true }
+        expect(shouldShowPosCartStorageLabels([item, service])).toBe(true)
+    })
+
+    it('keeps Activities in its dedicated transaction cart while allowing service and stock lines together', () => {
+        const activity = { ...item, product_id: 'activity', storageId: ACTIVITIES_VIRTUAL_STORAGE_ID }
+        const service = { ...item, product_id: 'service', storageId: SERVICES_VIRTUAL_STORAGE_ID, is_service: true }
+        expect(canAddPosCartItemFromStorage([item], ACTIVITIES_VIRTUAL_STORAGE_ID, ACTIVITIES_VIRTUAL_STORAGE_ID)).toBe(false)
+        expect(canAddPosCartItemFromStorage([activity], 'storage-2', ACTIVITIES_VIRTUAL_STORAGE_ID)).toBe(false)
+        expect(canAddPosCartItemFromStorage([item], service.storageId, ACTIVITIES_VIRTUAL_STORAGE_ID)).toBe(true)
+        expect(canAddPosCartItemFromStorage([service], 'storage-2', ACTIVITIES_VIRTUAL_STORAGE_ID)).toBe(true)
+        expect(canAddPosCartItemFromStorage([item], 'storage-2', ACTIVITIES_VIRTUAL_STORAGE_ID)).toBe(true)
+        expect(canAddPosCartItemFromStorage([activity], ACTIVITIES_VIRTUAL_STORAGE_ID, ACTIVITIES_VIRTUAL_STORAGE_ID)).toBe(true)
+    })
+
     it('blocks related-unit products from an Order cart without restricting other payment methods', () => {
         expect(canAddProductToPosCart('order', true)).toBe(false)
         expect(canAddProductToPosCart('order', false)).toBe(true)

@@ -51,7 +51,7 @@ import {
     SelectItem,
     SelectTrigger,
     SelectValue,
-    PrintPreviewModal,
+    PrintFlow,
     SalesNoteModal,
     ExportPreviewModal,
     Tooltip,
@@ -1041,7 +1041,7 @@ export function Sales() {
     )
 
     const handleConfirmPrint = () => {
-        // PrintPreviewModal handles PDF rendering/printing internally
+        // PrintFlow handles PDF rendering/printing internally
         setShowPrintPreview(false)
         setPrintingSale(null)
         setSaleToPrintSelection(null)
@@ -3268,7 +3268,7 @@ export function Sales() {
                 />
 
                 {/* Print Preview Modal */}
-                <PrintPreviewModal
+                <PrintFlow
                     isOpen={showPrintPreview}
                     onClose={() => {
                         setShowPrintPreview(false)

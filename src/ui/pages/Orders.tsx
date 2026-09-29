@@ -123,7 +123,7 @@ import {
     DropdownMenuTrigger,
     SettlementDialog,
     Textarea,
-    PrintPreviewModal,
+    PrintFlow,
     DateRangeFilters,
     Tooltip,
     TooltipContent,
@@ -3051,7 +3051,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                 </DialogContent>
             </Dialog>
 
-            <PrintPreviewModal
+            <PrintFlow
                 isOpen={showPrintPreview}
                 onClose={() => setShowPrintPreview(false)}
                 onConfirm={() => setShowPrintPreview(false)}

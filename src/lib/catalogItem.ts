@@ -26,6 +26,7 @@ export function canBePurchased(item: Pick<Product, 'isService'> | null | undefin
 
 /** A UI-only location key. It is never persisted to products, inventory, or sales. */
 export const SERVICES_VIRTUAL_STORAGE_ID = '__atlas_services__'
+export const ACTIVITIES_VIRTUAL_STORAGE_ID = '__atlas_activities__'
 
 export function isServicesVirtualStorage(storageId: string | null | undefined): boolean {
     return storageId === SERVICES_VIRTUAL_STORAGE_ID

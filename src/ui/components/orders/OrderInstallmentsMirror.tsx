@@ -27,7 +27,7 @@ import {
     CardHeader,
     CardTitle,
     Input,
-    PrintPreviewModal,
+    PrintFlow,
     SettlementDialog,
     Table,
     TableBody,
@@ -708,7 +708,7 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
                 onSubmit={handleSettlement}
             />
 
-            <PrintPreviewModal
+            <PrintFlow
                 isOpen={printTarget !== null}
                 onClose={() => {
                     setPrintTarget(null)
