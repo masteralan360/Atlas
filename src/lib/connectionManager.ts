@@ -61,6 +61,19 @@ export class ConnectionManager {
         return () => this.listeners.delete(listener)
     }
 
+    /** Announces an effective cloud-availability transition caused by maintenance. */
+    notifyMaintenanceAvailabilityChanged(wasBlocked: boolean, isBlocked: boolean) {
+        if (wasBlocked === isBlocked) return
+        if (isBlocked) {
+            this.emit('offline')
+            return
+        }
+
+        if (this.state.isOnline && navigator.onLine !== false) {
+            this.emit('online')
+        }
+    }
+
     getState(): Readonly<ConnectionState> {
         return { ...this.state }
     }

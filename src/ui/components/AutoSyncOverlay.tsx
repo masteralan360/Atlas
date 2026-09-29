@@ -13,6 +13,7 @@ import { LAST_SYNC_KEY } from '@/sync/constants'
 import { isRecoverablePriceBookMutation } from '@/sync/syncEngine'
 import { runManagedFullSync } from '@/sync/syncCoordinator'
 import { useSyncProgress } from '@/sync/syncProgress'
+import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 
 const MIN_OVERLAY_MS = 800
 
@@ -39,6 +40,7 @@ export function AutoSyncOverlay() {
     const { toast } = useToast()
     const { user, isAuthenticated } = useAuth()
     const { isLocalMode } = useWorkspace()
+    const isOnline = useNetworkStatus()
     const syncProgress = useSyncProgress()
     const recoverablePendingCount = useLiveQuery(countRecoverableMutations, []) ?? 0
     const pendingCount = isLocalMode ? 0 : recoverablePendingCount
@@ -64,7 +66,7 @@ export function AutoSyncOverlay() {
             return
         }
 
-        if (!connectionManager.getState().isOnline) {
+        if (!isOnline) {
             return
         }
 
@@ -87,6 +89,8 @@ export function AutoSyncOverlay() {
                 user.workspaceId,
                 localStorage.getItem(LAST_SYNC_KEY)
             )
+
+            if (result.maintenanceDeferred) return
 
             localStorage.setItem(LAST_SYNC_KEY, new Date().toISOString())
 
@@ -116,7 +120,7 @@ export function AutoSyncOverlay() {
                 setOverlayPendingCount(0)
             }
         }
-    }, [isAuthenticated, isLocalMode, t, toast, user])
+    }, [isAuthenticated, isLocalMode, isOnline, t, toast, user])
 
     useEffect(() => {
         if (!isSupabaseConfigured || !isAuthenticated || !user || isLocalMode) {
@@ -155,7 +159,7 @@ export function AutoSyncOverlay() {
             return
         }
 
-        if (!connectionManager.getState().isOnline || autoSyncActiveRef.current || scheduledSyncRef.current) {
+        if (!isOnline || autoSyncActiveRef.current || scheduledSyncRef.current) {
             return
         }
 
@@ -170,7 +174,7 @@ export function AutoSyncOverlay() {
                 scheduledSyncRef.current = null
             }
         }
-    }, [isAuthenticated, isLocalMode, pendingCount, runAutoSync, user])
+    }, [isAuthenticated, isLocalMode, isOnline, pendingCount, runAutoSync, user])
 
     const displayCount = syncProgress.isSyncing && syncProgress.phase === 'pushing' && syncProgress.total > 0
         ? syncProgress.total

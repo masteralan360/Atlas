@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 
 import { useAuth } from '@/auth'
 import { isSupabaseConfigured } from '@/auth/supabase'
-import { connectionManager } from '@/lib/connectionManager'
+import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { LAST_SYNC_KEY } from '@/sync/constants'
 import { runManagedFullSync } from '@/sync/syncCoordinator'
 import { useWorkspace } from '@/workspace'
@@ -50,21 +50,9 @@ export function WorkspaceWarmup() {
         isLoading: isWorkspaceLoading,
         isLocalMode
     } = useWorkspace()
-    const [isOnline, setIsOnline] = useState(() => connectionManager.getState().isOnline)
+    const isOnline = useNetworkStatus()
     const warmedWorkspacesRef = useRef(new Set<string>())
     const modulePreloadedWorkspacesRef = useRef(new Set<string>())
-
-    useEffect(() => {
-        const unsubscribe = connectionManager.subscribe((event) => {
-            if (event === 'online' || event === 'heartbeat' || event === 'wake') {
-                setIsOnline(true)
-            } else if (event === 'offline') {
-                setIsOnline(false)
-            }
-        })
-
-        return unsubscribe
-    }, [])
 
     const preloadWorkspaceModules = useCallback(async () => {
         const tasks: Array<() => Promise<unknown>> = [

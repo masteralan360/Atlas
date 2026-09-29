@@ -4,6 +4,13 @@ import { decrypt, encrypt } from '@/lib/encryption'
 import { createWorkspaceUsageFetch } from '@/lib/workspaceUsageFetch'
 import { isTauri } from '@/lib/platform'
 import { createAuthSessionManager } from './sessionManager'
+import { subscribeAppMaintenance } from '@/lib/appMaintenanceState'
+import { isCurrentWorkspaceMaintenanceBlockingDataAccess } from '@/lib/appMaintenanceAccess'
+import {
+    createMaintenanceAwareFetch,
+    installGlobalMaintenanceFetchGate,
+    installMaintenanceRealtimeGate
+} from '@/lib/supabaseMaintenanceGate'
 
 // Custom storage adapter that encrypts everything in local storage
 const EncryptedStorage = {
@@ -50,6 +57,7 @@ export const isSupabaseConfigured = Boolean(isUrlValid && isKeyValid)
 // The app will redirect to configuration page if isSupabaseConfigured is false
 const clientUrl = isUrlValid ? resolvedSupabaseUrl : 'https://placeholder.supabase.co'
 const clientKey = isKeyValid ? resolvedSupabaseAnonKey : 'placeholder-key'
+installGlobalMaintenanceFetchGate(clientUrl, isCurrentWorkspaceMaintenanceBlockingDataAccess)
 // Browser REST traffic is sent through the same-origin usage gateway so the
 // server, not the browser, chooses the Web Live (20x) charge rate. Desktop
 // clients retain their direct Tauri (10x) metering path.
@@ -60,14 +68,20 @@ const webStorageUsageGatewayUrl = !isTauri() && !isBackendConfigurationRequired
     ? (import.meta.env.VITE_WEB_STORAGE_USAGE_GATEWAY_URL || (import.meta.env.PROD ? '/api-workspace-storage' : ''))
     : ''
 
+const workspaceUsageFetch = createWorkspaceUsageFetch({
+    supabaseUrl: clientUrl,
+    supabaseAnonKey: clientKey,
+    webGatewayUrl: webUsageGatewayUrl,
+    webStorageGatewayUrl: webStorageUsageGatewayUrl
+})
+
 export const supabase = createClient(clientUrl, clientKey, {
     global: {
-        fetch: createWorkspaceUsageFetch({
-            supabaseUrl: clientUrl,
-            supabaseAnonKey: clientKey,
-            webGatewayUrl: webUsageGatewayUrl,
-            webStorageGatewayUrl: webStorageUsageGatewayUrl
-        })
+        fetch: createMaintenanceAwareFetch(
+            workspaceUsageFetch,
+            clientUrl,
+            isCurrentWorkspaceMaintenanceBlockingDataAccess
+        )
     },
     auth: {
         persistSession: true,
@@ -76,6 +90,17 @@ export const supabase = createClient(clientUrl, clientKey, {
         storage: EncryptedStorage
     }
 })
+
+const maintenanceRealtimeGate = installMaintenanceRealtimeGate(
+    supabase as any,
+    isCurrentWorkspaceMaintenanceBlockingDataAccess
+)
+subscribeAppMaintenance(() => {
+    void maintenanceRealtimeGate.reconcile()
+})
+
+export const createAppMaintenanceRealtimeChannel = () =>
+    maintenanceRealtimeGate.createMaintenanceChannel()
 
 const authSessionManager = createAuthSessionManager({
     refreshSession: () => supabase.auth.refreshSession(),

@@ -12,6 +12,24 @@
     ],
     "unavailable": ["hosted-supabase", "browser-workflow", "native-session-storage"]
   },
+  "maintenance-mode": {
+    "titleKey": "devTesting.maintenanceMode",
+    "coverageHelpKey": "devTesting.maintenanceModeCoverageHelp",
+    "groups": [
+      {
+        "id": "cloud-hybrid",
+        "titleKey": "devTesting.maintenanceModeGroup",
+        "layer": "contract",
+        "files": [
+          "src/services/appMaintenance.test.ts",
+          "src/lib/supabaseMaintenanceGate.test.ts",
+          "src/services/appMaintenanceMigration.test.ts",
+          "src/sync/syncCoordinator.test.ts"
+        ]
+      }
+    ],
+    "unavailable": ["hosted-supabase", "browser-workflow", "native-workspace-restart"]
+  },
   "printing-workflow": {
     "titleKey": "devTesting.printingWorkflow",
     "coverageHelpKey": "devTesting.printingWorkflowCoverageHelp",

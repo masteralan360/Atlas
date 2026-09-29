@@ -35,6 +35,7 @@ import {
 } from './workspaceLocalSettings'
 import { runSupabaseAction, normalizeSupabaseActionError } from '@/lib/supabaseRequest'
 import { setBusinessPartnerGroupPrivacyAccess } from '@/lib/network'
+import { ensureAppMaintenanceMonitoring } from '@/services/appMaintenance'
 import {
     DEFAULT_LEDGER_DASHBOARD_CONFIG,
     normalizeLedgerDashboardConfig,
@@ -1559,6 +1560,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 workspaceId,
                 dataMode: newMode
             })
+            ensureAppMaintenanceMonitoring(workspaceId, newMode)
 
             // Update Dexie workspace record
             await db.workspaces.update(workspaceId, { data_mode: newMode })

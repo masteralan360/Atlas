@@ -19,6 +19,10 @@ import {
   updateSyncProgress,
 } from "@/sync/syncProgress";
 import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
+import {
+  isCurrentWorkspaceMaintenanceBlockingDataAccess,
+  isWorkspaceMaintenanceBlockingDataAccess,
+} from "@/lib/appMaintenanceAccess";
 import { recordWorkspaceDataFetch } from "@/workspace/workspaceDataFreshness";
 import { getPostponedVoiceReasonCleanupPaths } from "@/lib/deliveryVoiceReasonPaths";
 import { linkPaymentTransactionToSettlement } from "@/local-db/partnerSettlementOperations";
@@ -31,6 +35,7 @@ export interface SyncResult {
   pushed: number;
   pulled: number;
   errors: string[];
+  maintenanceDeferred?: boolean;
 }
 
 const PULL_PAGE_SIZE = 1000;
@@ -1008,6 +1013,9 @@ export async function processMutationQueue(
   if (!isSupabaseConfigured) {
     return { success: 0, failed: 1, errors: ["Supabase not configured"] };
   }
+  if (isCurrentWorkspaceMaintenanceBlockingDataAccess()) {
+    return { success: 0, failed: 0, errors: [] };
+  }
 
   const mutationGroups = await Promise.all(
     PROCESSABLE_MUTATION_STATUSES.map((status) =>
@@ -1065,6 +1073,9 @@ export async function processMutationQueue(
   }>();
 
   for (const mutation of orderedMutations) {
+    if (isWorkspaceMaintenanceBlockingDataAccess(mutation.workspaceId)) {
+      break;
+    }
     if (mutation.entityType === "inventory" || mutation.entityType === "stock_batches") {
       const quarantineMessage = i18n.t("inventory.errors.legacyMutationQuarantined");
       await db.offline_mutations.update(mutation.id, {
@@ -1794,6 +1805,15 @@ export async function processMutationQueue(
       successCount++;
       reportCompleted();
     } catch (err: any) {
+      const maintenanceRejectedRequest = err?.code === "APP_MAINTENANCE"
+        || String(err?.message ?? "").includes("temporarily under maintenance")
+      if (maintenanceRejectedRequest && isWorkspaceMaintenanceBlockingDataAccess(mutation.workspaceId)) {
+        await db.offline_mutations.update(mutation.id, {
+          status: "pending",
+          error: undefined,
+        });
+        return { success: successCount, failed: failedCount, errors };
+      }
       console.error(`[Sync] Failed mutation ${mutation.id}:`, err);
       const errorMessage = err.message || "Unknown error";
       const schemaMismatchError = getSchemaMismatchError(
@@ -1920,6 +1940,10 @@ export async function pullChanges(
   ) => void,
 ): Promise<{ pulled: number; errors: string[] }> {
   if (isLocalWorkspaceMode(workspaceId)) {
+    return { pulled: 0, errors: [] };
+  }
+
+  if (isWorkspaceMaintenanceBlockingDataAccess(workspaceId)) {
     return { pulled: 0, errors: [] };
   }
 
@@ -2113,6 +2137,16 @@ export async function fullSync(
     };
   }
 
+  if (isWorkspaceMaintenanceBlockingDataAccess(workspaceId)) {
+    return {
+      success: false,
+      pushed: 0,
+      pulled: 0,
+      errors: [],
+      maintenanceDeferred: true,
+    };
+  }
+
   console.log(
     `[Sync] fullSync START for User ${userId}, Workspace ${workspaceId}`,
   );
@@ -2126,6 +2160,16 @@ export async function fullSync(
       (completed, total) => updateSyncProgress("pushing", completed, total),
     );
 
+    if (isWorkspaceMaintenanceBlockingDataAccess(workspaceId)) {
+      return {
+        success: false,
+        pushed: success,
+        pulled: 0,
+        errors: [],
+        maintenanceDeferred: true,
+      };
+    }
+
     // 2. Pull Changes (Force pull to ensure consistency)
     updateSyncProgress("pulling", 0, SYNC_PULL_TABLES.length);
     const { pulled, errors: pullErrors } = await pullChanges(
@@ -2133,6 +2177,15 @@ export async function fullSync(
       lastSyncTime,
       (completed, total, detail) => updateSyncProgress("pulling", completed, total, detail),
     );
+    if (isWorkspaceMaintenanceBlockingDataAccess(workspaceId)) {
+      return {
+        success: false,
+        pushed: success,
+        pulled: 0,
+        errors: [],
+        maintenanceDeferred: true,
+      };
+    }
     const errors = [...pushErrors, ...pullErrors];
     if (pullErrors.length === 0) {
       recordWorkspaceDataFetch(workspaceId, "supabase");

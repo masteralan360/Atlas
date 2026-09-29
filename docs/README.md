@@ -10,6 +10,7 @@
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Detailed system architecture and data flow |
 | [DATABASE.md](./DATABASE.md) | Local and cloud database schemas |
 | [SYNC_ENGINE.md](./SYNC_ENGINE.md) | Offline sync and conflict resolution |
+| [MAINTENANCE_MODE.md](./MAINTENANCE_MODE.md) | Server-controlled maintenance for Cloud and Hybrid workspaces |
 | [AUTHENTICATION.md](./AUTHENTICATION.md) | Auth system, roles, and workspace management |
 | [FEATURES.md](./FEATURES.md) | Feature modules and their implementation |
 | [transaction-reconciliation-integrity-audit.md](./transaction-reconciliation-integrity-audit.md) | Sales Order integrity audit behavior, canonical inventory movements, transaction graph, and historical evidence limits |

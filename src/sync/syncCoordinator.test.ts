@@ -9,6 +9,7 @@ vi.mock('./syncEngine', () => ({
 }))
 
 import { runManagedFullSync } from './syncCoordinator'
+import { beginAppMaintenanceCheck, clearAppMaintenanceState, setAppMaintenanceStatus } from '@/lib/appMaintenanceState'
 
 const successfulResult = {
     success: true,
@@ -27,8 +28,34 @@ function deferred<T>() {
 
 describe('runManagedFullSync', () => {
     beforeEach(() => {
+        clearAppMaintenanceState()
         mocks.fullSync.mockReset()
         mocks.fullSync.mockResolvedValue(successfulResult)
+    })
+
+    it('retries once after maintenance interrupts an in-flight sync', async () => {
+        const active = deferred<typeof successfulResult>()
+        mocks.fullSync
+            .mockReturnValueOnce(active.promise)
+            .mockResolvedValueOnce({ ...successfulResult, pushed: 3 })
+
+        const first = runManagedFullSync('user-1', 'workspace-1', '2026-09-01T00:00:00.000Z')
+        beginAppMaintenanceCheck('workspace-1', true)
+        await expect(runManagedFullSync('user-1', 'workspace-1', null)).resolves.toMatchObject({
+            maintenanceDeferred: true
+        })
+
+        setAppMaintenanceStatus('workspace-1', false)
+        const resumed = runManagedFullSync('user-1', 'workspace-1', '2026-09-01T00:00:00.000Z')
+        const duplicateResume = runManagedFullSync('user-1', 'workspace-1', '2026-09-01T00:00:00.000Z')
+        expect(resumed).toBe(duplicateResume)
+        expect(mocks.fullSync).toHaveBeenCalledTimes(1)
+
+        active.resolve(successfulResult)
+        await first
+        await expect(resumed).resolves.toMatchObject({ pushed: 3 })
+        expect(mocks.fullSync).toHaveBeenCalledTimes(2)
+        clearAppMaintenanceState()
     })
 
     it('shares an in-flight full pull for the same workspace', async () => {

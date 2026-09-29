@@ -48,6 +48,7 @@ import {
 } from "@/lib/updatePreference";
 import { createUpdateSafetyBackupIfNeeded } from "@/local-db/sqliteBackup";
 import { checkForTauriUpdate } from "@/lib/tauriUpdater";
+import { ensureAppMaintenanceMonitoring, stopAppMaintenanceMonitoring } from '@/services/appMaintenance'
 
 // @ts-ignore
 const isTauri = !!window.__TAURI_INTERNALS__;
@@ -1402,6 +1403,7 @@ function App() {
 
   return (
     <AuthProvider>
+      <AppMaintenanceController />
       <DeviceTokenBootstrap />
       <WorkspaceProvider>
         <ClinicalRegistryLocaleSync />
@@ -2556,6 +2558,21 @@ function App() {
       </WorkspaceProvider>
     </AuthProvider>
   );
+}
+
+function AppMaintenanceController() {
+  const { user, isLoading } = useAuth()
+
+  useEffect(() => {
+    if (isLoading) return
+    if (!user?.workspaceId) {
+      stopAppMaintenanceMonitoring()
+      return
+    }
+    ensureAppMaintenanceMonitoring(user.workspaceId, user.workspaceMode)
+  }, [isLoading, user?.workspaceId, user?.workspaceMode])
+
+  return null
 }
 
 export default App;

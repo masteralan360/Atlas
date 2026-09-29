@@ -92,6 +92,11 @@ export function useSyncStatus(): UseSyncStatusResult {
             const result = await runManagedFullSync(user.id, user.workspaceId, lastSyncTimeRef.current)
             console.log('[SyncHook] Sync finished with result:', result)
 
+            if (result.maintenanceDeferred) {
+                setSyncState('offline')
+                return
+            }
+
             const now = new Date().toISOString()
             setLastSyncTime(now)
             localStorage.setItem(LAST_SYNC_KEY, now)

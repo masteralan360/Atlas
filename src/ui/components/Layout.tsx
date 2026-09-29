@@ -3611,7 +3611,9 @@ export function Layout({ children }: LayoutProps) {
                 <div className="w-px h-4 bg-border mx-1" />
                 {(!isTauri || isMobile()) && <NotificationCenter />}
                 <UnifiedSnoozedRemindersBell />
-                {!isMobile() && <SyncStatusIndicator />}
+                {!isMobile()
+                  ? <SyncStatusIndicator />
+                  : <SyncStatusIndicator maintenanceOnly />}
 
                 {/* Refresh Button - Only for non-Tauri or Mobile where TitleBar is absent */}
                 {(!isTauri || isMobile()) && (

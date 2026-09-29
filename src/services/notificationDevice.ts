@@ -1,5 +1,8 @@
 ﻿import { supabase, isSupabaseConfigured } from '@/auth/supabase'
 import { requestFirebaseTokenSync } from '@/lib/firebase'
+import { resolvedSupabaseAnonKey, resolvedSupabaseUrl } from '@/auth/supabase'
+import { isWorkspaceMaintenanceBlockingDataAccess } from '@/lib/appMaintenanceAccess'
+import { shouldBlockSupabaseRequest } from '@/lib/supabaseMaintenanceGate'
 import { normalizeNotificationLanguage } from '@/lib/notificationLocalization'
 import { isDesktop, isMobile, isTauri } from '@/lib/platform'
 import { getActiveBusinessWorkspaceId } from '@/lib/network'
@@ -75,6 +78,8 @@ export async function registerDeviceTokenIfNeeded(userId: string, requestedLangu
         return
     }
 
+    if (isWorkspaceMaintenanceBlockingDataAccess(getActiveBusinessWorkspaceId())) return
+
     if (!isSupabaseConfigured) {
         console.log('[Notifications] Skipped: Supabase not configured')
         return
@@ -114,10 +119,17 @@ export async function registerDeviceTokenIfNeeded(userId: string, requestedLangu
             return
         }
 
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-        const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
-        const functionUrl = `${supabaseUrl}/functions/v1/register-device-token`
+        const functionUrl = `${resolvedSupabaseUrl.replace(/\/+$/, '')}/functions/v1/register-device-token`
         const requestBody = JSON.stringify({ token, platform, language })
+
+        if (shouldBlockSupabaseRequest(
+            functionUrl,
+            { method: 'POST' },
+            resolvedSupabaseUrl,
+            () => isWorkspaceMaintenanceBlockingDataAccess(getActiveBusinessWorkspaceId())
+        )) {
+            return
+        }
 
         let response: Response
 
@@ -128,7 +140,7 @@ export async function registerDeviceTokenIfNeeded(userId: string, requestedLangu
                 headers: {
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${accessToken}`,
-                    apikey: supabaseAnonKey,
+                    apikey: resolvedSupabaseAnonKey,
                 },
                 body: requestBody,
             })
@@ -138,7 +150,7 @@ export async function registerDeviceTokenIfNeeded(userId: string, requestedLangu
                 headers: {
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${accessToken}`,
-                    apikey: supabaseAnonKey,
+                    apikey: resolvedSupabaseAnonKey,
                 },
                 body: requestBody,
             })

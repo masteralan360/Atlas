@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
     AppDialog,
     AppDialogBody,
@@ -31,7 +31,7 @@ import { inspectRemoteMutationPayload, type RemoteMutationFieldInspection } from
 import { useTranslation } from 'react-i18next'
 import { runManagedFullSync } from '@/sync/syncCoordinator'
 import { LAST_SYNC_KEY } from '@/sync/constants'
-import { connectionManager } from '@/lib/connectionManager'
+import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { cn } from '@/lib/utils'
 import { useWorkspace } from '@/workspace'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
@@ -116,7 +116,7 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
     const { toast } = useToast()
     const pendingMutations = usePendingSyncMutations()
     const pendingCount = pendingMutations.length
-    const [isOnline, setIsOnline] = useState(() => connectionManager.getState().isOnline)
+    const isOnline = useNetworkStatus()
 
     const [isSyncing, setIsSyncing] = useState(false)
     const [status, setStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle')
@@ -155,18 +155,8 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
         onOpenChange(nextOpen)
     }
 
-    useEffect(() => {
-        return connectionManager.subscribe((event) => {
-            if (event === 'online' || event === 'heartbeat') {
-                setIsOnline(true)
-            } else if (event === 'offline') {
-                setIsOnline(false)
-            }
-        })
-    }, [])
-
     async function handleSync() {
-        if (!user || !user.workspaceId) return
+        if (!user || !user.workspaceId || !isOnline) return
 
         setIsSyncing(true)
         setStatus('syncing')
@@ -182,6 +172,11 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                 user.workspaceId,
                 localStorage.getItem(LAST_SYNC_KEY)
             )
+
+            if (result.maintenanceDeferred) {
+                setStatus('idle')
+                return
+            }
 
             if (result.success) {
                 localStorage.setItem(LAST_SYNC_KEY, new Date().toISOString())

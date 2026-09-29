@@ -1,6 +1,11 @@
 // Application connectivity status. The ConnectionManager updates this only after
 // a user confirms offline mode, or when the browser reports connectivity restored.
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import {
+    isAppMaintenanceActive,
+    isAppMaintenanceBlockingDataAccess,
+    subscribeAppMaintenance
+} from '@/lib/appMaintenanceState'
 
 let isActuallyOnline = true;
 let activeBusinessWorkspaceId: string | null = null;
@@ -9,14 +14,44 @@ let activeBusinessUserRole: 'admin' | 'staff' | 'viewer' | null = null;
 let activeBusinessUserWorkspaceId: string | null = null;
 let businessPartnerGroupPrivacyWorkspaceId: string | null = null;
 let businessPartnerGroupPrivacyEnabled = false;
+const networkListeners = new Set<() => void>()
+
+subscribeAppMaintenance(() => {
+    networkListeners.forEach((listener) => listener())
+})
+
+function notifyNetworkListeners() {
+    networkListeners.forEach((listener) => listener())
+}
 
 // Update the global state
 export function setNetworkStatus(online: boolean) {
+    if (isActuallyOnline === online) return
     isActuallyOnline = online;
+    notifyNetworkListeners()
+}
+
+export function subscribeNetworkStatus(listener: () => void) {
+    networkListeners.add(listener)
+    return () => networkListeners.delete(listener)
+}
+
+export function getNetworkStatus() {
+    return isActuallyOnline && (
+        isLocalWorkspaceMode(activeBusinessWorkspaceId)
+        || !isAppMaintenanceBlockingDataAccess()
+    )
+}
+
+export function isMaintenanceModeActive(workspaceId?: string | null) {
+    return isAppMaintenanceActive(workspaceId ?? activeBusinessWorkspaceId)
 }
 
 export function setActiveBusinessWorkspace(workspaceId: string | null | undefined) {
-    activeBusinessWorkspaceId = workspaceId ?? null;
+    const nextWorkspaceId = workspaceId ?? null
+    if (activeBusinessWorkspaceId === nextWorkspaceId) return
+    activeBusinessWorkspaceId = nextWorkspaceId
+    notifyNetworkListeners()
 }
 
 export function setActiveBusinessUser(
@@ -74,7 +109,7 @@ export function isBusinessDataOnline(workspaceId?: string | null): boolean {
         return false;
     }
 
-    return isActuallyOnline;
+    return isActuallyOnline && !isAppMaintenanceBlockingDataAccess();
 }
 
 // Get the current robust status

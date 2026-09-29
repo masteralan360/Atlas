@@ -83,6 +83,8 @@ export function SyncIntegrityOverlay() {
                 localStorage.getItem(LAST_SYNC_KEY)
             )
 
+            if (result.maintenanceDeferred) return
+
             if (result.success) {
                 localStorage.setItem(LAST_SYNC_KEY, new Date().toISOString())
             } else {

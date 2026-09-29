@@ -13,11 +13,12 @@ import { isAuthenticatedState, resolveCachedWorkspaceAssignment } from './authen
 import type { User, Session } from '@supabase/supabase-js'
 import type { CashierShiftAssignment, CashierShiftOccurrence, UserRole, WorkspaceDataMode } from '@/local-db/models'
 import { connectionManager } from '@/lib/connectionManager'
-import { setActiveBusinessUser, setActiveBusinessWorkspace } from '@/lib/network'
+import { isOnline as isBusinessDataOnline, setActiveBusinessUser, setActiveBusinessWorkspace } from '@/lib/network'
 import { clearWorkspaceCache } from '@/workspace/workspaceCache'
 import {
   clearWorkspaceModeSnapshot,
   normalizeWorkspaceDataMode,
+  readWorkspaceModeSnapshot,
   writeWorkspaceModeSnapshot
 } from '@/workspace/workspaceMode'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
@@ -29,6 +30,7 @@ import { runDailyBackupIfNeeded, runR2BackupIfNeeded } from '@/local-db/sqliteBa
 import { clearLocalDemoWorkspaceData, clearStoredDemoWorkspaces } from '@/demo/demoCleanup'
 import { isDemoWorkspace } from '@/demo/demoConfig'
 import { deleteDemoWorkspace } from '@/demo/demoService'
+import { ensureAppMaintenanceMonitoring } from '@/services/appMaintenance'
 import {
   enrollLocalAccountCredential,
   getLocalWorkspaceAccount,
@@ -507,6 +509,31 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
   parsedUser.workspaceId = canonicalWorkspaceId
   parsedUser.sourceWorkspaceId = sourceWorkspaceId
 
+  // Use the last locally known workspace mode to start maintenance monitoring
+  // before the remote workspace bootstrap whenever the app has enough cached
+  // information. On a first launch, the bootstrap response is still needed to
+  // establish the mode safely.
+  let earlyWorkspaceMode = cachedWorkspaceAssignment?.workspaceMode
+    ?? readWorkspaceModeSnapshot(parsedUser.workspaceId)?.dataMode
+  if (!earlyWorkspaceMode) {
+    try {
+      const cachedWorkspace = await db.workspaces.get(parsedUser.workspaceId)
+      if (cachedWorkspace?.data_mode) {
+        earlyWorkspaceMode = normalizeWorkspaceDataMode(cachedWorkspace.data_mode)
+      }
+    } catch (error) {
+      console.warn('[Auth] Could not read cached workspace mode before bootstrap:', error)
+    }
+  }
+  if (earlyWorkspaceMode) {
+    parsedUser.workspaceMode = normalizeWorkspaceDataMode(earlyWorkspaceMode)
+    writeWorkspaceModeSnapshot({
+      workspaceId: parsedUser.workspaceId,
+      dataMode: parsedUser.workspaceMode
+    })
+    ensureAppMaintenanceMonitoring(parsedUser.workspaceId, parsedUser.workspaceMode)
+  }
+
   try {
     const { data: workspaceRow, error: workspaceError } = (await runSupabaseAction(
       'auth.workspaceBootstrap',
@@ -544,6 +571,7 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
         workspaceId: parsedUser.workspaceId,
         dataMode: parsedUser.workspaceMode
       })
+      ensureAppMaintenanceMonitoring(parsedUser.workspaceId, parsedUser.workspaceMode)
       if (parsedUser.workspaceMode === 'local' || parsedUser.workspaceMode === 'hybrid') {
         await hydrateLocalModeCacheFromSqlite(db, parsedUser.workspaceId)
         void runDailyBackupIfNeeded(parsedUser.workspaceId)
@@ -566,6 +594,7 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
       workspaceId: parsedUser.workspaceId,
       dataMode: parsedUser.workspaceMode
     })
+    ensureAppMaintenanceMonitoring(parsedUser.workspaceId, parsedUser.workspaceMode)
     if (parsedUser.workspaceMode === 'local' || parsedUser.workspaceMode === 'hybrid') {
       await hydrateLocalModeCacheFromSqlite(db, parsedUser.workspaceId)
       void runDailyBackupIfNeeded(parsedUser.workspaceId)
@@ -574,6 +603,7 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
     await hydrateAssetProfile(parsedUser)
   }
 
+  ensureAppMaintenanceMonitoring(parsedUser.workspaceId, parsedUser.workspaceMode)
   return parsedUser
 }
 
@@ -1547,6 +1577,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       return { error: new CloudAccountSwitchError('offline') }
     }
+    if (!isBusinessDataOnline(currentUser.workspaceId)) {
+      return { error: new CloudAccountSwitchError('offline') }
+    }
 
     let verifiedAuthUser: User | null = null
     const result = await performCloudAccountSwitch<AuthUser, Session>(
@@ -1559,6 +1592,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {
         isOnline: () =>
           connectionManager.getState().isOnline &&
+          isBusinessDataOnline(currentUser.workspaceId) &&
           (typeof navigator === 'undefined' || navigator.onLine !== false),
         loadMember: (workspaceId, targetUserId) =>
           requestCloudWorkspaceAccount(workspaceId, targetUserId),

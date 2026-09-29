@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { CloudOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { useAuth } from '@/auth'
 import { connectionManager } from '@/lib/connectionManager'
+import { getAppMaintenanceSnapshot, subscribeAppMaintenance } from '@/lib/appMaintenanceState'
 import { Button } from '@/ui/components/button'
 
 function canEnterOfflineMode(workspaceMode: string | undefined) {
@@ -18,7 +19,14 @@ export function OfflineEntryOverlay() {
     const { t } = useTranslation()
     const { user, isAuthenticated } = useAuth()
     const [isVisible, setIsVisible] = useState(false)
-    const canPrompt = isAuthenticated && canEnterOfflineMode(user?.workspaceMode)
+    const maintenanceBlocking = useSyncExternalStore(
+        subscribeAppMaintenance,
+        () => getAppMaintenanceSnapshot().eligible && (
+            getAppMaintenanceSnapshot().active || getAppMaintenanceSnapshot().checking
+        ),
+        () => false
+    )
+    const canPrompt = isAuthenticated && canEnterOfflineMode(user?.workspaceMode) && !maintenanceBlocking
 
     useEffect(() => {
         if (!canPrompt) {
