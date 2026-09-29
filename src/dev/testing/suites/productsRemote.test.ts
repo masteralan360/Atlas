@@ -61,7 +61,7 @@ function input(sku: string): Omit<Product,
     'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'> {
     return {
         sku, name: 'Remote product', description: 'Request contract', categoryId: null,
-        category: null, storageId: null, price: 1250, costPrice: 700, quantity: 0,
+        category: null, storageId: null, price: 1250, minimumSellingPrice: 900, costPrice: 700, quantity: 0,
         minStockLevel: 2, unit: 'pcs', currency: 'iqd', imageUrl: '',
         canBeReturned: true, returnRules: ''
     }
@@ -105,19 +105,27 @@ describe('Products · Cloud / Hybrid request contracts', () => {
                     sku: `REMOTE-${mode.toUpperCase()}`,
                     name: 'Remote product',
                     price: 1250,
+                    minimum_selling_price: 900,
                     cost_price: 700,
                     currency: 'iqd'
                 })
             })
             expect(await db.products.get(product.id)).toMatchObject({ id: product.id, syncStatus: 'synced' })
 
-            await updateProduct(product.id, { name: 'Updated remote product', price: 1500 })
+            await updateProduct(product.id, { name: 'Updated remote product', price: 1500, minimumSellingPrice: 1000 })
             expect(remote.calls).toHaveLength(2)
             expect(remote.calls[1]).toMatchObject({
                 table: 'products', operation: 'update', id: product.id,
-                payload: expect.objectContaining({ name: 'Updated remote product', price: 1500 })
+                payload: expect.objectContaining({ name: 'Updated remote product', price: 1500, minimum_selling_price: 1000 })
             })
-            expect(await db.products.get(product.id)).toMatchObject({ name: 'Updated remote product', price: 1500, version: 2 })
+            expect(await db.products.get(product.id)).toMatchObject({ name: 'Updated remote product', price: 1500, minimumSellingPrice: 1000, version: 2 })
+
+            await updateProduct(product.id, { minimumSellingPrice: null })
+            expect(remote.calls[2]).toMatchObject({
+                table: 'products', operation: 'update', id: product.id,
+                payload: expect.objectContaining({ minimum_selling_price: null })
+            })
+            expect(await db.products.get(product.id)).toMatchObject({ minimumSellingPrice: null, version: 3 })
         })
     }
 
@@ -136,8 +144,8 @@ describe('Products · Cloud / Hybrid request contracts', () => {
         const product = await createProduct(WORKSPACE_ID, input('REMOTE-UNCHANGED'))
         remote.updateError = { message: 'permission denied', code: '42501' }
 
-        await expect(updateProduct(product.id, { name: 'Rejected update' })).rejects.toThrow()
-        expect(await db.products.get(product.id)).toMatchObject({ name: 'Remote product', version: 1 })
+        await expect(updateProduct(product.id, { name: 'Rejected update', minimumSellingPrice: 900 })).rejects.toThrow()
+        expect(await db.products.get(product.id)).toMatchObject({ name: 'Remote product', minimumSellingPrice: 900, version: 1 })
         expect(await db.offline_mutations.count()).toBe(0)
     })
 })

@@ -63,6 +63,8 @@ export interface Product extends BaseEntity {
   storageId?: string | null
   storageName?: string
   price: number
+  /** Staff-only selling floor; NULL means staff have no configured minimum. */
+  minimumSellingPrice?: number | null
   /** Null means no cost has been recorded. Zero remains a valid cost. */
   costPrice: number | null
   quantity: number

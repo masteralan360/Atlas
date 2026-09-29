@@ -8,7 +8,9 @@ import { isService } from '@/lib/catalogItem'
 import type { SalesExchangePayload } from '@/lib/salesExchange'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { db } from './database'
-import type { CurrencyCode, ExchangeRateSnapshot, StockBatchAllocation } from './models'
+import type { CurrencyCode, ExchangeRateSnapshot, StockBatchAllocation, UserRole } from './models'
+import { assertStaffMinimumSellingPrices } from './minimumSellingPrice'
+import type { MinimumSellingPriceCheckItem } from './minimumSellingPrice'
 import { createLoanFromPosSale, generateLocalSaleSequenceId } from './hooks'
 import { appendPaymentTransaction } from './payments'
 import { adjustInventoryQuantity } from './inventory'
@@ -75,7 +77,8 @@ export interface PosLoanRegistration {
 
 export interface PosCheckoutInput {
     payload: PosCheckoutPayload
-    user: { id: string; name: string }
+    user: { id: string; name: string; role?: UserRole }
+    minimumPriceValidationItems?: MinimumSellingPriceCheckItem[]
     timestamp: string
     exchangeRates: ExchangeRateSnapshot[] | null
     primaryRate: { rate: number; source: string } | null
@@ -272,7 +275,18 @@ export async function commitPosCheckout(input: PosCheckoutInput) {
     try {
         validate(input)
         const { payload: p } = input
+        const minimumPriceValidationItems = input.minimumPriceValidationItems ?? p.items.map((item) => ({
+            productId: item.product_id,
+            effectiveSellingPrice: item.unit_price,
+            unitFactor: item.unit_factor ?? 1,
+            currency: item.original_currency
+        }))
         if (isLocalWorkspaceMode(p.workspace_id)) {
+            await assertStaffMinimumSellingPrices({
+                workspaceId: p.workspace_id,
+                actingUserRole: input.user.role,
+                items: minimumPriceValidationItems
+            })
             const result = await saveLocal(input)
             // Automatic reorder transfers are follow-up work, outside the sale.
             const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')
@@ -281,6 +295,11 @@ export async function commitPosCheckout(input: PosCheckoutInput) {
             return result
         }
         if (!isOnline(p.workspace_id)) throw new Error(i18n.t('inventory.errors.onlineRequired'))
+        await assertStaffMinimumSellingPrices({
+            workspaceId: p.workspace_id,
+            actingUserRole: input.user.role,
+            items: minimumPriceValidationItems
+        })
         const call = () => input.atomicLoanPayload
             ? supabase.rpc('complete_sale_with_loan', { payload: p, p_loan: input.atomicLoanPayload })
             : supabase.rpc('complete_sale', { payload: p })

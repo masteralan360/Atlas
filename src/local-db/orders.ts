@@ -8,7 +8,7 @@ import {
     canAccessBusinessPartnerInLocalCache
 } from './businessPartnerAccess'
 import { roundOrderValue } from '@/lib/orderPrecision'
-import { convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
+import { convertCurrencyAmountWithAvailableSnapshot, convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
 import { createOrderAdjustment, normalizeOrderAdjustments, type OrderAdjustmentDraft } from '@/lib/orderAdjustments'
 import { isOnline } from '@/lib/network'
 import {
@@ -41,6 +41,7 @@ import type { WorkspacePermissionKey } from '@/permissions/workspacePermissionDe
 import i18n from '@/i18n/config'
 
 import { db } from './database'
+import { assertStaffMinimumSellingPrices, type MinimumSellingPriceCheckItem } from './minimumSellingPrice'
 import { serializePartnerSummaryRefresh } from './partnerSummaryRefresh'
 import { enqueuePartnerSummaryJobs, processPartnerSummaryJobs, type PartnerSummaryTarget } from './partnerSummaryJobs'
 import {
@@ -93,6 +94,7 @@ import type {
     Inventory,
     InventoryTransaction,
     Loan,
+    UserRole,
     OrderInstallment,
     OrderAdjustment,
     OrderReturn,
@@ -223,6 +225,48 @@ export type OrderFormSaveOptions = {
     orderId?: string
     /** Stable client identity prevents a retry from duplicating the first payment. */
     initialPaymentTransactionId?: string
+    /** Current user's role for Local-mode validation; Supabase re-reads it in Cloud/Hybrid. */
+    actingUserRole?: UserRole
+    /** Optional prices already converted to each product's selling-price currency. */
+    minimumPriceValidationItems?: MinimumSellingPriceCheckItem[]
+}
+
+async function assertSalesOrderMinimumPrices(
+    order: Pick<SalesOrder, 'workspaceId' | 'items' | 'exchangeRates'>,
+    options?: Pick<OrderFormSaveOptions, 'actingUserRole' | 'minimumPriceValidationItems'>
+) {
+    const items = options?.minimumPriceValidationItems ?? await Promise.all(order.items.map(async (item) => {
+        const product = await db.products.get(item.productId)
+        if (!product) return null
+        const effectiveSellingPrice = item.originalCurrency === product.currency
+            ? item.originalUnitPrice
+            : convertCurrencyAmountWithAvailableSnapshot(
+                item.originalUnitPrice,
+                item.originalCurrency,
+                product.currency,
+                order.exchangeRates
+            )
+        if (effectiveSellingPrice == null) {
+            if (product.minimumSellingPrice != null && options?.actingUserRole === 'staff') {
+                throw new Error(i18n.t('products.minimumSellingPrice.currencyUnavailable', {
+                    productName: product.name,
+                    defaultValue: 'Could not verify the selling currency for {{productName}}. Refresh exchange rates and try again.'
+                }))
+            }
+            return null
+        }
+        return {
+            productId: item.productId,
+            effectiveSellingPrice,
+            unitFactor: item.unitFactor ?? 1,
+            currency: product.currency
+        }
+    }))
+    await assertStaffMinimumSellingPrices({
+        workspaceId: order.workspaceId,
+        actingUserRole: options?.actingUserRole,
+        items: items.filter((item): item is MinimumSellingPriceCheckItem => item !== null)
+    })
 }
 
 function reportOrderSaveProgress(options: OrderFormSaveOptions | undefined, stage: OrderSaveProgressStage) {
@@ -2944,6 +2988,7 @@ export async function createSalesOrder(
     const order = await buildSalesOrderEntity(workspaceId, data, createdBy, options)
     const status = order.status
 
+    await assertSalesOrderMinimumPrices(order, options)
     await assertSalesProductsHaveCosts(order)
 
     if (status === 'pending' || status === 'completed') {
@@ -3189,6 +3234,8 @@ export async function createQuickSalesOrder(
     createdBy?: string | null,
     options?: {
         onProgress?: (stage: CompletedSalesOrderProgressStage) => void
+        actingUserRole?: UserRole
+        minimumPriceValidationItems?: MinimumSellingPriceCheckItem[]
     }
 ) {
     options?.onProgress?.('creating')
@@ -3239,6 +3286,7 @@ export async function createQuickSalesOrder(
             actualDeliveryDate: completedAt,
             reservedAt: completedAt
         }, createdBy)
+        await assertSalesOrderMinimumPrices(order, options)
         return completePaidQuickSalesOrderAtomically(order, options)
     }
 
@@ -3247,7 +3295,10 @@ export async function createQuickSalesOrder(
         status: 'draft',
         actualDeliveryDate: null,
         reservedAt: null
-    }, createdBy)
+    }, createdBy, {
+        actingUserRole: options?.actingUserRole,
+        minimumPriceValidationItems: options?.minimumPriceValidationItems
+    })
 
     if (targetStatus === 'draft') {
         return draft
@@ -3258,7 +3309,9 @@ export async function createQuickSalesOrder(
         // Quick Orders explicitly allow an unpaid sales order to reserve stock
         // or be completed. The regular Order workflow retains its stricter
         // paid-before-reservation rule.
-        allowUnpaidNonFinanced: true
+        allowUnpaidNonFinanced: true,
+        actingUserRole: options?.actingUserRole,
+        minimumPriceValidationItems: options?.minimumPriceValidationItems
     })
 
     if (targetStatus === 'pending') {
@@ -3266,7 +3319,10 @@ export async function createQuickSalesOrder(
     }
 
     options?.onProgress?.('completing')
-    return updateSalesOrderStatus(pending.id, 'completed')
+    return updateSalesOrderStatus(pending.id, 'completed', {
+        actingUserRole: options?.actingUserRole,
+        minimumPriceValidationItems: options?.minimumPriceValidationItems
+    })
 }
 
 /**
@@ -3379,6 +3435,7 @@ export async function updateSalesOrder(id: string, data: Partial<SalesOrder>, op
 
     updated.nextDueDate = isOrderFinancingMethod(updated.paymentMethod) ? updated.firstDueDate || null : null
     await assertOrderStorageAccess(updated)
+    await assertSalesOrderMinimumPrices(updated, options)
     await assertSalesProductsHaveCosts(updated)
     reportOrderSaveProgress(options, 'payment')
     await appendInitialOrderPaymentTransaction('sales', updated, options)
@@ -3611,7 +3668,11 @@ const salesOrderStatusTransitionsInFlight = new Map<string, {
 export function updateSalesOrderStatus(
     id: string,
     status: SalesOrderStatus,
-    options?: { allowUnpaidNonFinanced?: boolean }
+    options?: {
+        allowUnpaidNonFinanced?: boolean
+        actingUserRole?: UserRole
+        minimumPriceValidationItems?: MinimumSellingPriceCheckItem[]
+    }
 ) {
     const existingTransition = salesOrderStatusTransitionsInFlight.get(id)
     if (existingTransition?.status === status) {
@@ -3633,7 +3694,11 @@ export function updateSalesOrderStatus(
 async function updateSalesOrderStatusOnce(
     id: string,
     status: SalesOrderStatus,
-    options?: { allowUnpaidNonFinanced?: boolean }
+    options?: {
+        allowUnpaidNonFinanced?: boolean
+        actingUserRole?: UserRole
+        minimumPriceValidationItems?: MinimumSellingPriceCheckItem[]
+    }
 ) {
     const existing = await db.sales_orders.get(id)
     if (!existing || existing.isDeleted) {
@@ -3661,6 +3726,10 @@ async function updateSalesOrderStatusOnce(
 
     if (status !== 'cancelled') {
         await assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id)
+    }
+
+    if (status === 'pending' || status === 'completed') {
+        await assertSalesOrderMinimumPrices(existing, options)
     }
 
     if (status === 'cancelled' && shouldUseCloudBusinessData(existing.workspaceId)

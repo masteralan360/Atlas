@@ -58,6 +58,7 @@ import {
     useProducts,
     useProductVariants,
     useStorages,
+    useWorkspaceUsers,
     useUnits,
     useUnitRelationships,
     useProductUnitConversions,
@@ -88,6 +89,7 @@ import { platformService } from '@/services/platformService'
 import { useWorkspace } from '@/workspace'
 import { useHideCosts } from '@/permissions'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { shouldShowMinimumSellingPriceField } from '@/lib/minimumSellingPrice'
 import { normalizeUnitCode } from '@/local-db/models'
 import { buildProductUnitSelectionOptions } from '@/lib/unitRelationships'
 import { createRelationalConversionDraft } from '@/lib/productRelationalConversion'
@@ -160,6 +162,7 @@ type ProductFormData = {
     description: string
     categoryId: string | undefined
     price: string
+    minimumSellingPrice: string
     costPrice: string
     quantity: number | ''
     minStockLevel: number | ''
@@ -215,6 +218,7 @@ const emptyProductFormData: ProductFormData = {
     description: '',
     categoryId: undefined,
     price: '',
+    minimumSellingPrice: '',
     costPrice: '',
     quantity: '',
     minStockLevel: 0,
@@ -304,6 +308,7 @@ function mapProductToFormData(product: Product, hideCosts = false): ProductFormD
         description: product.description,
         categoryId: product.categoryId || undefined,
         price: String(product.price),
+        minimumSellingPrice: product.minimumSellingPrice == null ? '' : String(product.minimumSellingPrice),
         // A restricted user must never receive an existing product cost in
         // form state; edit saves intentionally omit the field below.
         costPrice: hideCosts || product.costPrice == null ? '' : String(product.costPrice),
@@ -334,6 +339,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const demoTutorial = useDemoTutorial()
     const categories = useCategories(user?.workspaceId)
     const storages = useStorages(user?.workspaceId)
+    const workspaceUsers = useWorkspaceUsers(user?.workspaceId)
     const product = useProduct(productId)
     const parentProduct = useProduct(product?.parentProductId || undefined)
     const isOnline = useNetworkStatus()
@@ -383,6 +389,10 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         ? productCommissionRuleAgents.filter((row) => row.ruleId === sourceProductCommissionRule.id).map((row) => row.agentId)
         : [], [productCommissionRuleAgents, sourceProductCommissionRule])
     const canEdit = user?.role === 'admin' || user?.role === 'staff'
+    const canManageMinimumSellingPrice = shouldShowMinimumSellingPriceField(
+        user?.role,
+        workspaceUsers.some((workspaceUser) => workspaceUser.role === 'staff' && !workspaceUser.isDeleted)
+    )
     const isClone = mode === 'clone'
     const isEditing = mode === 'edit'
     const isReadOnly = isEditing && !canEdit
@@ -1324,7 +1334,12 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                 ? storages.find((storage) => storage.id === formData.storageId)?.name
                 : null
 
-            const { perQuantity: _perQuantity, costPrice: costPriceInput, ...formDataToSave } = formData
+            const {
+                perQuantity: _perQuantity,
+                costPrice: costPriceInput,
+                minimumSellingPrice: minimumSellingPriceInput,
+                ...formDataToSave
+            } = formData
             const enteredCost = costPriceInput.trim() === ''
                 ? null
                 : Number(costPriceInput)
@@ -1334,6 +1349,14 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                     ? enteredCost / (Number(formData.perQuantity) || 1)
                     : enteredCost
             const shouldPersistCost = !isEditing || !hideCosts
+            const enteredMinimumSellingPrice = minimumSellingPriceInput.trim() === ''
+                ? null
+                : Number(minimumSellingPriceInput)
+            const normalizedMinimumSellingPrice = enteredMinimumSellingPrice == null
+                ? null
+                : isDynamicUnit(formData.unit)
+                    ? enteredMinimumSellingPrice / (Number(formData.perQuantity) || 1)
+                    : enteredMinimumSellingPrice
             const dataToSave = {
                 ...formDataToSave,
                 sku: formData.sku.trim(),
@@ -1346,6 +1369,9 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                 price: isDynamicUnit(formData.unit)
                     ? (Number(formData.price) || 0) / (Number(formData.perQuantity) || 1)
                     : Number(formData.price) || 0,
+                ...(canManageMinimumSellingPrice
+                    ? { minimumSellingPrice: normalizedMinimumSellingPrice }
+                    : {}),
                 ...(shouldPersistCost ? { costPrice: normalizedCost } : {}),
                 quantity: roundQuantity(Number(formData.quantity) || 0),
                 minStockLevel: roundQuantity(Number(formData.minStockLevel) || 0),
@@ -1395,8 +1421,16 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                 parentPrice: Number(row.parentPrice),
                                 currency: row.currency
                             }))
-                            : []
+                        : []
                     })
+                    if (canManageMinimumSellingPrice) {
+                        // The conversion RPC has a deliberately narrow product
+                        // payload. Persist this independently editable field
+                        // through the normal product update contract afterward.
+                        await updateProduct(product.id, {
+                            minimumSellingPrice: normalizedMinimumSellingPrice
+                        })
+                    }
                 } else {
                     await updateProduct(product.id, dataToSave)
                 }
@@ -1515,6 +1549,18 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
 
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault()
+
+        if (canManageMinimumSellingPrice && formData.minimumSellingPrice.trim() !== '') {
+            const minimumSellingPrice = Number(formData.minimumSellingPrice)
+            if (!Number.isFinite(minimumSellingPrice) || minimumSellingPrice < 0) {
+                toast({
+                    variant: 'destructive',
+                    title: t('common.error'),
+                    description: t('products.form.minimumSellingPriceInvalid')
+                })
+                return
+            }
+        }
 
         if ((mode === 'create' || isSingleToRelationalConversion) && !formData.storageId) {
             setStorageError(true)
@@ -2518,6 +2564,42 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                 </span>
                                             </div>
                                         )}
+                                        {canManageMinimumSellingPrice && (() => {
+                                            const hasValue = formData.minimumSellingPrice.trim() !== ''
+                                            const minimumValue = Number(formData.minimumSellingPrice)
+                                            const isInvalid = hasValue && (!Number.isFinite(minimumValue) || minimumValue < 0)
+                                            return (
+                                                <div className="space-y-2 pt-2">
+                                                    <Label htmlFor="product-minimum-selling-price" className="flex items-center gap-2 font-bold">
+                                                        <DollarSign className="h-4 w-4 text-primary/60" />
+                                                        {t('products.form.minimumSellingPrice')}
+                                                    </Label>
+                                                    <div className="relative">
+                                                        <NumericInput
+                                                            id="product-minimum-selling-price"
+                                                            value={formData.minimumSellingPrice}
+                                                            onValueChange={(minimumSellingPrice) => setFormData((current) => ({ ...current, minimumSellingPrice }))}
+                                                            maxFractionDigits={4}
+                                                            placeholder="0"
+                                                            readOnly={isReadOnly}
+                                                            aria-invalid={isInvalid}
+                                                            className={cn(
+                                                                'h-11 rounded-xl border-border/80 bg-background/80 pr-16 font-bold tabular-nums shadow-sm transition-all hover:border-primary/45 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50',
+                                                                isInvalid && 'border-destructive bg-destructive/5 text-destructive focus-visible:border-destructive focus-visible:ring-destructive/20'
+                                                            )}
+                                                        />
+                                                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold uppercase tracking-wider text-muted-foreground/60">
+                                                            {getCurrencySymbol(formData.currency, features.iqd_display_preference)}
+                                                        </span>
+                                                    </div>
+                                                    {isInvalid && (
+                                                        <p role="alert" className="text-xs font-medium text-destructive">
+                                                            {t('products.form.minimumSellingPriceInvalid')}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            )
+                                        })()}
                                     </div>
                                     <div className="space-y-2" data-tour-id="tutorial-product-currency">
                                         <CurrencySelector

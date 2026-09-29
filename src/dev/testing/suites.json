@@ -44,7 +44,8 @@
         "titleKey": "devTesting.groups.matrix",
         "layer": "business",
         "files": [
-          "src/dev/testing/suites/saleOrders.test.ts"
+          "src/dev/testing/suites/saleOrders.test.ts",
+          "src/local-db/minimumSellingPrice.test.ts"
         ]
       },
       {
@@ -79,6 +80,7 @@
         "titleKey": "devTesting.groups.pricing",
         "layer": "calculation",
         "files": [
+          "src/lib/minimumSellingPrice.test.ts",
           "src/lib/orderAdjustments.test.ts",
           "src/lib/orderLineItems.test.ts",
           "src/lib/salesExchange.test.ts",
@@ -242,6 +244,7 @@
         "layer": "business",
         "files": [
           "src/dev/testing/suites/posCheckout.test.ts",
+          "src/local-db/minimumSellingPrice.test.ts",
           "src/local-db/quickOrderAtomic.test.ts",
           "src/local-db/partnerSummaryRefresh.test.ts",
           "src/local-db/partnerSummaryJobs.test.ts",
@@ -269,6 +272,7 @@
         "layer": "calculation",
         "files": [
           "src/dev/testing/suites/posPricing.test.ts",
+          "src/lib/minimumSellingPrice.test.ts",
           "src/lib/discounts.test.ts",
           "src/lib/priceBooks.test.ts",
           "src/lib/productCost.test.ts"
@@ -616,6 +620,7 @@
         "layer": "calculation",
         "files": [
           "src/lib/discounts.test.ts",
+          "src/lib/minimumSellingPrice.test.ts",
           "src/lib/productCost.test.ts",
           "src/lib/priceBooks.test.ts",
           "src/lib/marketplaceDeliveryProductCommissionMigration.test.ts",
@@ -671,6 +676,7 @@
         "layer": "contract",
         "files": [
           "src/dev/testing/suites/productsRemote.test.ts",
+          "src/local-db/minimumSellingPrice.test.ts",
           "src/local-db/inventoryTransactionsCloud.test.ts",
           "src/local-db/productRelationalConversion.test.ts",
           "src/local-db/unitRelationships.test.ts"

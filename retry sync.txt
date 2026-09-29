@@ -4,6 +4,8 @@ Service optional Barcode
 Allow Storage and Services in POS cart
 Barcode Camera in Phone
 
+Force Update Action in admin dashboard
+
 remove R2 Print only
 
 Fix the Error in Supabase Logs
@@ -24,6 +26,8 @@ Context-menu partner account statement & invoice redirect
 Price books selector order form and quick order
 
 ##
+
+Not Activated Account
 
 Post Service Archiver
 

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useLocation, useRoute } from 'wouter'
 import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
-import { addToOfflineMutations, adjustInventoryQuantity, calculateStockBatchUnitCost, commitStockBatchAllocations, generateLocalSaleSequenceId, getPrimaryStorageFromList, getStockBatchSalePlans, refreshStockBatchesFromSupabase, useActiveDiscountMap, useBatchAwareInventoryProducts, useCategories, useProductSelectionAccess, useProducts, useProductUnitConversions, useStorages } from '@/local-db'
+import { addToOfflineMutations, adjustInventoryQuantity, assertStaffMinimumSellingPrices, calculateStockBatchUnitCost, commitStockBatchAllocations, generateLocalSaleSequenceId, getPrimaryStorageFromList, getStockBatchSalePlans, refreshStockBatchesFromSupabase, useActiveDiscountMap, useBatchAwareInventoryProducts, useCategories, useProductSelectionAccess, useProducts, useProductUnitConversions, useStorages } from '@/local-db'
 import { hydrateInventoryTransactionsForReferences } from '@/local-db/inventoryTransactions'
 import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { db } from '@/local-db/database'
@@ -372,6 +372,7 @@ function formatCountdown(ms: number, expiredLabel: string) {
 interface MobileTicketPanelProps {
     activeTicket: InstantPosTicket
     activeTicketTotals: { total: number, hasMixedCurrency: boolean }
+    minimumPriceViolations: Map<string, { productName: string; minimumSellingPrice: number; currency: string; currencyUnavailable?: boolean }>
     settlementCurrency: string
     features: any
     t: any
@@ -406,7 +407,7 @@ interface MobileTicketPanelProps {
 }
 
 function MobileTicketPanel({
-    activeTicket, activeTicketTotals, settlementCurrency, features, t,
+    activeTicket, activeTicketTotals, minimumPriceViolations, settlementCurrency, features, t,
     statusLabels, statusAction, activePendingTimeLeftMs, isCheckoutLoading,
     canPreprintReceipt, isPreprinting, isLoadingPreprintTemplate,
     canCookOrderTicket, isPrintingCookOrderTicket,
@@ -582,7 +583,7 @@ function MobileTicketPanel({
                                 e.stopPropagation();
                                 checkoutTicket();
                             }}
-                            disabled={activeTicket.items.length === 0 || isCheckoutLoading || activeTicketTotals.hasMixedCurrency}
+                            disabled={activeTicket.items.length === 0 || isCheckoutLoading || activeTicketTotals.hasMixedCurrency || minimumPriceViolations.size > 0}
                         >
                             {isCheckoutLoading ? <Loader2 className="animate-spin w-5 h-5" /> : (
                                 <div className="flex items-center gap-2">
@@ -688,7 +689,13 @@ function MobileTicketPanel({
                                     </div>
                                 ) : (
                                     activeTicket.items.map(item => (
-                                        <div key={buildInstantPosItemKey(item.productId, item.storageId)} className="rounded-2xl border border-border/60 bg-muted/30 p-4">
+                                        <div key={buildInstantPosItemKey(item.productId, item.storageId)} className={cn('rounded-2xl border border-border/60 bg-muted/30 p-4', minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId)) && 'border-destructive bg-destructive/5 ring-1 ring-destructive/25')}>
+                                            {minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId)) && (() => {
+                                                const violation = minimumPriceViolations.get(buildInstantPosItemKey(item.productId, item.storageId))!
+                                                return <p role="alert" className="mb-2 text-xs font-semibold text-destructive">{violation.currencyUnavailable
+                                                    ? t('products.minimumSellingPrice.currencyUnavailable', { productName: violation.productName })
+                                                    : t('products.minimumSellingPrice.staffViolation', { productName: violation.productName, minimumPrice: formatCurrency(violation.minimumSellingPrice, violation.currency, features.iqd_display_preference) })}</p>
+                                            })()}
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="flex items-start gap-3">
                                                     <div className="rounded-lg bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">
@@ -715,7 +722,7 @@ function MobileTicketPanel({
                                                             {formatCurrency(item.baseUnitPrice * item.quantity, item.currency, features.iqd_display_preference)}
                                                         </div>
                                                     )}
-                                                    <div className="text-sm font-semibold text-foreground">
+                                                    <div className={cn('text-sm font-semibold', minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId)) ? 'text-destructive' : 'text-foreground')}>
                                                         {formatCurrency(item.unitPrice * item.quantity, item.currency, features.iqd_display_preference)}
                                                     </div>
                                                 </div>
@@ -799,7 +806,7 @@ function MobileTicketPanel({
                                                 : <ChefHat className="h-5 w-5" />}
                                         </Button>
                                     )}
-                                    <Button className={cn("h-14 rounded-2xl font-black text-lg gap-2", !canCookOrderTicket && "col-start-2")} onClick={checkoutTicket} disabled={activeTicket.items.length === 0 || isCheckoutLoading || activeTicketTotals.hasMixedCurrency}>
+                                    <Button className={cn("h-14 rounded-2xl font-black text-lg gap-2", !canCookOrderTicket && "col-start-2")} onClick={checkoutTicket} disabled={activeTicket.items.length === 0 || isCheckoutLoading || activeTicketTotals.hasMixedCurrency || minimumPriceViolations.size > 0}>
                                         {isCheckoutLoading ? <Loader2 className="animate-spin" /> : <><CheckCircle2 className="w-5 h-5" /> {t('instantPos.checkout')}</>}
                                     </Button>
                                     {canPreprintReceipt && (
@@ -1262,6 +1269,30 @@ export function InstantPOS() {
         return { count, total, hasMixedCurrency }
     }, [activeTicket, settlementCurrency])
 
+    const minimumPriceViolations = useMemo(() => {
+        const violations = new Map<string, { productName: string; minimumSellingPrice: number; currency: string; currencyUnavailable?: boolean }>()
+        if (user?.role !== 'staff' || !activeTicket) return violations
+        for (const item of activeTicket.items) {
+            const product = resolveTicketProduct(item)
+            if (!product || product.minimumSellingPrice == null) continue
+            if (item.currency !== product.currency) {
+                violations.set(buildInstantPosItemKey(item.productId, item.storageId), {
+                    productName: product.name,
+                    minimumSellingPrice: product.minimumSellingPrice,
+                    currency: product.currency,
+                    currencyUnavailable: true
+                })
+            } else if (item.unitPrice < product.minimumSellingPrice) {
+                violations.set(buildInstantPosItemKey(item.productId, item.storageId), {
+                    productName: product.name,
+                    minimumSellingPrice: product.minimumSellingPrice,
+                    currency: product.currency
+                })
+            }
+        }
+        return violations
+    }, [activeTicket, resolveTicketProduct, user?.role])
+
     const activeTicketQuantityByItemKey = useMemo(() => new Map(
         activeTicket?.items.map((item) => [buildInstantPosItemKey(item.productId, item.storageId), item.quantity]) ?? []
     ), [activeTicket])
@@ -1679,6 +1710,26 @@ export function InstantPOS() {
         if (!activeTicket || !user?.workspaceId || !user?.id) return
         if (activeTicket.items.length === 0) return
 
+        try {
+            await assertStaffMinimumSellingPrices({
+                workspaceId: user.workspaceId,
+                actingUserRole: user.role,
+                items: activeTicket.items.flatMap((item) => {
+                    const product = resolveTicketProduct(item)
+                    return product
+                        ? [{ productId: product.id, effectiveSellingPrice: item.unitPrice, currency: item.currency as CurrencyCode }]
+                        : []
+                })
+            })
+        } catch (error) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: error instanceof Error ? error.message : (t('instantPos.checkoutError') || 'Unable to complete checkout.'),
+                variant: 'destructive'
+            })
+            return
+        }
+
         const restrictedItem = activeTicket.items.find((item) => {
             const product = products.find((candidate) => candidate.id === item.productId && candidate.storageId === item.storageId)
             return product ? !canSelectProduct(product) : false
@@ -1862,6 +1913,16 @@ export function InstantPOS() {
             if (isLocalMode) {
                 throw new Error('local_workspace_sale')
             }
+
+            await assertStaffMinimumSellingPrices({
+                workspaceId: user.workspaceId,
+                actingUserRole: user.role,
+                items: itemsWithMetadata.map((item) => ({
+                    productId: item.product_id,
+                    effectiveSellingPrice: item.unit_price,
+                    currency: item.original_currency as CurrencyCode
+                }))
+            })
 
             let completeSaleResponse = await runSupabaseAction('instantPos.completeSale', () =>
                 supabase.rpc('complete_sale', { payload: checkoutPayload })
@@ -2505,6 +2566,7 @@ export function InstantPOS() {
                         <MobileTicketPanel
                             activeTicket={activeTicket}
                             activeTicketTotals={activeTicketTotals}
+                            minimumPriceViolations={minimumPriceViolations}
                             settlementCurrency={settlementCurrency}
                             features={features}
                             t={t}
@@ -2637,7 +2699,13 @@ export function InstantPOS() {
                                     </div>
                                 ) : (
                                     activeTicket.items.map(item => (
-                                        <div key={buildInstantPosItemKey(item.productId, item.storageId)} className="group flex flex-col rounded-lg border border-border bg-background p-3 transition-all duration-200">
+                                        <div key={buildInstantPosItemKey(item.productId, item.storageId)} className={cn('group flex flex-col rounded-lg border border-border bg-background p-3 transition-all duration-200', minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId)) && 'border-destructive bg-destructive/5 ring-1 ring-destructive/25')}>
+                                            {minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId)) && (() => {
+                                                const violation = minimumPriceViolations.get(buildInstantPosItemKey(item.productId, item.storageId))!
+                                                return <p role="alert" className="mb-2 text-xs font-semibold text-destructive">{violation.currencyUnavailable
+                                                    ? t('products.minimumSellingPrice.currencyUnavailable', { productName: violation.productName })
+                                                    : t('products.minimumSellingPrice.staffViolation', { productName: violation.productName, minimumPrice: formatCurrency(violation.minimumSellingPrice, violation.currency, features.iqd_display_preference) })}</p>
+                                            })()}
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="min-w-0 flex-1">
                                                         <div className="truncate text-sm font-medium text-foreground">{item.name}</div>
@@ -2778,6 +2846,7 @@ export function InstantPOS() {
                                             isCheckoutLoading
                                             || activeTicket.items.length === 0
                                             || activeTicketTotals.hasMixedCurrency
+                                            || minimumPriceViolations.size > 0
                                         }
                                     >
                                         <CheckCircle2 className="w-4 h-4" />

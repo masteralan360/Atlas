@@ -111,13 +111,18 @@ const supabaseMock = vi.hoisted(() => {
     return { rpc, upsert, insert, createSelectQuery, select, from }
 })
 
-vi.mock('@/auth/supabase', () => ({
-    supabase: {
-        rpc: supabaseMock.rpc,
-        from: supabaseMock.from,
-        schema: () => ({ from: supabaseMock.from, rpc: supabaseMock.rpc })
+vi.mock('@/auth/supabase', () => {
+    const rpc = (name: string, args: Record<string, unknown>) => name === 'validate_staff_minimum_selling_prices'
+        ? Promise.resolve({ data: [], error: null })
+        : supabaseMock.rpc(name, args)
+    return {
+        supabase: {
+            rpc,
+            from: supabaseMock.from,
+            schema: () => ({ from: supabaseMock.from, rpc })
+        }
     }
-}))
+})
 
 vi.mock('@/lib/supabaseRequest', () => ({
     isRetriableWebRequestError: () => false,

@@ -19,8 +19,9 @@ import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { getLanguageDirection } from '@/lib/i18nRouting'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { getReportOriginId } from '@/lib/printIdentity'
-import { buildOrderExchangeRatesSnapshot, convertCurrencyAmountWithLiveRates, getPrimaryExchangeDetails } from '@/lib/orderCurrency'
+import { buildOrderExchangeRatesSnapshot, convertCurrencyAmountWithLiveRates, getAppliedCurrencyConversion, getPrimaryExchangeDetails } from '@/lib/orderCurrency'
 import { ORDER_DECIMAL_STEP, roundOrderValue } from '@/lib/orderPrecision'
+import { isBelowMinimumSellingPrice } from '@/lib/minimumSellingPrice'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import {
     clampOrdersPagination,
@@ -812,6 +813,24 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         () => salesForm.items.filter((item) => item.productId && Number(item.quantity) > 0).length,
         [salesForm.items]
     )
+    const salesMinimumPriceViolations = useMemo(() => salesForm.items.flatMap((item, lineIndex) => {
+        if (user?.role !== 'staff' || !item.productId || Number(item.quantity) <= 0) return []
+        const product = products.find((entry) => entry.id === item.productId)
+        if (!product || product.minimumSellingPrice == null) return []
+        const effectivePrice = Number(item.unitPrice) || 0
+        const conversion = getAppliedCurrencyConversion(
+            effectivePrice,
+            salesForm.currency,
+            product.currency,
+            buildOrderExchangeRatesSnapshot(liveRates)
+        )
+        if (!conversion) {
+            return [{ lineIndex, product, currencyUnavailable: true }]
+        }
+        return isBelowMinimumSellingPrice(user.role, conversion.convertedAmount, product.minimumSellingPrice)
+            ? [{ lineIndex, product, currencyUnavailable: false }]
+            : []
+    }), [liveRates, products, salesForm.currency, salesForm.items, user?.role])
 
     const purchasePreview = useMemo(() => {
         const subtotal = purchaseForm.items.reduce((sum, item) => sum + ((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)), 0)
@@ -1098,6 +1117,15 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
 
                 const quantity = Number(item.quantity)
                 const unitPrice = Number(item.unitPrice || 0)
+                const productPriceConversion = getAppliedCurrencyConversion(
+                    unitPrice,
+                    orderCurrency,
+                    product.currency,
+                    snapshot
+                )
+                if (user?.role === 'staff' && product.minimumSellingPrice != null && !productPriceConversion) {
+                    throw new Error(t('products.minimumSellingPrice.currencyUnavailable', { productName: product.name }))
+                }
                 return {
                     id: item.id,
                     productId: product.id,
@@ -1108,7 +1136,8 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                     quantity,
                     lineTotal: roundFormAmount(quantity * unitPrice),
                     originalCurrency: product.currency,
-                    originalUnitPrice: convertCurrencyAmountWithLiveRates(unitPrice, orderCurrency, product.currency, liveRates),
+                    originalUnitPrice: productPriceConversion?.convertedAmount
+                        ?? convertCurrencyAmountWithLiveRates(unitPrice, orderCurrency, product.currency, liveRates),
                     convertedUnitPrice: roundFormAmount(unitPrice),
                     settlementCurrency: orderCurrency,
                     costPrice: product.costPrice ?? 0,
@@ -1160,6 +1189,21 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     async function handleSalesSubmit(event: FormEvent) {
         event.preventDefault()
         if (!user?.workspaceId) return
+
+        if (salesMinimumPriceViolations.length > 0) {
+            const violation = salesMinimumPriceViolations[0]
+            toast({
+                title: t('common.error') || 'Error',
+                description: violation.currencyUnavailable
+                    ? t('products.minimumSellingPrice.currencyUnavailable', { productName: violation.product.name })
+                    : t('products.minimumSellingPrice.orderLineViolation', {
+                        productName: violation.product.name,
+                        minimumPrice: formatCurrency(violation.product.minimumSellingPrice!, violation.product.currency, features.iqd_display_preference)
+                    }),
+                variant: 'destructive'
+            })
+            return
+        }
 
         const customer = customers.find((entry) => entry.id === salesForm.customerId)
         if (!customer) {
@@ -1217,8 +1261,8 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                 notes: salesForm.notes || undefined
             }
 
-            if (editingSalesOrder) await updateSalesOrder(editingSalesOrder.id, payload)
-            else await createSalesOrder(user.workspaceId, payload, user?.id ?? null)
+            if (editingSalesOrder) await updateSalesOrder(editingSalesOrder.id, payload, { actingUserRole: user.role })
+            else await createSalesOrder(user.workspaceId, payload, user?.id ?? null, { actingUserRole: user.role })
 
             toast({ title: editingSalesOrder ? (t('common.save') || 'Saved') : (t('common.create') || 'Created') })
             setDialogOpen(false)
@@ -1437,7 +1481,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                         onSelect: () => runWorkflowAction(
                             order.id,
                             'reserve',
-                            () => updateSalesOrderStatus(order.id, 'pending'),
+                            () => updateSalesOrderStatus(order.id, 'pending', { actingUserRole: user?.role }),
                             'Sales order reserved'
                         )
                     })}
@@ -1448,7 +1492,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                         onSelect: () => runWorkflowAction(
                             order.id,
                             'complete',
-                            () => updateSalesOrderStatus(order.id, 'completed'),
+                            () => updateSalesOrderStatus(order.id, 'completed', { actingUserRole: user?.role }),
                             'Sales order completed'
                         )
                     })}
@@ -2435,7 +2479,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                                 const lineTotal = roundFormAmount((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0))
 
                                                 return (
-                                                    <div key={`sales-item-${index}`} className="grid gap-3 rounded-2xl border bg-background p-4 md:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_110px_140px_40px]">
+                                                    <div key={`sales-item-${index}`} className={cn('grid gap-3 rounded-2xl border bg-background p-4 md:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_110px_140px_40px]', salesMinimumPriceViolations.some((entry) => entry.lineIndex === index) && 'border-destructive bg-destructive/5 ring-1 ring-destructive/25')}>
                                                         <div className="space-y-2">
                                                             <Label className="md:hidden">{t('orders.form.table.product') || 'Product'}</Label>
                                                             <Select value={item.productId} onValueChange={(value) => updateSalesItem(index, { productId: value })}>
@@ -2471,7 +2515,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                                         </div>
                                                         <div className="space-y-2">
                                                             <Label className="md:hidden">{t('orders.form.table.price') || 'Unit Price'}</Label>
-                                                            <Input type="number" min="0" step={ORDER_DECIMAL_STEP} value={item.unitPrice} onChange={(event) => updateSalesItem(index, { unitPrice: event.target.value })} placeholder={t('common.price') || 'Price'} />
+                                                            <Input type="number" min="0" step={ORDER_DECIMAL_STEP} value={item.unitPrice} onChange={(event) => updateSalesItem(index, { unitPrice: event.target.value })} placeholder={t('common.price') || 'Price'} aria-invalid={salesMinimumPriceViolations.some((entry) => entry.lineIndex === index)} className={salesMinimumPriceViolations.some((entry) => entry.lineIndex === index) ? 'border-destructive text-destructive focus-visible:ring-destructive/25' : undefined} />
                                                         </div>
                                                         <div className="flex items-start justify-end">
                                                             <Button type="button" variant="ghost" size="icon" className="text-destructive" onClick={() => setSalesForm((current) => ({ ...current, items: current.items.filter((_, itemIndex) => itemIndex !== index) }))}>
@@ -2482,6 +2526,16 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                                             <span>{product?.sku ? `SKU: ${product.sku}` : '\u00A0'}</span>
                                                             <span>{(t('orders.form.table.total') || 'Total')}: {formatCurrency(lineTotal, salesForm.currency, features.iqd_display_preference)}</span>
                                                         </div>
+                                                        {salesMinimumPriceViolations.find((entry) => entry.lineIndex === index) && product?.minimumSellingPrice != null && (
+                                                            <p role="alert" className="text-sm font-semibold text-destructive md:col-span-5">
+                                                                {salesMinimumPriceViolations.find((entry) => entry.lineIndex === index)?.currencyUnavailable
+                                                                    ? t('products.minimumSellingPrice.currencyUnavailable', { productName: product.name })
+                                                                    : t('products.minimumSellingPrice.orderLineViolation', {
+                                                                        productName: product.name,
+                                                                        minimumPrice: formatCurrency(product.minimumSellingPrice, product.currency, features.iqd_display_preference)
+                                                                    })}
+                                                            </p>
+                                                        )}
                                                     </div>
                                                 )
                                             })}
@@ -2619,7 +2673,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
 
                             <DialogFooter layout="structured">
                                 <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => setDialogOpen(false)}>{t('common.cancel') || 'Cancel'}</Button>
-                                <Button type="submit" className="w-full sm:w-auto" disabled={isSaving}>
+                                <Button type="submit" className="w-full sm:w-auto" disabled={isSaving || salesMinimumPriceViolations.length > 0}>
                                     {isSaving ? (t('common.loading') || 'Loading...') : (editingSalesOrder ? (t('common.save') || 'Save') : (t('orders.form.saveOrder') || 'Save Order'))}
                                 </Button>
                             </DialogFooter>

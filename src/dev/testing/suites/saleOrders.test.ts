@@ -324,6 +324,88 @@ describe('Sale Orders developer scenarios', () => {
         await assertStock(product.id, storage.id, 10)
     })
 
+    it('rejects a Staff sales order below the minimum before recording payments or reserving stock', async () => {
+        const { customer, storage, product } = await arrange()
+        await db.products.update(product.id, { minimumSellingPrice: 12 })
+        const invalidOrder = saleOrderInput(customer.id, product, storage.id, 'cash', { unitPrice: 11, paid: true })
+
+        await expect(orders.createSalesOrder(TEST_WORKSPACE_ID, invalidOrder, null, { actingUserRole: 'staff' }))
+            .rejects.toThrow('cannot be lower than the minimum selling price')
+
+        expect(await db.sales_orders.count()).toBe(0)
+        expect(await db.payment_transactions.count()).toBe(0)
+        await assertStock(product.id, storage.id, 10)
+    })
+
+    it('allows Staff at the exact minimum and Admin below it, preserving order payments', async () => {
+        const { customer, storage, product } = await arrange()
+        await db.products.update(product.id, { minimumSellingPrice: 12 })
+
+        const staffOrder = await orders.createSalesOrder(
+            TEST_WORKSPACE_ID,
+            saleOrderInput(customer.id, product, storage.id, 'cash', { unitPrice: 12, paid: true }),
+            null,
+            { actingUserRole: 'staff' }
+        )
+        expect(staffOrder.items[0].originalUnitPrice).toBe(12)
+        await assertOrderFinancialEffects(staffOrder.id, 12, 0)
+
+        const adminOrder = await orders.createSalesOrder(
+            TEST_WORKSPACE_ID,
+            saleOrderInput(customer.id, product, storage.id, 'cash', { unitPrice: 11, paid: true }),
+            null,
+            { actingUserRole: 'admin' }
+        )
+        expect(adminOrder.items[0].originalUnitPrice).toBe(11)
+        await assertOrderFinancialEffects(adminOrder.id, 11, 0)
+        await assertStock(product.id, storage.id, 10)
+    })
+
+    it('converts the effective order price into the product currency before checking its minimum', async () => {
+        const { customer, storage, product } = await arrange('iqd')
+        await db.products.update(product.id, { minimumSellingPrice: 18_000 })
+        const exchangeRates = [{ pair: 'USD/IQD', rate: 150_000, priceBasisAmount: 100, source: 'scenario', timestamp: TEST_TIME }]
+        const belowMinimum = saleOrderInput(customer.id, product, storage.id, 'cash', {
+            currency: 'usd', unitPrice: 11.99, paid: true
+        })
+        belowMinimum.exchangeRates = exchangeRates
+
+        await expect(orders.createSalesOrder(TEST_WORKSPACE_ID, belowMinimum, null, { actingUserRole: 'staff' }))
+            .rejects.toThrow('cannot be lower than the minimum selling price')
+        expect(await db.sales_orders.count()).toBe(0)
+        expect(await db.payment_transactions.count()).toBe(0)
+
+        const atMinimum = saleOrderInput(customer.id, product, storage.id, 'cash', {
+            currency: 'usd', unitPrice: 12, paid: true
+        })
+        atMinimum.exchangeRates = exchangeRates
+        const saved = await orders.createSalesOrder(TEST_WORKSPACE_ID, atMinimum, null, { actingUserRole: 'staff' })
+        expect(saved.items[0].originalUnitPrice).toBe(12)
+        await assertOrderFinancialEffects(saved.id, 12, 0)
+    })
+
+    it('blocks a Staff edit below the current product minimum without changing the saved draft', async () => {
+        const { customer, storage, product } = await arrange()
+        await db.products.update(product.id, { minimumSellingPrice: 12 })
+        const order = await orders.createSalesOrder(
+            TEST_WORKSPACE_ID,
+            saleOrderInput(customer.id, product, storage.id, 'cash', { unitPrice: 12 }),
+            null,
+            { actingUserRole: 'staff' }
+        )
+
+        await expect(orders.updateSalesOrder(order.id, {
+            items: [{ ...order.items[0], originalUnitPrice: 11, convertedUnitPrice: 11, lineTotal: 11 }],
+            subtotal: 11,
+            total: 11
+        }, { actingUserRole: 'staff' })).rejects.toThrow('cannot be lower than the minimum selling price')
+
+        expect(await db.sales_orders.get(order.id)).toMatchObject({ total: 12 })
+        expect((await db.sales_orders.get(order.id))?.items[0].originalUnitPrice).toBe(12)
+        expect(await db.payment_transactions.count()).toBe(0)
+        await assertStock(product.id, storage.id, 10)
+    })
+
     it('an unpaid draft can be edited and soft-deleted without creating payments or stock movements', async () => {
         const { customer, storage, product } = await arrange()
         const order = await orders.createSalesOrder(TEST_WORKSPACE_ID, saleOrderInput(customer.id, product, storage.id, 'cash'))

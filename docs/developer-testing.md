@@ -170,6 +170,11 @@ returns, services, stable retry identities, and important validation failures.
 Assertions read saved orders, inventory, transactions, linked reversals, account
 movements/balances, loans/installments, and the ledger's production projection.
 Seeded cases add fractional prices/quantities with checkout and full return.
+The minimum-selling-price cases reject Staff creates and edits below the current
+product floor before recording payments or reserving stock, accept the exact
+boundary, and verify Admin bypass with payment and inventory assertions. The
+shared validation contract tests cover Local product reads and Cloud/Hybrid
+request payloads, server results, and friendly request failures.
 
 Existing regression groups add financing repayment/reversal, stock aggregation,
 commission mode snapshots, customer summaries, currency conversion, pricing,
@@ -216,6 +221,7 @@ loans/installments, cart and held-sale helpers, bulk and automatic discounts,
 conversion and immutable rate snapshots, stock batches, storage permissions,
 partial/full refund audit entries, exchanges, financing returns, barcode parsing,
 Activities, Quick Order routing, Cloud/Hybrid request/result/failure contracts,
+staff-only minimum selling price checks with Admin bypass and pre-write rollback,
 idempotent retries and atomic rollback. Generated cases belong to POS and do not
 reuse Sale Orders' scenarios. The complete rendered POS checkout and Sales return
 dialog are not automated by this suite.

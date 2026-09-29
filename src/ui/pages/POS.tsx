@@ -36,6 +36,7 @@ import {
     type SalesOrderItem
 } from '@/local-db'
 import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
+import { isBelowMinimumSellingPrice } from '@/lib/minimumSellingPrice'
 import { isPosPaymentTypeAllowed, getPosCheckoutRoute, type PosPaymentType } from '@/lib/posPaymentPolicy'
 import {
     canOfferMobileFreeOnlyOrderHold,
@@ -1357,6 +1358,52 @@ export function POS() {
         tryIqd: tryRates.try_iqd, usdTry: tryRates.usd_try
     }), [exchangeData, eurRates, tryRates])
 
+    const getCartMinimumPriceViolation = useCallback((item: CartItem) => {
+        if (user?.role !== 'staff') return null
+        const product = findStockProduct(item.product_id, item.storageId)
+        const minimumSellingPrice = product?.minimumSellingPrice
+        if (!product || minimumSellingPrice == null) return null
+
+        const effectiveCurrency = (item.effective_currency ?? getEffectiveProductCurrency(product)) as CurrencyCode
+        const posRates = {
+            usdIqd: exchangeData, eurIqd: eurRates.eur_iqd, usdEur: eurRates.usd_eur,
+            tryIqd: tryRates.try_iqd, usdTry: tryRates.usd_try
+        }
+        if (!hasPosConversionRate(effectiveCurrency, product.currency, posRates)) {
+            return { product, minimumSellingPrice, currency: product.currency, currencyUnavailable: true }
+        }
+        const effectivePriceInProductCurrency = convertPrice(
+            getCartEffectivePrice(item),
+            effectiveCurrency,
+            product.currency
+        )
+        const lineMinimum = minimumSellingPrice * (item.unit_factor ?? 1)
+        return isBelowMinimumSellingPrice(user.role, effectivePriceInProductCurrency, lineMinimum)
+            ? { product, minimumSellingPrice: lineMinimum, currency: product.currency }
+            : null
+    }, [convertPrice, exchangeData, eurRates.eur_iqd, eurRates.usd_eur, findStockProduct, getEffectiveProductCurrency, tryRates.try_iqd, tryRates.usd_try, user?.role])
+
+    const minimumPriceValidationItems = useMemo(() => cart.flatMap((item) => {
+        const product = findStockProduct(item.product_id, item.storageId)
+        if (!product) return []
+        const effectiveCurrency = (item.effective_currency ?? getEffectiveProductCurrency(product)) as CurrencyCode
+        const posRates = {
+            usdIqd: exchangeData, eurIqd: eurRates.eur_iqd, usdEur: eurRates.usd_eur,
+            tryIqd: tryRates.try_iqd, usdTry: tryRates.usd_try
+        }
+        const hasProductCurrencyRate = hasPosConversionRate(effectiveCurrency, product.currency, posRates)
+        return [{
+            productId: product.id,
+            effectiveSellingPrice: convertPrice(getCartEffectivePrice(item), effectiveCurrency, product.currency),
+            unitFactor: item.unit_factor ?? 1,
+            currency: hasProductCurrencyRate ? product.currency : effectiveCurrency
+        }]
+    }), [cart, convertPrice, exchangeData, eurRates.eur_iqd, eurRates.usd_eur, findStockProduct, getEffectiveProductCurrency, tryRates.try_iqd, tryRates.usd_try])
+    const hasMinimumSellingPriceViolation = useMemo(
+        () => cart.some((item) => getCartMinimumPriceViolation(item) !== null),
+        [cart, getCartMinimumPriceViolation]
+    )
+
     // Calculate totals
     const totalAmount = cart.reduce((sum, item) => {
         const itemCurrency = findStockProduct(item.product_id, item.storageId)?.currency || 'usd'
@@ -1851,6 +1898,7 @@ export function POS() {
                     sku: product.sku,
                     name: product.name,
                     price: effectivePrice,
+                    effective_currency: effectiveCurrency,
                     discounted_price: activeDiscount?.discountPrice,
                     discount_type: activeDiscount?.discountType,
                     discount_value: activeDiscount?.discountValue,
@@ -1932,6 +1980,7 @@ export function POS() {
                     sku: product.sku,
                     name: product.name,
                     price: effectivePrice,
+                    effective_currency: effectiveCurrency,
                     discounted_price: activeDiscount?.discountPrice,
                     discount_type: activeDiscount?.discountType,
                     discount_value: activeDiscount?.discountValue,
@@ -2655,6 +2704,20 @@ export function POS() {
 
     const handleCheckout = async (loanRegistrationData?: LoanRegistrationData) => {
         if (checkoutSubmissionInProgress.current || isLoading) return
+        const minimumViolation = cart.map((item) => getCartMinimumPriceViolation(item)).find(Boolean)
+        if (minimumViolation) {
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: minimumViolation.currencyUnavailable
+                    ? t('products.minimumSellingPrice.currencyUnavailable', { productName: minimumViolation.product.name })
+                    : t('products.minimumSellingPrice.staffViolation', {
+                        productName: minimumViolation.product.name,
+                        minimumPrice: formatCurrency(minimumViolation.minimumSellingPrice, minimumViolation.currency, features.iqd_display_preference)
+                    })
+            })
+            return
+        }
 
         checkoutSubmissionInProgress.current = true
         // Lock the visible checkout controls before any validation or network work
@@ -2985,6 +3048,7 @@ export function POS() {
                 paymentType, digitalProvider, accountId: paymentAccount?.id ?? null, loan: validLoanRegistrationData })
             const checkoutInput = posCheckoutAttempt.current.getOrCreate(attemptSignature, () => ({
                 payload: { ...checkoutPayload, origin: 'pos' }, user,
+                minimumPriceValidationItems,
                 timestamp: checkoutTimestamp, exchangeRates: exchangeRatesPayload,
                 primaryRate: hasExchangeSnapshot ? { rate: snapshotRate, source: snapshotSource } : null,
                 maxDiscountPercent: features.max_discount_percent,
@@ -3052,6 +3116,15 @@ export function POS() {
         try {
         if (cart.length === 0 || !user) {
             throw new Error(t('pos.emptyCart', { defaultValue: 'Your cart is empty.' }))
+        }
+        const minimumViolation = cart.map((item) => getCartMinimumPriceViolation(item)).find(Boolean)
+        if (minimumViolation) {
+            throw new Error(minimumViolation.currencyUnavailable
+                ? t('products.minimumSellingPrice.currencyUnavailable', { productName: minimumViolation.product.name })
+                : t('products.minimumSellingPrice.staffViolation', {
+                    productName: minimumViolation.product.name,
+                    minimumPrice: formatCurrency(minimumViolation.minimumSellingPrice, minimumViolation.currency, features.iqd_display_preference)
+                }))
         }
         if (cart.some((item) => item.selling_unit_ref && item.base_unit_ref)) {
             throw new Error(t('pos.unitSelection.ordersUnsupported'))
@@ -3190,7 +3263,9 @@ export function POS() {
                 sourceChannel: 'manual',
                 createdAt: checkoutTimestamp
             }, user.id, {
-                onProgress: (stage) => setQuickOrderProgressStage(stage)
+                onProgress: (stage) => setQuickOrderProgressStage(stage),
+                actingUserRole: user.role,
+                minimumPriceValidationItems
             })
 
             let commissionAssignmentError: unknown = null
@@ -3343,6 +3418,8 @@ export function POS() {
                                 isLoadingPreprintTemplate={isLoadingPreprintTemplate}
                                 getDisplayImageUrl={getDisplayImageUrl}
                                 products={sellableProducts}
+                                getCartMinimumPriceViolation={getCartMinimumPriceViolation}
+                                hasMinimumSellingPriceViolation={hasMinimumSellingPriceViolation}
                                 convertPrice={convertPrice}
                                 openPriceEdit={openPriceEdit}
                                 isAdmin={isAdmin}
@@ -3697,6 +3774,7 @@ export function POS() {
                                             const isConverted = productCurrency !== settlementCurrency
                                             const hasNegotiated = item.negotiated_price !== undefined
                                             const hasDiscount = hasAutomaticDiscount(item)
+                                            const minimumViolation = getCartMinimumPriceViolation(item)
                                             const itemKey = getCartItemKey(item)
 
                                             return (
@@ -3706,7 +3784,8 @@ export function POS() {
                                                     data-tour-id={demoTutorial.state?.productId === item.product_id ? 'tutorial-pos-cart-quantity' : undefined}
                                                     className={cn(
                                                         "bg-background border border-border p-3 rounded-lg flex gap-3 group transition-all duration-200 scroll-m-2",
-                                                        (isPosKeyboardSelectionEnabled && focusedSection === 'cart' && focusedCartIndex === index) ? "ring-2 ring-primary ring-offset-2 ring-offset-background border-primary/50 shadow-md transform scale-[1.01]" : ""
+                                                        (isPosKeyboardSelectionEnabled && focusedSection === 'cart' && focusedCartIndex === index) ? "ring-2 ring-primary ring-offset-2 ring-offset-background border-primary/50 shadow-md transform scale-[1.01]" : "",
+                                                        minimumViolation && 'border-destructive bg-destructive/5 ring-1 ring-destructive/25'
                                                     )}
                                                 >
                                                     {/* Product Image - Responsive Visibility */}
@@ -3750,6 +3829,16 @@ export function POS() {
                                                                 <div className="text-[10px] text-primary/60 font-medium">
                                                                     ≈ {formatCurrency(convertedPrice, settlementCurrency, features.iqd_display_preference)} {t('common.each')}
                                                                 </div>
+                                                            )}
+                                                            {minimumViolation && (
+                                                                <p role="alert" className="mt-1 text-[11px] font-semibold text-destructive">
+                                                                    {minimumViolation.currencyUnavailable
+                                                                        ? t('products.minimumSellingPrice.currencyUnavailable', { productName: minimumViolation.product.name })
+                                                                        : t('products.minimumSellingPrice.staffViolation', {
+                                                                            productName: minimumViolation.product.name,
+                                                                            minimumPrice: formatCurrency(minimumViolation.minimumSellingPrice, minimumViolation.currency, features.iqd_display_preference)
+                                                                        })}
+                                                                </p>
                                                             )}
                                                         </div>
                                                     </div>
@@ -4183,7 +4272,7 @@ export function POS() {
                                     data-tour-id="tutorial-pos-checkout"
                                     className="flex-[3] h-14 text-xl shadow-lg shadow-primary/20 rounded-2xl"
                                     onClick={() => handleCheckout()}
-                                    disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates}
+                                    disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates || hasMinimumSellingPriceViolation}
                                 >
                                     {isLoading ? (
                                         <Loader2 className="w-6 h-6 animate-spin mr-2" />
@@ -4526,6 +4615,29 @@ export function POS() {
                         const editingItem = cart.find((item) => getCartItemKey(item) === editingPriceItemKey)
                         const editingProduct = editingItem ? findStockProduct(editingItem.product_id, editingItem.storageId) : undefined
                         if (!editingItem) return null
+                        const editedPrice = parseFormattedNumber(negotiatedPriceInput)
+        const effectiveCurrency = (editingItem.effective_currency
+            ?? (editingProduct ? getEffectiveProductCurrency(editingProduct) : 'usd')) as CurrencyCode
+                        const minimumPriceForLine = editingProduct?.minimumSellingPrice == null
+                            ? null
+                            : editingProduct.minimumSellingPrice * (editingItem.unit_factor ?? 1)
+                        const editingPriceRates = {
+                            usdIqd: exchangeData, eurIqd: eurRates.eur_iqd, usdEur: eurRates.usd_eur,
+                            tryIqd: tryRates.try_iqd, usdTry: tryRates.usd_try
+                        }
+                        const minimumPriceCurrencyUnavailable = minimumPriceForLine != null
+                            && !!editingProduct
+                            && !hasPosConversionRate(effectiveCurrency, editingProduct.currency, editingPriceRates)
+                        const hasMinimumPriceError = user?.role === 'staff'
+                            && minimumPriceForLine != null
+                            && isBelowMinimumSellingPrice(
+                                user?.role,
+                                convertPrice(editedPrice, effectiveCurrency, editingProduct?.currency || effectiveCurrency),
+                                minimumPriceForLine
+                            )
+                        const shouldShowMinimumPriceError = user?.role === 'staff'
+                            && minimumPriceForLine != null
+                            && (minimumPriceCurrencyUnavailable || hasMinimumPriceError)
 
                         return (
                             <div className="space-y-4">
@@ -4555,7 +4667,11 @@ export function POS() {
                                                 setNegotiatedPriceInput(formatNumberWithCommas(raw))
                                             }}
                                             placeholder="0.00"
-                                            className="text-lg py-5 font-mono pr-14"
+                                            aria-invalid={shouldShowMinimumPriceError}
+                                            className={cn(
+                                                'text-lg py-5 font-mono pr-14',
+                                                shouldShowMinimumPriceError && 'border-destructive bg-destructive/5 text-destructive focus-visible:ring-destructive/25'
+                                            )}
                                             autoFocus
                                         />
                                         <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold uppercase tracking-wider text-muted-foreground/60">
@@ -4582,6 +4698,16 @@ export function POS() {
                                     <p className="text-xs text-muted-foreground mt-1">
                                         {t('pos.originalPriceDesc') || 'Original price will be preserved in records.'}
                                     </p>
+                                    {shouldShowMinimumPriceError && editingProduct && minimumPriceForLine != null && (
+                                        <p role="alert" className="mt-2 text-sm font-semibold text-destructive">
+                                            {minimumPriceCurrencyUnavailable
+                                                ? t('products.minimumSellingPrice.currencyUnavailable', { productName: editingProduct.name })
+                                                : t('products.minimumSellingPrice.staffViolation', {
+                                                    productName: editingProduct.name,
+                                                    minimumPrice: formatCurrency(minimumPriceForLine, editingProduct.currency, features.iqd_display_preference)
+                                                })}
+                                        </p>
+                                    )}
                                     {!isPriceBelowCostHidden && (() => {
                                         const parsedPrice = parseFormattedNumber(negotiatedPriceInput)
                                         const costPrice = editingProduct?.costPrice
@@ -5643,6 +5769,13 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
     )
 }
 
+type PosMinimumPriceViolation = {
+    product: InventoryProduct
+    minimumSellingPrice: number
+    currency: CurrencyCode
+    currencyUnavailable?: boolean
+}
+
 interface MobileCartProps {
     cart: CartItem[]
     removeFromCart: (itemKey: string) => void
@@ -5670,6 +5803,8 @@ interface MobileCartProps {
     isLoadingPreprintTemplate: boolean
     getDisplayImageUrl: (url?: string) => string
     products: InventoryProduct[]
+    getCartMinimumPriceViolation: (item: CartItem) => PosMinimumPriceViolation | null
+    hasMinimumSellingPriceViolation: boolean
     convertPrice: (amount: number, from: CurrencyCode, to: CurrencyCode) => number
     openPriceEdit: (item: CartItem) => void
     clearNegotiatedPrice: (item: CartItem) => void
@@ -5694,7 +5829,7 @@ function MobileCart({
     settlementCurrency, paymentType, setPaymentType, isOrderPaymentLocked, isTutorialPosTask, tutorialProductId, digitalProvider,
     setDigitalProvider, workspaceId, paymentAccount, setPaymentAccount, quickOrderEnabled, handleCheckout, handleHoldSale, isLoading,
     canPreprintReceipt, handlePreprintReceipt, isPreprinting, isLoadingPreprintTemplate,
-    getDisplayImageUrl, products, convertPrice, openPriceEdit,
+    getDisplayImageUrl, products, getCartMinimumPriceViolation, hasMinimumSellingPriceViolation, convertPrice, openPriceEdit,
     clearNegotiatedPrice, isAdmin,
     discountValue, setDiscountValue, discountType, setDiscountType,
     hasTrulyMissingRates, hasLoadingRates, isActivitiesStorage, t,
@@ -5817,13 +5952,17 @@ function MobileCart({
                         const convertedUnitPrice = convertPrice(unitPrice, originalCurrency, settlementCurr)
                         const isExchanged = originalCurrency !== settlementCurr
                         const hasDiscount = hasAutomaticDiscount(item)
+                        const minimumViolation = getCartMinimumPriceViolation(item)
                         const itemKey = buildCartItemKey(item.product_id, item.storageId, item.selling_unit_ref)
 
                         return (
                             <div
                                 key={itemKey}
                                 data-tour-id={tutorialProductId === item.product_id ? 'tutorial-pos-cart-quantity' : undefined}
-                                className="flex gap-4 bg-card p-4 rounded-[2rem] border border-border shadow-sm group"
+                                className={cn(
+                                    'flex gap-4 bg-card p-4 rounded-[2rem] border border-border shadow-sm group',
+                                    minimumViolation && 'border-destructive bg-destructive/5 ring-1 ring-destructive/25'
+                                )}
                             >
                                 <div className="w-20 h-20 bg-muted/30 rounded-2xl overflow-hidden shrink-0">
                                     <ProductImage
@@ -5889,6 +6028,16 @@ function MobileCart({
                                                     <div className="text-primary/40 font-medium">
                                                         ≈ {formatCurrency(convertedUnitPrice, settlementCurr, features.iqd_display_preference)} each
                                                     </div>
+                                                )}
+                                                {minimumViolation && (
+                                                    <p role="alert" className="mt-1 text-[11px] font-semibold text-destructive">
+                                                            {minimumViolation.currencyUnavailable
+                                                                ? t('products.minimumSellingPrice.currencyUnavailable', { productName: minimumViolation.product.name })
+                                                                : t('products.minimumSellingPrice.staffViolation', {
+                                                                    productName: minimumViolation.product.name,
+                                                                    minimumPrice: formatCurrency(minimumViolation.minimumSellingPrice, minimumViolation.currency, features.iqd_display_preference)
+                                                                })}
+                                                    </p>
                                                 )}
                                             </div>
                                         </div>
@@ -6043,7 +6192,7 @@ function MobileCart({
                                     e.stopPropagation();
                                     handleCheckout();
                                 }}
-                                disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates}
+                                disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates || hasMinimumSellingPriceViolation}
                             >
                                 {isLoading ? <Loader2 className="animate-spin w-5 h-5" /> : (
                                     <div className="flex items-center gap-2">
@@ -6257,7 +6406,7 @@ function MobileCart({
                                     data-tour-id="tutorial-pos-checkout"
                                     className="flex-[4] h-14 rounded-2xl text-lg font-black shadow-xl shadow-primary/20 active:scale-95 transition-all text-primary-foreground"
                                     onClick={() => handleCheckout()}
-                                disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates}
+                                disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates || hasMinimumSellingPriceViolation}
                                 >
                                     {isLoading ? <Loader2 className="animate-spin w-6 h-6" /> : (
                                         <div className="flex items-center gap-2">

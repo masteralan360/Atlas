@@ -1,3 +1,5 @@
+import type { CurrencyCode } from './local-db/models'
+
 export interface SaleItem {
     id: string
     // Older local snapshots may not yet have this field. New Supabase rows
@@ -190,6 +192,8 @@ export interface CartItem {
     is_service?: boolean
     price_book_id?: string
     price_book_name?: string
+    /** Currency used by the selected product, unit, or Price Book for this line. */
+    effective_currency?: CurrencyCode
 }
 
 export interface UniversalInvoiceItem {

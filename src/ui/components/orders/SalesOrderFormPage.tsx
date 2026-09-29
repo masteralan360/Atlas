@@ -9,7 +9,7 @@ import { isMobile } from '@/lib/platform'
 import { getPrioritizedPaymentMethod, setPrioritizedPaymentMethod } from '@/lib/prioritizedPaymentMethod'
 import { ORDER_FINANCING_PAYMENT_METHODS, STANDARD_PAYMENT_METHODS, type PaymentMethodOption } from '@/lib/paymentMethods'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
-import { buildOrderExchangeRatesSnapshot, convertCurrencyAmountWithLiveRates, getPrimaryExchangeDetails } from '@/lib/orderCurrency'
+import { buildOrderExchangeRatesSnapshot, convertCurrencyAmountWithLiveRates, getAppliedCurrencyConversion, getPrimaryExchangeDetails } from '@/lib/orderCurrency'
 import { calculateOrderTotalWithAdjustments, normalizeOrderAdjustments, repriceOrderAdjustment } from '@/lib/orderAdjustments'
 import {
     cn,
@@ -70,6 +70,7 @@ import {
 import { useWorkspace } from '@/workspace'
 import { useOrderEditorLiveData } from '@/hooks/useOrderEditorLiveData'
 import { isOrderReadOnly } from '@/lib/orderEditability'
+import { isBelowMinimumSellingPrice } from '@/lib/minimumSellingPrice'
 import { isRemoteOrderSaveConfirmationError, ORDER_SUMMARY_RECOVERY_PERSISTENCE_ERROR, type OrderSaveProgress } from '@/lib/orderSaveProgress'
 import { hasEffectiveSalesAgentCommissionPermission, useHideCosts, useWorkspacePermissions } from '@/permissions'
 import { getMissingPriceBookCostMessage, getMissingProductCostMessage, hasValidProductCost } from '@/lib/productCost'
@@ -1187,6 +1188,65 @@ export function SalesOrderFormPage({
         [items]
     )
 
+    const minimumPriceValidationItems = useMemo(() => items.flatMap((item) => {
+        if (!item.productId || !hasOrderLineInventoryQuantity(item)) return []
+        const product = products.find((entry) => entry.id === item.productId)
+        if (!product) return []
+        const unitOption = getFormUnitOption(item, product)
+        const effectivePrice = Number(item.unitPrice) || 0
+        const conversion = getAppliedCurrencyConversion(
+            effectivePrice,
+            currency,
+            product.currency,
+            buildOrderExchangeRatesSnapshot(liveRates)
+        )
+        return [{
+            productId: product.id,
+            effectiveSellingPrice: conversion?.convertedAmount ?? effectivePrice,
+            unitFactor: unitOption?.factor ?? 1,
+            currency: conversion ? product.currency : currency
+        }]
+    }), [currency, getFormUnitOption, items, liveRates, products])
+    const minimumPriceViolations = useMemo(() => items.flatMap((item, lineIndex) => {
+        if (user?.role !== 'staff') return []
+        const product = products.find((entry) => entry.id === item.productId)
+        if (!product || product.minimumSellingPrice == null) return []
+        const unitOption = getFormUnitOption(item, product)
+        const exchangeSnapshot = buildOrderExchangeRatesSnapshot(liveRates)
+        const effectivePrice = Number(item.unitPrice) || 0
+        const effectivePriceConversion = getAppliedCurrencyConversion(
+            effectivePrice,
+            currency,
+            product.currency,
+            exchangeSnapshot
+        )
+        const minimumPriceConversion = getAppliedCurrencyConversion(
+            product.minimumSellingPrice,
+            product.currency,
+            currency,
+            exchangeSnapshot
+        )
+        if (!effectivePriceConversion || !minimumPriceConversion) {
+            return [{
+                lineIndex,
+                product,
+                minimumPrice: product.minimumSellingPrice,
+                currency: product.currency,
+                currencyUnavailable: true
+            }]
+        }
+        const minimumPriceInOrderCurrency = minimumPriceConversion.convertedAmount * (unitOption?.factor ?? 1)
+        return isBelowMinimumSellingPrice(user.role, effectivePrice, minimumPriceInOrderCurrency)
+            ? [{
+                lineIndex,
+                product,
+                minimumPrice: minimumPriceInOrderCurrency,
+                currency,
+                currencyUnavailable: false
+            }]
+            : []
+    }), [currency, getFormUnitOption, items, liveRates, products, user?.role])
+
     const initialPayment = roundFormAmount(Math.max(0, Number(initialPaymentAmount || 0)))
     const isFinanced = paymentMethod === 'loan' || paymentMethod === 'installments'
     const isInstallmentBased = paymentMethod === 'installments'
@@ -1198,7 +1258,7 @@ export function SalesOrderFormPage({
         (!isInstallmentBased || (
             Number(installmentCount) >= 1
             && Boolean(firstDueDate)
-        ))
+        )) && minimumPriceViolations.length === 0
 
     const finishSavedOrder = useCallback((orderId: string) => {
         if (finalizedOrderIdRef.current === orderId) return
@@ -1253,6 +1313,20 @@ export function SalesOrderFormPage({
         if (isOrderEditorBlocked || isExistingOrderReadOnly) return
         if (priceBooksEnabled && !isPriceBookCatalogReady) return
         if (!user?.workspaceId || isSaving) return
+
+        if (minimumPriceViolations.length > 0) {
+            const violation = minimumPriceViolations[0]
+            toast({
+                title: t('common.error') || 'Error',
+                description: violation.currencyUnavailable
+                    ? t('products.minimumSellingPrice.currencyUnavailable', { productName: violation.product.name })
+                    : t('products.minimumSellingPrice.orderLineViolation', {
+                        minimumPrice: formatCurrency(violation.minimumPrice, violation.currency, features.iqd_display_preference)
+                    }),
+                variant: 'destructive'
+            })
+            return
+        }
 
         const customer = selectedCustomer
         if (!customer) {
@@ -1524,7 +1598,9 @@ export function SalesOrderFormPage({
                 deferSummaryRefresh: true,
                 orderId: saveOperation.orderId,
                 initialPaymentTransactionId: saveOperation.initialPaymentTransactionId,
-                onProgress: updateSaveProgressToast
+                onProgress: updateSaveProgressToast,
+                actingUserRole: user.role,
+                minimumPriceValidationItems
             }
             const savedOrder = editingOrderId
                 ? await updateSalesOrder(editingOrderId, payload, saveOptions)
@@ -1890,6 +1966,7 @@ export function SalesOrderFormPage({
                                         const lineTotal = roundFormAmount((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0))
                                         const costPrice = product ? getItemCostDetails(item, product).selectedConvertedCostPrice : 0
                                         const isSellingAtLoss = isItemSellingAtLoss(item, product)
+                                        const minimumPriceViolation = minimumPriceViolations.find((violation) => violation.lineIndex === index)
                                         const freeBonusQuantity = Math.max(0, Number(item.freeBonusQuantity || 0))
                                         const inventoryQuantity = getOrderLineInventoryQuantity({
                                             quantity: Number(item.quantity) || 0,
@@ -1912,7 +1989,7 @@ export function SalesOrderFormPage({
                                                 key={`sales-item-${index}`}
                                                 className={cn(
                                                     'relative grid gap-4 rounded-2xl border bg-background p-4 transition-all duration-700 sm:grid-cols-2 lg:grid-cols-[repeat(24,minmax(0,1fr))]',
-                                                    isSellingAtLoss && 'border-destructive bg-destructive/5',
+                                                    (isSellingAtLoss || minimumPriceViolation) && 'border-destructive bg-destructive/5',
                                                     item.seq === highlightedNewSeq && 'border-primary ring-2 ring-primary/60 bg-primary/5'
                                                 )}
                                             >
@@ -2126,7 +2203,26 @@ export function SalesOrderFormPage({
                                                     data-tour-id={index === 0 ? 'tutorial-order-unit-price' : undefined}
                                                 >
                                                     <Label>{t('common.sellingPrice', { defaultValue: 'Selling Price' })}</Label>
-                                                    <Input className="w-full min-w-0" value={formatNumericInput(item.unitPrice)} onChange={(event) => updateItem(index, { unitPrice: sanitizeNumericInput(event.target.value, { allowDecimal: true, maxFractionDigits: 3 }) })} placeholder={t('common.sellingPrice', { defaultValue: 'Selling Price' })} />
+                                                    <Input
+                                                        className={cn(
+                                                            'w-full min-w-0',
+                                                            minimumPriceViolation && 'border-destructive bg-destructive/5 text-destructive focus-visible:ring-destructive/25'
+                                                        )}
+                                                        value={formatNumericInput(item.unitPrice)}
+                                                        onChange={(event) => updateItem(index, { unitPrice: sanitizeNumericInput(event.target.value, { allowDecimal: true, maxFractionDigits: 3 }) })}
+                                                        placeholder={t('common.sellingPrice', { defaultValue: 'Selling Price' })}
+                                                        aria-invalid={Boolean(minimumPriceViolation)}
+                                                    />
+                                                    {minimumPriceViolation ? (
+                                                        <p role="alert" className="flex items-start gap-1.5 text-xs font-semibold text-destructive">
+                                                            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                                            <span>{minimumPriceViolation.currencyUnavailable
+                                                                ? t('products.minimumSellingPrice.currencyUnavailable', { productName: minimumPriceViolation.product.name })
+                                                                : t('products.minimumSellingPrice.orderLineViolation', {
+                                                                    minimumPrice: formatCurrency(minimumPriceViolation.minimumPrice, minimumPriceViolation.currency, features.iqd_display_preference)
+                                                                })}</span>
+                                                        </p>
+                                                    ) : null}
                                                     {!hideCosts && isSellingAtLoss ? (
                                                         <div role="alert" className="flex items-start gap-1.5 text-xs text-destructive">
                                                             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />

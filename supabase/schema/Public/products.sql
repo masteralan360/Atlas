@@ -6,6 +6,7 @@ CREATE TABLE public.products (
   description text NULL DEFAULT ''::text,
   category character varying NULL,
   price numeric NOT NULL DEFAULT 0,
+  minimum_selling_price numeric NULL CHECK (minimum_selling_price IS NULL OR minimum_selling_price >= 0),
   cost_price numeric NULL,
   quantity numeric NOT NULL DEFAULT 0,
   min_stock_level numeric NOT NULL DEFAULT 10,

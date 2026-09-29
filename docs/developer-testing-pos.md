@@ -35,8 +35,8 @@ access rules.
 
 | Behavior | Production code | Test ownership |
 | --- | --- | --- |
-| Sale persistence, payments, inventory and financing | `src/local-db/posCheckout.ts` | `posCheckout.test.ts`, `posFinancing.test.ts`, `posRemote.test.ts`, `posRecovery.test.ts` |
-| Price precedence, bulk discount, conversion, held-cart snapshot/restore | `src/lib/posCart.ts` | `posCart.test.ts`, `posPricing.test.ts`, `posCurrency.test.ts` |
+| Sale persistence, payments, inventory, financing, and minimum-price transaction enforcement | `src/local-db/posCheckout.ts`, `src/local-db/minimumSellingPrice.ts` | `posCheckout.test.ts`, `minimumSellingPrice.test.ts`, `posFinancing.test.ts`, `posRemote.test.ts`, `posRecovery.test.ts` |
+| Price precedence, staff minimum-price boundaries, bulk discount, conversion, held-cart snapshot/restore | `src/lib/posCart.ts`, `src/lib/minimumSellingPrice.ts` | `posCart.test.ts`, `posPricing.test.ts`, `minimumSellingPrice.test.ts`, `posCurrency.test.ts` |
 | Frozen retry identities after uncertain responses | `src/lib/posCheckoutAttempt.ts`, POS page | `posAttempt.test.ts` and remote retry checks |
 | Sale / Activities / Quick Order routing | `src/lib/posPaymentPolicy.ts` | `posRouting.test.ts`, existing policy tests |
 | Refund amounts, records and linked counter-entries | `src/local-db/posSaleReturns.ts`, Sales page | `posReturns.test.ts`, remote refund contracts |
@@ -139,9 +139,9 @@ The registry at `src/dev/testing/suites.json` is the authoritative file allowlis
 
 | ID | Coverage |
 | --- | --- |
-| `checkout` | Payment-method × currency × optional-account matrix, physical/service checkout, cache reopen, replay, payment/account/ledger regressions, generated POS cases |
+| `checkout` | Payment-method × currency × optional-account matrix, physical/service checkout, Staff below-minimum rollback, exact-boundary acceptance, Admin bypass, Local/Cloud/Hybrid validation contracts, cache reopen, replay, payment/account/ledger regressions, generated POS cases |
 | `cart` | Independent held snapshots, fractional quantities, price-book/negotiation retention, current stock bounds, legacy/cross-storage restoration |
-| `pricing` | Price precedence including zero, percentage/fixed bulk discount, caps/reset/subtotal boundaries, discounts, price books and cost validation |
+| `pricing` | Price precedence including zero, Staff/Admin minimum-price boundaries and admin-only product-field gate, percentage/fixed bulk discount, caps/reset/subtotal boundaries, discounts, price books and cost validation |
 | `currency` | Supported direct/inverse/cross pairs, IQD/decimal rounding, missing/invalid rate availability and immutable rate payloads |
 | `inventory` | Batch allocation/costing/FEFO/fraction/duplicate-line regressions, Local stock effects and storage access |
 | `financing` | Simple/standard POS loans in all four currencies, schedule sums, zero checkout receipt and repayment-related ledger rules |

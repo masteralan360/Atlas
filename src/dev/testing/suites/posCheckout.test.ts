@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { db } from '@/local-db/database'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 import { installTestBrowser } from '../fixtures/browser'
-import { assertPosPayment } from '../assertions/pos'
+import { assertNoPosCommit, assertPosPayment } from '../assertions/pos'
 import { POS_BATCH, POS_CURRENCIES, POS_INVENTORY, POS_METHODS, POS_PRODUCT, POS_STORAGE, POS_WORKSPACE,
     posCheckoutInput, seededPosCases, seedPosStock } from '../fixtures/pos'
 
@@ -72,8 +72,51 @@ describe('POS checkout scenarios (independent of Instant POS)', () => {
         await assertPosPayment(input.payload.id, 100)
     })
 
+    it('blocks a Staff checkout below the minimum before sale, payment, ledger, or inventory writes', async () => {
+        await seedPosStock('usd')
+        await db.products.update(POS_PRODUCT, { minimumSellingPrice: 12 })
+        const input = posCheckoutInput({ unitPrice: 11 })
+        input.user.role = 'staff'
+
+        await expect(checkout.commitPosCheckout(input)).rejects.toMatchObject({
+            name: 'PosCheckoutError',
+            cause: expect.objectContaining({ name: 'MinimumSellingPriceViolationError' })
+        })
+
+        await assertNoPosCommit()
+        await assertPosPayment(input.payload.id, 0)
+        expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 20 })
+        expect(await db.products.get(POS_PRODUCT)).toMatchObject({ quantity: 20 })
+    })
+
+    it('allows Staff at the exact minimum even when the selling price is below cost', async () => {
+        await seedPosStock('usd')
+        await db.products.update(POS_PRODUCT, { minimumSellingPrice: 12 })
+        const input = posCheckoutInput({ unitPrice: 12 })
+        input.user.role = 'staff'
+
+        await checkout.commitPosCheckout(input)
+
+        expect(await db.sale_items.where('saleId').equals(input.payload.id).first()).toMatchObject({ unitPrice: 12 })
+        expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 19 })
+        await assertPosPayment(input.payload.id, 12)
+    })
+
+    it('allows Admin checkout below the staff minimum', async () => {
+        await seedPosStock('usd')
+        await db.products.update(POS_PRODUCT, { minimumSellingPrice: 12 })
+        const input = posCheckoutInput({ unitPrice: 11 })
+        input.user.role = 'admin'
+
+        await checkout.commitPosCheckout(input)
+
+        expect(await db.sale_items.where('saleId').equals(input.payload.id).first()).toMatchObject({ unitPrice: 11 })
+        await assertPosPayment(input.payload.id, 11)
+    })
+
     it('related parent-unit sale keeps the sold-unit snapshot and deducts canonical child stock', async () => {
         await seedPosStock('iqd')
+        await db.products.update(POS_PRODUCT, { minimumSellingPrice: 2_000 })
         const now = new Date().toISOString()
         await db.products.update(POS_PRODUCT, { unit: 'sheet' })
         await db.unit_relationships.put({
@@ -90,6 +133,7 @@ describe('POS checkout scenarios (independent of Instant POS)', () => {
             version: 1, isDeleted: false
         })
         const input = posCheckoutInput({ currency: 'iqd', quantity: 1, unitPrice: 40_000 })
+        input.user.role = 'staff'
         input.payload.items[0] = {
             ...input.payload.items[0],
             selling_unit_ref: 'builtin:carton',
