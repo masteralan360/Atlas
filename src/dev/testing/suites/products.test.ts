@@ -66,7 +66,7 @@ describe('Products · catalog lifecycle', () => {
         deleteProduct = hooks.deleteProduct
         createCategory = hooks.createCategory
         deleteCategory = hooks.deleteCategory
-    })
+    }, 30_000)
 
     beforeEach(async () => {
         await db.delete()

@@ -39,6 +39,36 @@ export async function freshProductsClient() {
     return client
 }
 
+export async function priceBooksCapabilityAllowed() {
+    const client = await freshProductsClient()
+    try {
+        const workspace = requireProductsLiveData<{ plan: string }>(
+            await client.from('workspaces').select('plan').eq('id', liveProductsWorkspaceId).single(), 'Price Books workspace plan')
+        return requireProductsLiveData<boolean>(await client.rpc('workspace_capability_allowed', {
+            p_workspace_id: liveProductsWorkspaceId,
+            p_plan: workspace.plan,
+            p_capability: 'priceBooks'
+        }), 'Price Books capability')
+    } finally {
+        await client.auth.signOut()
+    }
+}
+
+export async function salesAgentCommissionsModuleAllowed() {
+    const client = await freshProductsClient()
+    try {
+        const workspace = requireProductsLiveData<{ plan: string }>(
+            await client.from('workspaces').select('plan').eq('id', liveProductsWorkspaceId).single(), 'commission workspace plan')
+        return requireProductsLiveData<boolean>(await client.rpc('workspace_module_allowed', {
+            p_workspace_id: liveProductsWorkspaceId,
+            p_plan: workspace.plan,
+            p_module: 'sales_agent_commissions'
+        }), 'Sales agent commissions module access')
+    } finally {
+        await client.auth.signOut()
+    }
+}
+
 export function setupHostedProducts() {
     beforeAll(async () => {
         installTestBrowser()

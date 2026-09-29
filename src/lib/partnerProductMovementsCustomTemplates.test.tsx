@@ -39,9 +39,13 @@ describe('product movement module integration', () => {
       texts: [{ id: 'edit', text: 'Current edited footer', x: 10, y: 230, width: 150, rotation: 0 }], updatedAt: '2026-09-16T10:00:00Z' }
     const blob = await buildCustomTemplateLayoutPdf({ target, layout, values: {}, options: { printLang: 'en' }, fieldMode: 'layoutOverrides' })
     expect(blob.type).toBe('application/pdf')
-    const exported = vi.mocked(generateTemplatePdf).mock.calls[0][0]
+    const calls = vi.mocked(generateTemplatePdf).mock.calls
+    expect(calls).not.toHaveLength(0)
+    const exported = calls.at(-1)![0]
     expect(exported.format).toBe('a4')
-    expect(renderToStaticMarkup(exported.element)).toContain('Current edited footer')
+    expect(exported.printLang).toBe('en')
+    expect(exported.pages).toHaveLength(1)
+    expect(renderToStaticMarkup(exported.pages![0])).toContain('Current edited footer')
   })
   it('shows the sub-tab only with the CRM plan and Business Partners access', () => {
     const contains = (crm: boolean, partners: boolean) => buildWorkspaceNavigation({

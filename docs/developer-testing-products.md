@@ -55,13 +55,18 @@ a substitute for testing each permission role. Those environments are marked
 unavailable or isolated-only in the registry until they have a safe, dedicated
 adapter and scenarios.
 
-## Existing failing product-movement checks
+## Product movement checks
 
-The first full isolated run preserved two failures in the existing product
-movement scenarios. `src/lib/partnerProductMovements.test.ts` expected fulfilled
-quantities `[1.5, 3, 2]` but received `[3, 2]`. The PDF integration case in
-`src/lib/partnerProductMovementsCustomTemplates.test.tsx` expected the edited
-footer `Current edited footer` but received an empty footer. They remain
-registered in **Orders, POS, agents, and storefront consumers** so later changes
-can show when the behavior is corrected. Reproduce them with
+Movement statements include fulfilled sales and received purchase quantities.
+An `ordered` purchase order is not counted as received inventory, even when its
+line contains a planned quantity. The custom-template integration check inspects
+the rendered page passed to the PDF generator, including the current edited
+text and print language. Reproduce these checks with
 `npm run test:products -- --groups product-consumers`.
+
+The hosted pricing scenario reads the workspace's `priceBooks` capability. When
+granted, it verifies Price Book and item persistence. When absent, it verifies
+that RLS rejects creation. Product discounts are checked in either case.
+Commission-rule persistence runs only when the workspace has the
+`sales_agent_commissions` module grant; otherwise the isolated commission tests
+remain the coverage for that module.

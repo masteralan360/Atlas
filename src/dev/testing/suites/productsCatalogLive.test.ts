@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-    freshProductsClient, liveProductsWorkspaceId, requireProductsLiveData,
+    freshProductsClient, liveProductsWorkspaceId, recordProductFixture, requireProductsLiveData,
     setupHostedProducts, withLiveProductFixture
 } from '../fixtures/productsLive'
 
