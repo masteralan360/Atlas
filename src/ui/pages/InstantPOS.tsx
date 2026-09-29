@@ -888,7 +888,7 @@ export function InstantPOS() {
         if (!hasFeature('services')) return []
         return filterSelectableProducts(catalogProducts.filter(isService)).map((service) => ({
             ...service,
-            sku: '', unit: '', storageId: SERVICES_VIRTUAL_STORAGE_ID, storageName: 'Services',
+            unit: '', storageId: SERVICES_VIRTUAL_STORAGE_ID, storageName: 'Services',
             quantity: Number.MAX_SAFE_INTEGER, minStockLevel: 0,
             inventoryId: `service:${service.id}`, inventoryQuantity: Number.MAX_SAFE_INTEGER,
             hasBatches: false, batchCount: 0, nextBatchNumber: null, nextBatchExpiryDate: null, nextBatchQuantity: null

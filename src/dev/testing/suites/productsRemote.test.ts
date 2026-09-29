@@ -67,6 +67,18 @@ function input(sku: string): Omit<Product,
     }
 }
 
+function serviceInput(sku: string): Omit<Product,
+    'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'> {
+    return {
+        ...input(sku),
+        isService: true,
+        costPrice: null,
+        quantity: 0,
+        minStockLevel: 0,
+        unit: ''
+    }
+}
+
 describe('Products · Cloud / Hybrid request contracts', () => {
     beforeAll(async () => {
         installTestBrowser()
@@ -127,6 +139,50 @@ describe('Products · Cloud / Hybrid request contracts', () => {
             })
             expect(await db.products.get(product.id)).toMatchObject({ minimumSellingPrice: null, version: 3 })
         })
+
+        it(`${mode}: persists a service SKU in Supabase and local cache on create and edit`, async () => {
+            writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: mode })
+            const service = await createProduct(WORKSPACE_ID, serviceInput(`SERVICE-${mode.toUpperCase()}`))
+
+            expect(remote.calls[0]).toMatchObject({
+                table: 'products', operation: 'insert',
+                payload: expect.objectContaining({
+                    workspace_id: WORKSPACE_ID,
+                    is_service: true,
+                    sku: `SERVICE-${mode.toUpperCase()}`,
+                    unit: null,
+                    quantity: null
+                })
+            })
+            expect(await db.products.get(service.id)).toMatchObject({
+                isService: true,
+                sku: `SERVICE-${mode.toUpperCase()}`,
+                quantity: 0,
+                unit: ''
+            })
+            expect(await db.inventory.where('productId').equals(service.id).count()).toBe(0)
+
+            await updateProduct(service.id, { sku: `SERVICE-EDITED-${mode.toUpperCase()}` })
+            expect(remote.calls[1]).toMatchObject({
+                table: 'products', operation: 'update', id: service.id,
+                payload: expect.objectContaining({ sku: `SERVICE-EDITED-${mode.toUpperCase()}` })
+            })
+            expect(await db.products.get(service.id)).toMatchObject({
+                sku: `SERVICE-EDITED-${mode.toUpperCase()}`,
+                skuKey: `service-edited-${mode.toLowerCase()}`
+            })
+
+            remote.updateError = { message: 'permission denied', code: '42501' }
+            await expect(updateProduct(service.id, { sku: `SERVICE-REJECTED-${mode.toUpperCase()}` })).rejects.toThrow()
+            expect(remote.calls[2]).toMatchObject({
+                table: 'products', operation: 'update', id: service.id,
+                payload: expect.objectContaining({ sku: `SERVICE-REJECTED-${mode.toUpperCase()}` })
+            })
+            expect(await db.products.get(service.id)).toMatchObject({
+                sku: `SERVICE-EDITED-${mode.toUpperCase()}`,
+                version: 2
+            })
+        })
     }
 
     it('does not cache a product or queue a mutation when Supabase rejects its insert', async () => {
@@ -134,6 +190,16 @@ describe('Products · Cloud / Hybrid request contracts', () => {
         remote.insertError = { message: 'permission denied', code: '42501' }
 
         await expect(createProduct(WORKSPACE_ID, input('REMOTE-REJECTED'))).rejects.toThrow()
+        expect(remote.calls).toHaveLength(1)
+        expect(await db.products.count()).toBe(0)
+        expect(await db.offline_mutations.count()).toBe(0)
+    })
+
+    it('does not cache a service SKU when Supabase rejects its insert', async () => {
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
+        remote.insertError = { message: 'permission denied', code: '42501' }
+
+        await expect(createProduct(WORKSPACE_ID, serviceInput('SERVICE-REJECTED'))).rejects.toThrow()
         expect(remote.calls).toHaveLength(1)
         expect(await db.products.count()).toBe(0)
         expect(await db.offline_mutations.count()).toBe(0)

@@ -186,7 +186,9 @@ function toSupabaseProductPayload(product: Partial<Product>) {
     }
 
     if (product.isService === true) {
-        payload.sku = null
+        payload.sku = typeof product.sku === 'string' && product.sku.trim() !== ''
+            ? product.sku.trim()
+            : null
         payload.unit = null
         payload.quantity = null
         payload.minStockLevel = null
@@ -916,7 +918,7 @@ export async function createProduct(workspaceId: string, data: Omit<Product, 'id
     const now = new Date().toISOString()
     const id = generateId()
     const service = isService(data)
-    const sku = service ? '' : trimProductSku(data.sku)
+    const sku = trimProductSku(data.sku)
     const isSavingOnline = isOnline(workspaceId)
     const initialQuantity = service ? 0 : Number(data.quantity)
     const initialStorageId = service ? null : data.storageId ?? null
@@ -940,12 +942,10 @@ export async function createProduct(workspaceId: string, data: Omit<Product, 'id
         await assertCanUseProductAsVariantParent(workspaceId, data.parentProductId)
     }
 
-    if (!service) {
-        await ensureProductSkuIsAvailable(workspaceId, sku, {
-            productId: id,
-            parentProductId: data.parentProductId ?? null
-        })
-    }
+    await ensureProductSkuIsAvailable(workspaceId, sku, {
+        productId: id,
+        parentProductId: service ? null : data.parentProductId ?? null
+    })
 
     const product: Product = {
         ...data,
@@ -1028,7 +1028,7 @@ export async function updateProduct(id: string, data: Partial<Product>): Promise
     const hasSkuUpdate = Object.prototype.hasOwnProperty.call(productData, 'sku')
     const hasParentProductIdUpdate = Object.prototype.hasOwnProperty.call(productData, 'parentProductId')
     const hasIsDeletedUpdate = Object.prototype.hasOwnProperty.call(productData, 'isDeleted')
-    const sku = nextIsService ? '' : hasSkuUpdate ? trimProductSku(productData.sku ?? '') : existing.sku
+    const sku = hasSkuUpdate ? trimProductSku(productData.sku ?? '') : existing.sku
 
     if (isService(existing) && hasIsServiceUpdate && !nextIsService) {
         throw new Error('Services cannot be converted into inventory products.')
@@ -1052,7 +1052,7 @@ export async function updateProduct(id: string, data: Partial<Product>): Promise
         : existing.parentProductId ?? null
 
     const remainsActive = hasIsDeletedUpdate ? !productData.isDeleted : !existing.isDeleted
-    if (!nextIsService && remainsActive && (hasSkuUpdate || hasParentProductIdUpdate || (hasIsDeletedUpdate && productData.isDeleted === false))) {
+    if (remainsActive && (hasSkuUpdate || hasParentProductIdUpdate || (hasIsDeletedUpdate && productData.isDeleted === false))) {
         await ensureProductSkuIsAvailable(existing.workspaceId, sku, {
             productId: id,
             parentProductId
@@ -1064,8 +1064,6 @@ export async function updateProduct(id: string, data: Partial<Product>): Promise
         ...productData,
         ...(nextIsService ? {
             isService: true,
-            sku: '',
-            skuKey: '',
             unit: '',
             quantity: 0,
             minStockLevel: 0,

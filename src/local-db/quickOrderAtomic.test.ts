@@ -719,6 +719,7 @@ describe('atomic POS Quick Order completion', () => {
             expect.objectContaining({
                 payload: expect.objectContaining({
                     order: expect.objectContaining({
+                        workspace_id: WORKSPACE_ID,
                         status: 'completed',
                         commission_enabled: false,
                         commission_mode: null,

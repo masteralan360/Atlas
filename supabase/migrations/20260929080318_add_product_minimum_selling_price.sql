@@ -38,7 +38,7 @@ BEGIN
   SELECT
     (item.ordinality - 1)::integer,
     product.id,
-    product.name,
+    product.name::text,
     product.minimum_selling_price,
     CASE
       WHEN lower(COALESCE(item.value->>'currency', product.currency::text))

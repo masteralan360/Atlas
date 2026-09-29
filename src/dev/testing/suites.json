@@ -596,6 +596,7 @@
         "files": [
           "src/local-db/productBarcodes.test.ts",
           "src/local-db/productSku.test.ts",
+          "src/local-db/services.test.ts",
           "src/local-db/productVariants.test.ts"
         ]
       },
@@ -665,6 +666,7 @@
           "src/dev/testing/suites/posCart.test.ts",
           "src/dev/testing/suites/posPricing.test.ts",
           "src/dev/testing/suites/posRouting.test.ts",
+          "src/lib/posCatalogBarcodeLookup.test.ts",
           "src/lib/agentProductSelection.test.ts",
           "src/lib/catalogItem.test.ts",
           "src/lib/storefrontCatalogRules.test.ts"

@@ -41,6 +41,7 @@ export function Services() {
             const query = search.trim().toLocaleLowerCase()
             return !query
                 || service.name.toLocaleLowerCase().includes(query)
+                || service.sku?.toLocaleLowerCase().includes(query)
                 || service.description?.toLocaleLowerCase().includes(query)
                 || categories.find((category) => category.id === service.categoryId)?.name.toLocaleLowerCase().includes(query)
         })
@@ -69,7 +70,10 @@ export function Services() {
                                     </div>
                                     <div className="min-w-0 flex-1">
                                         <div className="flex items-center gap-2"><span className="truncate font-semibold">{service.name}</span><span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">{t('services.badge')}</span></div>
-                                        <div className="truncate text-sm text-muted-foreground">{categories.find((category) => category.id === service.categoryId)?.name || t('categories.noCategory')}</div>
+                                        <div className="flex min-w-0 flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+                                            <span className="truncate">{categories.find((category) => category.id === service.categoryId)?.name || t('categories.noCategory')}</span>
+                                            {service.sku && <span className="font-mono text-xs">{t('products.table.sku')}: {service.sku}</span>}
+                                        </div>
                                     </div>
                                     <div className="text-right font-semibold">{formatCurrency(service.price, service.currency, features.iqd_display_preference)}</div>
                                     <Button variant="ghost" size="icon" onClick={() => navigate(`/services/${service.id}`)}><Pencil className="h-4 w-4" /></Button>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useRoute } from 'wouter'
 import {
     ArrowLeft,
+    Barcode,
     BriefcaseBusiness,
     Camera,
     ChevronRight,
@@ -12,6 +13,7 @@ import {
     Info,
     Save,
     Settings,
+    Shuffle,
     Tag,
     Trash2,
     Type,
@@ -24,7 +26,9 @@ import {
     createProduct,
     db,
     deleteProduct,
+    DuplicateProductSkuError,
     fetchTableFromSupabase,
+    findActiveProductBySku,
     updateProduct,
     useCategories,
     useProduct,
@@ -32,6 +36,7 @@ import {
 } from '@/local-db'
 import type { CurrencyCode } from '@/local-db/models'
 import { isService } from '@/lib/catalogItem'
+import { normalizeBarcodeDigits, normalizeBarcodeScannerText } from '@/lib/barcodeScanner'
 import { assetManager } from '@/lib/assetManager'
 import { getClipboardImageFile } from '@/lib/clipboardImage'
 import { storeProductImageFile } from '@/lib/productImageStorage'
@@ -41,10 +46,12 @@ import { isTauri } from '@/lib/platform'
 import { cn, formatCurrency, formatNumericInput, sanitizeNumericInput } from '@/lib/utils'
 import { platformService } from '@/services/platformService'
 import { getMediaUploadErrorCode } from '@/services/mediaUploadService'
+import { generateRandomUpc } from '@/lib/upc'
 import { useWorkspace } from '@/workspace'
 import { useHideCosts } from '@/permissions'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { ProductAdditionalImagesModal } from '@/ui/components/ProductAdditionalImagesModal'
+import { BarcodeScannerToggleButton } from '@/ui/components/BarcodeScannerToggleButton'
 import {
     Button,
     Card,
@@ -72,7 +79,35 @@ import {
 
 type ServiceFormMode = 'create' | 'edit'
 
+const PRODUCT_SCANNER_TARGET_KEY = 'products_scanner_target'
+const PRODUCT_SKU_SCANNER_ENABLED_KEY = 'products_sku_scanner_enabled'
+const PRODUCT_BARCODE_SCANNER_ENABLED_KEY = 'products_barcode_scanner_enabled'
+const PRODUCT_SKU_HID_DEVICE_KEY = 'products_sku_hid_device_id'
+const SERVICE_FORM_SCANNER_IDLE_COMMIT_DELAY_MS = 1200
+
+function readSkuScannerEnabled() {
+    if (typeof localStorage === 'undefined') {
+        return false
+    }
+
+    const storedTarget = localStorage.getItem(PRODUCT_SCANNER_TARGET_KEY)
+    if (storedTarget === 'sku') return true
+    if (storedTarget === 'barcode') return false
+    return localStorage.getItem(PRODUCT_SKU_SCANNER_ENABLED_KEY) === 'true'
+}
+
+function writeSkuScannerEnabled(enabled: boolean) {
+    if (typeof localStorage === 'undefined') {
+        return
+    }
+
+    localStorage.setItem(PRODUCT_SCANNER_TARGET_KEY, enabled ? 'sku' : 'none')
+    localStorage.setItem(PRODUCT_SKU_SCANNER_ENABLED_KEY, String(enabled))
+    localStorage.setItem(PRODUCT_BARCODE_SCANNER_ENABLED_KEY, 'false')
+}
+
 type ServiceFormData = {
+    sku: string
     name: string
     description: string
     categoryId: string | undefined
@@ -85,6 +120,7 @@ type ServiceFormData = {
 }
 
 const emptyServiceFormData: ServiceFormData = {
+    sku: '',
     name: '',
     description: '',
     categoryId: undefined,
@@ -120,6 +156,7 @@ function createInitialFormData(defaultCurrency: CurrencyCode): ServiceFormData {
 
 function mapServiceToFormData(product: Product, hideCosts = false): ServiceFormData {
     return {
+        sku: product.sku || '',
         name: product.name,
         description: product.description || '',
         categoryId: product.categoryId || undefined,
@@ -155,6 +192,8 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
         createInitialFormData(features.default_currency)
     )
     const [isSaving, setIsSaving] = useState(false)
+    const [isGeneratingSku, setIsGeneratingSku] = useState(false)
+    const [isSkuScannerEnabled, setIsSkuScannerEnabled] = useState(() => readSkuScannerEnabled())
     const [imageError, setImageError] = useState(false)
     const [returnRulesModalOpen, setReturnRulesModalOpen] = useState(false)
     const [visualsModalOpen, setVisualsModalOpen] = useState(false)
@@ -165,6 +204,8 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
     const [isDeletingService, setIsDeletingService] = useState(false)
     const imageUploadInputRef = useRef<HTMLInputElement>(null)
     const cameraInputRef = useRef<HTMLInputElement>(null)
+    const skuInputRef = useRef<HTMLInputElement>(null)
+    const isGeneratingSkuRef = useRef(false)
     const initializedKeyRef = useRef<string | null>(null)
     const initialFormSnapshotRef = useRef<string | null>(null)
     const createdServiceIdRef = useRef<string | null>(null)
@@ -435,6 +476,52 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
         }
     }
 
+    const handleSkuBarcodeScan = (value: string) => {
+        if (isReadOnly || !isSkuScannerEnabled) {
+            return
+        }
+
+        setFormData((current) => ({ ...current, sku: normalizeBarcodeScannerText(value) }))
+    }
+
+    const handleSkuScannerEnabledChange = (enabled: boolean) => {
+        setIsSkuScannerEnabled(enabled)
+        writeSkuScannerEnabled(enabled)
+    }
+
+    const handleGenerateSku = async () => {
+        if (isReadOnly || !workspaceId || isGeneratingSkuRef.current) {
+            return
+        }
+
+        isGeneratingSkuRef.current = true
+        setIsGeneratingSku(true)
+        try {
+            for (let attempt = 0; attempt < 20; attempt += 1) {
+                const sku = generateRandomUpc()
+                if (sku === formData.sku) {
+                    continue
+                }
+
+                const existingProduct = await findActiveProductBySku(workspaceId, sku)
+                if (!existingProduct) {
+                    setFormData((current) => ({ ...current, sku }))
+                    skuInputRef.current?.focus()
+                    return
+                }
+            }
+
+            toast({
+                variant: 'destructive',
+                title: t('common.error', { defaultValue: 'Error' }),
+                description: t('services.form.generateSkuError')
+            })
+        } finally {
+            isGeneratingSkuRef.current = false
+            setIsGeneratingSku(false)
+        }
+    }
+
     const persistService = async ({ navigateAfterSave = true }: { navigateAfterSave?: boolean } = {}) => {
         if (!workspaceId || !canEdit) {
             return false
@@ -452,6 +539,7 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
             const shouldPersistCost = !isEditing || !hideCosts
             const dataToSave = {
                 isService: true,
+                sku: formData.sku.trim(),
                 name: formData.name.trim(),
                 description: formData.description.trim(),
                 categoryId: formData.categoryId || null,
@@ -462,9 +550,8 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
                 imageUrl: formData.imageUrl.trim() || undefined,
                 canBeReturned: formData.canBeReturned,
                 returnRules: formData.returnRules.trim() || undefined,
-                // Required by the shared local Product type; createProduct
-                // deliberately strips these for services.
-                sku: '', unit: '', quantity: 0, minStockLevel: 0,
+                // Services may have a SKU, but never participate in inventory.
+                unit: '', quantity: 0, minStockLevel: 0,
                 createdBy: user?.id || null
             }
 
@@ -499,9 +586,11 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
             console.error('Error saving service:', error)
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: error instanceof Error ? error.message : t('services.messages.saveError', {
-                    defaultValue: 'Failed to save the service'
-                }),
+                description: error instanceof DuplicateProductSkuError
+                    ? t('products.messages.skuDuplicate', { defaultValue: 'A product with this SKU already exists in this workspace.' })
+                    : error instanceof Error ? error.message : t('services.messages.saveError', {
+                        defaultValue: 'Failed to save the service'
+                    }),
                 variant: 'destructive'
             })
             return false
@@ -525,7 +614,7 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
         ? (t('services.readOnlyNotice') || 'Viewing this service in read-only mode.')
         : isEditing
             ? (t('services.editSubtitle') || 'Update service details, pricing, and return rules.')
-            : (t('services.createSubtitle') || 'Services have no SKU, unit, stock, or physical storage.')
+            : (t('services.createSubtitle') || 'Services have no unit, stock, or physical storage. SKU is optional.')
 
     const statusLabel = isEditing
         ? isReadOnly
@@ -669,6 +758,7 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
                         )}
                     </div>
                     <dl className="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
+                        <div><dt className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">{t('products.table.sku')}</dt><dd className="mt-0.5 font-semibold font-mono text-foreground">{formData.sku || '—'}</dd></div>
                         <div><dt className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">{t('products.table.category')}</dt><dd className="mt-0.5 font-semibold text-foreground">{selectedCategoryLabel}</dd></div>
                         <div><dt className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">{t('products.table.price')}</dt><dd className="mt-0.5 font-semibold text-foreground">{pricePreview}</dd></div>
                         <div><dt className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">{t('products.form.canBeReturned') || 'Can be Returned'}</dt><dd className="mt-0.5 font-semibold text-foreground">{formData.canBeReturned ? (t('common.yes') || 'Yes') : (t('common.no') || 'No')}</dd></div>
@@ -709,6 +799,71 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
                                     required
                                     className="h-12 rounded-xl border-border/80 bg-background/80 font-bold shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50"
                                 />
+                            </div>
+                            <div className="space-y-2">
+                                <div className="flex items-center gap-1">
+                                    <Label htmlFor="service-sku" className="flex items-center gap-2 font-bold">
+                                        <Barcode className="h-4 w-4 text-primary/60" />
+                                        {t('products.table.sku')}
+                                    </Label>
+                                    {!isReadOnly && (
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon"
+                                            onClick={(event) => {
+                                                if (!isEditing || event.detail === 0) {
+                                                    void handleGenerateSku()
+                                                }
+                                            }}
+                                            onDoubleClick={() => {
+                                                if (isEditing) {
+                                                    void handleGenerateSku()
+                                                }
+                                            }}
+                                            disabled={isGeneratingSku}
+                                            aria-label={isEditing
+                                                ? t('services.form.generateSkuOnDoubleClick')
+                                                : t('services.form.generateSku')}
+                                            title={isEditing
+                                                ? t('services.form.generateSkuOnDoubleClick')
+                                                : t('services.form.generateSku')}
+                                            className="h-6 w-6 rounded-md text-muted-foreground hover:text-primary"
+                                        >
+                                            <Shuffle className="h-3.5 w-3.5" />
+                                        </Button>
+                                    )}
+                                </div>
+                                <div className="flex gap-2">
+                                    <Input
+                                        ref={skuInputRef}
+                                        id="service-sku"
+                                        value={formData.sku}
+                                        onChange={(event) => setFormData((current) => ({
+                                            ...current,
+                                            sku: normalizeBarcodeDigits(event.target.value)
+                                        }))}
+                                        placeholder={t('services.form.skuPlaceholder')}
+                                        readOnly={isReadOnly}
+                                        className="h-12 min-w-0 flex-1 rounded-xl border-border/80 bg-background/80 font-mono shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50"
+                                    />
+                                    {!isReadOnly && (
+                                        <BarcodeScannerToggleButton
+                                            enabled={isSkuScannerEnabled}
+                                            onEnabledChange={handleSkuScannerEnabledChange}
+                                            onScan={handleSkuBarcodeScan}
+                                            label={t('products.table.sku')}
+                                            activeLabel={t('pos.scannerEnabled')}
+                                            inactiveLabel={t('pos.scannerDisabled')}
+                                            deviceStorageKey={PRODUCT_SKU_HID_DEVICE_KEY}
+                                            targetInputRef={skuInputRef}
+                                            idleCommitDelayMs={SERVICE_FORM_SCANNER_IDLE_COMMIT_DELAY_MS}
+                                        />
+                                    )}
+                                </div>
+                                <p className="text-xs leading-5 text-muted-foreground">
+                                    {t('services.form.skuScanHint')}
+                                </p>
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="service-category" className="flex items-center gap-2 font-bold">

@@ -83,6 +83,7 @@ import {
     normalizeBarcodeScannerText,
     shouldCommitBarcodeScannerValue
 } from '@/lib/barcodeScanner'
+import { findPosBarcodeCandidates, getPosBarcodeLookupProducts } from '@/lib/posCatalogBarcodeLookup'
 import { ExchangeRateResult } from '@/lib/exchangeRate'
 import { buildCheckoutRatesSnapshot, getPrimaryCheckoutRate } from '@/lib/currencyRates'
 import { buildOrderExchangeRatesSnapshot } from '@/lib/orderCurrency'
@@ -729,12 +730,16 @@ export function POS() {
         if (!hasFeature('services')) return []
         return filterSelectableProducts(catalogProducts.filter(isService)).map((service) => ({
             ...service,
-            sku: '', unit: '', storageId: SERVICES_VIRTUAL_STORAGE_ID, storageName: 'Services',
+            unit: '', storageId: SERVICES_VIRTUAL_STORAGE_ID, storageName: 'Services',
             quantity: Number.MAX_SAFE_INTEGER, minStockLevel: 0,
             inventoryId: `service:${service.id}`, inventoryQuantity: Number.MAX_SAFE_INTEGER,
             hasBatches: false, batchCount: 0, nextBatchNumber: null, nextBatchExpiryDate: null, nextBatchQuantity: null
         }))
     }, [catalogProducts, filterSelectableProducts, hasFeature])
+    const scannableProducts = useMemo(
+        () => getPosBarcodeLookupProducts(selectableInventoryProducts, serviceProducts, isServicesStorage),
+        [isServicesStorage, selectableInventoryProducts, serviceProducts]
+    )
     const sellableProducts: PosCatalogProduct[] = isActivitiesStorage
         ? activityProducts
         : isServicesStorage
@@ -1225,35 +1230,35 @@ export function POS() {
     const barcodeMap = useMemo(() => {
         const map = new Map<string, string>()
         for (const barcodeRow of productBarcodes) {
-            if (selectableInventoryProducts.some((product) => product.id === barcodeRow.productId)) {
+            if (scannableProducts.some((product) => product.id === barcodeRow.productId)) {
                 addBarcodeLookupCode(map, barcodeRow.barcode, barcodeRow.productId, barcodeRow.isPrimary)
             }
         }
-        for (const product of selectableInventoryProducts) {
+        for (const product of scannableProducts) {
             addBarcodeLookupCode(map, product.barcode, product.id)
             for (const barcode of product.barcodes ?? []) {
                 addBarcodeLookupCode(map, barcode, product.id)
             }
         }
         return map
-    }, [productBarcodes, selectableInventoryProducts])
+    }, [productBarcodes, scannableProducts])
 
     const knownScannerCodeIndex = useMemo(() => {
         const codes: string[] = []
 
         for (const barcodeRow of productBarcodes) {
-            if (selectableInventoryProducts.some((product) => product.id === barcodeRow.productId)) {
+            if (scannableProducts.some((product) => product.id === barcodeRow.productId)) {
                 codes.push(barcodeRow.barcode)
             }
         }
 
-        for (const product of selectableInventoryProducts) {
+        for (const product of scannableProducts) {
             codes.push(product.sku, product.barcode ?? '')
             codes.push(...(product.barcodes ?? []))
         }
 
         return createBarcodeScannerCodeIndex(codes)
-    }, [productBarcodes, selectableInventoryProducts])
+    }, [productBarcodes, scannableProducts])
 
     const canImmediatelySubmitDeviceScan = useCallback((value: string) => {
         // Treat a recognized, unambiguous code as the end of a scan. If a code
@@ -2288,15 +2293,11 @@ export function POS() {
     const handleSkuSubmit = (e: React.FormEvent) => {
         e.preventDefault()
         const normalizedInput = normalizeBarcodeScannerText(skuInput)
-        const term = normalizedInput.toLowerCase()
         if (!normalizedInput) {
             return
         }
 
-        const barcodeProductId = barcodeMap.get(normalizedInput) ?? barcodeMap.get(term)
-        const candidates = barcodeProductId
-            ? selectableInventoryProducts.filter((product) => product.id === barcodeProductId)
-            : selectableInventoryProducts.filter((product) => product.sku.toLowerCase() === term)
+        const candidates = findPosBarcodeCandidates(normalizedInput, scannableProducts, barcodeMap)
 
         const exactMatch = candidates.find(p => p.storageId === selectedStorageId)
         const otherMatch = candidates.find(p => p.storageId !== selectedStorageId)
@@ -2342,11 +2343,7 @@ export function POS() {
         lastScannedCode.current = text
         lastScannedTime.current = now
 
-        const term = text.toLowerCase()
-        const barcodeProductId = barcodeMap.get(text) ?? barcodeMap.get(term)
-        const candidates = barcodeProductId
-            ? selectableInventoryProducts.filter((product) => product.id === barcodeProductId)
-            : selectableInventoryProducts.filter((product) => product.sku.toLowerCase() === term)
+        const candidates = findPosBarcodeCandidates(text, scannableProducts, barcodeMap)
 
         const exactMatch = candidates.find(p => p.storageId === selectedStorageId)
         const otherMatch = candidates.find(p => p.storageId !== selectedStorageId)
@@ -2370,7 +2367,7 @@ export function POS() {
             })
             hapticTrigger('error')
         }
-    }, [isCameraScannerAutoEnabled, isDeviceScannerAutoEnabled, scanDelay, barcodeMap, selectableInventoryProducts, addToCart, t, toast, selectedStorageId, storages, hapticTrigger])
+    }, [isCameraScannerAutoEnabled, isDeviceScannerAutoEnabled, scanDelay, barcodeMap, scannableProducts, addToCart, t, toast, selectedStorageId, storages, hapticTrigger])
 
     useEffect(() => {
         const clearDeviceScanTimeout = () => {

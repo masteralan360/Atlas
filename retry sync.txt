@@ -1,5 +1,3 @@
-lowest price for staff
-
 Service optional Barcode
 Allow Storage and Services in POS cart
 Barcode Camera in Phone

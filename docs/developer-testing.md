@@ -113,9 +113,7 @@ The Payments live case needs the Payment Accounts module enabled in the target
 workspace. Account and unit configuration created by passing scenarios may
 remain because financial and order history can refer to them.
 
-The independent `live-transactions` group creates a paid cash Quick Order and
-full return, plus simple-loan and installment sale orders with and without a
-down payment. It uses production functions and fresh authenticated clients to
+The independent `live-transactions` group completes a paid cash Quick Order through its authenticated workspace-scoped RPC, verifies a full return, and creates simple-loan and installment sale orders with and without a down payment. It uses production functions and fresh authenticated clients to
 check stored orders, returns, loans, installments, payment counter-entries and
 stock. It also completes a regular pending Sale Order through the atomic
 completion RPC and verifies one stock deduction with one sale-ledger entry.
