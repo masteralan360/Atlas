@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const testState = vi.hoisted(() => ({
     activeWorkspaceId: null as string | null,
-    localWorkspaceIds: new Set<string>()
+    localWorkspaceIds: new Set<string>(),
+    networkErrors: [] as Array<Record<string, unknown>>
 }))
 
 vi.mock('@/lib/network', () => ({
@@ -15,6 +16,10 @@ vi.mock('@/workspace/workspaceMode', () => ({
         workspaceId && testState.localWorkspaceIds.has(workspaceId) ? 'local' : 'cloud'
     ),
     isLocalWorkspaceMode: (workspaceId?: string | null) => Boolean(workspaceId && testState.localWorkspaceIds.has(workspaceId))
+}))
+
+vi.mock('@/lib/errorLogger', () => ({
+    recordNetworkError: (input: Record<string, unknown>) => testState.networkErrors.push(input)
 }))
 
 import {
@@ -30,6 +35,67 @@ describe('workspace usage fetch metering', () => {
     beforeEach(() => {
         testState.activeWorkspaceId = null
         testState.localWorkspaceIds.clear()
+        testState.networkErrors.length = 0
+    })
+
+    it('records the structured body and status of a failed Supabase request without consuming the response', async () => {
+        const errorPayload = {
+            code: '42804',
+            details: 'Returned type character varying(255) does not match expected type text in column 3.',
+            hint: null,
+            message: 'structure of query does not match function result type'
+        }
+        const fetchImpl = vi.fn(async () => new Response(JSON.stringify(errorPayload), {
+            status: 400,
+            statusText: 'Bad Request',
+            headers: { 'Content-Type': 'application/json' }
+        })) as unknown as typeof fetch
+        const appFetch = createWorkspaceUsageFetch({
+            supabaseUrl: 'https://example.supabase.co',
+            supabaseAnonKey: 'anon-key',
+            fetchImpl
+        })
+
+        const response = await appFetch('https://example.supabase.co/rest/v1/rpc/example_rpc', { method: 'POST' })
+
+        expect(await response.json()).toEqual(errorPayload)
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(testState.networkErrors).toEqual([{
+            method: 'POST',
+            endpoint: '/rest/v1/rpc/example_rpc',
+            status: 400,
+            statusText: 'Bad Request',
+            responseBody: errorPayload
+        }])
+    })
+
+    it('records fetch-level network failures and rethrows the original error', async () => {
+        const failure = Object.assign(new TypeError('Failed to fetch'), { code: 'ERR_NETWORK' })
+        const fetchImpl = vi.fn().mockRejectedValue(failure) as unknown as typeof fetch
+        const appFetch = createWorkspaceUsageFetch({
+            supabaseUrl: 'https://example.supabase.co',
+            supabaseAnonKey: 'anon-key',
+            fetchImpl
+        })
+
+        await expect(appFetch('https://example.supabase.co/rest/v1/products')).rejects.toBe(failure)
+        expect(testState.networkErrors).toEqual([{
+            method: 'GET',
+            endpoint: '/rest/v1/products',
+            error: failure
+        }])
+    })
+
+    it('does not create network error records for successful responses', async () => {
+        const appFetch = createWorkspaceUsageFetch({
+            supabaseUrl: 'https://example.supabase.co',
+            supabaseAnonKey: 'anon-key',
+            fetchImpl: vi.fn(async () => new Response('{}', { status: 200 })) as unknown as typeof fetch
+        })
+
+        await appFetch('https://example.supabase.co/rest/v1/products')
+
+        expect(testState.networkErrors).toEqual([])
     })
 
     it('extracts workspace filters from PostgREST URLs', () => {

@@ -1,4 +1,5 @@
 import { getActiveBusinessWorkspaceId } from '@/lib/network'
+import { recordNetworkError } from '@/lib/errorLogger'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 // Legacy backend message: this limit is enforced against CHARGED usage, even
@@ -9,6 +10,7 @@ const WORKSPACE_USAGE_UPDATED_EVENT = 'workspace-usage-updated'
 // user's workspace. Routing those reads through the usage gateway would create
 // a dependency loop: the gateway itself must first resolve that workspace.
 export const WORKSPACE_USAGE_SKIP_HEADER = 'X-Workspace-Usage-Skip'
+const MAX_NETWORK_ERROR_BODY_LENGTH = 32_768
 const TABLE_WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 const RPC_METHODS = new Set(['GET', 'POST'])
 const UNMETERED_RPC_NAMES = new Set([
@@ -93,6 +95,45 @@ function getRequestUrl(input: RequestInfo | URL): URL | null {
 
 function getRequestMethod(input: RequestInfo | URL, init?: RequestInit) {
     return (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase()
+}
+
+function getRequestEndpoint(input: RequestInfo | URL) {
+    return getRequestUrl(input)?.pathname ?? 'unknown'
+}
+
+async function captureNetworkResponseError(
+    response: Response,
+    input: RequestInfo | URL,
+    init?: RequestInit
+) {
+    let responseBody: unknown
+    try {
+        const rawBody = await response.clone().text()
+        if (rawBody) {
+            if (rawBody.length > MAX_NETWORK_ERROR_BODY_LENGTH) {
+                responseBody = {
+                    truncated: true,
+                    preview: rawBody.slice(0, MAX_NETWORK_ERROR_BODY_LENGTH),
+                }
+            } else {
+                try {
+                    responseBody = JSON.parse(rawBody)
+                } catch {
+                    responseBody = rawBody
+                }
+            }
+        }
+    } catch {
+        // A readable HTTP status is still useful when the body cannot be cloned.
+    }
+
+    recordNetworkError({
+        method: getRequestMethod(input, init),
+        endpoint: getRequestEndpoint(input),
+        status: response.status,
+        statusText: response.statusText || undefined,
+        ...(responseBody !== undefined ? { responseBody } : {}),
+    })
 }
 
 function getRequestHeaders(input: RequestInfo | URL, init?: RequestInit) {
@@ -619,10 +660,23 @@ export function createWorkspaceUsageFetch(options: WorkspaceUsageFetchOptions): 
             ? getRequestTransferBytes(input, init)
             : Promise.resolve(0)
 
-        const response = await normalizedOptions.fetchImpl(
-            gatewayRequest?.input ?? directRequest?.input ?? input,
-            gatewayRequest?.init ?? directRequest?.init ?? init
-        )
+        const requestInput = gatewayRequest?.input ?? directRequest?.input ?? input
+        const requestInit = gatewayRequest?.init ?? directRequest?.init ?? init
+        let response: Response
+        try {
+            response = await normalizedOptions.fetchImpl(requestInput, requestInit)
+        } catch (error) {
+            recordNetworkError({
+                method: getRequestMethod(requestInput, requestInit),
+                endpoint: getRequestEndpoint(requestInput),
+                error,
+            })
+            throw error
+        }
+
+        if (!response.ok) {
+            void captureNetworkResponseError(response, requestInput, requestInit)
+        }
         if (!countContext || !response.ok) {
             return response
         }

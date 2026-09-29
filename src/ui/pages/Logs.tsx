@@ -10,6 +10,7 @@ import {
     FileWarning,
     FolderClock,
     LoaderCircle,
+    Network,
     Play,
     RefreshCw,
     Search,
@@ -74,6 +75,27 @@ function getRecordSummary(record: ErrorLogRecord) {
             .filter((value): value is string => Boolean(value))
             .join(' — ')
         if (toastText) return toastText
+    }
+
+    if (record.source === 'network') {
+        const metadata = record.arguments[1]
+        const properties = metadata && typeof metadata === 'object' && metadata.type === 'object'
+            ? metadata.properties
+            : undefined
+        const responseBody = properties?.responseBody
+        const responseProperties = responseBody && typeof responseBody === 'object' && responseBody.type === 'object'
+            ? responseBody.properties
+            : undefined
+        const message = getLogSummary(responseProperties?.message)
+        const code = getLogSummary(responseProperties?.code)
+        if (message) return code ? `${code}: ${message}` : message
+
+        const networkError = getLogSummary(properties?.error)
+        if (networkError) return networkError
+        if (typeof properties?.status === 'number') {
+            const statusText = getLogSummary(properties.statusText)
+            return statusText ? `HTTP ${properties.status}: ${statusText}` : `HTTP ${properties.status}`
+        }
     }
 
     return getLogSummary(record.arguments[0])
@@ -334,10 +356,14 @@ export function Logs() {
                                             <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-border/60 bg-muted/40 px-2 py-1 text-xs font-medium">
                                                 {record.source === 'toast'
                                                     ? <BellRing className="h-3.5 w-3.5 text-destructive" />
-                                                    : <Terminal className="h-3.5 w-3.5 text-primary" />}
+                                                    : record.source === 'network'
+                                                        ? <Network className="h-3.5 w-3.5 text-amber-600" />
+                                                        : <Terminal className="h-3.5 w-3.5 text-primary" />}
                                                 {record.source === 'toast'
                                                     ? t('errorLogs.sources.toast')
-                                                    : t('errorLogs.sources.console')}
+                                                    : record.source === 'network'
+                                                        ? t('errorLogs.sources.network')
+                                                        : t('errorLogs.sources.console')}
                                             </span>
                                         </TableCell>
                                         <TableCell className="max-w-56 truncate font-mono text-xs" title={record.route}>
@@ -398,7 +424,9 @@ export function Logs() {
                                         <p className="mt-1 text-sm font-medium">
                                             {selectedRecord.source === 'toast'
                                                 ? t('errorLogs.sources.toast')
-                                                : t('errorLogs.sources.console')}
+                                                : selectedRecord.source === 'network'
+                                                    ? t('errorLogs.sources.network')
+                                                    : t('errorLogs.sources.console')}
                                         </p>
                                     </div>
                                     <div>

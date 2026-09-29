@@ -30,6 +30,26 @@ describe('errorLogger', () => {
         expect(formatErrorLogRecord(record)).toContain('Save failed')
     })
 
+    it('preserves structured PostgREST fields attached to an Error object', () => {
+        const error = Object.assign(new Error('structure of query does not match function result type'), {
+            code: '42804',
+            details: 'Returned type character varying(255) does not match expected type text in column 3.',
+            hint: null,
+        })
+
+        const record = createErrorLogRecord(['RPC failed', error])
+
+        expect(record.arguments[1]).toMatchObject({
+            type: 'error',
+            message: 'structure of query does not match function result type',
+            properties: {
+                code: '42804',
+                details: 'Returned type character varying(255) does not match expected type text in column 3.',
+                hint: null,
+            },
+        })
+    })
+
     it('serializes circular values without throwing', () => {
         const circular: { name: string; self?: unknown } = { name: 'cycle' }
         circular.self = circular

@@ -20,7 +20,7 @@ const MAX_PENDING_ERROR_LOG_RECORDS = 2_000
 export const ERROR_LOG_RECORDING_PREFERENCE_KEY = 'atlas.error-log-recording-enabled'
 const CONSOLE_ERROR_LOGGER_INSTALLED = Symbol.for('atlas.console-error-logger-installed')
 
-export type ErrorLogSource = 'console' | 'toast'
+export type ErrorLogSource = 'console' | 'toast' | 'network'
 
 export type SerializedConsoleValue =
     | null
@@ -38,6 +38,7 @@ export type SerializedConsoleValue =
         message: string
         stack?: string
         cause?: SerializedConsoleValue
+        properties?: Record<string, SerializedConsoleValue>
     }
     | {
         type: 'date'
@@ -256,12 +257,30 @@ function serializeValue(value: unknown, ancestors: WeakSet<object>, depth: numbe
     try {
         if (value instanceof Error) {
             const error = value as Error & { cause?: unknown }
+            const properties: Record<string, SerializedConsoleValue> = {}
+            for (const key of Reflect.ownKeys(error)) {
+                const propertyName = typeof key === 'symbol' ? key.toString() : key
+                if (propertyName === 'name' || propertyName === 'message' || propertyName === 'stack' || propertyName === 'cause') {
+                    continue
+                }
+
+                try {
+                    const descriptor = Object.getOwnPropertyDescriptor(error, key)
+                    properties[propertyName] = descriptor && 'value' in descriptor
+                        ? serializeValue(descriptor.value, ancestors, depth + 1)
+                        : { type: 'accessor' }
+                } catch {
+                    properties[propertyName] = { type: 'accessor' }
+                }
+            }
+
             return {
                 type: 'error',
                 name: error.name || 'Error',
                 message: toEnglishLogText(error.message),
                 ...(typeof error.stack === 'string' && error.stack ? { stack: error.stack } : {}),
                 ...('cause' in error ? { cause: serializeValue(error.cause, ancestors, depth + 1) } : {}),
+                ...(Object.keys(properties).length > 0 ? { properties } : {}),
             }
         }
 
@@ -318,6 +337,7 @@ function collectStacks(value: SerializedConsoleValue, stacks: string[]) {
         if (value.type === 'error') {
             if (value.stack) stacks.push(value.stack)
             if (value.cause) collectStacks(value.cause, stacks)
+            if (value.properties) Object.values(value.properties).forEach((item) => collectStacks(item, stacks))
             return
         }
 
@@ -405,6 +425,27 @@ export function createToastErrorLogRecord(input: ErrorToastLogInput, options: Om
         source: 'toast',
         ...(Object.keys(toast).length > 0 ? { toast } : {}),
     })
+}
+
+export interface NetworkErrorLogInput {
+    method: string
+    endpoint: string
+    status?: number
+    statusText?: string
+    responseBody?: unknown
+    error?: unknown
+}
+
+/** Records the response or transport error from a Supabase request. */
+export function recordNetworkError(input: NetworkErrorLogInput) {
+    try {
+        const summary = input.status === undefined
+            ? 'Supabase network request failed before receiving a response'
+            : `Supabase request returned HTTP ${input.status}`
+        queueErrorLog(createErrorLogRecord([summary, input], { source: 'network' }))
+    } catch {
+        // Network logging must never change the request result or interrupt the app.
+    }
 }
 
 export function formatErrorLogRecord(record: ErrorLogRecord) {
@@ -654,7 +695,7 @@ export async function readErrorLogs(): Promise<ErrorLogRecord[]> {
                 if (!value || typeof value !== 'object') return []
                 const record = value as Partial<ErrorLogRecord>
                 return record.version === 1 && typeof record.timestamp === 'string' && Array.isArray(record.arguments)
-                    ? [{ ...record, source: record.source === 'toast' ? 'toast' : 'console' } as ErrorLogRecord]
+                    ? [{ ...record, source: record.source === 'toast' || record.source === 'network' ? record.source : 'console' } as ErrorLogRecord]
                     : []
             }).sort((first, second) => second.timestamp.localeCompare(first.timestamp))
         } catch {
@@ -685,7 +726,7 @@ export async function readErrorLogs(): Promise<ErrorLogRecord[]> {
                 try {
                     const record = JSON.parse(line) as Partial<ErrorLogRecord>
                     return record.version === 1 && typeof record.timestamp === 'string' && Array.isArray(record.arguments)
-                        ? [{ ...record, source: record.source === 'toast' ? 'toast' : 'console' } as ErrorLogRecord]
+                        ? [{ ...record, source: record.source === 'toast' || record.source === 'network' ? record.source : 'console' } as ErrorLogRecord]
                         : []
                 } catch {
                     return []
