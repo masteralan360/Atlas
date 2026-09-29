@@ -4,6 +4,8 @@ Barcode Camera in Phone
 
 Maintenence Mode Local Mode Enabled
 
+New Update alert like in PWA
+
 Make Workspace Payment Invoices
 
 PAYG-Control
@@ -21,14 +23,11 @@ Make Maintenence Mode servier-side
 
 Remake PrintPreviewEditorPage
 
-
 Check relational-Unit bigger unit cost price
 
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide
 
-Context-menu partner account statement & invoice redirect
-
-Remake 
+Context-menu partner account statement & invoice redirect 
 
 Price books selector order form and quick order
 

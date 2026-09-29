@@ -3846,7 +3846,11 @@ export function POS() {
                                                                 "text-xs",
                                                                 hasNegotiated || hasDiscount ? "text-muted-foreground/50 line-through" : "text-muted-foreground"
                                                             )}>
-                                                                {formatCurrency(item.price, productCurrency, features.iqd_display_preference)} x {item.quantity} {t(`products.units.${item.unit}`, { defaultValue: item.unit ?? '' }).toUpperCase()}
+                                                                <PosCartPriceQuantity
+                                                                    quantity={item.quantity}
+                                                                    unitLabel={t(`products.units.${item.unit}`, { defaultValue: item.unit ?? '' }).toUpperCase()}
+                                                                    priceLabel={formatCurrency(item.price, productCurrency, features.iqd_display_preference)}
+                                                                />
                                                             </div>
                                                             {(hasDiscount || hasNegotiated) && (
                                                                 <div className="text-xs text-emerald-600 font-medium flex items-center gap-1">
@@ -5833,6 +5837,25 @@ type PosMinimumPriceViolation = {
     currencyUnavailable?: boolean
 }
 
+function PosCartPriceQuantity({
+    quantity,
+    unitLabel,
+    priceLabel,
+}: {
+    quantity: number
+    unitLabel: string
+    priceLabel: string
+}) {
+    return (
+        <span dir="ltr" className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-1 text-left leading-tight">
+            <span className="shrink-0 tabular-nums">{quantity}</span>
+            {unitLabel && <bdi dir="auto" className="shrink-0">{unitLabel}</bdi>}
+            <span aria-hidden="true" className="shrink-0">×</span>
+            <bdi dir="ltr" className="min-w-0">{priceLabel}</bdi>
+        </span>
+    )
+}
+
 interface MobileCartProps {
     cart: CartItem[]
     removeFromCart: (itemKey: string) => void
@@ -6078,12 +6101,20 @@ function MobileCart({
                                                     "text-muted-foreground transition-all duration-300",
                                                     item.negotiated_price !== undefined || hasDiscount ? "line-through opacity-50" : ""
                                                 )}>
-                                                    {formatCurrency(item.price, originalCurrency, features.iqd_display_preference)} x {item.quantity} {t(`products.units.${item.unit}`, item.unit).toUpperCase()}
+                                                    <PosCartPriceQuantity
+                                                        quantity={item.quantity}
+                                                        unitLabel={t(`products.units.${item.unit}`, { defaultValue: item.unit ?? '' }).toUpperCase()}
+                                                        priceLabel={formatCurrency(item.price, originalCurrency, features.iqd_display_preference)}
+                                                    />
                                                 </div>
 
                                                 {(item.negotiated_price !== undefined || hasDiscount) && (
                                                     <div className="text-emerald-500 font-bold flex items-center gap-1 animate-in slide-in-from-left-2 duration-300">
-                                                        {formatCurrency(unitPrice, originalCurrency, features.iqd_display_preference)} x {item.quantity} {t(`products.units.${item.unit}`, item.unit).toUpperCase()}
+                                                        <PosCartPriceQuantity
+                                                            quantity={item.quantity}
+                                                            unitLabel={t(`products.units.${item.unit}`, { defaultValue: item.unit ?? '' }).toUpperCase()}
+                                                            priceLabel={formatCurrency(unitPrice, originalCurrency, features.iqd_display_preference)}
+                                                        />
                                                         <button
                                                             onClick={() => clearNegotiatedPrice(item)}
                                                             className="p-0.5 rounded-full hover:bg-destructive/10 text-destructive transition-colors"
