@@ -132,6 +132,7 @@ vi.mock('@/lib/supabaseRequest', () => ({
 
 import { setNetworkStatus } from '@/lib/network'
 import { SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
+import { toSnakeCase } from '@/lib/utils'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 
 import { db } from './database'
@@ -307,7 +308,7 @@ function freeOnlyQuickOrderInput(freeBonusQuantity = 1): SalesOrderCreateInput {
     }
 }
 
-function installSuccessfulRpcResponse() {
+function installSuccessfulRpcResponse(inventoryQuantity = 4) {
     supabaseMock.rpc.mockImplementationOnce(async (_name: string, args: { payload: any }) => {
         const orderPayload = args.payload.order
         const paymentPayload = args.payload.payment
@@ -322,8 +323,8 @@ function installSuccessfulRpcResponse() {
                     reserved_at: completedAt,
                     items: orderPayload.items.map((item: Record<string, unknown>) => ({
                         ...item,
-                        reservedQuantity: 1,
-                        fulfilledQuantity: 1,
+                        reservedQuantity: item.inventoryQuantity ?? item.quantity,
+                        fulfilledQuantity: item.inventoryQuantity ?? item.quantity,
                         batchAllocations: null
                     })),
                     updated_at: completedAt,
@@ -353,7 +354,7 @@ function installSuccessfulRpcResponse() {
                     workspace_id: WORKSPACE_ID,
                     product_id: PRODUCT_ID,
                     storage_id: STORAGE_ID,
-                    quantity: 4,
+                    quantity: inventoryQuantity,
                     created_at: '2026-08-31T08:00:00.000Z',
                     updated_at: completedAt,
                     version: 2,
@@ -481,6 +482,64 @@ describe('atomic POS Quick Order completion', () => {
     })
 
     describe('sales order form summary refresh', () => {
+        it('keeps database-normalized UoM snapshots in the local order cache after save', async () => {
+            const uomId = crypto.randomUUID()
+            let selectedColumns = ''
+            supabaseMock.upsert.mockImplementationOnce((payload: unknown) => {
+                const rows = Array.isArray(payload) ? payload : [payload]
+                const response = { data: [], error: null }
+                return {
+                    select: async (columns: string) => {
+                        selectedColumns = columns
+                        return {
+                            data: rows.map((row) => {
+                                const order = row as { id?: string; items?: Array<Record<string, unknown>> }
+                                return {
+                                    id: order.id,
+                                    order_number: 'SO-2026-00999',
+                                    items: (order.items ?? []).map((item) => ({
+                                        ...item,
+                                        uomId,
+                                        uomNameSnapshot: 'Piece',
+                                        unitRef: 'builtin:piece',
+                                        unit: 'piece',
+                                        unitNameSnapshot: 'Piece',
+                                        baseUnitRef: 'builtin:piece',
+                                        baseUnitCode: 'piece',
+                                        baseUnitNameSnapshot: 'Piece',
+                                        unitFactor: 1,
+                                        inventoryQuantity: item.quantity,
+                                        freeBonusInventoryQuantity: 0
+                                    }))
+                                }
+                            }),
+                            error: null
+                        }
+                    },
+                    then: <TResult1 = typeof response, TResult2 = never>(
+                        onfulfilled?: ((value: typeof response) => TResult1 | PromiseLike<TResult1>) | null,
+                        onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+                    ) => Promise.resolve(response).then(onfulfilled, onrejected)
+                } as unknown as ReturnType<typeof supabaseMock.upsert>
+            })
+
+            const saved = await createSalesOrder(WORKSPACE_ID, unpaidQuickOrderInput('draft'), USER_ID, {
+                deferSummaryRefresh: true
+            })
+            const expectedSnapshot = {
+                uomId,
+                uomNameSnapshot: 'Piece',
+                baseUnitCode: 'piece',
+                unitFactor: 1,
+                inventoryQuantity: 1
+            }
+
+            expect(selectedColumns).toBe('id, order_number, items')
+            expect(saved.items[0]).toMatchObject(expectedSnapshot)
+            expect((await db.sales_orders.get(saved.id))?.items[0]).toMatchObject(expectedSnapshot)
+            await finishSummaryRefresh()
+        })
+
         for (const dataMode of ['cloud', 'hybrid'] as const) {
             for (const paid of [false, true]) {
                 it(`${dataMode}: confirms a ${paid ? 'paid' : 'unpaid'} draft while summary RPCs are still pending`, async () => {
@@ -953,42 +1012,52 @@ describe('atomic POS Quick Order completion', () => {
         expect(supabaseMock.rpc).toHaveBeenCalledTimes(1)
     })
 
-    it('rejects a related-unit product before the cloud Quick Order RPC or any local writes', async () => {
-        await db.product_unit_conversions.put({
-            ...baseEntity('10000000-0000-4000-8000-000000000010'),
-            productId: PRODUCT_ID,
-            relationshipId: '10000000-0000-4000-8000-000000000011',
-            factor: 20,
-            parentPrice: 40
-        })
-
-        await expect(createCompletedSalesOrder(WORKSPACE_ID, quickOrderInput(), USER_ID))
-            .rejects.toThrow('quick_order_related_units_unsupported')
-
-        expect(supabaseMock.rpc).not.toHaveBeenCalled()
-        expect(await db.sales_orders.count()).toBe(0)
-        expect(await db.payment_transactions.count()).toBe(0)
-        expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(5)
-    })
-
-    it('rejects related-unit line metadata even when the conversion cache is empty', async () => {
-        const input = quickOrderInput()
+    it('completes a paid Cloud Quick Order in a selected UoM and sends its conversion snapshot', async () => {
+        await db.product_uoms.bulkPut([
+            {
+                ...baseEntity('10000000-0000-4000-8000-000000000010'),
+                productId: PRODUCT_ID, unitRef: 'builtin:pcs', unitCode: 'pcs', coefficient: 1,
+                isBase: true, isActive: true, isDefaultSelling: false,
+                sellingPrice: 100, costPrice: 40, minimumSellingPrice: null
+            },
+            {
+                ...baseEntity('10000000-0000-4000-8000-000000000011'),
+                productId: PRODUCT_ID, unitRef: 'builtin:carton', unitCode: 'carton', coefficient: 2,
+                isBase: false, isActive: true, isDefaultSelling: true,
+                sellingPrice: 200, costPrice: 80, minimumSellingPrice: 170
+            }
+        ] as never)
+        const input = quickOrderInput(200)
         input.items[0] = {
-            ...input.items[0],
-            unitRelationshipId: '10000000-0000-4000-8000-000000000011',
-            unitRef: 'builtin:carton',
-            baseUnitRef: 'builtin:pcs',
-            unitFactor: 20,
-            inventoryQuantity: 20
+            ...input.items[0], unit: 'carton', uomId: '10000000-0000-4000-8000-000000000011',
+            uomNameSnapshot: 'Carton', unitRef: 'builtin:carton', unitNameSnapshot: 'Carton',
+            baseUnitRef: 'builtin:pcs', baseUnitCode: 'pcs', baseUnitNameSnapshot: 'Piece',
+            unitFactor: 2, inventoryQuantity: 2, minimumSellingPriceSnapshot: 170,
+            uomCostPrice: 80, convertedUomCostPrice: 80, quantity: 1, lineTotal: 200,
+            originalUnitPrice: 200, convertedUnitPrice: 200, costPrice: 40, convertedCostPrice: 40
         }
+        input.subtotal = input.total = 200
+        installSuccessfulRpcResponse(3)
 
-        await expect(createCompletedSalesOrder(WORKSPACE_ID, input, USER_ID))
-            .rejects.toThrow('quick_order_related_units_unsupported')
+        const completed = await createCompletedSalesOrder(WORKSPACE_ID, input, USER_ID)
 
-        expect(supabaseMock.rpc).not.toHaveBeenCalled()
-        expect(await db.sales_orders.count()).toBe(0)
-        expect(await db.payment_transactions.count()).toBe(0)
-        expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(5)
+        expect(supabaseMock.rpc).toHaveBeenCalledWith('complete_quick_sales_order', expect.objectContaining({
+            payload: expect.objectContaining({
+                order: expect.objectContaining({
+                    items: [expect.objectContaining({
+                        uomId: '10000000-0000-4000-8000-000000000011',
+                        unitFactor: 2, inventoryQuantity: 2,
+                        uomCostPrice: 80, convertedUomCostPrice: 80, minimumSellingPriceSnapshot: 170
+                    })]
+                })
+            })
+        }))
+        expect(completed.items[0]).toMatchObject({
+            unit: 'carton', unitFactor: 2, inventoryQuantity: 2, uomCostPrice: 80,
+            convertedCostPrice: 40, convertedUomCostPrice: 80
+        })
+        expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(3)
+        expect(await db.payment_transactions.where('sourceRecordId').equals(completed.id).count()).toBe(1)
     })
 
     it('retains the existing transaction flow for Local Mode', async () => {
@@ -1098,16 +1167,26 @@ describe('atomic POS Quick Order completion', () => {
         expect((await db.business_partners.get(PARTNER_ID))?.receivableBalance).toBe(0)
     })
 
-    it('keeps a cloud free-only Quick Order off the atomic payment RPC', async () => {
-        supabaseMock.rpc.mockImplementation(async (name: string) => {
+    it('completes a cloud free-only Quick Order through inventory completion without a payment transaction', async () => {
+        supabaseMock.rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
             if (name === 'sync_customer' || name === 'sync_business_partner') {
                 return { data: null, error: null }
             }
-            if (name !== 'apply_inventory_snapshot_changes') {
+            if (name !== 'complete_sales_order_with_inventory') {
                 return { data: null, error: new Error(`Unexpected RPC: ${name}`) }
             }
+            const orderId = String(args.p_order_id)
+            const order = await db.sales_orders.get(orderId)
+            if (!order) throw new Error(`Missing order for completion: ${orderId}`)
             return {
                 data: {
+                    order: toSnakeCase({
+                        ...order,
+                        status: 'completed',
+                        version: Number(args.p_expected_order_version) + 1,
+                        items: args.p_items,
+                        actualDeliveryDate: args.p_actual_delivery_date
+                    }),
                     inventory: [{
                         id: INVENTORY_ID,
                         workspace_id: WORKSPACE_ID,
@@ -1119,6 +1198,7 @@ describe('atomic POS Quick Order completion', () => {
                         version: 2,
                         is_deleted: false
                     }],
+                    inventory_transactions: [],
                     conflict: false
                 },
                 error: null
@@ -1150,8 +1230,8 @@ describe('atomic POS Quick Order completion', () => {
             expect.anything()
         )
         expect(supabaseMock.rpc).toHaveBeenCalledWith(
-            'apply_inventory_snapshot_changes',
-            expect.objectContaining({ p_workspace_id: WORKSPACE_ID })
+            'complete_sales_order_with_inventory',
+            expect.objectContaining({ p_workspace_id: WORKSPACE_ID, p_order_id: completed.id })
         )
         expect(supabaseMock.upsert).toHaveBeenCalled()
         expect(await db.payment_transactions.where('sourceRecordId').equals(completed.id).count()).toBe(0)

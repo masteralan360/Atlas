@@ -119,8 +119,8 @@ export async function preflightLive(config, { fetchImpl = globalThis.fetch, suit
       }
     } else if (suiteId === 'products') {
       for (const table of [
-        'products', 'categories', 'product_barcodes', 'inventory', 'inventory_transactions', 'storages', 'units',
-        'unit_relationships', 'product_unit_conversions', 'price_books', 'price_book_items',
+        'products', 'categories', 'product_barcodes', 'product_uoms', 'inventory', 'inventory_transactions', 'storages', 'units',
+        'price_books', 'price_book_items',
         'product_discounts'
       ]) {
         const { error } = await client.from(table).select('id')

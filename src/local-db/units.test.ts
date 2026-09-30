@@ -78,9 +78,11 @@ function makeChainable() {
           tableRows.set(String(row.id), row);
           return { data: null, error: null };
         },
-        update: (_payload: unknown) => ({
-          eq: () => ({ data: null, error: null }),
-        }),
+        update: (_payload: unknown) => {
+          const result: Record<string, unknown> = { data: null, error: null }
+          result.eq = () => result
+          return { eq: () => result }
+        },
         delete: () => ({ eq: () => ({ data: null, error: null }) }),
         range: () => {
           return { data: Array.from(tableRows.values()), error: null };
@@ -165,15 +167,19 @@ describe("units normalization + rename migration", () => {
       version: 1,
       isDeleted: false,
     } as never);
-    await db.unit_relationships.put({
-      id: "relationship-a",
+    await db.product_uoms.put({
+      id: "product-uom-a",
       workspaceId: WORKSPACE_ID,
-      name: null,
-      parentUnitRef: `custom:${created.id}`,
-      parentUnitCode: "وحدة",
-      childUnitRef: "builtin:pcs",
-      childUnitCode: "pcs",
-      isArchived: false,
+      productId: "product-a",
+      unitRef: `custom:${created.id}`,
+      unitCode: "وحدة",
+      coefficient: 1,
+      isBase: true,
+      isActive: true,
+      isDefaultSelling: true,
+      sellingPrice: 1,
+      costPrice: null,
+      minimumSellingPrice: null,
       createdAt: now,
       updatedAt: now,
       syncStatus: "synced",
@@ -188,8 +194,8 @@ describe("units normalization + rename migration", () => {
     expect(product?.unit).toBe("وحدة معدلة");
     const unit = await db.units.get(created.id);
     expect(unit?.code).toBe("وحدة معدلة");
-    expect(await db.unit_relationships.get("relationship-a")).toMatchObject({
-      parentUnitCode: "وحدة معدلة",
+    expect(await db.product_uoms.get("product-uom-a")).toMatchObject({
+      unitCode: "وحدة معدلة",
     });
   }, 90_000);
 });

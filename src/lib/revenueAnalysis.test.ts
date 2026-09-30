@@ -25,6 +25,22 @@ describe('sales order revenue analysis', () => {
     expect(getRevenueAnalysisTotals(record)).toEqual({ revenue: 5000, cost: 0, profit: 5000, margin: 100 })
   })
 
+  it('uses the selected UoM cost on POS sales and preserves selected-unit return quantities', () => {
+    const record = toRevenueRecordFromSale({
+      id: 'sale-box-cost', origin: 'pos', created_at: '2026-09-22T00:00:00.000Z',
+      settlement_currency: 'iqd', has_partial_return: true, is_returned: false,
+      items: [{
+        id: 'line-box', product_id: 'product-1', product_name: 'Medicine', quantity: 2,
+        converted_unit_price: 32_000, converted_cost_price: 21_600, cost_price: 21_600,
+        unit_factor: 24, inventory_quantity: 48, uom_cost_price: 21_600,
+        returned_quantity: 1, is_returned: false,
+      }],
+    } as any)
+
+    expect(record.items[0]).toMatchObject({ quantity: 2, returnedQuantity: 1, costPrice: 21_600 })
+    expect(getRevenueAnalysisTotals(record)).toMatchObject({ revenue: 32_000, cost: 21_600, profit: 10_400 })
+  })
+
   it('charges revenue on paid quantity and cost on paid plus free bonus quantity', () => {
     const order = {
       id: 'order-1',
@@ -102,7 +118,26 @@ describe('sales order revenue analysis', () => {
     })
   })
 
-  it('uses paid returns for related-unit revenue and total returned stock for cost', () => {
+  it('calculates gross profit using independent UoM cost rather than multiplying base cost', () => {
+    const order = {
+      id: 'order-box-cost', orderNumber: 'SO-BOX-COST', customerId: 'customer-1', customerName: 'Customer',
+      createdAt: '2026-09-22T00:00:00.000Z', updatedAt: '2026-09-22T00:00:00.000Z',
+      currency: 'iqd', status: 'completed', returnStatus: 'none', isDeleted: false, total: 32_000,
+      items: [{
+        id: 'line-box', productId: 'product-1', productName: 'Medicine', productSku: 'MED-1',
+        quantity: 1, unitFactor: 24, inventoryQuantity: 24, lineTotal: 32_000,
+        originalCurrency: 'iqd', originalUnitPrice: 32_000, convertedUnitPrice: 32_000,
+        settlementCurrency: 'iqd', costPrice: 1_000, convertedCostPrice: 1_000,
+        uomCostPrice: 21_600, convertedUomCostPrice: 21_600
+      }]
+    } as SalesOrder
+
+    const record = toRevenueRecordFromSalesOrder(order)
+    expect(record.items[0].costPrice).toBe(900)
+    expect(getRevenueAnalysisTotals(record)).toMatchObject({ revenue: 32_000, cost: 21_600, profit: 10_400 })
+  })
+
+  it('uses paid returns for UoM revenue and total returned stock for cost', () => {
     const order = {
       id: 'order-related-return',
       orderNumber: 'SO-RELATED-RETURN',

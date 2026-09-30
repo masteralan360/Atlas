@@ -72,9 +72,10 @@ describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () 
         expect(await db.offline_mutations.count()).toBe(0)
     })
 
-    it('sends immutable related-unit snapshots and canonical stock quantity to complete_sale', async () => {
+    it('sends immutable product UoM snapshots and canonical stock quantity to complete_sale', async () => {
         const input = posCheckoutInput({ currency: 'usd', quantity: 1, unitPrice: 1_000 })
         Object.assign(input.payload.items[0], {
+            selling_uom_id: 'uom-carton',
             selling_unit_ref: 'builtin:carton',
             selling_unit_code: 'carton',
             base_unit_ref: 'custom:sheet',
@@ -100,6 +101,7 @@ describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () 
         expect(remote.rpc).toHaveBeenCalledWith('complete_sale', {
             payload: expect.objectContaining({
                 items: [expect.objectContaining({
+                    selling_uom_id: 'uom-carton',
                     selling_unit_ref: 'builtin:carton',
                     selling_unit_code: 'carton',
                     base_unit_ref: 'custom:sheet',

@@ -37,6 +37,33 @@ export function getOrderLineUnitFactor(item: OrderLineQuantityLike) {
   return Number.isFinite(factor) && factor > 0 ? roundQuantity(factor) : 1
 }
 
+type OrderLineCostLike = OrderLineQuantityLike & {
+  costPrice?: unknown
+  convertedCostPrice?: unknown
+  uomCostPrice?: unknown
+  convertedUomCostPrice?: unknown
+}
+
+/** Cost in the selected unit, falling back to the historical base-unit cost. */
+export function getOrderLineSelectedUnitCost(item: OrderLineCostLike) {
+  const selectedCost = item.convertedUomCostPrice
+  if (selectedCost !== null && selectedCost !== undefined && Number.isFinite(Number(selectedCost)) && Number(selectedCost) >= 0) {
+    return Number(selectedCost)
+  }
+  if (item.uomCostPrice !== null && item.uomCostPrice !== undefined
+    && Number.isFinite(Number(item.uomCostPrice)) && Number(item.uomCostPrice) >= 0) {
+    const convertedCost = Number(item.convertedCostPrice ?? item.costPrice ?? item.uomCostPrice)
+    return Number.isFinite(convertedCost) && convertedCost >= 0 ? convertedCost : Number(item.uomCostPrice)
+  }
+  const baseCost = Number(item.convertedCostPrice ?? item.costPrice ?? 0)
+  return Number.isFinite(baseCost) && baseCost >= 0 ? baseCost * getOrderLineUnitFactor(item) : 0
+}
+
+/** Cost per canonical inventory unit for historical profit and stock costing. */
+export function getOrderLineCostPerInventoryUnit(item: OrderLineCostLike) {
+  return getOrderLineSelectedUnitCost(item) / getOrderLineUnitFactor(item)
+}
+
 export function getOrderLinePaidInventoryQuantity(item: OrderLineQuantityLike) {
   if (item.inventoryQuantity !== null && item.inventoryQuantity !== undefined) {
     return normalizeNonNegativeQuantity(item.inventoryQuantity)

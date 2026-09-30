@@ -48,7 +48,7 @@ describe('hosted Supabase test boundary', () => {
   it('keeps the hosted and isolated group allowlists separate', () => {
     const hosted = validateRunOptions({ suiteId: 'sale-orders', environment: 'hosted-supabase' }).groups
     expect(hosted.map((group) => group.id)).toEqual([
-      'matrix', 'printing', 'account-statement', 'lifecycle', 'pricing', 'related-units',
+      'matrix', 'printing', 'account-statement', 'lifecycle', 'pricing', 'unit-of-measure',
       'payments', 'ui-access', 'live-transactions', 'completion-integrity'
     ])
     const mappedIsolatedGroups = hosted.filter((group) => group.isolatedGroupId).map((group) => group.isolatedGroupId)
@@ -57,14 +57,14 @@ describe('hosted Supabase test boundary', () => {
     expect(new Set(mappedIsolatedGroups).size).toBe(mappedIsolatedGroups.length)
     const posIsolated = validateRunOptions({ suiteId: 'pos' }).groups.map((group) => group.id)
     const posHosted = validateRunOptions({ suiteId: 'pos', environment: 'hosted-supabase' }).groups
-    expect(posHosted.map((group) => group.id)).toEqual(posIsolated)
+    expect(posHosted.map((group) => group.id)).toEqual(posIsolated.filter((groupId) => groupId !== 'printing'))
     expect(posHosted.filter((group) => group.isolatedOnly).map((group) => group.id))
       .toEqual(['cart', 'media-uploads', 'ui-access'])
     expect(posHosted.filter((group) => !group.isolatedOnly).every((group) => group.files.length > 0)).toBe(true)
 
     const productsIsolated = validateRunOptions({ suiteId: 'products' }).groups
     const productsHosted = validateRunOptions({ suiteId: 'products', environment: 'hosted-supabase' }).groups
-    expect(productsHosted.map((group) => group.id)).toEqual(productsIsolated.map((group) => group.id))
+    expect(productsHosted.map((group) => group.id)).toEqual(productsIsolated.filter((group) => group.id !== 'printing').map((group) => group.id))
     expect(productsHosted.filter((group) => group.isolatedOnly).map((group) => group.id))
       .toEqual(['import-export-assets', 'product-consumers', 'cloud-hybrid-contracts'])
     expect(productsHosted.filter((group) => !group.isolatedOnly).every((group) => group.files.length > 0)).toBe(true)
@@ -114,7 +114,7 @@ describe('hosted Supabase test boundary', () => {
     expect(paths).not.toContain('/rest/v1/rpc/services_module_allowed')
   })
 
-  it('preflights the product catalog and related table contracts without requiring order schemas', async () => {
+  it('preflights the product catalog and UoM table contracts without requiring order schemas', async () => {
     const paths = []
     const fetchImpl = vi.fn(async (input) => {
       const target = new URL(typeof input === 'string' ? input : input.url)
@@ -128,8 +128,8 @@ describe('hosted Supabase test boundary', () => {
         ? [{ id }] : { id, name: 'DEV TEST Atlas', data_mode: 'cloud' })
       if (target.pathname === '/auth/v1/logout') return new Response(null, { status: 204 })
       if ([
-        'products', 'categories', 'product_barcodes', 'inventory', 'inventory_transactions', 'storages', 'units',
-        'unit_relationships', 'product_unit_conversions', 'price_books', 'price_book_items',
+        'products', 'categories', 'product_barcodes', 'product_uoms', 'inventory', 'inventory_transactions', 'storages', 'units',
+        'price_books', 'price_book_items',
         'product_discounts'
       ].some((table) => target.pathname === `/rest/v1/${table}`)) return Response.json([])
       if (target.pathname === '/rest/v1/product_commission_rules') return Response.json([])
@@ -140,7 +140,7 @@ describe('hosted Supabase test boundary', () => {
     expect(paths).toContain('/rest/v1/products')
     expect(paths).toContain('/rest/v1/product_barcodes')
     expect(paths).toContain('/rest/v1/inventory_transactions')
-    expect(paths).toContain('/rest/v1/product_unit_conversions')
+    expect(paths).toContain('/rest/v1/product_uoms')
     expect(paths).toContain('/rest/v1/product_commission_rules')
     expect(paths).not.toContain('/rest/v1/sales_orders')
   })

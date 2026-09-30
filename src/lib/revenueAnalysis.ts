@@ -7,7 +7,9 @@ import {
     getOrderLinePaidQuantity,
     getOrderLineReturnedInventoryQuantity,
     getOrderLineReturnedPaidInventoryQuantity,
-    getOrderLineUnitFactor
+    getOrderLineUnitFactor,
+    getOrderLineCostPerInventoryUnit,
+    getOrderLineSelectedUnitCost
 } from '@/lib/orderLineItems'
 
 export interface RevenueAnalysisItem {
@@ -167,7 +169,13 @@ export function toRevenueRecordFromSale(sale: Sale, options: RevenueCategoryLook
             quantity: item.quantity || 0,
             returnedQuantity: item.is_returned ? (item.quantity || 0) : (item.returned_quantity || 0),
             unitPrice: item.converted_unit_price || item.unit_price || 0,
-            costPrice: item.converted_cost_price || item.cost_price || 0
+            costPrice: getOrderLineSelectedUnitCost({
+                unitFactor: item.unit_factor,
+                costPrice: item.cost_price,
+                convertedCostPrice: item.converted_cost_price,
+                uomCostPrice: item.uom_cost_price,
+                convertedUomCostPrice: item.converted_uom_cost_price
+            })
         }))
     }
 }
@@ -220,7 +228,7 @@ export function toRevenueRecordFromSalesOrder(order: SalesOrder, options: Revenu
                     getOrderLineReturnedInventoryQuantity(item)
                 ),
                 unitPrice: item.convertedUnitPrice || 0,
-                costPrice: item.convertedCostPrice || item.costPrice || 0
+                costPrice: getOrderLineCostPerInventoryUnit(item)
             }
         })
     }

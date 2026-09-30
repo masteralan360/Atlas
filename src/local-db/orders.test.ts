@@ -115,8 +115,8 @@ vi.mock('./businessPartners', () => ({
 
 import { recalculateCustomerSummary, sanitizeSyncPayload } from './orders'
 
-describe('order related-unit Cloud request contract', () => {
-    it('keeps immutable line snapshots in the JSON payload while removing client-only sync metadata', () => {
+describe('order product UoM Cloud request contract', () => {
+    it('keeps immutable UoM snapshots in the JSON payload while removing client-only sync metadata', () => {
         const payload = sanitizeSyncPayload('sales_orders', {
             id: 'order-related',
             workspaceId: WORKSPACE_ID,
@@ -125,7 +125,8 @@ describe('order related-unit Cloud request contract', () => {
             items: [{
                 id: 'line-related',
                 quantity: 2,
-                unitRelationshipId: 'relationship-carton-sheet',
+                uomId: 'uom-carton',
+                uomNameSnapshot: 'Carton',
                 unitRef: 'builtin:carton',
                 baseUnitRef: 'builtin:sheet',
                 baseUnitCode: 'sheet',
@@ -138,7 +139,8 @@ describe('order related-unit Cloud request contract', () => {
         expect(payload).toMatchObject({
             workspace_id: WORKSPACE_ID,
             items: [expect.objectContaining({
-                unitRelationshipId: 'relationship-carton-sheet',
+                uomId: 'uom-carton',
+                uomNameSnapshot: 'Carton',
                 unitRef: 'builtin:carton',
                 baseUnitRef: 'builtin:sheet',
                 unitFactor: 20,

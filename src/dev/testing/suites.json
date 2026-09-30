@@ -37,7 +37,7 @@
       { "id": "account-statement", "titleKey": "devTesting.groups.accountStatement", "layer": "live", "isolatedGroupId": "account-statement", "files": ["src/dev/testing/suites/saleOrdersStatementLive.test.ts"] },
       { "id": "lifecycle", "titleKey": "devTesting.groups.lifecycle", "layer": "live", "isolatedGroupId": "lifecycle", "files": ["src/dev/testing/suites/saleOrdersLifecycleLive.test.ts"] },
       { "id": "pricing", "titleKey": "devTesting.groups.pricing", "layer": "live", "isolatedGroupId": "pricing", "files": ["src/dev/testing/suites/saleOrdersPricingLive.test.ts"] },
-      { "id": "related-units", "titleKey": "devTesting.groups.relatedUnits", "layer": "live", "isolatedGroupId": "related-units", "files": ["src/dev/testing/suites/saleOrdersUnitsLive.test.ts"] },
+      { "id": "unit-of-measure", "titleKey": "devTesting.groups.productUom", "layer": "live", "isolatedGroupId": "unit-of-measure", "files": ["src/dev/testing/suites/saleOrdersUomLive.test.ts"] },
       { "id": "payments", "titleKey": "devTesting.groups.payments", "layer": "live", "isolatedGroupId": "payments", "files": ["src/dev/testing/suites/saleOrdersPaymentsLive.test.ts"] },
       { "id": "ui-access", "titleKey": "devTesting.groups.uiAccess", "layer": "live", "isolatedGroupId": "ui-access", "files": ["src/dev/testing/suites/saleOrdersAccessLive.test.ts"] },
       {
@@ -103,21 +103,24 @@
           "src/lib/orderPartnerBalance.test.ts",
           "src/lib/priceBooks.test.ts",
           "src/local-db/orderPriceBooks.test.ts",
+          "src/local-db/priceBookUomPrices.test.ts",
           "src/ui/components/orders/SalesOrderFormPage.test.ts"
         ]
       },
       {
-        "id": "related-units",
-        "titleKey": "devTesting.groups.relatedUnits",
+        "id": "unit-of-measure",
+        "titleKey": "devTesting.groups.productUom",
         "layer": "business",
         "files": [
             "src/dev/testing/suites/orderLineItemLayout.test.ts",
-            "src/dev/testing/suites/orderRelatedUnits.test.ts",
-            "src/dev/testing/suites/orderRelatedUnitsTransactions.test.ts",
+            "src/dev/testing/suites/orderUom.test.ts",
+            "src/dev/testing/suites/orderUomTransactions.test.ts",
             "src/lib/orderLineItems.test.ts",
             "src/lib/orderUnitErrors.test.ts",
-            "src/lib/unitRelationships.test.ts",
-          "src/lib/orderPrintReturnState.test.ts"
+            "src/local-db/productUoms.test.ts",
+            "src/lib/productUomMigration.test.ts",
+            "src/lib/revenueAnalysis.test.ts",
+            "src/lib/orderPrintReturnState.test.ts"
         ]
       },
       {
@@ -244,7 +247,7 @@
       { "id": "pricing", "titleKey": "devTesting.posGroups.pricing", "layer": "live", "isolatedGroupId": "pricing", "files": ["src/dev/testing/suites/posPricingLive.test.ts"] },
       { "id": "currency", "titleKey": "devTesting.posGroups.currency", "layer": "live", "isolatedGroupId": "currency", "files": ["src/dev/testing/suites/posCurrencyLive.test.ts"] },
       { "id": "inventory", "titleKey": "devTesting.posGroups.inventory", "layer": "live", "isolatedGroupId": "inventory", "files": ["src/dev/testing/suites/posInventoryLive.test.ts"] },
-      { "id": "related-units", "titleKey": "devTesting.posGroups.relatedUnits", "layer": "live", "isolatedGroupId": "related-units", "files": ["src/dev/testing/suites/posUnitsLive.test.ts"] },
+      { "id": "unit-of-measure", "titleKey": "devTesting.posGroups.productUom", "layer": "live", "isolatedGroupId": "unit-of-measure", "files": ["src/dev/testing/suites/posUomLive.test.ts"] },
       { "id": "financing", "titleKey": "devTesting.posGroups.financing", "layer": "live", "isolatedGroupId": "financing", "files": ["src/dev/testing/suites/posFinancingLive.test.ts"] },
       { "id": "returns-exchanges", "titleKey": "devTesting.posGroups.returns", "layer": "live", "isolatedGroupId": "returns-exchanges", "files": ["src/dev/testing/suites/posReturnsLive.test.ts"] },
       { "id": "entry-routing", "titleKey": "devTesting.posGroups.routing", "layer": "live", "isolatedGroupId": "entry-routing", "files": ["src/dev/testing/suites/posRoutingLive.test.ts"] },
@@ -300,6 +303,7 @@
           "src/lib/minimumSellingPrice.test.ts",
           "src/lib/discounts.test.ts",
           "src/lib/priceBooks.test.ts",
+          "src/local-db/priceBookUomPrices.test.ts",
           "src/lib/productCost.test.ts"
         ]
       },
@@ -326,16 +330,17 @@
         ]
       },
       {
-        "id": "related-units",
-        "titleKey": "devTesting.posGroups.relatedUnits",
+        "id": "unit-of-measure",
+        "titleKey": "devTesting.posGroups.productUom",
         "layer": "business",
         "files": [
-          "src/lib/unitRelationships.test.ts",
-          "src/lib/productRelationalConversion.test.ts",
-          "src/lib/hierarchicalPackagingMigration.test.ts",
-          "src/local-db/unitRelationships.test.ts",
-          "src/local-db/productRelationalConversion.test.ts",
-          "src/local-db/units.test.ts"
+          "src/local-db/productUoms.test.ts",
+          "src/lib/productUomMigration.test.ts",
+          "src/local-db/units.test.ts",
+          "src/dev/testing/suites/posCart.test.ts",
+          "src/dev/testing/suites/posCheckout.test.ts",
+          "src/local-db/quickOrderAtomic.test.ts",
+          "src/local-db/saleProductExchanges.test.ts"
         ]
       },
       {
@@ -630,14 +635,12 @@
         "titleKey": "devTesting.productsGroups.unitsStock",
         "layer": "business",
         "files": [
-          "src/lib/productRelationalConversion.test.ts",
+          "src/local-db/productUoms.test.ts",
+          "src/lib/productUomMigration.test.ts",
           "src/lib/productStockPresentation.test.ts",
           "src/lib/productUnitPresentation.test.ts",
           "src/local-db/inventorySnapshotSync.test.ts",
-          "src/local-db/productRelationalConversion.test.ts",
-          "src/local-db/unitRelationships.test.ts",
-          "src/local-db/units.test.ts",
-          "src/lib/unitRelationships.test.ts"
+          "src/local-db/units.test.ts"
         ]
       },
       {
@@ -654,6 +657,7 @@
           "src/local-db/agentCommissions.creatorRecoveryCloud.test.ts",
           "src/local-db/orderPriceBooks.test.ts",
           "src/local-db/priceBooks.test.ts",
+          "src/local-db/priceBookUomPrices.test.ts",
           "src/ui/components/commissions/ProductCommissionPreview.test.ts"
         ]
       },
@@ -695,8 +699,8 @@
           "src/lib/partnerProductMovementsTemplates.test.ts",
           "src/lib/partnerProductMovementsCustomTemplates.test.tsx",
           "src/ui/components/crm/PartnerProductMovementsPrintTemplate.test.tsx",
-          "src/dev/testing/suites/orderRelatedUnits.test.ts",
-          "src/dev/testing/suites/orderRelatedUnitsTransactions.test.ts",
+          "src/dev/testing/suites/orderUom.test.ts",
+          "src/dev/testing/suites/orderUomTransactions.test.ts",
           "src/dev/testing/suites/posCart.test.ts",
           "src/dev/testing/suites/posPricing.test.ts",
           "src/dev/testing/suites/posRouting.test.ts",
@@ -714,8 +718,7 @@
           "src/dev/testing/suites/productsRemote.test.ts",
           "src/local-db/minimumSellingPrice.test.ts",
           "src/local-db/inventoryTransactionsCloud.test.ts",
-          "src/local-db/productRelationalConversion.test.ts",
-          "src/local-db/unitRelationships.test.ts"
+          "src/local-db/productUoms.test.ts"
         ]
       }
     ],

@@ -12,6 +12,10 @@ export type MinimumSellingPriceCheckItem = {
     effectiveSellingPrice: number
     /** Number of product selling units represented by one line item unit. */
     unitFactor?: number | null
+    /** Unit-specific floor captured from the selected Product UoM. */
+    minimumSellingPrice?: number | null
+    /** Current Product UoM id lets Supabase verify the floor server-side. */
+    sellingUomId?: string | null
     currency?: CurrencyCode
 }
 
@@ -72,7 +76,7 @@ export async function assertStaffMinimumSellingPrices(input: {
         const products = await db.products.bulkGet(input.items.map((item) => item.productId))
         const violations = input.items.flatMap<MinimumSellingPriceViolation>((item, lineIndex) => {
             const product = products[lineIndex]
-            const minimum = product?.minimumSellingPrice
+            const minimum = item.minimumSellingPrice ?? product?.minimumSellingPrice ?? null
             const factor = Number.isFinite(item.unitFactor) && Number(item.unitFactor) > 0
                 ? Number(item.unitFactor)
                 : 1
@@ -85,12 +89,14 @@ export async function assertStaffMinimumSellingPrices(input: {
                     reason: 'currency_unavailable' as const
                 }]
             }
-            return product && minimum != null && item.effectiveSellingPrice < minimum * factor
+            const effectiveMinimum = item.minimumSellingPrice
+                ?? (minimum == null ? null : minimum * factor)
+            return product && effectiveMinimum != null && item.effectiveSellingPrice < effectiveMinimum
                 ? [{
                     lineIndex,
                     productId: product.id,
                     productName: product.name,
-                    minimumSellingPrice: minimum * factor,
+                    minimumSellingPrice: effectiveMinimum,
                     currency: product.currency
                 }]
                 : []
@@ -107,6 +113,8 @@ export async function assertStaffMinimumSellingPrices(input: {
                 product_id: item.productId,
                 effective_selling_price: item.effectiveSellingPrice,
                 unit_factor: item.unitFactor ?? 1,
+                minimum_selling_price: item.minimumSellingPrice ?? null,
+                selling_uom_id: item.sellingUomId ?? null,
                 currency: item.currency ?? null
             }))
         }
@@ -123,7 +131,6 @@ export async function assertStaffMinimumSellingPrices(input: {
                 ? { reason: 'currency_unavailable' as const }
                 : {
                     minimumSellingPrice: Number(row.minimum_selling_price)
-                        * (Number(input.items[Number(row.line_index)]?.unitFactor) || 1)
                 }),
             currency: input.items[Number(row.line_index)]?.currency ?? 'usd'
         })))

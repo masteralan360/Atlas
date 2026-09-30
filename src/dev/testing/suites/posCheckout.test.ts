@@ -98,12 +98,13 @@ describe('POS checkout scenarios (independent of Instant POS)', () => {
             ...firstLine,
             storage_id: secondStorageId,
             quantity: 2,
+            inventory_quantity: 2,
             total_price: 200,
             total: 200,
             inventory_snapshot: 5,
             batch_allocations: [{
                 batch_id: secondBatchId, batch_number: 'POS-2', quantity: 2,
-                price: 100, cost_price: 40, currency: 'usd', expiry_date: null, manufacturing_date: null
+                price: 100, cost_price: 40, currency: 'usd' as const, expiry_date: null, manufacturing_date: null
             }]
         }
         const serviceLine = {
@@ -194,23 +195,16 @@ describe('POS checkout scenarios (independent of Instant POS)', () => {
         await assertPosPayment(input.payload.id, 11)
     })
 
-    it('related parent-unit sale keeps the sold-unit snapshot and deducts canonical child stock', async () => {
+    it('pack UoM sale keeps its unit snapshot, independent pricing and deducts canonical base stock', async () => {
         await seedPosStock('iqd')
         await db.products.update(POS_PRODUCT, { minimumSellingPrice: 2_000 })
         const now = new Date().toISOString()
-        await db.products.update(POS_PRODUCT, { unit: 'sheet' })
-        await db.unit_relationships.put({
-            id: 'pos-unit-relationship', workspaceId: POS_WORKSPACE, name: 'Packaging',
-            parentUnitRef: 'builtin:carton', parentUnitCode: 'carton',
-            childUnitRef: 'builtin:sheet', childUnitCode: 'sheet', isArchived: false,
-            createdAt: now, updatedAt: now, syncStatus: 'synced', lastSyncedAt: now,
-            version: 1, isDeleted: false
-        })
-        await db.product_unit_conversions.put({
-            id: 'pos-unit-conversion', workspaceId: POS_WORKSPACE, productId: POS_PRODUCT,
-            relationshipId: 'pos-unit-relationship', factor: 20, parentPrice: 40_000,
-            createdAt: now, updatedAt: now, syncStatus: 'synced', lastSyncedAt: now,
-            version: 1, isDeleted: false
+        await db.product_uoms.put({
+            id: 'pos-uom-carton', workspaceId: POS_WORKSPACE, productId: POS_PRODUCT,
+            unitRef: 'builtin:carton', unitCode: 'carton', coefficient: 20, isBase: false,
+            isActive: true, isDefaultSelling: false, sellingPrice: 40_000, costPrice: 800,
+            minimumSellingPrice: 30_000, createdAt: now, updatedAt: now,
+            syncStatus: 'synced', lastSyncedAt: now, version: 1, isDeleted: false
         })
         const input = posCheckoutInput({ currency: 'iqd', quantity: 1, unitPrice: 40_000 })
         input.user.role = 'staff'
@@ -218,10 +212,14 @@ describe('POS checkout scenarios (independent of Instant POS)', () => {
             ...input.payload.items[0],
             selling_unit_ref: 'builtin:carton',
             selling_unit_code: 'carton',
-            base_unit_ref: 'builtin:sheet',
-            base_unit_code: 'sheet',
+            selling_uom_id: 'pos-uom-carton',
+            selling_unit_name_snapshot: 'carton',
+            base_unit_ref: 'builtin:pcs',
+            base_unit_code: 'pcs',
             unit_factor: 20,
             inventory_quantity: 20,
+            uom_cost_price: 800,
+            minimum_selling_price_snapshot: 30_000,
             cost_price: 800,
             converted_cost_price: 800,
             batch_allocations: [{
@@ -241,10 +239,14 @@ describe('POS checkout scenarios (independent of Instant POS)', () => {
             quantity: 1,
             sellingUnitRef: 'builtin:carton',
             sellingUnitCode: 'carton',
-            baseUnitRef: 'builtin:sheet',
-            baseUnitCode: 'sheet',
+            sellingUomId: 'pos-uom-carton',
+            sellingUnitNameSnapshot: 'carton',
+            baseUnitRef: 'builtin:pcs',
+            baseUnitCode: 'pcs',
             unitFactor: 20,
             inventoryQuantity: 20,
+            uomCostPrice: 800,
+            minimumSellingPriceSnapshot: 30_000,
             costPrice: 800
         })
         expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 0 })
@@ -253,7 +255,7 @@ describe('POS checkout scenarios (independent of Instant POS)', () => {
         await assertPosPayment(input.payload.id, 40_000)
     })
 
-    it('rejects a related-unit payload whose stock quantity does not match its immutable factor', async () => {
+    it('rejects a UoM payload whose stock quantity does not match its immutable factor', async () => {
         await seedPosStock()
         const input = posCheckoutInput({ quantity: 1 })
         Object.assign(input.payload.items[0], { unit_factor: 20, inventory_quantity: 19 })
@@ -262,7 +264,7 @@ describe('POS checkout scenarios (independent of Instant POS)', () => {
         expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 20 })
     })
 
-    it('rejects a related-unit payload that invents a conversion not configured for the product', async () => {
+    it('rejects a UoM payload that invents a conversion not configured for the product', async () => {
         await seedPosStock()
         const input = posCheckoutInput({ quantity: 1 })
         Object.assign(input.payload.items[0], {

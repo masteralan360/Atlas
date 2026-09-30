@@ -11,6 +11,8 @@ import {
   getOrderLineReturnedFreeInventoryQuantity,
   getOrderLineReturnedInventoryQuantity,
   getOrderLineReturnedPaidInventoryQuantity,
+  getOrderLineCostPerInventoryUnit,
+  getOrderLineSelectedUnitCost,
   getOrderLineUnitFactor,
   hasOrderLineInventoryQuantity,
   hasOrderLineFreeBonus,
@@ -44,6 +46,13 @@ describe('order line item quantity normalization', () => {
     expect(getOrderLinePaidInventoryQuantity(item)).toBe(40)
     expect(getOrderLineFreeBonusInventoryQuantity(item)).toBe(20)
     expect(getOrderLineInventoryQuantity(item)).toBe(60)
+  })
+
+  it('uses an independently captured selected-unit cost in either reporting unit', () => {
+    const line = { unitFactor: 24, convertedCostPrice: 1_000, convertedUomCostPrice: 21_600 }
+    expect(getOrderLineSelectedUnitCost(line)).toBe(21_600)
+    expect(getOrderLineCostPerInventoryUnit(line)).toBe(900)
+    expect(getOrderLineCostPerInventoryUnit({ unitFactor: 24, convertedCostPrice: 1_000 })).toBe(1_000)
   })
 
   it('prefers immutable inventory snapshots and tolerates legacy or invalid factors', () => {

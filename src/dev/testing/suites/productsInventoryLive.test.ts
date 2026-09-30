@@ -7,68 +7,51 @@ import {
 describe('Products · hosted units and inventory', () => {
     setupHostedProducts()
 
-    it('persists a product unit conversion against its workspace relationship', async () => {
-        const relationships = await import('@/local-db/unitRelationships')
+    it('persists independent product UoM price and coefficient rows', async () => {
         const hooks = await import('@/local-db/hooks')
+        const { replaceProductUoms } = await import('@/local-db/productUoms')
         const tag = `DEV TEST PRODUCT ${process.env.ATLAS_LIVE_RUN_ID?.slice(0, 8)} ${crypto.randomUUID().slice(0, 8)}`
-        const ids: Record<string, string | null> = {
-            productId: null, unitRelationshipId: null, parentUnitId: null, childUnitId: null
-        }
+        const ids: Record<string, string | null> = { productId: null, productUomId: null }
         let passed = false
         try {
-            const parentUnit = await hooks.createUnit(liveProductsWorkspaceId, {
-                code: `livebox${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`,
-                icon: 'Box', isDynamic: false
-            })
-            ids.parentUnitId = parentUnit.id
-            recordProductFixture(ids)
-            const childUnit = await hooks.createUnit(liveProductsWorkspaceId, {
-                code: `livepiece${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`,
-                icon: 'Package', isDynamic: false
-            })
-            ids.childUnitId = childUnit.id
-            recordProductFixture(ids)
-            const relationship = await relationships.saveUnitRelationship(liveProductsWorkspaceId, {
-                name: `${tag} carton conversion`,
-                parentUnitRef: `custom:${parentUnit.id}`, parentUnitCode: parentUnit.code,
-                childUnitRef: `custom:${childUnit.id}`, childUnitCode: childUnit.code
-            })
-            ids.unitRelationshipId = relationship.id
-            recordProductFixture(ids)
             const product = await hooks.createProduct(liveProductsWorkspaceId, {
                 sku: `DTU-${crypto.randomUUID().slice(0, 12)}`, name: `${tag} unit product`, description: '',
                 categoryId: null, category: null, storageId: null, price: 1500, costPrice: 800,
-                quantity: 0, minStockLevel: 0, unit: childUnit.code, currency: 'iqd', imageUrl: '',
+                quantity: 0, minStockLevel: 0, unit: 'pcs', currency: 'iqd', imageUrl: '',
                 canBeReturned: true, returnRules: ''
             })
             ids.productId = product.id
             recordProductFixture(ids)
-            const conversion = await relationships.replaceProductUnitConversion(liveProductsWorkspaceId, product.id, {
-                relationshipId: relationship.id, factor: 12, parentPrice: 15_000, childIsDynamic: false
-            })
-            expect(conversion).toMatchObject({
-                productId: product.id, relationshipId: relationship.id, factor: 12, parentPrice: 15_000
-            })
+            const uoms = await replaceProductUoms(liveProductsWorkspaceId, product.id, [
+                { unitRef: 'builtin:pcs', unitCode: 'pcs', coefficient: 1, isBase: true,
+                    isActive: true, isDefaultSelling: true, sellingPrice: 1500,
+                    costPrice: 800, minimumSellingPrice: 1200 },
+                { unitRef: 'builtin:box', unitCode: 'box', coefficient: 12, isBase: false,
+                    isActive: true, isDefaultSelling: false, sellingPrice: 15_000,
+                    costPrice: 9_600, minimumSellingPrice: 13_000, sku: `DTUB-${crypto.randomUUID().slice(0, 8)}` },
+            ])
+            const box = uoms.find((row) => row.unitCode === 'box')
+            if (!box) throw new Error('product_uom_box_missing')
+            ids.productUomId = box.id
+            recordProductFixture(ids)
 
             const client = await freshProductsClient()
             try {
-                const saved = requireProductsLiveData<any>(await client.from('product_unit_conversions')
-                    .select('workspace_id,product_id,relationship_id,factor,parent_price,is_deleted')
-                    .eq('product_id', product.id).single(), 'product unit conversion')
+                const saved = requireProductsLiveData<any>(await client.from('product_uoms')
+                    .select('workspace_id,product_id,unit_ref,coefficient,is_base,selling_price,cost_price,minimum_selling_price,sku,is_active,is_deleted')
+                    .eq('id', box.id).single(), 'product UoM')
                 expect(saved).toMatchObject({
-                    workspace_id: liveProductsWorkspaceId, product_id: product.id,
-                    relationship_id: relationship.id, factor: 12, parent_price: 15_000, is_deleted: false
+                    workspace_id: liveProductsWorkspaceId, product_id: product.id, unit_ref: 'builtin:box',
+                    coefficient: 12, is_base: false, selling_price: 15_000,
+                    cost_price: 9_600, minimum_selling_price: 13_000,
+                    sku: expect.stringMatching(/^DTUB-/), is_active: true, is_deleted: false
                 })
             } finally { await client.auth.signOut() }
 
-            await relationships.replaceProductUnitConversion(liveProductsWorkspaceId, product.id, null)
             await hooks.deleteProduct(product.id)
-            await relationships.deleteUnitRelationship(relationship.id)
-            await hooks.deleteUnit(parentUnit.id)
-            await hooks.deleteUnit(childUnit.id)
             passed = true
         } finally {
-            recordProductFixture(ids, passed ? 'product-archived; unit-relationship-removed' : 'retained-for-inspection')
+            recordProductFixture(ids, passed ? 'product-archived' : 'retained-for-inspection')
         }
     }, 120_000)
 

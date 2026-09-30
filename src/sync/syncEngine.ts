@@ -47,6 +47,7 @@ async function deleteQueuedDeliveryVoiceReasons(paths: readonly string[]) {
 
 const SYNC_PULL_TABLES = [
   "products",
+  "product_uoms",
   "product_barcodes",
   "price_books",
   "price_book_items",
@@ -320,6 +321,10 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
   };
 
   switch (entityType) {
+    case "product_uoms":
+      addCustomUnitParent("unitRef", "unit_ref");
+      addParent("products", "productId", "product_id");
+      break;
     case "unit_relationships":
       addCustomUnitParent("parentUnitRef", "parent_unit_ref");
       addCustomUnitParent("childUnitRef", "child_unit_ref");

@@ -14,6 +14,7 @@ const LOCAL_MODE_SQLITE_PATH = "sqlite:atlas-local-mode.db";
 
 export const LOCAL_MODE_SQLITE_TABLES = [
   "products",
+  "product_uoms",
   "product_barcodes",
   "price_books",
   "price_book_items",

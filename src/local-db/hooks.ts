@@ -637,26 +637,40 @@ export async function updateUnit(id: string, data: Partial<Unit>): Promise<void>
     // the registry (empty dropdown trigger, missing prints).
     if (codeChanged) {
         await migrateProductUnitsToRenamedUnit(existing.workspaceId, oldCode, nextCode as string)
-        await migrateRelationshipUnitsToRenamedUnit(existing.workspaceId, id, nextCode as string)
+        await migrateProductUomsToRenamedUnit(existing.workspaceId, id, nextCode as string)
     }
 }
 
-async function migrateRelationshipUnitsToRenamedUnit(workspaceId: string, unitId: string, newCode: string) {
+async function migrateProductUomsToRenamedUnit(workspaceId: string, unitId: string, newCode: string) {
     const unitRef = `custom:${unitId}`
-    const relationships = await db.unit_relationships
+    const rows = await db.product_uoms
         .where('workspaceId')
         .equals(workspaceId)
-        .and((row) => !row.isDeleted && (row.parentUnitRef === unitRef || row.childUnitRef === unitRef))
+        .and((row) => !row.isDeleted && row.unitRef === unitRef)
         .toArray()
-    if (relationships.length === 0) return
+    if (rows.length === 0) return
     const now = new Date().toISOString()
-    await db.unit_relationships.bulkPut(relationships.map((row) => ({
+    const updatedRows = rows.map((row) => ({
         ...row,
-        ...(row.parentUnitRef === unitRef ? { parentUnitCode: newCode } : {}),
-        ...(row.childUnitRef === unitRef ? { childUnitCode: newCode } : {}),
+        unitCode: newCode,
         updatedAt: now,
-        version: row.version + 1
-    })))
+        version: row.version + 1,
+        syncStatus: (isOnline() ? 'synced' : 'pending') as 'synced' | 'pending',
+        lastSyncedAt: isOnline() ? now : row.lastSyncedAt,
+    }))
+    if (isOnline()) {
+        const { error } = await runMutation('productUoms.renameUnit', () => supabase
+            .from('product_uoms')
+            .update({ unit_code: newCode, updated_at: now })
+            .eq('workspace_id', workspaceId)
+            .eq('unit_ref', unitRef))
+        if (error) throw normalizeSupabaseActionError(error)
+    } else {
+        for (const row of updatedRows) {
+            await addToOfflineMutations('product_uoms', row.id, 'update', row as unknown as Record<string, unknown>, workspaceId)
+        }
+    }
+    await db.product_uoms.bulkPut(updatedRows)
 }
 
 async function migrateProductUnitsToRenamedUnit(workspaceId: string, oldCode: string, newCode: string) {
@@ -681,13 +695,13 @@ export async function deleteUnit(id: string): Promise<void> {
         .and((product) => !product.isDeleted && product.unit === existing.code)
         .count()
     const unitRef = `custom:${id}`
-    const relationshipCount = await db.unit_relationships
+    const uomCount = await db.product_uoms
         .where('workspaceId')
         .equals(existing.workspaceId)
-        .and((row) => !row.isDeleted && (row.parentUnitRef === unitRef || row.childUnitRef === unitRef))
+        .and((row) => !row.isDeleted && row.unitRef === unitRef)
         .count()
 
-    if (usedCount > 0 || relationshipCount > 0) {
+    if (usedCount > 0 || uomCount > 0) {
         throw new UnitInUseError()
     }
 
@@ -2507,6 +2521,10 @@ export async function enrichSalesForUiRows(workspaceId: string, sales: Sale[]) {
             quantity: item.quantity,
             selling_unit_ref: item.sellingUnitRef,
             selling_unit_code: item.sellingUnitCode,
+            selling_uom_id: item.sellingUomId,
+            selling_unit_name_snapshot: item.sellingUnitNameSnapshot,
+            uom_cost_price: item.uomCostPrice,
+            minimum_selling_price_snapshot: item.minimumSellingPriceSnapshot,
             base_unit_ref: item.baseUnitRef,
             base_unit_code: item.baseUnitCode,
             unit_factor: item.unitFactor ?? 1,

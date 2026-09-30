@@ -42,16 +42,17 @@ import {
     getPrimaryStorageFromList,
     replaceProductCommissionRule,
     replaceProductPriceBookItems,
-    replaceProductPriceBookUnitPrices,
-    replaceProductUnitConversion,
-    convertSingleUnitProductToRelationship,
-    ProductRelationalConversionError,
+    replaceProductPriceBookUomPrices,
+    replaceProductUoms,
+    assertProductBaseUnitChangeAllowed,
+    ProductUomValidationError,
+    validateProductUoms,
     syncProductBarcodeCachesForWorkspace,
     updateProductBarcode,
     updateProduct,
     useCategories,
     usePriceBookCatalogState,
-    usePriceBookUnitPrices,
+    usePriceBookUomPrices,
     useProductCommissionCatalogState,
     useProduct,
     useProductBarcodes,
@@ -60,9 +61,10 @@ import {
     useStorages,
     useWorkspaceUsers,
     useUnits,
-    useUnitRelationships,
-    useProductUnitConversions,
+    useProductUomCatalogState,
     type Product,
+    type ProductUomInput,
+    type UnitRef,
     type ProductBarcode,
     type PriceBookItem
 } from '@/local-db'
@@ -91,15 +93,9 @@ import { useHideCosts } from '@/permissions'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { shouldShowMinimumSellingPriceField } from '@/lib/minimumSellingPrice'
 import { normalizeUnitCode } from '@/local-db/models'
-import { buildProductUnitSelectionOptions } from '@/lib/unitRelationships'
-import { createRelationalConversionDraft } from '@/lib/productRelationalConversion'
+import { productUomRefForCode } from '@/lib/productUoms'
 import { BarcodeScannerToggleButton } from '@/ui/components/BarcodeScannerToggleButton'
-import { ProductUnitIcon } from '@/ui/components/ProductUnitIcon'
-import { ProductUnitPackagingSection } from '@/ui/components/products/ProductUnitPackagingSection'
-import {
-    EMPTY_PRODUCT_UNIT_PACKAGING,
-    type ProductUnitPackagingDraft
-} from '@/ui/components/products/productUnitPackaging'
+import { ProductUomEditor, createEmptyProductUomDraft, type ProductUomDraft } from '@/ui/components/products/ProductUomEditor'
 import { ProductAdditionalImagesModal } from '@/ui/components/ProductAdditionalImagesModal'
 import { ProductVariantParentNotice, ProductVariantsSection } from '@/ui/components/ProductVariantsSection'
 import { useUnitRegistry } from '@/ui/components/unitRegistry'
@@ -173,11 +169,6 @@ type ProductFormData = {
     canBeReturned: boolean
     returnRules: string
     storageId: string
-}
-
-type SingleUnitConversionSnapshot = {
-    formData: ProductFormData
-    priceBookRows: ProductPriceBookDraft[]
 }
 
 function mapPriceBookItemsToDrafts(
@@ -346,9 +337,9 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const workspaceId = user?.workspaceId || ''
     const { isDynamicUnit, options: unitOptions } = useUnitRegistry(workspaceId)
     const customUnits = useUnits(workspaceId)
-    const unitRelationships = useUnitRelationships(workspaceId || undefined)
-    const productUnitConversions = useProductUnitConversions(workspaceId || undefined)
-    const priceBookUnitPrices = usePriceBookUnitPrices(workspaceId || undefined)
+    const productUomCatalog = useProductUomCatalogState(workspaceId || undefined)
+    const productUomRows = productUomCatalog.rows
+    const priceBookUomPrices = usePriceBookUomPrices(workspaceId || undefined)
     const priceBooksEnabled = hasCapability('priceBooks')
     const productCommissionsEnabled = hasFeature('sales_agent_commissions')
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.managePlans')
@@ -374,11 +365,11 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             : [],
         [priceBookItems, sourcePriceBookProductId]
     )
-    const sourcePriceBookUnitPrices = useMemo(
+    const sourcePriceBookUomPrices = useMemo(
         () => sourcePriceBookProductId
-            ? priceBookUnitPrices.filter((item) => item.productId === sourcePriceBookProductId)
+            ? priceBookUomPrices.filter((item) => item.productId === sourcePriceBookProductId)
             : [],
-        [priceBookUnitPrices, sourcePriceBookProductId]
+        [priceBookUomPrices, sourcePriceBookProductId]
     )
     const sourceProductCommissionRule = useMemo(() => (product?.id
         ? productCommissionRules
@@ -430,14 +421,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         )
     )
     const [priceBookRows, setPriceBookRows] = useState<ProductPriceBookDraft[]>([])
-    const [unitPackaging, setUnitPackaging] = useState<ProductUnitPackagingDraft>(EMPTY_PRODUCT_UNIT_PACKAGING)
-    const sourceUnitConversion = product?.id
-        ? productUnitConversions.find((row) => row.productId === product.id && !row.isDeleted)
-        : undefined
-    const isSingleToRelationalConversion = Boolean(
-        isEditing && product && !sourceUnitConversion && unitPackaging.relationshipId
-    )
-    const canEditStockAllocation = mode !== 'edit' || isSingleToRelationalConversion
+    const [productUomDrafts, setProductUomDrafts] = useState<ProductUomDraft[]>([])
     const [productCommissionDraft, setProductCommissionDraft] = useState<ProductCommissionRuleDraft>(() => emptyProductCommissionRuleDraft(features.default_currency))
     const [isSaving, setIsSaving] = useState(false)
     const [overrideAttention, setOverrideAttention] = useState(false)
@@ -472,12 +456,11 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const initialFormSnapshotRef = useRef<string | null>(null)
     const initializedPriceBookRowsKeyRef = useRef<string | null>(null)
     const initialPriceBookRowsSnapshotRef = useRef<string | null>(null)
-    const initializedUnitPackagingKeyRef = useRef<string | null>(null)
-    const initialUnitPackagingSnapshotRef = useRef<string | null>(null)
+    const initializedProductUomsKeyRef = useRef<string | null>(null)
+    const initialProductUomsSnapshotRef = useRef<string | null>(null)
     const initializedProductCommissionRuleKeyRef = useRef<string | null>(null)
     const initialProductCommissionSnapshotRef = useRef<string | null>(null)
     const createdProductIdRef = useRef<string | null>(null)
-    const singleUnitConversionSnapshotRef = useRef<SingleUnitConversionSnapshot | null>(null)
 
     const isProductDirty = useMemo(() => {
         if (!initialFormSnapshotRef.current || isReadOnly) {
@@ -531,9 +514,9 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         && JSON.stringify(productCommissionDraft) !== initialProductCommissionSnapshotRef.current
     ), [isReadOnly, productCommissionDraft, productCommissionsEnabled])
 
-    const isUnitPackagingDirty = !isReadOnly
-        && initialUnitPackagingSnapshotRef.current !== null
-        && JSON.stringify(unitPackaging) !== initialUnitPackagingSnapshotRef.current
+    const areProductUomsDirty = !isReadOnly
+        && initialProductUomsSnapshotRef.current !== null
+        && JSON.stringify(productUomDrafts) !== initialProductUomsSnapshotRef.current
 
     const productCommissionValidationMessage = useMemo(() => {
         if (!productCommissionsEnabled || !productCommissionDraft.enabled) return null
@@ -547,7 +530,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         return null
     }, [productCommissionDraft, productCommissionsEnabled, t])
 
-    const isDirty = isProductDirty || arePriceBookRowsDirty || isProductCommissionDirty || isUnitPackagingDirty
+    const isDirty = isProductDirty || arePriceBookRowsDirty || isProductCommissionDirty || areProductUomsDirty
 
     const { showGuard, confirmNavigation, cancelNavigation, requestNavigation } = useUnsavedChangesGuard(isDirty)
 
@@ -654,38 +637,32 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
 
         setFormData(nextFormData)
         setImageError(false)
-        singleUnitConversionSnapshotRef.current = null
         initialFormSnapshotRef.current = JSON.stringify(nextFormData)
         initializedKeyRef.current = nextKey
     }, [features.default_currency, hideCosts, mode, product, storages])
 
     useEffect(() => {
         const sourceKey = mode === 'create' ? 'create' : product ? `${mode}:${product.id}` : null
-        if (!sourceKey) return
-        const source = mode === 'create'
-            ? undefined
-            : productUnitConversions.find((row) => row.productId === product?.id && !row.isDeleted)
-        const next = source ? {
-            relationshipId: source.relationshipId,
-            factor: String(source.factor),
-            parentPrice: String(source.parentPrice)
-        } : EMPTY_PRODUCT_UNIT_PACKAGING
-        if (initializedUnitPackagingKeyRef.current === sourceKey) {
-            const emptySnapshot = JSON.stringify(EMPTY_PRODUCT_UNIT_PACKAGING)
-            if (
-                source
-                && initialUnitPackagingSnapshotRef.current === emptySnapshot
-                && JSON.stringify(unitPackaging) === emptySnapshot
-            ) {
-                setUnitPackaging(next)
-                initialUnitPackagingSnapshotRef.current = JSON.stringify(next)
-            }
-            return
-        }
-        setUnitPackaging(next)
-        initialUnitPackagingSnapshotRef.current = JSON.stringify(next)
-        initializedUnitPackagingKeyRef.current = sourceKey
-    }, [mode, product, productUnitConversions, unitPackaging])
+        if (!sourceKey || (mode !== 'create' && !productUomCatalog.isReady)) return
+        if (initializedProductUomsKeyRef.current === sourceKey) return
+        const next = mode === 'create' ? [] : productUomRows
+            .filter((row) => row.productId === product?.id && !row.isBase && !row.isDeleted)
+            .map((row) => ({
+                unitRef: row.unitRef,
+                unitCode: row.unitCode,
+                coefficient: String(row.coefficient),
+                sellingPrice: String(row.sellingPrice),
+                costPrice: row.costPrice == null ? '' : String(row.costPrice),
+                minimumSellingPrice: row.minimumSellingPrice == null ? '' : String(row.minimumSellingPrice),
+                isDefaultSelling: row.isDefaultSelling === true,
+                isActive: row.isActive,
+                sku: row.sku ?? '',
+                barcode: row.barcode ?? '',
+            }))
+        setProductUomDrafts(next)
+        initialProductUomsSnapshotRef.current = JSON.stringify(next)
+        initializedProductUomsKeyRef.current = sourceKey
+    }, [mode, product?.id, productUomCatalog.isReady, productUomRows])
 
     useEffect(() => {
         if (!priceBooksEnabled || !isPriceBookCatalogReady) {
@@ -704,26 +681,12 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
 
         const sourceRows = mode === 'create'
             ? []
-            : mapPriceBookItemsToDrafts(sourcePriceBookItems, sourcePriceBookUnitPrices)
-        const nextRows = isSingleToRelationalConversion
-            ? sourceRows.map((row) => ({
-                ...row,
-                price: '',
-                costPrice: '',
-                parentPrice: ''
-            }))
-            : sourceRows
+            : mapPriceBookItemsToDrafts(sourcePriceBookItems, sourcePriceBookUomPrices)
+        const nextRows = sourceRows
         const nextSnapshot = serializePriceBookDrafts(nextRows)
-        const sourceSnapshot = serializePriceBookDrafts(sourceRows)
-
         if (initializedPriceBookRowsKeyRef.current !== sourceKey) {
             setPriceBookRows(nextRows)
-            initialPriceBookRowsSnapshotRef.current = isSingleToRelationalConversion
-                ? sourceSnapshot
-                : nextSnapshot
-            if (isSingleToRelationalConversion && singleUnitConversionSnapshotRef.current) {
-                singleUnitConversionSnapshotRef.current.priceBookRows = sourceRows.map((row) => ({ ...row }))
-            }
+            initialPriceBookRowsSnapshotRef.current = nextSnapshot
             initializedPriceBookRowsKeyRef.current = sourceKey
             return
         }
@@ -737,13 +700,12 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         }
     }, [
         isPriceBookCatalogReady,
-        isSingleToRelationalConversion,
         mode,
         priceBookRows,
         priceBooksEnabled,
         product,
         sourcePriceBookItems,
-        sourcePriceBookUnitPrices
+        sourcePriceBookUomPrices
     ])
 
     useEffect(() => {
@@ -772,20 +734,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             setOverrideAttention(false)
         }
     }, [overrideAttention, priceBookRows.length])
-
-    useEffect(() => {
-        if (mode !== 'create' || unitPackaging.relationshipId) return
-        const pcsIsReserved = unitRelationships.some((relationship) => (
-            !relationship.isDeleted
-            && !relationship.isArchived
-            && [relationship.parentUnitCode, relationship.childUnitCode]
-                .some((code) => normalizeUnitCode(code).toLowerCase() === 'pcs')
-        ))
-        if (!pcsIsReserved) return
-        setFormData((current) => normalizeUnitCode(current.unit).toLowerCase() === 'pcs'
-            ? { ...current, unit: '' }
-            : current)
-    }, [mode, unitPackaging.relationshipId, unitRelationships])
 
     if (!canEdit && mode !== 'edit') {
         return null
@@ -989,11 +937,13 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             return
         }
 
-        if (error instanceof ProductRelationalConversionError) {
+        if (error instanceof ProductUomValidationError) {
             toast({
                 variant: 'destructive',
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: t(`products.packaging.conversionErrors.${error.code}`)
+                description: t(`products.uom.errors.${error.code}`, {
+                    defaultValue: t('products.uom.errors.product_uom_invalid')
+                })
             })
             return
         }
@@ -1241,86 +1191,63 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             toast({
                 variant: 'destructive',
                 title: t('common.error'),
-                description: t('products.packaging.unitRequired')
+                description: t('products.uom.errors.product_uom_base_required')
+            })
+            return false
+        }
+        if (!productUomCatalog.isReady && isEditing) {
+            toast({
+                variant: 'destructive',
+                title: t('common.error'),
+                description: t('products.uom.loadingError')
             })
             return false
         }
 
-        const selectedUnitRelationship = unitRelationships.find((row) => row.id === unitPackaging.relationshipId && !row.isDeleted)
-        const unitFactor = Number(unitPackaging.factor)
-        const parentUnitPrice = Number(unitPackaging.parentPrice)
-        const childUnitOption = selectedUnitRelationship
-            ? unitOptions.find((option) => option.value === selectedUnitRelationship.childUnitCode)
-            : undefined
-        if (isSingleToRelationalConversion && (
-            !formData.storageId
-            || formData.quantity === ''
-            || !Number.isFinite(Number(formData.quantity))
-            || Number(formData.quantity) < 0
-            || (!childUnitOption?.isDynamic && !Number.isInteger(Number(formData.quantity)))
-        )) {
-            toast({
-                variant: 'destructive',
-                title: t('common.error'),
-                description: !formData.storageId
-                    ? t('products.packaging.storageRequired')
-                    : t('products.packaging.initialStockValidation')
-            })
+        const invalidAdditionalUom = productUomDrafts.some((row) => (
+            !row.unitRef
+            || !normalizeUnitCode(row.unitCode)
+            || row.coefficient.trim() === ''
+            || !Number.isFinite(Number(row.coefficient))
+            || Number(row.coefficient) <= 0
+            || Number(row.coefficient) === 1
+            || row.sellingPrice.trim() === ''
+            || !Number.isFinite(Number(row.sellingPrice))
+            || Number(row.sellingPrice) < 0
+            || (row.costPrice.trim() !== '' && (!Number.isFinite(Number(row.costPrice)) || Number(row.costPrice) < 0))
+            || (row.minimumSellingPrice.trim() !== '' && (!Number.isFinite(Number(row.minimumSellingPrice)) || Number(row.minimumSellingPrice) < 0))
+        ))
+        if (invalidAdditionalUom) {
+            toast({ variant: 'destructive', title: t('common.error'), description: t('products.uom.errors.product_uom_invalid') })
             return false
         }
-        if (selectedUnitRelationship && (
-            !Number.isFinite(unitFactor)
-            || unitFactor <= 0
-            || (!childUnitOption?.isDynamic && !Number.isInteger(unitFactor))
-            || unitPackaging.parentPrice.trim() === ''
-            || !Number.isFinite(parentUnitPrice)
-            || parentUnitPrice < 0
-        )) {
-            toast({
-                variant: 'destructive',
-                title: t('common.error'),
-                description: t('products.packaging.validation')
-            })
-            return false
-        }
-
-        if (selectedUnitRelationship && (
-            formData.price.trim() === ''
-            || !Number.isFinite(Number(formData.price))
-            || Number(formData.price) < 0
-            || (!hideCosts && (
-                formData.costPrice.trim() === ''
-                || !Number.isFinite(Number(formData.costPrice))
-                || Number(formData.costPrice) < 0
-            ))
-        )) {
-            toast({
-                variant: 'destructive',
-                title: t('common.error'),
-                description: t('products.packaging.sellingPriceValidation')
-            })
-            return false
-        }
-
-        if (selectedUnitRelationship && priceBookRows.some((row) => (
-            row.parentPrice == null
-            || row.parentPrice.trim() === ''
-            || !Number.isFinite(Number(row.parentPrice))
-            || Number(row.parentPrice) < 0
-            || row.price.trim() === ''
-            || !Number.isFinite(Number(row.price))
-            || Number(row.price) < 0
-            || (!hideCosts && (
-                row.costPrice.trim() === ''
-                || !Number.isFinite(Number(row.costPrice))
-                || Number(row.costPrice) < 0
-            ))
-        ))) {
-            toast({
-                variant: 'destructive',
-                title: t('common.error'),
-                description: t('products.packaging.priceBookValidation')
-            })
+        try {
+            validateProductUoms([
+                {
+                    unitRef: productUomRefForCode(formData.unit, customUnits),
+                    unitCode: normalizeUnitCode(formData.unit),
+                    coefficient: 1,
+                    isBase: true,
+                    isActive: true,
+                    isDefaultSelling: !productUomDrafts.some((row) => row.isActive && row.isDefaultSelling),
+                    sellingPrice: Number(formData.price || 0),
+                    costPrice: formData.costPrice.trim() === '' ? null : Number(formData.costPrice),
+                    minimumSellingPrice: formData.minimumSellingPrice.trim() === '' ? null : Number(formData.minimumSellingPrice),
+                },
+                ...productUomDrafts.map((row) => ({
+                    unitRef: row.unitRef as UnitRef,
+                    unitCode: row.unitCode,
+                    coefficient: Number(row.coefficient),
+                    isBase: false,
+                    isActive: row.isActive,
+                    isDefaultSelling: row.isDefaultSelling,
+                    sellingPrice: Number(row.sellingPrice),
+                    costPrice: row.costPrice.trim() === '' ? null : Number(row.costPrice),
+                    minimumSellingPrice: row.minimumSellingPrice.trim() === '' ? null : Number(row.minimumSellingPrice),
+                }))
+            ])
+        } catch {
+            toast({ variant: 'destructive', title: t('common.error'), description: t('products.uom.errors.product_uom_duplicate') })
             return false
         }
 
@@ -1379,61 +1306,13 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             }
 
             let savedProductId: string
-            let convertedRelationalState: Awaited<ReturnType<typeof convertSingleUnitProductToRelationship>> | null = null
             const replacedImagePath = isEditing && product?.imageUrl && product.imageUrl !== formData.imageUrl
                 ? product.imageUrl
                 : null
 
             if (isEditing && product && !isClone) {
-                if (isSingleToRelationalConversion && selectedUnitRelationship) {
-                    if (normalizedCost == null) {
-                        throw new ProductRelationalConversionError('validation')
-                    }
-                    convertedRelationalState = await convertSingleUnitProductToRelationship({
-                        workspaceId,
-                        productId: product.id,
-                        relationshipId: selectedUnitRelationship.id,
-                        factor: unitFactor,
-                        parentPrice: parentUnitPrice,
-                        childIsDynamic: childUnitOption?.isDynamic === true,
-                        initialStock: roundQuantity(Number(formData.quantity)),
-                        storageId: formData.storageId,
-                        createdBy: user?.id || null,
-                        product: {
-                            sku: dataToSave.sku,
-                            name: dataToSave.name,
-                            description: dataToSave.description,
-                            categoryId: dataToSave.categoryId,
-                            category: dataToSave.category,
-                            price: dataToSave.price,
-                            costPrice: normalizedCost,
-                            minStockLevel: dataToSave.minStockLevel,
-                            currency: dataToSave.currency,
-                            imageUrl: dataToSave.imageUrl,
-                            canBeReturned: dataToSave.canBeReturned,
-                            returnRules: dataToSave.returnRules
-                        },
-                        priceBookItems: priceBooksEnabled
-                            ? priceBookRows.map((row) => ({
-                                priceBookId: row.priceBookId,
-                                costPrice: Number(row.costPrice),
-                                price: Number(row.price),
-                                parentPrice: Number(row.parentPrice),
-                                currency: row.currency
-                            }))
-                        : []
-                    })
-                    if (canManageMinimumSellingPrice) {
-                        // The conversion RPC has a deliberately narrow product
-                        // payload. Persist this independently editable field
-                        // through the normal product update contract afterward.
-                        await updateProduct(product.id, {
-                            minimumSellingPrice: normalizedMinimumSellingPrice
-                        })
-                    }
-                } else {
-                    await updateProduct(product.id, dataToSave)
-                }
+                await assertProductBaseUnitChangeAllowed(workspaceId, product.id, dataToSave.unit)
+                await updateProduct(product.id, dataToSave)
                 savedProductId = product.id
             } else if (createdProductIdRef.current) {
                 await updateProduct(createdProductIdRef.current, dataToSave)
@@ -1460,21 +1339,40 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                 )
             }
 
-            if (!convertedRelationalState) {
-                await replaceProductUnitConversion(
-                    workspaceId,
-                    savedProductId,
-                    selectedUnitRelationship ? {
-                        relationshipId: selectedUnitRelationship.id,
-                        factor: unitFactor,
-                        parentPrice: parentUnitPrice,
-                        childIsDynamic: childUnitOption?.isDynamic === true
-                    } : null
-                )
-            }
-            initialUnitPackagingSnapshotRef.current = JSON.stringify(unitPackaging)
+            const persistedProduct = await db.products.get(savedProductId)
+            if (!persistedProduct) throw new Error('product_uom_product_missing')
+            const hasAdditionalDefault = productUomDrafts.some((row) => row.isActive && row.isDefaultSelling)
+            const nextProductUoms: ProductUomInput[] = [
+                {
+                    unitRef: productUomRefForCode(persistedProduct.unit, customUnits),
+                    unitCode: persistedProduct.unit,
+                    coefficient: 1,
+                    isBase: true,
+                    isActive: true,
+                    isDefaultSelling: !hasAdditionalDefault,
+                    sellingPrice: persistedProduct.price,
+                    costPrice: persistedProduct.costPrice,
+                    minimumSellingPrice: persistedProduct.minimumSellingPrice ?? null,
+                    sku: persistedProduct.sku,
+                },
+                ...productUomDrafts.map((row) => ({
+                    unitRef: row.unitRef as UnitRef,
+                    unitCode: row.unitCode,
+                    coefficient: Number(row.coefficient),
+                    isBase: false,
+                    isActive: row.isActive,
+                    isDefaultSelling: row.isActive && row.isDefaultSelling,
+                    sellingPrice: Number(row.sellingPrice),
+                    costPrice: row.costPrice.trim() === '' ? null : Number(row.costPrice),
+                    minimumSellingPrice: row.minimumSellingPrice.trim() === '' ? null : Number(row.minimumSellingPrice),
+                    sku: row.sku || null,
+                    barcode: row.barcode || null,
+                }))
+            ]
+            await replaceProductUoms(workspaceId, savedProductId, nextProductUoms)
+            initialProductUomsSnapshotRef.current = JSON.stringify(productUomDrafts)
 
-            if (priceBooksEnabled && !convertedRelationalState) {
+            if (priceBooksEnabled) {
                 const savedItems = await replaceProductPriceBookItems(
                     workspaceId,
                     savedProductId,
@@ -1486,26 +1384,20 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                     })),
                     user?.id || null
                 )
-                const savedUnitPrices = await replaceProductPriceBookUnitPrices(
+                const savedUnitPrices = await replaceProductPriceBookUomPrices(
                     workspaceId,
                     savedProductId,
-                    selectedUnitRelationship
+                    productUomDrafts.some((row) => row.isActive && row.isDefaultSelling)
                         ? priceBookRows.map((row) => ({
                             priceBookId: row.priceBookId,
-                            unitRef: selectedUnitRelationship.parentUnitRef,
+                            unitRef: (productUomDrafts.find((uom) => uom.isActive && uom.isDefaultSelling)?.unitRef
+                                || productUomRefForCode(persistedProduct.unit, customUnits)) as UnitRef,
                             price: Number(row.parentPrice),
                             currency: row.currency
                         }))
                         : []
                 )
                 const completeSavedRows = mapPriceBookItemsToDrafts(savedItems, savedUnitPrices)
-                setPriceBookRows(completeSavedRows)
-                initialPriceBookRowsSnapshotRef.current = serializePriceBookDrafts(completeSavedRows)
-            } else if (priceBooksEnabled && convertedRelationalState) {
-                const completeSavedRows = mapPriceBookItemsToDrafts(
-                    convertedRelationalState.priceBookItems.filter((row) => !row.isDeleted),
-                    convertedRelationalState.priceBookUnitPrices.filter((row) => !row.isDeleted)
-                )
                 setPriceBookRows(completeSavedRows)
                 initialPriceBookRowsSnapshotRef.current = serializePriceBookDrafts(completeSavedRows)
             }
@@ -1531,7 +1423,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             }
 
             initialFormSnapshotRef.current = JSON.stringify(formData)
-            singleUnitConversionSnapshotRef.current = null
 
             if (navigateAfterSave) {
                 navigate('/products')
@@ -1562,7 +1453,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             }
         }
 
-        if ((mode === 'create' || isSingleToRelationalConversion) && !formData.storageId) {
+        if (mode === 'create' && !formData.storageId) {
             setStorageError(true)
             storageTriggerRef.current?.focus()
             storageTriggerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -1627,162 +1518,32 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const unitLabel = normalizedUnit
         ? t(`products.units.${normalizedUnit}`, { defaultValue: normalizedUnit })
         : t('units.selectPlaceholder', { defaultValue: 'Select unit' })
-    const sourceUnitRelationship = sourceUnitConversion
-        ? unitRelationships.find((row) => row.id === sourceUnitConversion.relationshipId)
-        : undefined
-    const selectedUnitRelationshipForDisplay = unitRelationships.find((row) => row.id === unitPackaging.relationshipId)
-    const unitSelectionOptions = buildProductUnitSelectionOptions(
-        unitOptions,
-        unitRelationships,
-        unitPackaging.relationshipId
-    )
-    const unitSelectionValue = unitPackaging.relationshipId
-        ? `relationship:${unitPackaging.relationshipId}`
-        : normalizedUnit ? `unit:${normalizedUnit}` : undefined
-    const selectedUnitSelectionOption = unitSelectionOptions.find((option) => option.value === unitSelectionValue)
-    const selectedChildUnitForDisplay = selectedUnitRelationshipForDisplay
-        ? unitOptions.find((option) => option.value === selectedUnitRelationshipForDisplay.childUnitCode)
-        : undefined
-    const displayedUnitFactor = Number(unitPackaging.factor)
-    const displayedParentPrice = Number(unitPackaging.parentPrice)
-    const isUnitPackagingInvalid = !normalizedUnit
-        || Boolean(unitPackaging.relationshipId && !selectedUnitRelationshipForDisplay)
-        || Boolean(selectedUnitRelationshipForDisplay && (
-            unitPackaging.factor.trim() === ''
-            || !Number.isFinite(displayedUnitFactor)
-            || displayedUnitFactor <= 0
-            || (!selectedChildUnitForDisplay?.isDynamic && !Number.isInteger(displayedUnitFactor))
-            || unitPackaging.parentPrice.trim() === ''
-            || !Number.isFinite(displayedParentPrice)
-            || displayedParentPrice < 0
-            || priceBookRows.some((row) => row.parentPrice == null || row.parentPrice.trim() === '' || Number(row.parentPrice) < 0)
-        ))
-    const isRelationalSellingPriceInvalid = Boolean(selectedUnitRelationshipForDisplay && (
-        formData.price.trim() === ''
-        || !Number.isFinite(Number(formData.price))
-        || Number(formData.price) < 0
-        || (!hideCosts && (
-            formData.costPrice.trim() === ''
-            || !Number.isFinite(Number(formData.costPrice))
-            || Number(formData.costPrice) < 0
-        ))
-        || priceBookRows.some((row) => (
-            row.price.trim() === ''
-            || !Number.isFinite(Number(row.price))
-            || Number(row.price) < 0
-            || (!hideCosts && (
-                row.costPrice.trim() === ''
-                || !Number.isFinite(Number(row.costPrice))
-                || Number(row.costPrice) < 0
-            ))
-        ))
-    ))
-    const isRelationalInitialStockInvalid = isSingleToRelationalConversion && (
-        formData.quantity === ''
-        || !Number.isFinite(Number(formData.quantity))
-        || Number(formData.quantity) < 0
-        || (!selectedChildUnitForDisplay?.isDynamic && !Number.isInteger(Number(formData.quantity)))
-        || !formData.storageId
-    )
+    const uomUnitOptions = unitOptions.map((option) => ({
+        ...option,
+        ref: productUomRefForCode(option.value, customUnits),
+    }))
+    const isProductUomInvalid = productUomDrafts.some((row) => (
+        !row.unitRef
+        || !row.unitCode
+        || row.coefficient.trim() === ''
+        || !Number.isFinite(Number(row.coefficient))
+        || Number(row.coefficient) <= 0
+        || row.sellingPrice.trim() === ''
+        || !Number.isFinite(Number(row.sellingPrice))
+        || Number(row.sellingPrice) < 0
+        || (row.costPrice.trim() !== '' && (!Number.isFinite(Number(row.costPrice)) || Number(row.costPrice) < 0))
+        || (row.minimumSellingPrice.trim() !== '' && (!Number.isFinite(Number(row.minimumSellingPrice)) || Number(row.minimumSellingPrice) < 0))
+    )) || !normalizedUnit
     const isProductSaveDisabled = isSaving
         || isImageProcessing
-        || isUnitPackagingInvalid
-        || isRelationalSellingPriceInvalid
-        || isRelationalInitialStockInvalid
+        || isProductUomInvalid
+        || (isEditing && !productUomCatalog.isReady)
         || (priceBooksEnabled && !isPriceBookCatalogReady)
         || Boolean(productCommissionValidationMessage)
 
-    const handleUnitRelationshipChange = (relationshipId: string) => {
-        if (!relationshipId) {
-            setUnitPackaging(EMPTY_PRODUCT_UNIT_PACKAGING)
-            return
-        }
-        const relationship = unitRelationships.find((row) => row.id === relationshipId && !row.isDeleted)
-        if (!relationship) return
-        if (isEditing && sourceUnitRelationship && sourceUnitRelationship.childUnitRef !== relationship.childUnitRef) {
-            toast({ variant: 'destructive', title: t('common.error'), description: t('products.packaging.switchChildBlocked') })
-            return
-        }
-
-        if (isEditing && product && !sourceUnitConversion && hideCosts) {
-            toast({
-                variant: 'destructive',
-                title: t('common.error'),
-                description: t('products.packaging.conversionErrors.hidden_costs')
-            })
-            return
-        }
-        if (isEditing && product && !sourceUnitConversion) {
-            if (!singleUnitConversionSnapshotRef.current) {
-                singleUnitConversionSnapshotRef.current = {
-                    formData: { ...formData },
-                    priceBookRows: priceBookRows.map((row) => ({ ...row }))
-                }
-            }
-            const draft = createRelationalConversionDraft({
-                formData,
-                priceBookRows,
-                childUnitCode: relationship.childUnitCode,
-                inventoryRows: productInventoryRows ?? []
-            })
-            setUnitPackaging({ relationshipId, factor: '', parentPrice: '' })
-            setFormData(draft.formData)
-            setPriceBookRows(draft.priceBookRows)
-            setStorageError(false)
-            return
-        }
-        setUnitPackaging({
-            relationshipId,
-            factor: unitPackaging.relationshipId === relationshipId ? unitPackaging.factor : '',
-            parentPrice: unitPackaging.relationshipId === relationshipId
-                ? unitPackaging.parentPrice
-                : ''
-        })
-        setFormData((current) => ({
-            ...current,
-            unit: relationship.childUnitCode
-        }))
-    }
-
     const handleUnitSelectionChange = (value: string) => {
-        if (value.startsWith('relationship:')) {
-            handleUnitRelationshipChange(value.slice('relationship:'.length))
-            return
-        }
-        if (!value.startsWith('unit:')) return
-        const unit = normalizeUnitCode(value.slice('unit:'.length))
-        const originalSingleUnit = isEditing && product && !sourceUnitConversion
-            ? normalizeUnitCode(product.unit)
-            : ''
-        if (
-            originalSingleUnit
-            && unit.toLowerCase() === originalSingleUnit.toLowerCase()
-            && singleUnitConversionSnapshotRef.current
-        ) {
-            const snapshot = singleUnitConversionSnapshotRef.current
-            setUnitPackaging(EMPTY_PRODUCT_UNIT_PACKAGING)
-            setFormData({ ...snapshot.formData })
-            setPriceBookRows(snapshot.priceBookRows.map((row) => ({ ...row })))
-            setStorageError(false)
-            singleUnitConversionSnapshotRef.current = null
-            return
-        }
-        const reserved = unitRelationships.some((relationship) => (
-            !relationship.isDeleted
-            && !relationship.isArchived
-            && [relationship.parentUnitCode, relationship.childUnitCode]
-                .some((code) => normalizeUnitCode(code).toLowerCase() === unit.toLowerCase())
-        ))
-        if (reserved) {
-            toast({ variant: 'destructive', title: t('common.error'), description: t('products.packaging.standaloneReserved') })
-            return
-        }
-        if (isEditing && product && normalizeUnitCode(product.unit).toLowerCase() !== unit.toLowerCase()) {
-            toast({ variant: 'destructive', title: t('common.error'), description: t('products.packaging.unitChangeBlocked') })
-            return
-        }
-        setUnitPackaging(EMPTY_PRODUCT_UNIT_PACKAGING)
-        setFormData((current) => ({ ...current, unit }))
+        const unit = normalizeUnitCode(value)
+        if (unit) setFormData((current) => ({ ...current, unit }))
     }
     const quantityValue = Number(formData.quantity) || 0
     const minStockValue = Number(formData.minStockLevel) || 0
@@ -2156,51 +1917,19 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                             {t('products.form.unit')} *
                                         </Label>
                                         <Select
-                                            value={unitSelectionValue}
+                                            value={normalizedUnit}
                                             onValueChange={handleUnitSelectionChange}
                                             disabled={isReadOnly}
                                         >
                                             <SelectTrigger id="product-unit" data-tour-id="tutorial-product-unit" className="h-12 rounded-xl border-border/80 bg-background/80 shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50" allowViewer={true}>
                                                 <SelectValue placeholder={t('units.selectPlaceholder', { defaultValue: 'Select unit' })}>
-                                                    {selectedUnitSelectionOption ? (
-                                                        <span className="flex items-center gap-2">
-                                                            {selectedUnitSelectionOption.kind === 'relationship' ? (
-                                                                <>
-                                                                    <Boxes className="h-4 w-4 text-primary" />
-                                                                    {t('products.packaging.combinedUnitLabel', {
-                                                                        parent: t(`products.units.${selectedUnitSelectionOption.parentUnitCode}`, { defaultValue: selectedUnitSelectionOption.parentUnitCode }),
-                                                                        child: t(`products.units.${selectedUnitSelectionOption.childUnitCode}`, { defaultValue: selectedUnitSelectionOption.childUnitCode })
-                                                                    })}
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    <ProductUnitIcon unit={selectedUnitSelectionOption.unitCode} iconName={selectedUnitSelectionOption.icon} />
-                                                                    {t(`products.units.${selectedUnitSelectionOption.unitCode}`, { defaultValue: selectedUnitSelectionOption.unitCode })}
-                                                                </>
-                                                            )}
-                                                        </span>
-                                                    ) : null}
+                                                    {normalizedUnit ? t(`products.units.${normalizedUnit}`, { defaultValue: normalizedUnit }) : null}
                                                 </SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
-                                                {unitSelectionOptions.map((option) => (
+                                                {unitOptions.map((option) => (
                                                     <SelectItem key={option.value} value={option.value}>
-                                                        <span className="flex items-center gap-2">
-                                                            {option.kind === 'relationship' ? (
-                                                                <>
-                                                                    <Boxes className="h-4 w-4 text-primary" />
-                                                                    {t('products.packaging.combinedUnitLabel', {
-                                                                        parent: t(`products.units.${option.parentUnitCode}`, { defaultValue: option.parentUnitCode }),
-                                                                        child: t(`products.units.${option.childUnitCode}`, { defaultValue: option.childUnitCode })
-                                                                    })}
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    <ProductUnitIcon unit={option.unitCode} iconName={option.icon} />
-                                                                    {t(`products.units.${option.unitCode}`, { defaultValue: option.unitCode })}
-                                                                </>
-                                                            )}
-                                                        </span>
+                                                        <span className="flex items-center gap-2"><Ruler className="h-4 w-4 text-primary/70" />{t(`products.units.${option.value}`, { defaultValue: option.value })}</span>
                                                     </SelectItem>
                                                 ))}
                                             </SelectContent>
@@ -2210,7 +1939,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                         <div className="order-5 space-y-2 md:order-none md:col-start-1 md:row-start-3">
                                             <Label htmlFor="product-storage-edit" className="flex items-center gap-2 font-bold">
                                                 <Warehouse className="h-4 w-4 text-primary/60" />
-                                                {t('storages.title') || 'Storage'}{isSingleToRelationalConversion ? ' *' : ''}
+                                                {t('storages.title') || 'Storage'}
                                             </Label>
                                             <Select
                                                 value={formData.storageId}
@@ -2218,7 +1947,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                     setFormData((current) => ({ ...current, storageId: value }))
                                                     setStorageError(false)
                                                 }}
-                                                disabled={isReadOnly || !canEditStockAllocation}
+                                                disabled={isReadOnly}
                                             >
                                                 <SelectTrigger
                                                     ref={storageTriggerRef}
@@ -2252,7 +1981,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                     setFormData((current) => ({ ...current, storageId: value }))
                                                     setStorageError(false)
                                                 }}
-                                                disabled={isReadOnly || !canEditStockAllocation}
+                                                disabled={isReadOnly}
                                             >
                                                 <SelectTrigger
                                                     ref={storageTriggerRef}
@@ -2499,14 +2228,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                     <div className="space-y-2">
                                         <Label htmlFor="product-price" className="flex items-center gap-2 font-bold">
                                             <DollarSign className="h-4 w-4 text-primary/60" />
-                                            {selectedUnitRelationshipForDisplay
-                                                ? t('products.packaging.childPrice', {
-                                                    unit: t(
-                                                        `products.units.${selectedUnitRelationshipForDisplay.childUnitCode}`,
-                                                        { defaultValue: selectedUnitRelationshipForDisplay.childUnitCode }
-                                                    )
-                                                })
-                                                : t('products.form.price')} *
+                                            {t('products.form.price')} *
                                         </Label>
                                         {isDynamicUnit(formData.unit) ? (
                                             <div className="flex items-start gap-1.5">
@@ -2665,18 +2387,30 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                     )}
                                 </div>
                             </div>
-                            {selectedUnitRelationshipForDisplay ? (
-                                <ProductUnitPackagingSection
-                                    relationship={selectedUnitRelationshipForDisplay}
-                                    units={customUnits}
-                                    draft={unitPackaging}
-                                    childPrice={formData.price}
-                                    currency={formData.currency}
-                                    iqdDisplayPreference={features.iqd_display_preference}
-                                    disabled={isReadOnly || isSaving}
-                                    onChange={setUnitPackaging}
-                                />
-                            ) : null}
+                            <ProductUomEditor
+                                base={{
+                                    unitCode: normalizedUnit,
+                                    sellingPrice: effectivePrice,
+                                    costPrice: effectiveCost,
+                                    minimumSellingPrice: formData.minimumSellingPrice.trim() === ''
+                                        ? null
+                                        : isDynamicUnit(formData.unit)
+                                            ? Number(formData.minimumSellingPrice) / perQty
+                                            : Number(formData.minimumSellingPrice),
+                                    currency: formData.currency,
+                                }}
+                                rows={productUomDrafts}
+                                units={uomUnitOptions}
+                                currency={formData.currency}
+                                iqdDisplayPreference={features.iqd_display_preference}
+                                disabled={isReadOnly || isSaving}
+                                hideCosts={hideCosts}
+                                hideMinimumPrice={!canManageMinimumSellingPrice}
+                                defaultSku={formData.sku}
+                                defaultBarcode={product?.barcode}
+                                onChange={setProductUomDrafts}
+                                onAdd={() => setProductUomDrafts((current) => [...current, createEmptyProductUomDraft()])}
+                            />
 
                             {priceBooksEnabled ? (
                                 isPriceBookCatalogReady ? (
@@ -2687,13 +2421,8 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                             onChange={setPriceBookRows}
                                             defaultCostPrice={effectiveCost == null ? '' : String(effectiveCost)}
                                             defaultPrice={String(effectivePrice)}
-                                            defaultParentPrice={unitPackaging.parentPrice}
-                                            parentUnitLabel={unitPackaging.relationshipId
-                                                ? t(
-                                                    `products.units.${selectedUnitRelationshipForDisplay?.parentUnitCode}`,
-                                                    { defaultValue: selectedUnitRelationshipForDisplay?.parentUnitCode || '' }
-                                                )
-                                                : undefined}
+                                            defaultParentPrice={String(productUomDrafts.find((row) => row.isActive && row.isDefaultSelling)?.sellingPrice || '')}
+                                            parentUnitLabel={productUomDrafts.find((row) => row.isActive && row.isDefaultSelling)?.unitCode}
                                             defaultCurrency={formData.currency}
                                             allowedCurrencies={features.allowed_currencies}
                                             iqdDisplayPreference={features.iqd_display_preference}
@@ -2775,9 +2504,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                             <>
                                                 <Label htmlFor="product-quantity" className="flex items-center gap-2 font-bold">
                                                     <Boxes className="h-4 w-4 text-primary/60" />
-                                                    {isSingleToRelationalConversion
-                                                        ? t('products.packaging.initialStock')
-                                                        : t('products.form.stock')}
+                                                    {t('products.form.stock')}
                                                 </Label>
                                                 <div className="relative">
                                                     <Input
@@ -2793,7 +2520,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                             quantity: event.target.value === '' ? '' : Number(event.target.value)
                                                         }))}
                                                         placeholder="0"
-                                                        readOnly={isReadOnly || (isEditing && !isSingleToRelationalConversion)}
+                                                        readOnly={isReadOnly || isEditing}
                                                         required
                                                         className="h-12 rounded-xl border-border/80 bg-background/80 pr-16 font-black shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50"
                                                     />
@@ -2803,7 +2530,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                 </div>
                                             </>
                                         )
-                                        return isEditing && !isSingleToRelationalConversion ? (
+                                        return isEditing ? (
                                             <HoverHintVideo
                                                 src="export-1785734352530.mp4"
                                                 title={t('products.form.stockAdjustmentHint.videoTitle', { defaultValue: 'Watch how to adjust stock' })}
@@ -3211,9 +2938,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                             {!isReadOnly && (
                                 <div className="rounded-2xl border border-border/50 bg-muted/20 p-4 text-xs leading-5 text-muted-foreground">
                                     {isEditing
-                                        ? isSingleToRelationalConversion
-                                            ? t('products.packaging.saveHint')
-                                            : (t('products.saveHintEdit') || 'Saving updates product details, image, pricing, and return settings. Stock changes happen in Stock Adjustments.')
+                                        ? (t('products.saveHintEdit') || 'Saving updates product details, image, pricing, and return settings. Stock changes happen in Stock Adjustments.')
                                         : (t('products.saveHint') || 'Saving applies the current details, image, stock, and return settings together.')}
                                 </div>
                             )}

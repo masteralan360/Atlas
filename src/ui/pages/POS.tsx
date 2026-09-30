@@ -18,9 +18,9 @@ import {
     updateActivityTransactionNotes,
     useActivityCatalog,
     usePriceBookCatalogState,
-    usePriceBookUnitPrices,
-    useProductUnitConversions,
-    useUnitRelationships,
+    usePriceBookUomPrices,
+    useProductUoms,
+    useUnits,
     usePaymentAccounts,
     useProducts,
     toUISaleFromActivityTransaction,
@@ -33,7 +33,8 @@ import {
     type ActivityTransactionLine,
     type PaymentAccount,
     type SalesOrder,
-    type SalesOrderItem
+    type SalesOrderItem,
+    type ProductUom
 } from '@/local-db'
 import { ACTIVITIES_VIRTUAL_STORAGE_ID, isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { isBelowMinimumSellingPrice } from '@/lib/minimumSellingPrice'
@@ -41,7 +42,6 @@ import { isPosPaymentTypeAllowed, getPosCheckoutRoute, type PosPaymentType } fro
 import {
     canOfferMobileFreeOnlyOrderHold,
     canAddPosCartItemFromStorage,
-    canAddProductToPosCart,
     canSetPosPaidQuantity,
     convertPosPrice,
     getCartBasePrice,
@@ -55,7 +55,7 @@ import {
     applyPosBulkDiscount,
     hasPosConversionRate
 } from '@/lib/posCart'
-import { getCartInventoryQuantity, indexProductUnitContexts, inventoryQuantityToSellingAvailability } from '@/lib/unitRelationships'
+import { getActiveProductUoms, getCartInventoryQuantity, getUomDescriptors, indexProductUomsByProduct, inventoryQuantityToSellingAvailability } from '@/lib/productUoms'
 import { commitPosCheckout, PosCheckoutError, loadPosCurrencyConversionPolicy } from '@/local-db/posCheckout'
 import { PosCheckoutAttempt, PosCheckoutPendingError } from '@/lib/posCheckoutAttempt'
 import { formatCurrency, generateId, cn } from '@/lib/utils'
@@ -244,12 +244,15 @@ function buildCartItemKey(productId: string, storageId?: string | null, sellingU
 }
 
 type PosUnitSelection = {
+    uomId: string
     sellingUnitRef: string
     sellingUnitCode: string
     baseUnitRef: string
     baseUnitCode: string
     factor: number
     price: number
+    costPrice: number | null
+    minimumSellingPrice: number | null
     currency: CurrencyCode
     priceBookId?: string
     priceBookName?: string
@@ -486,12 +489,13 @@ export function POS() {
     const priceBookCatalog = usePriceBookCatalogState(user?.workspaceId, {
         enabled: priceBooksEnabled && !!selectedStorageId && !isLocalMode
     })
-    const unitRelationships = useUnitRelationships(user?.workspaceId)
-    const productUnitConversions = useProductUnitConversions(user?.workspaceId)
-    const priceBookUnitPrices = usePriceBookUnitPrices(user?.workspaceId)
+    const productUoms = useProductUoms(user?.workspaceId)
+    const customUnits = useUnits(user?.workspaceId)
+    const unitDescriptors = useMemo(() => getUomDescriptors(customUnits), [customUnits])
+    const priceBookUomPrices = usePriceBookUomPrices(user?.workspaceId)
     const unitContextsByProductId = useMemo(
-        () => indexProductUnitContexts(productUnitConversions, unitRelationships),
-        [productUnitConversions, unitRelationships]
+        () => indexProductUomsByProduct(productUoms),
+        [productUoms]
     )
     const [selectedPriceBookId, setSelectedPriceBookId] = useState<string>(() => {
         return localStorage.getItem('pos_selected_price_book') || ''
@@ -847,6 +851,49 @@ export function POS() {
             priceBookName: priceBookItem.priceBook.name
         }
     }, [priceBookItemByProductId])
+
+    const getProductUomOptions = useCallback((product: Pick<PosCatalogProduct, 'id' | 'unit' | 'price' | 'costPrice' | 'minimumSellingPrice' | 'currency'>) => (
+        getActiveProductUoms(product, unitContextsByProductId.get(product.id) ?? [], unitDescriptors)
+    ), [unitContextsByProductId, unitDescriptors])
+
+    const buildPosUnitSelection = useCallback((
+        product: PosCatalogProduct,
+        uom: ProductUom,
+    ): PosUnitSelection => {
+        const options = getProductUomOptions(product)
+        const base = options.find((row) => row.isBase) ?? options[0]
+        const priceBookPricing = getPriceBookPricing(product)
+        const priceBookUnitPrice = selectedPriceBookId
+            ? priceBookUomPrices.find((row) => !row.isDeleted
+                && row.priceBookId === selectedPriceBookId
+                && row.productId === product.id
+                && row.unitRef === uom.unitRef)
+            : undefined
+        const priceBook = priceBookUnitPrice ? priceBookById.get(priceBookUnitPrice.priceBookId) : undefined
+        return {
+            uomId: uom.id,
+            sellingUnitRef: uom.unitRef,
+            sellingUnitCode: uom.unitCode,
+            baseUnitRef: base?.unitRef ?? uom.unitRef,
+            baseUnitCode: base?.unitCode ?? product.unit,
+            factor: uom.coefficient,
+            price: priceBookUnitPrice?.price ?? (uom.isBase ? priceBookPricing?.price ?? product.price : uom.sellingPrice),
+            costPrice: uom.isBase
+                ? priceBookPricing?.costPrice ?? product.costPrice
+                : uom.costPrice ?? ((product.costPrice ?? 0) * uom.coefficient),
+            minimumSellingPrice: uom.minimumSellingPrice
+                ?? (product.minimumSellingPrice == null ? null : product.minimumSellingPrice * uom.coefficient),
+            currency: (priceBookUnitPrice?.currency ?? (uom.isBase ? priceBookPricing?.currency : product.currency) ?? product.currency) as CurrencyCode,
+            priceBookId: priceBookUnitPrice?.priceBookId ?? (uom.isBase ? priceBookPricing?.priceBookId : undefined),
+            priceBookName: priceBook?.name ?? (uom.isBase ? priceBookPricing?.priceBookName : undefined),
+        }
+    }, [getPriceBookPricing, getProductUomOptions, priceBookById, priceBookUomPrices, selectedPriceBookId])
+
+    const getDefaultPosUnitSelection = useCallback((product: PosCatalogProduct) => {
+        const options = getProductUomOptions(product)
+        const selected = options.find((row) => row.isDefaultSelling) ?? options.find((row) => row.isBase) ?? options[0]
+        return selected ? buildPosUnitSelection(product, selected) : undefined
+    }, [buildPosUnitSelection, getProductUomOptions])
 
     const getEffectiveProductCurrency = useCallback((product: PosCatalogProduct | undefined) => {
         if (!product) {
@@ -1263,8 +1310,33 @@ export function POS() {
                 addBarcodeLookupCode(map, barcode, product.id)
             }
         }
+        for (const uom of productUoms) {
+            if (!uom.isActive || uom.isDeleted || !scannableProducts.some((product) => product.id === uom.productId)) continue
+            addBarcodeLookupCode(map, uom.barcode, uom.productId, true)
+            addBarcodeLookupCode(map, uom.sku, uom.productId, true)
+        }
         return map
-    }, [productBarcodes, scannableProducts])
+    }, [productBarcodes, productUoms, scannableProducts])
+
+    const barcodeUomMap = useMemo(() => {
+        const map = new Map<string, string>()
+        for (const uom of productUoms) {
+            if (!uom.isActive || uom.isDeleted || !uom.barcode) continue
+            const normalized = normalizeBarcodeScannerText(uom.barcode)
+            if (normalized) {
+                map.set(normalized, uom.id)
+                map.set(normalized.toLowerCase(), uom.id)
+            }
+            if (uom.sku) {
+                const normalizedSku = normalizeBarcodeScannerText(uom.sku)
+                if (normalizedSku) {
+                    map.set(normalizedSku, uom.id)
+                    map.set(normalizedSku.toLowerCase(), uom.id)
+                }
+            }
+        }
+        return map
+    }, [productUoms])
 
     const knownScannerCodeIndex = useMemo(() => {
         const codes: string[] = []
@@ -1279,9 +1351,12 @@ export function POS() {
             codes.push(product.sku, product.barcode ?? '')
             codes.push(...(product.barcodes ?? []))
         }
+        for (const uom of productUoms) {
+            if (uom.isActive && !uom.isDeleted) codes.push(uom.sku ?? '', uom.barcode ?? '')
+        }
 
         return createBarcodeScannerCodeIndex(codes)
-    }, [productBarcodes, scannableProducts])
+    }, [productBarcodes, productUoms, scannableProducts])
 
     const canImmediatelySubmitDeviceScan = useCallback((value: string) => {
         // Treat a recognized, unambiguous code as the end of a scan. If a code
@@ -1321,7 +1396,7 @@ export function POS() {
 
     const currencyConversionEnabled = features.pos_convert_to_workspace_currency
     const cartCurrencies = useMemo(() => Array.from(new Set(
-        cart.map((item) => getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId)))
+        cart.map((item) => item.effective_currency ?? getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId)))
     )), [cart, findStockProduct, getEffectiveProductCurrency])
     const hasMixedCartCurrencies = cartCurrencies.length > 1
     const settlementCurrency = (currencyConversionEnabled || cartCurrencies.length === 0
@@ -1389,7 +1464,8 @@ export function POS() {
     const getCartMinimumPriceViolation = useCallback((item: CartItem) => {
         if (user?.role !== 'staff') return null
         const product = findStockProduct(item.product_id, item.storageId)
-        const minimumSellingPrice = product?.minimumSellingPrice
+        const minimumSellingPrice = item.minimum_selling_price_snapshot
+            ?? (product?.minimumSellingPrice == null ? null : product.minimumSellingPrice * (item.unit_factor ?? 1))
         if (!product || minimumSellingPrice == null) return null
 
         const effectiveCurrency = (item.effective_currency ?? getEffectiveProductCurrency(product)) as CurrencyCode
@@ -1405,7 +1481,7 @@ export function POS() {
             effectiveCurrency,
             product.currency
         )
-        const lineMinimum = minimumSellingPrice * (item.unit_factor ?? 1)
+        const lineMinimum = minimumSellingPrice
         return isBelowMinimumSellingPrice(user.role, effectivePriceInProductCurrency, lineMinimum)
             ? { product, minimumSellingPrice: lineMinimum, currency: product.currency }
             : null
@@ -1424,6 +1500,8 @@ export function POS() {
             productId: product.id,
             effectiveSellingPrice: convertPrice(getCartEffectivePrice(item), effectiveCurrency, product.currency),
             unitFactor: item.unit_factor ?? 1,
+            minimumSellingPrice: item.minimum_selling_price_snapshot ?? null,
+            sellingUomId: item.selling_uom_id ?? null,
             currency: hasProductCurrencyRate ? product.currency : effectiveCurrency
         }]
     }), [cart, convertPrice, exchangeData, eurRates.eur_iqd, eurRates.usd_eur, findStockProduct, getEffectiveProductCurrency, tryRates.try_iqd, tryRates.usd_try])
@@ -1434,14 +1512,16 @@ export function POS() {
 
     // Calculate totals
     const totalAmount = cart.reduce((sum, item) => {
-        const itemCurrency = findStockProduct(item.product_id, item.storageId)?.currency || 'usd'
+        const product = findStockProduct(item.product_id, item.storageId)
+        const itemCurrency = item.effective_currency ?? product?.currency ?? 'usd'
         const basePrice = getCartEffectivePrice(item)
         const converted = convertPrice(basePrice, itemCurrency, settlementCurrency)
         return sum + (converted * item.quantity)
     }, 0)
     const isFreeOnlyQuickOrder = isFreeOnlyPosQuickOrder(cart, totalAmount)
     const originalSubtotal = cart.reduce((sum, item) => {
-        const itemCurrency = findStockProduct(item.product_id, item.storageId)?.currency || 'usd'
+        const product = findStockProduct(item.product_id, item.storageId)
+        const itemCurrency = item.effective_currency ?? product?.currency ?? 'usd'
         const converted = convertPrice(getCartBasePrice(item), itemCurrency, settlementCurrency)
         return sum + (converted * item.quantity)
     }, 0)
@@ -1502,7 +1582,7 @@ export function POS() {
         const printedAt = new Date().toISOString()
         const previewId = generateId()
         const usedCurrencies = new Set(cart.map((item) =>
-            getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId))
+            item.effective_currency ?? getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId))
         ))
         const knownRates = {
             usdIqd: exchangeData ? { rate: exchangeData.rate, source: exchangeData.source, timestamp: exchangeData.timestamp || printedAt } : null,
@@ -1534,7 +1614,7 @@ export function POS() {
             payment_method: paymentMethod,
             items: cart.map((item) => {
                 const product = findStockProduct(item.product_id, item.storageId)
-                const originalCurrency = getEffectiveProductCurrency(product)
+                const originalCurrency = (item.effective_currency ?? getEffectiveProductCurrency(product)) as CurrencyCode
                 const effectivePrice = getCartEffectivePrice(item)
                 const convertedUnitPrice = convertPrice(effectivePrice, originalCurrency, settlementCurrency)
 
@@ -1838,7 +1918,7 @@ export function POS() {
         const priceBookPricing = isInfiniteActivity ? null : getPriceBookPricing(product)
         const effectivePrice = unitSelection?.price ?? priceBookPricing?.price ?? product.price
         const effectiveCurrency = (unitSelection?.currency ?? priceBookPricing?.currency ?? product.currency) as CurrencyCode
-        const effectiveCostPrice = priceBookPricing?.costPrice ?? product.costPrice
+        const effectiveCostPrice = unitSelection?.costPrice ?? priceBookPricing?.costPrice ?? product.costPrice
         const sellingFactor = unitSelection?.factor ?? 1
         const maxSellingQuantity = (isInfiniteActivity || isNonInventoryService)
             ? ACTIVITY_POS_QUANTITY_LIMIT
@@ -1937,6 +2017,10 @@ export function POS() {
                     base_unit_ref: unitSelection?.baseUnitRef ?? null,
                     base_unit_code: unitSelection?.baseUnitCode ?? product.unit,
                     unit_factor: sellingFactor,
+                    selling_uom_id: unitSelection?.uomId.startsWith('legacy-base:') ? null : unitSelection?.uomId,
+                    selling_unit_name_snapshot: unitSelection?.sellingUnitCode ?? product.unit,
+                    uom_cost_price: unitSelection?.costPrice ?? effectiveCostPrice,
+                    minimum_selling_price_snapshot: unitSelection?.minimumSellingPrice ?? null,
                     is_service: isNonInventoryService,
                     price_book_id: unitSelection?.priceBookId ?? priceBookPricing?.priceBookId,
                     price_book_name: unitSelection?.priceBookName ?? priceBookPricing?.priceBookName
@@ -1959,21 +2043,12 @@ export function POS() {
             return false
         }
         const isNonInventoryService = isService(product)
-        const hasRelatedSellingUnit = !isNonInventoryService && unitContextsByProductId.has(product.id)
-        if (!canAddProductToPosCart('order', hasRelatedSellingUnit)) {
-            toast({
-                variant: 'destructive',
-                title: t('messages.error'),
-                description: t('pos.unitSelection.ordersUnsupported')
-            })
-            hapticTrigger('error')
-            return false
-        }
+        const unitSelection = isNonInventoryService ? undefined : getDefaultPosUnitSelection(product)
         const priceBookPricing = getPriceBookPricing(product)
-        const effectivePrice = priceBookPricing?.price ?? product.price
-        const effectiveCurrency = (priceBookPricing?.currency ?? product.currency) as CurrencyCode
-        const effectiveCostPrice = priceBookPricing?.costPrice ?? product.costPrice
-        const itemKey = buildCartItemKey(product.id, product.storageId)
+        const effectivePrice = unitSelection?.price ?? priceBookPricing?.price ?? product.price
+        const effectiveCurrency = (unitSelection?.currency ?? priceBookPricing?.currency ?? product.currency) as CurrencyCode
+        const effectiveCostPrice = unitSelection?.costPrice ?? priceBookPricing?.costPrice ?? product.costPrice
+        const itemKey = buildCartItemKey(product.id, product.storageId, unitSelection?.sellingUnitRef)
 
         if (!canSelectProduct(product)) {
             toast({
@@ -2002,7 +2077,8 @@ export function POS() {
             const committedInventoryQuantity = previous
                 .filter((item) => item.product_id === product.id && item.storageId === product.storageId)
                 .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
-            if (!isNonInventoryService && committedInventoryQuantity + 1 > product.inventoryQuantity + 0.000001) {
+            const coefficient = unitSelection?.factor ?? 1
+            if (!isNonInventoryService && committedInventoryQuantity + coefficient > product.inventoryQuantity + 0.000001) {
                 return previous
             }
 
@@ -2024,14 +2100,18 @@ export function POS() {
                     freeBonusQuantity: 1,
                     max_stock: isNonInventoryService
                         ? ACTIVITY_POS_QUANTITY_LIMIT
-                        : inventoryQuantityToSellingAvailability(product.inventoryQuantity, 1),
+                        : inventoryQuantityToSellingAvailability(product.inventoryQuantity, unitSelection?.factor ?? 1),
                     imageUrl: product.imageUrl,
-                    unit: product.unit,
-                    selling_unit_ref: null,
-                    selling_unit_code: product.unit,
-                    base_unit_ref: null,
-                    base_unit_code: product.unit,
-                    unit_factor: 1,
+                    unit: unitSelection?.sellingUnitCode ?? product.unit,
+                    selling_unit_ref: unitSelection?.sellingUnitRef ?? null,
+                    selling_unit_code: unitSelection?.sellingUnitCode ?? product.unit,
+                    selling_uom_id: unitSelection?.uomId.startsWith('legacy-base:') ? null : unitSelection?.uomId,
+                    selling_unit_name_snapshot: unitSelection?.sellingUnitCode ?? product.unit,
+                    uom_cost_price: unitSelection?.costPrice ?? effectiveCostPrice,
+                    minimum_selling_price_snapshot: unitSelection?.minimumSellingPrice ?? null,
+                    base_unit_ref: unitSelection?.baseUnitRef ?? null,
+                    base_unit_code: unitSelection?.baseUnitCode ?? product.unit,
+                    unit_factor: unitSelection?.factor ?? 1,
                     is_service: isNonInventoryService,
                     price_book_id: priceBookPricing?.priceBookId,
                     price_book_name: priceBookPricing?.priceBookName
@@ -2042,27 +2122,27 @@ export function POS() {
         setPaymentAccount(null)
         hapticTrigger('success')
         return true
-    }, [canSelectProduct, canUseOrderFreeBonus, cart, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, hapticTrigger, isActivitiesStorage, quickOrderEnabled, t, toast, unitContextsByProductId])
+    }, [canSelectProduct, canUseOrderFreeBonus, cart, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, getDefaultPosUnitSelection, hapticTrigger, isActivitiesStorage, quickOrderEnabled, t, toast])
 
     const addToCart = useCallback((product: PosCatalogProduct) => {
-        const hasRelatedSellingUnit = !product.isInfiniteActivity
-            && !isService(product)
-            && unitContextsByProductId.has(product.id)
-        if (!canAddProductToPosCart(paymentType, hasRelatedSellingUnit)) {
-            toast({
-                variant: 'destructive',
-                title: t('messages.error'),
-                description: t('pos.unitSelection.ordersUnsupported')
-            })
-            hapticTrigger('error')
-            return
-        }
-        if (hasRelatedSellingUnit) {
+        const options = !product.isInfiniteActivity && !isService(product) ? getProductUomOptions(product) : []
+        if (options.length > 1) {
             setUnitSelectionProduct(product)
             return
         }
-        addSelectedUnitToCart(product)
-    }, [addSelectedUnitToCart, hapticTrigger, paymentType, t, toast, unitContextsByProductId])
+        addSelectedUnitToCart(product, options[0] ? buildPosUnitSelection(product, options[0]) : undefined)
+    }, [addSelectedUnitToCart, buildPosUnitSelection, getProductUomOptions])
+
+    const addScannedProduct = useCallback((product: PosCatalogProduct, scannedCode: string) => {
+        const normalized = normalizeBarcodeScannerText(scannedCode)
+        const uomId = barcodeUomMap.get(normalized) ?? barcodeUomMap.get(normalized.toLowerCase())
+        const uom = uomId ? getProductUomOptions(product).find((row) => row.id === uomId) : undefined
+        if (uom) {
+            addSelectedUnitToCart(product, buildPosUnitSelection(product, uom))
+            return
+        }
+        addToCart(product)
+    }, [addSelectedUnitToCart, addToCart, barcodeUomMap, buildPosUnitSelection, getProductUomOptions])
 
     const openMobileFreeOnlyProduct = useCallback((product: PosCatalogProduct) => {
         const alreadyInCart = cart.some((item) => (
@@ -2095,42 +2175,15 @@ export function POS() {
         if (!isLayoutMobile) setMobileFreeOnlyProduct(null)
     }, [isLayoutMobile])
 
-    const chooseProductSellingUnit = useCallback((kind: 'parent' | 'child') => {
+    const chooseProductSellingUnit = useCallback((uomId: string) => {
         const product = unitSelectionProduct
         if (!product) return
-        const context = unitContextsByProductId.get(product.id)
-        if (!context) {
-            setUnitSelectionProduct(null)
-            addSelectedUnitToCart(product)
-            return
-        }
-        const { conversion, relationship } = context
-        const priceBookPricing = getPriceBookPricing(product)
-        const isParent = kind === 'parent'
-        const unitRef = isParent ? relationship.parentUnitRef : relationship.childUnitRef
-        const priceBookUnitPrice = selectedPriceBookId
-            ? priceBookUnitPrices.find((row) => (
-                !row.isDeleted
-                && row.priceBookId === selectedPriceBookId
-                && row.productId === product.id
-                && row.unitRef === unitRef
-            ))
-            : undefined
-        const priceBook = priceBookUnitPrice ? priceBookById.get(priceBookUnitPrice.priceBookId) : undefined
-        const selection: PosUnitSelection = {
-            sellingUnitRef: unitRef,
-            sellingUnitCode: isParent ? relationship.parentUnitCode : relationship.childUnitCode,
-            baseUnitRef: relationship.childUnitRef,
-            baseUnitCode: relationship.childUnitCode,
-            factor: isParent ? conversion.factor : 1,
-            price: priceBookUnitPrice?.price ?? (isParent ? conversion.parentPrice : priceBookPricing?.price ?? product.price),
-            currency: (priceBookUnitPrice?.currency ?? (isParent ? product.currency : priceBookPricing?.currency ?? product.currency)) as CurrencyCode,
-            priceBookId: priceBookUnitPrice?.priceBookId ?? (!isParent ? priceBookPricing?.priceBookId : undefined),
-            priceBookName: priceBook?.name ?? (!isParent ? priceBookPricing?.priceBookName : undefined)
-        }
+        const uom = getProductUomOptions(product).find((row) => row.id === uomId)
+        if (!uom) return
+        const selection = buildPosUnitSelection(product, uom)
         setUnitSelectionProduct(null)
         addSelectedUnitToCart(product, selection)
-    }, [addSelectedUnitToCart, getPriceBookPricing, priceBookById, priceBookUnitPrices, selectedPriceBookId, unitContextsByProductId, unitSelectionProduct])
+    }, [addSelectedUnitToCart, buildPosUnitSelection, getProductUomOptions, unitSelectionProduct])
 
     const removeFromCart = (itemKey: string) => {
         setCart((prev) => prev.filter((item) => getCartItemKey(item) !== itemKey))
@@ -2332,7 +2385,7 @@ export function POS() {
         const otherMatch = candidates.find(p => p.storageId !== selectedStorageId)
 
         if (exactMatch) {
-            addToCart(exactMatch)
+            addScannedProduct(exactMatch, normalizedInput)
             setSkuInput('')
             setIsSkuModalOpen(false)
             toast({
@@ -2378,7 +2431,7 @@ export function POS() {
         const otherMatch = candidates.find(p => p.storageId !== selectedStorageId)
 
         if (exactMatch) {
-            addToCart(exactMatch)
+            addScannedProduct(exactMatch, text)
             toast({
                 title: t('messages.success'),
                 description: `${exactMatch.name} ${t('common.added')}`,
@@ -2396,7 +2449,7 @@ export function POS() {
             })
             hapticTrigger('error')
         }
-    }, [isCameraScannerAutoEnabled, isDeviceScannerAutoEnabled, scanDelay, barcodeMap, scannableProducts, addToCart, t, toast, selectedStorageId, storages, hapticTrigger])
+    }, [isCameraScannerAutoEnabled, isDeviceScannerAutoEnabled, scanDelay, barcodeMap, scannableProducts, addScannedProduct, t, toast, selectedStorageId, storages, hapticTrigger])
 
     useEffect(() => {
         const clearDeviceScanTimeout = () => {
@@ -2676,7 +2729,8 @@ export function POS() {
                 return
             }
 
-            if (!activity.isInfiniteActivity && item.quantity > activity.inventoryQuantity) {
+            if (!('isInfiniteActivity' in activity && activity.isInfiniteActivity)
+                && item.quantity > activity.inventoryQuantity) {
                 toast({
                     variant: 'destructive',
                     title: t('messages.error'),
@@ -2756,14 +2810,6 @@ export function POS() {
         const checkoutRoute = getPosCheckoutRoute(paymentType, { isActivitiesStorage: isActivitiesCheckout, isServicesStorage, quickOrderEnabled })
         if (checkoutRoute === 'blocked') { setPaymentType('cash'); return }
         if (checkoutRoute === 'quick-order') {
-            if (cart.some((item) => item.selling_unit_ref && item.base_unit_ref)) {
-                toast({
-                    variant: 'destructive',
-                    title: t('messages.error'),
-                    description: t('pos.unitSelection.ordersUnsupported')
-                })
-                return
-            }
             setQuickOrderProgressStage(null)
             setIsQuickOrderModalOpen(true)
             return
@@ -2848,7 +2894,7 @@ export function POS() {
         const checkoutRates = { usdIqd: exchangeData, eurIqd: eurRates.eur_iqd, usdEur: eurRates.usd_eur,
             tryIqd: tryRates.try_iqd, usdTry: tryRates.usd_try }
         const missingConversionRate = cart.some(item => !hasPosConversionRate(
-            getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId)), settlementCurrency, checkoutRates))
+            item.effective_currency ?? getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId)), settlementCurrency, checkoutRates))
         if (missingConversionRate) {
             toast({
                 variant: 'destructive',
@@ -2899,7 +2945,7 @@ export function POS() {
         const checkoutTimestamp = new Date().toISOString()
 
         // Collect actually used exchange rates for this specific checkout
-        const usedCurrencies = new Set(cart.map(item => getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId))))
+        const usedCurrencies = new Set(cart.map(item => item.effective_currency ?? getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId))))
 
         const knownRates = {
             usdIqd: exchangeData ? { rate: exchangeData.rate, source: exchangeData.source, timestamp: exchangeData.timestamp || new Date().toISOString() } : null,
@@ -2958,7 +3004,7 @@ export function POS() {
         const itemsWithMetadata = cart.map((item) => {
             const product = findStockProduct(item.product_id, item.storageId)
             const service = isService(product)
-            const originalCurrency = getEffectiveProductCurrency(product)
+            const originalCurrency = (item.effective_currency ?? getEffectiveProductCurrency(product)) as CurrencyCode
             const priceBookPricing = product ? getPriceBookPricing(product) : null
             const fallbackCostPrice = priceBookPricing?.costPrice ?? product?.costPrice ?? 0
             const unitFactor = item.unit_factor ?? 1
@@ -2979,6 +3025,11 @@ export function POS() {
                 convertPrice,
                 batchPlan?.requestedQuantity ?? getCartInventoryQuantity(item)
             )
+            const uomCostPrice = item.uom_cost_price
+            const soldUnitCost = uomCostPrice ?? baseCostPrice * unitFactor
+            const convertedSoldUnitCost = uomCostPrice == null
+                ? baseConvertedCostPrice * unitFactor
+                : convertPrice(uomCostPrice, originalCurrency, settlementCurrency)
 
             return {
                 product_id: item.product_id,
@@ -2990,14 +3041,18 @@ export function POS() {
                 quantity: item.quantity,
                 selling_unit_ref: item.selling_unit_ref ?? null,
                 selling_unit_code: item.selling_unit_code ?? item.unit ?? product?.unit ?? null,
+                selling_uom_id: item.selling_uom_id ?? null,
+                selling_unit_name_snapshot: item.selling_unit_name_snapshot ?? item.selling_unit_code ?? item.unit ?? product?.unit ?? null,
+                uom_cost_price: uomCostPrice,
+                minimum_selling_price_snapshot: item.minimum_selling_price_snapshot ?? null,
                 base_unit_ref: item.base_unit_ref ?? null,
                 base_unit_code: item.base_unit_code ?? product?.unit ?? null,
                 unit_factor: unitFactor,
                 inventory_quantity: service ? item.quantity : getCartInventoryQuantity(item),
                 unit_price: effectivePrice, // negotiated or original
                 total_price: effectivePrice * item.quantity,
-                cost_price: baseCostPrice * unitFactor,
-                converted_cost_price: baseConvertedCostPrice * unitFactor,
+                cost_price: soldUnitCost,
+                converted_cost_price: convertedSoldUnitCost,
                 original_currency: originalCurrency,
                 original_unit_price: item.price, // always store original list price
                 converted_unit_price: convertedUnitPrice,
@@ -3152,9 +3207,6 @@ export function POS() {
                     minimumPrice: formatCurrency(minimumViolation.minimumSellingPrice, minimumViolation.currency, features.iqd_display_preference)
                 }))
         }
-        if (cart.some((item) => item.selling_unit_ref && item.base_unit_ref)) {
-            throw new Error(t('pos.unitSelection.ordersUnsupported'))
-        }
         if (cart.some(shouldRemovePosCartItem)) {
             throw new Error(t('pos.invalidCartQuantity'))
         }
@@ -3178,7 +3230,7 @@ export function POS() {
         try {
             const checkoutTimestamp = new Date().toISOString()
             const usedCurrencies = new Set(cart.map((item) =>
-                getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId))
+                item.effective_currency ?? getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId))
             ))
             const knownRates = {
                 usdIqd: exchangeData ? { rate: exchangeData.rate, source: exchangeData.source, timestamp: exchangeData.timestamp || checkoutTimestamp } : null,
@@ -3203,7 +3255,7 @@ export function POS() {
                     throw new Error(t('pos.stockMismatch', { defaultValue: 'One or more cart items no longer match an inventory row.' }))
                 }
 
-                const originalCurrency = getEffectiveProductCurrency(product)
+                const originalCurrency = (item.effective_currency ?? getEffectiveProductCurrency(product)) as CurrencyCode
                 const priceBookItem = item.price_book_id
                     ? priceBookCatalog.priceBookItems.find((entry) => (
                         !entry.isDeleted
@@ -3213,7 +3265,10 @@ export function POS() {
                     : undefined
                 const effectivePrice = getCartEffectivePrice(item)
                 const convertedUnitPrice = roundOrderValue(convertPrice(effectivePrice, originalCurrency, settlementCurrency))
-                const sourceCostPrice = Number(priceBookItem?.costPrice ?? product.costPrice ?? 0)
+                const coefficient = item.unit_factor ?? 1
+                const sourceCostPrice = Number(item.uom_cost_price
+                    ?? priceBookItem?.costPrice
+                    ?? (product.costPrice ?? 0) * coefficient)
                 const freeBonusQuantity = getOrderLineFreeBonusQuantity(item)
 
                 return {
@@ -3222,9 +3277,20 @@ export function POS() {
                     storageId,
                     productName: product.name,
                     productSku: product.sku,
-                    unit: product.unit,
+                    unit: item.selling_unit_code ?? product.unit,
+                    uomId: item.selling_uom_id ?? null,
+                    uomNameSnapshot: item.selling_unit_name_snapshot ?? item.selling_unit_code ?? product.unit,
+                    unitRef: item.selling_unit_ref as never,
+                    unitNameSnapshot: item.selling_unit_name_snapshot ?? item.selling_unit_code ?? product.unit,
+                    baseUnitRef: item.base_unit_ref as never,
+                    baseUnitCode: item.base_unit_code ?? product.unit,
+                    baseUnitNameSnapshot: item.base_unit_code ?? product.unit,
+                    unitFactor: coefficient,
+                    minimumSellingPriceSnapshot: item.minimum_selling_price_snapshot ?? null,
                     quantity: item.quantity,
+                    inventoryQuantity: item.quantity * coefficient,
                     ...(freeBonusQuantity > 0 ? { freeBonusQuantity } : {}),
+                    ...(freeBonusQuantity > 0 ? { freeBonusInventoryQuantity: freeBonusQuantity * coefficient } : {}),
                     ...(freeBonusQuantity > 0 && item.freeBonusUnit && item.freeBonusUnit !== product.unit
                         ? { freeBonusUnit: item.freeBonusUnit }
                         : {}),
@@ -4588,48 +4654,32 @@ export function POS() {
                         }}>
                             {(() => {
                                 if (!unitSelectionProduct) return null
-                                const context = unitContextsByProductId.get(unitSelectionProduct.id)
-                                if (!context) return null
-                                const { conversion, relationship } = context
-                                const childPricing = getPriceBookPricing(unitSelectionProduct)
-                                const parentOverride = selectedPriceBookId
-                                    ? priceBookUnitPrices.find((row) => !row.isDeleted
-                                        && row.priceBookId === selectedPriceBookId
-                                        && row.productId === unitSelectionProduct.id
-                                        && row.unitRef === relationship.parentUnitRef)
-                                    : undefined
-                                const parentPrice = parentOverride?.price ?? conversion.parentPrice
-                                const childPrice = childPricing?.price ?? unitSelectionProduct.price
+                                const options = getProductUomOptions(unitSelectionProduct)
                                 const committedInventoryQuantity = cart
                                     .filter((item) => item.product_id === unitSelectionProduct.id && item.storageId === unitSelectionProduct.storageId)
                                     .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
                                 const remainingInventoryQuantity = Math.max(0, unitSelectionProduct.inventoryQuantity - committedInventoryQuantity)
-                                const canSellParent = remainingInventoryQuantity + 0.000001 >= conversion.factor
-                                const canSellChild = remainingInventoryQuantity > 0
                                 return (
                                     <div className="grid gap-3 sm:grid-cols-2">
-                                        <button
-                                            type="button"
-                                            disabled={!canSellParent}
-                                            onClick={() => chooseProductSellingUnit('parent')}
-                                            className="rounded-2xl border bg-background p-5 text-start transition hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-45"
-                                        >
-                                            <Boxes className="mb-3 h-7 w-7 text-primary" />
-                                            <div className="font-black">{t(`products.units.${relationship.parentUnitCode}`, { defaultValue: relationship.parentUnitCode })}</div>
-                                            <div className="mt-1 text-sm font-bold text-primary">{formatCurrency(parentPrice, (parentOverride?.currency ?? unitSelectionProduct.currency) as CurrencyCode, features.iqd_display_preference)}</div>
-                                            <div className="mt-2 text-xs text-muted-foreground">{t('pos.unitSelection.stockEffect', { count: conversion.factor, unit: t(`products.units.${relationship.childUnitCode}`, { defaultValue: relationship.childUnitCode }) })}</div>
-                                        </button>
-                                        <button
-                                            type="button"
-                                            disabled={!canSellChild}
-                                            onClick={() => chooseProductSellingUnit('child')}
-                                            className="rounded-2xl border bg-background p-5 text-start transition hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-45"
-                                        >
-                                            <Package className="mb-3 h-7 w-7 text-primary" />
-                                            <div className="font-black">{t(`products.units.${relationship.childUnitCode}`, { defaultValue: relationship.childUnitCode })}</div>
-                                            <div className="mt-1 text-sm font-bold text-primary">{formatCurrency(childPrice, (childPricing?.currency ?? unitSelectionProduct.currency) as CurrencyCode, features.iqd_display_preference)}</div>
-                                            <div className="mt-2 text-xs text-muted-foreground">{t('pos.unitSelection.stockEffect', { count: 1, unit: t(`products.units.${relationship.childUnitCode}`, { defaultValue: relationship.childUnitCode }) })}</div>
-                                        </button>
+                                        {options.map((uom) => {
+                                            const selection = buildPosUnitSelection(unitSelectionProduct, uom)
+                                            const canSell = remainingInventoryQuantity + 0.000001 >= uom.coefficient
+                                            return (
+                                                <button
+                                                    key={uom.id}
+                                                    type="button"
+                                                    disabled={!canSell}
+                                                    onClick={() => chooseProductSellingUnit(uom.id)}
+                                                    className="rounded-2xl border bg-background p-5 text-start transition hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-45"
+                                                >
+                                                    {uom.isBase ? <Package className="mb-3 h-7 w-7 text-primary" /> : <Boxes className="mb-3 h-7 w-7 text-primary" />}
+                                                    <div className="font-black">{t(`products.units.${uom.unitCode}`, { defaultValue: uom.unitCode })}</div>
+                                                    <div className="mt-1 text-sm font-bold text-primary">{formatCurrency(selection.price, selection.currency, features.iqd_display_preference)}</div>
+                                                    <div className="mt-2 text-xs text-muted-foreground">{t('pos.unitSelection.stockEffect', { count: uom.coefficient, unit: t(`products.units.${options.find((row) => row.isBase)?.unitCode ?? unitSelectionProduct.unit}`, { defaultValue: options.find((row) => row.isBase)?.unitCode ?? unitSelectionProduct.unit }) })}</div>
+                                                    {uom.isDefaultSelling && <div className="mt-2 text-xs font-semibold text-primary">{t('products.uom.defaultSelling')}</div>}
+                                                </button>
+                                            )
+                                        })}
                                     </div>
                                 )
                             })()}
@@ -4677,9 +4727,10 @@ export function POS() {
                         const editedPrice = parseFormattedNumber(negotiatedPriceInput)
         const effectiveCurrency = (editingItem.effective_currency
             ?? (editingProduct ? getEffectiveProductCurrency(editingProduct) : 'usd')) as CurrencyCode
-                        const minimumPriceForLine = editingProduct?.minimumSellingPrice == null
-                            ? null
-                            : editingProduct.minimumSellingPrice * (editingItem.unit_factor ?? 1)
+                        const minimumPriceForLine = editingItem.minimum_selling_price_snapshot
+                            ?? (editingProduct?.minimumSellingPrice == null
+                                ? null
+                                : editingProduct.minimumSellingPrice * (editingItem.unit_factor ?? 1))
                         const editingPriceRates = {
                             usdIqd: exchangeData, eurIqd: eurRates.eur_iqd, usdEur: eurRates.usd_eur,
                             tryIqd: tryRates.try_iqd, usdTry: tryRates.usd_try
@@ -4769,7 +4820,10 @@ export function POS() {
                                     )}
                                     {!isPriceBelowCostHidden && (() => {
                                         const parsedPrice = parseFormattedNumber(negotiatedPriceInput)
-                                        const costPrice = editingProduct?.costPrice
+                                        const costPrice = editingItem.uom_cost_price
+                                            ?? (editingProduct?.costPrice == null
+                                                ? null
+                                                : editingProduct.costPrice * (editingItem.unit_factor ?? 1))
                                         if (costPrice != null && costPrice > 0 && !isNaN(parsedPrice) && parsedPrice < costPrice) {
                                             return (
                                                 <div className="mt-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 animate-in fade-in slide-in-from-top-1 duration-200">

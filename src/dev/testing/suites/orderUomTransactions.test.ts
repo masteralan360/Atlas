@@ -9,13 +9,14 @@ import { installTestBrowser } from '../fixtures/browser'
 import { saleOrderInput, TEST_TIME, TEST_WORKSPACE_ID } from '../fixtures/saleOrder'
 
 vi.mock('@/auth/supabase', () => {
-  const remote = () => { throw new Error('Unexpected remote request in a Local related-unit scenario') }
+  const remote = () => { throw new Error('Unexpected remote request in a Local product UoM scenario') }
   return { supabase: { schema: () => ({ from: remote }), from: remote, rpc: remote } }
 })
 
 let orders: typeof import('@/local-db/orders')
 let hooks: typeof import('@/local-db/hooks')
 let partners: typeof import('@/local-db/businessPartners')
+let replaceProductUoms: typeof import('@/local-db/productUoms').replaceProductUoms
 
 async function createPartner(role: 'customer' | 'supplier', name: string) {
   return partners.createBusinessPartner(TEST_WORKSPACE_ID, {
@@ -32,8 +33,8 @@ async function createPartner(role: 'customer' | 'supplier', name: string) {
 async function createPackagedProduct(quantity: number) {
   const storage = await hooks.createStorage(TEST_WORKSPACE_ID, { name: `Related-unit stock ${quantity}` })
   const product = await hooks.createProduct(TEST_WORKSPACE_ID, {
-    sku: `RELATED-${quantity}`,
-    name: 'Related-unit medicine',
+    sku: `UOM-${quantity}`,
+    name: 'UoM medicine',
     description: '',
     categoryId: null,
     category: null,
@@ -52,15 +53,22 @@ async function createPackagedProduct(quantity: number) {
     returnRules: '',
     createdBy: null,
   })
-  return { storage, product }
+  const uoms = await replaceProductUoms(TEST_WORKSPACE_ID, product.id, [
+    { unitRef: 'builtin:sheet', unitCode: 'sheet', coefficient: 1, isBase: true, isActive: true,
+      isDefaultSelling: false, sellingPrice: 2250, costPrice: 1000, minimumSellingPrice: null },
+    { unitRef: 'builtin:carton', unitCode: 'carton', coefficient: 20, isBase: false, isActive: true,
+      isDefaultSelling: true, sellingPrice: 40000, costPrice: 20000, minimumSellingPrice: 35000 },
+  ])
+  return { storage, product, carton: uoms.find((row) => row.unitCode === 'carton')! }
 }
 
-describe('related units in order transactions', () => {
+describe('product UoM conversion in order transactions', () => {
   beforeAll(async () => {
     installTestBrowser()
     orders = await import('@/local-db/orders')
     hooks = await import('@/local-db/hooks')
     partners = await import('@/local-db/businessPartners')
+    replaceProductUoms = (await import('@/local-db/productUoms')).replaceProductUoms
   }, 30_000)
 
   beforeEach(async () => {
@@ -73,8 +81,8 @@ describe('related units in order transactions', () => {
   afterAll(async () => { await db.delete() })
 
   it('sells cartons, deducts sheets, and returns paid and free quantities independently', async () => {
-    const customer = await createPartner('customer', 'Related-unit customer')
-    const { product, storage } = await createPackagedProduct(100)
+    const customer = await createPartner('customer', 'UoM customer')
+    const { product, storage, carton } = await createPackagedProduct(100)
     const input = saleOrderInput(customer.id, product, storage.id, 'cash', {
       currency: 'iqd',
       quantity: 2,
@@ -84,7 +92,8 @@ describe('related units in order transactions', () => {
     input.items[0] = {
       ...input.items[0],
       unit: 'carton',
-      unitRelationshipId: '00000000-0000-4000-8000-000000000071',
+      uomId: carton.id,
+      uomNameSnapshot: 'Carton',
       unitRef: 'builtin:carton',
       unitNameSnapshot: 'Carton',
       baseUnitRef: 'builtin:sheet',
@@ -100,6 +109,8 @@ describe('related units in order transactions', () => {
       originalUnitPrice: 40_000,
       convertedUnitPrice: 40_000,
       settlementCurrency: 'iqd',
+      uomCostPrice: 20_000,
+      convertedUomCostPrice: 20_000,
       costPrice: 1_000,
       convertedCostPrice: 1_000,
     }
@@ -114,6 +125,8 @@ describe('related units in order transactions', () => {
 
     expect(completed.items[0]).toMatchObject({
       quantity: 2,
+      uomId: carton.id,
+      uomNameSnapshot: 'Carton',
       unitRef: 'builtin:carton',
       unitFactor: 20,
       inventoryQuantity: 40,
@@ -179,7 +192,7 @@ describe('related units in order transactions', () => {
 
   it('reports the reserving order in canonical inventory units when a carton reservation blocks another order', async () => {
     const customer = await createPartner('customer', 'Reservation customer')
-    const { product, storage } = await createPackagedProduct(50)
+    const { product, storage, carton } = await createPackagedProduct(50)
     const makeInput = (quantity: number) => {
       const input = saleOrderInput(customer.id, product, storage.id, 'cash', {
         currency: 'iqd',
@@ -190,7 +203,8 @@ describe('related units in order transactions', () => {
       input.items[0] = {
         ...input.items[0],
         unit: 'carton',
-        unitRelationshipId: '00000000-0000-4000-8000-000000000071',
+        uomId: carton.id,
+        uomNameSnapshot: 'Carton',
         unitRef: 'builtin:carton',
         unitNameSnapshot: 'Carton',
         baseUnitRef: 'builtin:sheet',
@@ -214,7 +228,7 @@ describe('related units in order transactions', () => {
 
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toBe(
-      `Not enough stock is available for Related-unit medicine. `
+      `Not enough stock is available for UoM medicine. `
       + `On hand: 50 sheet; reserved: 40 sheet; available: 10 sheet; required: 20 sheet. `
       + `Reserved by sales orders: ${existingReservation.orderNumber} (40 sheet).`
     )
@@ -223,8 +237,8 @@ describe('related units in order transactions', () => {
   })
 
   it('receives cartons and free cartons as sheets while spreading paid cost across all received stock', async () => {
-    const supplier = await createPartner('supplier', 'Related-unit supplier')
-    const { product, storage } = await createPackagedProduct(0)
+    const supplier = await createPartner('supplier', 'UoM supplier')
+    const { product, storage, carton } = await createPackagedProduct(0)
     const itemId = crypto.randomUUID()
 
     const order = await orders.createPurchaseOrder(TEST_WORKSPACE_ID, {
@@ -239,7 +253,8 @@ describe('related units in order transactions', () => {
         productName: product.name,
         productSku: product.sku,
         unit: 'carton',
-        unitRelationshipId: '00000000-0000-4000-8000-000000000071',
+        uomId: carton.id,
+        uomNameSnapshot: 'Carton',
         unitRef: 'builtin:carton',
         unitNameSnapshot: 'Carton',
         baseUnitRef: 'builtin:sheet',

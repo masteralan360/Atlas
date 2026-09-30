@@ -11,7 +11,7 @@ import { useDemoTutorial } from '@/demo'
 import { useProfileData } from '@/hooks/useProfileData'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { resolveOrderDetailsLookupStatus, type OrderDetailsRemoteLookupStatus } from '@/lib/orderDetailsLookup'
-import { getOrderLineFreeBonusInventoryQuantity, getOrderLineFreeBonusQuantity, getOrderLineFulfilledQuantity, getOrderLineInventoryQuantity, getOrderLinePaidInventoryQuantity, getOrderLinePaidQuantity, getOrderLineUnitFactor, hasOrderLineFreeBonus, isFulfilledUnitsAvailableForOrder } from '@/lib/orderLineItems'
+import { getOrderLineCostPerInventoryUnit, getOrderLineSelectedUnitCost, getOrderLineFreeBonusInventoryQuantity, getOrderLineFreeBonusQuantity, getOrderLineFulfilledQuantity, getOrderLineInventoryQuantity, getOrderLinePaidInventoryQuantity, getOrderLinePaidQuantity, getOrderLineUnitFactor, hasOrderLineFreeBonus, isFulfilledUnitsAvailableForOrder } from '@/lib/orderLineItems'
 import {
     getOrderAdjustmentTotals,
     getOrderTotalWithPostReturnAdjustments,
@@ -1039,7 +1039,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const nextInstallment = installments.find((installment) => installment.balanceAmount > 0)
     const profit = isSales
         ? order.total - (order as SalesOrder).items.reduce((sum, item) => sum + (
-            item.convertedCostPrice * Math.max(0, getOrderLineInventoryQuantity(item) - (returnedQuantityByItemId.get(item.id) || 0))
+            getOrderLineCostPerInventoryUnit(item) * Math.max(0, getOrderLineInventoryQuantity(item) - (returnedQuantityByItemId.get(item.id) || 0))
         ), 0)
         : null
     const margin = profit !== null && order.total > 0 ? (profit / order.total) * 100 : null
@@ -2005,8 +2005,9 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                          const isItemFullyReturned = returnState?.status === 'fully-returned'
                                          const hasItemPartialReturn = returnState?.status === 'partially-returned'
                                          const remainingLineTotal = returnState?.remainingLineTotal ?? item.lineTotal
-                                         const originalItemProfit = isSales ? item.lineTotal - (salesItem.convertedCostPrice * inventoryQuantity) : 0
-                                         const itemProfit = isSales ? remainingLineTotal - (salesItem.convertedCostPrice * remainingInventoryQuantity) : 0
+                                         const inventoryUnitCost = isSales ? getOrderLineCostPerInventoryUnit(salesItem) : 0
+                                         const originalItemProfit = isSales ? item.lineTotal - (inventoryUnitCost * inventoryQuantity) : 0
+                                         const itemProfit = isSales ? remainingLineTotal - (inventoryUnitCost * remainingInventoryQuantity) : 0
                                          const itemReceived = !isSales && (order.status === 'received' || order.status === 'completed')
                                              ? purchaseItem.receivedQuantity ?? inventoryQuantity
                                              : 0
@@ -2163,8 +2164,9 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                                  const itemReceived = order.status === 'received' || order.status === 'completed'
                                                      ? purchaseItem.receivedQuantity ?? inventoryQuantity
                                                      : 0
-                                                 const originalItemProfit = isSales ? item.lineTotal - (salesItem.convertedCostPrice * inventoryQuantity) : 0
-                                                 const itemProfit = isSales ? remainingLineTotal - (salesItem.convertedCostPrice * remainingInventoryQuantity) : 0
+                                                 const inventoryUnitCost = isSales ? getOrderLineCostPerInventoryUnit(salesItem) : 0
+                                                 const originalItemProfit = isSales ? item.lineTotal - (inventoryUnitCost * inventoryQuantity) : 0
+                                                 const itemProfit = isSales ? remainingLineTotal - (inventoryUnitCost * remainingInventoryQuantity) : 0
                                                  const returnableQuantity = isSales ? getReturnableQuantity(salesItem) : 0
                                                  const itemUnit = item.unit?.trim() || productUnits[item.productId]?.trim() || ''
                                                   const itemUnitLabel = item.unitRef?.startsWith('custom:') && item.unitNameSnapshot
@@ -2220,7 +2222,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                                         {showFreeBonus && <TableCell className="text-end">{freeBonusQuantity}{freeBonusItemUnitLabel ? ` ${freeBonusItemUnitLabel}` : ''}</TableCell>}
                                                         {!isSales && <TableCell className="text-end">{itemReceived}</TableCell>}
                                                         <TableCell className="text-end">{formatCurrency(item.convertedUnitPrice, currency, iqd)}</TableCell>
-                                                        {isSales && canViewProfit && <TableCell className="text-end">{formatCurrency(salesItem.convertedCostPrice * (item.unitFactor || 1), currency, iqd)}</TableCell>}
+                                                        {isSales && canViewProfit && <TableCell className="text-end">{formatCurrency(getOrderLineSelectedUnitCost(salesItem), currency, iqd)}</TableCell>}
                                                         <TableCell className="text-end font-semibold">
                                                             {hasReturnAdjustment ? (
                                                                 <ReturnedOrderValue

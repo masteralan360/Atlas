@@ -3,11 +3,11 @@ import { useTranslation } from 'react-i18next'
 import { useLocation, useRoute } from 'wouter'
 import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
-import { addToOfflineMutations, adjustInventoryQuantity, assertStaffMinimumSellingPrices, calculateStockBatchUnitCost, commitStockBatchAllocations, generateLocalSaleSequenceId, getPrimaryStorageFromList, getStockBatchSalePlans, refreshStockBatchesFromSupabase, useActiveDiscountMap, useBatchAwareInventoryProducts, useCategories, useProductSelectionAccess, useProducts, useProductUnitConversions, useStorages } from '@/local-db'
+import { addToOfflineMutations, adjustInventoryQuantity, assertStaffMinimumSellingPrices, calculateStockBatchUnitCost, commitStockBatchAllocations, generateLocalSaleSequenceId, getPrimaryStorageFromList, getStockBatchSalePlans, refreshStockBatchesFromSupabase, useActiveDiscountMap, useBatchAwareInventoryProducts, useCategories, useProductSelectionAccess, useProductUoms, useProducts, useStorages, useUnits } from '@/local-db'
 import { hydrateInventoryTransactionsForReferences } from '@/local-db/inventoryTransactions'
 import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { db } from '@/local-db/database'
-import type { CurrencyCode } from '@/local-db/models'
+import type { CurrencyCode, UnitRef } from '@/local-db/models'
 import { useWorkspace } from '@/workspace'
 import { formatCompactDateTime, formatCurrency, generateId, cn, stylizeText } from '@/lib/utils'
 import { readInstantPosProductsPerRow, saveInstantPosProductsPerRow } from '@/lib/instantPosLayout'
@@ -30,6 +30,8 @@ import { usePosReceiptPrinter } from '@/ui/components/pos/usePosReceiptPrinter'
 import { RestaurantTableGrid } from '@/ui/components/pos/RestaurantTableGrid'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { calculateRestaurantTicketTotal } from '@/lib/restaurantTableView'
+import { getActiveProductUoms, getUomDescriptors, soldQuantityToInventoryQuantity } from '@/lib/productUoms'
+import type { ResolvedActiveDiscount } from '@/lib/discounts'
 import {
     readRestaurantTableActionVisibility,
     saveRestaurantTableActionVisibility,
@@ -58,6 +60,14 @@ type InstantPosItem = {
     unitPrice: number
     quantity: number
     currency: string
+    uomId?: string
+    sellingUnitRef?: UnitRef
+    sellingUnitCode?: string
+    baseUnitRef?: string
+    baseUnitCode?: string
+    unitFactor?: number
+    uomCostPrice?: number | null
+    minimumSellingPriceSnapshot?: number | null
     discountType?: 'percentage' | 'fixed_amount'
     discountValue?: number
     discountSource?: 'product' | 'category'
@@ -118,8 +128,8 @@ function instantTicketToRestaurantTicket(
 
 const STATUS_FLOW: InstantPosStatus[] = ['pending', 'preparing', 'ready', 'served']
 
-function buildInstantPosItemKey(productId: string, storageId?: string | null) {
-    return `${productId}:${storageId ?? ''}`
+function buildInstantPosItemKey(productId: string, storageId?: string | null, uomId?: string | null) {
+    return `${productId}:${storageId ?? ''}:${uomId ?? ''}`
 }
 
 function formatDiscountBadge(
@@ -387,14 +397,14 @@ interface MobileTicketPanelProps {
     isPrintingCookOrderTicket: boolean
     getStorageLabel: (storageId?: string | null) => string | null
     checkoutTicket: () => void
-    handlePreprintReceipt: () => Promise<void>
+    handlePreprintReceipt: () => void
     handleCookOrderTicket: () => Promise<void>
     setTicketStatus: (status: InstantPosStatus) => void
     extendPendingExpiry: (id: string) => void
     clearActiveTicket: () => void
-    updateItemQuantity: (productId: string, storageId: string | undefined, delta: number) => void
-    setItemQuantity: (productId: string, storageId: string | undefined, quantity: number) => void
-    removeItem: (productId: string, storageId: string | undefined) => void
+    updateItemQuantity: (productId: string, storageId: string | undefined, delta: number, uomId?: string) => void
+    setItemQuantity: (productId: string, storageId: string | undefined, quantity: number, uomId?: string) => void
+    removeItem: (productId: string, storageId: string | undefined, uomId?: string) => void
     setNoteItem: (item: { productId: string, storageId?: string, name: string, note: string } | null) => void
     hasTicketNote: boolean
     openTicketNoteEditor: () => void
@@ -689,9 +699,9 @@ function MobileTicketPanel({
                                     </div>
                                 ) : (
                                     activeTicket.items.map(item => (
-                                        <div key={buildInstantPosItemKey(item.productId, item.storageId)} className={cn('rounded-2xl border border-border/60 bg-muted/30 p-4', minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId)) && 'border-destructive bg-destructive/5 ring-1 ring-destructive/25')}>
-                                            {minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId)) && (() => {
-                                                const violation = minimumPriceViolations.get(buildInstantPosItemKey(item.productId, item.storageId))!
+                                        <div key={buildInstantPosItemKey(item.productId, item.storageId, item.uomId)} className={cn('rounded-2xl border border-border/60 bg-muted/30 p-4', minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId, item.uomId)) && 'border-destructive bg-destructive/5 ring-1 ring-destructive/25')}>
+                                            {minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId, item.uomId)) && (() => {
+                                                const violation = minimumPriceViolations.get(buildInstantPosItemKey(item.productId, item.storageId, item.uomId))!
                                                 return <p role="alert" className="mb-2 text-xs font-semibold text-destructive">{violation.currencyUnavailable
                                                     ? t('products.minimumSellingPrice.currencyUnavailable', { productName: violation.productName })
                                                     : t('products.minimumSellingPrice.staffViolation', { productName: violation.productName, minimumPrice: formatCurrency(violation.minimumSellingPrice, violation.currency, features.iqd_display_preference) })}</p>
@@ -699,7 +709,7 @@ function MobileTicketPanel({
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="flex items-start gap-3">
                                                     <div className="rounded-lg bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">
-                                                        {item.quantity}x
+                                                        {item.quantity}x {item.sellingUnitCode || ''}
                                                     </div>
                                                     <div>
                                                         <div className="text-sm font-semibold text-foreground">{item.name}</div>
@@ -722,16 +732,16 @@ function MobileTicketPanel({
                                                             {formatCurrency(item.baseUnitPrice * item.quantity, item.currency, features.iqd_display_preference)}
                                                         </div>
                                                     )}
-                                                    <div className={cn('text-sm font-semibold', minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId)) ? 'text-destructive' : 'text-foreground')}>
+                                                    <div className={cn('text-sm font-semibold', minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId, item.uomId)) ? 'text-destructive' : 'text-foreground')}>
                                                         {formatCurrency(item.unitPrice * item.quantity, item.currency, features.iqd_display_preference)}
                                                     </div>
                                                 </div>
                                             </div>
                                             <div className="mt-4 flex items-center justify-between">
                                                 <div className="flex items-center gap-3">
-                                                    <button onClick={() => updateItemQuantity(item.productId, item.storageId, -1)} className="p-2 bg-background rounded-full border border-border/60"><Minus className="w-3 h-3" /></button>
-                                                    {item.storageId === SERVICES_VIRTUAL_STORAGE_ID && <Input type="number" min="0.001" step="0.001" value={item.quantity} onChange={(event) => setItemQuantity(item.productId, item.storageId, Number(event.target.value))} className="h-8 w-20 text-center" aria-label="Service quantity" />}
-                                                    <button onClick={() => updateItemQuantity(item.productId, item.storageId, 1)} className="p-2 bg-background rounded-full border border-border/60"><Plus className="w-3 h-3" /></button>
+                                                    <button onClick={() => updateItemQuantity(item.productId, item.storageId, -1, item.uomId)} className="p-2 bg-background rounded-full border border-border/60"><Minus className="w-3 h-3" /></button>
+                                                    {item.storageId === SERVICES_VIRTUAL_STORAGE_ID && <Input type="number" min="0.001" step="0.001" value={item.quantity} onChange={(event) => setItemQuantity(item.productId, item.storageId, Number(event.target.value), item.uomId)} className="h-8 w-20 text-center" aria-label="Service quantity" />}
+                                                    <button onClick={() => updateItemQuantity(item.productId, item.storageId, 1, item.uomId)} className="p-2 bg-background rounded-full border border-border/60"><Plus className="w-3 h-3" /></button>
                                                     <button
                                                         onClick={() => setNoteItem({ productId: item.productId, storageId: item.storageId, name: item.name, note: item.note || '' })}
                                                         className={cn("h-8 px-3 rounded-full border border-border/60 text-[10px] font-bold uppercase flex items-center gap-1.5", item.note ? "bg-primary/10 text-primary border-primary/40" : "bg-background")}
@@ -740,7 +750,7 @@ function MobileTicketPanel({
                                                     </button>
                                                 </div>
                                                 {!hideItemDelete && (
-                                                    <button onClick={() => removeItem(item.productId, item.storageId)} className="text-destructive p-2"><Trash2 className="w-4 h-4" /></button>
+                                                    <button onClick={() => removeItem(item.productId, item.storageId, item.uomId)} className="text-destructive p-2"><Trash2 className="w-4 h-4" /></button>
                                                 )}
                                             </div>
                                         </div>
@@ -878,11 +888,9 @@ export function InstantPOS() {
         storageId: isServicesStorage ? undefined : selectedStorageId || undefined
     })
     const catalogProducts = useProducts(user?.workspaceId, { syncBarcodeCache: false })
-    const productUnitConversions = useProductUnitConversions(user?.workspaceId)
-    const relatedUnitProductIds = useMemo(
-        () => new Set(productUnitConversions.filter((row) => !row.isDeleted).map((row) => row.productId)),
-        [productUnitConversions]
-    )
+    const productUoms = useProductUoms(user?.workspaceId)
+    const customUnits = useUnits(user?.workspaceId)
+    const uomDescriptors = useMemo(() => getUomDescriptors(customUnits), [customUnits])
     const { canSelectProduct, filterProducts: filterSelectableProducts } = useProductSelectionAccess(user?.workspaceId, user?.id)
     const serviceProducts = useMemo(() => {
         if (!hasFeature('services')) return []
@@ -895,8 +903,8 @@ export function InstantPOS() {
         }))
     }, [catalogProducts, filterSelectableProducts, hasFeature])
     const inventoryProducts = useMemo(
-        () => filterSelectableProducts(products.filter((product) => !relatedUnitProductIds.has(product.id))),
-        [filterSelectableProducts, products, relatedUnitProductIds]
+        () => filterSelectableProducts(products),
+        [filterSelectableProducts, products]
     )
     const selectableProducts = useMemo(
         () => isServicesStorage ? serviceProducts : inventoryProducts,
@@ -913,6 +921,22 @@ export function InstantPOS() {
         syncRemote: false
     })
     const categories = useCategories(user?.workspaceId)
+
+    const getDefaultSellingUom = useCallback((product: (typeof catalogProducts)[number]) => {
+        const available = getActiveProductUoms(product, productUoms, uomDescriptors)
+        return available.find((row) => row.isDefaultSelling) ?? available.find((row) => row.isBase) ?? available[0]
+    }, [productUoms, uomDescriptors])
+
+    const getDiscountedUomPrice = (price: number, discount: ResolvedActiveDiscount | undefined) => {
+        if (!discount) return price
+        if (discount.discountType === 'percentage') return price * (1 - discount.discountValue / 100)
+        return Math.max(0, price - discount.discountValue)
+    }
+
+    const getTicketItemFactor = (item: InstantPosItem) => {
+        const value = Number(item.unitFactor ?? 1)
+        return Number.isFinite(value) && value > 0 ? value : 1
+    }
 
     // KDS Streaming
     const { status: kdsStatus, startStream, broadcast } = useKdsStream(true)
@@ -1055,6 +1079,7 @@ export function InstantPOS() {
     const [productsPerRow, setProductsPerRow] = useState(readInstantPosProductsPerRow)
     const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
     const [isCheckoutLoading, setIsCheckoutLoading] = useState(false)
+    const [unitPickerProductId, setUnitPickerProductId] = useState<string | null>(null)
     const [isPreprinting, setIsPreprinting] = useState(false)
     const [isPrintingCookOrderTicket, setIsPrintingCookOrderTicket] = useState(false)
     const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false)
@@ -1269,23 +1294,37 @@ export function InstantPOS() {
         return { count, total, hasMixedCurrency }
     }, [activeTicket, settlementCurrency])
 
+    const unitPickerProduct = unitPickerProductId
+        ? selectableProducts.find((product) => product.id === unitPickerProductId)
+        : undefined
+    const unitPickerOptions = unitPickerProduct && !isService(unitPickerProduct)
+        ? getActiveProductUoms(unitPickerProduct, productUoms, uomDescriptors)
+        : []
+    const unitPickerUsedBaseQuantity = unitPickerProduct
+        ? (activeTicket?.items ?? [])
+            .filter((item) => item.productId === unitPickerProduct.id && item.storageId === unitPickerProduct.storageId)
+            .reduce((sum, item) => sum + soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item)), 0)
+        : 0
+
     const minimumPriceViolations = useMemo(() => {
         const violations = new Map<string, { productName: string; minimumSellingPrice: number; currency: string; currencyUnavailable?: boolean }>()
         if (user?.role !== 'staff' || !activeTicket) return violations
         for (const item of activeTicket.items) {
             const product = resolveTicketProduct(item)
-            if (!product || product.minimumSellingPrice == null) continue
+            if (!product) continue
+            const minimum = item.minimumSellingPriceSnapshot ?? product.minimumSellingPrice
+            if (minimum == null) continue
             if (item.currency !== product.currency) {
-                violations.set(buildInstantPosItemKey(item.productId, item.storageId), {
+                violations.set(buildInstantPosItemKey(item.productId, item.storageId, item.uomId), {
                     productName: product.name,
-                    minimumSellingPrice: product.minimumSellingPrice,
+                    minimumSellingPrice: minimum,
                     currency: product.currency,
                     currencyUnavailable: true
                 })
-            } else if (item.unitPrice < product.minimumSellingPrice) {
-                violations.set(buildInstantPosItemKey(item.productId, item.storageId), {
+            } else if (item.unitPrice < minimum) {
+                violations.set(buildInstantPosItemKey(item.productId, item.storageId, item.uomId), {
                     productName: product.name,
-                    minimumSellingPrice: product.minimumSellingPrice,
+                    minimumSellingPrice: minimum,
                     currency: product.currency
                 })
             }
@@ -1293,9 +1332,16 @@ export function InstantPOS() {
         return violations
     }, [activeTicket, resolveTicketProduct, user?.role])
 
-    const activeTicketQuantityByItemKey = useMemo(() => new Map(
-        activeTicket?.items.map((item) => [buildInstantPosItemKey(item.productId, item.storageId), item.quantity]) ?? []
-    ), [activeTicket])
+    const activeTicketQuantityByItemKey = useMemo(() => {
+        const quantities = new Map<string, number>()
+        for (const item of activeTicket?.items ?? []) {
+            const key = buildInstantPosItemKey(item.productId, item.storageId)
+            quantities.set(key, soldQuantityToInventoryQuantity(
+                (quantities.get(key) ?? 0) + soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item)),
+            ))
+        }
+        return quantities
+    }, [activeTicket])
 
     const preprintReceiptData = useMemo(() => {
         if (!user || !activeTicket || activeTicket.items.length === 0 || activeTicketTotals.hasMixedCurrency) {
@@ -1322,8 +1368,16 @@ export function InstantPOS() {
                     quantity: item.quantity,
                     unit_price: item.unitPrice,
                     total_price: item.unitPrice * item.quantity,
-                    cost_price: product?.costPrice ?? 0,
-                    converted_cost_price: product?.costPrice ?? 0,
+                    cost_price: item.uomCostPrice ?? (product?.costPrice ?? 0) * getTicketItemFactor(item),
+                    converted_cost_price: item.uomCostPrice ?? (product?.costPrice ?? 0) * getTicketItemFactor(item),
+                    selling_uom_id: item.uomId ?? null,
+                    selling_unit_ref: item.sellingUnitRef ?? null,
+                    selling_unit_code: item.sellingUnitCode ?? product?.unit ?? null,
+                    selling_unit_name_snapshot: item.sellingUnitCode ?? product?.unit ?? null,
+                    unit_factor: getTicketItemFactor(item),
+                    inventory_quantity: soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item)),
+                    uom_cost_price: item.uomCostPrice ?? null,
+                    minimum_selling_price_snapshot: item.minimumSellingPriceSnapshot ?? null,
                     original_currency: item.currency,
                     original_unit_price: item.baseUnitPrice,
                     converted_unit_price: item.unitPrice,
@@ -1468,7 +1522,7 @@ export function InstantPOS() {
         setIsTablePickerOpen(false)
     }, [activeTicket, updateTicket])
 
-    const addItemToTicket = (productId: string) => {
+    const addItemToTicket = (productId: string, selectedUomId?: string) => {
         const product = selectableProducts.find(item => item.id === productId && item.storageId === selectedStorageId)
         const activeDiscount = activeDiscountMap.get(productId)
         if (!product) return
@@ -1480,7 +1534,14 @@ export function InstantPOS() {
             })
             return
         }
-        if (!isService(product) && !hasValidProductCost(product.costPrice)) {
+        const availableUoms = isService(product) ? [] : getActiveProductUoms(product, productUoms, uomDescriptors)
+        const selectedUom = selectedUomId
+            ? availableUoms.find((row) => row.id === selectedUomId) ?? getDefaultSellingUom(product)
+            : getDefaultSellingUom(product)
+        const effectiveCost = selectedUom?.costPrice ?? (product.costPrice == null
+            ? null
+            : product.costPrice * (selectedUom?.coefficient ?? 1))
+        if (!isService(product) && !hasValidProductCost(effectiveCost)) {
             toast({
                 title: t('common.error') || 'Error',
                 description: getMissingProductCostMessage(product.name),
@@ -1511,11 +1572,20 @@ export function InstantPOS() {
                     productId: product.id,
                     storageId: product.storageId ?? undefined,
                     name: product.name,
-                    sku: product.sku,
-                    baseUnitPrice: product.price,
-                    unitPrice: activeDiscount?.discountPrice ?? product.price,
+                    sku: selectedUom?.sku || product.sku,
+                    baseUnitPrice: selectedUom?.sellingPrice ?? product.price,
+                    unitPrice: getDiscountedUomPrice(selectedUom?.sellingPrice ?? product.price, activeDiscount),
                     quantity: 1,
                     currency: product.currency,
+                    uomId: selectedUom?.id.startsWith('legacy-base:') ? undefined : selectedUom?.id,
+                    sellingUnitRef: selectedUom?.unitRef,
+                    sellingUnitCode: selectedUom?.unitCode ?? product.unit,
+                    baseUnitRef: selectedUom?.isBase ? selectedUom.unitRef : getActiveProductUoms(product, productUoms, uomDescriptors).find((row) => row.isBase)?.unitRef,
+                    baseUnitCode: getActiveProductUoms(product, productUoms, uomDescriptors).find((row) => row.isBase)?.unitCode ?? product.unit,
+                    unitFactor: selectedUom?.coefficient ?? 1,
+                    uomCostPrice: effectiveCost,
+                    minimumSellingPriceSnapshot: selectedUom?.minimumSellingPrice
+                        ?? (product.minimumSellingPrice == null ? null : product.minimumSellingPrice * (selectedUom?.coefficient ?? 1)),
                     discountType: activeDiscount?.discountType,
                     discountValue: activeDiscount?.discountValue,
                     discountSource: activeDiscount?.source,
@@ -1531,10 +1601,14 @@ export function InstantPOS() {
 
         updateTicket(activeTicket.id, ticket => {
             const existing = ticket.items.find(item =>
-                item.productId === product.id && item.storageId === product.storageId
+                item.productId === product.id && item.storageId === product.storageId && item.uomId === selectedUom?.id
             )
             if (existing) {
-                if (!isService(product) && existing.quantity >= product.quantity) {
+                const existingFactor = getTicketItemFactor(existing)
+                const reservedByOtherUnits = ticket.items
+                    .filter((item) => item.productId === product.id && item.storageId === product.storageId && item.uomId !== selectedUom?.id)
+                    .reduce((sum, item) => sum + soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item)), 0)
+                if (!isService(product) && reservedByOtherUnits + soldQuantityToInventoryQuantity(existing.quantity + 1, existingFactor) > product.quantity) {
                     toast({
                         title: t('common.error') || 'Error',
                         description: t('instantPos.outOfStock') || 'This product is out of stock.',
@@ -1543,7 +1617,7 @@ export function InstantPOS() {
                     return ticket
                 }
                 const items = ticket.items.map(item =>
-                    item.productId === product.id && item.storageId === product.storageId
+                    item.productId === product.id && item.storageId === product.storageId && item.uomId === selectedUom?.id
                         ? { ...item, quantity: item.quantity + 1 }
                         : item
                 )
@@ -1554,11 +1628,20 @@ export function InstantPOS() {
                 productId: product.id,
                 storageId: product.storageId ?? undefined,
                 name: product.name,
-                sku: product.sku,
-                baseUnitPrice: product.price,
-                unitPrice: activeDiscount?.discountPrice ?? product.price,
+                sku: selectedUom?.sku || product.sku,
+                baseUnitPrice: selectedUom?.sellingPrice ?? product.price,
+                unitPrice: getDiscountedUomPrice(selectedUom?.sellingPrice ?? product.price, activeDiscount),
                 quantity: 1,
                 currency: product.currency,
+                uomId: selectedUom?.id.startsWith('legacy-base:') ? undefined : selectedUom?.id,
+                sellingUnitRef: selectedUom?.unitRef,
+                sellingUnitCode: selectedUom?.unitCode ?? product.unit,
+                baseUnitRef: getActiveProductUoms(product, productUoms, uomDescriptors).find((row) => row.isBase)?.unitRef,
+                baseUnitCode: getActiveProductUoms(product, productUoms, uomDescriptors).find((row) => row.isBase)?.unitCode ?? product.unit,
+                unitFactor: selectedUom?.coefficient ?? 1,
+                uomCostPrice: effectiveCost,
+                minimumSellingPriceSnapshot: selectedUom?.minimumSellingPrice
+                    ?? (product.minimumSellingPrice == null ? null : product.minimumSellingPrice * (selectedUom?.coefficient ?? 1)),
                 discountType: activeDiscount?.discountType,
                 discountValue: activeDiscount?.discountValue,
                 discountSource: activeDiscount?.source,
@@ -1569,15 +1652,32 @@ export function InstantPOS() {
         })
     }
 
-    const updateItemQuantity = (productId: string, storageId: string | undefined, delta: number) => {
+    const requestAddItemToTicket = (productId: string) => {
+        const product = selectableProducts.find((item) => item.id === productId && item.storageId === selectedStorageId)
+        if (!product || isService(product)) {
+            addItemToTicket(productId)
+            return
+        }
+        const options = getActiveProductUoms(product, productUoms, uomDescriptors)
+        if (options.length > 1) {
+            setUnitPickerProductId(productId)
+            return
+        }
+        addItemToTicket(productId, options[0]?.id)
+    }
+
+    const updateItemQuantity = (productId: string, storageId: string | undefined, delta: number, uomId?: string) => {
         if (!activeTicket) return
         updateTicket(activeTicket.id, ticket => {
             const product = resolveTicketProduct({ productId, storageId })
             const items = ticket.items
                 .map(item => {
-                    if (item.productId !== productId || item.storageId !== storageId) return item
+                    if (item.productId !== productId || item.storageId !== storageId || item.uomId !== uomId) return item
                     const nextQuantity = Math.max(1, item.quantity + delta)
-                    const maxStock = isService(product) ? Number.MAX_SAFE_INTEGER : (product?.quantity ?? nextQuantity)
+                    const reservedByOtherUnits = ticket.items
+                        .filter((other) => other.productId === productId && other.storageId === storageId && other.uomId !== item.uomId)
+                        .reduce((sum, other) => sum + soldQuantityToInventoryQuantity(other.quantity, getTicketItemFactor(other)), 0)
+                    const maxStock = isService(product) ? Number.MAX_SAFE_INTEGER : Math.max(0, (product?.quantity ?? nextQuantity) - reservedByOtherUnits) / getTicketItemFactor(item)
                     const boundedQuantity = maxStock > 0 ? Math.min(nextQuantity, maxStock) : 1
                     return {
                         ...item,
@@ -1588,21 +1688,22 @@ export function InstantPOS() {
         })
     }
 
-    const setItemQuantity = (productId: string, storageId: string | undefined, quantity: number) => {
+    const setItemQuantity = (productId: string, storageId: string | undefined, quantity: number, uomId?: string) => {
         if (!activeTicket || !Number.isFinite(quantity) || quantity <= 0) return
         updateTicket(activeTicket.id, (ticket) => ({
             ...ticket,
-            items: ticket.items.map((item) => item.productId === productId && item.storageId === storageId
-                ? { ...item, quantity: isService(resolveTicketProduct(item)) ? quantity : Math.min(quantity, resolveTicketProduct(item)?.quantity ?? quantity) }
+            items: ticket.items.map((item) => item.productId === productId && item.storageId === storageId && item.uomId === uomId
+                ? { ...item, quantity: isService(resolveTicketProduct(item)) ? quantity : Math.min(quantity, (resolveTicketProduct(item)?.quantity ?? quantity) / getTicketItemFactor(item)) }
                 : item)
         }))
     }
 
-    const removeItem = (productId: string, storageId: string | undefined) => {
+    const removeItem = (productId: string, storageId: string | undefined, uomId?: string) => {
         if (!activeTicket) return
         if (restaurantMode && activeTicket.items.length === 1
             && activeTicket.items[0].productId === productId
-            && activeTicket.items[0].storageId === storageId) {
+            && activeTicket.items[0].storageId === storageId
+            && activeTicket.items[0].uomId === uomId) {
             const storedTicket = restaurantPosTickets.find((ticket) => ticket.id === activeTicket.id)
             if (storedTicket) {
                 void hardDeleteRestaurantPosTicket(storedTicket, restaurantLiveSyncEnabled)
@@ -1613,7 +1714,7 @@ export function InstantPOS() {
         }
         updateTicket(activeTicket.id, ticket => ({
             ...ticket,
-            items: ticket.items.filter(item => item.productId !== productId || item.storageId !== storageId)
+            items: ticket.items.filter(item => item.productId !== productId || item.storageId !== storageId || item.uomId !== uomId)
         }))
     }
 
@@ -1703,7 +1804,14 @@ export function InstantPOS() {
                 items: activeTicket.items.flatMap((item) => {
                     const product = resolveTicketProduct(item)
                     return product
-                        ? [{ productId: product.id, effectiveSellingPrice: item.unitPrice, currency: item.currency as CurrencyCode }]
+                        ? [{
+                            productId: product.id,
+                            effectiveSellingPrice: item.unitPrice,
+                            currency: item.currency as CurrencyCode,
+                            unitFactor: getTicketItemFactor(item),
+                            minimumSellingPrice: item.minimumSellingPriceSnapshot,
+                            sellingUomId: item.uomId,
+                        }]
                         : []
                 })
             })
@@ -1731,7 +1839,7 @@ export function InstantPOS() {
 
         const missingCostItem = activeTicket.items.find((item) => {
             const product = resolveTicketProduct(item)
-            return product ? !isService(product) && !hasValidProductCost(product.costPrice) : false
+            return product ? !isService(product) && !hasValidProductCost(item.uomCostPrice ?? product.costPrice) : false
         })
         if (missingCostItem) {
             const product = resolveTicketProduct(missingCostItem)
@@ -1767,16 +1875,28 @@ export function InstantPOS() {
                 setIsCheckoutLoading(false)
                 return
             }
+        }
 
-            if (!isService(product) && item.quantity > product.quantity) {
-                toast({
-                    title: t('common.error') || 'Error',
-                    description: `${product.name} ${t('instantPos.outOfStock') || 'is out of stock.'}`,
-                    variant: 'destructive'
-                })
-                setIsCheckoutLoading(false)
-                return
-            }
+        const inventoryDemandByProduct = new Map<string, { product: NonNullable<ReturnType<typeof resolveTicketProduct>>; quantity: number }>()
+        for (const item of activeTicket.items) {
+            const product = resolveTicketProduct(item)
+            if (!product || isService(product)) continue
+            const key = `${product.id}:${item.storageId || product.storageId}`
+            const current = inventoryDemandByProduct.get(key)
+            inventoryDemandByProduct.set(key, {
+                product,
+                quantity: (current?.quantity ?? 0) + soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item))
+            })
+        }
+        const insufficientInventory = Array.from(inventoryDemandByProduct.values()).find(({ product, quantity }) => quantity > product.quantity)
+        if (insufficientInventory) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: `${insufficientInventory.product.name} ${t('instantPos.outOfStock') || 'is out of stock.'}`,
+                variant: 'destructive'
+            })
+            setIsCheckoutLoading(false)
+            return
         }
 
         const physicalItems = activeTicket.items.filter((item) => !isService(resolveTicketProduct(item)))
@@ -1791,7 +1911,7 @@ export function InstantPOS() {
                 return {
                     productId: item.productId,
                     storageId: resolvedStorageId,
-                    quantity: item.quantity
+                    quantity: soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item))
                 }
             }))
         } catch (error) {
@@ -1806,33 +1926,39 @@ export function InstantPOS() {
         }
 
         const batchPlanByItemKey = new Map(
-            physicalItems.map((item, index) => [buildInstantPosItemKey(item.productId, item.storageId), batchSalePlans[index]] as const)
+            physicalItems.map((item, index) => [buildInstantPosItemKey(item.productId, item.storageId, item.uomId), batchSalePlans[index]] as const)
         )
 
         const itemsWithMetadata = activeTicket.items.map((item) => {
             const product = resolveTicketProduct(item)
             const service = isService(product)
             const inventorySnapshot = service ? null : (product?.quantity ?? 0)
-            const batchPlan = batchPlanByItemKey.get(buildInstantPosItemKey(item.productId, item.storageId))
+            const batchPlan = batchPlanByItemKey.get(buildInstantPosItemKey(item.productId, item.storageId, item.uomId))
             const resolvedStorageId = service ? null : (item.storageId || product?.storageId || null)
             const originalCurrency = item.currency as CurrencyCode
             const targetCurrency = settlementCurrency as CurrencyCode
             const convertBatchCost = (amount: number, from: CurrencyCode, to: CurrencyCode) =>
                 convertCurrencyAmountWithAvailableSnapshot(amount, from, to) ?? amount
-            const costPrice = calculateStockBatchUnitCost(
+            const factor = getTicketItemFactor(item)
+            const convertedInventoryQuantity = soldQuantityToInventoryQuantity(item.quantity, factor)
+            const batchUnitCost = calculateStockBatchUnitCost(
                 batchPlan?.allocations ?? [],
                 product?.costPrice || 0,
                 originalCurrency,
                 convertBatchCost,
-                batchPlan?.requestedQuantity ?? item.quantity
+                batchPlan?.requestedQuantity ?? convertedInventoryQuantity
             )
-            const convertedCostPrice = calculateStockBatchUnitCost(
+            const convertedBatchUnitCost = calculateStockBatchUnitCost(
                 batchPlan?.allocations ?? [],
                 convertBatchCost(product?.costPrice || 0, originalCurrency, targetCurrency),
                 targetCurrency,
                 convertBatchCost,
-                batchPlan?.requestedQuantity ?? item.quantity
+                batchPlan?.requestedQuantity ?? convertedInventoryQuantity
             )
+            const costPrice = item.uomCostPrice ?? batchUnitCost * factor
+            const convertedCostPrice = item.uomCostPrice != null
+                ? convertBatchCost(item.uomCostPrice, originalCurrency, targetCurrency)
+                : convertedBatchUnitCost * factor
             return {
                 product_id: item.productId,
                 storage_id: resolvedStorageId,
@@ -1845,6 +1971,14 @@ export function InstantPOS() {
                 total_price: item.unitPrice * item.quantity,
                 cost_price: costPrice,
                 converted_cost_price: convertedCostPrice,
+                selling_uom_id: item.uomId ?? null,
+                selling_unit_ref: item.sellingUnitRef ?? null,
+                selling_unit_code: item.sellingUnitCode ?? product?.unit ?? null,
+                selling_unit_name_snapshot: item.sellingUnitCode ?? product?.unit ?? null,
+                unit_factor: factor,
+                inventory_quantity: convertedInventoryQuantity,
+                uom_cost_price: item.uomCostPrice ?? null,
+                minimum_selling_price_snapshot: item.minimumSellingPriceSnapshot ?? null,
                 original_currency: item.currency,
                 original_unit_price: item.baseUnitPrice,
                 converted_unit_price: item.unitPrice,
@@ -1906,7 +2040,10 @@ export function InstantPOS() {
                 items: itemsWithMetadata.map((item) => ({
                     productId: item.product_id,
                     effectiveSellingPrice: item.unit_price,
-                    currency: item.original_currency as CurrencyCode
+                    currency: item.original_currency as CurrencyCode,
+                    unitFactor: item.unit_factor,
+                    minimumSellingPrice: item.minimum_selling_price_snapshot,
+                    sellingUomId: item.selling_uom_id
                 }))
             })
 
@@ -1937,7 +2074,7 @@ export function InstantPOS() {
                         workspaceId: user.workspaceId,
                         productId: item.productId,
                         storageId: resolvedStorageId,
-                        quantityDelta: -item.quantity,
+                        quantityDelta: -soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item)),
                         timestamp: snapshotTimestamp,
                         syncSource: 'remote',
                         skipRemoteSync: true,
@@ -2018,6 +2155,14 @@ export function InstantPOS() {
                         totalPrice: item.total_price,
                         costPrice: item.cost_price,
                         convertedCostPrice: item.converted_cost_price,
+                        sellingUomId: item.selling_uom_id ?? undefined,
+                        sellingUnitRef: item.selling_unit_ref ?? undefined,
+                        sellingUnitCode: item.selling_unit_code ?? undefined,
+                        sellingUnitNameSnapshot: item.selling_unit_name_snapshot ?? undefined,
+                        unitFactor: item.unit_factor,
+                        inventoryQuantity: item.inventory_quantity,
+                        uomCostPrice: item.uom_cost_price,
+                        minimumSellingPriceSnapshot: item.minimum_selling_price_snapshot,
                         originalCurrency: item.original_currency as CurrencyCode,
                         originalUnitPrice: item.original_unit_price,
                         convertedUnitPrice: item.converted_unit_price,
@@ -2086,7 +2231,7 @@ export function InstantPOS() {
                                 workspaceId: user.workspaceId,
                                 productId: item.productId,
                                 storageId: resolvedStorageId,
-                                quantityDelta: -item.quantity,
+                                quantityDelta: -soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item)),
                                 timestamp: snapshotTimestamp,
                                 movement: {
                                     productId: item.productId,
@@ -2481,18 +2626,20 @@ export function InstantPOS() {
                             ) : (
                                 filteredProducts.map(product => {
                                     const imageUrl = getDisplayImageUrl(product.imageUrl)
+                                    const service = isService(product)
                                     const activeDiscount = activeDiscountMap.get(product.id)
-                                    const displayPrice = activeDiscount?.discountPrice ?? product.price
+                                    const defaultUom = service ? undefined : getDefaultSellingUom(product)
+                                    const defaultUnitPrice = defaultUom?.sellingPrice ?? product.price
+                                    const displayPrice = getDiscountedUomPrice(defaultUnitPrice, activeDiscount)
                                     const inTicketQuantity = activeTicketQuantityByItemKey.get(
                                         buildInstantPosItemKey(product.id, product.storageId)
                                     ) ?? 0
-                                    const service = isService(product)
-                                    const remainingQuantity = service ? null : Math.max(0, product.quantity - inTicketQuantity)
+                                    const remainingQuantity = service ? null : Math.max(0, (product.quantity - inTicketQuantity) / (defaultUom?.coefficient ?? 1))
                                     const isOutOfStock = !service && remainingQuantity === 0
                                     return (
                                         <button
                                             key={buildInstantPosItemKey(product.id, product.storageId)}
-                                            onClick={() => addItemToTicket(product.id)}
+                                            onClick={() => requestAddItemToTicket(product.id)}
                                             disabled={isOutOfStock}
                                             className={cn(
                                                 'group relative flex flex-col gap-4 overflow-hidden rounded-[1.5rem] border border-border/50 bg-card p-4 text-left outline-none transition-all duration-300 hover:-translate-y-1 hover:bg-accent/5 hover:shadow-2xl hover:shadow-primary/5',
@@ -2513,7 +2660,7 @@ export function InstantPOS() {
                                                 )}
                                                 {inTicketQuantity > 0 && (
                                                     <div className="absolute left-2 top-2 rounded-2xl border border-emerald-400 bg-emerald-500 px-2.5 py-1.5 text-[12px] font-black text-white shadow-md">
-                                                        +{inTicketQuantity}
+                                                        +{Number((inTicketQuantity / (defaultUom?.coefficient ?? 1)).toFixed(3))}
                                                     </div>
                                                 )}
                                                 {service ? (
@@ -2550,15 +2697,15 @@ export function InstantPOS() {
                                                 {activeDiscount ? (
                                                     <div className="space-y-0.5">
                                                         <div className="text-xs font-semibold text-muted-foreground line-through">
-                                                            {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
+                                                            {formatCurrency(defaultUnitPrice, product.currency, features.iqd_display_preference)}
                                                         </div>
                                                         <div className="text-lg font-black text-emerald-600">
-                                                            {formatCurrency(displayPrice, product.currency, features.iqd_display_preference)}
+                                                            {formatCurrency(displayPrice, product.currency, features.iqd_display_preference)}{defaultUom ? ` / ${defaultUom.unitCode}` : ''}
                                                         </div>
                                                     </div>
                                                 ) : (
                                                     <div className="text-lg font-black text-primary">
-                                                        {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
+                                                        {formatCurrency(defaultUnitPrice, product.currency, features.iqd_display_preference)}{defaultUom ? ` / ${defaultUom.unitCode}` : ''}
                                                     </div>
                                                 )}
                                             </div>
@@ -2706,16 +2853,16 @@ export function InstantPOS() {
                                     </div>
                                 ) : (
                                     activeTicket.items.map(item => (
-                                        <div key={buildInstantPosItemKey(item.productId, item.storageId)} className={cn('group flex flex-col rounded-lg border border-border bg-background p-3 transition-all duration-200', minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId)) && 'border-destructive bg-destructive/5 ring-1 ring-destructive/25')}>
-                                            {minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId)) && (() => {
-                                                const violation = minimumPriceViolations.get(buildInstantPosItemKey(item.productId, item.storageId))!
+                                        <div key={buildInstantPosItemKey(item.productId, item.storageId, item.uomId)} className={cn('group flex flex-col rounded-lg border border-border bg-background p-3 transition-all duration-200', minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId, item.uomId)) && 'border-destructive bg-destructive/5 ring-1 ring-destructive/25')}>
+                                            {minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId, item.uomId)) && (() => {
+                                                const violation = minimumPriceViolations.get(buildInstantPosItemKey(item.productId, item.storageId, item.uomId))!
                                                 return <p role="alert" className="mb-2 text-xs font-semibold text-destructive">{violation.currencyUnavailable
                                                     ? t('products.minimumSellingPrice.currencyUnavailable', { productName: violation.productName })
                                                     : t('products.minimumSellingPrice.staffViolation', { productName: violation.productName, minimumPrice: formatCurrency(violation.minimumSellingPrice, violation.currency, features.iqd_display_preference) })}</p>
                                             })()}
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="min-w-0 flex-1">
-                                                        <div className="truncate text-sm font-medium text-foreground">{item.name}</div>
+                                                        <div className="truncate text-sm font-medium text-foreground">{item.name} {item.sellingUnitCode ? <span className="text-xs text-muted-foreground">· {item.sellingUnitCode}</span> : null}</div>
                                                         {item.note && (
                                                             <div className="text-[10px] italic text-primary/80 font-medium">
                                                                 --{stylizeText(item.note)}
@@ -2742,14 +2889,14 @@ export function InstantPOS() {
                                             <div className="mt-3 flex items-center justify-between">
                                                 <div className="flex items-center gap-2">
                                                     <button
-                                                        onClick={() => updateItemQuantity(item.productId, item.storageId, -1)}
+                                                        onClick={() => updateItemQuantity(item.productId, item.storageId, -1, item.uomId)}
                                                         className="flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background text-foreground hover:bg-muted/60"
                                                     >
                                                         <Minus className="h-3 w-3" />
                                                     </button>
-                                                    {item.storageId === SERVICES_VIRTUAL_STORAGE_ID && <Input type="number" min="0.001" step="0.001" value={item.quantity} onChange={(event) => setItemQuantity(item.productId, item.storageId, Number(event.target.value))} className="h-7 w-14 border-0 bg-transparent p-0 text-center text-xs" aria-label="Service quantity" />}
+                                                    {item.storageId === SERVICES_VIRTUAL_STORAGE_ID && <Input type="number" min="0.001" step="0.001" value={item.quantity} onChange={(event) => setItemQuantity(item.productId, item.storageId, Number(event.target.value), item.uomId)} className="h-7 w-14 border-0 bg-transparent p-0 text-center text-xs" aria-label="Service quantity" />}
                                                     <button
-                                                        onClick={() => updateItemQuantity(item.productId, item.storageId, 1)}
+                                                        onClick={() => updateItemQuantity(item.productId, item.storageId, 1, item.uomId)}
                                                         className="flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background text-foreground hover:bg-muted/60"
                                                     >
                                                         <Plus className="h-3 w-3" />
@@ -2767,7 +2914,7 @@ export function InstantPOS() {
                                                 </div>
                                                 {!hideRestaurantItemDelete && (
                                                     <button
-                                                        onClick={() => removeItem(item.productId, item.storageId)}
+                                                        onClick={() => removeItem(item.productId, item.storageId, item.uomId)}
                                                         className="ml-1 flex h-7 w-7 items-center justify-center rounded-md border border-destructive/20 bg-destructive/10 text-destructive transition-opacity hover:bg-destructive/20"
                                                     >
                                                         <Trash2 className="h-4 w-4" />
@@ -2891,6 +3038,47 @@ export function InstantPOS() {
                         </div>
                     )}
                 </aside>
+
+            <AppDialog open={!!unitPickerProductId} onOpenChange={(open) => !open && setUnitPickerProductId(null)}>
+                <AppDialogContent className="max-w-lg">
+                    <AppDialogHeader>
+                        <AppDialogTitle>{t('products.uom.title', { defaultValue: 'Units of Measure' })}</AppDialogTitle>
+                    </AppDialogHeader>
+                    <AppDialogBody>
+                        <div className="space-y-2">
+                            <p className="text-sm text-muted-foreground">{unitPickerProduct?.name}</p>
+                            {unitPickerOptions.map((uom) => {
+                                const remaining = Math.max(0, (unitPickerProduct?.quantity ?? 0) - unitPickerUsedBaseQuantity)
+                                const canAdd = remaining + 1e-8 >= uom.coefficient
+                                const discount = activeDiscountMap.get(unitPickerProduct?.id ?? '')
+                                const price = getDiscountedUomPrice(uom.sellingPrice, discount)
+                                return (
+                                    <Button
+                                        key={uom.id}
+                                        type="button"
+                                        variant={uom.isDefaultSelling ? 'default' : 'outline'}
+                                        className="h-auto w-full justify-between gap-4 py-3"
+                                        disabled={!canAdd}
+                                        onClick={() => {
+                                            if (unitPickerProduct) addItemToTicket(unitPickerProduct.id, uom.id)
+                                            setUnitPickerProductId(null)
+                                        }}
+                                    >
+                                        <span className="min-w-0 text-left">
+                                            <span className="block font-semibold">{uom.unitCode}{uom.isDefaultSelling ? ` · ${t('products.uom.defaultSelling', { defaultValue: 'Default selling unit' })}` : ''}</span>
+                                            <span className="block text-xs opacity-75">{t('products.uom.conversionExample', { count: uom.coefficient, unit: unitPickerProduct?.unit ?? '' })}</span>
+                                        </span>
+                                        <span className="shrink-0">{formatCurrency(price, unitPickerProduct?.currency ?? 'usd', features.iqd_display_preference)}</span>
+                                    </Button>
+                                )
+                            })}
+                        </div>
+                    </AppDialogBody>
+                    <AppDialogFooter>
+                        <Button variant="outline" onClick={() => setUnitPickerProductId(null)}>{t('common.cancel', { defaultValue: 'Cancel' })}</Button>
+                    </AppDialogFooter>
+                </AppDialogContent>
+            </AppDialog>
 
             <Dialog open={!!noteItem} onOpenChange={(open) => !open && setNoteItem(null)}>
                 <DialogContent className="sm:max-w-[425px]">

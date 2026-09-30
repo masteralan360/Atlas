@@ -2,7 +2,7 @@ import type { CurrencyCode } from '@/local-db/models'
 import type { CartItem } from '@/types'
 import type { PosPaymentType } from '@/lib/posPaymentPolicy'
 import { getOrderLineFreeBonusQuantity, getOrderLinePaidQuantity } from '@/lib/orderLineItems'
-import { inventoryQuantityToSellingAvailability } from '@/lib/unitRelationships'
+import { inventoryQuantityToSellingAvailability } from '@/lib/productUoms'
 
 export interface PosRates {
     usdIqd: { rate: number } | null
@@ -73,16 +73,12 @@ export function canAddPosCartItemFromStorage(
     return cartUsesActivities === (nextStorageId === activitiesStorageId)
 }
 
-/**
- * Quick Orders cannot persist the selling-unit conversion snapshot required by
- * products with related selling units. Keep those products out of an Order
- * cart instead of silently adding them in their base unit.
- */
+/** Product UoM snapshots are supported by POS, Quick Orders, and order carts. */
 export function canAddProductToPosCart(
-    paymentType: PosPaymentType,
-    hasRelatedSellingUnit: boolean
+    _paymentType: PosPaymentType,
+    _hasAdditionalUom: boolean
 ) {
-    return paymentType !== 'order' || !hasRelatedSellingUnit
+    return true
 }
 
 /** A free quantity forces the cart through the Sales Order checkout route. */

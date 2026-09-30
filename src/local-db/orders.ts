@@ -259,6 +259,8 @@ async function assertSalesOrderMinimumPrices(
             productId: item.productId,
             effectiveSellingPrice,
             unitFactor: item.unitFactor ?? 1,
+            minimumSellingPrice: item.minimumSellingPriceSnapshot ?? null,
+            sellingUomId: item.uomId ?? null,
             currency: product.currency
         }
     }))
@@ -426,7 +428,7 @@ async function syncUpsertEntities(
         const shouldReceiveOrderNumber = tableName === 'sales_orders' || tableName === 'purchase_orders'
         const result = shouldReceiveOrderNumber
             ? await runMutation(`${tableName}.sync`, () =>
-                client.from(tableName).upsert(payload).select('id, order_number')
+                client.from(tableName).upsert(payload).select('id, order_number, items')
             )
             : await runMutation(`${tableName}.sync`, () => client.from(tableName).upsert(payload))
         const { error } = result
@@ -440,12 +442,16 @@ async function syncUpsertEntities(
         }
 
         const orderNumbers = new Map<string, string>()
+        const orderItems = new Map<string, unknown[]>()
         const rows = Array.isArray(result.data) ? result.data : []
         for (const row of rows) {
             if (!row || typeof row !== 'object') continue
-            const remoteOrder = row as { id?: unknown; order_number?: unknown }
+            const remoteOrder = row as { id?: unknown; order_number?: unknown; items?: unknown }
             if (typeof remoteOrder.id === 'string' && typeof remoteOrder.order_number === 'string') {
                 orderNumbers.set(remoteOrder.id, remoteOrder.order_number)
+            }
+            if (typeof remoteOrder.id === 'string' && Array.isArray(remoteOrder.items)) {
+                orderItems.set(remoteOrder.id, remoteOrder.items)
             }
         }
 
@@ -455,11 +461,13 @@ async function syncUpsertEntities(
         }>)[tableName as OrderTableName]
         await Promise.all(entities.map(async (entity) => {
             const orderNumber = orderNumbers.get(entity.id)
+            const items = orderItems.get(entity.id)
             if (options.requireRemoteConfirmation && !orderNumber) {
                 throw createRemoteOrderSaveConfirmationError()
             }
             await table.update(entity.id, {
                 ...(orderNumber ? { orderNumber } : {}),
+                ...(items ? { items } : {}),
                 syncStatus: 'synced',
                 lastSyncedAt: syncedAt
             })
@@ -3243,21 +3251,6 @@ export async function createQuickSalesOrder(
 
     if (targetStatus !== 'draft' && targetStatus !== 'pending' && targetStatus !== 'completed') {
         throw new Error('Quick orders must be saved as draft, pending, or completed')
-    }
-    // POS deliberately excludes products with related selling units from Quick
-    // Orders. Enforce the same boundary for callers that bypass the POS cart;
-    // the hosted atomic checkout does not convert pack quantities to base stock.
-    const productIds = new Set(data.items.map((item) => item.productId))
-    const hasRelatedUnitLine = data.items.some((item) => (
-        Boolean(item.unitRelationshipId || item.baseUnitRef)
-        || (item.unitFactor != null && Number(item.unitFactor) !== 1)
-    ))
-    const hasRelatedUnitProduct = productIds.size > 0 && await db.product_unit_conversions
-        .where('productId').anyOf([...productIds])
-        .filter((conversion) => conversion.workspaceId === workspaceId && !conversion.isDeleted)
-        .first()
-    if (hasRelatedUnitLine || hasRelatedUnitProduct) {
-        throw new Error('quick_order_related_units_unsupported')
     }
     if (targetStatus !== 'draft') {
         assertInventoryMutationConnectivity(workspaceId)

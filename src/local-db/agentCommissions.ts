@@ -4,7 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 
 import { supabase } from "@/auth/supabase";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
-import { getOrderLineInventoryQuantity, getOrderLinePaidInventoryQuantity, getOrderLinePaidQuantity, getOrderLineReturnedInventoryQuantity, getOrderLineReturnedPaidInventoryQuantity, getOrderLineUnitFactor } from "@/lib/orderLineItems";
+import { getOrderLineCostPerInventoryUnit, getOrderLineInventoryQuantity, getOrderLinePaidInventoryQuantity, getOrderLinePaidQuantity, getOrderLineReturnedInventoryQuantity, getOrderLineReturnedPaidInventoryQuantity, getOrderLineUnitFactor } from "@/lib/orderLineItems";
 import { isOnline } from "@/lib/network";
 import { normalizeOrderAdjustments } from "@/lib/orderAdjustments";
 import { getAppliedCurrencyConversion } from "@/lib/orderCurrency";
@@ -1189,7 +1189,7 @@ export function calculateSalesOrderCommission(
       getOrderLinePaidQuantity(item) - returnedPaidInventoryQuantity / getOrderLineUnitFactor(item));
     const netCostQuantity = Math.max(0, getOrderLineInventoryQuantity(item) - returnedQuantity);
     const itemRevenueAmount = netPaidQuantity * Math.max(0, Number(item.convertedUnitPrice || 0));
-    const itemCostAmount = netCostQuantity * Math.max(0, Number(item.convertedCostPrice ?? item.costPrice ?? 0));
+    const itemCostAmount = netCostQuantity * Math.max(0, getOrderLineCostPerInventoryUnit(item));
     fullItemRevenue += itemRevenueAmount;
     if (!excludedProductIds.has(item.productId)) {
       itemRevenue += itemRevenueAmount;

@@ -39,7 +39,7 @@ describe('sales order return print data', () => {
         })
     })
 
-    it('prints related-unit returns in the selected unit and excludes free units from the unit refund price', () => {
+    it('prints UoM returns in the selected unit and excludes free units from the unit refund price', () => {
         const order = {
             id: 'order-related',
             returnStatus: 'partial',

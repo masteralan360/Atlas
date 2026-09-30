@@ -59,7 +59,7 @@ describe('developer runner boundaries', () => {
         ])
       })
     ])
-    expect(validateRunOptions({ suiteId: 'pos' }).groups.length).toBe(13)
+    expect(validateRunOptions({ suiteId: 'pos' }).groups.length).toBe(14)
     expect(validateRunOptions({ suiteId: 'post-service' }).groups.length).toBe(13)
     expect(validateRunOptions({ suiteId: 'platform' }).groups).toEqual([
       expect.objectContaining({
@@ -72,14 +72,14 @@ describe('developer runner boundaries', () => {
     ])
     expect(validateRunOptions({ suiteId: 'post-service', groupIds: ['remote-contract', 'merchants'] }).groups.map((group) => group.id)).toEqual(['merchants', 'remote-contract'])
     expect(validateRunOptions({ suiteId: 'pos', groupIds: ['checkout', 'remote-contract'] }).groups.map((group) => group.id)).toEqual(['checkout', 'remote-contract'])
-    expect(validateRunOptions({ suiteId: 'pos', groupIds: ['related-units'] }).groups).toEqual([
+    expect(validateRunOptions({ suiteId: 'pos', groupIds: ['unit-of-measure'] }).groups).toEqual([
       expect.objectContaining({
-        id: 'related-units',
-        titleKey: 'devTesting.posGroups.relatedUnits',
+        id: 'unit-of-measure',
+        titleKey: 'devTesting.posGroups.productUom',
         files: expect.arrayContaining([
-          'src/lib/unitRelationships.test.ts',
-          'src/lib/hierarchicalPackagingMigration.test.ts',
-          'src/local-db/unitRelationships.test.ts',
+          'src/local-db/productUoms.test.ts',
+          'src/lib/productUomMigration.test.ts',
+          'src/dev/testing/suites/posCart.test.ts',
           'src/local-db/units.test.ts'
         ])
       })

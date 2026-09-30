@@ -436,7 +436,6 @@ export function Sales() {
 
         const isFlaggedSale = saleForProductExchange.system_review_status === 'flagged'
         return (saleForProductExchange.items || []).flatMap((item) => {
-            if ((item.unit_factor ?? 1) !== 1 || item.selling_unit_ref) return []
             const returnableQuantity = Math.max(
                 0,
                 Number(item.quantity || 0) - Math.max(0, Number(item.returned_quantity || 0)),
@@ -1403,11 +1402,6 @@ export function Sales() {
         if (!selectedSale || selectedSale.origin !== 'pos') {
             return
         }
-        if ((item.unit_factor ?? 1) !== 1 || item.selling_unit_ref) {
-            toast({ variant: 'destructive', title: t('common.error'), description: t('sales.exchange.relatedUnitsUnsupported') })
-            return
-        }
-
         setLockedProductExchangeSaleItemId(item.id)
         setSaleForProductExchange(selectedSale)
     }

@@ -4,6 +4,7 @@ CREATE TABLE public.order_return_items (
   return_id uuid NOT NULL REFERENCES public.order_returns(id),
   order_id uuid NOT NULL REFERENCES crm.sales_orders(id),
   order_item_id text NOT NULL,
+  uom_id uuid NULL REFERENCES public.product_uoms(id) ON DELETE SET NULL,
   quantity numeric NOT NULL,
   unit_refund_amount numeric NOT NULL DEFAULT 0,
   refund_amount numeric NOT NULL DEFAULT 0,

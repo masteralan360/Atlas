@@ -34,8 +34,7 @@ import {
     useBusinessPartners,
     usePriceBookCatalogState,
     useProducts,
-    useProductUnitConversions,
-    useUnitRelationships,
+    useProductUoms,
     useUnits,
     useWorkspaceProductBarcodes,
     usePurchaseOrder,
@@ -56,12 +55,12 @@ import { isRemoteOrderSaveConfirmationError, type OrderSaveProgress } from '@/li
 import { useWorkspacePermissions } from '@/permissions'
 import {
     assertValidOrderUnitQuantity,
-    buildProductOrderUnitOptions,
-    getUnitDescriptors,
-    indexProductUnitContexts,
+    buildProductUomOrderOptions,
+    getUomDescriptors,
+    indexProductUomsByProduct,
     soldQuantityToInventoryQuantity,
-    type ProductOrderUnitOption
-} from '@/lib/unitRelationships'
+    type ProductUomOrderOption
+} from '@/lib/productUoms'
 import { isOrderUnitConfigurationError } from '@/lib/orderUnitErrors'
 import {
     Button,
@@ -114,7 +113,7 @@ type FormItem = {
     storageId: string
     quantity: string
     unitRef: string
-    unitRelationshipId: string
+    uomId: string
     unitFactor: string
     baseUnitRef: string
     baseUnitCode: string
@@ -142,7 +141,7 @@ function createEmptyItem(storageId = '', seq = 1): FormItem {
         storageId,
         quantity: '1',
         unitRef: '',
-        unitRelationshipId: '',
+        uomId: '',
         unitFactor: '',
         baseUnitRef: '',
         baseUnitCode: '',
@@ -231,13 +230,12 @@ export function PurchaseOrderFormPage({
 
     const products = useProducts(workspaceId)
     const purchasableProducts = useMemo(() => products.filter(canBePurchased), [products])
-    const productUnitConversions = useProductUnitConversions(workspaceId)
-    const unitRelationships = useUnitRelationships(workspaceId)
+    const productUoms = useProductUoms(workspaceId)
     const customUnits = useUnits(workspaceId)
-    const unitDescriptors = useMemo(() => getUnitDescriptors(customUnits), [customUnits])
+    const unitDescriptors = useMemo(() => getUomDescriptors(customUnits), [customUnits])
     const productUnitContexts = useMemo(
-        () => indexProductUnitContexts(productUnitConversions, unitRelationships),
-        [productUnitConversions, unitRelationships]
+        () => indexProductUomsByProduct(productUoms),
+        [productUoms]
     )
     const orderSelectableProducts = purchasableProducts
     const productBarcodes = useWorkspaceProductBarcodes(workspaceId, { syncProductCache: false })
@@ -363,7 +361,7 @@ export function PurchaseOrderFormPage({
                     storageId: item.storageId || editingOrder.destinationStorageId || defaultStorageId,
                     quantity: String(item.quantity),
                     unitRef: item.unitRef || '',
-                    unitRelationshipId: item.unitRelationshipId || '',
+                    uomId: item.uomId || '',
                     unitFactor: item.unitFactor == null ? '' : String(item.unitFactor),
                     baseUnitRef: item.baseUnitRef || '',
                     baseUnitCode: item.baseUnitCode || item.unit || product?.unit || '',
@@ -433,7 +431,7 @@ export function PurchaseOrderFormPage({
                 storageId: item.storageId || editingOrder.destinationStorageId || defaultStorageId,
                 quantity: String(item.quantity),
                 unitRef: item.unitRef || '',
-                unitRelationshipId: item.unitRelationshipId || '',
+                uomId: item.uomId || '',
                 unitFactor: item.unitFactor == null ? '' : String(item.unitFactor),
                 baseUnitRef: item.baseUnitRef || '',
                 baseUnitCode: item.baseUnitCode || item.unit || product?.unit || '',
@@ -462,14 +460,20 @@ export function PurchaseOrderFormPage({
                 if (item.productId) {
                     const product = products.find((p) => p.id === item.productId)
                     if (product && (!item.productSearch || !item.unitRef)) {
-                        const legacyUnit = buildProductOrderUnitOptions(product, null, unitDescriptors)[0]
+                        const options = buildProductUomOrderOptions(
+                            product,
+                            productUnitContexts.get(product.id) ?? [],
+                            unitDescriptors
+                        )
+                        const legacyUnit = options.find((option) => option.isBase) ?? options[0]
+                        if (!legacyUnit) return item
                         changed = true
                         return {
                             ...item,
                             productSearch: item.productSearch || product.name,
                             ...(!item.unitRef ? {
                                 unitRef: legacyUnit.unitRef,
-                                unitRelationshipId: '',
+                                uomId: '',
                                 unitFactor: '1',
                                 baseUnitRef: legacyUnit.baseUnitRef,
                                 baseUnitCode: legacyUnit.baseUnitCode,
@@ -483,7 +487,7 @@ export function PurchaseOrderFormPage({
             })
             return changed ? next : current
         })
-    }, [products, editingOrder, unitDescriptors])
+    }, [editingOrder, productUnitContexts, products, unitDescriptors])
 
     const liveRates = useMemo(() => ({ exchangeData, eurRates, tryRates }), [exchangeData, eurRates, tryRates])
     const adjustmentExchangeRates = useMemo(() => buildOrderExchangeRatesSnapshot(liveRates), [liveRates])
@@ -510,31 +514,45 @@ export function PurchaseOrderFormPage({
     const getProductUnitOptions = useCallback((productId: string) => {
         const product = products.find((entry) => entry.id === productId)
         if (!product) return []
-        return buildProductOrderUnitOptions(product, productUnitContexts.get(productId), unitDescriptors)
+        return buildProductUomOrderOptions(product, productUnitContexts.get(productId) ?? [], unitDescriptors)
     }, [productUnitContexts, products, unitDescriptors])
 
-    const getFormUnitOption = useCallback((item: FormItem, product: typeof products[number] | undefined): ProductOrderUnitOption | null => {
+    const getFormUnitOption = useCallback((item: FormItem, product: typeof products[number] | undefined): ProductUomOrderOption | null => {
         if (!product || !item.unitRef) return null
         const current = getProductUnitOptions(product.id).find((option) => option.unitRef === item.unitRef)
-        if (!current) return null
+        if (!current) {
+            const factor = Number(item.unitFactor)
+            if (!Number.isFinite(factor) || factor <= 0 || !item.unitNameSnapshot) return null
+            const baseUnit = productUnitContexts.get(product.id)?.find((row) => row.isBase)
+            return {
+                kind: item.unitRef === baseUnit?.unitRef ? 'base' : 'converted',
+                uomId: item.uomId || '',
+                unitRef: item.unitRef as UnitRef,
+                unitCode: item.unitNameSnapshot,
+                baseUnitRef: (item.baseUnitRef || baseUnit?.unitRef || item.unitRef) as UnitRef,
+                baseUnitCode: item.baseUnitCode || baseUnit?.unitCode || product.unit,
+                factor, isDynamic: false, isBase: item.unitRef === baseUnit?.unitRef,
+                isDefaultSelling: false, sellingPrice: 0, costPrice: null, minimumSellingPrice: null,
+            }
+        }
         const snapshotFactor = Number(item.unitFactor)
         if (!Number.isFinite(snapshotFactor) || snapshotFactor <= 0) return current
         return {
             ...current,
             factor: snapshotFactor,
-            relationshipId: item.unitRelationshipId || current.relationshipId,
+            uomId: item.uomId || current.uomId,
             baseUnitRef: (item.baseUnitRef || current.baseUnitRef) as UnitRef,
             baseUnitCode: item.baseUnitCode || current.baseUnitCode
         }
-    }, [getProductUnitOptions])
+    }, [getProductUnitOptions, productUnitContexts])
 
     const getUnitLabel = useCallback((unitCode: string) =>
         t(`products.units.${unitCode}`, { defaultValue: unitCode }), [t])
 
-    const getUnitSnapshotFields = useCallback((option: ProductOrderUnitOption): Pick<FormItem,
-        'unitRef' | 'unitRelationshipId' | 'unitFactor' | 'baseUnitRef' | 'baseUnitCode' | 'unitNameSnapshot' | 'baseUnitNameSnapshot'> => ({
+    const getUnitSnapshotFields = useCallback((option: ProductUomOrderOption): Pick<FormItem,
+        'unitRef' | 'uomId' | 'unitFactor' | 'baseUnitRef' | 'baseUnitCode' | 'unitNameSnapshot' | 'baseUnitNameSnapshot'> => ({
         unitRef: option.unitRef,
-        unitRelationshipId: option.relationshipId || '',
+        uomId: option.uomId,
         unitFactor: String(option.factor),
         baseUnitRef: option.baseUnitRef,
         baseUnitCode: option.baseUnitCode,
@@ -572,10 +590,11 @@ export function PurchaseOrderFormPage({
         const factor = unitOption?.factor ?? 1
 
         const priceBookItem = getPriceBookItemForPartner(partner, productId)
+        const suggestedUnitCost = unitOption?.costPrice ?? (priceBookItem?.costPrice ?? product.costPrice ?? 0) * factor
         if (priceBookItem) {
             return {
                 unitPrice: String(convertCurrencyAmountWithLiveRates(
-                    (priceBookItem.costPrice ?? product.costPrice ?? 0) * factor,
+                    suggestedUnitCost,
                     priceBookItem.currency,
                     partnerCurrency,
                     liveRates
@@ -646,10 +665,10 @@ export function PurchaseOrderFormPage({
                 const next = { ...item, ...changes }
                 if (changes.productId && changes.productId !== item.productId) {
                     const unitOptions = getProductUnitOptions(changes.productId)
-                    const defaultUnit = productUnitContexts.has(changes.productId) ? null : unitOptions[0] ?? null
+                    const defaultUnit = unitOptions.find((option) => option.isBase) ?? unitOptions[0] ?? null
                     Object.assign(next, defaultUnit ? getUnitSnapshotFields(defaultUnit) : {
                         unitRef: '',
-                        unitRelationshipId: '',
+                        uomId: '',
                         unitFactor: '',
                         baseUnitRef: '',
                         baseUnitCode: '',
@@ -665,7 +684,7 @@ export function PurchaseOrderFormPage({
                     if (defaultUnit) Object.assign(next, resolveItemPricing(changes.productId, currency, selectedSupplier, defaultUnit.unitRef))
                 } else if (changes.productId !== undefined && !changes.productId) {
                     next.unitRef = ''
-                    next.unitRelationshipId = ''
+                    next.uomId = ''
                     next.unitFactor = ''
                     next.baseUnitRef = ''
                     next.baseUnitCode = ''
@@ -837,19 +856,23 @@ export function PurchaseOrderFormPage({
                         productName: product.name,
                         productSku: product.sku,
                         unit: unitOption.unitCode,
-                        unitRelationshipId: unitOption.relationshipId,
+                        uomId: unitOption.uomId,
+                        uomNameSnapshot: item.unitNameSnapshot || unitOption.unitCode,
                         unitRef: unitOption.unitRef,
                         unitNameSnapshot: item.unitNameSnapshot || unitOption.unitCode,
                         baseUnitRef: unitOption.baseUnitRef,
                         baseUnitCode: unitOption.baseUnitCode,
                         baseUnitNameSnapshot: item.baseUnitNameSnapshot || unitOption.baseUnitCode,
                         unitFactor: unitOption.factor,
+                        minimumSellingPriceSnapshot: unitOption.minimumSellingPrice ?? null,
+                        uomCostPrice: unitPrice,
+                        convertedUomCostPrice: roundFormAmount(unitPrice),
                         quantity,
                         ...(freeBonusQuantity > 0 ? { freeBonusQuantity } : {}),
                         inventoryQuantity: paidInventoryQuantity,
                         freeBonusInventoryQuantity,
                         receivedQuantity: paidInventoryQuantity + freeBonusInventoryQuantity,
-                        ...(!unitOption.relationshipId && item.freeBonusUnit && item.freeBonusUnit !== unitOption.unitCode ? { freeBonusUnit: item.freeBonusUnit } : {}),
+                        ...(unitOption.isBase && item.freeBonusUnit && item.freeBonusUnit !== unitOption.unitCode ? { freeBonusUnit: item.freeBonusUnit } : {}),
                         lineTotal: roundFormAmount(quantity * unitPrice),
                         originalCurrency: sourceCurrency,
                         originalUnitPrice: convertCurrencyAmountWithLiveRates(
@@ -1179,7 +1202,7 @@ export function PurchaseOrderFormPage({
                                         {items.map((item, index) => {
                                             const product = products.find((entry) => entry.id === item.productId)
                                             const itemUnitOptions = product ? getProductUnitOptions(product.id) : []
-                                            const hasRelatedUnits = Boolean(product && productUnitContexts.has(product.id))
+                                            const hasAdditionalUoms = itemUnitOptions.length > 1
                                             const selectedUnitOption = getFormUnitOption(item, product)
                                             const selectedUnitCode = selectedUnitOption?.unitCode || ''
                                             const freeBonusDisplayUnit = item.freeBonusUnit || selectedUnitCode
@@ -1295,7 +1318,7 @@ export function PurchaseOrderFormPage({
                                                     </div>
                                                     <div className="min-w-0 space-y-2 lg:col-span-5" data-tour-id={index === 0 ? 'tutorial-order-quantity' : undefined}>
                                                         <Label>
-                                                            {hasRelatedUnits
+                                                            {hasAdditionalUoms
                                                                 ? t('orders.form.quantityAndUnit', { defaultValue: 'Quantity and unit' })
                                                                 : t('common.quantity', { defaultValue: 'Quantity' })} *
                                                         </Label>
@@ -1309,7 +1332,7 @@ export function PurchaseOrderFormPage({
                                                                 onChange={(event) => updateItem(index, { quantity: event.target.value })}
                                                                 placeholder={t('common.quantity', { defaultValue: 'Quantity' })}
                                                             />
-                                                            {hasRelatedUnits ? (
+                                                            {hasAdditionalUoms ? (
                                                                 <Select value={item.unitRef} onValueChange={(value) => updateItem(index, { unitRef: value })}>
                                                                     <SelectTrigger className="min-w-28 flex-1 basis-28" aria-label={t('orders.form.unit', { defaultValue: 'Unit' })}>
                                                                         <SelectValue placeholder={t('orders.form.selectUnit', { defaultValue: 'Select unit' })} />
@@ -1342,7 +1365,7 @@ export function PurchaseOrderFormPage({
                                                                 />
                                                                 {(item.freeBonusUnit || product?.unit) && <span className="block truncate text-xs text-muted-foreground">{t(`products.units.${freeBonusDisplayUnit}`, freeBonusDisplayUnit)}</span>}
                                                             </div>
-                                                                {isAccessKeyHeld && !hasRelatedUnits ? (
+                                                                {isAccessKeyHeld && !hasAdditionalUoms ? (
                                                             <FreeBonusUnitSelect
                                                                 value={item.freeBonusUnit}
                                                                 productUnit={product?.unit}
@@ -1382,7 +1405,7 @@ export function PurchaseOrderFormPage({
                                                     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-muted-foreground sm:col-span-2 lg:col-span-full">
                                                         <span>{product?.sku ? `SKU: ${product.sku}` : '\u00A0'}</span>
                                                         <span className="ms-auto text-end">
-                                                            {selectedUnitOption && (hasRelatedUnits || (canUseFreeBonus && freeBonusQuantity > 0))
+                                                            {selectedUnitOption && (hasAdditionalUoms || (canUseFreeBonus && freeBonusQuantity > 0))
                                                                 ? `${t('orders.form.inventoryQuantity', { defaultValue: 'Inventory Qty' })}: ${inventoryQuantity} ${getUnitLabel(selectedUnitOption.baseUnitCode)} - `
                                                                 : ''}
                                                             {(t('orders.form.table.total', { defaultValue: 'Total' }))}: {formatCurrency(lineTotal, currency, features.iqd_display_preference)}

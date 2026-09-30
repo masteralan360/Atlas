@@ -1,6 +1,6 @@
-import { formatHierarchicalQuantity, splitHierarchicalQuantity } from '@/lib/unitRelationships'
+import { roundQuantity } from '@/lib/quantity'
 
-type RelatedUnits = {
+type ProductUomPresentation = {
   factor: number
   largerUnitLabel: string
   smallerUnitLabel: string
@@ -11,26 +11,25 @@ type RelatedUnits = {
 export function getProductStockPresentation(
   quantity: number,
   fallbackUnitLabel: string,
-  relatedUnits: RelatedUnits | null,
+  largerUom: ProductUomPresentation | null,
   formatNumber: (value: number) => string,
 ) {
-  if (!relatedUnits) {
+  if (!largerUom || !Number.isFinite(largerUom.factor) || largerUom.factor <= 1) {
     return {
       label: `${formatNumber(quantity)} ${fallbackUnitLabel}`,
       smallerUnitTotal: null,
     }
   }
 
-  const { factor, largerUnitLabel, smallerUnitLabel, conjunction } = relatedUnits
-  const label = formatHierarchicalQuantity(
-    quantity,
-    factor,
-    largerUnitLabel,
-    smallerUnitLabel,
-    conjunction,
-    formatNumber,
-  )
-  const { parentQuantity } = splitHierarchicalQuantity(quantity, factor)
+  const { factor, largerUnitLabel, smallerUnitLabel, conjunction } = largerUom
+  const normalized = roundQuantity(Math.max(0, quantity))
+  const parentQuantity = Math.floor((normalized + 1e-9) / factor)
+  const childQuantity = roundQuantity(normalized - parentQuantity * factor)
+  const parent = `${formatNumber(parentQuantity)} ${largerUnitLabel}`
+  const child = `${formatNumber(childQuantity)} ${smallerUnitLabel}`
+  const label = parentQuantity > 0 && childQuantity > 0
+    ? `${parent} ${conjunction} ${child}`
+    : parentQuantity > 0 ? parent : child
 
   return {
     label,

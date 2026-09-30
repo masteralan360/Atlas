@@ -154,6 +154,55 @@ describe('sale product exchanges', () => {
         })
     })
 
+    it('restores a partial UoM exchange using the original sale coefficient', async () => {
+        const now = '2026-07-27T10:00:00.000Z'
+        const original = await db.sale_items.get(SALE_ITEM_ID)
+        if (!original) throw new Error('sale item fixture missing')
+        await db.sale_items.put({
+            ...original,
+            quantity: 2,
+            totalPrice: 20,
+            unitPrice: 10,
+            sellingUnitRef: 'builtin:pack',
+            sellingUnitCode: 'pack',
+            sellingUnitNameSnapshot: 'Pack',
+            baseUnitRef: 'builtin:pcs',
+            baseUnitCode: 'pcs',
+            unitFactor: 6,
+            inventoryQuantity: 12,
+            batchAllocations: [{
+                batchId: 'return-batch', batchNumber: 'RETURN-1', quantity: 12,
+                price: 10, costPrice: 4, currency: 'usd', expiryDate: null, manufacturingDate: null
+            }],
+        })
+        await db.sales.update(SALE_ID, { totalAmount: 20, originalTotalAmount: 20 })
+        const inventory = await db.inventory.where('[productId+storageId]')
+            .equals([RETURNED_PRODUCT_ID, STORAGE_ID]).first()
+        if (!inventory) throw new Error('return product inventory fixture missing')
+        await db.inventory.update(inventory.id, { quantity: 0 })
+        await db.stock_batches.put({
+            id: 'return-batch', workspaceId: WORKSPACE_ID, productId: RETURNED_PRODUCT_ID,
+            storageId: STORAGE_ID, batchNumber: 'RETURN-1', quantity: 0, price: 10, costPrice: 4,
+            currency: 'usd', expiryDate: null, manufacturingDate: null, createdAt: now, updatedAt: now,
+            version: 1, isDeleted: true, syncStatus: 'synced', lastSyncedAt: now,
+        })
+
+        const result = await processSaleProductExchange({
+            workspaceId: WORKSPACE_ID, saleId: SALE_ID, returnSaleItemId: SALE_ITEM_ID, returnQuantity: 1,
+            replacementProductId: REPLACEMENT_PRODUCT_ID, replacementStorageId: STORAGE_ID,
+            replacementQuantity: 1, replacementUnitAmount: 15, settlementMethod: 'cash', createdBy: 'cashier',
+        })
+
+        expect(result.returnAmount).toBe(10)
+        expect(await db.inventory.where('[productId+storageId]')
+            .equals([RETURNED_PRODUCT_ID, STORAGE_ID]).first()).toMatchObject({ quantity: 6 })
+        expect(await db.inventory_transactions.where('referenceId').equals(result.returnId).first())
+            .toMatchObject({ quantityDelta: 6, previousQuantity: 0, newQuantity: 6 })
+        expect(await db.sale_items.get(SALE_ITEM_ID)).toMatchObject({ returnedQuantity: 1, unitFactor: 6 })
+        expect(await db.sale_return_items.where('returnId').equals(result.returnId).first())
+            .toMatchObject({ quantity: 1, unitRefundAmount: 10, refundAmount: 10 })
+    })
+
     it('rejects a replacement amount that does not match the current product price', async () => {
         await expect(processSaleProductExchange({
             workspaceId: WORKSPACE_ID, saleId: SALE_ID, returnSaleItemId: SALE_ITEM_ID, returnQuantity: 1,

@@ -1,6 +1,8 @@
-Service optional Barcode
-Allow Storage and Services in POS cart
+Allow Service Label to be changed in modify price
+Service label printer
 Barcode Camera in Phone
+
+in POS if Order payment method is selected, then loan payment method must disappear.
 
 Maintenence Mode Local Mode Enabled
 

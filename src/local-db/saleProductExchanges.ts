@@ -209,6 +209,12 @@ async function applyLocalSaleProductExchange(input: ProcessSaleProductExchangeIn
         throw new Error('Return quantity exceeds the remaining quantity for this sale item')
     }
 
+    const unitFactor = Number(returnItem.unitFactor ?? 1)
+    if (!Number.isFinite(unitFactor) || unitFactor <= 0) {
+        throw new Error('Original sale item has an invalid UoM conversion snapshot')
+    }
+    const returnInventoryQuantity = roundQuantity(returnQuantity * unitFactor)
+
     const returnStorageId = await resolveReturnStorageId({
         workspaceId: input.workspaceId,
         productId: returnItem.productId,
@@ -224,7 +230,7 @@ async function applyLocalSaleProductExchange(input: ProcessSaleProductExchangeIn
         input.replacementStorageId,
         replacementQuantity,
     )
-    const returnSplit = splitStockBatchAllocationsForReturn(returnItem.batchAllocations || [], returnQuantity)
+    const returnSplit = splitStockBatchAllocationsForReturn(returnItem.batchAllocations || [], returnInventoryQuantity)
     const returnUnitAmount = Number(returnItem.convertedUnitPrice ?? returnItem.unitPrice ?? 0)
     const returnAmount = returnUnitAmount * returnQuantity
     const replacementAmount = replacementUnitPrice * replacementQuantity
@@ -269,7 +275,7 @@ async function applyLocalSaleProductExchange(input: ProcessSaleProductExchangeIn
         }
 
         const returnPreviousQuantity = await getInventoryQuantityForProductStorage(returnItem.productId, returnStorageId)
-        const returnNewQuantity = roundQuantity(returnPreviousQuantity + returnQuantity)
+        const returnNewQuantity = roundQuantity(returnPreviousQuantity + returnInventoryQuantity)
         const returnInventoryRow = await putInventoryQuantity(
             input.workspaceId,
             returnItem.productId,
@@ -291,7 +297,7 @@ async function applyLocalSaleProductExchange(input: ProcessSaleProductExchangeIn
                 productId: returnItem.productId,
                 storageId: returnStorageId,
                 transactionType: 'return',
-                quantityDelta: returnQuantity,
+                quantityDelta: returnInventoryQuantity,
                 previousQuantity: returnPreviousQuantity,
                 newQuantity: returnNewQuantity,
                 referenceId: ids.returnId,

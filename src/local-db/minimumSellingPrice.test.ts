@@ -123,7 +123,14 @@ describe('minimum selling price validation service', () => {
 
         expect(remote.rpc).toHaveBeenCalledWith('validate_staff_minimum_selling_prices', {
             p_workspace_id: WORKSPACE_ID,
-            p_items: [{ product_id: PRODUCT_ID, effective_selling_price: 24, unit_factor: 2, currency: 'usd' }]
+            p_items: [{
+                product_id: PRODUCT_ID,
+                effective_selling_price: 24,
+                unit_factor: 2,
+                minimum_selling_price: null,
+                selling_uom_id: null,
+                currency: 'usd'
+            }]
         })
     })
 
@@ -133,7 +140,7 @@ describe('minimum selling price validation service', () => {
             line_index: 0,
             product_id: PRODUCT_ID,
             product_name: 'Minimum price item',
-            minimum_selling_price: '12'
+            minimum_selling_price: '24'
         }]
         remote.rpc.mockImplementation(async () => ({ data: remote.data, error: remote.error }))
 
@@ -168,7 +175,14 @@ describe('minimum selling price validation service', () => {
             message: expect.stringContaining('Could not verify the selling currency')
         })
         expect(remote.rpc).toHaveBeenCalledWith('validate_staff_minimum_selling_prices', expect.objectContaining({
-            p_items: [{ product_id: PRODUCT_ID, effective_selling_price: 1_000, unit_factor: 1, currency: 'iqd' }]
+            p_items: [{
+                product_id: PRODUCT_ID,
+                effective_selling_price: 1_000,
+                unit_factor: 1,
+                minimum_selling_price: null,
+                selling_uom_id: null,
+                currency: 'iqd'
+            }]
         }))
     })
 

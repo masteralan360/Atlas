@@ -13,7 +13,7 @@ import {
     shouldRemovePosCartItem,
     snapshotPosCart
 } from '@/lib/posCart'
-import { getCartInventoryQuantity } from '@/lib/unitRelationships'
+import { getCartInventoryQuantity } from '@/lib/productUoms'
 
 const item: CartItem = { product_id: 'p', storageId: 's', sku: 'SKU', name: 'Item', price: 100,
     quantity: 2.25, max_stock: 20, negotiated_price: 90, price_book_id: 'book' }
@@ -42,8 +42,8 @@ describe('POS held-cart snapshots and restoration', () => {
         expect(canAddPosCartItemFromStorage([activity], ACTIVITIES_VIRTUAL_STORAGE_ID, ACTIVITIES_VIRTUAL_STORAGE_ID)).toBe(true)
     })
 
-    it('blocks related-unit products from an Order cart without restricting other payment methods', () => {
-        expect(canAddProductToPosCart('order', true)).toBe(false)
+    it('allows products with additional UoMs in every POS checkout type', () => {
+        expect(canAddProductToPosCart('order', true)).toBe(true)
         expect(canAddProductToPosCart('order', false)).toBe(true)
         expect(canAddProductToPosCart('cash', true)).toBe(true)
         expect(canAddProductToPosCart('digital', true)).toBe(true)

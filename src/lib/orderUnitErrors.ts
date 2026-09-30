@@ -1,4 +1,4 @@
-const ORDER_UNIT_CONFIGURATION_ERROR = /(?:order item.*unit|product unit relationship|order unit selection)/i
+const ORDER_UOM_CONFIGURATION_ERROR = /(?:order item.*(?:unit|uom)|product uom|order (?:unit|uom) selection)/i
 
 /** Identifies authoritative database rejections caused by stale or invalid unit snapshots. */
 export function isOrderUnitConfigurationError(error: unknown) {
@@ -7,5 +7,5 @@ export function isOrderUnitConfigurationError(error: unknown) {
     : typeof error === 'object' && error && 'message' in error
       ? String((error as { message?: unknown }).message ?? '')
       : String(error ?? '')
-  return ORDER_UNIT_CONFIGURATION_ERROR.test(message)
+  return ORDER_UOM_CONFIGURATION_ERROR.test(message)
 }

@@ -28,6 +28,18 @@ describe('Sale Orders · hosted partner statement', () => {
             try {
                 const savedOrder = requireLiveData(await fresh.schema('crm').from('sales_orders')
                     .select('*').eq('id', order.id).single(), 'statement source order')
+                const savedItems = Array.isArray(savedOrder.items)
+                    ? savedOrder.items as Array<Record<string, unknown>>
+                    : []
+                expect(savedItems).toHaveLength(order.items.length)
+                expect(savedItems[0]).toBeDefined()
+                const savedFirstItem = savedItems[0]!
+                expect(order.items[0]).toMatchObject({
+                    uomId: savedFirstItem.uomId,
+                    uomNameSnapshot: savedFirstItem.uomNameSnapshot,
+                    unitFactor: savedFirstItem.unitFactor,
+                    inventoryQuantity: savedFirstItem.inventoryQuantity
+                })
                 const visiblePartners = requireLiveData<Array<{ id: string; receivable_balance: number }>>(
                     await fresh.schema('crm').rpc('list_visible_business_partners', { p_workspace_id: liveWorkspaceId }), 'visible partners')
                 const savedPartner = visiblePartners.find((row) => row.id === partner.id)

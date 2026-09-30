@@ -60,7 +60,8 @@ type SalesOrderLineProductSelection = {
     priceSourceCurrency: string
     priceBookCostPrice: string
     unitRef?: string
-    unitRelationshipId?: string
+    uomId?: string
+    uomNameSnapshot?: string
     unitFactor?: string
     baseUnitRef?: string
     baseUnitCode?: string
@@ -85,7 +86,8 @@ export function clearSalesItemProductForServicesStorage(
         priceSourceCurrency: '',
         priceBookCostPrice: '',
         unitRef: '',
-        unitRelationshipId: '',
+        uomId: '',
+        uomNameSnapshot: '',
         unitFactor: '',
         baseUnitRef: '',
         baseUnitCode: '',

@@ -9,6 +9,7 @@ import Dexie, {
 import type { PartnerSummaryJob } from './partnerSummaryJobs'
 import type {
   Product,
+  ProductUom,
   ProductBarcode,
   PriceBook,
   PriceBookItem,
@@ -412,6 +413,7 @@ function normalizeStockAdjustmentInventoryTransactionRecord(
 export class AtlasDatabase extends Dexie {
   products!: EntityTable<Product, 'id'>
   product_barcodes!: EntityTable<ProductBarcode, 'id'>
+  product_uoms!: EntityTable<ProductUom, 'id'>
   price_books!: EntityTable<PriceBook, 'id'>
   price_book_items!: EntityTable<PriceBookItem, 'id'>
   categories!: EntityTable<Category, 'id'>
@@ -3585,6 +3587,62 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, paidAt, accountId, cashierShiftOccurrenceId, sourceModule, sourceType, sourceRecordId, sourceSubrecordId, direction, reversalOfTransactionId, voidId, settlementOperationId, updatedAt, isDeleted, syncStatus, [workspaceId+paidAt], [workspaceId+accountId], [workspaceId+cashierShiftOccurrenceId], [workspaceId+sourceType+sourceRecordId], [workspaceId+settlementOperationId], [workspaceId+voidId]',
       partner_settlement_operations:
         'id, workspaceId, partnerId, direction, paidAt, status, updatedAt, isDeleted, syncStatus, [workspaceId+partnerId], [workspaceId+paidAt], [workspaceId+status]'
+    })
+
+    this.version(140).stores({
+      product_uoms:
+        'id, workspaceId, productId, unitRef, unitCode, isBase, isActive, isDefaultSelling, updatedAt, isDeleted, syncStatus, [workspaceId+productId], [productId+unitRef], [workspaceId+updatedAt]'
+    }).upgrade(async (tx) => {
+      const [products, customUnits, relationships, conversions] = await Promise.all([
+        tx.table('products').toArray(),
+        tx.table('units').toArray(),
+        tx.table('unit_relationships').toArray(),
+        tx.table('product_unit_conversions').toArray(),
+      ]) as [Product[], Unit[], UnitRelationship[], ProductUnitConversion[]]
+      const relationshipsById = new Map(relationships.map((row) => [row.id, row]))
+      const now = new Date().toISOString()
+      const id = () => globalThis.crypto?.randomUUID?.()
+        ?? `local-uom-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const unitRef = (workspaceId: string, code: string) => {
+        const normalized = code.trim().toLocaleLowerCase()
+        const custom = customUnits.find((row) => row.workspaceId === workspaceId
+          && !row.isDeleted && row.code.trim().toLocaleLowerCase() === normalized)
+        return custom ? `custom:${custom.id}` : `builtin:${normalized}`
+      }
+      const rows: ProductUom[] = []
+      for (const product of products) {
+        if (!product.workspaceId || !product.unit || product.isService) continue
+        const baseRef = unitRef(product.workspaceId, product.unit)
+        rows.push({
+          id: id(), workspaceId: product.workspaceId, productId: product.id,
+          unitRef: baseRef as ProductUom['unitRef'], unitCode: product.unit, coefficient: 1,
+          isBase: true, isActive: !product.isDeleted, isDefaultSelling: true,
+          sellingPrice: product.price, costPrice: product.costPrice,
+          minimumSellingPrice: product.minimumSellingPrice ?? null, sku: product.sku,
+          barcode: product.barcode ?? null, createdBy: product.createdBy ?? null,
+          createdAt: product.createdAt || now, updatedAt: now, version: 1,
+          isDeleted: false, syncStatus: product.syncStatus, lastSyncedAt: product.lastSyncedAt,
+        })
+      }
+      const productById = new Map(products.map((row) => [row.id, row]))
+      for (const conversion of conversions) {
+        if (conversion.isDeleted) continue
+        const product = productById.get(conversion.productId)
+        const relationship = relationshipsById.get(conversion.relationshipId)
+        if (!product || product.isService || !relationship || relationship.isDeleted) continue
+        rows.push({
+          id: id(), workspaceId: conversion.workspaceId, productId: conversion.productId,
+          unitRef: relationship.parentUnitRef, unitCode: relationship.parentUnitCode,
+          coefficient: conversion.factor, isBase: false,
+          isActive: conversion.factor !== 1 && !relationship.isArchived && !product.isDeleted,
+          isDefaultSelling: false, sellingPrice: conversion.parentPrice,
+          costPrice: null, minimumSellingPrice: null,
+          createdBy: conversion.createdBy ?? null, createdAt: conversion.createdAt || now,
+          updatedAt: conversion.updatedAt || now, version: 1, isDeleted: false,
+          syncStatus: conversion.syncStatus, lastSyncedAt: conversion.lastSyncedAt,
+        })
+      }
+      if (rows.length) await tx.table('product_uoms').bulkPut(rows)
     })
 
     this.registerIndexedDbDiagnostics()

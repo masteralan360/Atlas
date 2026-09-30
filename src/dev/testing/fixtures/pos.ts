@@ -5,6 +5,7 @@ import { CASH_AND_DIGITAL_PAYMENT_METHODS } from '@/lib/paymentMethods'
 
 export const POS_WORKSPACE = 'a7200000-0000-4000-8000-000000000001'
 export const POS_PRODUCT = 'a7200000-0000-4000-8000-000000000002'
+export const POS_BASE_UOM = 'a7200000-0000-4000-8000-000000000017'
 export const POS_STORAGE = 'a7200000-0000-4000-8000-000000000003'
 export const POS_INVENTORY = 'a7200000-0000-4000-8000-000000000004'
 export const POS_BATCH = 'a7200000-0000-4000-8000-000000000005'
@@ -21,6 +22,10 @@ export async function seedPosStock(currency: CurrencyCode = 'usd', service = fal
         description: '', categoryId: null, price: 100, costPrice: service ? 0 : 40,
         quantity: service ? 0 : 20, minStockLevel: 0, unit: 'pcs', currency, canBeReturned: true, isService: service })
     if (!service) {
+        await db.product_uoms.put({ id: POS_BASE_UOM, ...base, productId: POS_PRODUCT,
+            unitRef: 'builtin:pcs', unitCode: 'pcs', coefficient: 1, isBase: true, isActive: true,
+            isDefaultSelling: true, sellingPrice: 100, costPrice: 40, minimumSellingPrice: null,
+            sku: 'DEV-POS', barcode: null })
         await db.inventory.put({ id: POS_INVENTORY, ...base, productId: POS_PRODUCT, storageId: POS_STORAGE, quantity: 20 })
         await db.stock_batches.put({ id: POS_BATCH, ...base, productId: POS_PRODUCT, storageId: POS_STORAGE,
             batchNumber: 'POS-1', quantity: 20, price: 100, costPrice: 40, currency,
@@ -40,6 +45,11 @@ export function posCheckoutInput({ currency = 'usd', method = 'cash', service = 
             currency_conversion_applied: false, sales_exchange: [], payment_method: method,
             items: [{ product_id: POS_PRODUCT, storage_id: service ? null : POS_STORAGE,
                 product_name: 'POS scenario item', product_sku: 'DEV-POS', created_at: POS_TIME, updated_at: POS_TIME,
+                selling_uom_id: service ? null : POS_BASE_UOM,
+                selling_unit_ref: service ? null : 'builtin:pcs', selling_unit_code: 'pcs',
+                selling_unit_name_snapshot: 'pcs', base_unit_ref: service ? null : 'builtin:pcs', base_unit_code: 'pcs',
+                unit_factor: 1, inventory_quantity: quantity,
+                uom_cost_price: service ? 0 : 40, minimum_selling_price_snapshot: null,
                 quantity, unit_price: unitPrice, total_price: unitPrice * quantity,
                 cost_price: service ? 0 : 40, converted_cost_price: service ? 0 : 40,
                 original_currency: currency, original_unit_price: 100, converted_unit_price: unitPrice,

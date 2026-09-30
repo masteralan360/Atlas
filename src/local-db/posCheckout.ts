@@ -29,6 +29,10 @@ export interface PosCheckoutItem {
     quantity: number
     selling_unit_ref?: string | null
     selling_unit_code?: string | null
+    selling_uom_id?: string | null
+    selling_unit_name_snapshot?: string | null
+    uom_cost_price?: number | null
+    minimum_selling_price_snapshot?: number | null
     base_unit_ref?: string | null
     base_unit_code?: string | null
     unit_factor?: number
@@ -181,34 +185,34 @@ async function saveLocal(input: PosCheckoutInput) {
                 || (isService(product) ? item.storage_id !== null : !item.storage_id)) {
                 throw new Error(i18n.t('pos.stockMismatch'))
             }
-            const unitFactor = item.unit_factor ?? 1
-            const inventoryQuantity = item.inventory_quantity ?? item.quantity
-            if (!item.selling_unit_ref) {
-                if (item.base_unit_ref
-                    || (item.selling_unit_code ?? null) !== (item.base_unit_code ?? null)
-                    || unitFactor !== 1
-                    || Math.abs(inventoryQuantity - item.quantity) > 0.000001) {
+            if (isService(product)) {
+                if ((item.unit_factor ?? 1) !== 1
+                    || Math.abs((item.inventory_quantity ?? item.quantity) - item.quantity) > 0.000001) {
                     throw new Error(i18n.t('pos.stockMismatch'))
                 }
                 continue
             }
-            const conversion = await db.product_unit_conversions
+            const unitFactor = item.unit_factor ?? 1
+            const inventoryQuantity = item.inventory_quantity ?? item.quantity
+            const configuredUoms = await db.product_uoms
                 .where('[workspaceId+productId]')
                 .equals([p.workspace_id, item.product_id])
-                .and((row) => !row.isDeleted)
-                .first()
-            const relationship = conversion
-                ? await db.unit_relationships.get(conversion.relationshipId)
-                : undefined
-            if (!conversion || !relationship || relationship.isDeleted
-                || product.unit.trim().toLocaleLowerCase() !== relationship.childUnitCode.trim().toLocaleLowerCase()
-                || item.base_unit_ref !== relationship.childUnitRef
-                || item.base_unit_code !== relationship.childUnitCode
-                || (item.selling_unit_ref === relationship.parentUnitRef
-                    ? item.selling_unit_code !== relationship.parentUnitCode || unitFactor !== conversion.factor
-                    : item.selling_unit_ref === relationship.childUnitRef
-                        ? item.selling_unit_code !== relationship.childUnitCode || unitFactor !== 1
-                        : true)) {
+                .and((row) => !row.isDeleted && row.isActive)
+                .toArray()
+            const selectedUom = item.selling_uom_id
+                ? configuredUoms.find((row) => row.id === item.selling_uom_id)
+                : configuredUoms.find((row) => row.unitRef === item.selling_unit_ref)
+                    ?? configuredUoms.find((row) => row.isBase)
+            const baseUom = configuredUoms.find((row) => row.isBase)
+            const sellingUnitRef = item.selling_unit_ref ?? baseUom?.unitRef ?? null
+            if (!selectedUom || !baseUom
+                || selectedUom.unitRef !== sellingUnitRef
+                || selectedUom.unitCode !== (item.selling_unit_code ?? product.unit)
+                || item.base_unit_ref !== baseUom.unitRef
+                || item.base_unit_code !== baseUom.unitCode
+                || Math.abs(unitFactor - selectedUom.coefficient) > 0.000001
+                || Math.abs(inventoryQuantity - item.quantity * selectedUom.coefficient) > 0.000001
+                || product.unit.trim().toLocaleLowerCase() !== baseUom.unitCode.trim().toLocaleLowerCase()) {
                 throw new Error(i18n.t('pos.stockMismatch'))
             }
         }
@@ -236,6 +240,13 @@ async function saveLocal(input: PosCheckoutInput) {
                 createdAt: input.timestamp, updatedAt: input.timestamp,
                 productId: item.product_id, storageId: item.storage_id, quantity: item.quantity,
                 sellingUnitRef: item.selling_unit_ref as never, sellingUnitCode: item.selling_unit_code,
+                sellingUomId: item.selling_uom_id ?? null,
+                sellingUnitNameSnapshot: item.selling_unit_name_snapshot
+                    ?? item.selling_unit_code
+                    ?? item.base_unit_code
+                    ?? '',
+                uomCostPrice: item.uom_cost_price ?? item.cost_price,
+                minimumSellingPriceSnapshot: item.minimum_selling_price_snapshot ?? null,
                 baseUnitRef: item.base_unit_ref as never, baseUnitCode: item.base_unit_code,
                 unitFactor: item.unit_factor ?? 1, inventoryQuantity: item.inventory_quantity ?? item.quantity,
                 unitPrice: item.unit_price, totalPrice: item.total_price, costPrice: item.cost_price,

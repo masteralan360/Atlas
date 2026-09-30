@@ -592,7 +592,7 @@ describe("sales agent commission lifecycle", () => {
     expect(recognizedProductCommission).toBe(7);
   });
 
-  it("does not reverse related-unit revenue for returned free stock", () => {
+  it("does not reverse product UoM revenue for returned free stock", () => {
     const order = completedOrder(crypto.randomUUID());
     order.total = 40_000;
     order.subtotal = 40_000;

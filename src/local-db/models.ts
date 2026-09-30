@@ -40,6 +40,8 @@ export interface User extends BaseEntity {
 
 export interface ProductBarcode extends BaseEntity {
   productId: string
+  /** Optional product-specific UoM; null keeps this as a product-wide barcode. */
+  productUomId?: string | null
   barcode: string
   label?: string
   isPrimary: boolean
@@ -77,6 +79,29 @@ export interface Product extends BaseEntity {
   imageUrl?: string
   canBeReturned: boolean
   returnRules?: string
+  createdBy?: string | null
+}
+
+/**
+ * A product's commercial unit of measure. Inventory remains stored in the
+ * product's base unit; `coefficient` converts one selected unit into that
+ * canonical quantity. The base row mirrors the Product's primary unit and
+ * prices so Product remains the existing source of truth for its base values.
+ */
+export interface ProductUom extends BaseEntity {
+  productId: string
+  unitRef: UnitRef
+  unitCode: string
+  coefficient: number
+  isBase: boolean
+  isActive: boolean
+  /** Future POS additions default to this unit; the base unit is the fallback. */
+  isDefaultSelling?: boolean
+  sellingPrice: number
+  costPrice: number | null
+  minimumSellingPrice: number | null
+  sku?: string | null
+  barcode?: string | null
   createdBy?: string | null
 }
 
@@ -855,8 +880,10 @@ export interface OrderLineItem {
   productSku: string
   /** Selected commercial unit code at the time this line was added. */
   unit?: string | null
-  /** Relationship selected for this line, when the product has hierarchical units. */
-  unitRelationshipId?: string | null
+  /** Product UoM selected for this line. */
+  uomId?: string | null
+  /** Immutable commercial UoM label at the time this order line was created. */
+  uomNameSnapshot?: string | null
   /** Stable selected commercial unit identifier. */
   unitRef?: UnitRef | null
   /** Historical selected-unit label. Custom-unit renames do not rewrite this value. */
@@ -869,6 +896,11 @@ export interface OrderLineItem {
   baseUnitNameSnapshot?: string | null
   /** Number of canonical inventory units represented by one selected commercial unit. */
   unitFactor?: number | null
+  /** Selected-unit staff price floor copied at order creation. */
+  minimumSellingPriceSnapshot?: number | null
+  /** Selected-unit cost copied at order creation, independent of coefficient. */
+  uomCostPrice?: number | null
+  convertedUomCostPrice?: number | null
   /** Display-only unit override for the free bonus quantity. Never affects logic, which always uses `unit`. */
   freeBonusUnit?: string | null
   quantity: number
@@ -1958,12 +1990,18 @@ export interface SaleItem {
   storageId?: string | null
   quantity: number
   /** Unit selected by the cashier. Legacy rows default to the product unit. */
+  sellingUomId?: string | null
   sellingUnitRef?: UnitRef | null
   sellingUnitCode?: string | null
+  sellingUnitNameSnapshot?: string | null
+  /** Selling UoM cost captured independently from the product base-unit cost. */
+  uomCostPrice?: number | null
   /** Canonical inventory unit and immutable conversion snapshot. */
   baseUnitRef?: UnitRef | null
   baseUnitCode?: string | null
   unitFactor?: number
+  /** Selling-unit staff floor as configured when this sale was made. */
+  minimumSellingPriceSnapshot?: number | null
   /** Canonical stock quantity deducted/restored for this sold quantity. */
   inventoryQuantity?: number
   unitPrice: number
@@ -2073,6 +2111,7 @@ export interface OrderReturnItem extends BaseEntity {
   paidInventoryQuantity?: number | null
   freeInventoryQuantity?: number | null
   unitRef?: UnitRef | null
+  uomId?: string | null
   unit?: string | null
   unitNameSnapshot?: string | null
   baseUnitRef?: UnitRef | null
@@ -2664,6 +2703,7 @@ export interface SyncQueueItem {
   id: string
   entityType:
     | 'products'
+    | 'product_uoms'
     | 'product_barcodes'
     | 'price_books'
     | 'price_book_items'
@@ -2898,6 +2938,7 @@ export interface OfflineMutation {
   workspaceId: string
   entityType:
     | 'products'
+    | 'product_uoms'
     | 'product_barcodes'
     | 'price_books'
     | 'price_book_items'

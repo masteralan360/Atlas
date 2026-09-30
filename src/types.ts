@@ -15,6 +15,11 @@ export interface SaleItem {
     quantity: number
     selling_unit_ref?: string | null
     selling_unit_code?: string | null
+    selling_uom_id?: string | null
+    selling_unit_name_snapshot?: string | null
+    uom_cost_price?: number | null
+    converted_uom_cost_price?: number | null
+    minimum_selling_price_snapshot?: number | null
     base_unit_ref?: string | null
     base_unit_code?: string | null
     unit_factor?: number
@@ -187,6 +192,10 @@ export interface CartItem {
     selling_unit_code?: string | null
     base_unit_ref?: string | null
     base_unit_code?: string | null
+    selling_uom_id?: string | null
+    selling_unit_name_snapshot?: string | null
+    uom_cost_price?: number | null
+    minimum_selling_price_snapshot?: number | null
     unit_factor?: number
     /** Service lines use the UI-only Services virtual location and never affect stock. */
     is_service?: boolean
