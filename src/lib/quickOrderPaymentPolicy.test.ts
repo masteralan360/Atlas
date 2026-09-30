@@ -12,7 +12,8 @@ describe('Quick Order payment status policy', () => {
             requiredStatus: null,
             selectorDisabled: true,
             paidDisabled: false,
-            unpaidDisabled: false
+            unpaidDisabled: false,
+            partialDisabled: true
         })
     })
 
@@ -22,7 +23,8 @@ describe('Quick Order payment status policy', () => {
                 requiredStatus: 'paid',
                 selectorDisabled: false,
                 paidDisabled: false,
-                unpaidDisabled: true
+                unpaidDisabled: true,
+                partialDisabled: true
             })
         }
     })
@@ -32,7 +34,8 @@ describe('Quick Order payment status policy', () => {
             requiredStatus: null,
             selectorDisabled: false,
             paidDisabled: false,
-            unpaidDisabled: false
+            unpaidDisabled: false,
+            partialDisabled: true
         })
     })
 
@@ -43,23 +46,38 @@ describe('Quick Order payment status policy', () => {
                 requiredStatus: 'unpaid',
                 selectorDisabled: false,
                 paidDisabled: true,
-                unpaidDisabled: false
+                unpaidDisabled: false,
+                partialDisabled: paymentMethod !== 'loan'
             })
         }
     )
+
+    it('allows Partially Paid for Loans while keeping Unpaid as the default and Paid disabled', () => {
+        expect(getQuickOrderPaymentStatusPolicy('loan', 'completed')).toEqual({
+            requiredStatus: 'unpaid',
+            selectorDisabled: false,
+            paidDisabled: true,
+            unpaidDisabled: false,
+            partialDisabled: false
+        })
+        expect(getQuickOrderPaymentStatusAfterMethodChange(null, 'loan', 'completed')).toBe('unpaid')
+    })
 
     it('does not force a status for other payment methods', () => {
         expect(getQuickOrderPaymentStatusPolicy('bank_transfer', 'completed')).toEqual({
             requiredStatus: null,
             selectorDisabled: false,
             paidDisabled: false,
-            unpaidDisabled: false
+            unpaidDisabled: false,
+            partialDisabled: true
         })
     })
 
     it('immediately applies the required status when the method changes', () => {
         expect(getQuickOrderPaymentStatusAfterMethodChange(null, 'cash', 'completed')).toBe('paid')
         expect(getQuickOrderPaymentStatusAfterMethodChange('paid', 'loan', 'draft')).toBe('unpaid')
+        expect(getQuickOrderPaymentStatusAfterMethodChange('partial', 'installments', 'completed')).toBe('unpaid')
+        expect(getQuickOrderPaymentStatusAfterMethodChange('partial', 'bank_transfer', 'draft')).toBe('unpaid')
         expect(getQuickOrderPaymentStatusAfterMethodChange('paid', null, 'completed')).toBeNull()
         expect(getQuickOrderPaymentStatusAfterMethodChange(null, 'bank_transfer', 'completed')).toBeNull()
     })
@@ -67,6 +85,7 @@ describe('Quick Order payment status policy', () => {
     it('reapplies Cash restrictions when Draft changes to an active order status', () => {
         expect(getQuickOrderPaymentStatusAfterOrderStatusChange('unpaid', 'cash', 'completed')).toBe('paid')
         expect(getQuickOrderPaymentStatusAfterOrderStatusChange('unpaid', 'cash', 'pending')).toBe('paid')
+        expect(getQuickOrderPaymentStatusAfterOrderStatusChange('partial', 'loan', 'completed')).toBe('partial')
     })
 
     it('keeps Draft payment choices open and leaves an empty method unselected', () => {

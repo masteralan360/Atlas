@@ -1,4 +1,5 @@
 import { roundOrderValue } from '@/lib/orderPrecision'
+import { getRemainingFinancedBalance } from '@/lib/orderFinancing'
 
 export type QuickOrderInstallmentSummary = {
     installmentCount: number | null
@@ -31,7 +32,7 @@ export function getQuickOrderInstallmentSummary(
     return {
         installmentCount: isInstallmentCountValid ? parsedCount : null,
         initialPaymentAmount,
-        financedBalance: roundOrderValue(Math.max(0, total - (initialPaymentAmount ?? 0))),
+        financedBalance: getRemainingFinancedBalance(total, initialPaymentAmount),
         isInstallmentCountValid,
         isInitialPaymentAmountValid,
         isValid: isInstallmentCountValid && isInitialPaymentAmountValid

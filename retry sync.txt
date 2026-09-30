@@ -1,4 +1,10 @@
-POS Quick Order Fields
+Implement an **Order Archiving** feature for both **Sales Orders** and **Purchase Orders**.
+
+Expand Testing Suite to Loans
+
+Fix POS Quick Order Time
+
+Collectable Open Payments for Transportation and Travel
 
 Maintenence Mode Local Mode Enabled
 

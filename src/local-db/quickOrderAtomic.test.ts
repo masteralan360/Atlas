@@ -1456,6 +1456,88 @@ describe('atomic POS Quick Order completion', () => {
         expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(4)
     })
 
+    it('records a partially paid Loan Quick Order through the order-linked loan repayment flow', async () => {
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'local' })
+        await db.payment_accounts.put({
+            ...baseEntity(PAYMENT_ACCOUNT_ID),
+            name: 'Main cash drawer',
+            accountType: 'cash_drawer',
+            linkedPaymentMethod: null,
+            iconKey: 'cash_drawer',
+            notes: null,
+            isActive: true,
+            isPrimary: true,
+            isDefaultForPaymentSelector: true,
+            createdBy: USER_ID
+        })
+        const completed = await createQuickSalesOrder(WORKSPACE_ID, {
+            ...unpaidQuickOrderInput('completed'),
+            paymentMethod: 'loan',
+            paymentStatus: 'partial',
+            paidAmount: 25,
+            balanceAmount: 75,
+            initialPaymentAmount: 25,
+            initialPaymentAccountId: PAYMENT_ACCOUNT_ID,
+            initialPaymentAccountNameSnapshot: 'Main cash drawer',
+            firstDueDate: null,
+            nextDueDate: null
+        }, USER_ID)
+
+        expect(completed).toMatchObject({
+            status: 'completed',
+            paymentMethod: 'loan',
+            paymentStatus: 'partial',
+            isPaid: false,
+            paidAmount: 25,
+            balanceAmount: 75,
+            initialPaymentAmount: 25,
+            firstDueDate: null,
+            linkedLoanId: expect.any(String)
+        })
+        const loan = await db.loans.get(completed.linkedLoanId!)
+        expect(loan).toMatchObject({
+            loanCategory: 'simple',
+            principalAmount: 100,
+            totalPaidAmount: 25,
+            balanceAmount: 75,
+            firstDueDate: null
+        })
+        const [payment] = await db.payment_transactions
+            .where('[workspaceId+sourceType+sourceRecordId]')
+            .equals([WORKSPACE_ID, 'simple_loan', loan!.id])
+            .toArray()
+        expect(payment).toMatchObject({
+            direction: 'incoming',
+            amount: 25,
+            paymentMethod: 'cash',
+            accountId: PAYMENT_ACCOUNT_ID,
+            accountNameSnapshot: 'Main cash drawer',
+            metadata: { isOrderLoanInitialRepayment: true }
+        })
+        expect(await db.loan_installments.where('loanId').equals(loan!.id).toArray()).toEqual([
+            expect.objectContaining({
+                installmentNo: 1,
+                plannedAmount: 100,
+                paidAmount: 25,
+                balanceAmount: 75
+            })
+        ])
+        expect(await db.payment_account_movements.toArray()).toEqual([
+            expect.objectContaining({
+                paymentTransactionId: payment.id,
+                accountId: PAYMENT_ACCOUNT_ID,
+                direction: 'incoming',
+                amount: 25,
+                deltaAmount: 25
+            })
+        ])
+        expect(await db.payment_account_balances
+            .where('[accountId+currency]')
+            .equals([PAYMENT_ACCOUNT_ID, 'usd'])
+            .first()).toMatchObject({ balanceAmount: 25 })
+        expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(4)
+    })
+
     it('rejects a paid Quick Order with a financing payment method before records are created', async () => {
         const invalid = {
             ...quickOrderInput(),

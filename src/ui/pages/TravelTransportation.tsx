@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { CalendarDays, Eye, Plane, Plus, Search, UsersRound } from 'lucide-react'
+import { CalendarDays, CircleDollarSign, CreditCard, Eye, Plane, Plus, Search, UsersRound } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useRoute } from 'wouter'
 
@@ -11,6 +11,8 @@ import {
     useTravelBookings,
     useTravelPassengers,
     useTravelPassengersForWorkspace,
+    summarizeTravelBookings,
+    type CurrencyCode,
     type TravelBooking
 } from '@/local-db'
 import { useWorkspace } from '@/workspace'
@@ -19,6 +21,8 @@ import {
     Button,
     Card,
     CardContent,
+    CardHeader,
+    CardTitle,
     DateRangeFilters,
     Input,
     Table,
@@ -74,7 +78,7 @@ function matchesCreatedDate(
 }
 
 export function TravelTransportation() {
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     // WorkspaceContext exposes the selected workspace as `activeWorkspace`.
     // Keeping a local alias preserves the booking data API's workspace naming
     // while ensuring the page does not render an empty main area.
@@ -102,6 +106,9 @@ export function TravelTransportation() {
         }
         return result
     }, [workspacePassengers])
+    const passengerCountByBookingId = useMemo(() => new Map<string, number>(
+        [...passengerNamesByBookingId].map(([id, names]) => [id, names.length] as const)
+    ), [passengerNamesByBookingId])
     const visibleBookings = useMemo(() => {
         const query = search.trim().toLowerCase()
         return bookings.filter((candidate) => {
@@ -110,8 +117,24 @@ export function TravelTransportation() {
             return (!query || searchable.includes(query)) && matchesCreatedDate(candidate.createdAt, dateRange, customDates)
         })
     }, [bookings, customDates, dateRange, passengerNamesByBookingId, search])
+    const summary = useMemo(
+        () => summarizeTravelBookings(visibleBookings, passengerCountByBookingId),
+        [passengerCountByBookingId, visibleBookings]
+    )
 
     if (!workspace) return null
+
+    const defaultCurrency = features.default_currency || 'usd'
+    const sortCurrencyEntries = (totals: Record<string, number>): [string, number][] => {
+        const entries = Object.entries(totals).sort(([left], [right]) => {
+            if (left === defaultCurrency) return -1
+            if (right === defaultCurrency) return 1
+            return left.localeCompare(right)
+        })
+        return entries.length > 0 ? entries : [[defaultCurrency, 0]]
+    }
+    const totalProfitEntries = sortCurrencyEntries(summary.profitByCurrency)
+    const outstandingProfitEntries = sortCurrencyEntries(summary.outstandingProfitByCurrency)
 
     if (isNew) {
         return <TravelBookingFormPage
@@ -155,19 +178,65 @@ export function TravelTransportation() {
                         </div>
                     </div>
                 </div>
-                <Button type="button" onClick={() => setLocation('/travel-transportation/new')}>
-                    <Plus className="mr-2 h-4 w-4" />{t('travelTransportation.newBooking')}
-                </Button>
+                <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
+                    <DateRangeFilters label={t('travelTransportation.table.created')} className="w-full lg:w-auto" />
+                    <Button type="button" className="w-full sm:w-auto" onClick={() => setLocation('/travel-transportation/new')}>
+                        <Plus className="mr-2 h-4 w-4" />{t('travelTransportation.newBooking')}
+                    </Button>
+                </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                <Card className="rounded-2xl border-border/80 shadow-none">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground">
+                            {t('travelTransportation.summary.totalPassengers')}
+                        </CardTitle>
+                        <span className="rounded-xl bg-muted/60 p-2 text-muted-foreground"><UsersRound className="h-4 w-4" /></span>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                        <div className="text-3xl font-black tracking-tight">{new Intl.NumberFormat(i18n.language).format(summary.totalPassengers)}</div>
+                    </CardContent>
+                </Card>
+
+                <Card className="rounded-2xl border-border/80 shadow-none">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground">
+                            {t('travelTransportation.summary.totalProfit')}
+                        </CardTitle>
+                        <span className="rounded-xl bg-emerald-500/10 p-2 text-emerald-700 dark:text-emerald-300"><CircleDollarSign className="h-4 w-4" /></span>
+                    </CardHeader>
+                    <CardContent className="space-y-1 pt-0">
+                        {totalProfitEntries.map(([currency, amount], index) => (
+                            <div key={currency} className={cn('break-words font-black leading-tight tracking-tight', index === 0 ? 'text-3xl' : 'text-base text-muted-foreground')}>
+                                {formatCurrency(amount, currency as CurrencyCode, features.iqd_display_preference)}
+                            </div>
+                        ))}
+                    </CardContent>
+                </Card>
+
+                <Card className="rounded-2xl border-border/80 shadow-none">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground">
+                            {t('travelTransportation.summary.totalOutstandingProfit')}
+                        </CardTitle>
+                        <span className="rounded-xl bg-amber-500/10 p-2 text-amber-700 dark:text-amber-300"><CreditCard className="h-4 w-4" /></span>
+                    </CardHeader>
+                    <CardContent className="space-y-1 pt-0">
+                        {outstandingProfitEntries.map(([currency, amount], index) => (
+                            <div key={currency} className={cn('break-words font-black leading-tight tracking-tight', index === 0 ? 'text-3xl' : 'text-base text-muted-foreground')}>
+                                {formatCurrency(amount, currency as CurrencyCode, features.iqd_display_preference)}
+                            </div>
+                        ))}
+                    </CardContent>
+                </Card>
             </div>
 
             <Card className="border-border/60 shadow-sm">
                 <CardContent className="space-y-4 pt-6">
-                    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-                        <div className="relative">
-                            <Search className="pointer-events-none absolute start-3 top-3 h-4 w-4 text-muted-foreground" />
-                            <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('travelTransportation.search')} className="ps-9" />
-                        </div>
-                        <DateRangeFilters label={t('travelTransportation.table.created')} />
+                    <div className="relative">
+                        <Search className="pointer-events-none absolute start-3 top-3 h-4 w-4 text-muted-foreground" />
+                        <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('travelTransportation.search')} className="ps-9" />
                     </div>
                     <div className="overflow-x-auto">
                         <Table>

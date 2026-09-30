@@ -19,15 +19,10 @@ import {
     type SalesAgentCommissionMode,
     type SalesOrder
 } from '@/local-db'
-import {
-    formatCurrency,
-    formatLocalDateValue,
-    formatNumericInput,
-    parseLocalDateValue,
-    sanitizeNumericInput
-} from '@/lib/utils'
+import { formatCurrency } from '@/lib/utils'
 import { getOrderLineFreeBonusQuantity } from '@/lib/orderLineItems'
 import { getQuickOrderInstallmentSummary } from '@/lib/quickOrderInstallments'
+import { getQuickOrderLoanRepaymentSummary } from '@/lib/orderFinancing'
 import {
     getQuickOrderPaymentStatusAfterMethodChange,
     getQuickOrderPaymentStatusAfterOrderStatusChange,
@@ -45,8 +40,6 @@ import {
     AppDialogHeader,
     AppDialogTitle,
     Button,
-    DateTimePicker,
-    Input,
     Label,
     MultipleModalLayout,
     Progress,
@@ -66,6 +59,7 @@ import { BusinessPartnerFormDialog, type BusinessPartnerFormPayload } from '@/ui
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import { PaymentMethodSelect } from '@/ui/components/payments/PaymentMethodSelect'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
+import { OrderFinancingTermsFields } from '@/ui/components/orders/OrderFinancingTermsFields'
 import {
     SalesOrderCommissionAssignmentSection,
     type SalesOrderCommissionAssignmentHandle,
@@ -84,7 +78,7 @@ export type QuickOrderCheckoutData = {
     salesAccountAgentId?: string | null
     commissionEnabled: boolean
     orderStatus: Extract<SalesOrder['status'], 'draft' | 'pending' | 'completed'>
-    paymentStatus: Extract<SalesOrder['paymentStatus'], 'paid' | 'unpaid'>
+    paymentStatus: Extract<SalesOrder['paymentStatus'], 'paid' | 'unpaid' | 'partial'>
     paymentMethod: PaymentMethodOption
     installmentCount: number
     installmentFrequency: InstallmentFrequency
@@ -272,6 +266,8 @@ export function QuickOrderModal({
     const [installmentFrequency, setInstallmentFrequency] = useState<InstallmentFrequency>('monthly')
     const [initialPaymentAmount, setInitialPaymentAmount] = useState('0')
     const [firstDueDate, setFirstDueDate] = useState('')
+    const [loanInitialRepaymentAmount, setLoanInitialRepaymentAmount] = useState('')
+    const [loanDueDate, setLoanDueDate] = useState('')
     const [isCommissionPanelOpen, setIsCommissionPanelOpen] = useState(false)
     const [submitError, setSubmitError] = useState<string | null>(null)
     const [commissionSummaries, setCommissionSummaries] = useState<SalesOrderCommissionAssignmentSummary[]>([])
@@ -369,12 +365,14 @@ export function QuickOrderModal({
     ], [installmentsEnabled, loansEnabled])
     const isInstallmentBased = paymentMethod === 'installments'
     const isFinanced = paymentMethod === 'loan' || paymentMethod === 'installments'
+    const isLoanPartiallyPaid = paymentMethod === 'loan' && paymentStatus === 'partial'
     const isPaidOnSave = isFreeOnlyOrder || paymentStatus === 'paid'
     const installmentSummary = getQuickOrderInstallmentSummary(
         totalAmount,
         installmentCount,
         initialPaymentAmount
     )
+    const loanRepaymentSummary = getQuickOrderLoanRepaymentSummary(totalAmount, loanInitialRepaymentAmount)
     const paymentStatusPolicy = getQuickOrderPaymentStatusPolicy(paymentMethod, orderStatus)
     const orderCounterparty = selectedSalesAccount?.partner ?? customer
     const isQuickOrderValid = Boolean(
@@ -385,6 +383,7 @@ export function QuickOrderModal({
             firstDueDate
             && installmentSummary.isValid
         ))
+        && (!isLoanPartiallyPaid || loanRepaymentSummary.isValid)
         && !(isPaidOnSave && isFinanced)
     )
     const canCreditCommission = Boolean(commissionRecipient && isQuickOrderValid)
@@ -411,6 +410,8 @@ export function QuickOrderModal({
         setInstallmentFrequency('monthly')
         setInitialPaymentAmount('0')
         setFirstDueDate('')
+        setLoanInitialRepaymentAmount('')
+        setLoanDueDate('')
         setIsCommissionPanelOpen(false)
         setSubmitError(null)
         setCommissionSummaries([])
@@ -448,6 +449,16 @@ export function QuickOrderModal({
             }
             if (!firstDueDate) {
                 setSubmitError(t('orders.form.errors.firstInstallmentDueDateRequired'))
+                return false
+            }
+        }
+        if (isLoanPartiallyPaid) {
+            if (loanInitialRepaymentAmount.trim() === '' || loanRepaymentSummary.initialPaymentAmount === 0) {
+                setSubmitError(t('pos.quickOrder.loanRepaymentRequired'))
+                return false
+            }
+            if (!loanRepaymentSummary.isValid) {
+                setSubmitError(t('pos.quickOrder.loanRepaymentMustBeLessThanTotal'))
                 return false
             }
         }
@@ -537,8 +548,10 @@ export function QuickOrderModal({
                 installmentFrequency,
                 initialPaymentAmount: isInstallmentBased
                     ? installmentSummary.initialPaymentAmount ?? 0
-                    : 0,
-                firstDueDate: isInstallmentBased ? firstDueDate : null,
+                    : isLoanPartiallyPaid ? loanRepaymentSummary.initialPaymentAmount ?? 0 : 0,
+                firstDueDate: isInstallmentBased
+                    ? firstDueDate
+                    : isLoanPartiallyPaid ? loanDueDate || null : null,
                 paymentAccountId: isFreeOnlyOrder ? null : paymentAccount?.id ?? null,
                 paymentAccountNameSnapshot: isFreeOnlyOrder ? null : paymentAccount?.name ?? null,
             }, shouldSaveCommissionAssignments ? {
@@ -733,6 +746,10 @@ export function QuickOrderModal({
                             onValueChange={(value) => {
                                 const nextPaymentStatus = value as QuickOrderCheckoutData['paymentStatus']
                                 setPaymentStatus(nextPaymentStatus)
+                                if (paymentMethod === 'loan') {
+                                    setLoanInitialRepaymentAmount('')
+                                    setLoanDueDate('')
+                                }
                                 if (nextPaymentStatus === 'paid' && isFinanced) {
                                     setPaymentMethod('cash')
                                     setFirstDueDate('')
@@ -746,6 +763,11 @@ export function QuickOrderModal({
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="unpaid" disabled={paymentStatusPolicy.unpaidDisabled}>{t('orders.status.unpaid')}</SelectItem>
+                                {paymentMethod === 'loan' ? (
+                                    <SelectItem value="partial" disabled={paymentStatusPolicy.partialDisabled}>
+                                        {t('orders.status.partial')}
+                                    </SelectItem>
+                                ) : null}
                                 <SelectItem value="paid" disabled={paymentStatusPolicy.paidDisabled}>{t('orders.status.paid')}</SelectItem>
                             </SelectContent>
                         </Select>
@@ -773,6 +795,8 @@ export function QuickOrderModal({
                                 value={paymentMethod}
                                 onValueChange={(value) => {
                                     setPaymentMethod(value)
+                                    setLoanInitialRepaymentAmount('')
+                                    setLoanDueDate('')
                                     setPaymentStatus((current) => getQuickOrderPaymentStatusAfterMethodChange(
                                         current,
                                         value,
@@ -790,7 +814,9 @@ export function QuickOrderModal({
                             />
                         </div>
 
-                        {isPaidOnSave || (isInstallmentBased && (installmentSummary.initialPaymentAmount ?? 0) > 0) ? (
+                        {isPaidOnSave
+                            || (isInstallmentBased && (installmentSummary.initialPaymentAmount ?? 0) > 0)
+                            || (isLoanPartiallyPaid && (loanRepaymentSummary.initialPaymentAmount ?? 0) > 0) ? (
                             <PaymentAccountSelector
                                 workspaceId={workspaceId}
                                 value={paymentAccount?.id ?? null}
@@ -835,83 +861,61 @@ export function QuickOrderModal({
                 ) : null}
 
                 {isInstallmentBased ? (
-                    <div className="grid gap-4 rounded-2xl border p-4 sm:grid-cols-2">
-                        <div className="space-y-2">
-                            <Label htmlFor="quick-order-installment-count">
-                                {t('orders.form.installmentCount')} <span className="text-destructive">*</span>
-                            </Label>
-                            <Input
-                                id="quick-order-installment-count"
-                                type="number"
-                                min="1"
-                                max="120"
-                                value={installmentCount}
-                                onChange={(event) => {
-                                    setInstallmentCount(sanitizeNumericInput(event.target.value, { allowDecimal: false }))
-                                    setIsCommissionPanelOpen(false)
-                                }}
-                                disabled={isSubmitting || isCommissionPanelOpen}
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="quick-order-installment-frequency">
-                                {t('orders.form.installmentFrequency')} <span className="text-destructive">*</span>
-                            </Label>
-                            <Select
-                                value={installmentFrequency}
-                                onValueChange={(value) => {
-                                    setInstallmentFrequency(value as InstallmentFrequency)
-                                    setIsCommissionPanelOpen(false)
-                                }}
-                                disabled={isSubmitting || isCommissionPanelOpen}
-                            >
-                                <SelectTrigger id="quick-order-installment-frequency"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="weekly">{t('orders.form.weekly')}</SelectItem>
-                                    <SelectItem value="biweekly">{t('orders.form.biweekly')}</SelectItem>
-                                    <SelectItem value="monthly">{t('orders.form.monthly')}</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="min-w-0 space-y-2">
-                            <Label className="block break-words" htmlFor="quick-order-initial-payment">
-                                {t('orders.form.initialPayment')} <span className="text-destructive">*</span>
-                            </Label>
-                            <Input
-                                id="quick-order-initial-payment"
-                                inputMode="decimal"
-                                placeholder="0"
-                                value={formatNumericInput(initialPaymentAmount)}
-                                onChange={(event) => {
-                                    setInitialPaymentAmount(sanitizeNumericInput(event.target.value, { allowDecimal: true, maxFractionDigits: 3 }))
-                                    setIsCommissionPanelOpen(false)
-                                }}
-                                disabled={isSubmitting || isCommissionPanelOpen}
-                            />
-                        </div>
-                        <div className="min-w-0 space-y-2">
-                            <Label className="block break-words" htmlFor="quick-order-first-due-date">
-                                {t('orders.form.firstDueDate')} <span className="text-destructive">*</span>
-                            </Label>
-                            <DateTimePicker
-                                id="quick-order-first-due-date"
-                                mode="date"
-                                date={parseLocalDateValue(firstDueDate)}
-                                setDate={(date) => {
-                                    setFirstDueDate(formatLocalDateValue(date))
-                                    setIsCommissionPanelOpen(false)
-                                }}
-                                disabled={isSubmitting || isCommissionPanelOpen}
-                                placeholder={t('orders.form.firstDueDate')}
-                            />
-                        </div>
-                        <div className="flex items-center justify-between text-sm sm:col-span-2">
-                            <span className="text-muted-foreground">{t('orders.form.financedBalance')}</span>
-                            <span className="font-semibold">
-                                {formatCurrency(installmentSummary.financedBalance, settlementCurrency, iqdPreference)}
-                            </span>
-                        </div>
-                    </div>
+                    <OrderFinancingTermsFields
+                        mode="installments"
+                        idPrefix="quick-order"
+                        orderTotal={totalAmount}
+                        currency={settlementCurrency}
+                        iqdPreference={iqdPreference}
+                        initialPaymentAmount={initialPaymentAmount}
+                        onInitialPaymentAmountChange={(value) => {
+                            setInitialPaymentAmount(value)
+                            setIsCommissionPanelOpen(false)
+                        }}
+                        firstDueDate={firstDueDate}
+                        onFirstDueDateChange={(value) => {
+                            setFirstDueDate(value)
+                            setIsCommissionPanelOpen(false)
+                        }}
+                        installmentCount={installmentCount}
+                        onInstallmentCountChange={(value) => {
+                            setInstallmentCount(value)
+                            setIsCommissionPanelOpen(false)
+                        }}
+                        installmentFrequency={installmentFrequency}
+                        onInstallmentFrequencyChange={(value) => {
+                            setInstallmentFrequency(value)
+                            setIsCommissionPanelOpen(false)
+                        }}
+                        initialPaymentRequired
+                        disabled={isSubmitting || isCommissionPanelOpen}
+                    />
+                ) : null}
+
+                {isLoanPartiallyPaid ? (
+                    <OrderFinancingTermsFields
+                        mode="loan"
+                        idPrefix="quick-order-loan"
+                        orderTotal={totalAmount}
+                        currency={settlementCurrency}
+                        iqdPreference={iqdPreference}
+                        initialPaymentAmount={loanInitialRepaymentAmount}
+                        onInitialPaymentAmountChange={(value) => {
+                            setLoanInitialRepaymentAmount(value)
+                            setIsCommissionPanelOpen(false)
+                        }}
+                        firstDueDate={loanDueDate}
+                        onFirstDueDateChange={(value) => {
+                            setLoanDueDate(value)
+                            setIsCommissionPanelOpen(false)
+                        }}
+                        installmentCount={installmentCount}
+                        onInstallmentCountChange={setInstallmentCount}
+                        installmentFrequency={installmentFrequency}
+                        onInstallmentFrequencyChange={setInstallmentFrequency}
+                        initialPaymentRequired
+                        disabled={isSubmitting || isCommissionPanelOpen}
+                    />
                 ) : null}
 
                 {productCommissionAgentIds.length > 0 ? (

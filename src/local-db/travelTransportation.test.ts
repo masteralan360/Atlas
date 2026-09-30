@@ -4,6 +4,7 @@ import {
     calculateTravelBookingAmounts,
     calculateTravelBookingPaymentState,
     getActiveTravelBookingPayments,
+    summarizeTravelBookings,
     TRAVEL_BOOKING_PAYMENT_SOURCE_TYPE
 } from './travelTransportationCalculations'
 import type { PaymentTransaction } from './models'
@@ -44,6 +45,34 @@ function payment(
 }
 
 describe('Travel & Transportation calculations and payment projections', () => {
+    it('summarizes passengers and profit by currency for the filtered bookings', () => {
+        const summary = summarizeTravelBookings([
+            { id: 'booking-1', currency: 'usd', status: 'booked', profitAmount: 0.1, outstandingProfitAmount: 0.1 },
+            { id: 'booking-2', currency: 'usd', status: 'partially_paid', profitAmount: 0.2, outstandingProfitAmount: 0.05 },
+            { id: 'booking-3', currency: 'iqd', status: 'completed', profitAmount: 1000, outstandingProfitAmount: 0 },
+            { id: 'booking-4', currency: 'usd', status: 'cancelled', profitAmount: 50, outstandingProfitAmount: 50 }
+        ], new Map([
+            ['booking-1', 2],
+            ['booking-2', 1],
+            ['booking-3', 3],
+            ['booking-4', 4]
+        ]))
+
+        expect(summary).toEqual({
+            totalPassengers: 10,
+            profitByCurrency: { usd: 0.3, iqd: 1000 },
+            outstandingProfitByCurrency: { usd: 0.15, iqd: 0 }
+        })
+    })
+
+    it('returns zero totals for no filtered bookings', () => {
+        expect(summarizeTravelBookings([], new Map())).toEqual({
+            totalPassengers: 0,
+            profitByCurrency: {},
+            outstandingProfitByCurrency: {}
+        })
+    })
+
     it('keeps Booking Total equal to passenger prices while storing confirmed adjustments as a separate amount', () => {
         const amounts = calculateTravelBookingAmounts(
             [{ price: 10.105 }, { price: 20.205 }],

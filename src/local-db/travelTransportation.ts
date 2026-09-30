@@ -38,7 +38,8 @@ import {
 export {
     calculateTravelBookingAmounts,
     calculateTravelBookingPaymentState,
-    getActiveTravelBookingPayments
+    getActiveTravelBookingPayments,
+    summarizeTravelBookings
 } from './travelTransportationCalculations'
 
 const BOOKINGS_TABLE = 'travel_bookings'

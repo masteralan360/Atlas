@@ -77,9 +77,22 @@ async function readPaymentRows(client: Awaited<ReturnType<typeof freshLiveClient
 
 async function readLoanPaymentRows(client: Awaited<ReturnType<typeof freshLiveClient>>, loanId: string) {
     return requireLiveData<Array<Record<string, unknown>>>(await client.from('payment_transactions')
-        .select('id,amount,currency,reversal_of_transaction_id,account_id,source_record_id')
+        .select('id,amount,currency,reversal_of_transaction_id,account_id,source_record_id,source_subrecord_id,source_type,direction,payment_method,metadata')
         .eq('workspace_id', liveWorkspaceId).eq('source_module', 'loans')
         .eq('source_record_id', loanId).order('id'), 'completion test loan payment ledger')
+}
+
+async function readLoanRepayments(client: Awaited<ReturnType<typeof freshLiveClient>>, loanId: string) {
+    return requireLiveData<Array<{
+        id: string
+        amount: number | string
+        sequence_no: number | null
+        payment_transaction_id: string | null
+        integrity_version: number
+    }>>(await client.from('loan_payments')
+        .select('id,amount,sequence_no,payment_transaction_id,integrity_version')
+        .eq('workspace_id', liveWorkspaceId).eq('loan_id', loanId).order('sequence_no'),
+    'completion test loan repayments')
 }
 
 async function readAccountMovements(client: Awaited<ReturnType<typeof freshLiveClient>>, accountId: string) {
@@ -650,15 +663,51 @@ describe('Sale Orders · hosted completion integrity', () => {
                 const before = await freshLiveClient()
                 let orderPaymentsBefore: Array<Record<string, unknown>>
                 let loanPaymentsBefore: Array<Record<string, unknown>>
+                let loanRepaymentsBefore: Awaited<ReturnType<typeof readLoanRepayments>> = []
                 try {
-                    const loan = requireLiveData<{ id: string; is_deleted: boolean }>(await before.from('loans')
-                        .select('id,is_deleted').eq('id', pending.linkedLoanId).single(), 'financed completion loan')
+                    const loan = requireLiveData<{
+                        id: string
+                        is_deleted: boolean
+                        principal_amount: number | string
+                        total_paid_amount: number | string
+                        balance_amount: number | string
+                    }>(await before.from('loans')
+                        .select('id,is_deleted,principal_amount,total_paid_amount,balance_amount')
+                        .eq('id', pending.linkedLoanId).single(), 'financed completion loan')
                     const installments = requireLiveData<Array<{ id: string; is_deleted: boolean }>>(await before.from('loan_installments')
                         .select('id,is_deleted').eq('loan_id', pending.linkedLoanId).order('id'), 'financed completion installments')
                     const stock = await readInventoryPosition(before, product.id, storage.id)
                     orderPaymentsBefore = await readPaymentRows(before, draft.id)
                     loanPaymentsBefore = await readLoanPaymentRows(before, pending.linkedLoanId as string)
                     expect(loan).toMatchObject({ id: pending.linkedLoanId, is_deleted: false })
+                    if (method === 'loan') {
+                        loanRepaymentsBefore = await readLoanRepayments(before, pending.linkedLoanId as string)
+                        expect(loanRepaymentsBefore).toHaveLength(1)
+                        expect(Number(loanRepaymentsBefore[0].amount)).toBe(25)
+                        expect(loanRepaymentsBefore[0]).toMatchObject({
+                            sequence_no: 1,
+                            payment_transaction_id: expect.any(String),
+                            integrity_version: 1
+                        })
+                        const linkedTransaction = loanPaymentsBefore.find((row) => row.id === loanRepaymentsBefore[0].payment_transaction_id)
+                        expect(linkedTransaction).toMatchObject({
+                            id: loanRepaymentsBefore[0].payment_transaction_id,
+                            source_type: 'simple_loan',
+                            source_record_id: pending.linkedLoanId,
+                            source_subrecord_id: loanRepaymentsBefore[0].id,
+                            direction: 'incoming',
+                            currency: draft.currency,
+                            payment_method: 'cash',
+                            metadata: {
+                                loanPaymentId: loanRepaymentsBefore[0].id,
+                                isOrderLoanInitialRepayment: true
+                            }
+                        })
+                        expect(Number(linkedTransaction?.amount)).toBe(25)
+                        expect(Number(loan.principal_amount)).toBe(100)
+                        expect(Number(loan.total_paid_amount)).toBe(25)
+                        expect(Number(loan.balance_amount)).toBe(75)
+                    }
                     expect(installments.length).toBeGreaterThan(0)
                     expect(installments.every((row) => !row.is_deleted)).toBe(true)
                     expect(stock.quantity).toBe(10)
@@ -691,6 +740,9 @@ describe('Sale Orders · hosted completion integrity', () => {
                     expect(installments.every((row) => !row.is_deleted)).toBe(true)
                     expect(await readPaymentRows(fresh, draft.id)).toEqual(orderPaymentsBefore)
                     expect(await readLoanPaymentRows(fresh, pending.linkedLoanId as string)).toEqual(loanPaymentsBefore)
+                    if (method === 'loan') {
+                        expect(await readLoanRepayments(fresh, pending.linkedLoanId as string)).toEqual(loanRepaymentsBefore)
+                    }
                 } finally { await fresh.auth.signOut() }
             })
         }, 120_000)

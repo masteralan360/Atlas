@@ -1,6 +1,6 @@
 import type { PaymentMethodOption } from '@/lib/paymentMethods'
 
-export type QuickOrderPaymentStatus = 'paid' | 'unpaid'
+export type QuickOrderPaymentStatus = 'paid' | 'unpaid' | 'partial'
 export type QuickOrderStatus = 'draft' | 'pending' | 'completed'
 
 export type QuickOrderPaymentStatusPolicy = {
@@ -8,11 +8,12 @@ export type QuickOrderPaymentStatusPolicy = {
     selectorDisabled: boolean
     paidDisabled: boolean
     unpaidDisabled: boolean
+    partialDisabled: boolean
 }
 
 /**
- * Cash is paid on save for active orders, while financed orders must remain
- * unpaid. Draft cash orders keep both statuses available for later editing.
+ * Cash is paid on save for active orders. Financed orders default to unpaid;
+ * Quick Orders may also record a partial initial repayment for Loans.
  */
 export function getQuickOrderPaymentStatusPolicy(
     paymentMethod: PaymentMethodOption | null,
@@ -25,7 +26,8 @@ export function getQuickOrderPaymentStatusPolicy(
         requiredStatus: isFinanced ? 'unpaid' : cashRequiresPaid ? 'paid' : null,
         selectorDisabled: paymentMethod === null,
         paidDisabled: isFinanced,
-        unpaidDisabled: cashRequiresPaid
+        unpaidDisabled: cashRequiresPaid,
+        partialDisabled: paymentMethod !== 'loan'
     }
 }
 
@@ -36,7 +38,9 @@ export function getQuickOrderPaymentStatusAfterMethodChange(
     orderStatus: QuickOrderStatus
 ): QuickOrderPaymentStatus | null {
     if (!paymentMethod) return null
-    return getQuickOrderPaymentStatusPolicy(paymentMethod, orderStatus).requiredStatus ?? currentStatus
+    const policy = getQuickOrderPaymentStatusPolicy(paymentMethod, orderStatus)
+    if (policy.requiredStatus) return policy.requiredStatus
+    return currentStatus === 'partial' && paymentMethod !== 'loan' ? 'unpaid' : currentStatus
 }
 
 /** Reapply an active method's required status when the order lifecycle changes. */
@@ -45,5 +49,8 @@ export function getQuickOrderPaymentStatusAfterOrderStatusChange(
     paymentMethod: PaymentMethodOption | null,
     orderStatus: QuickOrderStatus
 ): QuickOrderPaymentStatus | null {
+    if (paymentMethod === 'loan' && currentStatus === 'partial') {
+        return currentStatus
+    }
     return getQuickOrderPaymentStatusPolicy(paymentMethod, orderStatus).requiredStatus ?? currentStatus
 }

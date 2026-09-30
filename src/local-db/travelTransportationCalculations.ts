@@ -1,10 +1,37 @@
 import { getOrderAdjustmentNetAmount } from '@/lib/orderAdjustments'
 import { roundOrderValue } from '@/lib/orderPrecision'
 
-import type { OrderAdjustment, PaymentTransaction, TravelBookingStatus, TravelPassenger } from './models'
+import type { OrderAdjustment, PaymentTransaction, TravelBooking, TravelBookingStatus, TravelPassenger } from './models'
 
 export const TRAVEL_BOOKING_PAYMENT_SOURCE_TYPE = 'travel_booking_payment' as const
 export const TRAVEL_BOOKING_PAYMENT_EPSILON = 0.0001
+
+type TravelBookingSummaryRecord = Pick<TravelBooking, 'id' | 'currency' | 'status' | 'profitAmount' | 'outstandingProfitAmount'>
+
+export function summarizeTravelBookings(
+    bookings: readonly TravelBookingSummaryRecord[],
+    passengerCountByBookingId: ReadonlyMap<string, number>
+) {
+    const summary = {
+        totalPassengers: 0,
+        profitByCurrency: {} as Record<string, number>,
+        outstandingProfitByCurrency: {} as Record<string, number>
+    }
+
+    for (const booking of bookings) {
+        summary.totalPassengers += passengerCountByBookingId.get(booking.id) ?? 0
+        if (booking.status === 'cancelled') continue
+
+        summary.profitByCurrency[booking.currency] = roundAmount(
+            (summary.profitByCurrency[booking.currency] ?? 0) + booking.profitAmount
+        )
+        summary.outstandingProfitByCurrency[booking.currency] = roundAmount(
+            (summary.outstandingProfitByCurrency[booking.currency] ?? 0) + booking.outstandingProfitAmount
+        )
+    }
+
+    return summary
+}
 
 function roundAmount(value: number) {
     return roundOrderValue(Number.isFinite(value) ? value : 0)

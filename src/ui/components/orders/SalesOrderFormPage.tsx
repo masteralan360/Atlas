@@ -15,11 +15,9 @@ import {
     cn,
     formatCurrency,
     formatLocalDateTimeValue,
-    formatLocalDateValue,
     formatNumericInput,
     generateId,
     parseLocalDateTimeValue,
-    parseLocalDateValue,
     sanitizeNumericInput
 } from '@/lib/utils'
 import { getOrderLineFreeBonusQuantity, getOrderLineInventoryQuantity, hasOrderLineInventoryQuantity } from '@/lib/orderLineItems'
@@ -118,6 +116,7 @@ import { QuickCustomerButton } from '@/ui/components/crm/QuickCustomerButton'
 import { ProductsViewModal, ProductsViewModalTrigger } from '@/ui/components/ProductsViewModal'
 import { PaymentMethodSelect } from '@/ui/components/payments/PaymentMethodSelect'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
+import { OrderFinancingTermsFields } from './OrderFinancingTermsFields'
 import { SettlementDialog } from '@/ui/components/payments/SettlementDialog'
 import { ProductAutocompleteInput } from './ProductAutocompleteInput'
 import { useOrderBarcodeScanner } from './useOrderBarcodeScanner'
@@ -2477,64 +2476,21 @@ export function SalesOrderFormPage({
                                         </div>
                                     ) : null}
                                     {isFinanced ? (
-                                        <div className="grid gap-4 rounded-2xl border p-4 sm:grid-cols-2">
-                                            {isInstallmentBased ? <><div className="space-y-2">
-                                                <Label htmlFor="sales-installment-count">{t('orders.form.installmentCount')}</Label>
-                                                <Input
-                                                    id="sales-installment-count"
-                                                    type="number"
-                                                    min="1"
-                                                    max="120"
-                                                    value={installmentCount}
-                                                    onChange={(event) => setInstallmentCount(event.target.value)}
-                                                />
-                                            </div>
-                                                <div className="space-y-2">
-                                                    <Label>{t('orders.form.installmentFrequency')}</Label>
-                                                    <Select value={installmentFrequency} onValueChange={(value) => setInstallmentFrequency(value as InstallmentFrequency)}>
-                                                        <SelectTrigger><SelectValue /></SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="weekly">{t('orders.form.weekly')}</SelectItem>
-                                                            <SelectItem value="biweekly">{t('orders.form.biweekly')}</SelectItem>
-                                                            <SelectItem value="monthly">{t('orders.form.monthly')}</SelectItem>
-                                                        </SelectContent>
-                                                    </Select>
-                                                </div></> : null}
-                                            <div className="min-w-0 space-y-2">
-                                                <Label className="block break-words" htmlFor="sales-initial-payment">{isInstallmentBased
-                                                    ? t('orders.form.initialPayment')
-                                                    : t('orders.form.initialLoanRepayment')}</Label>
-                                                <Input
-                                                    id="sales-initial-payment"
-                                                    inputMode="decimal"
-                                                    placeholder="0"
-                                                    value={formatNumericInput(initialPaymentAmount)}
-                                                    onChange={(event) => setInitialPaymentAmount(sanitizeNumericInput(event.target.value, { allowDecimal: true, maxFractionDigits: 3 }))}
-                                                />
-                                            </div>
-                                            <div className="min-w-0 space-y-2">
-                                                <Label className="block break-words" htmlFor="sales-first-due">{isInstallmentBased
-                                                    ? t('orders.form.firstDueDate')
-                                                    : t('orders.form.dueDate')}</Label>
-                                                <DateTimePicker
-                                                    id="sales-first-due"
-                                                    mode="date"
-                                                    date={parseLocalDateValue(firstDueDate)}
-                                                    setDate={(value) => setFirstDueDate(formatLocalDateValue(value))}
-                                                    placeholder={isInstallmentBased
-                                                        ? t('orders.form.firstDueDate')
-                                                        : t('orders.form.dueDatePlaceholder')}
-                                                />
-                                            </div>
-                                            <div className="flex items-center justify-between text-sm sm:col-span-2">
-                                                <span className="text-muted-foreground">{isInstallmentBased
-                                                    ? t('orders.form.financedBalance')
-                                                    : t('orders.form.remainingLoanBalance')}</span>
-                                                <span className="font-semibold">
-                                                    {formatCurrency(Math.max(preview - initialPayment, 0), currency, features.iqd_display_preference)}
-                                                </span>
-                                            </div>
-                                        </div>
+                                        <OrderFinancingTermsFields
+                                            mode={isInstallmentBased ? 'installments' : 'loan'}
+                                            idPrefix="sales"
+                                            orderTotal={preview}
+                                            currency={currency}
+                                            iqdPreference={features.iqd_display_preference}
+                                            initialPaymentAmount={initialPaymentAmount}
+                                            onInitialPaymentAmountChange={setInitialPaymentAmount}
+                                            firstDueDate={firstDueDate}
+                                            onFirstDueDateChange={setFirstDueDate}
+                                            installmentCount={installmentCount}
+                                            onInstallmentCountChange={setInstallmentCount}
+                                            installmentFrequency={installmentFrequency}
+                                            onInstallmentFrequencyChange={setInstallmentFrequency}
+                                        />
                                     ) : null}
                                 </CardContent>
                             </Card>

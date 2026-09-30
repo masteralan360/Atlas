@@ -40,8 +40,9 @@ access rules.
 | App-generated service display names and immutable line metadata in regular POS and Quick Order | `src/lib/posServiceName.ts`, POS page, checkout and order persistence | `posServiceName.test.ts`, `posCheckout.test.ts`, `posRemote.test.ts`, `quickOrderAtomic.test.ts`, hosted POS checkout |
 | Frozen retry identities after uncertain responses | `src/lib/posCheckoutAttempt.ts`, POS page | `posAttempt.test.ts` and remote retry checks |
 | Sale / Activities / Quick Order routing | `src/lib/posPaymentPolicy.ts` | `posRouting.test.ts`, existing policy tests |
-| Quick Order payment method and status selection | `QuickOrderModal.tsx`, `src/lib/quickOrderPaymentPolicy.ts` | `src/lib/quickOrderPaymentPolicy.test.ts` in the checkout group |
-| Quick Order installment terms, down payment, financed balance, and loan schedule | `QuickOrderModal.tsx`, `src/lib/quickOrderInstallments.ts`, order persistence | `src/lib/quickOrderInstallments.test.ts`, `quickOrderAtomic.test.ts` in the checkout group |
+| Quick Order payment method and status selection, including partial Loans | `QuickOrderModal.tsx`, `src/lib/quickOrderPaymentPolicy.ts` | `src/lib/quickOrderPaymentPolicy.test.ts` in the checkout group |
+| Shared Quick Order/Sales Order financing terms, down payments, remaining balances, and loan schedules | `OrderFinancingTermsFields.tsx`, `src/lib/orderFinancing.ts`, order persistence | `src/lib/orderFinancing.test.ts`, `src/lib/quickOrderInstallments.test.ts`, `quickOrderAtomic.test.ts` in the checkout group |
+| Cloud / Hybrid Quick Order initial loan repayment and linked payment transaction | `src/local-db/orders.ts`, `activate_financed_order` | `posFinancingLive.test.ts` in the financing group |
 | Refund amounts, records and linked counter-entries | `src/local-db/posSaleReturns.ts`, Sales page | `posReturns.test.ts`, remote refund contracts |
 | Activities | `src/local-db/activities.ts` | `posActivities.test.ts`, existing Activities regressions |
 | Barcode input | `src/lib/barcodeScanner.ts` | Existing barcode regressions |

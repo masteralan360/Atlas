@@ -265,6 +265,7 @@
           "src/dev/testing/suites/posCheckout.test.ts",
           "src/lib/quickOrderPaymentPolicy.test.ts",
           "src/lib/quickOrderInstallments.test.ts",
+          "src/lib/orderFinancing.test.ts",
           "src/local-db/minimumSellingPrice.test.ts",
           "src/local-db/quickOrderAtomic.test.ts",
           "src/local-db/partnerSummaryRefresh.test.ts",
