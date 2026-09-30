@@ -38,7 +38,7 @@ import {
 } from '@/local-db'
 import { ACTIVITIES_VIRTUAL_STORAGE_ID, isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { isBelowMinimumSellingPrice } from '@/lib/minimumSellingPrice'
-import { isPosPaymentTypeAllowed, getPosCheckoutRoute, type PosPaymentType } from '@/lib/posPaymentPolicy'
+import { isPosPaymentTypeAllowed, getPosCheckoutRoute, shouldShowPosLoanPaymentOption, type PosPaymentType } from '@/lib/posPaymentPolicy'
 import {
     canOfferMobileFreeOnlyOrderHold,
     canAddPosCartItemFromStorage,
@@ -4255,7 +4255,7 @@ export function POS() {
                                             <Zap className={cn("w-3 h-3 transition-colors", paymentType === 'digital' ? "text-blue-600 dark:text-blue-400" : "text-blue-600/80")} />
                                             {t('pos.digital') || 'Digital'}
                                         </button>
-                                        {!isActivitiesCheckout && <button
+                                        {shouldShowPosLoanPaymentOption(paymentType, isActivitiesCheckout) && <button
                                             data-tour-id="tutorial-pos-payment-loan"
                                             onClick={() => {
                                                 if (!isTutorialPosTask && !hasFreeOrderBonus) setPaymentType('loan')
@@ -6437,7 +6437,7 @@ function MobileCart({
                             >
                                 <Zap className={cn("w-4 h-4 transition-colors", paymentType === 'digital' ? "text-blue-600 dark:text-blue-400" : "text-blue-600/80")} /> {t('pos.digital') || 'Digital'}
                             </button>
-                            {!isActivitiesCheckout && <button
+                            {shouldShowPosLoanPaymentOption(paymentType, isActivitiesCheckout) && <button
                                 data-tour-id="tutorial-pos-payment-loan"
                                 onClick={() => {
                                     if (!isTutorialPosTask && !isOrderPaymentLocked) setPaymentType('loan')

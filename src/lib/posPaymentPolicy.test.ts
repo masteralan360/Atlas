@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest'
 
-import { isPosPaymentTypeAllowed } from './posPaymentPolicy'
+import { isPosPaymentTypeAllowed, shouldShowPosLoanPaymentOption } from './posPaymentPolicy'
 
 describe('POS payment policy', () => {
+    it('hides the Loan option while Order is selected and shows it for other regular POS methods', () => {
+        expect(shouldShowPosLoanPaymentOption('order', false)).toBe(false)
+        expect(shouldShowPosLoanPaymentOption('cash', false)).toBe(true)
+        expect(shouldShowPosLoanPaymentOption('digital', false)).toBe(true)
+        expect(shouldShowPosLoanPaymentOption('loan', false)).toBe(true)
+    })
+
+    it('keeps the Loan option hidden for Activities checkout', () => {
+        expect(shouldShowPosLoanPaymentOption('cash', true)).toBe(false)
+    })
+
     it('allows service sales to use the existing loan checkout flow', () => {
         expect(isPosPaymentTypeAllowed('loan', {
             isActivitiesStorage: false,

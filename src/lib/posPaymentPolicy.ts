@@ -1,5 +1,10 @@
 export type PosPaymentType = 'cash' | 'digital' | 'loan' | 'order'
 
+/** Keep the loan option out of the payment toggle while a Quick Order is selected. */
+export function shouldShowPosLoanPaymentOption(paymentType: PosPaymentType, isActivitiesCheckout: boolean): boolean {
+    return paymentType !== 'order' && !isActivitiesCheckout
+}
+
 interface PosPaymentPolicyInput {
     isActivitiesStorage: boolean
     isServicesStorage: boolean
