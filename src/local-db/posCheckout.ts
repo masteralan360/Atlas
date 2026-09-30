@@ -46,6 +46,7 @@ export interface PosCheckoutItem {
     converted_unit_price: number
     settlement_currency: CurrencyCode
     negotiated_price?: number
+    metadata?: Record<string, unknown> | null
     price_book_id: string | null
     total: number
     inventory_snapshot: number | null
@@ -253,6 +254,7 @@ async function saveLocal(input: PosCheckoutInput) {
                 convertedCostPrice: item.converted_cost_price, originalCurrency: item.original_currency,
                 originalUnitPrice: item.original_unit_price, convertedUnitPrice: item.converted_unit_price,
                 settlementCurrency: item.settlement_currency, negotiatedPrice: item.negotiated_price,
+                metadata: item.metadata ?? null,
                 priceBookId: item.price_book_id, inventorySnapshot: item.inventory_snapshot,
                 batchAllocations: allocations, originalBatchAllocations: allocations
             }

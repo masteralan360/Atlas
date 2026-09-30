@@ -4,6 +4,7 @@ import { db } from '@/local-db/database'
 import type { Sale } from '@/types'
 import { getLedgerPaymentTransactions, getLedgerPaymentTransactionEffect } from '@/lib/ledgerPaymentTransactions'
 import { setNetworkStatus } from '@/lib/network'
+import { createPosServiceNameMetadata } from '@/lib/posServiceName'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 import { installTestBrowser } from '../fixtures/browser'
 import { assertNoPosCommit, assertPosPayment } from '../assertions/pos'
@@ -70,6 +71,22 @@ describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () 
         await assertPosPayment(input.payload.id, 100)
         expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 19 })
         expect(await db.offline_mutations.count()).toBe(0)
+    })
+
+    for (const mode of ['cloud', 'hybrid'] as const) it(`${mode}: service name metadata is sent with the POS line and checkout succeeds`, async () => {
+        writeWorkspaceModeSnapshot({ workspaceId: POS_WORKSPACE, dataMode: mode })
+        await db.products.update(POS_PRODUCT, { isService: true, storageId: null, costPrice: 0, quantity: 0 })
+        const input = posCheckoutInput({ service: true })
+        input.payload.items[0].product_name = 'POS scenario item - NewService'
+        input.payload.items[0].metadata = createPosServiceNameMetadata('POS scenario item', 'NewService') ?? null
+
+        const result = await checkout.commitPosCheckout(input)
+
+        expect(remote.rpc).toHaveBeenCalledExactlyOnceWith('complete_sale', { payload: input.payload })
+        expect(result).toEqual({ sequenceId: 42, loanId: null })
+        expect(await db.invoices.get(input.payload.id)).toMatchObject({ totalAmount: 100, origin: 'pos' })
+        expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 20 })
+        await assertPosPayment(input.payload.id, 100)
     })
 
     it('sends immutable product UoM snapshots and canonical stock quantity to complete_sale', async () => {
@@ -170,6 +187,22 @@ describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () 
         expect(await db.invoices.count()).toBe(0)
         expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 20 })
         expect(remote.payment).not.toHaveBeenCalled()
+    })
+
+    it('a rejected service-name checkout leaves payment and stock effects untouched', async () => {
+        await db.products.update(POS_PRODUCT, { isService: true, storageId: null, costPrice: 0, quantity: 0 })
+        const input = posCheckoutInput({ service: true })
+        input.payload.items[0].product_name = 'POS scenario item - NewService'
+        input.payload.items[0].metadata = createPosServiceNameMetadata('POS scenario item', 'NewService') ?? null
+        remote.rpc.mockResolvedValue({ data: null, error: { message: 'Service name details are invalid', code: '22023' } })
+
+        await expect(checkout.commitPosCheckout(input)).rejects.toThrow('Review the additional service name and try again.')
+
+        expect(remote.rpc).toHaveBeenCalledExactlyOnceWith('complete_sale', { payload: input.payload })
+        expect(await db.invoices.count()).toBe(0)
+        expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 20 })
+        expect(remote.payment).not.toHaveBeenCalled()
+        await assertNoPosCommit()
     })
 
     it('two transport failures never create an offline sale or payment', async () => {

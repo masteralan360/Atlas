@@ -95,7 +95,9 @@ import { shouldShowMinimumSellingPriceField } from '@/lib/minimumSellingPrice'
 import { normalizeUnitCode } from '@/local-db/models'
 import { productUomRefForCode } from '@/lib/productUoms'
 import { BarcodeScannerToggleButton } from '@/ui/components/BarcodeScannerToggleButton'
+import { CameraBarcodeScanner } from '@/ui/components/pos/CameraBarcodeScanner'
 import { ProductUomEditor, createEmptyProductUomDraft, type ProductUomDraft } from '@/ui/components/products/ProductUomEditor'
+import { ProductUnitIcon } from '@/ui/components/ProductUnitIcon'
 import { ProductAdditionalImagesModal } from '@/ui/components/ProductAdditionalImagesModal'
 import { ProductVariantParentNotice, ProductVariantsSection } from '@/ui/components/ProductVariantsSection'
 import { useUnitRegistry } from '@/ui/components/unitRegistry'
@@ -110,6 +112,12 @@ import {
     type ProductCommissionRuleDraft
 } from '@/ui/components/commissions/ProductCommissionRuleEditor'
 import {
+    AppDialog,
+    AppDialogBody,
+    AppDialogContent,
+    AppDialogFooter,
+    AppDialogHeader,
+    AppDialogTitle,
     Button,
     Card,
     CardContent,
@@ -139,6 +147,7 @@ import {
     TooltipTrigger,
     useToast
 } from '@/ui/components'
+import { getProductSkuFromCameraCapture } from '@/lib/productSkuCameraScan'
 
 type ProductScannerTarget = 'none' | 'sku' | 'barcode' | 'variantSku'
 
@@ -442,6 +451,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const [deleteProductOpen, setDeleteProductOpen] = useState(false)
     const [isDeletingProduct, setIsDeletingProduct] = useState(false)
     const [isGeneratingSku, setIsGeneratingSku] = useState(false)
+    const [isCameraSkuScannerOpen, setIsCameraSkuScannerOpen] = useState(false)
     const [activeScannerTarget, setActiveScannerTarget] = useState<ProductScannerTarget>(() => readStoredScannerTarget())
     const [variantSkuScannerPreference, setVariantSkuScannerPreference] = useState(() => readStoredBoolean(PRODUCT_VARIANT_SKU_SCANNER_ENABLED_KEY))
     const skuInputRef = useRef<HTMLInputElement>(null)
@@ -1099,6 +1109,20 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         setFormData((current) => ({ ...current, sku: normalizeBarcodeScannerText(value) }))
     }
 
+    const handleCameraSkuCapture = (barcodes: Array<{ rawValue?: string | null }>) => {
+        if (isReadOnly) {
+            return
+        }
+
+        const sku = getProductSkuFromCameraCapture(barcodes)
+        if (!sku) {
+            return
+        }
+
+        setFormData((current) => ({ ...current, sku }))
+        setIsCameraSkuScannerOpen(false)
+    }
+
     const handleGenerateSku = async () => {
         if (isReadOnly || !workspaceId || isGeneratingSkuRef.current) {
             return
@@ -1515,6 +1539,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const normalizedUnit = normalizeUnitCode(notYetPatched && product ? product.unit : formUnit)
         || productUnit
         || (mode === 'create' ? '' : 'pcs')
+    const selectedUnitOption = unitOptions.find((option) => option.value === normalizedUnit)
     const unitLabel = normalizedUnit
         ? t(`products.units.${normalizedUnit}`, { defaultValue: normalizedUnit })
         : t('units.selectPlaceholder', { defaultValue: 'Select unit' })
@@ -1843,6 +1868,18 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                     idleCommitDelayMs={PRODUCT_FORM_SCANNER_IDLE_COMMIT_DELAY_MS}
                                                 />
                                             )}
+                                            {!isReadOnly && (
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    aria-label={t('products.form.scanSkuWithCamera', { defaultValue: 'Scan SKU with camera' })}
+                                                    title={t('products.form.scanSkuWithCamera', { defaultValue: 'Scan SKU with camera' })}
+                                                    onClick={() => setIsCameraSkuScannerOpen(true)}
+                                                    className="h-12 shrink-0 gap-2 rounded-xl px-3 text-primary sm:px-4"
+                                                >
+                                                    <Camera className="h-5 w-5" />
+                                                </Button>
+                                            )}
                                         </div>
                                     </div>
                                     <div className="order-1 space-y-2 md:order-none md:col-start-1 md:row-start-1">
@@ -1923,13 +1960,21 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                         >
                                             <SelectTrigger id="product-unit" data-tour-id="tutorial-product-unit" className="h-12 rounded-xl border-border/80 bg-background/80 shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50" allowViewer={true}>
                                                 <SelectValue placeholder={t('units.selectPlaceholder', { defaultValue: 'Select unit' })}>
-                                                    {normalizedUnit ? t(`products.units.${normalizedUnit}`, { defaultValue: normalizedUnit }) : null}
+                                                    {normalizedUnit ? (
+                                                        <span className="flex min-w-0 items-center gap-2">
+                                                            <ProductUnitIcon unit={normalizedUnit} iconName={selectedUnitOption?.icon} className="h-4 w-4 shrink-0 text-primary/70" />
+                                                            <span className="truncate">{unitLabel}</span>
+                                                        </span>
+                                                    ) : null}
                                                 </SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
                                                 {unitOptions.map((option) => (
                                                     <SelectItem key={option.value} value={option.value}>
-                                                        <span className="flex items-center gap-2"><Ruler className="h-4 w-4 text-primary/70" />{t(`products.units.${option.value}`, { defaultValue: option.value })}</span>
+                                                        <span className="flex items-center gap-2">
+                                                            <ProductUnitIcon unit={option.value} iconName={option.icon} className="h-4 w-4 shrink-0 text-primary/70" />
+                                                            {t(`products.units.${option.value}`, { defaultValue: option.value })}
+                                                        </span>
                                                     </SelectItem>
                                                 ))}
                                             </SelectContent>
@@ -2406,6 +2451,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                 disabled={isReadOnly || isSaving}
                                 hideCosts={hideCosts}
                                 hideMinimumPrice={!canManageMinimumSellingPrice}
+                                allowRemovingUnits={mode !== 'edit'}
                                 defaultSku={formData.sku}
                                 defaultBarcode={product?.barcode}
                                 onChange={setProductUomDrafts}
@@ -3077,6 +3123,30 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                     </DialogContent>
                 </Dialog>
             )}
+            <AppDialog open={isCameraSkuScannerOpen} onOpenChange={setIsCameraSkuScannerOpen}>
+                <AppDialogContent className="max-w-xl">
+                    <AppDialogHeader>
+                        <AppDialogTitle className="flex items-center gap-2">
+                            <Camera className="h-5 w-5 text-primary" />
+                            {t('products.form.scanSkuTitle', { defaultValue: 'Scan product SKU' })}
+                        </AppDialogTitle>
+                    </AppDialogHeader>
+                    <AppDialogBody className="space-y-4">
+                        <p className="text-sm text-muted-foreground">
+                            {t('products.form.scanSkuHint', { defaultValue: 'Point the rear camera at a product barcode. Its value will fill the SKU field.' })}
+                        </p>
+                        <div className="relative aspect-[4/3] overflow-hidden rounded-xl border border-border bg-black sm:aspect-video">
+                            <CameraBarcodeScanner selectedCameraId="" onCapture={handleCameraSkuCapture} />
+                            <div className="pointer-events-none absolute inset-x-8 top-1/2 h-0.5 -translate-y-1/2 animate-pulse bg-primary/70 shadow-[0_0_15px_rgba(var(--primary),0.5)]" />
+                        </div>
+                    </AppDialogBody>
+                    <AppDialogFooter>
+                        <Button type="button" variant="outline" onClick={() => setIsCameraSkuScannerOpen(false)}>
+                            {t('common.cancel')}
+                        </Button>
+                    </AppDialogFooter>
+                </AppDialogContent>
+            </AppDialog>
         </div>
     )
 }

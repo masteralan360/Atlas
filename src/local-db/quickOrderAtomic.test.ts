@@ -140,6 +140,7 @@ import { createCompletedSalesOrder, createQuickSalesOrder, createSalesOrder, rec
 import { recalculateBusinessPartnerSummary } from './businessPartners'
 import { enqueuePartnerSummaryJobs, processPartnerSummaryJobs } from './partnerSummaryJobs'
 import { assertOrderFinancialEffects } from '@/dev/testing/assertions/saleOrders'
+import { createPosServiceNameMetadata } from '@/lib/posServiceName'
 
 const WORKSPACE_ID = '10000000-0000-4000-8000-000000000001'
 const USER_ID = '10000000-0000-4000-8000-000000000002'
@@ -277,7 +278,8 @@ function serviceQuickOrderInput(): SalesOrderCreateInput {
             id: crypto.randomUUID(),
             productId: SERVICE_ID,
             storageId: SERVICES_VIRTUAL_STORAGE_ID,
-            productName: 'Fast Checkout Service',
+            productName: 'Fast Checkout Service - NewService',
+            metadata: createPosServiceNameMetadata('Fast Checkout Service', 'NewService'),
             productSku: '',
             unit: 'service',
             costPrice: 0,
@@ -939,7 +941,15 @@ describe('atomic POS Quick Order completion', () => {
                         source_storage_id: null,
                         items: [expect.objectContaining({
                             productId: SERVICE_ID,
-                            storageId: SERVICES_VIRTUAL_STORAGE_ID
+                            storageId: SERVICES_VIRTUAL_STORAGE_ID,
+                            productName: 'Fast Checkout Service - NewService',
+                            metadata: {
+                                posServiceName: {
+                                    baseNameSnapshot: 'Fast Checkout Service',
+                                    suffix: 'NewService',
+                                    displayNameSnapshot: 'Fast Checkout Service - NewService'
+                                }
+                            }
                         })]
                     })
                 })
@@ -947,7 +957,15 @@ describe('atomic POS Quick Order completion', () => {
         )
         expect(completed.items).toMatchObject([{
             productId: SERVICE_ID,
-            storageId: SERVICES_VIRTUAL_STORAGE_ID
+            storageId: SERVICES_VIRTUAL_STORAGE_ID,
+            productName: 'Fast Checkout Service - NewService',
+            metadata: {
+                posServiceName: {
+                    baseNameSnapshot: 'Fast Checkout Service',
+                    suffix: 'NewService',
+                    displayNameSnapshot: 'Fast Checkout Service - NewService'
+                }
+            }
         }])
         expect(await db.payment_transactions.where('sourceRecordId').equals(completed.id).count()).toBe(1)
         expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(5)

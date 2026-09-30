@@ -39,6 +39,7 @@ import {
 import { ACTIVITIES_VIRTUAL_STORAGE_ID, isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { isBelowMinimumSellingPrice } from '@/lib/minimumSellingPrice'
 import { isPosPaymentTypeAllowed, getPosCheckoutRoute, shouldShowPosLoanPaymentOption, type PosPaymentType } from '@/lib/posPaymentPolicy'
+import { createPosServiceNameMetadata, formatPosServiceName, normalizePosServiceNameSuffix } from '@/lib/posServiceName'
 import {
     canOfferMobileFreeOnlyOrderHold,
     canAddPosCartItemFromStorage,
@@ -1026,6 +1027,7 @@ export function POS() {
     // Negotiated Price Edit State
     const [editingPriceItemKey, setEditingPriceItemKey] = useState<string | null>(null)
     const [negotiatedPriceInput, setNegotiatedPriceInput] = useState('')
+    const [serviceNameSuffixInput, setServiceNameSuffixInput] = useState('')
     const isAdmin = user?.role === 'admin'
     const isModifyPriceHidden = !isAdmin && permissionKeys.includes('pos.hideModifyPriceButton' as any)
     const isPriceBelowCostHidden = hideCosts || (!isAdmin && permissionKeys.includes('pos.hidePriceBelowCostIndicator' as any))
@@ -1625,9 +1627,13 @@ export function POS() {
                     updated_at: printedAt,
                     product_id: item.product_id,
                     storage_id: item.storageId || selectedStorageId || null,
-                    product_name: product?.name || item.name || 'Unknown',
+                    product_name: formatPosServiceName(product?.name || item.name || 'Unknown', item.is_service ? item.service_name_suffix : undefined),
                     product_sku: product?.sku || '',
-                    product: product ? { ...product, can_be_returned: true } : undefined,
+                    product: product ? {
+                        ...product,
+                        name: formatPosServiceName(product.name, item.is_service ? item.service_name_suffix : undefined),
+                        can_be_returned: true
+                    } : undefined,
                     quantity: item.quantity,
                     unit_price: effectivePrice,
                     total_price: effectivePrice * item.quantity,
@@ -2350,22 +2356,31 @@ export function POS() {
     const openPriceEdit = (item: CartItem) => {
         setEditingPriceItemKey(getCartItemKey(item))
         setNegotiatedPriceInput(formatNumberWithCommas(getCartEffectivePrice(item).toString()))
+        setServiceNameSuffixInput(item.is_service ? item.service_name_suffix ?? '' : '')
     }
 
     const savePriceEdit = () => {
-        if (editingPriceItemKey) {
-            const newPrice = parseFormattedNumber(negotiatedPriceInput)
-            if (!isNaN(newPrice) && newPrice >= 0) {
-                setNegotiatedPrice(editingPriceItemKey, newPrice)
+        if (!editingPriceItemKey) return
+        const newPrice = parseFormattedNumber(negotiatedPriceInput)
+        if (!Number.isFinite(newPrice) || newPrice < 0) return
+
+        const serviceNameSuffix = normalizePosServiceNameSuffix(serviceNameSuffixInput)
+        setCart((current) => current.map((item) => getCartItemKey(item) === editingPriceItemKey
+            ? {
+                ...item,
+                negotiated_price: newPrice,
+                ...(item.is_service ? { service_name_suffix: serviceNameSuffix || undefined } : {}),
             }
-            setEditingPriceItemKey(null)
-            setNegotiatedPriceInput('')
-        }
+            : item))
+        setEditingPriceItemKey(null)
+        setNegotiatedPriceInput('')
+        setServiceNameSuffixInput('')
     }
 
     const cancelPriceEdit = () => {
         setEditingPriceItemKey(null)
         setNegotiatedPriceInput('')
+        setServiceNameSuffixInput('')
     }
 
     const clearNegotiatedPrice = (item: CartItem) => {
@@ -3034,7 +3049,7 @@ export function POS() {
             return {
                 product_id: item.product_id,
                 storage_id: service ? null : item.storageId || selectedStorageId || null,
-                product_name: product?.name || 'Unknown',
+                product_name: formatPosServiceName(product?.name || 'Unknown', service ? item.service_name_suffix : undefined),
                 product_sku: product?.sku || '',
                 created_at: checkoutTimestamp,
                 updated_at: checkoutTimestamp,
@@ -3058,6 +3073,7 @@ export function POS() {
                 converted_unit_price: convertedUnitPrice,
                 settlement_currency: settlementCurrency,
                 negotiated_price: item.negotiated_price, // store if negotiated
+                metadata: service ? createPosServiceNameMetadata(product?.name || item.name, item.service_name_suffix) ?? null : null,
                 price_book_id: item.price_book_id ?? null,
                 total: convertedUnitPrice * item.quantity,
                 // Immutable inventory snapshot at checkout time
@@ -3254,6 +3270,7 @@ export function POS() {
                 if (!product || !storageId) {
                     throw new Error(t('pos.stockMismatch', { defaultValue: 'One or more cart items no longer match an inventory row.' }))
                 }
+                const service = isService(product)
 
                 const originalCurrency = (item.effective_currency ?? getEffectiveProductCurrency(product)) as CurrencyCode
                 const priceBookItem = item.price_book_id
@@ -3275,7 +3292,10 @@ export function POS() {
                     id: generateId(),
                     productId: product.id,
                     storageId,
-                    productName: product.name,
+                    productName: formatPosServiceName(product.name, service ? item.service_name_suffix : undefined),
+                    ...(service
+                        ? { metadata: createPosServiceNameMetadata(product.name, item.service_name_suffix) ?? null }
+                        : {}),
                     productSku: product.sku,
                     unit: item.selling_unit_code ?? product.unit,
                     uomId: item.selling_uom_id ?? null,
@@ -3898,7 +3918,7 @@ export function POS() {
 
                                                     <div className="flex-1 min-w-0">
                                                         <div className="min-w-0">
-                                                            <div className="font-medium truncate">{item.name}</div>
+                                                            <div className="font-medium truncate"><bdi>{formatPosServiceName(item.name, item.is_service ? item.service_name_suffix : undefined)}</bdi></div>
                                                             {showCartStorageLabels && (
                                                                 <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
                                                                     <Warehouse className="h-3 w-3 shrink-0" />
@@ -4715,18 +4735,15 @@ export function POS() {
             </Dialog>
 
             {/* Negotiated Price Edit Dialog */}
-            <Dialog open={editingPriceItemKey !== null} onOpenChange={() => cancelPriceEdit()}>
-                <DialogContent className="max-w-sm">
-                    <DialogHeader>
-                        <DialogTitle>{t('pos.modifyPrice') || 'Modify Price'}</DialogTitle>
-                    </DialogHeader>
+            <AppDialog open={editingPriceItemKey !== null} onOpenChange={(open) => { if (!open) cancelPriceEdit() }}>
+                <AppDialogContent className="max-w-md">
                     {(() => {
                         const editingItem = cart.find((item) => getCartItemKey(item) === editingPriceItemKey)
                         const editingProduct = editingItem ? findStockProduct(editingItem.product_id, editingItem.storageId) : undefined
                         if (!editingItem) return null
                         const editedPrice = parseFormattedNumber(negotiatedPriceInput)
-        const effectiveCurrency = (editingItem.effective_currency
-            ?? (editingProduct ? getEffectiveProductCurrency(editingProduct) : 'usd')) as CurrencyCode
+                        const effectiveCurrency = (editingItem.effective_currency
+                            ?? (editingProduct ? getEffectiveProductCurrency(editingProduct) : 'usd')) as CurrencyCode
                         const minimumPriceForLine = editingItem.minimum_selling_price_snapshot
                             ?? (editingProduct?.minimumSellingPrice == null
                                 ? null
@@ -4749,112 +4766,145 @@ export function POS() {
                             && minimumPriceForLine != null
                             && (minimumPriceCurrencyUnavailable || hasMinimumPriceError)
 
+                        const canSavePrice = Number.isFinite(editedPrice) && editedPrice >= 0 && !shouldShowMinimumPriceError
+
                         return (
-                            <div className="space-y-4">
-                                {/* Product Name */}
-                                <div className="text-sm font-medium text-center p-2 bg-muted/30 rounded">
-                                    {editingItem.name}
-                                </div>
-
-                                {/* Original Price - Readonly */}
-                                <div>
-                                    <Label className="text-muted-foreground">{t('pos.originalPriceLabel') || 'Original Price'}</Label>
-                                    <div className="text-lg font-mono font-bold mt-1 p-3 bg-muted/50 rounded border border-border">
-                                        {formatCurrency(editingItem.price, editingProduct?.currency || 'usd', features.iqd_display_preference)}
-                                    </div>
-                                </div>
-
-                                {/* Negotiated Price - Editable */}
-                                <div>
-                                    <Label>{t('pos.negotiatedPrice') || 'Negotiated Price'}</Label>
-                                    <div className="relative mt-1">
-                                        <Input
-                                            type="text"
-                                            inputMode="decimal"
-                                            value={negotiatedPriceInput}
-                                            onChange={(e) => {
-                                                const raw = e.target.value.replace(/[^0-9.,]/g, '')
-                                                setNegotiatedPriceInput(formatNumberWithCommas(raw))
-                                            }}
-                                            placeholder="0.00"
-                                            aria-invalid={shouldShowMinimumPriceError}
-                                            className={cn(
-                                                'text-lg py-5 font-mono pr-14',
-                                                shouldShowMinimumPriceError && 'border-destructive bg-destructive/5 text-destructive focus-visible:ring-destructive/25'
-                                            )}
-                                            autoFocus
-                                        />
-                                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold uppercase tracking-wider text-muted-foreground/60">
-                                            {editingProduct?.currency === 'iqd' ? features.iqd_display_preference : editingProduct?.currency === 'usd' ? '$' : (editingProduct?.currency || '').toUpperCase()}
-                                        </span>
-                                    </div>
-                                    {/* Live Conversion Display */}
-                                    {editingProduct && editingProduct.currency !== features.default_currency && negotiatedPriceInput && !isNaN(parseFormattedNumber(negotiatedPriceInput)) && (
-                                        <div className="mt-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 animate-in fade-in slide-in-from-top-1 duration-200">
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-xs font-medium text-emerald-600/80 uppercase tracking-wider">
-                                                    {t('pos.convertedValue') || 'Converted Value'}
-                                                </span>
-                                                <div className="flex items-center gap-1.5 text-xs text-emerald-600/70 font-mono">
-                                                    <TrendingUp className="w-3 h-3" />
-                                                    <span>1 {editingProduct.currency.toUpperCase()} = {formatCurrency(convertPrice(1, editingProduct.currency as any, features.default_currency as any), features.default_currency, features.iqd_display_preference)}</span>
-                                                </div>
-                                            </div>
-                                            <div className="text-xl font-mono font-black text-emerald-500 mt-0.5">
-                                                {formatCurrency(convertPrice(parseFormattedNumber(negotiatedPriceInput), editingProduct.currency as any, features.default_currency as any), features.default_currency, features.iqd_display_preference)}
+                            <>
+                                <AppDialogHeader>
+                                    <AppDialogTitle className="flex items-center justify-center gap-2 text-center">
+                                        <Pencil className="h-4 w-4 text-primary" />
+                                        {editingItem.is_service
+                                            ? t('pos.modifyPriceAndServiceName')
+                                            : t('pos.modifyPrice') || 'Modify Price'}
+                                    </AppDialogTitle>
+                                </AppDialogHeader>
+                                <AppDialogBody className="space-y-4">
+                                    {editingItem.is_service ? (
+                                        <div className="space-y-2">
+                                            <Label htmlFor="pos-service-name-suffix">{t('pos.serviceNameAddition')}</Label>
+                                            <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1.2fr)] items-center gap-2 rounded border border-border bg-muted/30 p-2 text-sm font-medium">
+                                                <bdi className="truncate" title={editingItem.name}>{editingItem.name}</bdi>
+                                                <span aria-hidden="true">-</span>
+                                                <Input
+                                                    id="pos-service-name-suffix"
+                                                    value={serviceNameSuffixInput}
+                                                    onChange={(event) => setServiceNameSuffixInput(event.target.value)}
+                                                    maxLength={120}
+                                                    placeholder={t('pos.serviceNameAdditionPlaceholder')}
+                                                    aria-label={t('pos.serviceNameAddition')}
+                                                    className="min-w-0 bg-background text-sm font-normal"
+                                                />
                                             </div>
                                         </div>
+                                    ) : (
+                                        <div className="text-sm font-medium text-center p-2 bg-muted/30 rounded">
+                                            {editingItem.name}
+                                        </div>
                                     )}
-                                    <p className="text-xs text-muted-foreground mt-1">
-                                        {t('pos.originalPriceDesc') || 'Original price will be preserved in records.'}
-                                    </p>
-                                    {shouldShowMinimumPriceError && editingProduct && minimumPriceForLine != null && (
-                                        <p role="alert" className="mt-2 text-sm font-semibold text-destructive">
-                                            {minimumPriceCurrencyUnavailable
-                                                ? t('products.minimumSellingPrice.currencyUnavailable', { productName: editingProduct.name })
-                                                : t('products.minimumSellingPrice.staffViolation', {
-                                                    productName: editingProduct.name,
-                                                    minimumPrice: formatCurrency(minimumPriceForLine, editingProduct.currency, features.iqd_display_preference)
-                                                })}
-                                        </p>
-                                    )}
-                                    {!isPriceBelowCostHidden && (() => {
-                                        const parsedPrice = parseFormattedNumber(negotiatedPriceInput)
-                                        const costPrice = editingItem.uom_cost_price
-                                            ?? (editingProduct?.costPrice == null
-                                                ? null
-                                                : editingProduct.costPrice * (editingItem.unit_factor ?? 1))
-                                        if (costPrice != null && costPrice > 0 && !isNaN(parsedPrice) && parsedPrice < costPrice) {
-                                            return (
-                                                <div className="mt-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 animate-in fade-in slide-in-from-top-1 duration-200">
-                                                    <div className="flex items-center gap-2 text-red-600">
-                                                        <span className="text-sm font-semibold">
-                                                            {t('pos.priceBelowCost') || '⚠️ Price is below cost!'}
-                                                        </span>
-                                                    </div>
-                                                    <div className="text-xs text-red-500/80 mt-0.5">
-                                                        {formatCurrency(costPrice, editingProduct?.currency || 'usd', features.iqd_display_preference)}
+
+                                    {/* Original Price - Readonly */}
+                                    <div>
+                                        <Label className="text-muted-foreground">{t('pos.originalPriceLabel') || 'Original Price'}</Label>
+                                        <div className="text-lg font-mono font-bold mt-1 p-3 bg-muted/50 rounded border border-border">
+                                            {formatCurrency(editingItem.price, editingProduct?.currency || 'usd', features.iqd_display_preference)}
+                                        </div>
+                                    </div>
+
+                                    {/* Negotiated Price - Editable */}
+                                    <div>
+                                        <Label htmlFor="pos-negotiated-price">
+                                            {t('pos.negotiatedPrice') || 'Negotiated Price'} <span className="text-destructive">*</span>
+                                        </Label>
+                                        <div className="relative mt-1">
+                                            <Input
+                                                id="pos-negotiated-price"
+                                                type="text"
+                                                inputMode="decimal"
+                                                value={negotiatedPriceInput}
+                                                onChange={(e) => {
+                                                    const raw = e.target.value.replace(/[^0-9.,]/g, '')
+                                                    setNegotiatedPriceInput(formatNumberWithCommas(raw))
+                                                }}
+                                                placeholder="0"
+                                                aria-invalid={shouldShowMinimumPriceError}
+                                                className={cn(
+                                                    'text-lg py-5 font-mono pr-14',
+                                                    shouldShowMinimumPriceError && 'border-destructive bg-destructive/5 text-destructive focus-visible:ring-destructive/25'
+                                                )}
+                                                autoFocus
+                                            />
+                                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold uppercase tracking-wider text-muted-foreground/60">
+                                                {editingProduct?.currency === 'iqd' ? features.iqd_display_preference : editingProduct?.currency === 'usd' ? '$' : (editingProduct?.currency || '').toUpperCase()}
+                                            </span>
+                                        </div>
+                                        {/* Live Conversion Display */}
+                                        {editingProduct && editingProduct.currency !== features.default_currency && negotiatedPriceInput && !isNaN(parseFormattedNumber(negotiatedPriceInput)) && (
+                                            <div className="mt-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 animate-in fade-in slide-in-from-top-1 duration-200">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs font-medium text-emerald-600/80 uppercase tracking-wider">
+                                                        {t('pos.convertedValue') || 'Converted Value'}
+                                                    </span>
+                                                    <div className="flex items-center gap-1.5 text-xs text-emerald-600/70 font-mono">
+                                                        <TrendingUp className="w-3 h-3" />
+                                                        <span>1 {editingProduct.currency.toUpperCase()} = {formatCurrency(convertPrice(1, editingProduct.currency as any, features.default_currency as any), features.default_currency, features.iqd_display_preference)}</span>
                                                     </div>
                                                 </div>
-                                            )
-                                        }
-                                        return null
-                                    })()}
-                                </div>
+                                                <div className="text-xl font-mono font-black text-emerald-500 mt-0.5">
+                                                    {formatCurrency(convertPrice(parseFormattedNumber(negotiatedPriceInput), editingProduct.currency as any, features.default_currency as any), features.default_currency, features.iqd_display_preference)}
+                                                </div>
+                                            </div>
+                                        )}
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            {t('pos.originalPriceDesc') || 'Original price will be preserved in records.'}
+                                        </p>
+                                        {shouldShowMinimumPriceError && editingProduct && minimumPriceForLine != null && (
+                                            <p role="alert" className="mt-2 text-sm font-semibold text-destructive">
+                                                {minimumPriceCurrencyUnavailable
+                                                    ? t('products.minimumSellingPrice.currencyUnavailable', { productName: editingProduct.name })
+                                                    : t('products.minimumSellingPrice.staffViolation', {
+                                                        productName: editingProduct.name,
+                                                        minimumPrice: formatCurrency(minimumPriceForLine, editingProduct.currency, features.iqd_display_preference)
+                                                    })}
+                                            </p>
+                                        )}
+                                        {!isPriceBelowCostHidden && (() => {
+                                            const parsedPrice = parseFormattedNumber(negotiatedPriceInput)
+                                            const costPrice = editingItem.uom_cost_price
+                                                ?? (editingProduct?.costPrice == null
+                                                    ? null
+                                                    : editingProduct.costPrice * (editingItem.unit_factor ?? 1))
+                                            if (costPrice != null && costPrice > 0 && !isNaN(parsedPrice) && parsedPrice < costPrice) {
+                                                return (
+                                                    <div className="mt-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 animate-in fade-in slide-in-from-top-1 duration-200">
+                                                        <div className="flex items-center gap-2 text-red-600">
+                                                            <span className="text-sm font-semibold">
+                                                                {t('pos.priceBelowCost') || '⚠️ Price is below cost!'}
+                                                            </span>
+                                                        </div>
+                                                        <div className="text-xs text-red-500/80 mt-0.5">
+                                                            {formatCurrency(costPrice, editingProduct?.currency || 'usd', features.iqd_display_preference)}
+                                                        </div>
+                                                    </div>
+                                                )
+                                            }
+                                            return null
+                                        })()}
+                                    </div>
 
-                                <DialogFooter>
-                                    <Button type="button" variant="outline" onClick={cancelPriceEdit}>
-                                        {t('common.cancel')}
-                                    </Button>
-                                    <Button type="button" onClick={savePriceEdit}>
-                                        {t('common.save')}
-                                    </Button>
-                                </DialogFooter>
-                            </div>
+                                </AppDialogBody>
+                                    <AppDialogFooter>
+                                        <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={cancelPriceEdit}>
+                                            {t('common.cancel')}
+                                        </Button>
+                                        <Button type="button" className="w-full sm:w-auto" onClick={savePriceEdit} disabled={!canSavePrice}>
+                                            {t('common.save')}
+                                        </Button>
+                                </AppDialogFooter>
+                            </>
                         )
                     })()}
-                </DialogContent>
-            </Dialog>
+                </AppDialogContent>
+            </AppDialog>
 
             {/* Dynamic Unit Slider Modal */}
             <Dialog open={dynamicUnitModal !== null} onOpenChange={(open) => { if (!open) setDynamicUnitModal(null) }}>
@@ -6116,7 +6166,7 @@ function MobileCart({
                                         <div className="flex flex-col min-w-0 flex-1">
                                             <div className="flex items-center justify-between gap-2">
                                                 <div className="min-w-0 flex-1">
-                                                    <h3 className="font-bold text-sm truncate">{item.name}</h3>
+                                                    <h3 className="font-bold text-sm truncate"><bdi>{formatPosServiceName(item.name, item.is_service ? item.service_name_suffix : undefined)}</bdi></h3>
                                                     {showCartStorageLabels && (
                                                         <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
                                                             <Warehouse className="h-3 w-3 shrink-0" />

@@ -39,7 +39,7 @@ import { useHideCosts } from '@/permissions'
 import { hasValidProductCost } from '@/lib/productCost'
 import { isService } from '@/lib/catalogItem'
 import { UiAccessGate, useUiAccess } from '@/context/UiAccessContext'
-import { getBarcodeLabelData } from '@/lib/barcodeLabel'
+import { getBarcodeLabelData, isProductSelectableForBarcodePrint } from '@/lib/barcodeLabel'
 import {
     buildCustomTemplateLayoutPdf,
     createCustomTemplatePreview,
@@ -736,9 +736,17 @@ export function Products() {
         () => products.filter((product) => !isService(product)),
         [products]
     )
-    const selectedProductsCount = selectionEligibleProducts.filter((product) => selectedProductIds.has(product.id)).length
+    const barcodeSelectionEligibleProducts = useMemo(
+        () => products.filter((product) =>
+            (hasFeature('services') || !isService(product))
+            && isProductSelectableForBarcodePrint(product)
+        ),
+        [hasFeature, products]
+    )
+    const selectedProductsCount = (isBarcodeSelectionMode ? barcodeSelectionEligibleProducts : selectionEligibleProducts)
+        .filter((product) => selectedProductIds.has(product.id)).length
     const allWorkspaceProductsSelected = selectionEligibleProducts.length > 0 && selectedProductsCount === selectionEligibleProducts.length
-    const selectableFilteredProducts = filteredProducts.filter((product) => !isService(product))
+    const selectableFilteredProducts = filteredProducts.filter(isProductSelectableForBarcodePrint)
     const allFilteredProductsSelected = selectableFilteredProducts.length > 0
         && selectableFilteredProducts.every((product) => selectedProductIds.has(product.id))
     const isProductSelectionMode = isBranchCloneSelectionMode || isBarcodeSelectionMode
@@ -749,9 +757,9 @@ export function Products() {
 
         return [
             ...visibleProducts,
-            ...selectionEligibleProducts.filter((product) => selectedIds.has(product.id) && !visibleProductIds.has(product.id))
+            ...barcodeSelectionEligibleProducts.filter((product) => selectedIds.has(product.id) && !visibleProductIds.has(product.id))
         ]
-    }, [selectableFilteredProducts, selectionEligibleProducts, selectedProductIds])
+    }, [barcodeSelectionEligibleProducts, selectableFilteredProducts, selectedProductIds])
     const barcodeLabels = useMemo(
         () => getBarcodeLabelData(barcodePrintProducts, features.iqd_display_preference),
         [barcodePrintProducts, features.iqd_display_preference]
@@ -862,7 +870,10 @@ export function Products() {
     }
 
     const toggleProductSelection = (productId: string) => {
-        if (isService(products.find((product) => product.id === productId))) return
+        const product = products.find((row) => row.id === productId)
+        if (!product || (isBarcodeSelectionMode
+            ? !isProductSelectableForBarcodePrint(product)
+            : isService(product))) return
         setSelectedProductIds((previous) => {
             const next = new Set(previous)
             if (next.has(productId)) {
@@ -1390,7 +1401,7 @@ export function Products() {
                 ) : null}
             </div>
 
-            {isProductSelectionMode && selectionEligibleProducts.length > 0 && (
+            {isProductSelectionMode && (isBarcodeSelectionMode ? barcodeSelectionEligibleProducts : selectionEligibleProducts).length > 0 && (
                 <Card className="border-primary/15 bg-primary/5">
                     <CardContent className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
                         <div className="space-y-2">
@@ -1405,26 +1416,29 @@ export function Products() {
                                     className="cursor-pointer font-medium"
                                 >
                                     {isBarcodeSelectionMode
-                                        ? `Select All Products (${filteredProducts.length})`
+                                        ? t('products.barcodePrint.selectAll', {
+                                            defaultValue: 'Select all eligible items ({{count}})',
+                                            count: selectableFilteredProducts.length
+                                        })
                                         : `${t('products.branchClone.selectAllWorkspace', { defaultValue: 'Select all workspace products' })} (${selectionEligibleProducts.length})`}
                                 </Label>
                             </div>
-                            <p className="text-sm text-muted-foreground">
-                                {isBarcodeSelectionMode
-                                    ? t('products.barcodePrint.selectedCount', {
-                                        defaultValue: '{{count}} products selected',
-                                        count: selectedProductsCount
-                                    })
+                                    <p className="text-sm text-muted-foreground">
+                                        {isBarcodeSelectionMode
+                                            ? t('products.barcodePrint.selectedCount', {
+                                                defaultValue: '{{count}} items selected',
+                                                count: selectedProductsCount
+                                            })
                                     : t('products.branchClone.selectedCount', {
                                         defaultValue: '{{count}} products selected',
                                         count: selectedProductsCount
                                     })}
                             </p>
-                            <p className="text-sm text-muted-foreground">
-                                {isBarcodeSelectionMode
-                                    ? t('products.barcodePrint.selectHint', {
-                                        defaultValue: 'Select products, then choose a label size to print.'
-                                    })
+                                    <p className="text-sm text-muted-foreground">
+                                        {isBarcodeSelectionMode
+                                            ? t('products.barcodePrint.selectHint', {
+                                                defaultValue: 'Select products, plus services that have an SKU, then choose a label size to print.'
+                                            })
                                     : t('products.branchClone.selectionHint', {
                                         defaultValue: 'Select the products you want to copy, then choose the destination workspace and storage.'
                                     })}
@@ -1548,7 +1562,9 @@ export function Products() {
                                                                             hasProductCostWarning(product) && 'border-destructive/40 bg-destructive/10'
                                                                         )}
                                                                     >
-                                                                        {isProductSelectionMode && !isService(product) && (
+                                                                        {isProductSelectionMode && (isBarcodeSelectionMode
+                                                                            ? isProductSelectableForBarcodePrint(product)
+                                                                            : !isService(product)) && (
                                                                             <div className="flex items-center gap-2">
                                                                                 <Checkbox
                                                                                     id={`product-select-mobile-${product.id}`}
@@ -1556,7 +1572,9 @@ export function Products() {
                                                                                     onCheckedChange={() => toggleProductSelection(product.id)}
                                                                                 />
                                                                                 <Label htmlFor={`product-select-mobile-${product.id}`} className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                                                                                    {t('products.branchClone.selectProduct', { defaultValue: 'Select Product' })}
+                                                                                    {isBarcodeSelectionMode
+                                                                                        ? t('products.barcodePrint.selectRow', { defaultValue: 'Select item' })
+                                                                                        : t('products.branchClone.selectProduct', { defaultValue: 'Select Product' })}
                                                                                 </Label>
                                                                             </div>
                                                                         )}
@@ -1694,7 +1712,9 @@ export function Products() {
                                                                 hasProductCostWarning(product) && 'border-destructive/40 bg-destructive/10 hover:bg-destructive/15'
                                                             )}
                                                         >
-                                                            {isProductSelectionMode && !isService(product) && (
+                                                            {isProductSelectionMode && (isBarcodeSelectionMode
+                                                                ? isProductSelectableForBarcodePrint(product)
+                                                                : !isService(product)) && (
                                                                 <div className="flex items-center gap-2">
                                                                     <Checkbox
                                                                         id={`product-select-grid-${product.id}`}
@@ -1702,7 +1722,9 @@ export function Products() {
                                                                         onCheckedChange={() => toggleProductSelection(product.id)}
                                                                     />
                                                                     <Label htmlFor={`product-select-grid-${product.id}`} className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                                                                        {t('products.branchClone.selectProduct', { defaultValue: 'Select Product' })}
+                                                                        {isBarcodeSelectionMode
+                                                                            ? t('products.barcodePrint.selectRow', { defaultValue: 'Select item' })
+                                                                            : t('products.branchClone.selectProduct', { defaultValue: 'Select Product' })}
                                                                     </Label>
                                                                 </div>
                                                             )}
@@ -1881,7 +1903,9 @@ export function Products() {
                                                                 hasProductCostWarning(product) && 'bg-destructive/10 hover:bg-destructive/15'
                                                             )}>
                                                                 {isProductSelectionMode && (
-                                                                    <TableCell>{!isService(product) && <Checkbox
+                                                                    <TableCell>{(isBarcodeSelectionMode
+                                                                        ? isProductSelectableForBarcodePrint(product)
+                                                                        : !isService(product)) && <Checkbox
                                                                         id={`product-select-table-${product.id}`}
                                                                         checked={selectedProductIds.has(product.id)}
                                                                         onCheckedChange={() => toggleProductSelection(product.id)}
@@ -1998,6 +2022,7 @@ export function Products() {
 
             <PrintFlow
                 isOpen={isBarcodePrintOpen}
+                module="products"
                 onClose={() => {
                     setIsBarcodePrintOpen(false)
                     setBarcodePrintProducts([])

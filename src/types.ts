@@ -35,6 +35,7 @@ export interface SaleItem {
     converted_unit_price: number
     settlement_currency: string
     negotiated_price?: number
+    metadata?: Record<string, unknown> | null
     inventory_snapshot?: number
     batch_allocations?: {
         batch_id: string
@@ -185,6 +186,8 @@ export interface CartItem {
     freeBonusUnit?: string
     max_stock: number
     negotiated_price?: number
+    /** Optional per-line addition shown after the app-owned service-name separator. */
+    service_name_suffix?: string
     imageUrl?: string
     unit?: string
     /** Immutable selling/base unit selection used by checkout and held carts. */

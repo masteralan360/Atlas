@@ -37,6 +37,7 @@ access rules.
 | --- | --- | --- |
 | Sale persistence, payments, inventory, financing, and minimum-price transaction enforcement | `src/local-db/posCheckout.ts`, `src/local-db/minimumSellingPrice.ts` | `posCheckout.test.ts`, `minimumSellingPrice.test.ts`, `posFinancing.test.ts`, `posRemote.test.ts`, `posRecovery.test.ts` |
 | Price precedence, staff minimum-price boundaries, bulk discount, conversion, held-cart snapshot/restore | `src/lib/posCart.ts`, `src/lib/minimumSellingPrice.ts` | `posCart.test.ts`, `posPricing.test.ts`, `minimumSellingPrice.test.ts`, `posCurrency.test.ts` |
+| App-generated service display names and immutable line metadata in regular POS and Quick Order | `src/lib/posServiceName.ts`, POS page, checkout and order persistence | `posServiceName.test.ts`, `posCheckout.test.ts`, `posRemote.test.ts`, `quickOrderAtomic.test.ts`, hosted POS checkout |
 | Frozen retry identities after uncertain responses | `src/lib/posCheckoutAttempt.ts`, POS page | `posAttempt.test.ts` and remote retry checks |
 | Sale / Activities / Quick Order routing | `src/lib/posPaymentPolicy.ts` | `posRouting.test.ts`, existing policy tests |
 | Refund amounts, records and linked counter-entries | `src/local-db/posSaleReturns.ts`, Sales page | `posReturns.test.ts`, remote refund contracts |
@@ -66,6 +67,9 @@ run-tagged product/storage/batch records, and inspect their own IDs through a
 fresh authenticated client. A passing case may retire its product; sale,
 payment, loan and return audit records remain. Failed fixtures are retained for
 inspection. Use an empty test workspace rather than business data.
+The hosted checkout group also verifies that a service suffix and app-generated
+` - ` separator persist together in sale-line metadata. That case requires the
+Services feature to be enabled in the dedicated workspace.
 
 Cash, FIB, QiCard, ZainCash and FastPay are immediate POS methods. The fixture uses
 `CASH_AND_DIGITAL_PAYMENT_METHODS`; bank transfer belongs to other flows and is
@@ -92,6 +96,12 @@ created. A stock, payment, financing or SQLite write failure rolls back the sale
 write set. Reorder rules run afterward as follow-up work. Reusing an already
 committed sale ID returns its existing result; conflicting total/currency/method
 inputs are rejected.
+
+Service-name additions are immutable line snapshots. Regular POS stores the
+app-generated display name, including ` - `, in `sale_items.metadata` under
+`posServiceName`; POS Quick Order stores the same metadata on each item inside
+`sales_orders.items`. Local-mode SQLite keeps it in the sale-item JSON payload,
+and sale history reads the snapshot rather than a later catalog name.
 
 **Cloud / Hybrid:** the existing `complete_sale` or `complete_sale_with_loan` RPC
 owns authoritative sale and stock changes. One transient verification retry
@@ -140,7 +150,7 @@ The registry at `src/dev/testing/suites.json` is the authoritative file allowlis
 | ID | Coverage |
 | --- | --- |
 | `checkout` | Payment-method × currency × optional-account matrix, physical/service checkout, multi-storage stock and mixed Services checkout effects, Staff below-minimum rollback, exact-boundary acceptance, Admin bypass, Local/Cloud/Hybrid validation contracts, cache reopen, replay, payment/account/ledger regressions, generated POS cases |
-| `cart` | Independent held snapshots, fractional quantities, price-book/negotiation retention, current stock bounds, legacy/cross-storage restoration, switching catalog storage with a populated cart, and mixed-source label visibility |
+| `cart` | Independent held snapshots, fractional quantities, price-book/negotiation retention, current stock bounds, legacy/cross-storage restoration, switching catalog storage with a populated cart, mixed-source label visibility, and app-generated service-name formatting |
 | `pricing` | Price precedence including zero, Staff/Admin minimum-price boundaries and admin-only product-field gate, percentage/fixed bulk discount, caps/reset/subtotal boundaries, discounts, price books and cost validation |
 | `currency` | Supported direct/inverse/cross pairs, IQD/decimal rounding, missing/invalid rate availability and immutable rate payloads |
 | `inventory` | Batch allocation/costing/FEFO/fraction/duplicate-line regressions, Local stock effects and storage access |

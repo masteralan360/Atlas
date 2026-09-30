@@ -12,10 +12,10 @@ count; the remaining checks use fixed scenarios.
 | Group | Main coverage |
 | --- | --- |
 | Catalog fields, categories, and product lifecycle | Generated Local-mode create/edit/archive cases; defaults, price/cost/currency, return settings, zero initial stock, duplicate SKU rejection, category cleanup, and services/catalog persistence. Hosted checks persist edits, reject duplicate SKUs, detach archived categories, verify workspace-scoped reads, and archive products. |
-| SKU, barcode, and product variants | SKU normalization/uniqueness, barcode normalization and workspace-scoped uniqueness, primary-barcode changes/deletion, parent/variant relations, and marketplace product-image snapshots. Hosted checks persist a variant and barcode revision. |
+| SKU, barcode, and product variants | SKU normalization/uniqueness, camera-capture SKU normalization, barcode normalization and workspace-scoped uniqueness, primary-barcode changes/deletion, parent/variant relations, and marketplace product-image snapshots. Hosted checks persist a variant and barcode revision. |
 | Units, inventory, and stock movements | Unit and relationship validation, product unit conversions, stock presentation, inventory hydration/sync, and Cloud inventory transaction contracts. Hosted checks save a conversion between unique custom units and verify opening stock and the separate archive movement. |
 | Prices, discounts, price books, and commissions | Product cost and discount calculations, rounding, price books, order price-book consumers, minimum selling price field visibility and staff/admin boundaries, commission previews and assignments, and marketplace delivery product-commission migration rules. Hosted checks persist and then remove a price-book item, product discount, and commission rule. |
-| Import, export, labels, templates, and images | Product import mapping/validation, export table rendering, barcode labels, print templates, marketplace images, image paths, and initial additional-image upload/rollback contracts. Upload behavior uses mocks; it does not write to real Supabase Storage. |
+| Import, export, labels, templates, and images | Product import mapping/validation, export table rendering, barcode labels (including service rows with an SKU), print templates, marketplace images, image paths, and initial additional-image upload/rollback contracts. Upload behavior uses mocks; it does not write to real Supabase Storage. |
 | Orders, POS, agents, and storefront consumers | Related-unit ordering and inventory transactions, POS cart/pricing/routing, product selection, catalog/storefront rules, sale product exchanges, partner product movement reads/templates/printing, and workspace-scoped destination matching. |
 | Cloud / Hybrid product request contracts | Product create/edit payload scoping, cache updates only after acknowledgement, remote rejection behavior, minimum selling price validation request/result/failure handling, inventory movement requests, and unit/relationship request contracts. Mocked Supabase requests run in both Cloud and Hybrid modes. |
 
@@ -47,9 +47,10 @@ test workspace because product stock history is audit data.
 
 ## Coverage gaps
 
-The suite does not automate the Products browser form, native SQLite persistence
-or restart, Hybrid SQLite mirror parity, hardware barcode scanning, actual image
-uploads to private Storage, or broad live RLS checks across non-admin roles.
+The suite does not automate the Products browser form, live device-camera or
+hardware barcode scanning, native SQLite persistence or restart, Hybrid SQLite
+mirror parity, actual image uploads to private Storage, or broad live RLS checks
+across non-admin roles.
 Hosted workspace scoping is checked with the dedicated admin account; it is not
 a substitute for testing each permission role. Those environments are marked
 unavailable or isolated-only in the registry until they have a safe, dedicated

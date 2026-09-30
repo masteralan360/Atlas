@@ -4,7 +4,8 @@ import {
     formatBarcodeLabelPrice,
     getBarcodeLabelData,
     getBarcodeLabelPricePerUnit,
-    getCode128BBarWidths
+    getCode128BBarWidths,
+    isProductSelectableForBarcodePrint
 } from './barcodeLabel'
 import type { Product } from '@/local-db'
 
@@ -34,6 +35,12 @@ function product(id: string, sku: string, barcode?: string): Product {
 }
 
 describe('barcode label data', () => {
+    it('allows service rows in barcode selection only when the service has an SKU', () => {
+        expect(isProductSelectableForBarcodePrint({ ...product('service-with-sku', ' SERVICE-1 '), isService: true })).toBe(true)
+        expect(isProductSelectableForBarcodePrint({ ...product('service-without-sku', '  '), isService: true })).toBe(false)
+        expect(isProductSelectableForBarcodePrint(product('product-without-sku', ''))).toBe(true)
+    })
+
     it('keeps products in the supplied selection order', () => {
         const labels = getBarcodeLabelData([
             product('second', 'SKU-2', 'BC-2'),

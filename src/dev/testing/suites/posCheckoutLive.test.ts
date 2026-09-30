@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createPosServiceNameMetadata } from '@/lib/posServiceName'
 import {
     freshPosClient, livePosWorkspaceId, recordPosFixture, requirePosLiveData,
     setupHostedPos, withLivePosFixture, livePosMethods, livePosCurrency
@@ -67,6 +68,37 @@ describe('POS · hosted checkout', () => {
             })
         }, 120_000)
     }
+
+    it('service name metadata is persisted on the hosted sale line', async () => {
+        await withLivePosFixture(async ({ ids, product, input }) => {
+            const { commitPosCheckout } = await import('@/local-db/posCheckout')
+            const checkout = input({ unitPrice: 100 })
+            checkout.payload.items[0].product_name = `${product.name} - NewService`
+            checkout.payload.items[0].metadata = createPosServiceNameMetadata(product.name, 'NewService') ?? null
+            ids.saleId = checkout.payload.id
+            recordPosFixture(ids)
+
+            await commitPosCheckout(checkout)
+
+            const fresh = await freshPosClient()
+            try {
+                const lines = requirePosLiveData(await fresh.from('sale_items')
+                    .select('product_id,storage_id,metadata').eq('sale_id', checkout.payload.id), 'POS service lines')
+                expect(lines).toHaveLength(1)
+                expect(lines[0]).toMatchObject({
+                    product_id: product.id,
+                    storage_id: null,
+                    metadata: {
+                        posServiceName: {
+                            baseNameSnapshot: product.name,
+                            suffix: 'NewService',
+                            displayNameSnapshot: `${product.name} - NewService`
+                        }
+                    }
+                })
+            } finally { await fresh.auth.signOut() }
+        }, { service: true })
+    }, 120_000)
 
     it('selected payment account creates exactly one hosted account movement', async () => {
         await withLivePosFixture(async ({ tag, ids, input }) => {

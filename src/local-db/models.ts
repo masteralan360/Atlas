@@ -919,6 +919,8 @@ export interface OrderLineItem {
 export interface SalesOrderItem extends OrderLineItem {
   costPrice: number
   convertedCostPrice: number
+  /** POS line metadata, including the optional service-name snapshot. */
+  metadata?: Record<string, unknown> | null
   /** Cumulative quantity returned from this line. The immutable return rows remain the source of truth. */
   returnedQuantity?: number
   /** Cumulative returned paid quantity in the canonical inventory unit. */
@@ -2013,6 +2015,8 @@ export interface SaleItem {
   convertedUnitPrice: number
   settlementCurrency: CurrencyCode
   negotiatedPrice?: number
+  /** POS-only descriptive metadata captured for this immutable sale line. */
+  metadata?: Record<string, unknown> | null
   /** Price Book that priced this line at checkout, when one was selected in POS. */
   priceBookId?: string | null
   // Immutable inventory snapshot at checkout (null for service items)

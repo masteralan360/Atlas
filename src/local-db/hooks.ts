@@ -82,6 +82,7 @@ import {
 import { DuplicateProductSkuError, normalizeProductSku, trimProductSku } from './productSku'
 import { replaceProductPriceBookItems } from './priceBooks'
 import { isService } from '@/lib/catalogItem'
+import { getPosServiceDisplayName } from '@/lib/posServiceName'
 import { generateId, toSnakeCase, toCamelCase } from '@/lib/utils'
 import { supabase } from '@/auth/supabase'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
@@ -2506,6 +2507,8 @@ export async function enrichSalesForUiRows(workspaceId: string, sales: Sale[]) {
     const itemsBySaleId = new Map<string, Record<string, unknown>[]>()
     for (const item of localItems) {
         const product = productById.get(item.productId)
+        const productName = product?.name || 'Unknown Product'
+        const displayName = getPosServiceDisplayName(productName, item.metadata)
         const categoryName = product?.categoryId
             ? (categoryById.get(product.categoryId)?.name || product.category || '')
             : (product?.category || '')
@@ -2533,8 +2536,9 @@ export async function enrichSalesForUiRows(workspaceId: string, sales: Sale[]) {
             total_price: item.totalPrice,
             cost_price: item.costPrice,
             converted_cost_price: item.convertedCostPrice,
-            product_name: product?.name || 'Unknown Product',
+            product_name: displayName,
             product_sku: product?.sku || '',
+            metadata: item.metadata ?? null,
             original_currency: item.originalCurrency,
             original_unit_price: item.originalUnitPrice,
             converted_unit_price: item.convertedUnitPrice,
@@ -2550,7 +2554,7 @@ export async function enrichSalesForUiRows(workspaceId: string, sales: Sale[]) {
             returned_by: (item as SaleItem & { returnedBy?: string }).returnedBy,
             product_category: categoryName,
             product: {
-                name: product?.name || 'Unknown Product',
+                name: displayName,
                 sku: product?.sku || '',
                 category: categoryName || undefined,
                 can_be_returned: product?.canBeReturned ?? true,
@@ -2893,13 +2897,17 @@ async function performSalesSync(
     localSale.syncStatus = 'synced'
     localSale.lastSyncedAt = syncedAt
 
-    const enrichedItems = (remoteItems || []).map((item: any) => ({
-      ...item,
-      product_name: item.product?.name || 'Unknown Product',
-      product_sku: item.product?.sku || '',
-      product_category: item.product?.category || '',
-      product_unit: item.product?.unit || '',
-    }))
+    const enrichedItems = (remoteItems || []).map((item: any) => {
+      const displayName = getPosServiceDisplayName(item.product?.name || 'Unknown Product', item.metadata)
+      return {
+        ...item,
+        product_name: displayName,
+        product_sku: item.product?.sku || '',
+        product_category: item.product?.category || '',
+        product_unit: item.product?.unit || '',
+        product: item.product ? { ...item.product, name: displayName } : item.product,
+      }
+    })
     ;(localSale as any)._enrichedItems = enrichedItems
     ;(localSale as any)._cashierName = profilesMap[saleData.cashier_id]
       || (existingSaleById.get(localSale.id) as any)?._cashierName

@@ -1,4 +1,5 @@
 import type { IQDDisplayPreference, Product } from '@/local-db'
+import { isService } from '@/lib/catalogItem'
 
 export type BarcodeLabelData = {
     id: string
@@ -15,6 +16,10 @@ export type BarcodeLabelPriceUnitTranslations = {
     perSquareMeter: string
     perDynamicKilogram: string
     perMeter: string
+}
+
+export function isProductSelectableForBarcodePrint(product: Product): boolean {
+    return !isService(product) || Boolean(product.sku?.trim())
 }
 
 // Code 128 character-set B patterns. Each digit describes the width of an

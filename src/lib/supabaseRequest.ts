@@ -88,6 +88,16 @@ function localizeInsufficientInventoryError(error: unknown): Error | null {
     }))
 }
 
+function localizePosServiceNameError(error: unknown): Error | null {
+    const message = getErrorMessage(error)
+    if (message !== 'Service name details are invalid'
+        && message !== 'A named service can only appear once in a POS cart') return null
+
+    return new Error(i18n.t('pos.serviceNameInvalid', {
+        defaultValue: 'Review the additional service name and try again.'
+    }))
+}
+
 function isNetworkLikeError(error: unknown): boolean {
     const message = getErrorMessage(error).toLowerCase()
     const status = getErrorStatus(error)
@@ -120,6 +130,11 @@ export function normalizeSupabaseActionError(error: unknown): Error {
     const localizedInventoryError = localizeInsufficientInventoryError(error)
     if (localizedInventoryError) {
         return localizedInventoryError
+    }
+
+    const localizedServiceNameError = localizePosServiceNameError(error)
+    if (localizedServiceNameError) {
+        return localizedServiceNameError
     }
 
     if (error instanceof Error) {

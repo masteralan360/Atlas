@@ -6,6 +6,7 @@ import { installTestBrowser } from '../fixtures/browser'
 import { assertNoPosCommit, assertPosPayment } from '../assertions/pos'
 import { POS_BATCH, POS_CURRENCIES, POS_INVENTORY, POS_METHODS, POS_PRODUCT, POS_STORAGE, POS_WORKSPACE,
     posCheckoutInput, seededPosCases, seedPosStock } from '../fixtures/pos'
+import { createPosServiceNameMetadata } from '@/lib/posServiceName'
 
 vi.mock('@/auth/supabase', () => {
     const unexpected = () => { throw new Error('Unexpected remote call in isolated Local POS scenario') }
@@ -65,8 +66,14 @@ describe('POS checkout scenarios (independent of Instant POS)', () => {
     for (const method of POS_METHODS) it(`${method}: service checkout records payment without stock`, async () => {
         await seedPosStock('usd', true)
         const input = posCheckoutInput({ service: true, method })
+        input.payload.items[0].product_name = 'POS scenario item - NewService'
+        input.payload.items[0].metadata = createPosServiceNameMetadata('POS scenario item', 'NewService') ?? null
         await checkout.commitPosCheckout(input)
-        expect(await db.sale_items.where('saleId').equals(input.payload.id).first()).toMatchObject({ storageId: null, inventorySnapshot: null })
+        expect(await db.sale_items.where('saleId').equals(input.payload.id).first()).toMatchObject({
+            storageId: null,
+            inventorySnapshot: null,
+            metadata: { posServiceName: { baseNameSnapshot: 'POS scenario item', suffix: 'NewService' } }
+        })
         expect(await db.inventory.count()).toBe(0)
         expect(await db.stock_batches.count()).toBe(0)
         await assertPosPayment(input.payload.id, 100)

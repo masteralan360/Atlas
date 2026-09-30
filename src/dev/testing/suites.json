@@ -282,7 +282,8 @@
         "titleKey": "devTesting.posGroups.cart",
         "layer": "calculation",
         "files": [
-          "src/dev/testing/suites/posCart.test.ts"
+          "src/dev/testing/suites/posCart.test.ts",
+          "src/lib/posServiceName.test.ts"
         ]
       },
       {
@@ -626,6 +627,7 @@
         "files": [
           "src/local-db/productBarcodes.test.ts",
           "src/local-db/productSku.test.ts",
+          "src/lib/productSkuCameraScan.test.ts",
           "src/local-db/services.test.ts",
           "src/local-db/productVariants.test.ts"
         ]
