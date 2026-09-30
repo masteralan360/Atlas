@@ -40,6 +40,8 @@ access rules.
 | App-generated service display names and immutable line metadata in regular POS and Quick Order | `src/lib/posServiceName.ts`, POS page, checkout and order persistence | `posServiceName.test.ts`, `posCheckout.test.ts`, `posRemote.test.ts`, `quickOrderAtomic.test.ts`, hosted POS checkout |
 | Frozen retry identities after uncertain responses | `src/lib/posCheckoutAttempt.ts`, POS page | `posAttempt.test.ts` and remote retry checks |
 | Sale / Activities / Quick Order routing | `src/lib/posPaymentPolicy.ts` | `posRouting.test.ts`, existing policy tests |
+| Quick Order payment method and status selection | `QuickOrderModal.tsx`, `src/lib/quickOrderPaymentPolicy.ts` | `src/lib/quickOrderPaymentPolicy.test.ts` in the checkout group |
+| Quick Order installment terms, down payment, financed balance, and loan schedule | `QuickOrderModal.tsx`, `src/lib/quickOrderInstallments.ts`, order persistence | `src/lib/quickOrderInstallments.test.ts`, `quickOrderAtomic.test.ts` in the checkout group |
 | Refund amounts, records and linked counter-entries | `src/local-db/posSaleReturns.ts`, Sales page | `posReturns.test.ts`, remote refund contracts |
 | Activities | `src/local-db/activities.ts` | `posActivities.test.ts`, existing Activities regressions |
 | Barcode input | `src/lib/barcodeScanner.ts` | Existing barcode regressions |
@@ -150,6 +152,7 @@ The registry at `src/dev/testing/suites.json` is the authoritative file allowlis
 | ID | Coverage |
 | --- | --- |
 | `checkout` | Payment-method × currency × optional-account matrix, physical/service checkout, multi-storage stock and mixed Services checkout effects, Staff below-minimum rollback, exact-boundary acceptance, Admin bypass, Local/Cloud/Hybrid validation contracts, cache reopen, replay, payment/account/ledger regressions, generated POS cases |
+| `printing` | The checkout success receipt button in regular POS and Instant POS uses the direct receipt pipeline without opening `PrintFlow` and shares one PDF builder with invoice sync |
 | `cart` | Independent held snapshots, fractional quantities, price-book/negotiation retention, current stock bounds, legacy/cross-storage restoration, switching catalog storage with a populated cart, mixed-source label visibility, and app-generated service-name formatting |
 | `pricing` | Price precedence including zero, Staff/Admin minimum-price boundaries and admin-only product-field gate, percentage/fixed bulk discount, caps/reset/subtotal boundaries, discounts, price books and cost validation |
 | `currency` | Supported direct/inverse/cross pairs, IQD/decimal rounding, missing/invalid rate availability and immutable rate payloads |

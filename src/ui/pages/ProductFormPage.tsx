@@ -100,6 +100,7 @@ import { ProductUomEditor, createEmptyProductUomDraft, type ProductUomDraft } fr
 import { ProductUnitIcon } from '@/ui/components/ProductUnitIcon'
 import { ProductAdditionalImagesModal } from '@/ui/components/ProductAdditionalImagesModal'
 import { ProductVariantParentNotice, ProductVariantsSection } from '@/ui/components/ProductVariantsSection'
+import { ProductMinimumSellingPriceDisclosure } from '@/ui/components/products/ProductMinimumSellingPriceDisclosure'
 import { useUnitRegistry } from '@/ui/components/unitRegistry'
 import { useDemoTutorial } from '@/demo'
 import {
@@ -439,6 +440,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const [isImageProcessing, setIsImageProcessing] = useState(false)
     const [storageError, setStorageError] = useState(false)
     const [returnRulesModalOpen, setReturnRulesModalOpen] = useState(false)
+    const [isMinimumSellingPriceVisible, setIsMinimumSellingPriceVisible] = useState(false)
     const [visualsModalOpen, setVisualsModalOpen] = useState(false)
     const [additionalImagesModalOpen, setAdditionalImagesModalOpen] = useState(false)
     const [missingProductStateVisible, setMissingProductStateVisible] = useState(false)
@@ -471,6 +473,10 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const initializedProductCommissionRuleKeyRef = useRef<string | null>(null)
     const initialProductCommissionSnapshotRef = useRef<string | null>(null)
     const createdProductIdRef = useRef<string | null>(null)
+
+    useEffect(() => {
+        setIsMinimumSellingPriceVisible(false)
+    }, [canManageMinimumSellingPrice, mode, product?.id])
 
     const isProductDirty = useMemo(() => {
         if (!initialFormSnapshotRef.current || isReadOnly) {
@@ -2275,98 +2281,88 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                             <DollarSign className="h-4 w-4 text-primary/60" />
                                             {t('products.form.price')} *
                                         </Label>
-                                        {isDynamicUnit(formData.unit) ? (
-                                            <div className="flex items-start gap-1.5">
-                                                <div className="relative flex-[2] min-w-0">
-                                                    <NumericInput
-                                                        id="product-price"
-                                                        data-tour-id="tutorial-product-price"
-                                                        value={formData.price}
-                                                        onValueChange={(price) => setFormData((current) => ({ ...current, price }))}
-                                                        maxFractionDigits={4}
-                                                        placeholder="0"
-                                                        readOnly={isReadOnly}
-                                                        required
-                                                        className="h-12 rounded-xl border-border/80 bg-background/80 pr-3 text-lg font-black text-primary shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50"
-                                                    />
-                                                </div>
-                                                <div className="flex items-center gap-1.5 pt-3 shrink-0">
-                                                    <span className="text-[11px] font-medium text-muted-foreground whitespace-nowrap">{t('products.form.per') || 'per'}</span>
-                                                    <Input
-                                                        id="product-per-quantity"
-                                                        type="text"
-                                                        inputMode="decimal"
-                                                        value={formData.perQuantity}
-                                                        onChange={(event) => {
-                                                            const val = event.target.value
-                                                            if (/^\d*\.?\d*$/.test(val) || val === '') {
-                                                                setFormData((current) => ({ ...current, perQuantity: val }))
-                                                            }
-                                                        }}
-                                                        className="h-9 w-24 rounded-lg border-border/80 bg-background/80 text-center text-sm font-medium tabular-nums shadow-sm transition-all hover:border-primary/45 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50"
-                                                        placeholder="1"
-                                                        readOnly={isReadOnly}
-                                                    />
-                                                    <span className="text-xs font-bold text-muted-foreground">{unitLabel}</span>
-                                                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/40 ml-0.5">
-                                                        {getCurrencySymbol(formData.currency, features.iqd_display_preference)}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <div className="relative">
-                                                <NumericInput
-                                                    id="product-price"
-                                                    data-tour-id="tutorial-product-price"
-                                                    value={formData.price}
-                                                    onValueChange={(price) => setFormData((current) => ({ ...current, price }))}
-                                                    maxFractionDigits={4}
-                                                    placeholder="0.000"
-                                                    readOnly={isReadOnly}
-                                                    required
-                                                    className="h-12 rounded-xl border-border/80 bg-background/80 pr-16 text-lg font-black text-primary shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50"
-                                                />
-                                                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold uppercase tracking-wider text-muted-foreground/60">
-                                                    {getCurrencySymbol(formData.currency, features.iqd_display_preference)}
-                                                </span>
-                                            </div>
-                                        )}
-                                        {canManageMinimumSellingPrice && (() => {
-                                            const hasValue = formData.minimumSellingPrice.trim() !== ''
-                                            const minimumValue = Number(formData.minimumSellingPrice)
-                                            const isInvalid = hasValue && (!Number.isFinite(minimumValue) || minimumValue < 0)
-                                            return (
-                                                <div className="space-y-2 pt-2">
-                                                    <Label htmlFor="product-minimum-selling-price" className="flex items-center gap-2 font-bold">
-                                                        <DollarSign className="h-4 w-4 text-primary/60" />
-                                                        {t('products.form.minimumSellingPrice')}
-                                                    </Label>
-                                                    <div className="relative">
-                                                        <NumericInput
-                                                            id="product-minimum-selling-price"
-                                                            value={formData.minimumSellingPrice}
-                                                            onValueChange={(minimumSellingPrice) => setFormData((current) => ({ ...current, minimumSellingPrice }))}
-                                                            maxFractionDigits={4}
-                                                            placeholder="0"
+                                        <ProductMinimumSellingPriceDisclosure
+                                            enabled={canManageMinimumSellingPrice}
+                                            open={isMinimumSellingPriceVisible}
+                                            onOpenChange={setIsMinimumSellingPriceVisible}
+                                            value={formData.minimumSellingPrice}
+                                            onValueChange={(minimumSellingPrice) => setFormData((current) => ({ ...current, minimumSellingPrice }))}
+                                            currencySymbol={getCurrencySymbol(formData.currency, features.iqd_display_preference)}
+                                            readOnly={isReadOnly}
+                                            minimumPriceLabel={t('products.form.minimumSellingPrice')}
+                                            invalidLabel={t('products.form.minimumSellingPriceInvalid')}
+                                            showLabel={t('products.form.showMinimumSellingPrice')}
+                                            hideLabel={t('products.form.hideMinimumSellingPrice')}
+                                        >
+                                            {(toggleButton) => isDynamicUnit(formData.unit) ? (
+                                                <div className="flex items-start gap-1.5">
+                                                    <div className="flex min-w-0 flex-[2]">
+                                                        <div className="relative min-w-0 flex-1">
+                                                            <NumericInput
+                                                                id="product-price"
+                                                                data-tour-id="tutorial-product-price"
+                                                                value={formData.price}
+                                                                onValueChange={(price) => setFormData((current) => ({ ...current, price }))}
+                                                                maxFractionDigits={4}
+                                                                placeholder="0"
+                                                                readOnly={isReadOnly}
+                                                                required
+                                                                className={cn(
+                                                                    'h-12 border-border/80 bg-background/80 text-lg font-black text-primary shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50',
+                                                                    canManageMinimumSellingPrice ? 'rounded-s-xl rounded-e-none pe-3' : 'rounded-xl pe-3'
+                                                                )}
+                                                            />
+                                                        </div>
+                                                        {toggleButton}
+                                                    </div>
+                                                    <div className="flex shrink-0 items-center gap-1.5 pt-3">
+                                                        <span className="whitespace-nowrap text-[11px] font-medium text-muted-foreground">{t('products.form.per') || 'per'}</span>
+                                                        <Input
+                                                            id="product-per-quantity"
+                                                            type="text"
+                                                            inputMode="decimal"
+                                                            value={formData.perQuantity}
+                                                            onChange={(event) => {
+                                                                const val = event.target.value
+                                                                if (/^\d*\.?\d*$/.test(val) || val === '') {
+                                                                    setFormData((current) => ({ ...current, perQuantity: val }))
+                                                                }
+                                                            }}
+                                                            className="h-9 w-24 rounded-lg border-border/80 bg-background/80 text-center text-sm font-medium tabular-nums shadow-sm transition-all hover:border-primary/45 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50"
+                                                            placeholder="1"
                                                             readOnly={isReadOnly}
-                                                            aria-invalid={isInvalid}
+                                                        />
+                                                        <span className="text-xs font-bold text-muted-foreground">{unitLabel}</span>
+                                                        <span className="ml-0.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/40">
+                                                            {getCurrencySymbol(formData.currency, features.iqd_display_preference)}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="flex min-w-0">
+                                                    <div className="relative min-w-0 flex-1">
+                                                        <NumericInput
+                                                            id="product-price"
+                                                            data-tour-id="tutorial-product-price"
+                                                            value={formData.price}
+                                                            onValueChange={(price) => setFormData((current) => ({ ...current, price }))}
+                                                            maxFractionDigits={4}
+                                                            placeholder="0.000"
+                                                            readOnly={isReadOnly}
+                                                            required
                                                             className={cn(
-                                                                'h-11 rounded-xl border-border/80 bg-background/80 pr-16 font-bold tabular-nums shadow-sm transition-all hover:border-primary/45 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50',
-                                                                isInvalid && 'border-destructive bg-destructive/5 text-destructive focus-visible:border-destructive focus-visible:ring-destructive/20'
+                                                                'h-12 border-border/80 bg-background/80 text-lg font-black text-primary shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50',
+                                                                canManageMinimumSellingPrice ? 'rounded-s-xl rounded-e-none pe-16' : 'rounded-xl pe-16'
                                                             )}
                                                         />
                                                         <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold uppercase tracking-wider text-muted-foreground/60">
                                                             {getCurrencySymbol(formData.currency, features.iqd_display_preference)}
                                                         </span>
                                                     </div>
-                                                    {isInvalid && (
-                                                        <p role="alert" className="text-xs font-medium text-destructive">
-                                                            {t('products.form.minimumSellingPriceInvalid')}
-                                                        </p>
-                                                    )}
+                                                    {toggleButton}
                                                 </div>
-                                            )
-                                        })()}
+                                            )}
+                                        </ProductMinimumSellingPriceDisclosure>
                                     </div>
                                     <div className="space-y-2" data-tour-id="tutorial-product-currency">
                                         <CurrencySelector

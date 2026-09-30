@@ -141,7 +141,8 @@ describe('POS checkout scenarios (independent of Instant POS)', () => {
 
         const saleItems = await db.sale_items.where('saleId').equals(input.payload.id).toArray()
         expect(saleItems.filter((saleItem) => saleItem.productId === POS_PRODUCT)
-            .map((saleItem) => [saleItem.storageId, saleItem.quantity])).toEqual([
+            .map((saleItem) => [saleItem.storageId, saleItem.quantity])
+            .sort(([leftStorage], [rightStorage]) => String(leftStorage).localeCompare(String(rightStorage)))).toEqual([
             [POS_STORAGE, 1], [secondStorageId, 2]
         ])
         expect(saleItems.find((saleItem) => saleItem.productId === serviceProductId)).toMatchObject({

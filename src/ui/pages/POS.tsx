@@ -3331,6 +3331,10 @@ export function POS() {
             const subtotal = roundOrderValue(orderItems.reduce((sum, item) => sum + item.lineTotal, 0))
             const paymentMethod = checkout.paymentMethod as SalesOrder['paymentMethod']
             const isFinanced = isOrderFinancingMethod(paymentMethod)
+            const initialPaymentAmount = isFinanced
+                ? roundOrderValue(Math.max(0, checkout.initialPaymentAmount))
+                : 0
+            const remainingBalance = roundOrderValue(Math.max(0, subtotal - initialPaymentAmount))
             const sourceStorageIds = Array.from(new Set(orderItems
                 .map((item) => item.storageId)
                 .filter((storageId): storageId is string => Boolean(storageId) && storageId !== SERVICES_VIRTUAL_STORAGE_ID)))
@@ -3354,13 +3358,17 @@ export function POS() {
                 status: checkout.orderStatus,
                 expectedDeliveryDate: null,
                 actualDeliveryDate: null,
-                isPaid: checkout.paymentStatus === 'paid',
+                isPaid: !isFinanced && checkout.paymentStatus === 'paid',
                 paymentStatus: checkout.paymentStatus,
-                paidAmount: checkout.paymentStatus === 'paid' ? subtotal : 0,
-                balanceAmount: checkout.paymentStatus === 'paid' ? 0 : subtotal,
-                paidAt: checkout.paymentStatus === 'paid' ? checkoutTimestamp : null,
+                paidAmount: isFinanced
+                    ? initialPaymentAmount
+                    : checkout.paymentStatus === 'paid' ? subtotal : 0,
+                balanceAmount: isFinanced
+                    ? remainingBalance
+                    : checkout.paymentStatus === 'paid' ? 0 : subtotal,
+                paidAt: !isFinanced && checkout.paymentStatus === 'paid' ? checkoutTimestamp : null,
                 paymentMethod,
-                initialPaymentAmount: 0,
+                initialPaymentAmount,
                 initialPaymentAccountId: checkout.paymentAccountId ?? null,
                 initialPaymentAccountNameSnapshot: checkout.paymentAccountNameSnapshot ?? null,
                 linkedLoanId: null,

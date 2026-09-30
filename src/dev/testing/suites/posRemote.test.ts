@@ -11,7 +11,7 @@ import { assertNoPosCommit, assertPosPayment } from '../assertions/pos'
 import { POS_BATCH, POS_INVENTORY, POS_PRODUCT, POS_STORAGE, POS_TIME, POS_WORKSPACE,
     financePosInput, posCheckoutInput, seedPosStock } from '../fixtures/pos'
 
-const remote = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn(), payment: vi.fn(), policy: { enabled: true, error: null as unknown },
+const remote = vi.hoisted(() => ({ rpc: vi.fn(), saleRpc: vi.fn(), from: vi.fn(), payment: vi.fn(), policy: { enabled: true, error: null as unknown },
     queries: [] as { table: string; select: ReturnType<typeof vi.fn>; eq: ReturnType<typeof vi.fn> }[],
     batches: [] as Record<string, unknown>[] }))
 vi.mock('@/auth/supabase', () => ({ supabase: {
@@ -21,13 +21,18 @@ vi.mock('@/auth/supabase', () => ({ supabase: {
 let checkout: typeof import('@/local-db/posCheckout')
 let returns: typeof import('@/local-db/posSaleReturns')
 
+const saleRpcCalls = () => remote.rpc.mock.calls.filter(([name]) => name === 'complete_sale' || name === 'complete_sale_with_loan')
+
 describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () => {
     beforeAll(async () => { installTestBrowser(); checkout = await import('@/local-db/posCheckout'); returns = await import('@/local-db/posSaleReturns') }, 90_000)
     beforeEach(async () => {
         await db.delete(); await db.open(); await seedPosStock()
         remote.queries.length = 0
         remote.policy = { enabled: true, error: null }
-        remote.rpc.mockReset().mockResolvedValue({ data: { sequence_id: 42 }, error: null })
+        remote.saleRpc.mockReset().mockResolvedValue({ data: { sequence_id: 42 }, error: null })
+        remote.rpc.mockReset().mockImplementation((name: string, args: Record<string, unknown>) => name === 'validate_staff_minimum_selling_prices'
+            ? Promise.resolve({ data: [], error: null })
+            : remote.saleRpc(name, args))
         remote.payment.mockReset().mockResolvedValue({ data: null, error: null })
         remote.batches = [{ id: POS_BATCH, workspace_id: POS_WORKSPACE, product_id: POS_PRODUCT,
             storage_id: POS_STORAGE, batch_number: 'POS-1', quantity: 19, price: 100, cost_price: 40, currency: 'usd',
@@ -56,7 +61,7 @@ describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () 
         const input = posCheckoutInput()
         input.account = { id: 'a7200000-0000-4000-8000-000000000010', name: 'POS remote account' }
         const result = await checkout.commitPosCheckout(input)
-        expect(remote.rpc).toHaveBeenCalledExactlyOnceWith('complete_sale', { payload: input.payload })
+        expect(saleRpcCalls()).toEqual([['complete_sale', { payload: input.payload }]])
         expect(result).toEqual({ sequenceId: 42, loanId: null })
         expect(await db.invoices.get(input.payload.id)).toMatchObject({ sequenceId: 42, totalAmount: 100, origin: 'pos', syncStatus: 'synced' })
         expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 19 })
@@ -82,7 +87,7 @@ describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () 
 
         const result = await checkout.commitPosCheckout(input)
 
-        expect(remote.rpc).toHaveBeenCalledExactlyOnceWith('complete_sale', { payload: input.payload })
+        expect(saleRpcCalls()).toEqual([['complete_sale', { payload: input.payload }]])
         expect(result).toEqual({ sequenceId: 42, loanId: null })
         expect(await db.invoices.get(input.payload.id)).toMatchObject({ totalAmount: 100, origin: 'pos' })
         expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 20 })
@@ -95,6 +100,7 @@ describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () 
             selling_uom_id: 'uom-carton',
             selling_unit_ref: 'builtin:carton',
             selling_unit_code: 'carton',
+            selling_unit_name_snapshot: 'Carton',
             base_unit_ref: 'custom:sheet',
             base_unit_code: 'sheet',
             unit_factor: 20,
@@ -121,6 +127,7 @@ describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () 
                     selling_uom_id: 'uom-carton',
                     selling_unit_ref: 'builtin:carton',
                     selling_unit_code: 'carton',
+                    selling_unit_name_snapshot: 'Carton',
                     base_unit_ref: 'custom:sheet',
                     base_unit_code: 'sheet',
                     unit_factor: 20,
@@ -134,7 +141,7 @@ describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () 
     it('retries a transient RPC using exactly the same sale and loan identities', async () => {
         const input = financePosInput(posCheckoutInput(), 3)
         const loanId = input.atomicLoanPayload!.id
-        remote.rpc.mockResolvedValueOnce({ data: null, error: { message: 'Failed to fetch', status: 503 } })
+        remote.saleRpc.mockResolvedValueOnce({ data: null, error: { message: 'Failed to fetch', status: 503 } })
             .mockResolvedValueOnce({ data: { sequence_id: 42, loan_aggregate: {
                 loan: { ...input.atomicLoanPayload, principal_amount: 100, total_paid_amount: 0, balance_amount: 100,
                     status: 'active', created_at: POS_TIME, updated_at: POS_TIME, version: 1, is_deleted: false },
@@ -145,9 +152,9 @@ describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () 
                 })), payments: [], transactions: []
             } }, error: null })
         const result = await checkout.commitPosCheckout(input)
-        expect(remote.rpc).toHaveBeenCalledTimes(2)
-        expect(remote.rpc.mock.calls[0]).toEqual(remote.rpc.mock.calls[1])
-        expect(remote.rpc.mock.calls[0]).toEqual(['complete_sale_with_loan', { payload: input.payload, p_loan: input.atomicLoanPayload }])
+        expect(saleRpcCalls()).toHaveLength(2)
+        expect(saleRpcCalls()[0]).toEqual(saleRpcCalls()[1])
+        expect(saleRpcCalls()[0]).toEqual(['complete_sale_with_loan', { payload: input.payload, p_loan: input.atomicLoanPayload }])
         expect(result.loanId).toBe(loanId)
         expect(await db.loans.get(result.loanId!)).toMatchObject({ source: 'pos', saleId: input.payload.id, balanceAmount: 100 })
         expect(await db.loan_installments.where('loanId').equals(result.loanId!).count()).toBe(3)
@@ -181,7 +188,7 @@ describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () 
     })
 
     it('a rejected RPC leaves payments, cache and stock untouched', async () => {
-        remote.rpc.mockResolvedValue({ data: null, error: { message: 'Insufficient inventory in source storage', code: 'P0001' } })
+        remote.saleRpc.mockResolvedValue({ data: null, error: { message: 'Insufficient inventory in source storage', code: 'P0001' } })
         await expect(checkout.commitPosCheckout(posCheckoutInput())).rejects.toMatchObject({ committed: false })
         await assertNoPosCommit()
         expect(await db.invoices.count()).toBe(0)
@@ -194,11 +201,11 @@ describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () 
         const input = posCheckoutInput({ service: true })
         input.payload.items[0].product_name = 'POS scenario item - NewService'
         input.payload.items[0].metadata = createPosServiceNameMetadata('POS scenario item', 'NewService') ?? null
-        remote.rpc.mockResolvedValue({ data: null, error: { message: 'Service name details are invalid', code: '22023' } })
+        remote.saleRpc.mockResolvedValue({ data: null, error: { message: 'Service name details are invalid', code: '22023' } })
 
         await expect(checkout.commitPosCheckout(input)).rejects.toThrow('Review the additional service name and try again.')
 
-        expect(remote.rpc).toHaveBeenCalledExactlyOnceWith('complete_sale', { payload: input.payload })
+        expect(saleRpcCalls()).toEqual([['complete_sale', { payload: input.payload }]])
         expect(await db.invoices.count()).toBe(0)
         expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 20 })
         expect(remote.payment).not.toHaveBeenCalled()
@@ -206,9 +213,9 @@ describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () 
     })
 
     it('two transport failures never create an offline sale or payment', async () => {
-        remote.rpc.mockResolvedValue({ data: null, error: new TypeError('Failed to fetch') })
+        remote.saleRpc.mockResolvedValue({ data: null, error: new TypeError('Failed to fetch') })
         await expect(checkout.commitPosCheckout(posCheckoutInput())).rejects.toThrow('request did not finish')
-        expect(remote.rpc).toHaveBeenCalledTimes(2)
+        expect(saleRpcCalls()).toHaveLength(2)
         await assertNoPosCommit()
         expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 20 })
     })
@@ -217,7 +224,7 @@ describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () 
         const input = posCheckoutInput()
         remote.payment.mockResolvedValue({ data: null, error: { message: 'permission denied', code: '42501' } })
         await expect(checkout.commitPosCheckout(input)).rejects.toMatchObject({ committed: true, saleId: input.payload.id })
-        expect(remote.rpc).toHaveBeenCalledTimes(1)
+        expect(saleRpcCalls()).toHaveLength(1)
         await assertNoPosCommit()
         expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 20 })
     })
@@ -271,7 +278,7 @@ describe('POS Cloud / Hybrid request contracts and committed-sale recovery', () 
     })
 
     for (const data of [null, {}, { sequence_id: -1 }, { sequence_id: '42' }]) it(`malformed success ${JSON.stringify(data)} cannot be displayed as a completed sale`, async () => {
-        remote.rpc.mockResolvedValue({ data, error: null })
+        remote.saleRpc.mockResolvedValue({ data, error: null })
         await expect(checkout.commitPosCheckout(posCheckoutInput())).rejects.toMatchObject({ committed: true })
         await assertNoPosCommit()
         expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 20 })

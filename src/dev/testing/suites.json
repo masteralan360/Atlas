@@ -263,6 +263,8 @@
         "layer": "business",
         "files": [
           "src/dev/testing/suites/posCheckout.test.ts",
+          "src/lib/quickOrderPaymentPolicy.test.ts",
+          "src/lib/quickOrderInstallments.test.ts",
           "src/local-db/minimumSellingPrice.test.ts",
           "src/local-db/quickOrderAtomic.test.ts",
           "src/local-db/partnerSummaryRefresh.test.ts",
@@ -288,11 +290,12 @@
       },
       {
         "id": "printing",
-        "titleKey": "devTesting.printingWorkflowGroup",
+        "titleKey": "devTesting.posGroups.printing",
         "layer": "contract",
-        "coverageHelpKey": "devTesting.printingWorkflowCoverageHelp",
+        "coverageHelpKey": "devTesting.posPrintingCoverageHelp",
         "files": [
-          "src/lib/printFlow.test.ts"
+          "src/lib/printFlow.test.ts",
+          "src/dev/testing/suites/posCheckoutSuccessPrint.test.tsx"
         ]
       },
       {
@@ -661,6 +664,14 @@
           "src/local-db/priceBooks.test.ts",
           "src/local-db/priceBookUomPrices.test.ts",
           "src/ui/components/commissions/ProductCommissionPreview.test.ts"
+        ]
+      },
+      {
+        "id": "minimum-price-disclosure",
+        "titleKey": "devTesting.productsGroups.minimumPriceDisclosure",
+        "layer": "contract",
+        "files": [
+          "src/ui/components/products/ProductMinimumSellingPriceDisclosure.test.tsx"
         ]
       },
       {

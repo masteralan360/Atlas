@@ -14,7 +14,6 @@ remove R2 Print Blob, only keep Manual Entry
 
 Fix the Error in Supabase Logs
 
-My Orders with unqiue tracked number and search by my phone number
 Shipped Point Makes Sale Order
 Allow Shipped to be cancelled
 Make Maintenence Mode servier-side

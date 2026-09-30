@@ -53,6 +53,12 @@ interface NullablePaymentMethodSelectProps extends Omit<SharedPaymentMethodSelec
 
 type PaymentMethodSelectProps = StandardPaymentMethodSelectProps | NullablePaymentMethodSelectProps
 
+const PAYMENT_METHOD_DISPLAY_PRIORITY: Partial<Record<PaymentMethodOption, number>> = {
+    cash: 0,
+    loan: 1,
+    installments: 2,
+}
+
 function PaymentMethodVisual({ method }: { method: PaymentMethodOption }) {
     const brandLogos: Partial<Record<PaymentMethodOption, string>> = {
         fib: '/icons/payment-methods/fib.svg',
@@ -118,6 +124,17 @@ export function PaymentMethodSelect({
         ),
         [accounts],
     )
+    const orderedMethods = useMemo(
+        () => methods
+            .map((method, index) => ({ method, index }))
+            .sort((left, right) => (
+                (PAYMENT_METHOD_DISPLAY_PRIORITY[left.method] ?? 3)
+                - (PAYMENT_METHOD_DISPLAY_PRIORITY[right.method] ?? 3)
+                || left.index - right.index
+            ))
+            .map(({ method }) => method),
+        [methods],
+    )
 
     const handleValueChange = (nextValue: string) => {
         if (allowNone && nextValue === '__none__') {
@@ -151,7 +168,7 @@ export function PaymentMethodSelect({
             </SelectTrigger>
             <SelectContent>
                 {allowNone ? <SelectItem value="__none__">{noneLabel}</SelectItem> : null}
-                {methods.map((method) => {
+                {orderedMethods.map((method) => {
                     const linkedWallet = linkedWalletForMethod(method)
 
                     return (

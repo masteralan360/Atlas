@@ -4,8 +4,7 @@ import {
     Dialog,
     DialogContent,
     DialogTitle,
-    Button,
-    PrintFlow
+    Button
 } from '@/ui/components'
 import { CheckCircle2, Printer, Coins, Table2 } from 'lucide-react'
 import { formatCurrency, cn } from '@/lib/utils'
@@ -55,7 +54,6 @@ export function CheckoutSuccessModal({
     const [timeLeft, setTimeLeft] = useState(15)
     const [isPaused, setIsPaused] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
-    const [isPrintFlowOpen, setIsPrintFlowOpen] = useState(false)
     const [note, setNote] = useState(saleData?.notes || '')
     const [noteSourceId, setNoteSourceId] = useState<string | null>(saleData?.id || null)
     const hasAutoPrintedRef = useRef(false)
@@ -206,40 +204,6 @@ export function CheckoutSuccessModal({
         persistNote,
     ])
 
-    const handleSelectedReceiptPrint = useCallback(async (blob: Blob) => {
-        if (isProcessing || !saleData || !user) return
-
-        void persistNote(note).catch((error) => {
-            console.error('[CheckoutSuccessModal] Failed to save note before printing:', error)
-        })
-
-        triggerInvoiceSync({
-            saleData: receiptSaleData,
-            features: printFeatures,
-            workspaceName: resolvedWorkspaceName,
-            workspaceId,
-            user: { id: user.id, name: user.name || 'System' },
-            format: 'receipt',
-            pdfBuilder: async () => blob
-        })
-
-        await printReceipt({
-            pdfBuilder: async () => blob,
-            title: `Receipt_${receiptSaleData?.invoiceid || receiptSaleData?.id || 'Sale'}`
-        })
-    }, [
-        isProcessing,
-        note,
-        persistNote,
-        printFeatures,
-        printReceipt,
-        receiptSaleData,
-        resolvedWorkspaceName,
-        saleData,
-        user,
-        workspaceId
-    ])
-
     useEffect(() => {
         if (!isOpen) {
             hasAutoPrintedRef.current = false
@@ -274,7 +238,6 @@ export function CheckoutSuccessModal({
     ])
 
     return (
-        <>
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
             <DialogContent
                 data-tour-id="tutorial-pos-success-modal"
@@ -367,7 +330,7 @@ export function CheckoutSuccessModal({
                                     ? "bg-muted text-muted-foreground border border-border shadow-none cursor-not-allowed hover:bg-muted"
                                     : "bg-[#23c55e] hover:bg-[#1ea34d] text-white shadow-lg shadow-green-500/20"
                             )}
-                            onClick={() => setIsPrintFlowOpen(true)}
+                            onClick={handlePrintAndUpload}
                             disabled={isPrintDisabled}
                         >
                             <Printer className={cn("w-6 h-6 mr-3 transition-transform", !isPrintDisabled && "group-hover:rotate-12")} />
@@ -389,21 +352,5 @@ export function CheckoutSuccessModal({
 
             </DialogContent>
         </Dialog>
-        <PrintFlow
-            isOpen={isPrintFlowOpen}
-            onClose={() => setIsPrintFlowOpen(false)}
-            title={t('pos.printReceipt', { defaultValue: 'Print Receipt' })}
-            showSaveButton={false}
-            features={features}
-            originId={saleData?.id}
-            printSelectionOptions={[{
-                format: 'receipt',
-                label: t('pos.printReceipt', { defaultValue: 'Print Receipt' }),
-                description: t('pos.receipt', { defaultValue: 'Receipt' })
-            }]}
-            pdfBuilder={buildReceiptPdf}
-            onPreviewPrint={handleSelectedReceiptPrint}
-        />
-        </>
     )
 }
