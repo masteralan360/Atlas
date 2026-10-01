@@ -5,6 +5,7 @@ import { IntegrityAuditReadError } from '@/lib/integrityAudit/types'
 import { runLoanIntegrityAudit, type LoanIntegrityAuditResult } from '@/lib/integrityAudit/loanAudit'
 import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle, Button } from '@/ui/components'
 import { AuditModelJsonPanel } from '@/ui/components/integrity-audit/AuditModelJsonPanel'
+import { IntegrityAuditCategoryIcon } from '@/ui/components/integrity-audit/IntegrityAuditCategoryIcon'
 
 const categories = ['loan', 'installments', 'payments', 'relationships', 'mirror'] as const
 
@@ -71,7 +72,7 @@ export function LoanIntegrityAuditDialog({ open, onOpenChange, workspaceId, loan
               : rows.some(item => item.status === 'FAIL') ? 'FAIL'
                 : rows.some(item => item.status === 'WARNING') ? 'WARNING' : 'PASS'
             return <details key={category} className="rounded-lg border p-3" open={status !== 'PASS' || undefined}>
-              <summary className="flex cursor-pointer items-center gap-2 font-medium"><StatusIcon status={status} />{t(`transactionAudit.categories.${category}`)} <span className="text-xs text-muted-foreground">({rows.length})</span>{status === 'NOT_APPLICABLE' && <span className="text-xs text-muted-foreground">{t('transactionAudit.status.NOT_APPLICABLE')}</span>}</summary>
+              <summary className="flex cursor-pointer items-center gap-2 font-medium"><StatusIcon status={status} /><IntegrityAuditCategoryIcon category={category} />{t(`transactionAudit.categories.${category}`)} <span className="text-xs text-muted-foreground">({rows.length})</span>{status === 'NOT_APPLICABLE' && <span className="text-xs text-muted-foreground">{t('transactionAudit.status.NOT_APPLICABLE')}</span>}</summary>
               <div className="mt-3 space-y-2">
                 {rows.map((item, index) => <div key={`${item.code}:${item.entityId ?? index}`} className="rounded-md bg-muted/50 p-3 text-sm">
                   <div className="flex items-center gap-2"><StatusIcon status={item.status} /><span className="font-mono text-xs break-all">{item.code}</span></div>

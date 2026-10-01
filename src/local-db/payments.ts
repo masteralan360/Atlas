@@ -114,6 +114,8 @@ export interface RecordObligationSettlementInput {
     paymentMethod: WorkspacePaymentMethod
     paidAt?: string
     amount?: number
+    /** Stable payment intent key reused when the same order settlement is retried. */
+    idempotencyKey?: string
     note?: string
     counterpartyName?: string
     businessPartnerId?: string | null
@@ -219,6 +221,8 @@ export interface AppendPaymentTransactionInput {
     id?: string
     /** Uses an ID upsert for an operation that may be replayed by an offline client. */
     idempotent?: boolean
+    /** Posts an order payment through the row-locked Supabase RPC when online. */
+    atomicOrderPayment?: boolean
     /** Aggregate workflows own remote replay and must not enqueue a second row mutation. */
     deferRemoteSync?: boolean
     /** The caller cannot report success until Supabase confirms this payment write. */
@@ -1921,6 +1925,27 @@ export async function appendPaymentTransaction(
   try {
     const client = getSupabaseClientForTable('payment_transactions')
     const payload = sanitizeSyncPayload(transaction as unknown as Record<string, unknown>)
+    if (input.atomicOrderPayment) {
+      const { data, error } = await runMutation<{ data: unknown; error: unknown }>('payment_transactions.create_order_payment', () =>
+        (client as any).rpc('record_order_payment', { p_transaction: payload })
+      )
+      if (error) throw error
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        throw new Error('The order payment could not be confirmed by the server')
+      }
+
+      const syncedAt = new Date().toISOString()
+      const syncedTransaction: PaymentTransaction = {
+        ...transaction,
+        ...toCamelCase(data as Record<string, unknown>),
+        syncStatus: 'synced',
+        lastSyncedAt: syncedAt
+      } as PaymentTransaction
+      await db.payment_transactions.put(syncedTransaction)
+      await mirrorPaymentAccountTransactionLocally(syncedTransaction)
+      return syncedTransaction
+    }
+
     const mutation = input.idempotent || input.requireRemoteConfirmation
       ? client.from('payment_transactions').upsert(payload, { onConflict: 'id' })
       : client.from('payment_transactions').insert(payload)
@@ -3355,6 +3380,7 @@ export async function recordObligationSettlement(
         orderId: obligation.sourceRecordId,
         installmentId: obligation.sourceSubrecordId,
         amount: settlementAmount,
+        idempotencyKey: input.idempotencyKey,
         paymentMethod: input.paymentMethod,
         paidAt,
         note,
@@ -3429,6 +3455,7 @@ export async function recordObligationSettlement(
         orderId: obligation.sourceRecordId,
         installmentId: obligation.sourceSubrecordId,
         amount: settlementAmount,
+        idempotencyKey: input.idempotencyKey,
         paymentMethod: input.paymentMethod,
         paidAt,
         note,

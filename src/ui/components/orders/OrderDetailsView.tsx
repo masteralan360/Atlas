@@ -1195,6 +1195,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         paymentMethod: WorkspacePaymentMethod
         paidAt: string
         amount?: number
+        idempotencyKey?: string
         note?: string
         accountId?: string | null
         accountNameSnapshot?: string | null

@@ -99,8 +99,13 @@ describe('purchase receipt base-unit rounding on hosted Supabase', () => {
       try {
         order = await orders.createPurchaseOrder(liveWorkspaceId, input)
       } catch (error) {
-        const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : String(error)
-        throw new Error(`fractional_purchase_receipt_save_failed:${cause}`, { cause: error })
+        const nestedCause = error instanceof Error
+          ? (error as Error & { cause?: unknown }).cause
+          : undefined
+        const cause = nestedCause instanceof Error
+          ? nestedCause.message
+          : error instanceof Error ? error.message : String(error)
+        throw new Error(`fractional_purchase_receipt_save_failed:${cause}`)
       }
       recordLiveFixture({ supplierId: supplier.id, productId: fixture.product.id, storageId: fixture.storage.id, purchaseOrderId: order.id })
 

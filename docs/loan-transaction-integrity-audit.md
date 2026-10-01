@@ -21,7 +21,7 @@ Older records without transaction integrity versions may report warnings where t
 | Mode | Transaction integrity | Mirror integrity |
 | --- | --- | --- |
 | Cloud | Audit Supabase as the source of truth. | No SQLite comparison. |
-| Hybrid | Audit Supabase first. | Compare loan, schedule, payment, account-movement, and account records against SQLite. |
+| Hybrid | Audit Supabase first. | Compare loan, schedule, payment, account-movement, and account records against SQLite; report differences as warnings. |
 | Local | Audit the existing SQLite database as the source of truth. | No Supabase comparison. |
 
 The SQLite reader uses an existing connection and `SELECT` queries only. A denied or failed authoritative read fails the audit rather than producing a partial pass. In Hybrid mode, an unreadable mirror is reported as a warning without changing the Supabase transaction result.

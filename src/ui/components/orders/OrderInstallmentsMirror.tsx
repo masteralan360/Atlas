@@ -547,6 +547,7 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
         paymentMethod: WorkspacePaymentMethod
         paidAt: string
         amount?: number
+        idempotencyKey?: string
         note?: string
         accountId?: string | null
         accountNameSnapshot?: string | null

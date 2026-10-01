@@ -60,7 +60,7 @@ The example shows the structure, not a complete Sales Order. `actual.authoritati
 | Mode | Transaction integrity | Mirror integrity |
 | --- | --- | --- |
 | Cloud | Audit Supabase as the source of truth. | No SQLite comparison. |
-| Hybrid | Audit Supabase first. | Compare relevant SQLite records and fields against Supabase; report a separate mirror status. |
+| Hybrid | Audit Supabase first. | Compare relevant SQLite records and fields against Supabase; report mirror mismatches or an unavailable mirror as warnings. |
 | Local | Audit the existing SQLite database as the source of truth. | No Supabase comparison. |
 
 The SQLite audit reader uses an existing connection and `SELECT` queries. It does not initialize the database, hydrate a cache, or trigger a sync. A denied authoritative read fails the audit rather than producing a partial pass. If the Hybrid mirror cannot be read, the mirror section reports a warning without changing the Supabase transaction result.
@@ -73,7 +73,7 @@ The SQLite audit reader uses an existing connection and `SELECT` queries. It doe
 - **Loans:** Where financing applies, verify the order/partner link, principal, repayments, installments, and remaining balance. The balance is reconstructed from the order financing amount and payment history rather than accepted from a cached loan balance alone.
 - **Relationships:** Report missing, duplicate, orphaned, or wrongly linked records, including workspace mismatches.
 
-Check statuses are `PASS`, `WARNING`, `FAIL`, and `NOT_APPLICABLE`; severities are `info`, `warning`, `error`, and `critical`. The transaction status is calculated without mirror checks, so a SQLite mismatch does not mark the authoritative Supabase transaction as corrupt.
+Check statuses are `PASS`, `WARNING`, `FAIL`, and `NOT_APPLICABLE`; severities are `info`, `warning`, `error`, and `critical`. Hybrid SQLite mirror mismatches are classified as warnings in the mirror section and summary counts. The transaction status is calculated without mirror checks, so a SQLite mismatch does not mark the authoritative Supabase transaction as corrupt.
 
 ## Historical evidence limits
 

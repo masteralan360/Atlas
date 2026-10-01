@@ -26,7 +26,7 @@ Normalize/Summarize Result
 Module-Wide Audit Results UI
 ```
 
-The shared feature defines a small adapter contract, executes audits with bounded concurrency, tracks progress, and normalizes each result to a transaction reference, passed count, warning count, failed count, and visual severity. The caller supplies a localized module label; the generic result dialog renders only those summaries.
+The shared feature defines a small adapter contract, executes audits with bounded concurrency, tracks progress, and normalizes each result to a transaction reference, passed count, warning count, failed count, visual severity, and optional category-level warning/failure counts. Each completed transaction summary is published to the dialog immediately while the remaining audits continue. The generic result dialog renders compact category icons and warning/failure indicators only for groups with issues; it does not show check details.
 
 Module-specific integration provides the already-filtered transaction list and an adapter. The module page owns fetching and filtering. The adapter supplies the transaction ID/reference, calls the existing audit implementation, and maps its summary. The existing single-transaction audit remains the only owner of integrity rules and audit reads.
 
@@ -34,6 +34,7 @@ Module-specific integration provides the already-filtered transaction list and a
 | --- | --- |
 | Shared runner, adapter contract, progress, severity | `src/lib/integrityAudit/moduleWide.ts` |
 | Shared summary-only dialog | `src/ui/components/integrity-audit/ModuleWideIntegrityAuditDialog.tsx` |
+| Shared category icons | `src/ui/components/integrity-audit/IntegrityAuditCategoryIcon.tsx` |
 | Sales Orders adapter | `src/lib/integrityAudit/salesOrderModuleWide.ts` |
 | Active Sales Orders filtering and entry point | `src/ui/pages/Orders.tsx` |
 | Existing single-order graph and integrity checks | `src/lib/integrityAudit/salesOrderAudit.ts` and `src/lib/integrityAudit/salesOrderGraph.ts` |
@@ -43,13 +44,15 @@ This preserves one source of truth: changes to the Sales Order single-transactio
 
 ## Sales Orders V1 integration
 
-The Sales Orders page exposes **Module-Wide Integrity Audit** in the list action bar beside Archives and Print, and passes its existing `filteredSalesOrders` collection to the shared dialog. That collection is computed by the page's current production filtering path. It applies the created-date `DateRangeFilter`, fulfilled-date range, active-order rule, status, payment status, order source, commission mode when available, and search over order number, customer, product, and visible sales agent. The audit does not keep a second filter state or reinterpret these controls.
+The Sales Orders page exposes **Module-Wide Integrity Audit** in the list action bar beside Archives and Print. The entry point is gated by the existing `UiAccessGate` (Shift access key) and is unavailable on mobile. It passes its existing `filteredSalesOrders` collection to the shared dialog. That collection is computed by the page's current production filtering path. It applies the created-date `DateRangeFilter`, fulfilled-date range, active-order rule, status, payment status, order source, commission mode when available, and search over order number, customer, product, and visible sales agent. The audit does not keep a second filter state or reinterpret these controls.
 
 `filteredSalesOrders` is computed before `paginateOrders` creates the table rows. The dialog receives the full filtered collection, so table page size and current page do not limit the audit. This is the same list represented by the active Sales Orders filters.
 
-When the user selects **Start Audit**, the shared runner takes a snapshot of that list and invokes the Sales Orders adapter for every order. The adapter calls the existing `runSalesOrderIntegrityAudit(workspaceId, order.id, mode)`. It gets the displayed reference from `order.orderNumber` and maps the existing result's `summary` fields (`passed`, `warnings`, and `failed`). No checks, graph reads, or integrity rules are repeated in the module-wide layer.
+When the user selects **Start Audit**, the shared runner takes a snapshot of that list and invokes the Sales Orders adapter for every order. The adapter calls the existing `runSalesOrderIntegrityAudit(workspaceId, order.id, mode)`. It gets the displayed reference from `order.orderNumber`, maps the existing result's `summary` fields (`passed`, `warnings`, and `failed`), and groups existing warning/failure check counts by their existing audit category. Each summary appears as soon as that order's audit finishes, alongside the run progress; the modal remains in its running state until all scheduled audits finish. No checks, graph reads, or integrity rules are repeated in the module-wide layer.
 
-Each result row displays the Sales Order number, the three check counts, and a highlight derived from severity. Failure takes precedence over warning; warning takes precedence over pass. If an individual audit cannot read its required records, the run reports a localized error and does not present a partial result list as complete.
+Each result row displays the Sales Order number, the three check counts, a highlight derived from severity, and compact category icons with per-category warning/failure counts. Failure takes precedence over warning; warning takes precedence over pass. The **Warnings**, **Failures**, and **Warnings and Failures** exports download matching Sales Order references as one-reference-per-line `.txt` files into the operating system's Downloads folder in the desktop app; browser downloads use the browser's configured download location.
+
+The user can cancel an active run. Cancellation stops scheduling further transactions and lets already-running individual audits finish; their summaries remain visible as a clearly marked partial result set. If an individual audit cannot read its required records, the run reports a localized error while retaining completed summaries; it does not present a partial list as a completed full run.
 
 ## Future Module Expansion Guide
 
@@ -62,7 +65,7 @@ A module must provide:
 1. **Transaction source:** all transactions matching the module page's active filters, independent of table pagination.
 2. **Existing single-transaction audit:** a functioning audit for one transaction, called by the adapter without recreating its rules.
 3. **Transaction identifier:** a stable record ID and a human-readable reference for display.
-4. **Standardized audit summary:** a mapping to `passed`, `warnings`, and `failed` counts. The shared runner derives visual status from these counts.
+4. **Standardized audit summary:** a mapping to `passed`, `warnings`, and `failed` counts. The shared runner derives visual status from these counts. Optionally provide issue counts by common `AuditCategory`; the shared dialog displays the category icon with its warning and/or failure counts. These are summaries of existing check statuses, not new validation rules.
 5. **Filter integration:** access to the same active filters and filtering/query semantics used by the normal module page. Module-wide audit must not maintain an independent filter state.
 
 ### Expansion procedure
@@ -86,7 +89,10 @@ const adapter: ModuleWideIntegrityAuditAdapter<PurchaseOrder, PurchaseOrderAudit
   getTransactionId: order => order.id,
   getTransactionReference: order => order.orderNumber,
   auditTransaction: order => runPurchaseOrderIntegrityAudit(workspaceId, order.id, mode),
-  getSummary: result => result.summary
+  getSummary: result => ({
+    ...result.summary,
+    groups: summarizeExistingAuditChecksByCategory(result.checks)
+  })
 }
 
 <ModuleWideIntegrityAuditDialog
@@ -99,6 +105,8 @@ const adapter: ModuleWideIntegrityAuditAdapter<PurchaseOrder, PurchaseOrderAudit
 ```
 
 `runPurchaseOrderIntegrityAudit` above represents a future module's already-existing single-transaction implementation; it is not a V1 function. The adapter delegates to it and maps its summary. It must not contain Purchase Order integrity rules.
+
+`summarizeExistingAuditChecksByCategory` is an adapter-level count of the existing audit's warning and failure statuses grouped by category. It does not evaluate transaction integrity. The shared UI uses the common category icon map and only renders groups whose warning or failure count is nonzero.
 
 ### Conceptual future example: Purchase Orders
 

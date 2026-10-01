@@ -5,3 +5,4 @@ export const isNavigationRailEnabled = import.meta.env.DEV
   ? NAVIGATION_RAIL_DEV_ENABLED
   : NAVIGATION_RAIL_ENABLED
 export const NAVIGATION_RAIL_WIDTH = 56
+export const NAVIGATION_RAIL_CORNER_RADIUS = 16

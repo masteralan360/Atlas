@@ -20,7 +20,7 @@ describe('module-wide transaction integrity audit orchestration', () => {
       { id: 'order-2', reference: 'SO-0002' },
       { id: 'order-3', reference: 'SO-0003' }
     ]
-    const results = {
+    const results: Record<string, AuditResult> = {
       'order-1': { summary: { passed: 200, warnings: 0, failed: 0 }, checks: ['details not retained'] },
       'order-2': { summary: { passed: 199, warnings: 1, failed: 0 }, checks: ['details not retained'] },
       'order-3': { summary: { passed: 197, warnings: 2, failed: 1 }, checks: ['details not retained'] }

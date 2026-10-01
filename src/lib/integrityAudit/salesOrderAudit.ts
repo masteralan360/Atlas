@@ -4,7 +4,7 @@ import { ORDER_AMOUNT_EPSILON, roundOrderValue } from '@/lib/orderPrecision'
 import { roundQuantity } from '@/lib/quantity'
 import type { PaymentTransaction } from '@/local-db/models'
 import type { SalesOrderTransactionGraph } from './salesOrderGraph'
-import { IntegrityAuditReadError, type AuditCategory, type AuditStatus, type IntegrityAuditResult } from './types'
+import { IntegrityAuditReadError, type AuditCategory, type AuditStatus, type IntegrityAuditCheck, type IntegrityAuditResult } from './types'
 
 export { IntegrityAuditReadError } from './types'
 export type { AuditCategory, AuditStatus, IntegrityAuditCheck, IntegrityAuditResult } from './types'
@@ -174,8 +174,57 @@ export function auditSalesOrderGraph(graph: SalesOrderTransactionGraph, workspac
     }
   }
   for (const key of actualInventory.keys()) if (!expectedInventory.has(key)) add('inventory', 'UNEXPECTED_INVENTORY_MOVEMENT', false, 'inventory_transaction', key, null, actualInventory.get(key))
-  if (postedReturns.length > 0) {
-    add('inventory', 'RETURN_INVENTORY_HISTORY_UNAVAILABLE', false, 'order_return', order.id, 'transaction-specific restoration rows', null, true)
+  const returnMovementTypes = new Set(['order_return', 'sales_order_return'])
+  const legacyReturnMovementCutoff = Date.parse('2026-09-26T13:00:00Z')
+  for (const returned of postedReturns) {
+    const expectedRestorations = new Map<string, number>()
+    const returnedItems = active(graph.returnItems).filter(item => item.returnId === returned.id)
+    for (const returnItem of returnedItems) {
+      const orderItem = items.find(item => item.id === returnItem.orderItemId)
+      if (!orderItem) continue
+      const storageId = returnItem.restoredStorageId || orderItem.storageId || order.sourceStorageId
+      if (!storageId) {
+        add('inventory', 'RETURN_RESTORATION_STORAGE_MISSING', false, 'order_return_item', returnItem.id,
+          'restored storage', returnItem.restoredStorageId ?? null)
+        continue
+      }
+      const position = `${orderItem.productId}:${storageId}`
+      expectedRestorations.set(position, roundQuantity(
+        (expectedRestorations.get(position) ?? 0) + amount(returnItem.inventoryQuantity ?? returnItem.quantity)
+      ))
+    }
+
+    const restorationRows = active(graph.inventoryMovements).filter(row =>
+      row.referenceId === returned.id && returnMovementTypes.has(row.referenceType ?? '')
+    )
+    const actualRestorations = new Map<string, number>()
+    for (const movement of restorationRows) {
+      const position = `${movement.productId}:${movement.storageId}`
+      actualRestorations.set(position, roundQuantity(
+        (actualRestorations.get(position) ?? 0) + amount(movement.quantityDelta)
+      ))
+      add('inventory', 'RETURN_INVENTORY_MOVEMENT_TYPE_INVALID', movement.transactionType === 'return',
+        'inventory_transaction', movement.id, 'return', movement.transactionType)
+      add('inventory', 'INVENTORY_MOVEMENT_ARITHMETIC_MISMATCH', quantityEqual(
+        amount(movement.previousQuantity) + amount(movement.quantityDelta), amount(movement.newQuantity)
+      ), 'inventory_transaction', movement.id)
+    }
+
+    const hasRestorationRows = [...expectedRestorations.keys()].every(position =>
+      restorationRows.some(row => `${row.productId}:${row.storageId}` === position)
+    )
+    const expectedRestorationRecord = Object.fromEntries([...expectedRestorations.entries()].sort(([left], [right]) => left.localeCompare(right)))
+    const actualRestorationRecord = Object.fromEntries([...actualRestorations.entries()].sort(([left], [right]) => left.localeCompare(right)))
+    const legacyReturn = Date.parse(returned.returnedAt || returned.createdAt || '') < legacyReturnMovementCutoff
+    add('inventory', 'RETURN_INVENTORY_HISTORY_UNAVAILABLE', hasRestorationRows, 'order_return', returned.id,
+      expectedRestorationRecord, actualRestorationRecord, legacyReturn)
+    const restorationMatches = (legacyReturn && !hasRestorationRows)
+      || (expectedRestorations.size === actualRestorations.size
+        && [...expectedRestorations.entries()].every(([position, expectedQuantity]) =>
+          quantityEqual(expectedQuantity, actualRestorations.get(position) ?? 0)
+        ))
+    add('inventory', 'RETURN_INVENTORY_RESTORATION_MISMATCH', restorationMatches, 'order_return', returned.id,
+      expectedRestorationRecord, actualRestorationRecord)
   }
 
   const paymentRows = active(graph.payments)
@@ -341,7 +390,7 @@ export async function runSalesOrderIntegrityAudit(
         for (const row of sourceRows) {
           const localRow = mirrorById.get(row.id)
           if (!localRow) {
-            checks.push(buildCheck('mirror', 'SQLITE_MIRROR_RECORD_MISSING', false, key, row.id, 'present', 'missing'))
+            checks.push(buildCheck('mirror', 'SQLITE_MIRROR_RECORD_MISSING', false, key, row.id, 'present', 'missing', true))
             continue
           }
           const fields = key === 'order' ? ['workspaceId', 'status', 'subtotal', 'discount', 'tax', 'total', 'paidAmount', 'balanceAmount', 'linkedLoanId', 'items', 'returnStatus', 'returnedAmount']
@@ -357,10 +406,10 @@ export async function runSalesOrderIntegrityAudit(
           for (const field of fields) {
             const expectedField = (row as any)[field] ?? null
             const actualField = (localRow as any)[field] ?? null
-            checks.push(buildCheck('mirror', 'SQLITE_MIRROR_FIELD_MISMATCH', JSON.stringify(expectedField) === JSON.stringify(actualField), `${key}.${field}`, row.id, expectedField, actualField))
+            checks.push(buildCheck('mirror', 'SQLITE_MIRROR_FIELD_MISMATCH', JSON.stringify(expectedField) === JSON.stringify(actualField), `${key}.${field}`, row.id, expectedField, actualField, true))
           }
         }
-        for (const row of mirrorRows) if (!sourceRows.some(source => source.id === row.id)) checks.push(buildCheck('mirror', 'SQLITE_MIRROR_ORPHAN', false, key, row.id))
+        for (const row of mirrorRows) if (!sourceRows.some(source => source.id === row.id)) checks.push(buildCheck('mirror', 'SQLITE_MIRROR_ORPHAN', false, key, row.id, undefined, undefined, true))
       }
       mirrorStatus = statusOf(checks.filter(row => row.category === 'mirror'))
     } catch (error) {

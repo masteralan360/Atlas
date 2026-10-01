@@ -382,6 +382,7 @@ export function Payments() {
         paymentMethod: PaymentTransaction['paymentMethod']
         paidAt: string
         amount?: number
+        idempotencyKey?: string
         note?: string
         counterpartyName?: string
         businessPartnerId?: string | null
@@ -398,6 +399,7 @@ export function Payments() {
                 paymentMethod: input.paymentMethod,
                 paidAt: input.paidAt,
                 amount: input.amount,
+                idempotencyKey: input.idempotencyKey,
                 note: input.note,
                 counterpartyName: input.counterpartyName,
                 businessPartnerId: input.businessPartnerId,

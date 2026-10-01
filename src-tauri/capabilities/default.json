@@ -82,6 +82,10 @@
       "allow": [
         {
           "path": "$APPDATA/Logs/**/*"
+        },
+        {
+          "path": "$DOWNLOAD/**/*",
+          "baseDir": "Download"
         }
       ]
     },

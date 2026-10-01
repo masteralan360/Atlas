@@ -15,6 +15,7 @@ const DeveloperTestButton = import.meta.env.DEV && __ATLAS_DEV_TESTING__
     : null
 
 import { useAuth } from '@/auth'
+import { UiAccessGate } from '@/context/UiAccessContext'
 import { useDateRange, type DateRangeType } from '@/context/DateRangeContext'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { getLanguageDirection } from '@/lib/i18nRouting'
@@ -1019,6 +1020,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         paymentMethod: WorkspacePaymentMethod
         paidAt: string
         amount?: number
+        idempotencyKey?: string
         note?: string
         accountId?: string | null
         accountNameSnapshot?: string | null
@@ -2311,7 +2313,8 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                 </div>
 
                                 <div className="flex flex-wrap items-center gap-2 self-start print:hidden sm:self-auto">
-                                    {activeTab === 'sales' && (
+                                    {activeTab === 'sales' && !isMobile() && (
+                                      <UiAccessGate>
                                         <Button
                                             variant="outline"
                                             allowViewer={true}
@@ -2321,6 +2324,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                             <ClipboardCheck className="h-4 w-4" aria-hidden="true" />
                                             {t('moduleWideIntegrityAudit.open')}
                                         </Button>
+                                      </UiAccessGate>
                                     )}
                                     <Button variant="outline" allowViewer={true} onClick={() => setArchivesOpen(true)} className="gap-2 rounded-xl">
                                         <Archive className="h-4 w-4" />
@@ -3220,7 +3224,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                     )
                 }}
             />
-            {activeTab === 'sales' && (
+            {activeTab === 'sales' && !isMobile() && (
                 <ModuleWideIntegrityAuditDialog
                     open={moduleWideAuditOpen}
                     onOpenChange={setModuleWideAuditOpen}

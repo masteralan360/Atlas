@@ -1072,6 +1072,7 @@ export function Ecommerce() {
     const handleCollectionSettlement = async (input: {
         paymentMethod: WorkspacePaymentMethod
         paidAt: string
+        idempotencyKey?: string
         note?: string
         accountId?: string | null
         accountNameSnapshot?: string | null

@@ -134,12 +134,12 @@ describe('Loan transaction integrity reconciliation', () => {
     vi.mocked(resolveLoanTransactionGraph).mockImplementation(async (_workspace, _loan, target) => target === 'supabase' ? source : mirror)
     const result = await runLoanIntegrityAudit(workspaceId, loanId, 'hybrid')
     expect(result.integrityStatus).toBe('PASS')
-    expect(result.mirrorStatus).toBe('FAIL')
-    expect(result.checks).toContainEqual(expect.objectContaining({ category: 'mirror', code: 'SQLITE_MIRROR_FIELD_MISMATCH', entityType: 'loan.balanceAmount' }))
+    expect(result.mirrorStatus).toBe('WARNING')
+    expect(result.checks).toContainEqual(expect.objectContaining({ category: 'mirror', code: 'SQLITE_MIRROR_FIELD_MISMATCH', entityType: 'loan.balanceAmount', status: 'WARNING', severity: 'warning' }))
     expect(buildIntegrityAuditModel(result)).toMatchObject({
       transaction: { type: 'loan', id: loanId, number: 'LN-00001', status: 'active', currency: 'usd' },
       expected: { totalPaidAmount: 20, balanceAmount: 80 },
-      summary: { integrityStatus: 'PASS', mirrorStatus: 'FAIL' }
+      summary: { integrityStatus: 'PASS', mirrorStatus: 'WARNING' }
     })
   })
 

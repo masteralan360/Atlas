@@ -2837,6 +2837,7 @@ export async function recordOrderPayment(
         amount: number
         paymentMethod: Exclude<OrderPaymentMethod, 'loan' | 'installments'>
         paidAt: string
+        idempotencyKey?: string
         note?: string | null
         createdBy?: string | null
         accountId?: string | null
@@ -2904,6 +2905,9 @@ export async function recordOrderPayment(
 
     const { appendPaymentTransaction } = await import('./payments')
     const transaction = await appendPaymentTransaction(workspaceId, {
+        id: input.idempotencyKey || generateId(),
+        idempotent: true,
+        atomicOrderPayment: true,
         sourceModule: 'orders',
         sourceType,
         sourceRecordId: order.id,
@@ -4340,13 +4344,19 @@ async function applySalesOrderReturnToFinancing(input: {
         input.order.currency
     )
     // A full order return cancels its loan; it is not a zero-value completed
-    // loan. Keep the originated principal for the audit trail while the
-    // refunded payments and written-off balance both become zero. Apart from
-    // preserving the financial history, this is required by the v1 loan
+    // loan. Simple order loans are originated for the full original order
+    // total, so restore that principal after earlier partial returns reduced
+    // it. Keep the refunded payments and written-off balance at zero. Apart
+    // from preserving the financial history, this is required by the v1 loan
     // contract, which deliberately rejects a zero-principal active/completed
     // loan.
     const nextPrincipal = input.isFullReturn
-        ? roundAmount(Math.max(0, Number(loan.principalAmount || 0)), loan.settlementCurrency)
+        ? roundAmount(Math.max(
+            0,
+            input.order.paymentMethod === 'loan'
+                ? getSalesOrderOriginalTotal(input.order)
+                : Number(loan.principalAmount || 0)
+        ), loan.settlementCurrency)
         : roundAmount(
             Math.max(0, Number(loan.principalAmount || 0) - input.returnAmount),
             loan.settlementCurrency

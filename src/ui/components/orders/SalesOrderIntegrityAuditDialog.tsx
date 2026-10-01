@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, ClipboardCheck, Database, Loader2, XCircle
 import { IntegrityAuditReadError, runSalesOrderIntegrityAudit, type AuditCategory, type AuditStatus, type IntegrityAuditResult } from '@/lib/integrityAudit/salesOrderAudit'
 import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle, Button } from '@/ui/components'
 import { AuditModelJsonPanel } from '@/ui/components/integrity-audit/AuditModelJsonPanel'
+import { IntegrityAuditCategoryIcon } from '@/ui/components/integrity-audit/IntegrityAuditCategoryIcon'
 
 const categories: AuditCategory[] = ['order', 'items', 'inventory', 'payments', 'loan', 'relationships', 'mirror']
 export { AuditModelJsonPanel } from '@/ui/components/integrity-audit/AuditModelJsonPanel'
@@ -64,7 +65,7 @@ export function SalesOrderIntegrityAuditDialog({ open, onOpenChange, workspaceId
             const rows = result.checks.filter(check => check.category === category)
             const status: AuditStatus = rows.length === 0 ? 'NOT_APPLICABLE' : rows.some(row => row.status === 'FAIL') ? 'FAIL' : rows.some(row => row.status === 'WARNING') ? 'WARNING' : 'PASS'
             return <details key={category} className="rounded-lg border p-3" open={status !== 'PASS' || undefined}>
-              <summary className="flex cursor-pointer items-center gap-2 font-medium"><StatusIcon status={status} />{t(`transactionAudit.categories.${category}`)} <span className="text-xs text-muted-foreground">({rows.length})</span>{status === 'NOT_APPLICABLE' && <span className="text-xs text-muted-foreground">{t('transactionAudit.status.NOT_APPLICABLE')}</span>}</summary>
+              <summary className="flex cursor-pointer items-center gap-2 font-medium"><StatusIcon status={status} /><IntegrityAuditCategoryIcon category={category} />{t(`transactionAudit.categories.${category}`)} <span className="text-xs text-muted-foreground">({rows.length})</span>{status === 'NOT_APPLICABLE' && <span className="text-xs text-muted-foreground">{t('transactionAudit.status.NOT_APPLICABLE')}</span>}</summary>
               <div className="mt-3 space-y-2">
                 {rows.map((check, index) => <div key={`${check.code}:${check.entityId ?? index}`} className="rounded-md bg-muted/50 p-3 text-sm">
                   <div className="flex items-center gap-2"><StatusIcon status={check.status} /><span className="font-mono text-xs break-all">{check.code}</span></div>

@@ -54,7 +54,11 @@ import { ModuleLockerPasskeyDialog, type ModuleLockerPasskeyAction } from './mod
 import { LoadingGlowLine } from './GlowLine'
 import { ModulePageFreshnessLoadingProvider } from './ModulePageFreshness'
 import { buildWorkspaceNavigation, type WorkspaceNavigationGroup, type WorkspaceNavigationItem } from '@/ui/navigation/workspaceNavigation'
-import { isNavigationRailEnabled, NAVIGATION_RAIL_WIDTH } from '@/ui/navigation/navigationRail'
+import {
+  isNavigationRailEnabled,
+  NAVIGATION_RAIL_CORNER_RADIUS,
+  NAVIGATION_RAIL_WIDTH
+} from '@/ui/navigation/navigationRail'
 import { launcherSectionOrder, type NavigationSectionKey } from '@/ui/navigation/navigationMeta'
 import {
   createSidebarSectionOrderStorageValue,
@@ -420,6 +424,9 @@ export function Layout({ children }: LayoutProps) {
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1440))
   const desktopStickyBarCollapseProgress = isTauri && viewportWidth >= 1024 ? desktopStickyBarProgress : 0
   const showNavigationRail = isNavigationRailEnabled && isTauri && !isMobile() && viewportWidth >= 1024
+  const navigationRailIsRtl = i18n.dir() === 'rtl'
+  const sidebarTopCornerMask = `radial-gradient(circle at ${navigationRailIsRtl ? 'left' : 'right'} bottom, transparent ${NAVIGATION_RAIL_CORNER_RADIUS}px, black ${NAVIGATION_RAIL_CORNER_RADIUS + 0.5}px)`
+  const sidebarBottomCornerMask = `radial-gradient(circle at ${navigationRailIsRtl ? 'left' : 'right'} top, transparent ${NAVIGATION_RAIL_CORNER_RADIUS}px, black ${NAVIGATION_RAIL_CORNER_RADIUS + 0.5}px)`
   const showSidebarThemeSelector = !isTauri && !isMobile() && viewportWidth >= 1024
   const fullWorkspaceLabel = currentWorkspaceLabel || workspaceName || 'Atlas'
   const sidebarWorkspaceLabel = getSidebarWorkspaceLabel(fullWorkspaceLabel)
@@ -1641,6 +1648,36 @@ export function Layout({ children }: LayoutProps) {
                 </div>
               )}
             </aside>
+          )}
+
+          {/* Match the navigation rail only in the sidebar's rounded start-side cutouts. */}
+          {showNavigationRail && desktopSidebarOpen && (
+            <>
+              <div
+                aria-hidden="true"
+                className="pointer-events-none fixed z-40 h-4 w-4 bg-background sidebar-gradient"
+                style={{
+                  insetInlineStart: NAVIGATION_RAIL_WIDTH,
+                  top: 'var(--titlebar-height)',
+                  backgroundSize: '100% 100vh',
+                  backgroundPositionY: 'calc(0px - var(--titlebar-height))',
+                  maskImage: sidebarTopCornerMask,
+                  WebkitMaskImage: sidebarTopCornerMask
+                }}
+              />
+              <div
+                aria-hidden="true"
+                className="pointer-events-none fixed z-40 h-4 w-4 bg-background sidebar-gradient"
+                style={{
+                  insetInlineStart: NAVIGATION_RAIL_WIDTH,
+                  bottom: 0,
+                  backgroundSize: '100% 100vh',
+                  backgroundPositionY: `calc(${NAVIGATION_RAIL_CORNER_RADIUS}px - 100vh)`,
+                  maskImage: sidebarBottomCornerMask,
+                  WebkitMaskImage: sidebarBottomCornerMask
+                }}
+              />
+            </>
           )}
 
           {/* Sidebar */}
@@ -3527,6 +3564,7 @@ export function Layout({ children }: LayoutProps) {
             <header
               className={cn(
                 'hidden z-10 flex-shrink-0 origin-top items-center gap-4 px-4 py-3 bg-background/60 backdrop-blur-xl transition-[margin-bottom,opacity,transform] duration-200 ease-out lg:flex',
+                isTauri && 'dark:bg-background',
                 'pt-[calc(0.75rem+var(--safe-area-top))]',
                 isPosLikeRoute && 'hidden'
               )}

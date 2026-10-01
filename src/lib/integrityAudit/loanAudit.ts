@@ -1,5 +1,5 @@
 import { ORDER_AMOUNT_EPSILON, roundOrderValue } from '@/lib/orderPrecision'
-import type { LoanPayment, PaymentTransaction } from '@/local-db/models'
+import type { PaymentTransaction } from '@/local-db/models'
 import type { LoanTransactionGraph } from './loanGraph'
 import { IntegrityAuditReadError, type AuditCategory, type AuditStatus, type IntegrityAuditCheck, type IntegrityAuditResult } from './types'
 
@@ -61,8 +61,7 @@ const statusOf = (checks: IntegrityAuditCheck[]): AuditStatus => checks.some(row
 export function auditLoanGraph(
   graph: LoanTransactionGraph,
   workspaceId: string,
-  loanId: string,
-  source?: 'supabase' | 'sqlite'
+  loanId: string
 ) {
   const checks: IntegrityAuditCheck[] = []
   const add = (...args: Parameters<typeof check>) => checks.push(check(...args))
@@ -292,7 +291,7 @@ export async function runLoanIntegrityAudit(
     throw new IntegrityAuditReadError(sourceOfTruth, error)
   }
 
-  const { checks, expected } = auditLoanGraph(actual, workspaceId, loanId, sourceOfTruth)
+  const { checks, expected } = auditLoanGraph(actual, workspaceId, loanId)
   let mirrorStatus: AuditStatus | null = null
   let mirrorActual: LoanTransactionGraph | null = null
   if (mode === 'hybrid') {
@@ -307,7 +306,7 @@ export async function runLoanIntegrityAudit(
         for (const row of sourceRows) {
           const localRow = byId.get(row.id)
           if (!localRow) {
-            checks.push(check('mirror', 'SQLITE_MIRROR_RECORD_MISSING', false, key, row.id, 'present', 'missing'))
+            checks.push(check('mirror', 'SQLITE_MIRROR_RECORD_MISSING', false, key, row.id, 'present', 'missing', true))
             continue
           }
           const fieldsToCompare = key === 'loan'
@@ -321,14 +320,14 @@ export async function runLoanIntegrityAudit(
             const supabaseValue = (row as unknown as Record<string, unknown>)[field]
             const sqliteValue = (localRow as unknown as Record<string, unknown>)[field]
             if (supabaseValue !== sqliteValue) checks.push(check('mirror', 'SQLITE_MIRROR_FIELD_MISMATCH', false,
-              `${key}.${field}`, row.id, supabaseValue, sqliteValue))
+              `${key}.${field}`, row.id, supabaseValue, sqliteValue, true))
           }
         }
         for (const row of mirrorRows) if (!sourceRows.some(candidate => candidate.id === row.id)) {
-          checks.push(check('mirror', 'SQLITE_MIRROR_EXTRA_RECORD', false, key, row.id, 'absent', 'present'))
+          checks.push(check('mirror', 'SQLITE_MIRROR_EXTRA_RECORD', false, key, row.id, 'absent', 'present', true))
         }
       }
-      mirrorStatus = checks.some(row => row.category === 'mirror' && row.status === 'FAIL') ? 'FAIL' : 'PASS'
+      mirrorStatus = statusOf(checks.filter(row => row.category === 'mirror'))
     } catch {
       mirrorStatus = 'WARNING'
       checks.push(check('mirror', 'SQLITE_MIRROR_UNAVAILABLE', false, 'loan', loanId, 'readable SQLite mirror', null, true))

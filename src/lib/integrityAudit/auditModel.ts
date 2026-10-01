@@ -1,7 +1,7 @@
 import type { IntegrityAuditResult } from './types'
 
 /** The inspectable, read-only snapshot shown to the user for this audit run. */
-export function buildIntegrityAuditModel(result: IntegrityAuditResult) {
+export function buildIntegrityAuditModel<TActual>(result: IntegrityAuditResult<TActual>) {
   const actual = result.actual && typeof result.actual === 'object'
     ? result.actual as Record<string, { status?: unknown; currency?: unknown; settlementCurrency?: unknown } | null>
     : {}

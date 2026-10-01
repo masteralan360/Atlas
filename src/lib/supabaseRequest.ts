@@ -88,6 +88,18 @@ function localizeInsufficientInventoryError(error: unknown): Error | null {
     }))
 }
 
+function localizeOrderPaymentBalanceError(error: unknown): Error | null {
+    const message = getErrorMessage(error)
+    if (message !== 'order_payment_exceeds_remaining_balance'
+        && message !== 'order_installment_payment_exceeds_remaining_balance') {
+        return null
+    }
+
+    return new Error(i18n.t('settlementModal.amountExceedsBalance', {
+        defaultValue: 'Amount cannot exceed the remaining balance.'
+    }))
+}
+
 function localizePosServiceNameError(error: unknown): Error | null {
     const message = getErrorMessage(error)
     if (message !== 'Service name details are invalid'
@@ -125,6 +137,11 @@ export function normalizeSupabaseActionError(error: unknown): Error {
     const localizedPaymentAccountError = localizePaymentAccountInsufficientFundsError(error)
     if (localizedPaymentAccountError) {
         return localizedPaymentAccountError
+    }
+
+    const localizedOrderPaymentError = localizeOrderPaymentBalanceError(error)
+    if (localizedOrderPaymentError) {
+        return localizedOrderPaymentError
     }
 
     const localizedInventoryError = localizeInsufficientInventoryError(error)

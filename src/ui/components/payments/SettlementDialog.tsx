@@ -1,9 +1,9 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
 
 import { type BusinessPartner, type PaymentObligation, type WorkspacePaymentMethod, useBusinessPartners } from '@/local-db'
-import { formatCurrency, formatDate, formatLocalDateTimeValue, formatNumericInput, parseFormattedNumber, parseLocalDateTimeValue, sanitizeNumericInput } from '@/lib/utils'
+import { formatCurrency, formatDate, formatLocalDateTimeValue, formatNumericInput, generateId, parseFormattedNumber, parseLocalDateTimeValue, sanitizeNumericInput } from '@/lib/utils'
 import { LOAN_ADJUSTMENT_PAYMENT_METHOD, STANDARD_PAYMENT_METHODS } from '@/lib/paymentMethods'
 import {
     Button,
@@ -37,6 +37,7 @@ interface SettlementDialogProps {
         paymentMethod: WorkspacePaymentMethod
         paidAt: string
         amount?: number
+        idempotencyKey?: string
         note?: string
         counterpartyName?: string
         businessPartnerId?: string | null
@@ -71,6 +72,7 @@ export function SettlementDialog({
     const [note, setNote] = useState('')
     const [counterpartyName, setCounterpartyName] = useState('')
     const [linkedCounterparty, setLinkedCounterparty] = useState<{ id: string; name: string } | null>(null)
+    const orderPaymentRequestRef = useRef<{ obligationId: string; fingerprint: string; id: string } | null>(null)
     const showsCounterpartyPicker = obligation?.sourceType === 'real_estate_commission'
     const showsAmountInput = obligation?.sourceType === 'real_estate_commission'
         || obligation?.sourceType === 'sales_order'
@@ -85,6 +87,9 @@ export function SettlementDialog({
     const defaultBusinessPartner = defaultBusinessPartnerId ? businessPartnerById.get(defaultBusinessPartnerId) : undefined
     const defaultCounterpartyName = defaultBusinessPartner?.partnerName || obligation?.counterpartyName || obligation?.title || ''
     useEffect(() => {
+        if (!open || orderPaymentRequestRef.current?.obligationId !== obligation?.id) {
+            orderPaymentRequestRef.current = null
+        }
         if (!open) {
             return
         }
@@ -136,10 +141,31 @@ export function SettlementDialog({
     const handleSubmit = (e: FormEvent) => {
         e.preventDefault()
         if (!obligation || !selectedPaidAt || !canSubmit || isSubmitting) return
+        const isOrderPayment = obligation.sourceType === 'sales_order' || obligation.sourceType === 'purchase_order'
+        let idempotencyKey: string | undefined
+        if (isOrderPayment) {
+            const fingerprint = JSON.stringify([
+                obligation.id,
+                paymentMethod,
+                selectedPaidAt.toISOString(),
+                showsAmountInput ? parsedAmount : null,
+                note.trim(),
+                paymentAccountId,
+                paymentAccountNameSnapshot
+            ])
+            if (orderPaymentRequestRef.current?.obligationId === obligation.id
+                && orderPaymentRequestRef.current.fingerprint === fingerprint) {
+                idempotencyKey = orderPaymentRequestRef.current.id
+            } else {
+                idempotencyKey = generateId()
+                orderPaymentRequestRef.current = { obligationId: obligation.id, fingerprint, id: idempotencyKey }
+            }
+        }
         void onSubmit({
             paymentMethod,
             paidAt: selectedPaidAt?.toISOString() || '',
             amount: showsAmountInput ? parsedAmount : undefined,
+            idempotencyKey,
             note: note.trim() || undefined,
             counterpartyName: counterpartyName.trim() || undefined,
             businessPartnerId: linkedCounterparty?.id || null,
