@@ -12,11 +12,11 @@ import { runnerErrorKey, testRunnerClient } from './client'
 import type { LiveReadiness, SuiteDefinition, TestRun, TestStatus } from './types'
 
 const suites: Record<string, SuiteDefinition> = suitesJson
-const icons = { pending: Circle, running: Loader2, passed: CheckCircle2, failed: XCircle, skipped: AlertTriangle, cancelled: Square }
+const icons = { pending: Circle, running: Loader2, passed: CheckCircle2, failed: XCircle, blocked: AlertTriangle, skipped: AlertTriangle, cancelled: Square }
 
 function StatusIcon({ status }: { status: TestStatus }) {
     const Icon = icons[status]
-    return <Icon aria-hidden className={cn('h-4 w-4 shrink-0', status === 'running' && 'animate-spin', status === 'passed' && 'text-emerald-600', status === 'failed' && 'text-destructive', status === 'skipped' && 'text-amber-600')} />
+    return <Icon aria-hidden className={cn('h-4 w-4 shrink-0', status === 'running' && 'animate-spin', status === 'passed' && 'text-emerald-600', status === 'failed' && 'text-destructive', (status === 'skipped' || status === 'blocked') && 'text-amber-600')} />
 }
 
 export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { suiteId: string; open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -144,7 +144,7 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
         const done = group.tests.filter((test) => !['pending', 'running'].includes(test.status)).length
         return sum + (group.tests.length ? done / group.tests.length * 0.95 : 0)
     }, 0) ?? 0
-    const progress = activeRun?.groups.length ? Math.round(groupProgress / activeRun.groups.length * 100) : 0
+    const progress = activeRun?.expectedTests ? Math.round(finished / activeRun.expectedTests * 100) : activeRun?.groups.length ? Math.round(groupProgress / activeRun.groups.length * 100) : 0
     const failedGroups = activeRun?.groups.filter((group) => group.status === 'failed').map((group) => group.id) ?? []
     const blockClose = (event: { preventDefault: () => void }) => { if (busy) event.preventDefault() }
     const formatInput = (value: string) => value === '' ? '' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Number(value.replace(/,/g, '')))
@@ -205,26 +205,26 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
                 <div className="rounded-xl border border-amber-600/25 bg-amber-600/5 p-3 text-sm">
                     <p className="mb-2 flex items-center gap-2 font-medium"><AlertTriangle className="h-4 w-4" />{t('devTesting.coverageLimit')}</p>
                     <ul className="space-y-1">
-                        {suite?.unavailable.map((id) => <li key={id} className="flex flex-wrap items-center justify-between gap-2"><span>{t(`devTesting.environments.${id}`)}</span><span className="text-xs text-amber-700 dark:text-amber-400">{t('devTesting.blocked')}</span></li>)}
+                        {(environment === 'hosted-supabase' ? suite?.liveUnavailable ?? suite?.unavailable : suite?.unavailable)?.map((id) => <li key={id} className="flex flex-wrap items-center justify-between gap-2"><span>{t(`devTesting.environments.${id}`)}</span><span className="text-xs text-amber-700 dark:text-amber-400">{t('devTesting.blocked')}</span></li>)}
                     </ul>
                     <p className="mt-2 text-xs text-muted-foreground">{t(environment === 'hosted-supabase' ? suite?.liveCoverageHelpKey ?? 'devTesting.coverageHelp' : suite?.coverageHelpKey ?? 'devTesting.coverageHelp')}</p>
                 </div>
                 {activeRun && <section className="select-text space-y-3" aria-label={t('devTesting.results')}>
                     <div role="status" aria-live="polite" className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                        <p className="flex items-center gap-2 font-medium"><StatusIcon status={activeRun.status} />{t(`devTesting.runStatus.${activeRun.status}`)} · {t('devTesting.progress', { done: format(finished), total: format(tests.length) })}</p>
+                        <p className="flex items-center gap-2 font-medium"><StatusIcon status={activeRun.status} />{t(`devTesting.runStatus.${activeRun.status}`)} · {t('devTesting.progress', { done: format(finished), total: format(activeRun.expectedTests ?? tests.length) })}</p>
                         <span className="text-xs text-muted-foreground">{activeRun.environment === 'hosted-supabase' ? t('devTesting.adapters.hosted-supabase') : t('devTesting.runSeed', { seed: format(activeRun.seed) })}</span>
                     </div>
                     <div role="progressbar" aria-label={t('devTesting.results')} aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary transition-all" style={{ width: `${progress}%` }} /></div>
                     <div className="flex flex-wrap gap-3 text-xs">
-                        {(['passed', 'failed', 'skipped', 'cancelled'] as const).map((status) => <span key={status} className="flex items-center gap-1"><StatusIcon status={status} />{t(`devTesting.status.${status}`)}: {format(tests.filter((test) => test.status === status).length)}</span>)}
+                        {(['passed', 'failed', 'blocked', 'skipped', 'cancelled'] as const).map((status) => <span key={status} className="flex items-center gap-1"><StatusIcon status={status} />{t(`devTesting.status.${status}`)}: {format(tests.filter((test) => test.status === status).length)}</span>)}
                     </div>
                     <label className="flex items-center gap-2 text-sm"><Checkbox allowViewer aria-label={t('devTesting.onlyFailures')} checked={onlyFailures} onCheckedChange={(checked) => setOnlyFailures(checked === true)} />{t('devTesting.onlyFailures')}</label>
                     {activeRun.cancelRequested && activeRun.status === 'running' && <p role="status" className="text-sm text-amber-700 dark:text-amber-400">{t('devTesting.cancelling')}</p>}
-                    {activeRun.groups.map((group) => <details key={group.id} open={group.status === 'failed'} className="rounded-xl border p-3">
+                    {activeRun.groups.map((group) => <details key={group.id} open={group.status === 'failed' || group.status === 'blocked'} className="rounded-xl border p-3">
                         <summary className="cursor-pointer text-sm"><span className="inline-flex items-center gap-2"><StatusIcon status={group.status} />{t([...suite.groups, ...(suite.liveGroups ?? [])].find((entry) => entry.id === group.id)?.titleKey ?? 'devTesting.checks')} · {t(`devTesting.status.${group.status}`)} · {format(group.tests.length)}</span></summary>
                         {group.errors.map((error, index) => <pre key={index} className="mt-2 max-w-full whitespace-pre-wrap break-words rounded-lg bg-destructive/5 p-2 text-xs text-destructive" dir="ltr">{error}</pre>)}
                         <div className="mt-2 space-y-2">
-                            {group.tests.filter((test) => !onlyFailures || test.status === 'failed').map((test) => <div key={test.id} className="rounded-lg bg-muted/40 p-2 text-xs">
+                            {group.tests.filter((test) => !onlyFailures || test.status === 'failed' || test.status === 'blocked').map((test) => <div key={test.id} className="rounded-lg bg-muted/40 p-2 text-xs">
                                 <div className="flex flex-wrap items-start gap-2">
                                     <StatusIcon status={test.status} />
                                     <span className="min-w-[10rem] flex-1 break-words" dir="ltr">{test.name}</span>

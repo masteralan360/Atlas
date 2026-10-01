@@ -41,7 +41,28 @@ export function loadLiveConfig(root) {
   let source
   try { source = readFileSync(join(root, LIVE_CONFIG_FILE), 'utf8') }
   catch { throw new Error('live_config_missing') }
-  return parseLiveConfig(source)
+  const config = parseLiveConfig(source)
+  let extended
+  try { extended = readFileSync(join(root, '.atlas-sales-order-hosted.local.json'), 'utf8') }
+  catch (error) { if (error.code !== 'ENOENT') throw new Error('live_sales_config_invalid') }
+  if (extended !== undefined) {
+    let parsed
+    try { parsed = JSON.parse(extended) } catch { throw new Error('live_sales_config_invalid') }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+      || Object.keys(parsed).some(key => !['personas', 'fixtures', 'observer'].includes(key))) throw new Error('live_sales_config_invalid')
+    for (const persona of Object.values(parsed.personas ?? {})) {
+      if (!persona || !uuid.test(persona.workspaceId ?? '') || !/^DEV TEST\b/i.test(persona.workspaceName ?? '')
+        || !['admin', 'staff', 'viewer'].includes(persona.role) || !persona.email || !persona.password) throw new Error('live_sales_persona_invalid')
+    }
+    if (parsed.observer) {
+      let observerUrl
+      try { observerUrl = new URL(parsed.observer.url) } catch { throw new Error('live_sales_observer_invalid') }
+      if (observerUrl.origin !== config.origin || !observerUrl.pathname.startsWith('/functions/v1/')
+        || observerUrl.username || observerUrl.password || !parsed.observer.bearer) throw new Error('live_sales_observer_invalid')
+    }
+    config.ATLAS_LIVE_SALES_CONFIG = JSON.stringify(parsed)
+  }
+  return config
 }
 
 export function liveTarget(config) {
@@ -58,7 +79,8 @@ export function liveChildEnv(config, baseEnv, runId, capabilities = {}) {
     ATLAS_LIVE_WORKSPACE_ID: config.ATLAS_LIVE_WORKSPACE_ID,
     ATLAS_LIVE_WORKSPACE_NAME: config.ATLAS_LIVE_WORKSPACE_NAME,
     ATLAS_LIVE_RUN_ID: runId,
-    ATLAS_LIVE_SERVICES_ENABLED: String(capabilities.servicesEnabled === true)
+    ATLAS_LIVE_SERVICES_ENABLED: String(capabilities.servicesEnabled === true),
+    ATLAS_LIVE_SALES_CONFIG: config.ATLAS_LIVE_SALES_CONFIG ?? '{}'
   }
 }
 
@@ -66,6 +88,16 @@ export function redactLiveText(value, config) {
   let result = String(value)
   for (const secret of [config.ATLAS_LIVE_SUPABASE_KEY, config.ATLAS_LIVE_TEST_PASSWORD, config.ATLAS_LIVE_TEST_EMAIL]) {
     if (secret) result = result.replaceAll(secret, '[redacted]')
+  }
+  if (config.ATLAS_LIVE_SALES_CONFIG) {
+    const walk = (value) => {
+      if (!value || typeof value !== 'object') return
+      for (const [key, item] of Object.entries(value)) {
+        if (typeof item === 'string' && /password|email|bearer|token|secret/i.test(key)) result = result.replaceAll(item, '[redacted]')
+        else if (typeof item === 'object') walk(item)
+      }
+    }
+    walk(JSON.parse(config.ATLAS_LIVE_SALES_CONFIG))
   }
   return result.replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer [redacted]')
     .replace(/eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted token]')
@@ -139,7 +171,18 @@ export async function preflightLive(config, { fetchImpl = globalThis.fetch, suit
           .eq('workspace_id', config.ATLAS_LIVE_WORKSPACE_ID).limit(1)
         if (error) throw new Error('live_schema_unavailable')
       }
+    } else if (suiteId === 'business-partners') {
+      for (const table of ['agents', 'sales_orders']) {
+        const { error } = await client.schema('crm').from(table).select('id')
+          .eq('workspace_id', config.ATLAS_LIVE_WORKSPACE_ID).limit(1)
+        if (error) throw new Error('live_schema_unavailable')
+      }
+      for (const table of ['payment_transactions', 'order_returns', 'order_return_items']) {
+        const { error } = await client.from(table).select('id')
+          .eq('workspace_id', config.ATLAS_LIVE_WORKSPACE_ID).limit(1)
+        if (error) throw new Error('live_schema_unavailable')
+      }
     } else throw new Error('live_suite_unavailable')
     return { target: liveTarget(config), mode: workspace.data_mode, userId: signIn.user.id }
-  } finally { await client.auth.signOut().catch(() => undefined) }
+  } finally { await client.auth.signOut({ scope: 'local' }).catch(() => undefined) }
 }

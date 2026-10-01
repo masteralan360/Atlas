@@ -300,7 +300,8 @@ export function Payments() {
         direction: directionFilter,
         sourceModule: sourceFilter,
         status: statusFilter,
-        search
+        search,
+        applySalesAgentAccountCredits: true
     })
     const visibleObligations = useMemo(() => {
         if (activeTab === 'payable') {
@@ -699,7 +700,20 @@ export function Payments() {
                                                 return (
                                                     <>
                                             <TableCell>{sourceTypeLabel(item.sourceType, t, item.metadata)}</TableCell>
-                                            <TableCell className="font-medium">{item.referenceLabel || item.title}</TableCell>
+                                            <TableCell className="font-medium">
+                                                <div>{item.referenceLabel || item.title}</div>
+                                                {Number(item.metadata?.salesAgentAccountCreditApplied || 0) > 0 ? (
+                                                    <div className="mt-1 text-xs font-normal text-muted-foreground">
+                                                        {t('payments.salesAgentAccountCreditApplied', {
+                                                            amount: formatCurrency(
+                                                                Number(item.metadata?.salesAgentAccountCreditApplied || 0),
+                                                                item.currency,
+                                                                features.iqd_display_preference
+                                                            )
+                                                        })}
+                                                    </div>
+                                                ) : null}
+                                            </TableCell>
                                             <TableCell>
                                                 <div>{item.counterpartyName || item.title}</div>
                                                 {item.subtitle ? <div className="text-xs text-muted-foreground">{item.subtitle}</div> : null}

@@ -32,13 +32,15 @@ export default class AtlasTestReporter {
   }
 
   serialize(test, status) {
+    const testErrors = errors(test.result().errors)
+    if (status === 'failed' && testErrors.length && testErrors.every(error => error.includes('hosted_blocked:'))) status = 'blocked'
     return {
       id: test.id,
       name: test.fullName,
       file: relative(process.cwd(), test.module.moduleId).replaceAll('\\', '/'),
       status,
       durationMs: test.diagnostic()?.duration || 0,
-      errors: errors(test.result().errors)
+      errors: testErrors
     }
   }
 }

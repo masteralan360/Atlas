@@ -170,7 +170,12 @@ export function auditSalesOrderGraph(graph: SalesOrderTransactionGraph, workspac
   }
   for (const item of items) {
     const returned = returnedByItem.get(item.id) ?? 0
-    add('items', 'ITEM_RETURNED_QUANTITY_MISMATCH', quantityEqual(returned, amount(item.returnedQuantity)), 'sales_order_item', item.id, returned, item.returnedQuantity)
+    // The server keeps order.items as an immutable creation-time snapshot when
+    // returns are synced. Return rows are authoritative; only compare this
+    // optional denormalized field when the snapshot actually contains it.
+    if (item.returnedQuantity != null) {
+      add('items', 'ITEM_RETURNED_QUANTITY_MISMATCH', quantityEqual(returned, amount(item.returnedQuantity)), 'sales_order_item', item.id, returned, item.returnedQuantity)
+    }
     add('inventory', 'RETURN_EXCEEDS_SOLD_QUANTITY', returned <= getOrderLineInventoryQuantity(item), 'sales_order_item', item.id, getOrderLineInventoryQuantity(item), returned)
   }
   expected.inventoryNet = Object.fromEntries([...new Set([...expectedInventory.keys(), ...returnedInventory.keys()])].map(key => [key, roundQuantity((expectedInventory.get(key) ?? 0) + (returnedInventory.get(key) ?? 0))]))
@@ -183,8 +188,9 @@ export function auditSalesOrderGraph(graph: SalesOrderTransactionGraph, workspac
   const salesMovements = active(graph.inventoryMovements).filter(row => row.referenceId === order.id && row.referenceType === 'sales_order')
   const actualInventory = new Map<string, number>()
   for (const row of graph.inventoryMovements) {
+    const referencedReturn = row.referenceId ? returnMap.get(row.referenceId) : undefined
     add('relationships', 'WRONG_INVENTORY_REFERENCE', (row.referenceId === order.id && row.referenceType === 'sales_order')
-      || (!!row.referenceId && returnMap.has(row.referenceId) && row.referenceType === 'order_return'), 'inventory_transaction', row.id, order.id, row.referenceId)
+      || (referencedReturn?.orderId === order.id && (row.referenceType === 'order_return' || row.referenceType === 'sales_order_return')), 'inventory_transaction', row.id, order.id, row.referenceId)
   }
   for (const row of salesMovements) {
     const key = `${row.productId}:${row.storageId}`

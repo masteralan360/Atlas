@@ -43,7 +43,7 @@ export function setupHostedSaleOrders() {
         Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { onLine: true } })
         if (!runId || !liveWorkspaceId || !/^DEV TEST\b/i.test(workspaceName)) throw new Error('live_config_invalid')
         const { data, error } = await liveSupabase.auth.signInWithPassword({ email, password })
-        if (error || !data.user || data.user.email?.toLowerCase() !== email.toLowerCase()) throw new Error('live_auth_failed')
+        if (error || !data.user || data.user.email?.toLowerCase() !== email.toLowerCase()) throw new Error(`live_auth_failed:${error?.status ?? 'identity'}:${error?.code ?? 'no_user'}`)
         const profile = requireLiveData<{ current_workspace: string | null; role: string }>(
             await liveSupabase.from('profiles').select('current_workspace,role').eq('id', data.user.id).single(), 'profile')
         const workspace = requireLiveData<{ id: string; name: string; data_mode: 'cloud' | 'hybrid' }>(
@@ -68,7 +68,7 @@ export function setupHostedSaleOrders() {
         clearWorkspaceModeSnapshot(liveWorkspaceId)
         setActiveBusinessUser(null)
         setActiveBusinessWorkspace(null)
-        await liveSupabase.auth.signOut().catch(() => undefined)
+        await liveSupabase.auth.signOut({ scope: 'local' }).catch(() => undefined)
         await db.delete()
     })
 }
@@ -83,7 +83,7 @@ export type LiveSaleOrderFixture = {
 
 export async function withLiveSaleOrderFixture<T>(
     scenario: (fixture: LiveSaleOrderFixture) => Promise<T>,
-    options: { stock?: number; currency?: CurrencyCode; price?: number; costPrice?: number; unit?: string } = {}
+    options: { stock?: number; currency?: CurrencyCode; price?: number; costPrice?: number; unit?: string; retirePassedProduct?: boolean } = {}
 ): Promise<T> {
     const hooks = await import('@/local-db/hooks')
     const partners = await import('@/local-db/businessPartners')
@@ -115,7 +115,8 @@ export async function withLiveSaleOrderFixture<T>(
         return result
     } finally {
         let cleanup = 'retained'
-        if (passed && ids.productId) {
+        if (passed && options.retirePassedProduct === false) cleanup = 'scenario-managed'
+        else if (passed && ids.productId) {
             try { await hooks.deleteProduct(ids.productId); cleanup = 'product-retired' }
             catch { cleanup = 'product-retire-failed' }
         }

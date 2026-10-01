@@ -192,15 +192,59 @@ describe('Sales Order integrity reconciliation', () => {
     value.returnItems = [{ id: 'return-item-1', workspaceId, returnId: 'return-1', orderId,
       orderItemId: 'item-a', quantity: 1, inventoryQuantity: 1, paidInventoryQuantity: 1,
       freeInventoryQuantity: 0, restoredStorageId: 'storage-1', refundAmount: 10 }] as any
+    value.inventoryMovements.push({ id: 'return-movement-1', workspaceId, referenceId: 'return-1',
+      referenceType: 'sales_order_return', productId: 'product-a', storageId: 'storage-1',
+      transactionType: 'return', quantityDelta: 1, previousQuantity: 5, newQuantity: 6 } as any)
     expect(failures(value)).toEqual([])
+    expect(auditSalesOrderGraph(value, workspaceId, orderId).checks).toContainEqual(expect.objectContaining({
+      code: 'WRONG_INVENTORY_REFERENCE', entityId: 'return-movement-1', status: 'PASS'
+    }))
     expect(auditSalesOrderGraph(value, workspaceId, orderId).expected.inventoryNet).toEqual({
       'product-a:storage-1': -4, 'product-b:storage-1': -2
     })
+    for (const referenceType of [null, undefined]) {
+      value.inventoryMovements[2].referenceType = referenceType
+      expect(auditSalesOrderGraph(value, workspaceId, orderId).checks).toContainEqual(expect.objectContaining({
+        code: 'WRONG_INVENTORY_REFERENCE', entityId: 'return-movement-1', status: 'FAIL'
+      }))
+    }
+    value.inventoryMovements[2].referenceType = 'order_return'
+    expect(auditSalesOrderGraph(value, workspaceId, orderId).checks).toContainEqual(expect.objectContaining({
+      code: 'WRONG_INVENTORY_REFERENCE', entityId: 'return-movement-1', status: 'PASS'
+    }))
+    value.returns.push({ id: 'return-from-another-order', workspaceId, orderId: 'other-order',
+      refundAmount: 0, status: 'posted' } as any)
+    value.inventoryMovements[2].referenceId = 'return-from-another-order'
+    expect(auditSalesOrderGraph(value, workspaceId, orderId).checks).toContainEqual(expect.objectContaining({
+      code: 'WRONG_INVENTORY_REFERENCE', entityId: 'return-movement-1', status: 'FAIL'
+    }))
     value.loans[0].principalAmount = 60
     value.loans[0].balanceAmount = 40
     expect(failures(value).map(check => check.code)).toEqual(expect.arrayContaining([
       'LOAN_PRINCIPAL_MISMATCH', 'LOAN_BALANCE_MISMATCH'
     ]))
+  })
+
+  it('uses posted return items when immutable order-line snapshots omit returnedQuantity', () => {
+    const value = graph()
+    value.order = { ...value.order!, total: 50, subtotal: 50, originalTotalAmount: 60,
+      returnedAmount: 10, returnStatus: 'partial', balanceAmount: 30,
+      items: [{ ...value.order!.items[0], returnedQuantity: undefined }, { ...value.order!.items[1] }] }
+    value.loans[0].principalAmount = 50
+    value.loans[0].balanceAmount = 30
+    value.returns = [{ id: 'return-1', workspaceId, orderId, refundAmount: 10, status: 'posted' }] as any
+    value.returnItems = [{ id: 'return-item-1', workspaceId, returnId: 'return-1', orderId,
+      orderItemId: 'item-a', quantity: 1, inventoryQuantity: 1, paidInventoryQuantity: 1,
+      freeInventoryQuantity: 0, restoredStorageId: 'storage-1', refundAmount: 10 }] as any
+
+    const audit = auditSalesOrderGraph(value, workspaceId, orderId)
+    expect(audit.checks.some(check => check.code === 'ITEM_RETURNED_QUANTITY_MISMATCH' && check.entityId === 'item-a')).toBe(false)
+    expect(audit.checks.filter(check => check.status === 'FAIL')).toEqual([])
+
+    value.order!.items[0].returnedQuantity = 0
+    expect(failures(value).find(check => check.code === 'ITEM_RETURNED_QUANTITY_MISMATCH')).toMatchObject({
+      entityId: 'item-a', expected: 1, actual: 0
+    })
   })
 
   it('reports missing historical inventory evidence as a warning rather than a fabricated pass', () => {

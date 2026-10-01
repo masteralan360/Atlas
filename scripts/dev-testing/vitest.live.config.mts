@@ -20,7 +20,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/dev/testing/suites/*Live.test.ts'],
-    setupFiles: [path.join(root, 'scripts/dev-testing/liveNetworkGuard.ts')],
+    setupFiles: [path.join(root, 'scripts/dev-testing/liveNetworkGuard.ts'), path.join(root, 'scripts/dev-testing/liveBrowser.ts')],
     testTimeout: 120_000,
     hookTimeout: 120_000,
     retry: 0,

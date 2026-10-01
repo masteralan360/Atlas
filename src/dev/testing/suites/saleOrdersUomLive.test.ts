@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { db } from '@/local-db/database'
 import { saleOrderInput } from '../fixtures/saleOrder'
 import type { LiveSaleOrderFixture } from '../fixtures/saleOrdersLive'
 import type { ProductUom } from '@/local-db/models'
@@ -75,6 +74,7 @@ describe('Sale Orders · hosted product UoM conversion', () => {
             // Model an older/offline client whose cached line has a stale UoM
             // reference. A return updates the order summary and return audit
             // rows, while the hosted order keeps its saved item snapshot.
+            const { db } = await import('@/local-db/database')
             const cachedOrder = await db.sales_orders.get(order.id)
             if (!cachedOrder) throw new Error('cached_order_missing_before_return')
             await db.sales_orders.update(order.id, {

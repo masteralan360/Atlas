@@ -45,16 +45,32 @@ describe('hosted Supabase test boundary', () => {
     await expect(guarded('https://project.supabase.co/auth/v1/token')).rejects.toThrow('live_network_redirect_blocked')
   })
 
-  it('keeps the hosted and isolated group allowlists separate', () => {
+  it('registers Sales Orders hosted domains and the paired sales-agent refund statement selection', () => {
     const hosted = validateRunOptions({ suiteId: 'sale-orders', environment: 'hosted-supabase' }).groups
-    expect(hosted.map((group) => group.id)).toEqual([
-      'matrix', 'printing', 'account-statement', 'lifecycle', 'pricing', 'unit-of-measure',
-      'payments', 'ui-access', 'live-transactions', 'completion-integrity'
-    ])
-    const mappedIsolatedGroups = hosted.filter((group) => group.isolatedGroupId).map((group) => group.isolatedGroupId)
-    const isolatedGroups = validateRunOptions({ suiteId: 'sale-orders' }).groups.map((group) => group.id)
-    expect(mappedIsolatedGroups.every((groupId) => isolatedGroups.includes(groupId))).toBe(true)
-    expect(new Set(mappedIsolatedGroups).size).toBe(mappedIsolatedGroups.length)
+    const domains = hosted.filter(group => group.domainId)
+    expect(domains).toHaveLength(30)
+    expect(domains.map(group => group.domainId)).toEqual(Array.from({ length: 30 }, (_, i) => String(i + 1).padStart(2, '0')))
+    expect(domains.every(group => !group.isolatedGroupId && !group.isolatedOnly && group.files.length === 1)).toBe(true)
+    expect(domains[0].files).toEqual(['src/dev/testing/suites/saleOrdersHosted01Live.test.ts'])
+    expect(domains.at(-1).files).toEqual(['src/dev/testing/suites/saleOrdersHosted30Live.test.ts'])
+    expect(hosted.find(group => group.id === 'agent-refund-statement')).toMatchObject({
+      isolatedGroupId: 'agent-refund-statement',
+      files: ['src/dev/testing/suites/saleOrdersAgentRefundStatementLive.test.ts']
+    })
+  })
+
+  it('registers the same paired refund statement selection in Business Partners', () => {
+    const group = validateRunOptions({ suiteId: 'business-partners', environment: 'hosted-supabase', groupIds: ['agent-refund-statement'] }).groups[0]
+    expect(group).toMatchObject({
+      id: 'agent-refund-statement',
+      isolatedGroupId: 'agent-refund-statement',
+      files: ['src/dev/testing/suites/saleOrdersAgentRefundStatementLive.test.ts']
+    })
+    expect(validateRunOptions({ suiteId: 'business-partners', groupIds: ['agent-refund-statement'] }).groups[0].files)
+      .toContain('src/lib/partnerAccountStatementAgentRefund.test.ts')
+  })
+
+  it('keeps existing POS and Products hosted and isolated group allowlists separate', () => {
     const posIsolated = validateRunOptions({ suiteId: 'pos' }).groups.map((group) => group.id)
     const posHosted = validateRunOptions({ suiteId: 'pos', environment: 'hosted-supabase' }).groups
     expect(posHosted.map((group) => group.id)).toEqual(posIsolated.filter((groupId) => groupId !== 'printing'))

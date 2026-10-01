@@ -543,7 +543,7 @@ export function AccountStatements() {
         refreshError,
         liveRefreshProgress,
         retryLiveRefresh
-    } = usePartnerAccountStatement(workspaceId, selectedPartnerId, statementPeriod)
+    } = usePartnerAccountStatement(workspaceId, selectedPartnerId, statementPeriod, undefined, true)
     const liveRefreshProgressPercent = liveRefreshProgress && liveRefreshProgress.totalSources > 0
         ? Math.min(100, Math.round((liveRefreshProgress.completedSources / liveRefreshProgress.totalSources) * 100))
         : 0

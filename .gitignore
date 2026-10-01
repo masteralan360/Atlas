@@ -157,3 +157,6 @@ Secrets/novu-ec341-firebase-adminsdk-fbsvc-ee588ba935.json
 # Local workbook-creation diagnostics and previews are not release artifacts.
 *.xlsx.inspect.ndjson
 /excel samples/**/product-import-sample-preview.png
+
+# Hosted suite persona credentials and prepared DEV TEST fixture identities.
+.atlas-sales-order-hosted.local.json

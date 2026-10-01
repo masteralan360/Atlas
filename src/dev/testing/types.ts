@@ -1,5 +1,5 @@
-export type TestStatus = 'pending' | 'running' | 'passed' | 'failed' | 'skipped' | 'cancelled'
-export type RunStatus = 'running' | 'passed' | 'failed' | 'cancelled'
+export type TestStatus = 'pending' | 'running' | 'passed' | 'failed' | 'blocked' | 'skipped' | 'cancelled'
+export type RunStatus = 'running' | 'passed' | 'failed' | 'blocked' | 'cancelled'
 export interface TestResult {
     id: string
     name: string
@@ -16,6 +16,8 @@ export interface TestGroup {
     files: string[]
     isolatedGroupId?: string
     isolatedOnly?: boolean
+    domainId?: string
+    timeoutMs?: number
 }
 export interface SuiteDefinition {
     titleKey: string
@@ -25,12 +27,14 @@ export interface SuiteDefinition {
     groups: TestGroup[]
     liveGroups?: TestGroup[]
     unavailable: string[]
+    liveUnavailable?: string[]
 }
 export interface GroupResult {
     id: string
     status: TestStatus
     tests: TestResult[]
     errors: string[]
+    evidence?: unknown[]
 }
 export interface TestRun {
     id: string
@@ -48,6 +52,7 @@ export interface TestRun {
     groups: GroupResult[]
     unavailable: string[]
     reportPath?: string
+    expectedTests?: number
 }
 export type LiveReadiness =
     | { status: 'ready'; target: { host: string; workspaceId: string; workspaceName: string }; mode: 'cloud' | 'hybrid' }

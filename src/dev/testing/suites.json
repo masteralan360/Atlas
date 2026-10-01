@@ -32,26 +32,324 @@
     "coverageHelpKey": "devTesting.saleOrdersIsolatedCoverageHelp",
     "liveCoverageHelpKey": "devTesting.saleOrdersLiveCoverageHelp",
     "liveGroups": [
-      { "id": "matrix", "titleKey": "devTesting.groups.matrix", "layer": "live", "isolatedGroupId": "matrix", "files": ["src/dev/testing/suites/saleOrdersMatrixLive.test.ts"] },
-      { "id": "printing", "titleKey": "devTesting.groups.printing", "layer": "live", "isolatedGroupId": "printing", "files": ["src/dev/testing/suites/saleOrdersPrintingLive.test.ts"] },
-      { "id": "account-statement", "titleKey": "devTesting.groups.accountStatement", "layer": "live", "isolatedGroupId": "account-statement", "files": ["src/dev/testing/suites/saleOrdersStatementLive.test.ts"] },
-      { "id": "lifecycle", "titleKey": "devTesting.groups.lifecycle", "layer": "live", "isolatedGroupId": "lifecycle", "files": ["src/dev/testing/suites/saleOrdersLifecycleLive.test.ts"] },
-      { "id": "archiving", "titleKey": "devTesting.groups.archiving", "layer": "live", "isolatedGroupId": "archiving", "files": ["src/dev/testing/suites/saleOrdersArchivingLive.test.ts"] },
-      { "id": "pricing", "titleKey": "devTesting.groups.pricing", "layer": "live", "isolatedGroupId": "pricing", "files": ["src/dev/testing/suites/saleOrdersPricingLive.test.ts"] },
-      { "id": "unit-of-measure", "titleKey": "devTesting.groups.productUom", "layer": "live", "isolatedGroupId": "unit-of-measure", "files": ["src/dev/testing/suites/saleOrdersUomLive.test.ts"] },
-      { "id": "payments", "titleKey": "devTesting.groups.payments", "layer": "live", "isolatedGroupId": "payments", "files": ["src/dev/testing/suites/saleOrdersPaymentsLive.test.ts"] },
-      { "id": "ui-access", "titleKey": "devTesting.groups.uiAccess", "layer": "live", "isolatedGroupId": "ui-access", "files": ["src/dev/testing/suites/saleOrdersAccessLive.test.ts"] },
       {
-        "id": "live-transactions",
-        "titleKey": "devTesting.groups.liveTransactions",
+        "id": "hosted-authentication",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h01",
         "layer": "live",
-        "files": ["src/dev/testing/suites/saleOrdersLive.test.ts"]
+        "domainId": "01",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted01Live.test.ts"
+        ]
       },
       {
-        "id": "completion-integrity",
-        "titleKey": "devTesting.groups.completionIntegrity",
+        "id": "hosted-permissions",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h02",
         "layer": "live",
-        "files": ["src/dev/testing/suites/saleOrdersCompletionLive.test.ts"]
+        "domainId": "02",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted02Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-customers",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h03",
+        "layer": "live",
+        "domainId": "03",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted03Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-lines",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h04",
+        "layer": "live",
+        "domainId": "04",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted04Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-units",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h05",
+        "layer": "live",
+        "domainId": "05",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted05Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-prices",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h06",
+        "layer": "live",
+        "domainId": "06",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted06Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-currencies",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h07",
+        "layer": "live",
+        "domainId": "07",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted07Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-totals",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h08",
+        "layer": "live",
+        "domainId": "08",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted08Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-creation",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h09",
+        "layer": "live",
+        "domainId": "09",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted09Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-approval",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h10",
+        "layer": "live",
+        "domainId": "10",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted10Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-reservation",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h11",
+        "layer": "live",
+        "domainId": "11",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted11Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-completion",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h12",
+        "layer": "live",
+        "domainId": "12",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted12Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-quick-order",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h13",
+        "layer": "live",
+        "domainId": "13",
+        "timeoutMs": 604800000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted13Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-collections",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h14",
+        "layer": "live",
+        "domainId": "14",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted14Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-payment-accounts",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h15",
+        "layer": "live",
+        "domainId": "15",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted15Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-financing",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h16",
+        "layer": "live",
+        "domainId": "16",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted16Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-repayments",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h17",
+        "layer": "live",
+        "domainId": "17",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted17Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-cancellation",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h18",
+        "layer": "live",
+        "domainId": "18",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted18Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-standard-returns",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h19",
+        "layer": "live",
+        "domainId": "19",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted19Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-financed-returns",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h20",
+        "layer": "live",
+        "domainId": "20",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted20Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-corrections",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h21",
+        "layer": "live",
+        "domainId": "21",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted21Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-commission-sources",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h22",
+        "layer": "live",
+        "domainId": "22",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted22Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-commission-settlements",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h23",
+        "layer": "live",
+        "domainId": "23",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted23Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-marketplace",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h24",
+        "layer": "live",
+        "domainId": "24",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted24Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-terminal-states",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h25",
+        "layer": "live",
+        "domainId": "25",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted25Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-reads",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h26",
+        "layer": "live",
+        "domainId": "26",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted26Live.test.ts"
+        ]
+      },
+      {
+        "id": "agent-refund-statement",
+        "titleKey": "devTesting.groups.agentRefundStatement",
+        "layer": "live",
+        "isolatedGroupId": "agent-refund-statement",
+        "files": [
+          "src/dev/testing/suites/saleOrdersAgentRefundStatementLive.test.ts"
+        ]
+      },
+      {
+        "id": "agent-account-netting",
+        "titleKey": "devTesting.groups.agentAccountPaymentNetting",
+        "layer": "live",
+        "isolatedGroupId": "agent-account-netting",
+        "timeoutMs": 300000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersAgentAccountPaymentNettingLive.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-remote-contracts",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h27",
+        "layer": "live",
+        "domainId": "27",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted27Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-recovery",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h28",
+        "layer": "live",
+        "domainId": "28",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted28Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-historical",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h29",
+        "layer": "live",
+        "domainId": "29",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted29Live.test.ts"
+        ]
+      },
+      {
+        "id": "hosted-runner",
+        "titleKey": "devTesting.saleOrdersHostedGroups.h30",
+        "layer": "live",
+        "domainId": "30",
+        "timeoutMs": 86400000,
+        "files": [
+          "src/dev/testing/suites/saleOrdersHosted30Live.test.ts"
+        ]
       }
     ],
     "groups": [
@@ -79,6 +377,24 @@
         "files": [
           "src/lib/partnerAccountStatementDisplay.test.ts",
           "src/ui/components/crm/PartnerAccountStatementPrintTemplate.test.ts"
+        ]
+      },
+      {
+        "id": "agent-refund-statement",
+        "titleKey": "devTesting.groups.agentRefundStatement",
+        "layer": "calculation",
+        "files": [
+          "src/lib/partnerAccountStatementAgentRefund.test.ts",
+          "scripts/dev-testing/partnerStatementPreflight.test.mjs"
+        ]
+      },
+      {
+        "id": "agent-account-netting",
+        "titleKey": "devTesting.groups.agentAccountPaymentNetting",
+        "layer": "business",
+        "files": [
+          "src/lib/partnerAccountStatementAgentPaymentNetting.test.ts",
+          "src/local-db/payments.test.ts"
         ]
       },
       {
@@ -179,6 +495,7 @@
         ]
       }
     ],
+    "liveUnavailable": ["browser-workflow", "hybrid-native", "local-native"],
     "unavailable": [
       "browser-workflow",
       "cloud-database-broad",
@@ -191,6 +508,27 @@
     "titleKey": "devTesting.businessPartners",
     "samplesHelpKey": "devTesting.businessPartnersSamplesHelp",
     "coverageHelpKey": "devTesting.businessPartnersCoverageHelp",
+    "liveCoverageHelpKey": "devTesting.businessPartnersLiveCoverageHelp",
+    "liveGroups": [
+      {
+        "id": "agent-refund-statement",
+        "titleKey": "devTesting.businessPartnersGroups.agentRefundStatement",
+        "layer": "live",
+        "isolatedGroupId": "agent-refund-statement",
+        "files": [
+          "src/dev/testing/suites/saleOrdersAgentRefundStatementLive.test.ts"
+        ]
+      },
+      {
+        "id": "agent-account-netting",
+        "titleKey": "devTesting.businessPartnersGroups.agentAccountPaymentNetting",
+        "layer": "live",
+        "isolatedGroupId": "agent-account-netting",
+        "files": [
+          "src/dev/testing/suites/saleOrdersAgentAccountPaymentNettingLive.test.ts"
+        ]
+      }
+    ],
     "groups": [
       {
         "id": "account-statement-templates",
@@ -201,6 +539,24 @@
           "src/lib/partnerAccountStatementTemplates.test.ts",
           "src/lib/partnerAccountStatementTemplatePersistence.test.ts",
           "src/ui/components/crm/PartnerAccountStatementPrintTemplate.test.ts"
+        ]
+      },
+      {
+        "id": "agent-refund-statement",
+        "titleKey": "devTesting.businessPartnersGroups.agentRefundStatement",
+        "layer": "calculation",
+        "files": [
+          "src/lib/partnerAccountStatementAgentRefund.test.ts",
+          "scripts/dev-testing/partnerStatementPreflight.test.mjs"
+        ]
+      },
+      {
+        "id": "agent-account-netting",
+        "titleKey": "devTesting.businessPartnersGroups.agentAccountPaymentNetting",
+        "layer": "business",
+        "files": [
+          "src/lib/partnerAccountStatementAgentPaymentNetting.test.ts",
+          "src/local-db/payments.test.ts"
         ]
       },
       {

@@ -1,4 +1,5 @@
 import { TestController } from './controller.mjs'
+import { hostedDenominator, hostedTestCount } from './salesOrdersManifest.mjs'
 
 const value = (flag) => {
   const index = process.argv.indexOf(flag)
@@ -7,17 +8,22 @@ const value = (flag) => {
 const controller = new TestController({ onGroupResult: (group) => console.log(`${group.id}: ${group.status} (${group.tests.length} checks)`) })
 process.once('SIGINT', () => { if (controller.run) controller.cancel(controller.run.id) })
 try {
+  if (process.argv.includes('--list-hosted-sales-orders')) {
+    console.log(JSON.stringify({ domains: hostedDenominator, families: hostedDenominator.reduce((n, d) => n + d.families, 0), tests: hostedTestCount }, null, 2))
+    process.exit(0)
+  }
   const options = {
     suiteId: value('--suite') ?? 'sale-orders',
     environment: value('--environment') ?? 'isolated',
     groupIds: value('--groups')?.split(','),
     seed: value('--seed') === undefined ? undefined : Number(value('--seed')),
-    samples: value('--samples') === undefined ? undefined : Number(value('--samples'))
+    samples: value('--samples') === undefined ? undefined : Number(value('--samples')),
+    caseIds: value('--cases')?.split(',')
   }
   const run = options.environment === 'hosted-supabase'
     ? await controller.startLive(options)
     : controller.start(options)
-  console.log(`Running ${run.suiteId}, seed ${run.seed}, ${run.samples} generated cases`)
+  console.log(`Running ${run.suiteId}, seed ${run.seed}, ${run.expectedTests === undefined ? `${run.samples} generated cases` : `${run.expectedTests} registered hosted tests; ${run.samples} model samples`}`)
   await controller.completion
   console.log(`Full environment checks unavailable: ${run.unavailable.join(', ')}`)
   console.log(`Report: ${run.reportPath ?? 'unavailable'}`)

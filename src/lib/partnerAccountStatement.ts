@@ -9,6 +9,7 @@ import type {
   PartnerSettlementOperation,
   OrderReturn,
   OrderReturnItem,
+  PaymentObligation,
   PaymentTransaction,
   PurchaseOrder,
   SalesOrder
@@ -51,6 +52,8 @@ export type PartnerAccountStatementData = {
   itemizePosSaleLoans?: boolean
   /** Enables product-commission columns on an eligible agent statement. */
   isAgentCommissionStatement?: boolean
+  /** Agent IDs linked to the selected partner, used to keep agent-only refund rules scoped. */
+  salesAccountAgentIds?: string[]
   salesOrders: SalesOrder[]
   salesOrderReturns?: OrderReturn[]
   salesOrderReturnItems?: OrderReturnItem[]
@@ -280,6 +283,27 @@ function metadataText(metadata: PaymentTransaction['metadata'], key: string) {
 
 function metadataFlag(metadata: PaymentTransaction['metadata'], key: string) {
   return metadata?.[key] === true
+}
+
+function isSalesAccountAgentReturnReversal(
+  transaction: PaymentTransaction,
+  salesOrdersById: Map<string, SalesOrder>,
+  salesAccountAgentIds: Set<string>
+) {
+  if (
+    transaction.sourceType !== 'sales_order' ||
+    transaction.direction !== 'incoming' ||
+    Number(transaction.amount || 0) >= 0 ||
+    !transaction.reversalOfTransactionId
+  ) return false
+
+  const hasOrderReturnReference = Boolean(
+    metadataText(transaction.metadata, 'orderReturnId') || /^Order return\b/i.test(transaction.note?.trim() || '')
+  )
+  if (!hasOrderReturnReference) return false
+
+  const order = salesOrdersById.get(transaction.sourceRecordId)
+  return Boolean(order?.salesAccountAgentId && salesAccountAgentIds.has(order.salesAccountAgentId))
 }
 
 function getLegacyReturnReason(note: string | null | undefined) {
@@ -717,6 +741,7 @@ function getAutomaticCommissionSettlements(data: PartnerAccountStatementData): A
 function createPaymentEntries(data: PartnerAccountStatementData): PartnerAccountStatementEntry[] {
   const sourceOrders = data.statementOrders || data.salesOrders
   const salesOrdersById = new Map(sourceOrders.filter(isSalesOrder).map((order) => [order.id, order]))
+  const salesAccountAgentIds = new Set(data.salesAccountAgentIds || [])
   const settlementOperationsById = new Map(
     (data.settlementOperations || []).filter((operation) => !operation.isDeleted).map((operation) => [operation.id, operation])
   )
@@ -727,6 +752,10 @@ function createPaymentEntries(data: PartnerAccountStatementData): PartnerAccount
   return (data.settlementTransactions || [])
     .filter((transaction) => !transaction.isDeleted)
     .filter((transaction) => !collapsedPayoutIds.has(transaction.sourceSubrecordId || ''))
+    // Returned customer cash is not a new amount due from the sales-account agent.
+    // Keep the immutable reversal in payment_transactions and the general ledger;
+    // omit only its partner-statement debit for that order's linked agent.
+    .filter((transaction) => !isSalesAccountAgentReturnReversal(transaction, salesOrdersById, salesAccountAgentIds))
     .map((transaction) => {
       const rawAmount = Number(transaction.amount || 0)
       const multiplier = transaction.direction === 'incoming' ? -1 : 1
@@ -1278,6 +1307,95 @@ export function getPartnerAccountStatementClosingBalances(
     currency,
     closingBalance
   }))
+}
+
+/**
+ * Applies a sales-account agent's net partner-statement credit against the
+ * oldest open sales-order loans. The source loan and payment records remain
+ * unchanged; this is the receivable amount presented and collected through
+ * Payments after account-level credits are applied.
+ */
+export function applySalesAgentStatementCreditToOrderLoans(
+  obligations: PaymentObligation[],
+  data: PartnerAccountStatementData,
+  salesAccountAgentIds: string[]
+): PaymentObligation[] {
+  const partnerId = data.partnerId
+  if (!partnerId || salesAccountAgentIds.length === 0) return obligations
+
+  const eligibleOrderIds = new Set(
+    (data.salesOrders || [])
+      .filter((order) => !order.isDeleted && order.salesAccountAgentId && salesAccountAgentIds.includes(order.salesAccountAgentId))
+      .map((order) => order.id)
+  )
+  if (eligibleOrderIds.size === 0) return obligations
+
+  const statementBalances = new Map(
+    getPartnerAccountStatementClosingBalances({
+      ...data,
+      itemizeSalesOrders: true,
+      salesAccountAgentIds
+    }).map(({ currency, closingBalance }) => [currency.toLowerCase(), closingBalance])
+  )
+  if (statementBalances.size === 0) return obligations
+
+  const candidatesByCurrency = new Map<string, PaymentObligation[]>()
+  obligations.forEach((obligation) => {
+    const orderId = typeof obligation.metadata?.orderId === 'string' ? obligation.metadata.orderId : null
+    if (
+      obligation.sourceType !== 'simple_loan'
+      || obligation.direction !== 'incoming'
+      || obligation.metadata?.displaySourceLabel !== 'order_loan'
+      || obligation.metadata?.orderType !== 'sales'
+      || obligation.metadata?.businessPartnerId !== partnerId
+      || !orderId
+      || !eligibleOrderIds.has(orderId)
+      || obligation.amount <= 0
+    ) return
+
+    const currency = obligation.currency.toLowerCase()
+    const rows = candidatesByCurrency.get(currency) || []
+    rows.push(obligation)
+    candidatesByCurrency.set(currency, rows)
+  })
+
+  const adjustedAmounts = new Map<string, { amount: number; creditApplied: number }>()
+  for (const [currency, candidates] of candidatesByCurrency) {
+    const closingBalance = statementBalances.get(currency)
+    // Missing statement data means we cannot prove a credit is available.
+    if (closingBalance == null) continue
+
+    const grossOpen = candidates.reduce((sum, obligation) => sum + obligation.amount, 0)
+    let remainingCredit = Math.max(grossOpen - Math.max(closingBalance, 0), 0)
+    const oldestFirst = candidates.slice().sort((left, right) => {
+      const createdAtCompare = (left.createdAt || '').localeCompare(right.createdAt || '')
+      if (createdAtCompare !== 0) return createdAtCompare
+      const dueDateCompare = (left.dueDate || '').localeCompare(right.dueDate || '')
+      return dueDateCompare || (left.referenceLabel || '').localeCompare(right.referenceLabel || '')
+    })
+
+    for (const obligation of oldestFirst) {
+      if (remainingCredit <= 0.000001) break
+      const creditApplied = Math.min(obligation.amount, remainingCredit)
+      const amount = Math.max(obligation.amount - creditApplied, 0)
+      adjustedAmounts.set(obligation.id, { amount, creditApplied })
+      remainingCredit = Math.max(remainingCredit - creditApplied, 0)
+    }
+  }
+
+  if (adjustedAmounts.size === 0) return obligations
+  return obligations.map((obligation) => {
+    const adjusted = adjustedAmounts.get(obligation.id)
+    if (!adjusted) return obligation
+    return {
+      ...obligation,
+      amount: adjusted.amount,
+      metadata: {
+        ...(obligation.metadata || {}),
+        salesAgentAccountCreditApplied: adjusted.creditApplied
+      }
+    }
+  })
 }
 
 export function getPartnerAccountStatementDescriptionTranslationKey(

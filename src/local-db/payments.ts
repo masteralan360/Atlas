@@ -22,6 +22,10 @@ import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
 import { nextDirectTransactionVoucherNumber } from '@/lib/directTransactionVoucher'
 import { isReportablePaymentTransaction } from '@/lib/financialReportability'
 import {
+  applySalesAgentStatementCreditToOrderLoans,
+  type PartnerAccountStatementData
+} from '@/lib/partnerAccountStatement'
+import {
   getPaymentTransactionReversalState,
 } from '@/lib/paymentReversals'
 export {
@@ -54,6 +58,7 @@ import {
 import type {
     BusinessPartner,
     CurrencyCode,
+    Agent,
     ClinicalAppointment,
     Employee,
     ExpenseItem,
@@ -101,6 +106,8 @@ export interface PaymentObligationFilterOptions {
     sourceType?: PaymentTransactionSourceType | 'all'
     status?: 'all' | 'open' | 'overdue'
     search?: string
+    /** Net sales-account agent statement credits against oldest order loans. */
+    applySalesAgentAccountCredits?: boolean
 }
 
 export interface RecordObligationSettlementInput {
@@ -655,6 +662,16 @@ function acquirePaymentSourceTablesHydration(workspaceId: string): PaymentSource
 
   const tableLeases = [
     acquireTableHydrationFromSupabase('payment_transactions', db.payment_transactions, workspaceId, { includeDeleted: true }),
+    acquireTableHydrationFromSupabase('business_partners', db.business_partners, workspaceId, { includeDeleted: true }),
+    acquireTableHydrationFromSupabase('agents', db.agents, workspaceId, { includeDeleted: true }),
+    acquireTableHydrationFromSupabase('loan_payments', db.loan_payments, workspaceId, { includeDeleted: true }),
+    acquireTableHydrationFromSupabase('order_returns', db.order_returns, workspaceId, { includeDeleted: true }),
+    acquireTableHydrationFromSupabase('order_return_items', db.order_return_items, workspaceId, { includeDeleted: true }),
+    acquireTableHydrationFromSupabase('agent_commission_entries', db.agent_commission_entries, workspaceId, { includeDeleted: true }),
+    acquireTableHydrationFromSupabase('agent_product_commission_entries', db.agent_product_commission_entries, workspaceId, { includeDeleted: true }),
+    acquireTableHydrationFromSupabase('partner_settlement_operations', db.partner_settlement_operations, workspaceId, { includeDeleted: true }),
+    acquireTableHydrationFromSupabase('delivery_merchant_profiles', db.delivery_merchant_profiles, workspaceId, { includeDeleted: true }),
+    acquireTableHydrationFromSupabase('delivery_ledger_entries', db.delivery_ledger_entries, workspaceId, { includeDeleted: true }),
     acquireTableHydrationFromSupabase('clinical_appointments', db.clinical_appointments, workspaceId, {
       includeDeleted: true
     }),
@@ -1227,6 +1244,187 @@ function buildPayrollObligations(employees: Employee[], payrollStatuses: Payroll
   })
 }
 
+async function applySalesAccountAgentStatementCredits(
+  workspaceId: string,
+  obligations: PaymentObligation[],
+  loans: Loan[],
+  salesOrders: SalesOrder[],
+  purchaseOrders: PurchaseOrder[],
+  paymentTransactions: PaymentTransaction[]
+) {
+  const candidatePartnerIds = new Set(
+    obligations.flatMap((obligation) => {
+      const partnerId = getMetadataString(obligation.metadata, 'businessPartnerId')
+      const orderId = getMetadataString(obligation.metadata, 'orderId')
+      return obligation.sourceType === 'simple_loan'
+        && obligation.direction === 'incoming'
+        && obligation.metadata?.displaySourceLabel === 'order_loan'
+        && obligation.metadata?.orderType === 'sales'
+        && partnerId
+        && orderId
+        ? [partnerId]
+        : []
+    })
+  )
+  if (candidatePartnerIds.size === 0) return obligations
+
+  const [rawPartners, agents, loanPayments, orderReturns, orderReturnItems,
+    commissionEntries, productCommissionEntries, installmentSales, merchantProfiles,
+    deliveryLedgerEntries, settlementOperations] = await Promise.all([
+    db.business_partners.where('workspaceId').equals(workspaceId).toArray(),
+    db.agents.where('workspaceId').equals(workspaceId).toArray(),
+    db.loan_payments.where('workspaceId').equals(workspaceId).toArray(),
+    db.order_returns.where('workspaceId').equals(workspaceId).toArray(),
+    db.order_return_items.where('workspaceId').equals(workspaceId).toArray(),
+    db.agent_commission_entries.where('workspaceId').equals(workspaceId).toArray(),
+    db.agent_product_commission_entries.where('workspaceId').equals(workspaceId).toArray(),
+    db.installment_sales.where('workspaceId').equals(workspaceId).toArray(),
+    db.delivery_merchant_profiles.where('workspaceId').equals(workspaceId).toArray(),
+    db.delivery_ledger_entries.where('workspaceId').equals(workspaceId).toArray(),
+    db.partner_settlement_operations.where('workspaceId').equals(workspaceId).toArray()
+  ])
+  const visiblePartners = await filterBusinessPartnersByGroupPrivacy(
+    workspaceId,
+    rawPartners.filter((partner) => candidatePartnerIds.has(partner.id) && !partner.isDeleted)
+  )
+  const partners = visiblePartners.filter((partner) => partner.role === 'agent' && !partner.mergedIntoBusinessPartnerId)
+  if (partners.length === 0) return obligations
+
+  const agentsByPartner = new Map<string, Agent[]>()
+  agents
+    .filter((agent) => !agent.isDeleted && agent.agentType === 'field_agent')
+    .forEach((agent) => {
+      if (!candidatePartnerIds.has(agent.businessPartnerId)) return
+      const existing = agentsByPartner.get(agent.businessPartnerId) || []
+      existing.push(agent)
+      agentsByPartner.set(agent.businessPartnerId, existing)
+    })
+  const agentPartners = partners.filter((partner) => (agentsByPartner.get(partner.id) || []).length > 0)
+  if (agentPartners.length === 0) return obligations
+
+  const nettedByPartner = new Map<string, PaymentObligation[]>()
+  for (const partner of agentPartners) {
+    const partnerAgents = agentsByPartner.get(partner.id) || []
+    const salesAccountAgentIds = partnerAgents.map((agent) => agent.id)
+    const agentIds = new Set(salesAccountAgentIds)
+    const partnerSalesOrders = salesOrders.filter((order) => (
+      !order.isDeleted && (order.businessPartnerId === partner.id || order.customerId === partner.id)
+    ))
+    const partnerPurchaseOrders = purchaseOrders.filter((order) => (
+      !order.isDeleted && (order.businessPartnerId === partner.id || order.supplierId === partner.id)
+    ))
+    const partnerOrderIds = new Set(
+      partnerSalesOrders.filter((order) => order.status !== 'cancelled').map((order) => order.id)
+    )
+    const partnerPurchaseOrderIds = new Set(
+      partnerPurchaseOrders.filter((order) => order.status !== 'cancelled').map((order) => order.id)
+    )
+    const allPartnerSalesOrderIds = new Set(partnerSalesOrders.map((order) => order.id))
+    const partnerLoans = loans.filter((loan) => (
+      loan.linkedPartyType === 'business_partner' && loan.linkedPartyId === partner.id
+    ))
+    const partnerLoanIds = new Set(partnerLoans.map((loan) => loan.id))
+    const partnerLoanPayments = loanPayments.filter((payment) => partnerLoanIds.has(payment.loanId))
+    const loanPaymentTransactionIds = new Set(
+      partnerLoanPayments.map((payment) => payment.paymentTransactionId).filter((id): id is string => !!id)
+    )
+    const partnerOperations = settlementOperations.filter((operation) => (
+      !operation.isDeleted && operation.partnerId === partner.id
+    ))
+    const partnerOperationIds = new Set(partnerOperations.map((operation) => operation.id))
+    const settlementTransactions = paymentTransactions.filter((transaction) => {
+      if (transaction.isDeleted) return false
+      if (
+        transaction.settlementOperationId
+        && partnerOperationIds.has(transaction.settlementOperationId)
+        && transaction.sourceModule !== 'loans'
+      ) return true
+      if (transaction.sourceType === 'sales_order') return partnerOrderIds.has(transaction.sourceRecordId)
+      if (transaction.sourceType === 'purchase_order') return partnerPurchaseOrderIds.has(transaction.sourceRecordId)
+      if (
+        (transaction.sourceType === 'installment_sale_down_payment'
+          || transaction.sourceType === 'installment_sale_installment')
+        && transaction.metadata?.businessPartnerId === partner.id
+      ) return true
+      if (transaction.sourceType === 'agent_commission_payout' || transaction.sourceType === 'agent_commission_recovery') {
+        return agentIds.has(transaction.sourceRecordId) || transaction.metadata?.businessPartnerId === partner.id
+      }
+      return transaction.sourceType === 'direct_transaction'
+        && transaction.metadata?.businessPartnerId === partner.id
+        && isDirectTransactionPartnerAccountEffect(transaction.metadata?.partnerAccountEffect)
+    })
+    const merchantProfileIds = new Set(
+      merchantProfiles
+        .filter((profile) => !profile.isDeleted && profile.businessPartnerId === partner.id)
+        .map((profile) => profile.id)
+    )
+    const merchantKinds = new Set([
+      'merchant_cod_payable',
+      'merchant_cod_correction',
+      'merchant_recipient_payout_correction',
+      'merchant_fee',
+      'merchant_recipient_payout',
+      'merchant_payout',
+      'merchant_repayment',
+      'adjustment'
+    ])
+    const partnerDeliveryEntries = deliveryLedgerEntries.filter((entry) => (
+      !entry.isDeleted
+      && merchantKinds.has(entry.kind)
+      && ((entry.merchantProfileId != null && merchantProfileIds.has(entry.merchantProfileId))
+        || entry.businessPartnerId === partner.id)
+    ))
+    const statementData: PartnerAccountStatementData = {
+      partnerId: partner.id,
+      period: { type: 'allTime' },
+      salesOrders: partnerSalesOrders,
+      salesOrderReturns: orderReturns.filter((orderReturn) => allPartnerSalesOrderIds.has(orderReturn.orderId)),
+      salesOrderReturnItems: (() => {
+        const returnIds = new Set(
+          orderReturns.filter((orderReturn) => allPartnerSalesOrderIds.has(orderReturn.orderId)).map((orderReturn) => orderReturn.id)
+        )
+        return orderReturnItems.filter((item) => returnIds.has(item.returnId))
+      })(),
+      salesAccountAgentIds,
+      purchaseOrders: partnerPurchaseOrders,
+      statementOrders: [...partnerSalesOrders, ...partnerPurchaseOrders],
+      loans: partnerLoans,
+      loanPayments: partnerLoanPayments,
+      loanPaymentTransactions: paymentTransactions.filter((transaction) => (
+        !transaction.isDeleted && loanPaymentTransactionIds.has(transaction.id)
+      )),
+      installmentSales: installmentSales.filter((sale) => (
+        !sale.isDeleted && sale.customerBusinessPartnerId === partner.id
+      )),
+      settlementTransactions,
+      settlementOperations: partnerOperations,
+      agentCommissionEntries: commissionEntries.filter((entry) => (
+        !entry.isDeleted && agentIds.has(entry.agentId) && isPayableCommissionEntry(entry)
+      )),
+      agentProductCommissionEntries: productCommissionEntries.filter((entry) => (
+        !entry.isDeleted && agentIds.has(entry.agentId)
+      )),
+      deliveryLedgerEntries: partnerDeliveryEntries
+    }
+    const partnerObligations = obligations.filter((obligation) => (
+      getMetadataString(obligation.metadata, 'businessPartnerId') === partner.id
+    ))
+    nettedByPartner.set(
+      partner.id,
+      applySalesAgentStatementCreditToOrderLoans(partnerObligations, statementData, salesAccountAgentIds)
+    )
+  }
+
+  const replacements = new Map<string, PaymentObligation>()
+  for (const partnerRows of nettedByPartner.values()) {
+    partnerRows.forEach((obligation) => replacements.set(obligation.id, obligation))
+  }
+
+  return obligations.flatMap((obligation) => {
+    return [replacements.get(obligation.id) || obligation]
+  })
+}
+
 export async function buildPaymentObligations(workspaceId: string, filters: PaymentObligationFilterOptions) {
   const todayKey = new Date().toISOString().slice(0, 10)
   const [
@@ -1311,7 +1509,25 @@ export async function buildPaymentObligations(workspaceId: string, filters: Paym
   // settlement all see the identical per-assignment balance.
   const agentCommissionObligations = await buildAgentCommissionObligations(workspaceId)
 
-  return filterObligations([...obligations, ...agentCommissionObligations], filters).sort((left, right) => {
+  const allObligations = [...obligations, ...agentCommissionObligations]
+  const shouldApplySalesAgentCredits = filters.applySalesAgentAccountCredits && filters.direction !== 'outgoing'
+  const withAgentAccountCredits = shouldApplySalesAgentCredits
+    ? await applySalesAccountAgentStatementCredits(
+      workspaceId,
+      allObligations,
+      loans,
+      salesOrders,
+      purchaseOrders,
+      paymentTransactions
+    )
+    : allObligations
+
+  const filteredObligations = filterObligations(withAgentAccountCredits, filters)
+  const payableObligations = shouldApplySalesAgentCredits
+    ? filteredObligations.filter((obligation) => obligation.amount > PAYMENT_AMOUNT_EPSILON)
+    : filteredObligations
+
+  return payableObligations.sort((left, right) => {
     if (left.status !== right.status) {
       return left.status === 'overdue' ? -1 : 1
     }
@@ -1397,7 +1613,7 @@ export function usePaymentObligations(workspaceId: string | undefined, filters: 
   const online = useNetworkStatus()
   const filterKey = useMemo(
     () => JSON.stringify(filters),
-    [filters.direction, filters.search, filters.sourceModule, filters.sourceType, filters.status]
+    [filters.applySalesAgentAccountCredits, filters.direction, filters.search, filters.sourceModule, filters.sourceType, filters.status]
   )
 
   const obligations = useLiveQuery(
@@ -2631,7 +2847,7 @@ export async function getPartnerSettlementBalance(
 ): Promise<PartnerSettlementBalance> {
   const partner = await resolveSettlementPartner(workspaceId, partnerId)
   const [obligations, lockedSourceKeys] = await Promise.all([
-    buildPaymentObligations(workspaceId, { direction }),
+    buildPaymentObligations(workspaceId, { direction, applySalesAgentAccountCredits: true }),
     collectLockedOrderSourceKeys(workspaceId)
   ])
 
@@ -3035,12 +3251,15 @@ export async function recordObligationSettlement(
     case 'loan_installment':
     case 'simple_loan': {
       assertSettlementPaymentMethod(input.paymentMethod)
+      if (settlementAmount - obligation.amount > PAYMENT_AMOUNT_EPSILON) {
+        throw new Error('Settlement amount cannot exceed the loan balance')
+      }
       const { recordLoanPayment } = await import('./hooks')
       await recordLoanPayment(workspaceId, {
         loanId: obligation.sourceRecordId,
         installmentId:
           obligation.sourceType === 'loan_installment' ? obligation.sourceSubrecordId || undefined : undefined,
-        amount: obligation.amount,
+        amount: settlementAmount,
         paymentMethod: input.paymentMethod,
         note: note || undefined,
         paidAt,

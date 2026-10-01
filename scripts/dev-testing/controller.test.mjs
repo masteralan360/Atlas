@@ -43,6 +43,18 @@ function finishChild(child, { state = 'passed', errors = [], code = 0, finished 
 const input = { suiteId: 'sale-orders', groupIds: ['matrix'], seed: 0, samples: 1 }
 
 describe('developer runner boundaries', () => {
+  it('filters stable hosted case IDs without hiding invalid group requests', () => {
+    const base = { suiteId: 'sale-orders', environment: 'hosted-supabase' }
+    expect(validateRunOptions({ ...base, caseIds: ['SO-H12-01', 'SO-H19-02'] }).groups.map(group => group.id))
+      .toEqual(['hosted-completion', 'hosted-standard-returns'])
+    for (const patch of [
+      { caseIds: ['SO-H12-99'] }, { caseIds: ['SO-H12-01', 'SO-H12-01'] },
+      { caseIds: ['SO-H12-01'], groupIds: ['hosted-completion', '../../evil'] },
+      { caseIds: ['SO-H12-01'], groupIds: ['hosted-standard-returns'] },
+      { caseIds: ['SO-H12-01'], groupIds: ['hosted-completion', 'hosted-completion'] }
+    ]) expect(() => validateRunOptions({ ...base, ...patch })).toThrow()
+    expect(() => validateRunOptions({ ...base, environment: 'isolated', caseIds: ['SO-H12-01'] })).toThrow('invalid_cases')
+  })
   it('accepts only registered suites, groups, and bounded numeric inputs', () => {
     expect(validateRunOptions(input).seed).toBe(0)
     for (const options of [null, {}, { ...input, suiteId: ['sale-orders'] }, { ...input, suiteId: '__proto__' }, { ...input, suiteId: 'toString' }, { ...input, groupIds: ['../../arbitrary'] }, { ...input, groupIds: [] }, { ...input, groupIds: ['matrix', 'matrix'] }, { ...input, seed: -1 }, { ...input, seed: 0x100000000 }, { ...input, seed: '1' }, { ...input, samples: 0 }, { ...input, samples: 101 }]) {
@@ -122,6 +134,40 @@ describe('developer runner boundaries', () => {
 })
 
 describe('developer runner execution and reports', () => {
+  it('preserves missing hosted prerequisites as blocked and redacts their evidence', async () => {
+    const { controller, children } = await arrangeController()
+    const config = { origin: 'https://project.supabase.co', ATLAS_LIVE_TEST_PASSWORD: 'secret-password', ATLAS_LIVE_TEST_EMAIL: 'person@example.com', ATLAS_LIVE_SALES_CONFIG: JSON.stringify({ observer: { bearer: 'observer-secret' } }) }
+    controller.preflight = vi.fn(async () => ({ target: { host: 'project.supabase.co', workspaceId: 'test-workspace' }, mode: 'cloud' }))
+    const options = validateRunOptions({ suiteId: 'sale-orders', environment: 'hosted-supabase', groupIds: ['hosted-authentication'], caseIds: ['SO-H01-03'] })
+    const run = controller.startValidated(options, { config, readiness: await controller.preflight(config) })
+    await new Promise(resolve => setImmediate(resolve))
+    children[0].stdout.write(`ATLAS_TEST_EVENT ${JSON.stringify({ type: 'evidence', evidence: { caseId: 'SO-H01-03', error: 'secret-password person@example.com observer-secret' } })}\n`)
+    finishChild(children[0], { state: 'blocked', code: 1, errors: ['hosted_blocked: viewer persona is not configured'] })
+    await controller.completion
+    expect(run.status).toBe('blocked')
+    expect(run.groups[0].status).toBe('blocked')
+    expect(run.groups[0].evidence[0].error).toBe('[redacted] [redacted] [redacted]')
+    const saved = await readFile(run.reportPath, 'utf8')
+    expect(saved).not.toMatch(/secret-password|person@example|observer-secret/)
+    expect(JSON.parse(saved).groups[0].tests[0].status).toBe('blocked')
+  })
+
+  it('saves a checkpoint after each hosted group while subsequent checks continue', async () => {
+    const { controller, children } = await arrangeController()
+    controller.preflight = vi.fn(async () => ({ target: { host: 'project.supabase.co', workspaceId: 'test-workspace' }, mode: 'cloud' }))
+    const config = { origin: 'https://project.supabase.co' }
+    const options = validateRunOptions({ suiteId: 'sale-orders', environment: 'hosted-supabase', groupIds: ['hosted-completion', 'hosted-collections'], caseIds: ['SO-H12-01', 'SO-H14-01'] })
+    const run = controller.startValidated(options, { config, readiness: await controller.preflight(config) })
+    await new Promise(resolve => setImmediate(resolve))
+    finishChild(children[0])
+    for (let attempt = 0; attempt < 50 && children.length < 2; attempt++) await new Promise(resolve => setTimeout(resolve, 10))
+    const checkpoint = JSON.parse(await readFile(run.reportPath, 'utf8'))
+    expect(checkpoint.status).toBe('running')
+    expect(checkpoint.groups[0].status).toBe('passed')
+    finishChild(children[1])
+    await controller.completion
+    expect(JSON.parse(await readFile(run.reportPath, 'utf8')).status).toBe('passed')
+  })
   it('streams results, runs allowlisted files without a shell, and saves a reproducible report', async () => {
     const { controller, children, spawnChild } = await arrangeController()
     const run = controller.start(input)
@@ -137,27 +183,26 @@ describe('developer runner execution and reports', () => {
     expect(saved.unavailable).toContain('local-native')
   })
 
-  it('runs paired Sale Orders checks in separate isolated and hosted children', async () => {
+  it('runs Sale Orders hosted selections only in authenticated hosted children', async () => {
     const { controller, children, spawnChild } = await arrangeController()
     controller.preflight = vi.fn(async () => ({ target: { host: 'project.supabase.co', workspaceId: 'test-workspace', workspaceName: 'DEV TEST Atlas' }, mode: 'cloud' }))
-    const options = validateRunOptions({ suiteId: 'sale-orders', environment: 'hosted-supabase', groupIds: ['matrix'], seed: 0, samples: 1 })
+    const options = validateRunOptions({ suiteId: 'sale-orders', environment: 'hosted-supabase', groupIds: ['hosted-completion'], caseIds: ['SO-H12-01'], seed: 0, samples: 1 })
     const config = {
       origin: 'https://project.supabase.co', ATLAS_LIVE_SUPABASE_KEY: 'public-test-key',
       ATLAS_LIVE_TEST_EMAIL: 'dev-test@example.com', ATLAS_LIVE_TEST_PASSWORD: 'test-password',
       ATLAS_LIVE_WORKSPACE_ID: 'test-workspace', ATLAS_LIVE_WORKSPACE_NAME: 'DEV TEST Atlas'
     }
     const run = controller.startValidated(options, { config, readiness: await controller.preflight(config) })
-    expect(spawnChild.mock.calls[0][1]).toContain('src/dev/testing/suites/saleOrders.test.ts')
-    expect(spawnChild.mock.calls[0][2].env).not.toHaveProperty('ATLAS_LIVE_TEST_PASSWORD')
+    await new Promise(resolve => setImmediate(resolve))
+    expect(spawnChild.mock.calls[0][1]).toContain('src/dev/testing/suites/saleOrdersHosted12Live.test.ts')
+    expect(spawnChild.mock.calls[0][1]).toContain(join(controller.root, 'scripts/dev-testing/vitest.live.config.mts'))
+    expect(spawnChild.mock.calls[0][2].env.ATLAS_LIVE_TEST_PASSWORD).toBe('test-password')
+    expect(JSON.parse(spawnChild.mock.calls[0][2].env.ATLAS_LIVE_CASE_IDS)).toEqual(['SO-H12-01'])
     finishChild(children[0])
-    await new Promise((resolve) => setImmediate(resolve))
-    expect(spawnChild.mock.calls[1][1]).toContain('src/dev/testing/suites/saleOrdersMatrixLive.test.ts')
-    expect(spawnChild.mock.calls[1][2].env.ATLAS_LIVE_TEST_PASSWORD).toBe('test-password')
-    finishChild(children[1])
     await controller.completion
     expect(run.status).toBe('passed')
-    expect(run.groups[0].tests.map((test) => test.environment)).toEqual(['isolated', 'hosted-supabase'])
-    expect(new Set(run.groups[0].tests.map((test) => test.id)).size).toBe(2)
+    expect(run.groups[0].tests.map(test => test.environment)).toEqual(['hosted-supabase'])
+    expect(spawnChild).toHaveBeenCalledTimes(1)
   })
 
   it('keeps a POS hosted selection with no server scenario labeled as isolated', async () => {
@@ -180,7 +225,7 @@ describe('developer runner execution and reports', () => {
   it('keeps a paired group failed when its isolated checks fail but hosted checks pass', async () => {
     const { controller, children } = await arrangeController()
     controller.preflight = vi.fn(async () => ({ target: { host: 'project.supabase.co', workspaceId: 'test-workspace', workspaceName: 'DEV TEST Atlas' }, mode: 'cloud' }))
-    const options = validateRunOptions({ suiteId: 'sale-orders', environment: 'hosted-supabase', groupIds: ['matrix'], seed: 0, samples: 1 })
+    const options = validateRunOptions({ suiteId: 'pos', environment: 'hosted-supabase', groupIds: ['checkout'], seed: 0, samples: 1 })
     const config = {
       origin: 'https://project.supabase.co', ATLAS_LIVE_SUPABASE_KEY: 'public-test-key',
       ATLAS_LIVE_TEST_EMAIL: 'dev-test@example.com', ATLAS_LIVE_TEST_PASSWORD: 'test-password',
