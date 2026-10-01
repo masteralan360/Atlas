@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
-import { Archive, BadgeCheck, BadgeDollarSign, CalendarDays, ChevronDown, CircleCheck, CircleDashed, CircleDollarSign, Clock3, CreditCard, EllipsisVertical, Eye, HandCoins, LayoutGrid, List, ListFilter, Loader2, Lock, Package, PackageCheck, PackagePlus, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse, XCircle, type LucideIcon } from 'lucide-react'
+import { Archive, BadgeCheck, BadgeDollarSign, CalendarDays, ChevronDown, CircleCheck, CircleDashed, CircleDollarSign, ClipboardCheck, Clock3, CreditCard, EllipsisVertical, Eye, HandCoins, LayoutGrid, List, ListFilter, Loader2, Lock, Package, PackageCheck, PackagePlus, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse, XCircle, type LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLocalizedOrderError } from '@/lib/orderErrors'
 import { isActiveOrder } from '@/lib/orderArchiving'
@@ -24,6 +24,7 @@ import { buildOrderExchangeRatesSnapshot, convertCurrencyAmountWithLiveRates, ge
 import { ORDER_DECIMAL_STEP, roundOrderValue } from '@/lib/orderPrecision'
 import { isBelowMinimumSellingPrice } from '@/lib/minimumSellingPrice'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
+import { createSalesOrderModuleWideIntegrityAuditAdapter } from '@/lib/integrityAudit/salesOrderModuleWide'
 import {
     clampOrdersPagination,
     createOrdersPaginationState,
@@ -144,6 +145,7 @@ import { FilterDropdown } from '@/ui/components/FilterDropdown'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
 import { OrderDetailsView } from '@/ui/components/orders/OrderDetailsView'
+import { ModuleWideIntegrityAuditDialog } from '@/ui/components/integrity-audit/ModuleWideIntegrityAuditDialog'
 import { OrderProductMosaic } from '@/ui/components/orders/OrderProductAvatars'
 import { OrderListPrintTemplate } from '@/ui/components/orders/OrderPrintTemplates'
 import { OrderStatusBadge } from '@/ui/components/orders/OrderStatusBadge'
@@ -155,6 +157,7 @@ import {
 import { getProductCommissionPreviewTotal } from '@/ui/components/commissions/ProductCommissionPreview'
 import { buildProductCommissionPreviewRows } from '@/ui/components/commissions/productCommissionCalculation'
 import { getProductCommissionPreviewAgentIds } from '@/ui/components/commissions/productCommissionAgent'
+import { getWorkspaceDataMode } from '@/workspace/workspaceMode'
 
 type OrderTab = 'sales' | 'purchase'
 type StatusFilter = 'all' | 'draft' | 'pending' | 'ordered' | 'received' | 'completed' | 'cancelled'
@@ -524,6 +527,11 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const [isReversingPayment, setIsReversingPayment] = useState(false)
     const [showPrintPreview, setShowPrintPreview] = useState(false)
     const [archivesOpen, setArchivesOpen] = useState(false)
+    const [moduleWideAuditOpen, setModuleWideAuditOpen] = useState(false)
+    const moduleWideAuditAdapter = useMemo(
+        () => createSalesOrderModuleWideIntegrityAuditAdapter(workspaceId, getWorkspaceDataMode(workspaceId)),
+        [workspaceId]
+    )
 
     const [salesForm, setSalesForm] = useState<SalesFormState>({
         customerId: '',
@@ -2303,6 +2311,17 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                 </div>
 
                                 <div className="flex flex-wrap items-center gap-2 self-start print:hidden sm:self-auto">
+                                    {activeTab === 'sales' && (
+                                        <Button
+                                            variant="outline"
+                                            allowViewer={true}
+                                            onClick={() => setModuleWideAuditOpen(true)}
+                                            className="gap-2 whitespace-nowrap rounded-xl"
+                                        >
+                                            <ClipboardCheck className="h-4 w-4" aria-hidden="true" />
+                                            {t('moduleWideIntegrityAudit.open')}
+                                        </Button>
+                                    )}
                                     <Button variant="outline" allowViewer={true} onClick={() => setArchivesOpen(true)} className="gap-2 rounded-xl">
                                         <Archive className="h-4 w-4" />
                                         {t('orders.archive.open')}
@@ -3201,6 +3220,15 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                     )
                 }}
             />
+            {activeTab === 'sales' && (
+                <ModuleWideIntegrityAuditDialog
+                    open={moduleWideAuditOpen}
+                    onOpenChange={setModuleWideAuditOpen}
+                    transactions={filteredSalesOrders}
+                    adapter={moduleWideAuditAdapter}
+                    transactionLabel={t('orders.tabs.sales')}
+                />
+            )}
         </div>
     )
 }

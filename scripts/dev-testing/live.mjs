@@ -171,6 +171,20 @@ export async function preflightLive(config, { fetchImpl = globalThis.fetch, suit
           .eq('workspace_id', config.ATLAS_LIVE_WORKSPACE_ID).limit(1)
         if (error) throw new Error('live_schema_unavailable')
       }
+    } else if (suiteId === 'loans') {
+      for (const table of [
+        'sales', 'sale_items', 'inventory', 'stock_batches', 'payment_transactions',
+        'loans', 'loan_installments', 'loan_payments'
+      ]) {
+        const { error } = await client.from(table).select('id')
+          .eq('workspace_id', config.ATLAS_LIVE_WORKSPACE_ID).limit(1)
+        if (error) throw new Error('live_schema_unavailable')
+      }
+      for (const table of ['accounts', 'account_movements']) {
+        const { error } = await client.schema('payment_accounts').from(table).select('id')
+          .eq('workspace_id', config.ATLAS_LIVE_WORKSPACE_ID).limit(1)
+        if (error) throw new Error('live_schema_unavailable')
+      }
     } else if (suiteId === 'business-partners') {
       for (const table of ['agents', 'sales_orders']) {
         const { error } = await client.schema('crm').from(table).select('id')

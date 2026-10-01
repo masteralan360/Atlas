@@ -1600,10 +1600,10 @@ export function Layout({ children }: LayoutProps) {
 
           {showNavigationRail && (
             <aside
-              className="fixed inset-y-0 z-50 flex w-14 flex-col border-e border-border/80 bg-background/90 shadow-sm backdrop-blur-xl sidebar-gradient"
+              className="fixed inset-y-0 z-50 flex w-14 flex-col bg-background/90 shadow-sm backdrop-blur-xl sidebar-gradient"
               style={{ insetInlineStart: 0 }}
             >
-              <div className="flex h-12 shrink-0 items-center justify-center border-b border-border/70">
+              <div className="flex h-12 shrink-0 items-center justify-center">
                 <ThemeAwareTitleLogo className="h-7 w-7 opacity-90" />
               </div>
               <nav className="flex flex-1 flex-col items-center gap-2 px-2 py-3">
@@ -1649,6 +1649,7 @@ export function Layout({ children }: LayoutProps) {
           <aside
             className={cn(
               'fixed z-50 transition-all duration-300 ease-in-out flex flex-col',
+              showNavigationRail && 'rounded-s-2xl',
               mobileSidebarOpen ? 'bg-card border-r border-border/50' : 'glass',
               'sidebar-gradient shadow-2xl',
               isTauri ? 'top-[var(--titlebar-height)] h-[calc(100vh-var(--titlebar-height))]' : 'inset-y-0 h-full',

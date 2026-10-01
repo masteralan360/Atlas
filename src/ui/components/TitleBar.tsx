@@ -129,7 +129,7 @@ export function TitleBar() {
     return (
         <>
         <div dir="ltr" data-tauri-drag-region className={cn(
-            "fixed top-0 left-0 right-0 h-[48px] z-[100] flex items-center justify-between px-3 select-none bg-background/80 backdrop-blur-md border-b border-white/10 transition-all duration-300",
+            "fixed top-0 left-0 right-0 h-[48px] z-[100] flex items-center justify-between px-3 select-none bg-background/80 backdrop-blur-md transition-all duration-300",
             isFullscreen && "opacity-0 pointer-events-none -translate-y-full"
         )} style={{
             left: showNavigationRail && !isRtl ? NAVIGATION_RAIL_WIDTH : 0,

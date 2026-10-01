@@ -13,7 +13,9 @@
 | [AUTHENTICATION.md](./AUTHENTICATION.md) | Auth system, roles, and workspace management |
 | [FEATURES.md](./FEATURES.md) | Feature modules and their implementation |
 | [transaction-reconciliation-integrity-audit.md](./transaction-reconciliation-integrity-audit.md) | Sales Order integrity audit behavior, canonical inventory movements, transaction graph, and historical evidence limits |
-| [developer-testing.md](./developer-testing.md) | Developer runner quick start and independent Sale Orders V1, POS and Post Service coverage |
+| [module-wide-transaction-integrity-audit.md](./module-wide-transaction-integrity-audit.md) | Shared module-wide audit architecture, Sales Orders V1 integration, and future module expansion guide |
+| [loan-transaction-integrity-audit.md](./loan-transaction-integrity-audit.md) | Loan integrity audit behavior, loan graph, repayment reversals, installments, and database modes |
+| [developer-testing.md](./developer-testing.md) | Developer runner quick start and independent Loans, Sale Orders V1, POS and Post Service coverage |
 | [developer-testing-agent-guide.md](./developer-testing-agent-guide.md) | Agent handoff for extending shared infrastructure and independent module suites |
 | [developer-testing-pos.md](./developer-testing-pos.md) | Regular POS suite, production transaction boundaries and extension handoff |
 | [developer-testing-post-service.md](./developer-testing-post-service.md) | Independent Post Service suite, accounting contracts, coverage and extension handoff |

@@ -103,6 +103,8 @@ This check is forward-only. It does not scan or backfill transactions that preda
 | Inspectable JSON model | `src/lib/integrityAudit/auditModel.ts` |
 | Result dialog | `src/ui/components/orders/SalesOrderIntegrityAuditDialog.tsx` |
 
-Additional transaction types should supply their own graph resolver and validators while preserving the read-only, expected-versus-persisted approach and structured result model. V1 does not audit other modules.
+The Loans details view now supplies its own graph resolver and validators while preserving the read-only, expected-versus-persisted approach and structured result model. See [Loan Transaction Integrity Audit](./loan-transaction-integrity-audit.md) for its scope. Other transaction types still require their own resolver, validators, entry point, and coverage.
+
+Sales Orders also has a module-wide summary runner that delegates every filtered order to `runSalesOrderIntegrityAudit`. It uses the page's active filters and all matching orders independent of pagination. See [Module-Wide Transaction Integrity Audit](./module-wide-transaction-integrity-audit.md) for the shared adapter contract and expansion guide.
 
 For the selectable test group and its environment coverage, see [Developer Testing](./developer-testing.md#sale-orders-v1-coverage).

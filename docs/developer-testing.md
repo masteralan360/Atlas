@@ -152,11 +152,15 @@ but only hosted cases prove their selected server effects.
 ## Sale Orders V1 coverage
 
 The selectable **Integrity Audit** group runs isolated Sales Order graph,
-reconciliation, breadcrumb action, Audit Model JSON, and request-contract checks. It does not use
-a business workspace or write transaction records. Native SQLite execution,
-live Supabase permissions, and Hybrid mirror parity require separate environment
-checks. The feature's behavior, transaction graph, database modes, and evidence
-limits are documented in [Transaction Reconciliation & Integrity Audit](./transaction-reconciliation-integrity-audit.md).
+reconciliation, breadcrumb action, Audit Model JSON, request-contract, module-wide
+adapter, summary severity, failure, and summary-only UI checks. The paired hosted
+selection compares module-wide results with the same orders' individual audits and
+checks that persisted order and payment records stay unchanged. Native SQLite
+execution and Hybrid mirror parity require separate environment checks. Single-order
+audit behavior and evidence limits are documented in
+[Transaction Reconciliation & Integrity Audit](./transaction-reconciliation-integrity-audit.md);
+module-wide architecture, filter scope, and future module integration are documented
+in [Module-Wide Transaction Integrity Audit](./module-wide-transaction-integrity-audit.md).
 
 The generated matrix calls the production order, payment, return, and financing
 functions against disposable fake IndexedDB, with fresh data for every case.
@@ -191,6 +195,12 @@ coverage remain outside these groups. The modal and report label those gaps.
 IndexedDB reopen verifies cache survival only; standalone remote mocks verify
 client contracts only. Hosted scenarios verify their selected server effects,
 not every module workflow or permission role.
+
+## Loan Integrity Audit coverage
+
+The selectable **Loan Transaction Integrity Audit** group covers Supabase and SQLite graph reads, loan balance reconstruction, repayment and reversal links, payment-account movement checks, installment reconciliation, linked partner scope, Hybrid mirror parity, the JSON snapshot, the Loans breadcrumb action, and friendly read failures. Its hosted selection creates and audits a simple POS loan in the verified DEV TEST workspace, then confirms that the same loan ID is not visible when queried under another workspace. The audit is read-only and its persisted payment-transaction set is checked before completion.
+
+Run the isolated selection with `node scripts/dev-testing/cli.mjs --suite loans --groups integrity-audit`. Run the paired hosted selection with `node scripts/dev-testing/cli.mjs --suite loans --groups integrity-audit --environment hosted-supabase`. Hosted execution is opt-in and requires the configured DEV TEST workspace. Browser interaction, other workspace roles, and Hybrid native SQLite parity remain separate checks.
 
 ## Business Partners coverage
 

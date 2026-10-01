@@ -70,6 +70,21 @@ describe('hosted Supabase test boundary', () => {
       .toContain('src/lib/partnerAccountStatementAgentRefund.test.ts')
   })
 
+  it('registers matching isolated and hosted Loan Integrity Audit selections', () => {
+    const isolated = validateRunOptions({ suiteId: 'loans', groupIds: ['integrity-audit'] }).groups[0]
+    const hosted = validateRunOptions({ suiteId: 'loans', environment: 'hosted-supabase', groupIds: ['integrity-audit'] }).groups[0]
+    expect(isolated).toMatchObject({
+      id: 'integrity-audit',
+      files: ['src/lib/integrityAudit/loanAudit.test.ts', 'src/lib/integrityAudit/loanGraph.test.ts',
+        'src/ui/components/loans/LoanIntegrityAuditDialog.test.tsx']
+    })
+    expect(hosted).toMatchObject({
+      id: 'integrity-audit',
+      isolatedGroupId: 'integrity-audit',
+      files: ['src/dev/testing/suites/loanIntegrityAuditLive.test.ts']
+    })
+  })
+
   it('keeps existing POS and Products hosted and isolated group allowlists separate', () => {
     const posIsolated = validateRunOptions({ suiteId: 'pos' }).groups.map((group) => group.id)
     const posHosted = validateRunOptions({ suiteId: 'pos', environment: 'hosted-supabase' }).groups
@@ -128,6 +143,32 @@ describe('hosted Supabase test boundary', () => {
     expect(paths).toContain('/rest/v1/sales')
     expect(paths).toContain('/rest/v1/payment_transactions')
     expect(paths).not.toContain('/rest/v1/rpc/services_module_allowed')
+  })
+
+  it('preflights the loan graph tables for the paired Loans hosted selection', async () => {
+    const paths = []
+    const fetchImpl = vi.fn(async (input) => {
+      const target = new URL(typeof input === 'string' ? input : input.url)
+      paths.push(target.pathname)
+      if (target.pathname === '/auth/v1/token') return Response.json({
+        access_token: 'test-access', refresh_token: 'test-refresh', token_type: 'bearer', expires_in: 3600,
+        user: { id, email: 'dev-test@example.com', aud: 'authenticated', role: 'authenticated' }
+      })
+      if (target.pathname === '/rest/v1/profiles') return Response.json({ id, current_workspace: id, role: 'admin' })
+      if (target.pathname === '/rest/v1/workspaces') return Response.json(target.searchParams.get('select') === 'id'
+        ? [{ id }] : { id, name: 'DEV TEST Atlas', data_mode: 'cloud' })
+      if (target.pathname === '/auth/v1/logout') return new Response(null, { status: 204 })
+      if (['sales', 'sale_items', 'inventory', 'stock_batches', 'payment_transactions',
+        'loans', 'loan_installments', 'loan_payments', 'account_movements', 'accounts']
+        .some((table) => target.pathname === `/rest/v1/${table}`)) return Response.json([])
+      throw new Error(`unexpected request: ${target.pathname}`)
+    })
+    const result = await preflightLive(parseLiveConfig(source), { fetchImpl, suiteId: 'loans' })
+    expect(result.mode).toBe('cloud')
+    expect(paths).toEqual(expect.arrayContaining([
+      '/rest/v1/loans', '/rest/v1/loan_installments', '/rest/v1/loan_payments',
+      '/rest/v1/payment_transactions', '/rest/v1/account_movements', '/rest/v1/accounts'
+    ]))
   })
 
   it('preflights the product catalog and UoM table contracts without requiring order schemas', async () => {

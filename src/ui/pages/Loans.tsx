@@ -98,6 +98,9 @@ import { InstallmentSaleDetailsView } from '@/ui/components/installment-sales/In
 import { FilterDropdown } from '@/ui/components/FilterDropdown'
 import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { getWorkspaceDataMode } from '@/workspace/workspaceMode'
+import { LoanIntegrityAuditDialog } from '@/ui/components/loans/LoanIntegrityAuditDialog'
+import { LoanIntegrityAuditBreadcrumbAction } from '@/ui/components/loans/LoanIntegrityAuditBreadcrumbAction'
 
 type LoanFilter = 'all' | 'active' | 'overdue' | 'completed'
 
@@ -1067,6 +1070,7 @@ function LoanDetailsView({
 
 
     const [deleteOpen, setDeleteOpen] = useState(false)
+    const [auditOpen, setAuditOpen] = useState(false)
     const [isDeletingLoan, setIsDeletingLoan] = useState(false)
     const [showPrintPreview, setShowPrintPreview] = useState(false)
     const [showLoanAccountStatementPaymentPicker, setShowLoanAccountStatementPaymentPicker] = useState(false)
@@ -1364,13 +1368,14 @@ function LoanDetailsView({
     return (
         <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
                     <Link href={modulePath} className="hover:text-foreground inline-flex items-center gap-1">
                         <ArrowLeft className="w-4 h-4" />
                         {moduleTitle}
                     </Link>
                     <span>/</span>
                     <LoanNoDisplay loanNo={loan.loanNo} className="text-foreground" />
+                    <LoanIntegrityAuditBreadcrumbAction onClick={() => setAuditOpen(true)} />
                     {loan.source === 'order' ? (
                         <LoanSourceBadge source={loan.source} className="text-[10px] ms-2" />
                     ) : null}
@@ -1851,6 +1856,8 @@ function LoanDetailsView({
                 title={t('loans.confirmDelete')}
                 description={getLoanDeleteWarning(loan, t)}
             />
+            <LoanIntegrityAuditDialog open={auditOpen} onOpenChange={setAuditOpen}
+                workspaceId={workspaceId} loanId={loan.id} mode={getWorkspaceDataMode(workspaceId)} />
             <PaymentReversalDialog
                 open={!!transactionToReverse}
                 onOpenChange={(open) => {

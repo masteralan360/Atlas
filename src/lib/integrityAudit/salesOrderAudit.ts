@@ -4,44 +4,10 @@ import { ORDER_AMOUNT_EPSILON, roundOrderValue } from '@/lib/orderPrecision'
 import { roundQuantity } from '@/lib/quantity'
 import type { PaymentTransaction } from '@/local-db/models'
 import type { SalesOrderTransactionGraph } from './salesOrderGraph'
+import { IntegrityAuditReadError, type AuditCategory, type AuditStatus, type IntegrityAuditResult } from './types'
 
-export type AuditCategory = 'order' | 'items' | 'inventory' | 'payments' | 'loan' | 'relationships' | 'mirror'
-export type AuditStatus = 'PASS' | 'WARNING' | 'FAIL' | 'NOT_APPLICABLE'
-export interface IntegrityAuditCheck {
-  code: string
-  category: AuditCategory
-  status: AuditStatus
-  severity: 'info' | 'warning' | 'error' | 'critical'
-  entityType: string
-  entityId?: string
-  expected?: unknown
-  actual?: unknown
-}
-export interface IntegrityAuditResult {
-  transactionType: 'sales_order'
-  transactionId: string
-  transactionNumber?: string
-  workspaceId: string
-  auditedAt: string
-  sourceOfTruth: 'supabase' | 'sqlite'
-  integrityStatus: AuditStatus
-  mirrorStatus: AuditStatus | null
-  checks: IntegrityAuditCheck[]
-  summary: { total: number; passed: number; warnings: number; failed: number }
-  expected: Record<string, unknown>
-  actual: SalesOrderTransactionGraph
-  mirrorActual: SalesOrderTransactionGraph | null
-}
-
-export class IntegrityAuditReadError extends Error {
-  readonly code = 'AUDIT_SOURCE_READ_FAILED'
-  readonly messageKey = 'transactionAudit.loadFailed'
-  readonly cause: unknown
-  constructor(readonly source: 'supabase' | 'sqlite', cause: unknown) {
-    super(`Unable to read the ${source} audit graph`)
-    this.cause = cause
-  }
-}
+export { IntegrityAuditReadError } from './types'
+export type { AuditCategory, AuditStatus, IntegrityAuditCheck, IntegrityAuditResult } from './types'
 
 const close = (a: number, b: number) => Math.abs(roundOrderValue(a) - roundOrderValue(b)) <= ORDER_AMOUNT_EPSILON
 const active = <T extends { isDeleted?: boolean }>(rows: T[]) => rows.filter(row => !row.isDeleted)
@@ -348,7 +314,7 @@ const statusOf = (checks: IntegrityAuditCheck[]): AuditStatus => checks.some(row
 
 export async function runSalesOrderIntegrityAudit(
   workspaceId: string, orderId: string, mode: 'cloud' | 'hybrid' | 'local' | 'demo'
-): Promise<IntegrityAuditResult> {
+): Promise<IntegrityAuditResult<SalesOrderTransactionGraph>> {
   const { resolveSalesOrderTransactionGraph } = await import('./salesOrderGraph')
   const sourceOfTruth = mode === 'local' || mode === 'demo' ? 'sqlite' : 'supabase'
   let actual: SalesOrderTransactionGraph

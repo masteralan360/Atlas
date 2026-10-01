@@ -360,6 +360,16 @@
         "files": [
           "src/dev/testing/suites/saleOrdersHosted30Live.test.ts"
         ]
+      },
+      {
+        "id": "integrity-audit",
+        "titleKey": "devTesting.groups.integrityAudit",
+        "layer": "live",
+        "isolatedGroupId": "integrity-audit",
+        "timeoutMs": 300000,
+        "files": [
+          "src/dev/testing/suites/saleOrderModuleWideIntegrityAuditLive.test.ts"
+        ]
       }
     ],
     "groups": [
@@ -510,7 +520,10 @@
         "files": [
           "src/lib/integrityAudit/salesOrderAudit.test.ts",
           "src/lib/integrityAudit/salesOrderGraph.test.ts",
-          "src/ui/components/orders/SalesOrderIntegrityAuditDialog.test.tsx"
+          "src/lib/integrityAudit/moduleWide.test.ts",
+          "src/lib/integrityAudit/salesOrderModuleWide.test.ts",
+          "src/ui/components/orders/SalesOrderIntegrityAuditDialog.test.tsx",
+          "src/ui/components/integrity-audit/ModuleWideIntegrityAuditDialog.test.tsx"
         ]
       }
     ],
@@ -522,6 +535,34 @@
       "local-native"
     ],
     "samplesHelpKey": "devTesting.samplesHelp"
+  },
+  "loans": {
+    "titleKey": "devTesting.loans",
+    "coverageHelpKey": "devTesting.loansCoverageHelp",
+    "liveCoverageHelpKey": "devTesting.loansLiveCoverageHelp",
+    "liveGroups": [
+      {
+        "id": "integrity-audit",
+        "titleKey": "devTesting.loansGroups.integrityAudit",
+        "layer": "live",
+        "isolatedGroupId": "integrity-audit",
+        "files": ["src/dev/testing/suites/loanIntegrityAuditLive.test.ts"]
+      }
+    ],
+    "groups": [
+      {
+        "id": "integrity-audit",
+        "titleKey": "devTesting.loansGroups.integrityAudit",
+        "layer": "contract",
+        "files": [
+          "src/lib/integrityAudit/loanAudit.test.ts",
+          "src/lib/integrityAudit/loanGraph.test.ts",
+          "src/ui/components/loans/LoanIntegrityAuditDialog.test.tsx"
+        ]
+      }
+    ],
+    "liveUnavailable": ["browser-workflow", "hybrid-native", "local-native"],
+    "unavailable": ["browser-workflow", "cloud-database-broad", "hybrid-native", "local-native"]
   },
   "business-partners": {
     "titleKey": "devTesting.businessPartners",
