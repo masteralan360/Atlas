@@ -46,6 +46,7 @@ import { UnifiedSnoozedRemindersBell } from './reminders/UnifiedSnoozedReminders
 import { WorkspacePaygChargeButton, WorkspaceUsageButton, WorkspaceUsageCircleButton, WorkspaceUsageModal } from './WorkspaceUsageModal'
 import { useWorkspaceUsageMeter } from './workspaceUsageMeter'
 import { ThemeAwareLogo } from './ThemeAwareLogo'
+import { ThemeAwareTitleLogo } from './ThemeAwareTitleLogo'
 import { LocalAccountSwitcher } from './LocalAccountSwitcher'
 import { DeploymentRefreshVersion } from './DeploymentRefreshVersion'
 import { ModuleLockerOverlay } from './module-locker/ModuleLockerOverlay'
@@ -53,6 +54,7 @@ import { ModuleLockerPasskeyDialog, type ModuleLockerPasskeyAction } from './mod
 import { LoadingGlowLine } from './GlowLine'
 import { ModulePageFreshnessLoadingProvider } from './ModulePageFreshness'
 import { buildWorkspaceNavigation, type WorkspaceNavigationGroup, type WorkspaceNavigationItem } from '@/ui/navigation/workspaceNavigation'
+import { isNavigationRailEnabled, NAVIGATION_RAIL_WIDTH } from '@/ui/navigation/navigationRail'
 import { launcherSectionOrder, type NavigationSectionKey } from '@/ui/navigation/navigationMeta'
 import {
   createSidebarSectionOrderStorageValue,
@@ -122,6 +124,8 @@ import {
   ListOrdered,
   RotateCcw,
   Settings2,
+  Settings,
+  LayoutDashboard,
   Star,
   Search
 } from 'lucide-react'
@@ -415,6 +419,7 @@ export function Layout({ children }: LayoutProps) {
   const [isSidebarHeaderCompact, setIsSidebarHeaderCompact] = useState(false)
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1440))
   const desktopStickyBarCollapseProgress = isTauri && viewportWidth >= 1024 ? desktopStickyBarProgress : 0
+  const showNavigationRail = isNavigationRailEnabled && isTauri && !isMobile() && viewportWidth >= 1024
   const showSidebarThemeSelector = !isTauri && !isMobile() && viewportWidth >= 1024
   const fullWorkspaceLabel = currentWorkspaceLabel || workspaceName || 'Atlas'
   const sidebarWorkspaceLabel = getSidebarWorkspaceLabel(fullWorkspaceLabel)
@@ -890,9 +895,11 @@ export function Layout({ children }: LayoutProps) {
         const sectionKey = group.sectionKey
         if (!sectionKey) return []
 
-        return group.items.map((item) => ({ ...item, sectionKey, sectionTitle: group.title }))
+        return group.items
+          .filter((item) => !showNavigationRail || item.href !== '/settings')
+          .map((item) => ({ ...item, sectionKey, sectionTitle: group.title }))
       }),
-    [navigation]
+    [navigation, showNavigationRail]
   )
   const sidebarFavoriteHrefSet = useMemo(() => new Set(sidebarFavorites.order), [sidebarFavorites.order])
   const sidebarFavoritesGroup = useMemo<SidebarFavoritesGroup | null>(() => {
@@ -907,7 +914,13 @@ export function Layout({ children }: LayoutProps) {
     [sidebarFavoritesGroup, t]
   )
   const sidebarNavigation = useMemo(() => {
-    const standaloneGroups = navigation.filter((group) => !group.sectionKey)
+    const standaloneGroups = navigation
+      .filter((group) => !group.sectionKey)
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) => !showNavigationRail || item.href !== '/')
+      }))
+      .filter((group) => group.items.length > 0)
     const groupsBySectionKey = new Map(
       navigation
         .filter((group): group is WorkspaceNavigationGroup & { sectionKey: NavigationSectionKey } => Boolean(group.sectionKey))
@@ -928,7 +941,7 @@ export function Layout({ children }: LayoutProps) {
         const moduleOrderIndex = new Map(moduleOrder.map((href, index) => [href, index]))
 
         const items = [...group.items]
-          .filter((item) => !sidebarFavoriteHrefSet.has(item.href))
+          .filter((item) => !sidebarFavoriteHrefSet.has(item.href) && (!showNavigationRail || item.href !== '/settings'))
           .sort(
             (left, right) => (moduleOrderIndex.get(left.href) ?? 0) - (moduleOrderIndex.get(right.href) ?? 0)
           )
@@ -939,7 +952,7 @@ export function Layout({ children }: LayoutProps) {
         ]
       })
     ]
-  }, [navigation, sidebarFavoriteHrefSet, sidebarFavoritePlacementGroup, sidebarModuleOrderBySection, sidebarSectionOrder])
+  }, [navigation, showNavigationRail, sidebarFavoriteHrefSet, sidebarFavoritePlacementGroup, sidebarModuleOrderBySection, sidebarSectionOrder])
   const visibleSidebarSectionGroups = sidebarNavigation.filter(
     (group): group is WorkspaceNavigationGroup & { sectionKey: NavigationSectionKey } =>
       Boolean(group.sectionKey) && group.sectionKey !== 'favorites'
@@ -1585,6 +1598,51 @@ export function Layout({ children }: LayoutProps) {
             />
           )}
 
+          {showNavigationRail && (
+            <aside
+              className="fixed inset-y-0 z-50 flex w-14 flex-col border-e border-border/80 bg-background/90 shadow-sm backdrop-blur-xl sidebar-gradient"
+              style={{ insetInlineStart: 0 }}
+            >
+              <div className="flex h-12 shrink-0 items-center justify-center border-b border-border/70">
+                <ThemeAwareTitleLogo className="h-7 w-7 opacity-90" />
+              </div>
+              <nav className="flex flex-1 flex-col items-center gap-2 px-2 py-3">
+                <Link
+                  href="/"
+                  onClick={() => triggerHaptic('selection')}
+                  className={cn(
+                    'flex h-10 w-10 items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                    location === '/' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-primary/5 hover:text-primary'
+                  )}
+                  title={t('nav.dashboard')}
+                  aria-label={t('nav.dashboard')}
+                  aria-current={location === '/' ? 'page' : undefined}
+                >
+                  <LayoutDashboard className="h-5 w-5" />
+                </Link>
+              </nav>
+              {navigation.some((group) => group.items.some((item) => item.href === '/settings')) && (
+                <div className="flex shrink-0 justify-center border-t border-border/70 px-2 py-3">
+                  <Link
+                    href="/settings"
+                    onClick={() => triggerHaptic('selection')}
+                    className={cn(
+                      'flex h-10 w-10 items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                      location === '/settings' || location.startsWith('/settings/')
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-muted-foreground hover:bg-primary/5 hover:text-primary'
+                    )}
+                    title={t('nav.settings')}
+                    aria-label={t('nav.settings')}
+                    aria-current={location === '/settings' || location.startsWith('/settings/') ? 'page' : undefined}
+                  >
+                    <Settings className="h-5 w-5" />
+                  </Link>
+                </div>
+              )}
+            </aside>
+          )}
+
           {/* Sidebar */}
           <ContextMenu>
             <ContextMenuTrigger asChild>
@@ -1619,6 +1677,7 @@ export function Layout({ children }: LayoutProps) {
                   : 'translate-x-0 w-64'
                 : '-translate-x-full rtl:translate-x-full'
             )}
+            style={showNavigationRail ? { insetInlineStart: NAVIGATION_RAIL_WIDTH } : undefined}
           >
             {/* Logo */}
             <div
@@ -1642,7 +1701,7 @@ export function Layout({ children }: LayoutProps) {
                   )}
                   onError={() => setLogoError(true)}
                 />
-              ) : !logoError ? (
+              ) : !logoError && !showNavigationRail ? (
                 <ThemeAwareLogo
                   className={cn(
                     'h-10 w-10 object-contain transition-[width,height] duration-300 ease-out',
@@ -3351,6 +3410,11 @@ export function Layout({ children }: LayoutProps) {
                 : 'lg:pl-0',
               'pb-[var(--safe-area-bottom)]'
             )}
+            style={{
+              paddingInlineStart: showNavigationRail
+                ? NAVIGATION_RAIL_WIDTH + (desktopSidebarOpen ? (isSidebarMini ? 70 : isSidebarCustomizationMode ? 320 : 256) : 0)
+                : undefined
+            }}
           >
             {/* Mobile floating navigation: regular page flow, so it scrolls away with content. */}
             {!isPosLikeRoute && (

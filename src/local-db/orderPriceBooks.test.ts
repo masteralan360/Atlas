@@ -130,7 +130,7 @@ function receivedPurchaseOrderInput(
         priceBookItemId?: string | null
     },
     exchangeRates: PurchaseOrder['exchangeRates']
-): Omit<PurchaseOrder, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted' | 'orderNumber'> {
+): Omit<PurchaseOrder, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted' | 'isArchived' | 'orderNumber'> {
     return {
         businessPartnerId: fixture.supplier.id,
         supplierId: fixture.supplier.id,

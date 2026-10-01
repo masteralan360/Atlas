@@ -36,6 +36,7 @@
       { "id": "printing", "titleKey": "devTesting.groups.printing", "layer": "live", "isolatedGroupId": "printing", "files": ["src/dev/testing/suites/saleOrdersPrintingLive.test.ts"] },
       { "id": "account-statement", "titleKey": "devTesting.groups.accountStatement", "layer": "live", "isolatedGroupId": "account-statement", "files": ["src/dev/testing/suites/saleOrdersStatementLive.test.ts"] },
       { "id": "lifecycle", "titleKey": "devTesting.groups.lifecycle", "layer": "live", "isolatedGroupId": "lifecycle", "files": ["src/dev/testing/suites/saleOrdersLifecycleLive.test.ts"] },
+      { "id": "archiving", "titleKey": "devTesting.groups.archiving", "layer": "live", "isolatedGroupId": "archiving", "files": ["src/dev/testing/suites/saleOrdersArchivingLive.test.ts"] },
       { "id": "pricing", "titleKey": "devTesting.groups.pricing", "layer": "live", "isolatedGroupId": "pricing", "files": ["src/dev/testing/suites/saleOrdersPricingLive.test.ts"] },
       { "id": "unit-of-measure", "titleKey": "devTesting.groups.productUom", "layer": "live", "isolatedGroupId": "unit-of-measure", "files": ["src/dev/testing/suites/saleOrdersUomLive.test.ts"] },
       { "id": "payments", "titleKey": "devTesting.groups.payments", "layer": "live", "isolatedGroupId": "payments", "files": ["src/dev/testing/suites/saleOrdersPaymentsLive.test.ts"] },
@@ -89,6 +90,15 @@
           "src/local-db/orderInstallments.test.ts",
           "src/local-db/inventorySnapshotSync.test.ts",
           "src/local-db/quickOrderAtomic.test.ts"
+        ]
+      },
+      {
+        "id": "archiving",
+        "titleKey": "devTesting.groups.archiving",
+        "layer": "business",
+        "files": [
+          "src/lib/orderArchiving.test.ts",
+          "src/local-db/orderArchiving.test.ts"
         ]
       },
       {
@@ -798,5 +808,21 @@
       "hardware",
       "external-asset-storage"
     ]
+  },
+  "travel-transportation": {
+    "titleKey": "devTesting.travelTransportation",
+    "coverageHelpKey": "devTesting.travelTransportationCoverageHelp",
+    "groups": [
+      {
+        "id": "passenger-records",
+        "titleKey": "devTesting.travelTransportationGroups.passengerRecords",
+        "layer": "contract",
+        "files": [
+          "src/dev/testing/suites/travelTransportationPassengers.test.tsx",
+          "src/local-db/travelTransportation.test.ts"
+        ]
+      }
+    ],
+    "unavailable": ["hosted-supabase", "browser-workflow", "hybrid-native", "local-native"]
   }
 }

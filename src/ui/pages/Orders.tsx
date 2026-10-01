@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
-import { BadgeCheck, BadgeDollarSign, CalendarDays, ChevronDown, CircleCheck, CircleDashed, CircleDollarSign, Clock3, CreditCard, EllipsisVertical, Eye, HandCoins, LayoutGrid, List, ListFilter, Loader2, Lock, Package, PackageCheck, PackagePlus, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse, XCircle, type LucideIcon } from 'lucide-react'
+import { Archive, BadgeCheck, BadgeDollarSign, CalendarDays, ChevronDown, CircleCheck, CircleDashed, CircleDollarSign, Clock3, CreditCard, EllipsisVertical, Eye, HandCoins, LayoutGrid, List, ListFilter, Loader2, Lock, Package, PackageCheck, PackagePlus, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse, XCircle, type LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLocalizedOrderError } from '@/lib/orderErrors'
+import { isActiveOrder } from '@/lib/orderArchiving'
 import type { PaymentMethodOption } from '@/lib/paymentMethods'
 import { useLocation, useRoute } from 'wouter'
 
@@ -91,6 +92,12 @@ import {
     CardContent,
     CardHeader,
     CardTitle,
+    AppDialog,
+    AppDialogBody,
+    AppDialogContent,
+    AppDialogFooter,
+    AppDialogHeader,
+    AppDialogTitle,
     DateTimePicker,
     Dialog,
     DialogBody,
@@ -516,6 +523,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const [transactionToReverse, setTransactionToReverse] = useState<PaymentTransaction | null>(null)
     const [isReversingPayment, setIsReversingPayment] = useState(false)
     const [showPrintPreview, setShowPrintPreview] = useState(false)
+    const [archivesOpen, setArchivesOpen] = useState(false)
 
     const [salesForm, setSalesForm] = useState<SalesFormState>({
         customerId: '',
@@ -605,8 +613,19 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     )
 
     const hasEcommerceOrdersForCreatedDate = useMemo(
-        () => createdDateFilteredSalesOrders.some((order) => order.sourceChannel === 'marketplace'),
+        () => createdDateFilteredSalesOrders.some((order) => !order.isArchived && order.sourceChannel === 'marketplace'),
         [createdDateFilteredSalesOrders]
+    )
+
+    const archivedSalesOrders = useMemo(
+        () => salesOrders.filter((order) => order.isArchived === true)
+            .sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
+        [salesOrders]
+    )
+    const archivedPurchaseOrders = useMemo(
+        () => purchaseOrders.filter((order) => order.isArchived === true)
+            .sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
+        [purchaseOrders]
     )
 
     useEffect(() => {
@@ -626,7 +645,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     )
 
     const filteredSalesOrders = useMemo(() => {
-        let items = [...dateFilteredSalesOrders]
+        let items = dateFilteredSalesOrders.filter(isActiveOrder)
 
         if (statusFilter !== 'all') {
             items = items.filter((order) => order.status === statusFilter)
@@ -663,7 +682,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     }, [commissionModeFilter, dateFilteredSalesOrders, ecommerceFilter, paymentFilter, salesAgentCommissionsEnabled, search, statusFilter, visibleCommissionAgentsByOrderId])
 
     const filteredPurchaseOrders = useMemo(() => {
-        let items = [...dateFilteredPurchaseOrders]
+        let items = dateFilteredPurchaseOrders.filter(isActiveOrder)
 
         if (statusFilter !== 'all') {
             items = items.filter((order) => order.status === statusFilter)
@@ -2283,10 +2302,16 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                     </div>
                                 </div>
 
-                                <Button variant="outline" allowViewer={true} onClick={() => setShowPrintPreview(true)} className="gap-2 self-start rounded-xl print:hidden sm:self-auto">
-                                    <Printer className="h-4 w-4" />
-                                    {t('common.print') || 'Print'}
-                                </Button>
+                                <div className="flex flex-wrap items-center gap-2 self-start print:hidden sm:self-auto">
+                                    <Button variant="outline" allowViewer={true} onClick={() => setArchivesOpen(true)} className="gap-2 rounded-xl">
+                                        <Archive className="h-4 w-4" />
+                                        {t('orders.archive.open')}
+                                    </Button>
+                                    <Button variant="outline" allowViewer={true} onClick={() => setShowPrintPreview(true)} className="gap-2 rounded-xl">
+                                        <Printer className="h-4 w-4" />
+                                        {t('common.print') || 'Print'}
+                                    </Button>
+                                </div>
                             </div>
 
                             <div className="flex flex-col gap-2 xl:flex-row xl:items-center">
@@ -3050,6 +3075,64 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <AppDialog open={archivesOpen} onOpenChange={setArchivesOpen}>
+                <AppDialogContent className="max-w-4xl">
+                    <AppDialogHeader>
+                        <AppDialogTitle className="flex items-center gap-2">
+                            <Archive className="h-5 w-5 text-primary" />
+                            {activeTab === 'sales' ? t('orders.archive.salesTitle') : t('orders.archive.purchaseTitle')}
+                        </AppDialogTitle>
+                    </AppDialogHeader>
+                    <AppDialogBody className="space-y-3">
+                        {(activeTab === 'sales' ? archivedSalesOrders : archivedPurchaseOrders).length === 0 ? (
+                            <div className="rounded-xl border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
+                                {t('orders.archive.empty')}
+                            </div>
+                        ) : (activeTab === 'sales' ? archivedSalesOrders : archivedPurchaseOrders).map((order) => {
+                            const isReturned = activeTab === 'sales'
+                                ? (order as SalesOrder).returnStatus === 'full' || order.status === 'returned'
+                                : order.status === 'returned'
+                            const status = isReturned ? 'returned' : order.status
+                            const partnerName = activeTab === 'sales'
+                                ? (order as SalesOrder).customerName
+                                : (order as PurchaseOrder).supplierName
+                            return (
+                                <div key={order.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/70 bg-background p-3 sm:p-4">
+                                    <div className="min-w-0 flex-1 space-y-1">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span className="font-semibold">{order.orderNumber}</span>
+                                            <OrderStatusBadge status={status} label={isReturned
+                                                ? t('sales.return.returnedStatus')
+                                                : formatStatusLabel(t, status)} />
+                                        </div>
+                                        <div className="truncate text-sm text-muted-foreground">{partnerName}</div>
+                                        <div className="text-xs text-muted-foreground">
+                                            {formatDate(order.createdAt)} · {formatCurrency(order.total, order.currency, features.iqd_display_preference)}
+                                        </div>
+                                    </div>
+                                    <Button
+                                        variant="outline"
+                                        className="shrink-0 gap-2"
+                                        onClick={() => {
+                                            setArchivesOpen(false)
+                                            navigate(`/orders/${order.id}`)
+                                        }}
+                                    >
+                                        <Eye className="h-4 w-4" />
+                                        {t('orders.archive.view')}
+                                    </Button>
+                                </div>
+                            )
+                        })}
+                    </AppDialogBody>
+                    <AppDialogFooter>
+                        <Button variant="outline" onClick={() => setArchivesOpen(false)}>
+                            {t('common.cancel')}
+                        </Button>
+                    </AppDialogFooter>
+                </AppDialogContent>
+            </AppDialog>
 
             <PrintFlow
                 isOpen={showPrintPreview}

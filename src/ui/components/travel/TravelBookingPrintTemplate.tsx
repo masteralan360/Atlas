@@ -123,20 +123,20 @@ export function TravelBookingPrintTemplate({
                         <thead>
                             {chunkIndex > 0 ? <tr className="bg-slate-100"><th className="border border-slate-500 px-2 py-1.5 text-start text-[10px]" colSpan={5}>{t('travelTransportation.print.passengerList')} · {t('travelTransportation.print.continued')}</th></tr> : null}
                             <tr className="bg-slate-900 text-white">
-                                <th className="w-[8%] border border-slate-700 px-2 py-2 text-center">{t('travelTransportation.print.number')}</th>
-                                <th className="w-[22%] border border-slate-700 px-2 py-2 text-start">{t('travelTransportation.travelDate')}</th>
-                                <th className="w-[23%] border border-slate-700 px-2 py-2 text-start">{t('travelTransportation.transportationType')}</th>
-                                <th className="w-[29%] border border-slate-700 px-2 py-2 text-start">{t('travelTransportation.name')}</th>
-                                <th className="w-[18%] border border-slate-700 px-2 py-2 text-end">{t('travelTransportation.price')}</th>
+                                <th className="w-[7%] border border-slate-700 px-2 py-2 text-center">{t('travelTransportation.print.number')}</th>
+                                <th className="w-[25%] border border-slate-700 px-2 py-2 text-start">{t('travelTransportation.name')}</th>
+                                <th className="w-[23%] border border-slate-700 px-2 py-2 text-start">{t('travelTransportation.phoneNumber')}</th>
+                                <th className="w-[25%] border border-slate-700 px-2 py-2 text-start">{t('travelTransportation.transportationType')}</th>
+                                <th className="w-[20%] border border-slate-700 px-2 py-2 text-end">{t('travelTransportation.price')}</th>
                             </tr>
                         </thead>
                         <tbody>
                             {passengerChunk.length === 0 ? <tr style={{ height: '12mm' }}><td className="border border-slate-300 px-2 py-2 text-center text-slate-500" colSpan={5}>{t('travelTransportation.print.noPassengers')}</td></tr> : passengerChunk.map((passenger, index) => (
                                 <tr key={passenger.id} data-pdf-keep-together style={{ height: '12mm' }}>
                                     <td className="border border-slate-300 px-2 py-1.5 text-center font-semibold">{(chunkIndex * PASSENGERS_PER_PRINT_TABLE) + index + 1}</td>
-                                    <td className="border border-slate-300 px-2 py-1.5 whitespace-nowrap">{booking.travelDate ? formatDate(booking.travelDate) : '—'}</td>
-                                    <td className="border border-slate-300 px-2 py-1.5">{t(`travelTransportation.${passenger.transportationType}`)}</td>
                                     <td className="border border-slate-300 px-2 py-1.5 font-medium break-words">{passenger.name}</td>
+                                    <td className="border border-slate-300 px-2 py-1.5 break-words">{passenger.phoneNumber || '—'}</td>
+                                    <td className="border border-slate-300 px-2 py-1.5">{t(`travelTransportation.${passenger.transportationType}`)}</td>
                                     <td className="border border-slate-300 px-2 py-1.5 text-end font-semibold whitespace-nowrap">{formatAmount(passenger.price)}</td>
                                 </tr>
                             ))}

@@ -38,6 +38,7 @@ CREATE TABLE crm.purchase_orders (
   approval_requested_at timestamp with time zone NULL,
   approval_reviewed_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   approval_reviewed_at timestamp with time zone NULL,
+  is_archived boolean NOT NULL DEFAULT false,
   created_at timestamp with time zone NULL DEFAULT now(),
   updated_at timestamp with time zone NULL DEFAULT now(),
   sync_status text NULL DEFAULT 'synced'::text,

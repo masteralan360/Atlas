@@ -147,6 +147,7 @@ function normalizePassengers(
             workspaceId,
             bookingId,
             name,
+            phoneNumber: normalizeOptionalText(passenger.phoneNumber),
             transportationType: passenger.transportationType,
             price,
             createdAt: timestamp,
@@ -234,6 +235,7 @@ async function syncBookingAndPassengers(booking: TravelBooking, passengers: Trav
 export type TravelPassengerInput = {
     id?: string
     name: string
+    phoneNumber?: string | null
     transportationType: TravelTransportationType
     price: number
 }

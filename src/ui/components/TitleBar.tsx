@@ -5,6 +5,7 @@ import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useTheme } from '@/ui/components/theme-provider'
 import { useTranslation } from 'react-i18next'
 import { cn, formatDate } from '@/lib/utils'
+import { isNavigationRailEnabled, NAVIGATION_RAIL_WIDTH } from '@/ui/navigation/navigationRail'
 import { GlobalSearch } from './GlobalSearch'
 import { NotificationCenter } from './NotificationCenter'
 import { ThemeAwareTitleLogo } from './ThemeAwareTitleLogo'
@@ -18,11 +19,14 @@ import { WorkspaceResourceSyncPill } from './WorkspaceResourceSyncPill'
 export function TitleBar() {
     const [isMaximized, setIsMaximized] = useState(false)
     const [usageModalOpen, setUsageModalOpen] = useState(false)
+    const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
     const { workspaceName, branchInfo, pendingUpdate, isFullscreen, features, isLocalMode, isDemoMode, activeWorkspace } = useWorkspace()
     const { theme, setTheme, style } = useTheme()
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     // @ts-ignore
     const isTauri = !!window.__TAURI_INTERNALS__
+    const showNavigationRail = isNavigationRailEnabled && viewportWidth >= 1024
+    const isRtl = i18n.dir() === 'rtl'
     const subscriptionWarning = useSubscriptionExpiryWarning(
         isTauri && !isDemoMode ? features.subscription_expires_at : null
     )
@@ -36,6 +40,12 @@ export function TitleBar() {
         enabled: isTauri && !isLocalMode && !isDemoMode,
         workspaceId: activeWorkspace?.id
     })
+
+    useEffect(() => {
+        const updateViewportWidth = () => setViewportWidth(window.innerWidth)
+        window.addEventListener('resize', updateViewportWidth)
+        return () => window.removeEventListener('resize', updateViewportWidth)
+    }, [])
 
     useEffect(() => {
         if (!isTauri) return
@@ -121,13 +131,18 @@ export function TitleBar() {
         <div dir="ltr" data-tauri-drag-region className={cn(
             "fixed top-0 left-0 right-0 h-[48px] z-[100] flex items-center justify-between px-3 select-none bg-background/80 backdrop-blur-md border-b border-white/10 transition-all duration-300",
             isFullscreen && "opacity-0 pointer-events-none -translate-y-full"
-        )}>
+        )} style={{
+            left: showNavigationRail && !isRtl ? NAVIGATION_RAIL_WIDTH : 0,
+            right: showNavigationRail && isRtl ? NAVIGATION_RAIL_WIDTH : 0
+        }}>
             <div data-tauri-drag-region className="flex items-center gap-3 w-1/3 min-w-0">
-                <ThemeAwareTitleLogo className="w-10 h-10 opacity-90" />
+                {!showNavigationRail && <ThemeAwareTitleLogo className="w-10 h-10 opacity-90" />}
                 <div data-tauri-drag-region className="flex items-center gap-2 min-w-0">
-                    <span data-tauri-drag-region className="text-sm font-medium opacity-80 truncate">
-                        {workspaceName || t('auth.titleName')}
-                    </span>
+                    {!showNavigationRail && (
+                        <span data-tauri-drag-region className="text-sm font-medium opacity-80 truncate">
+                            {workspaceName || t('auth.titleName')}
+                        </span>
+                    )}
                     {branchInfo?.isBranch && (
                         <span
                             data-tauri-drag-region
@@ -182,7 +197,7 @@ export function TitleBar() {
 
             {/* Center: Search Box */}
             <div data-tauri-drag-region className="flex-1 flex justify-center max-w-md">
-                <GlobalSearch className="max-w-[400px]" />
+                <GlobalSearch className="max-w-[360px]" />
             </div>
 
             {/* Right: Window Controls */}

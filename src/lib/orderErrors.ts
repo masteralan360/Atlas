@@ -20,6 +20,30 @@ const ORDER_ERROR_TRANSLATIONS: Record<string, { key: string; fallback: string }
     order_cancellation_waiting_for_sync: {
         key: 'orders.cancellationWaitingForSync',
         fallback: 'Sync earlier order changes, then try cancelling again.'
+    },
+    order_archive_not_allowed: {
+        key: 'orders.archive.notAllowed',
+        fallback: 'Only cancelled or returned orders can be archived.'
+    },
+    order_archive_not_found: {
+        key: 'orders.archive.notFound',
+        fallback: 'The order could not be found. Refresh and try again.'
+    },
+    order_archive_conflict: {
+        key: 'orders.archive.conflict',
+        fallback: 'The order changed before this action. Refresh and try again.'
+    },
+    order_archive_must_not_change_order_data: {
+        key: 'orders.archive.conflict',
+        fallback: 'The order changed before this action. Refresh and try again.'
+    },
+    order_archive_requires_existing_order: {
+        key: 'orders.archive.conflict',
+        fallback: 'The order changed before this action. Refresh and try again.'
+    },
+    order_archive_wait_for_sync: {
+        key: 'orders.archive.waitForSync',
+        fallback: 'Sync this order before archiving it, then try again.'
     }
 }
 

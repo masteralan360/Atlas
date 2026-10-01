@@ -33,7 +33,9 @@ import type {
     OrderInstallment,
     PurchaseOrder,
     RealEstateTransactionType,
-    SalesOrder
+    SalesOrder,
+    TravelBooking,
+    TravelPassenger
 } from '@/local-db'
 import type { WorkspaceFeatures } from '@/workspace'
 import type { Sale, UniversalInvoice } from '@/types'
@@ -100,6 +102,7 @@ import {
     PROFESSIONAL_A4_MOVABLE_COMPONENT_KEYS,
     PROFESSIONAL_A4_TABLE_ROW_COUNT
 } from '@/ui/components/ProfessionalA4InvoiceTemplate'
+import { TravelBookingPrintTemplate } from '@/ui/components/travel/TravelBookingPrintTemplate'
 
 export const SALES_HISTORY_RECEIPT_TEMPLATE_KEY = 'salesHistory.Receipt'
 export const INSTANT_HISTORY_RECEIPT_TEMPLATE_KEY = 'instantHistory.Receipt'
@@ -122,6 +125,7 @@ export const ORDER_ATLAS_STANDARD_TEMPLATE_KEY = 'orders.AtlasStandard'
 export const ORDER_ATLAS_STANDARD_RETURN_TEMPLATE_KEY = 'orders.AtlasStandardReturn'
 export const ORDER_DETAILS_TEMPLATE_KEY = 'orders.Details'
 export const ORDER_RECEIPT_TEMPLATE_KEY = 'orders.Receipt'
+export const TRAVEL_BOOKING_TEMPLATE_KEY = 'travelTransportation.Booking'
 export const PARTNER_DETAILS_TEMPLATE_FIELD_KEYS = {
     showWhoOwesWhom: 'showWhoOwesWhom',
     showOrders: 'showOrders'
@@ -141,7 +145,7 @@ export const PARTNER_ORDER_ITEMS_TEMPLATE_FIELD_KEYS = {
 
 export type CustomTemplateTarget = {
     moduleTypeKey: string
-    workspaceModuleKey: 'instant_pos' | 'real_estate' | 'sales_history' | 'crm' | 'loans' | 'products'
+    workspaceModuleKey: 'instant_pos' | 'real_estate' | 'sales_history' | 'crm' | 'loans' | 'products' | 'travel_transportation'
     moduleLabel: string
     typeLabel: string
     description: string
@@ -346,6 +350,17 @@ export const CUSTOM_TEMPLATE_TARGETS: CustomTemplateTarget[] = [
         typeLabel: 'Loan Account Statement',
         description: 'Partner account summary through one selected loan repayment.',
         nativeTemplateKey: LOAN_ACCOUNT_STATEMENT_TEMPLATE_KEY,
+        nativeTemplateAvailable: true,
+        printFormat: 'a4',
+        page: { widthMm: 210, heightMm: 297 }
+    },
+    {
+        moduleTypeKey: TRAVEL_BOOKING_TEMPLATE_KEY,
+        workspaceModuleKey: 'travel_transportation',
+        get moduleLabel() { return i18n.t('travelTransportation.title') },
+        get typeLabel() { return i18n.t('travelTransportation.print.title') },
+        get description() { return i18n.t('travelTransportation.print.a4Description') },
+        nativeTemplateKey: TRAVEL_BOOKING_TEMPLATE_KEY,
         nativeTemplateAvailable: true,
         printFormat: 'a4',
         page: { widthMm: 210, heightMm: 297 }
@@ -648,6 +663,10 @@ export type CustomTemplatePreviewOptions = {
     partnerAccountStatementData?: PartnerAccountStatementPrintData
     partnerProductMovementsData?: PartnerProductMovementsPrintData
     loanAccountStatementData?: LoanAccountStatementPrintData
+    travelBookingData?: {
+        booking: TravelBooking
+        passengers: TravelPassenger[]
+    }
     order?: SalesOrder | PurchaseOrder
     orderKind?: 'sales' | 'purchase'
     orderReturnPrintData?: SalesOrderReturnPrintData | null
@@ -664,6 +683,62 @@ export type CustomTemplatePreviewOptions = {
     printLang?: string
     barcodeLabel?: BarcodeLabelData
     labelPageSizeMm?: LabelPrintPageSize
+}
+
+const SAMPLE_TRAVEL_BOOKING_DATA = {
+    booking: {
+        id: 'sample-travel-booking',
+        workspaceId: 'sample-workspace',
+        createdAt: '2026-09-01T10:00:00.000Z',
+        updatedAt: '2026-09-01T10:00:00.000Z',
+        syncStatus: 'synced',
+        lastSyncedAt: null,
+        version: 1,
+        isDeleted: false,
+        bookingNumber: 'TB-2026-0042',
+        currency: 'iqd',
+        travelDate: '2026-09-30',
+        passengerTotal: 360000,
+        bookingTotal: 360000,
+        adjustedBookingTotal: 380000,
+        bookingAdjustments: [],
+        profitAmount: 40000,
+        paidProfitAmount: 0,
+        outstandingProfitAmount: 40000,
+        paymentMethod: 'cash',
+        status: 'booked',
+        notes: 'Sample booking notes appear here when provided.'
+    } satisfies TravelBooking,
+    passengers: [
+        {
+            id: 'sample-travel-passenger-1',
+            workspaceId: 'sample-workspace',
+            createdAt: '2026-09-01T10:00:00.000Z',
+            updatedAt: '2026-09-01T10:00:00.000Z',
+            syncStatus: 'synced',
+            lastSyncedAt: null,
+            version: 1,
+            isDeleted: false,
+            bookingId: 'sample-travel-booking',
+            name: 'Sample Passenger One',
+            transportationType: 'flight',
+            price: 180000
+        },
+        {
+            id: 'sample-travel-passenger-2',
+            workspaceId: 'sample-workspace',
+            createdAt: '2026-09-01T10:00:00.000Z',
+            updatedAt: '2026-09-01T10:00:00.000Z',
+            syncStatus: 'synced',
+            lastSyncedAt: null,
+            version: 1,
+            isDeleted: false,
+            bookingId: 'sample-travel-booking',
+            name: 'Sample Passenger Two',
+            transportationType: 'bus',
+            price: 180000
+        }
+    ] satisfies TravelPassenger[]
 }
 
 const SAMPLE_RECEIPT_DATA: UniversalInvoice = {
@@ -865,6 +940,7 @@ const SAMPLE_PARTNER_DETAILS_DATA: PartnerDetailsPrintData = {
 const SAMPLE_ORDER_DATA: SalesOrder = {
     id: 'sample-sales-order',
     workspaceId: 'sample-workspace',
+    isArchived: false,
     orderNumber: 'SO-00042',
     customerId: 'sample-customer',
     customerName: 'Sample Customer',
@@ -918,6 +994,7 @@ const SAMPLE_ORDER_DATA: SalesOrder = {
 const SAMPLE_PURCHASE_ORDER_DATA: PurchaseOrder = {
     id: 'sample-purchase-order',
     workspaceId: 'sample-workspace',
+    isArchived: false,
     orderNumber: 'PO-00019',
     supplierId: 'sample-supplier',
     supplierName: 'Sample Supplier',
@@ -1742,6 +1819,39 @@ function createPartnerDetailsPreview(options: CustomTemplatePreviewOptions): Tem
     }
 }
 
+function createTravelBookingPreview(options: CustomTemplatePreviewOptions): TemplatePreview {
+    const travelBookingData = options.travelBookingData || SAMPLE_TRAVEL_BOOKING_DATA
+    const configuredPrintLang = options.features?.print_lang
+    const printLang = options.printLang
+        || (configuredPrintLang && configuredPrintLang !== 'auto' ? configuredPrintLang : 'en')
+    const fixedPrintLang: TemplatePreview['fixedPrintLang'] = printLang.startsWith('ar')
+        ? 'ar'
+        : printLang.startsWith('ku')
+            ? 'ku'
+            : 'en'
+
+    return {
+        fields: [],
+        page: { widthMm: 210, heightMm: 297 },
+        fixedPrintLang,
+        createElement: (_data, _effectiveId, printLangOverride) => (
+            <TravelBookingPrintTemplate
+                workspaceName={options.workspaceName}
+                printLang={printLangOverride || fixedPrintLang}
+                booking={travelBookingData.booking}
+                passengers={travelBookingData.passengers}
+                iqdPreference={options.features?.iqd_display_preference || 'IQD'}
+                logoUrl={options.features?.logo_url}
+            />
+        ),
+        buildPdf: (element, printLangOverride) => generateTemplatePdf({
+            element,
+            format: 'a4',
+            printLang: printLangOverride || fixedPrintLang
+        })
+    }
+}
+
 function createPartnerOrderItemsPreview(options: CustomTemplatePreviewOptions): TemplatePreview {
     const partnerOrderItemsData = options.partnerOrderItemsData || SAMPLE_PARTNER_ORDER_ITEMS_DATA
     const configuredPrintLang = options.features?.print_lang
@@ -2194,6 +2304,10 @@ export function createCustomTemplatePreview(
 
     if (target.moduleTypeKey === PARTNER_DETAILS_TEMPLATE_KEY) {
         return createPartnerDetailsPreview(options)
+    }
+
+    if (target.moduleTypeKey === TRAVEL_BOOKING_TEMPLATE_KEY) {
+        return createTravelBookingPreview(options)
     }
 
     if (target.moduleTypeKey === PARTNER_ORDER_ITEMS_TEMPLATE_KEY) {

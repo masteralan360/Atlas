@@ -830,8 +830,8 @@ export interface BusinessPartnerMergeCandidate extends BaseEntity {
   status: BusinessPartnerMergeStatus
 }
 
-export type SalesOrderStatus = 'draft' | 'pending' | 'completed' | 'cancelled'
-export type PurchaseOrderStatus = 'draft' | 'ordered' | 'received' | 'completed' | 'cancelled'
+export type SalesOrderStatus = 'draft' | 'pending' | 'completed' | 'cancelled' | 'returned'
+export type PurchaseOrderStatus = 'draft' | 'ordered' | 'received' | 'completed' | 'cancelled' | 'returned'
 export type OrderType = 'sales' | 'purchase'
 export type OrderApprovalStatus = 'requested' | 'approved' | 'rejected'
 export type OrderPaymentStatus = 'unpaid' | 'partial' | 'paid'
@@ -1238,6 +1238,8 @@ export interface CommissionCalculation {
 }
 
 export interface SalesOrder extends BaseEntity {
+  /** Archived orders remain readable, but are excluded from the active order list. */
+  isArchived: boolean
   orderNumber: string
   businessPartnerId?: string | null
   customerId: string
@@ -1311,6 +1313,8 @@ export interface SalesOrder extends BaseEntity {
 }
 
 export interface PurchaseOrder extends BaseEntity {
+  /** Archived orders remain readable, but are excluded from the active order list. */
+  isArchived: boolean
   orderNumber: string
   businessPartnerId?: string | null
   supplierId: string
@@ -1497,6 +1501,7 @@ export interface TravelBooking extends BaseEntity {
 export interface TravelPassenger extends BaseEntity {
   bookingId: string
   name: string
+  phoneNumber?: string | null
   transportationType: TravelTransportationType
   price: number
 }

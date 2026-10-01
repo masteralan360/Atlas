@@ -1,12 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Ban, CheckCircle2, CircleDollarSign, CreditCard, FilePenLine, Printer, ReceiptText, RotateCcw, Trash2, UsersRound } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { useAuth } from '@/auth'
+import { isSupabaseConfigured, useAuth } from '@/auth'
 import { STATUS_ADVANCE_HOLD_DURATION_MS } from '@/lib/pressAndHold'
-import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
+import type { CustomTemplateLayout } from '@/lib/printPreviewEditorStore'
+import {
+    buildCustomTemplateLayoutPdf,
+    createCustomTemplatePreview,
+    getCustomTemplatePrintLanguageWarning,
+    getCustomTemplateTarget,
+    getStoredCustomTemplateLabel,
+    isCustomTemplatePrintLanguageCompatible,
+    readCustomTemplateLayout,
+    resolveCustomTemplatePrintLanguage,
+    TRAVEL_BOOKING_TEMPLATE_KEY,
+    type StoredCustomTemplateRow
+} from '@/lib/customTemplates'
+import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
-import { generateTemplatePdf } from '@/services/pdfGenerator'
 import { printPdfBlob } from '@/services/pdfPrintService'
 import {
     bookTravelBooking,
@@ -45,7 +57,7 @@ import {
 } from '@/ui/components'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
 import { RecordTravelBookingPaymentDialog } from './RecordTravelBookingPaymentDialog'
-import { TravelBookingPrintTemplate } from './TravelBookingPrintTemplate'
+import { TravelPassengersTable } from './TravelPassengersTable'
 import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
 
 interface TravelBookingDetailsViewProps {
@@ -68,16 +80,47 @@ export function TravelBookingDetailsView({ booking, passengers, payments, onBack
     const { t, i18n } = useTranslation()
     const { toast } = useToast()
     const { user } = useAuth()
-    const { features, workspaceName } = useWorkspace()
+    const { features, workspaceName, isLocalMode } = useWorkspace()
     const [isProcessing, setIsProcessing] = useState(false)
     const [isPaymentOpen, setIsPaymentOpen] = useState(false)
     const [isDeleteOpen, setIsDeleteOpen] = useState(false)
     const [isCancelOpen, setIsCancelOpen] = useState(false)
     const [isPrintOpen, setIsPrintOpen] = useState(false)
+    const [customPrintTemplates, setCustomPrintTemplates] = useState<StoredCustomTemplateRow[]>([])
+    const [selectedPrintTemplate, setSelectedPrintTemplate] = useState<StoredCustomTemplateRow | null>(null)
     const [transactionToReverse, setTransactionToReverse] = useState<PaymentTransaction | null>(null)
     const [showAdvanceHoldTip, setShowAdvanceHoldTip] = useState(false)
     const advanceHoldMissCountRef = useRef(0)
     const advanceHoldTipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const workspaceId = user?.workspaceId
+    const travelBookingTarget = getCustomTemplateTarget(TRAVEL_BOOKING_TEMPLATE_KEY)!
+    const currentTemplatePrintLanguage = resolveCustomTemplatePrintLanguage(
+        features.print_lang,
+        i18n.language
+    )
+
+    useEffect(() => {
+        if (!workspaceId || (!isLocalMode && !isSupabaseConfigured)) {
+            setCustomPrintTemplates([])
+            return
+        }
+
+        let cancelled = false
+        void fetchCachedCustomTemplates(workspaceId, {
+            moduleTypeKey: TRAVEL_BOOKING_TEMPLATE_KEY,
+            activeOnly: true
+        }).then((templates) => {
+            if (!cancelled) setCustomPrintTemplates(templates as StoredCustomTemplateRow[])
+        }).catch((error) => {
+            console.error('[TravelBooking] Failed to load custom print templates:', error)
+            if (!cancelled) setCustomPrintTemplates([])
+        })
+
+        return () => {
+            cancelled = true
+        }
+    }, [isLocalMode, workspaceId])
+
     const activePayments = useMemo(() => getActiveTravelBookingPayments(payments), [payments])
     const paymentHistoryEntries = useMemo(() => {
         const reversalsByOriginalPaymentId = new Map<string, PaymentTransaction>()
@@ -96,29 +139,78 @@ export function TravelBookingDetailsView({ booking, passengers, payments, onBack
     }, [payments])
     const canEdit = (booking.status === 'draft' || booking.status === 'booked') && activePayments.length === 0
     const canRecordPayment = booking.status === 'booked' || booking.status === 'partially_paid'
-    const bookingPrintPreview = useMemo<TemplatePreview>(() => ({
-        fields: [],
-        page: { widthMm: 210, heightMm: 297 },
-        createElement: (_data, _effectiveId, printLangOverride) => {
-            const baseLanguage = features.print_lang !== 'auto' ? features.print_lang : i18n.language
-            return <TravelBookingPrintTemplate
-                workspaceName={workspaceName}
-                printLang={printLangOverride || baseLanguage}
-                booking={booking}
-                passengers={passengers}
-                iqdPreference={features.iqd_display_preference}
-                logoUrl={features.logo_url}
-            />
-        },
-        buildPdf: async (element, printLangOverride) => {
-            const baseLanguage = features.print_lang !== 'auto' ? features.print_lang : i18n.language
-            return generateTemplatePdf({
-                element,
-                format: 'a4',
-                printLang: printLangOverride || baseLanguage
-            })
+    const travelBookingTemplateOptions = useMemo(() => ({
+        workspaceId,
+        workspaceName,
+        features,
+        printLang: features.print_lang !== 'auto' ? features.print_lang : i18n.language,
+        travelBookingData: { booking, passengers }
+    }), [booking, features, i18n.language, passengers, workspaceId, workspaceName])
+    const bookingPrintPreview = useMemo(
+        () => createCustomTemplatePreview(travelBookingTarget, travelBookingTemplateOptions),
+        [travelBookingTarget, travelBookingTemplateOptions]
+    )
+    const activeTemplateLayout = useMemo<CustomTemplateLayout>(() => {
+        const selectedLayout = selectedPrintTemplate
+            && selectedPrintTemplate.module_type_key === TRAVEL_BOOKING_TEMPLATE_KEY
+            && isCustomTemplatePrintLanguageCompatible(selectedPrintTemplate, currentTemplatePrintLanguage)
+            ? readCustomTemplateLayout(selectedPrintTemplate)
+            : null
+        if (selectedLayout) return selectedLayout
+
+        return {
+            version: 1,
+            label: t('travelTransportation.print.title'),
+            moduleTypeKey: TRAVEL_BOOKING_TEMPLATE_KEY,
+            nativeTemplateKey: travelBookingTarget.nativeTemplateKey,
+            page: travelBookingTarget.page || { widthMm: 210, heightMm: 297 },
+            fields: {},
+            annotations: [],
+            texts: [],
+            images: [],
+            shapes: [],
+            updatedAt: new Date().toISOString()
         }
-    }), [booking, features.iqd_display_preference, features.logo_url, features.print_lang, i18n.language, passengers, workspaceName])
+    }, [currentTemplatePrintLanguage, selectedPrintTemplate, t, travelBookingTarget])
+    const customPrintSelectionTemplates = useMemo(() => customPrintTemplates
+        .filter((template) => template.module_type_key === TRAVEL_BOOKING_TEMPLATE_KEY
+            && Boolean(readCustomTemplateLayout(template)))
+        .map((template) => ({
+            format: 'a4' as const,
+            template,
+            label: getStoredCustomTemplateLabel(template),
+            description: t('travelTransportation.print.a4Description'),
+            primary: template.primary,
+            disabled: !isCustomTemplatePrintLanguageCompatible(template, currentTemplatePrintLanguage),
+            warning: getCustomTemplatePrintLanguageWarning(template, currentTemplatePrintLanguage, t)
+        })), [currentTemplatePrintLanguage, customPrintTemplates, t])
+
+    const buildTravelBookingLayoutPdf = useCallback((
+        layout: CustomTemplateLayout,
+        printLangOverride?: string,
+        effectiveId?: string
+    ) => buildCustomTemplateLayoutPdf({
+        target: travelBookingTarget,
+        layout,
+        values: {},
+        options: {
+            ...travelBookingTemplateOptions,
+            printLang: printLangOverride || travelBookingTemplateOptions.printLang
+        },
+        effectiveId,
+        fieldMode: 'layoutOverrides'
+    }), [travelBookingTarget, travelBookingTemplateOptions])
+
+    const handlePrintSelection = useCallback((
+        _format: 'a4' | 'receipt' | 'label',
+        template?: StoredCustomTemplateRow,
+        nativeTemplateKey?: string
+    ) => {
+        if (template && !isCustomTemplatePrintLanguageCompatible(template, currentTemplatePrintLanguage)) return
+        const requestedTemplateKey = template?.module_type_key || nativeTemplateKey
+        if (requestedTemplateKey !== TRAVEL_BOOKING_TEMPLATE_KEY) return
+        setSelectedPrintTemplate(template || null)
+    }, [currentTemplatePrintLanguage])
 
     const runAction = async (action: () => Promise<void>, successMessage: string) => {
         if (isProcessing) return
@@ -242,21 +334,7 @@ export function TravelBookingDetailsView({ booking, passengers, payments, onBack
 
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_330px]">
                 <div className="space-y-6">
-                    <Card className="border-border/60 shadow-sm">
-                        <CardHeader><CardTitle className="flex items-center gap-2"><UsersRound className="h-5 w-5 text-primary" />{t('travelTransportation.passengers')}</CardTitle></CardHeader>
-                        <CardContent className="overflow-x-auto">
-                            <Table>
-                                <TableHeader><TableRow><TableHead>{t('travelTransportation.name')}</TableHead><TableHead>{t('travelTransportation.transportationType')}</TableHead><TableHead className="text-end">{t('travelTransportation.price')}</TableHead></TableRow></TableHeader>
-                                <TableBody>
-                                    {passengers.map((passenger) => <TableRow key={passenger.id}>
-                                        <TableCell className="font-medium">{passenger.name}</TableCell>
-                                        <TableCell>{t(`travelTransportation.${passenger.transportationType}`)}</TableCell>
-                                        <TableCell className="text-end">{formatCurrency(passenger.price, booking.currency, features.iqd_display_preference)}</TableCell>
-                                    </TableRow>)}
-                                </TableBody>
-                            </Table>
-                        </CardContent>
-                    </Card>
+                    <TravelPassengersTable passengers={passengers} currency={booking.currency} iqdPreference={features.iqd_display_preference} />
 
                     <Card className="border-border/60 shadow-sm">
                         <CardHeader><CardTitle className="flex items-center gap-2"><CreditCard className="h-5 w-5 text-primary" />{t('travelTransportation.paymentHistory')}</CardTitle></CardHeader>
@@ -323,28 +401,48 @@ export function TravelBookingDetailsView({ booking, passengers, payments, onBack
 
             <PrintFlow
                 isOpen={isPrintOpen}
-                onClose={() => setIsPrintOpen(false)}
-                onConfirm={() => setIsPrintOpen(false)}
+                onClose={() => {
+                    setIsPrintOpen(false)
+                    setSelectedPrintTemplate(null)
+                }}
+                onConfirm={() => {
+                    setIsPrintOpen(false)
+                    setSelectedPrintTemplate(null)
+                }}
                 title={t('travelTransportation.print.title')}
                 module="travelTransportation"
                 features={features}
                 workspaceName={workspaceName}
                 originId={booking.id}
                 showSaveButton={false}
-                pdfBuilder={async ({ effectiveId, printLangOverride }) => bookingPrintPreview.buildPdf(
-                    bookingPrintPreview.createElement({}, effectiveId, printLangOverride),
-                    printLangOverride
+                pdfBuilder={({ effectiveId, printLangOverride }) => buildTravelBookingLayoutPdf(
+                    activeTemplateLayout,
+                    printLangOverride,
+                    effectiveId
                 )}
-                printTemplate={({ effectiveId }) => bookingPrintPreview.createElement({}, effectiveId)}
                 templatePreview={bookingPrintPreview}
+                customTemplate={{
+                    moduleTypeKey: TRAVEL_BOOKING_TEMPLATE_KEY,
+                    nativeTemplateKey: travelBookingTarget.nativeTemplateKey,
+                    templateId: selectedPrintTemplate?.id,
+                    label: selectedPrintTemplate
+                        ? getStoredCustomTemplateLabel(selectedPrintTemplate)
+                        : t('travelTransportation.print.title')
+                }}
+                initialTemplateLayout={activeTemplateLayout}
+                generateTemplateLayoutBlob={buildTravelBookingLayoutPdf}
                 printSelectionOptions={[{
                     format: 'a4',
+                    nativeTemplateKey: TRAVEL_BOOKING_TEMPLATE_KEY,
                     label: t('travelTransportation.print.a4'),
                     description: t('travelTransportation.print.a4Description')
                 }]}
+                printSelectionTemplates={customPrintSelectionTemplates}
+                onPrintSelection={handlePrintSelection}
                 onPreviewPrint={async (blob) => {
                     await printPdfBlob(blob, { title: t('travelTransportation.print.title') })
                     setIsPrintOpen(false)
+                    setSelectedPrintTemplate(null)
                 }}
                 previewPrintActionLabel={t('common.print')}
             />

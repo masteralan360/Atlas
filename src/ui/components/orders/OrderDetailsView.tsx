@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import { ArrowLeft, BadgeCheck, BadgeDollarSign, CalendarDays, CircleAlert, CircleCheck, Clock3, CreditCard, Eye, LayoutGrid, List, Loader2, Lock, Package, PackageCheck, Pencil, Plus, Printer, Receipt, RotateCcw, ShoppingCart, Trash2, TrendingUp, Truck, UsersRound, Warehouse, XCircle } from 'lucide-react'
+import { Archive, ArrowLeft, BadgeCheck, BadgeDollarSign, CalendarDays, CircleAlert, CircleCheck, Clock3, CreditCard, Eye, LayoutGrid, List, Loader2, Lock, Package, PackageCheck, Pencil, Plus, Printer, Receipt, RotateCcw, ShoppingCart, Trash2, TrendingUp, Truck, UsersRound, Warehouse, XCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLocalizedOrderError } from '@/lib/orderErrors'
+import { isOrderArchiveEligible } from '@/lib/orderArchiving'
 import { ORDER_STATUS_ADVANCE_HOLD_DURATION_MS } from '@/lib/pressAndHold'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
 import { Link, useLocation } from 'wouter'
@@ -47,6 +48,7 @@ import {
     recordObligationSettlement,
     returnSalesOrder,
     reversePaymentTransaction,
+    setOrderArchived,
     updatePurchaseOrderStatus,
     updateSalesOrderStatus,
     useBusinessPartner,
@@ -87,6 +89,12 @@ import {
     DialogFooter,
     DialogHeader,
     DialogTitle,
+    AppDialog,
+    AppDialogBody,
+    AppDialogContent,
+    AppDialogFooter,
+    AppDialogHeader,
+    AppDialogTitle,
     PrintFlow,
     ReturnConfirmationModal,
     SettlementDialog,
@@ -342,6 +350,8 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const [returnPaymentAccount, setReturnPaymentAccount] = useState<PaymentAccount | null>(null)
     const [isPostReturnAdjustmentOpen, setIsPostReturnAdjustmentOpen] = useState(false)
     const [isSavingPostReturnAdjustment, setIsSavingPostReturnAdjustment] = useState(false)
+    const [archiveConfirmation, setArchiveConfirmation] = useState<'archive' | 'unarchive' | null>(null)
+    const [isUpdatingArchive, setIsUpdatingArchive] = useState(false)
 
     useEffect(() => {
         localStorage.setItem('order_details_view_mode', viewMode)
@@ -493,6 +503,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const canApproveOrderRequests = user?.role === 'admin'
     const canViewProfit = !hideCosts
     const canReturnCurrentSalesOrder = resolved?.kind === 'sales'
+        && !resolved.order.isArchived
         && resolved.order.status === 'completed'
         && resolved.order.returnStatus !== 'full'
         && canReturnSalesOrder({
@@ -1007,7 +1018,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const isSales = resolved.kind === 'sales'
     const order = resolved.order
     const isApprovalRequested = isOrderApprovalRequested(order)
-    const canEditOrder = canManageOrder && order.status === 'draft' && (!isApprovalRequested || canApproveOrderRequests)
+    const canEditOrder = !order.isArchived && canManageOrder && order.status === 'draft' && (!isApprovalRequested || canApproveOrderRequests)
     const currency = order.currency
     const iqd = features.iqd_display_preference
     const orderAdjustments = normalizeOrderAdjustments(order.orderAdjustments, currency)
@@ -1031,6 +1042,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const canCreatePostReturnAdjustment = isSales
         && salesOrderReturns.length > 0
         && user?.role === 'admin'
+        && !order.isArchived
         && !order.isLocked
     const isFinanced = order.paymentMethod === 'loan' || order.paymentMethod === 'installments' || !!order.linkedLoanId
     const linkedLoanRoute = linkedLoan
@@ -1082,20 +1094,48 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         ? 100
         : Math.round((workflowSegments.filter((segment) => segment.reached).length / workflowSegments.length) * 100)
 
+    const canArchiveOrder = order.isArchived === false
+        && canManageOrder
+        && isOrderArchiveEligible(order, isSales ? 'sales' : 'purchase')
     const actions = isSales
         ? [
             isApprovalRequested && canApproveOrderRequests ? { key: 'approve', icon: BadgeCheck, label: t('orders.actions.approve', { defaultValue: 'Approve' }), onClick: () => runWorkflowAction('approve', () => approveSalesOrderRequest(order.id, user?.id ?? null), t('orders.actions.approveRequestSuccess', { defaultValue: 'Order request approved' })), variant: 'default' as const } : null,
             !isApprovalRequested && canManageOrder && order.status === 'draft' ? { key: 'reserve', icon: PackageCheck, label: t('orders.actions.reserve') || 'Reserve', onClick: () => runWorkflowAction('reserve', () => updateSalesOrderStatus(order.id, 'pending', { actingUserRole: user?.role }), t('orders.details.messages.reserveSuccess') || 'Sales order reserved'), variant: 'default' as const } : null,
             !isApprovalRequested && canManageOrder && order.status === 'pending' ? { key: 'complete', icon: CircleCheck, label: t('orders.actions.complete') || 'Complete', onClick: () => runWorkflowAction('complete', () => updateSalesOrderStatus(order.id, 'completed', { actingUserRole: user?.role }), t('orders.details.messages.completeSuccess') || 'Sales order completed'), variant: 'default' as const } : null,
-            !isApprovalRequested && canManageOrder && order.status === 'pending' ? { key: 'cancel', icon: XCircle, label: t('orders.actions.cancel') || 'Cancel', onClick: () => setCancelConfirm({ isOpen: true }), variant: 'outline' as const } : null
+            !isApprovalRequested && canManageOrder && order.status === 'pending' ? { key: 'cancel', icon: XCircle, label: t('orders.actions.cancel') || 'Cancel', onClick: () => setCancelConfirm({ isOpen: true }), variant: 'outline' as const } : null,
+            canArchiveOrder ? { key: 'archive', icon: Archive, label: t('orders.archive.archiveAction'), onClick: () => setArchiveConfirmation('archive'), variant: 'outline' as const } : null
         ].filter(Boolean)
         : [
             isApprovalRequested && canApproveOrderRequests ? { key: 'approve', icon: BadgeCheck, label: t('orders.actions.approve', { defaultValue: 'Approve' }), onClick: () => runWorkflowAction('approve', () => approvePurchaseOrderRequest(order.id, user?.id ?? null), t('orders.actions.approveRequestSuccess', { defaultValue: 'Order request approved' })), variant: 'default' as const } : null,
             !isApprovalRequested && canManageOrder && order.status === 'draft' ? { key: 'order', icon: ShoppingCart, label: t('orders.actions.order') || 'Order', onClick: () => runWorkflowAction('order', () => updatePurchaseOrderStatus(order.id, 'ordered'), t('orders.details.messages.orderSuccess') || 'Purchase order sent'), variant: 'default' as const } : null,
             !isApprovalRequested && canManageOrder && order.status === 'ordered' ? { key: 'receive', icon: PackageCheck, label: t('orders.actions.receive') || 'Receive', onClick: () => runWorkflowAction('receive', () => updatePurchaseOrderStatus(order.id, 'received'), t('orders.details.messages.receiveSuccess') || 'Purchase order received'), variant: 'default' as const } : null,
             !isApprovalRequested && canManageOrder && order.status === 'received' ? { key: 'complete', icon: CircleCheck, label: t('orders.actions.complete') || 'Complete', onClick: () => runWorkflowAction('complete', () => updatePurchaseOrderStatus(order.id, 'completed'), t('orders.details.messages.completeSuccess') || 'Purchase order completed'), variant: 'default' as const } : null,
-            !isApprovalRequested && canManageOrder && (order.status === 'draft' || order.status === 'ordered') ? { key: 'cancel', icon: XCircle, label: t('orders.actions.cancel') || 'Cancel', onClick: () => setCancelConfirm({ isOpen: true }), variant: 'outline' as const } : null
+            !isApprovalRequested && canManageOrder && (order.status === 'draft' || order.status === 'ordered') ? { key: 'cancel', icon: XCircle, label: t('orders.actions.cancel') || 'Cancel', onClick: () => setCancelConfirm({ isOpen: true }), variant: 'outline' as const } : null,
+            canArchiveOrder ? { key: 'archive', icon: Archive, label: t('orders.archive.archiveAction'), onClick: () => setArchiveConfirmation('archive'), variant: 'outline' as const } : null
         ].filter(Boolean)
+
+    const handleArchiveConfirmation = async () => {
+        if (!archiveConfirmation || isUpdatingArchive) return
+        const targetArchived = archiveConfirmation === 'archive'
+        setIsUpdatingArchive(true)
+        try {
+            await setOrderArchived(order.id, isSales ? 'sales' : 'purchase', targetArchived)
+            setArchiveConfirmation(null)
+            toast({ title: targetArchived
+                ? t('orders.archive.archiveSuccess')
+                : t('orders.archive.unarchiveSuccess') })
+        } catch (error) {
+            toast({
+                title: t('common.error'),
+                description: getLocalizedOrderError(error, t, targetArchived
+                    ? t('orders.archive.archiveError')
+                    : t('orders.archive.unarchiveError')),
+                variant: 'destructive'
+            })
+        } finally {
+            setIsUpdatingArchive(false)
+        }
+    }
 
     const confirmDelete = async () => {
         setIsDeleting(true)
@@ -1368,10 +1408,16 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                     <span>/</span>
                     <span className="inline-flex items-center gap-1 text-foreground">
                         <span className="font-semibold">{order.orderNumber}</span>
-                        {isSales && order.status === 'completed' && (
+                        {!order.isArchived && isSales && order.status === 'completed' && (
                             <SalesOrderAuditBreadcrumbAction onClick={() => setAuditOpen(true)} />
                         )}
                     </span>
+                    {order.isArchived ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                            <Archive className="h-3 w-3" />
+                            {t('orders.archive.archivedBadge')}
+                        </span>
+                    ) : null}
                     {isSales && (order as SalesOrder).sourceChannel === 'marketplace' ? (
                         <span className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-sky-700 dark:text-sky-300">
                             {t('ecommerce.title', { defaultValue: 'E-Commerce' })}
@@ -1385,6 +1431,14 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                     ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                    {order.isArchived ? (
+                        canManageOrder ? (
+                            <Button variant="outline" onClick={() => setArchiveConfirmation('unarchive')}>
+                                <RotateCcw className="mr-2 h-4 w-4" />
+                                {t('orders.archive.unarchiveAction')}
+                            </Button>
+                        ) : null
+                    ) : <>
                     {canEditOrder && (
                         <Button
                             variant="outline"
@@ -1398,7 +1452,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                         if (!action) return null
                         const ActionIcon = action.icon
                         const isActionLoading = activeWorkflowAction === action.key
-                        const isProgressAction = action.key !== 'cancel'
+                        const isProgressAction = action.key !== 'cancel' && action.key !== 'archive'
 
                         if (isProgressAction) {
                             return (
@@ -1535,6 +1589,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                         <Printer className="h-4 w-4" />
                         {t('common.print') || 'Print'}
                     </Button>
+                    </>}
                 </div>
             </div>
 
@@ -1570,7 +1625,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                         </CardContent>
                     </Card>
 
-                    {isSales && salesAgentCommissionsEnabled && productCommissionPreviewAgentIds.length > 0 ? (
+                    {!order.isArchived && isSales && salesAgentCommissionsEnabled && productCommissionPreviewAgentIds.length > 0 ? (
                         <ProductCommissionPreview
                             workspaceId={workspaceId}
                             items={productCommissionPreviewItems}
@@ -1597,7 +1652,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             <CardContent className="px-3 sm:px-6">
                                 <div className="divide-y overflow-hidden rounded-2xl border">
                                     {installments.map((installment) => {
-                                        const canPayInstallment = !isApprovalRequested && canManageOrder && installment.balanceAmount > 0 && !order.isLocked
+                                        const canPayInstallment = !order.isArchived && !isApprovalRequested && canManageOrder && installment.balanceAmount > 0 && !order.isLocked
                                         return (
                                             <div key={installment.id} className="space-y-3 p-3">
                                                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2507,10 +2562,58 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 </DialogContent>
             </Dialog>
 
+            <AppDialog
+                open={archiveConfirmation !== null}
+                onOpenChange={(open) => {
+                    if (!open && !isUpdatingArchive) setArchiveConfirmation(null)
+                }}
+            >
+                <AppDialogContent className="max-w-md" showCloseButton={!isUpdatingArchive}>
+                    <AppDialogHeader>
+                        <AppDialogTitle className="flex items-center gap-2">
+                            {archiveConfirmation === 'archive'
+                                ? <Archive className="h-5 w-5 text-primary" />
+                                : <RotateCcw className="h-5 w-5 text-primary" />}
+                            {archiveConfirmation === 'archive'
+                                ? t('orders.archive.archiveConfirmTitle')
+                                : t('orders.archive.unarchiveConfirmTitle')}
+                        </AppDialogTitle>
+                    </AppDialogHeader>
+                    <AppDialogBody>
+                        <p className="text-sm leading-relaxed text-muted-foreground">
+                            {archiveConfirmation === 'archive'
+                                ? t('orders.archive.archiveConfirm')
+                                : t('orders.archive.unarchiveConfirm')}
+                        </p>
+                        <div className="mt-4 rounded-lg border bg-muted/30 px-3 py-2 text-sm font-semibold">
+                            {order.orderNumber}
+                        </div>
+                    </AppDialogBody>
+                    <AppDialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => setArchiveConfirmation(null)}
+                            disabled={isUpdatingArchive}
+                        >
+                            {t('common.cancel')}
+                        </Button>
+                        <Button onClick={handleArchiveConfirmation} disabled={isUpdatingArchive}>
+                            {isUpdatingArchive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                                : archiveConfirmation === 'archive'
+                                    ? <Archive className="mr-2 h-4 w-4" aria-hidden="true" />
+                                    : <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />}
+                            {archiveConfirmation === 'archive'
+                                ? t('orders.archive.archiveAction')
+                                : t('orders.archive.unarchiveAction')}
+                        </Button>
+                    </AppDialogFooter>
+                </AppDialogContent>
+            </AppDialog>
+
             {isSales && <SalesOrderIntegrityAuditDialog open={auditOpen} onOpenChange={setAuditOpen}
                 workspaceId={workspaceId} orderId={order.id} mode={getWorkspaceDataMode(workspaceId)} />}
             <PrintFlow
-                isOpen={showPrintPreview}
+                isOpen={showPrintPreview && !order.isArchived}
                 onClose={() => {
                     setShowPrintPreview(false)
                     customOrderPrint.resetSelection()

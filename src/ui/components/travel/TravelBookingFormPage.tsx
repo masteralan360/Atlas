@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, CalendarDays, CircleDollarSign, ClipboardList, Minus, Plus, Save, Ticket, Trash2, UsersRound } from 'lucide-react'
+import { ArrowLeft, CalendarDays, CircleDollarSign, ClipboardList, Minus, Phone, Plus, Save, Ticket, Trash2, UsersRound } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { useAuth } from '@/auth'
@@ -54,6 +54,7 @@ import { PaymentMethodSelect } from '@/ui/components/payments/PaymentMethodSelec
 type PassengerDraft = {
     id: string
     name: string
+    phoneNumber: string
     transportationType: TravelTransportationType | ''
     price: string
 }
@@ -67,7 +68,7 @@ interface TravelBookingFormPageProps {
 }
 
 function createPassengerDraft(id: string): PassengerDraft {
-    return { id, name: '', transportationType: '', price: '' }
+    return { id, name: '', phoneNumber: '', transportationType: '', price: '' }
 }
 
 function bookingStatusAllowsEditing(booking: TravelBooking | null | undefined) {
@@ -113,6 +114,7 @@ export function TravelBookingFormPage({ workspaceId, booking, existingPassengers
             ? existingPassengers.map((passenger) => ({
                 id: passenger.id,
                 name: passenger.name,
+                phoneNumber: passenger.phoneNumber ?? '',
                 transportationType: passenger.transportationType,
                 price: String(passenger.price)
             }))
@@ -175,6 +177,7 @@ export function TravelBookingFormPage({ workspaceId, booking, existingPassengers
             passengers: passengers.map((passenger) => ({
                 id: passenger.id,
                 name: passenger.name,
+                phoneNumber: passenger.phoneNumber.trim() || null,
                 transportationType: passenger.transportationType as TravelTransportationType,
                 price: parseFormattedNumber(passenger.price)
             })),
@@ -244,7 +247,7 @@ export function TravelBookingFormPage({ workspaceId, booking, existingPassengers
                         </CardHeader>
                         <CardContent className="space-y-3">
                             {passengers.map((passenger, index) => (
-                                <div key={passenger.id} className="grid gap-3 rounded-2xl border bg-muted/15 p-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(160px,0.8fr)_minmax(130px,0.6fr)_auto] sm:items-end">
+                                <div key={passenger.id} className="grid gap-3 rounded-2xl border bg-muted/15 p-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(150px,0.8fr)_minmax(120px,0.6fr)_auto] sm:items-end">
                                     <div className="space-y-2">
                                         <Label htmlFor={`travel-passenger-name-${passenger.id}`}>{t('travelTransportation.name')} *</Label>
                                         <Input
@@ -252,6 +255,17 @@ export function TravelBookingFormPage({ workspaceId, booking, existingPassengers
                                             value={passenger.name}
                                             disabled={!isEditable || isSaving}
                                             onChange={(event) => updatePassenger(passenger.id, { name: event.target.value })}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor={`travel-passenger-phone-${passenger.id}`} className="flex items-center gap-2"><Phone className="h-4 w-4 text-muted-foreground" />{t('travelTransportation.phoneNumber')}</Label>
+                                        <Input
+                                            id={`travel-passenger-phone-${passenger.id}`}
+                                            type="tel"
+                                            autoComplete="tel"
+                                            value={passenger.phoneNumber}
+                                            disabled={!isEditable || isSaving}
+                                            onChange={(event) => updatePassenger(passenger.id, { phoneNumber: event.target.value })}
                                         />
                                     </div>
                                     <div className="space-y-2">
@@ -285,7 +299,7 @@ export function TravelBookingFormPage({ workspaceId, booking, existingPassengers
                                         type="button"
                                         variant="ghost"
                                         size="icon"
-                                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                        className="text-destructive hover:bg-destructive/10 hover:text-destructive sm:col-span-2 sm:justify-self-end lg:col-span-1"
                                         disabled={!isEditable || isSaving || passengers.length === 1}
                                         onClick={() => setPassengers((current) => current.filter((row) => row.id !== passenger.id))}
                                         aria-label={`${t('common.delete')} ${index + 1}`}

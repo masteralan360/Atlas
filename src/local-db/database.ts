@@ -3645,6 +3645,23 @@ export class AtlasDatabase extends Dexie {
       if (rows.length) await tx.table('product_uoms').bulkPut(rows)
     })
 
+    this.version(141).upgrade(async (tx) => {
+      const [salesOrders, purchaseOrders] = await Promise.all([
+        tx.table('sales_orders').toArray(),
+        tx.table('purchase_orders').toArray()
+      ]) as [Array<Record<string, unknown>>, Array<Record<string, unknown>>]
+      await Promise.all([
+        tx.table('sales_orders').bulkPut(salesOrders.map((order) => ({
+          ...order,
+          isArchived: order.isArchived === true
+        }))),
+        tx.table('purchase_orders').bulkPut(purchaseOrders.map((order) => ({
+          ...order,
+          isArchived: order.isArchived === true
+        })))
+      ])
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()

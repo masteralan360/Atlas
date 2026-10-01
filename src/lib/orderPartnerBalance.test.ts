@@ -40,7 +40,8 @@ function salesOrder(id: string, total: number): SalesOrder {
     syncStatus: 'synced',
     lastSyncedAt: TIMESTAMP,
     version: 1,
-    isDeleted: false
+    isDeleted: false,
+    isArchived: false
   }
 }
 

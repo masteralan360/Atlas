@@ -116,6 +116,7 @@ function salesOrder(overrides: Partial<SalesOrder> = {}): SalesOrder {
         lastSyncedAt: null,
         version: 1,
         isDeleted: false,
+        isArchived: false,
         ...overrides
     }
 }
@@ -161,6 +162,7 @@ function purchaseOrder(overrides: Partial<PurchaseOrder> = {}): PurchaseOrder {
         lastSyncedAt: null,
         version: 1,
         isDeleted: false,
+        isArchived: false,
         ...overrides
     }
 }

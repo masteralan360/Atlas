@@ -48,6 +48,7 @@ CREATE TABLE crm.sales_orders (
   is_locked boolean NOT NULL DEFAULT false,
   source_channel text NOT NULL DEFAULT 'manual'::text,
   marketplace_order_id uuid NULL,
+  is_archived boolean NOT NULL DEFAULT false,
   original_total_amount numeric NULL,
   returned_amount numeric NOT NULL DEFAULT 0,
   return_status text NOT NULL DEFAULT 'none'::text,

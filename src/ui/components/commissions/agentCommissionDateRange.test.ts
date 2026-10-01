@@ -22,6 +22,7 @@ function entry(overrides: Partial<AgentCommissionEntry> = {}): AgentCommissionEn
 function order(overrides: Partial<SalesOrder> = {}): SalesOrder {
     return {
         ...metadata, id: 'sale', orderNumber: 'SO-2026-00010', customerId: 'customer', customerName: 'Customer',
+        isArchived: false,
         items: [], subtotal: 1_000, discount: 0, tax: 0, total: 1_000, currency: 'iqd',
         exchangeRate: null, exchangeRateSource: null, exchangeRateTimestamp: null,
         status: 'completed', actualDeliveryDate: new Date(2026, 8, 3).toISOString(),

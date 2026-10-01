@@ -122,6 +122,7 @@ describe('dashboard transactions and partner profit', () => {
             lastSyncedAt: at(24),
             version: 1,
             isDeleted: false,
+            isArchived: false,
             currency: 'usd',
             items: [],
             customerId: 'customer',

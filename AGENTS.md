@@ -43,6 +43,8 @@ When changing production behavior in a module that has a developer testing suite
 
 New feature coverage does not count as part of a developer testing suite merely because standalone test files exist. The relevant tests MUST be referenced by `src/dev/testing/suites.json`, exposed through an appropriate selectable group in the Developer Test dialog, and described in that suite's localized coverage documentation. If the feature spans multiple modules, every module with an existing developer testing suite MUST expose its relevant coverage there.
 
+Every new individual test case or selectable test group added to an isolated developer suite MUST also have corresponding hosted Supabase coverage registered under that same suite's `liveGroups`. Register a new selectable group in both `groups` and `liveGroups` with matching IDs and `isolatedGroupId`, and cover the relevant live request, persisted records, server-side validation, and failure behavior. Isolated Vitest or SQL tests alone do not count as hosted coverage. Update the localized live coverage documentation and run both the isolated and hosted selections.
+
 If the change exposes an existing product bug while the suite is being updated, preserve the failing scenario and report the bug according to the developer testing guide; do not silently weaken the assertion or fix an unrelated bug unless the user requested that fix.
 
 # Atlas UI conventions

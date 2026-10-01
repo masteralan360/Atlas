@@ -618,7 +618,8 @@ describe('partner settlement', () => {
             syncStatus: 'synced',
             lastSyncedAt: occurredAt,
             version: 1,
-            isDeleted: false
+            isDeleted: false,
+            isArchived: false
         }
         const assignment: SalesOrderAgentAssignment = {
             id: 'sales-account-agent-assignment',

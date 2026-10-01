@@ -1,4 +1,4 @@
-Implement an **Order Archiving** feature for both **Sales Orders** and **Purchase Orders**.
+Navigation Rail Hover to expand
 
 Expand Testing Suite to Loans
 
@@ -25,8 +25,6 @@ Allow Shipped to be cancelled
 Make Maintenence Mode servier-side
 
 Remake PrintPreviewEditorPage
-
-Check relational-Unit bigger unit cost price
 
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide
 

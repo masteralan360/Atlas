@@ -20,6 +20,7 @@ type PurchaseOrderCreateInput = Omit<
     | 'lastSyncedAt'
     | 'version'
     | 'isDeleted'
+    | 'isArchived'
     | 'orderNumber'
 >
 
@@ -33,6 +34,7 @@ type SalesOrderCreateInput = Omit<
     | 'lastSyncedAt'
     | 'version'
     | 'isDeleted'
+    | 'isArchived'
     | 'orderNumber'
 >
 
@@ -214,7 +216,8 @@ function salesOrderWithStaleRoundedBalance(customerId: string): SalesOrder {
         syncStatus: 'synced',
         lastSyncedAt: now,
         version: 1,
-        isDeleted: false
+        isDeleted: false,
+        isArchived: false
     }
 }
 

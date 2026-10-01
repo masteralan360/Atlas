@@ -669,6 +669,7 @@ export function mapSaleToSalesHistoryAtlasStandardOrder(sale: Sale): SalesOrder 
         updatedAt: sale.updated_at || sale.created_at,
         version: 1,
         isDeleted: false,
+        isArchived: false,
         syncStatus: 'synced',
         lastSyncedAt: null,
         orderNumber: sale._transactionNo || sale._orderNumber || `#${sale.sequenceId || sale.id.slice(0, 8)}`,

@@ -153,6 +153,7 @@ function completedOrder(id: string): SalesOrder {
     lastSyncedAt: now,
     version: 1,
     isDeleted: false,
+    isArchived: false,
   };
 }
 

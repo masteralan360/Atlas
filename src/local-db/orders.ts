@@ -205,7 +205,7 @@ type BaseEntityPayload = {
 
 type CreateOrderInput<TOrder extends SalesOrder | PurchaseOrder> = Omit<
     TOrder,
-    'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted' | 'orderNumber'
+    'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted' | 'isArchived' | 'orderNumber'
 > & {
     /**
      * The timestamp captured when the order form was opened. It is optional
@@ -532,6 +532,8 @@ async function syncSoftDelete(tableName: SimpleEntityTableName | OrderTableName 
         await addToOfflineMutations(tableName, entityId, 'delete', { id: entityId }, workspaceId)
     }
 }
+
+export { setOrderArchived } from './orderArchiving'
 
 export function isOrderApprovalRequested(order: OrderWithApproval) {
     return order.approvalStatus === 'requested'
@@ -868,6 +870,7 @@ function buildBaseEntity<T extends Record<string, unknown>>(
         updatedAt: now,
         version: 1,
         isDeleted: false,
+        isArchived: false,
         isLocked: false,
         ...getSyncMetadata(workspaceId, now)
     }

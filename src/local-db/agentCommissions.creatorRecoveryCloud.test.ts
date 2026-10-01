@@ -39,7 +39,7 @@ beforeEach(async () => {
     isInstallmentBased: false, installmentCount: 0, installmentFrequency: null,
     firstDueDate: null, nextDueDate: null, reservedAt: null, returnStatus: "none", returnedAmount: 0,
     commissionEnabled: true, commissionMode: "tracked", isPaid: false, paymentStatus: "unpaid",
-    paidAmount: 0, balanceAmount: 100, items: [], syncStatus: "synced", isDeleted: false,
+    paidAmount: 0, balanceAmount: 100, items: [], syncStatus: "synced", isDeleted: false, isArchived: false,
     createdAt: "2026-09-01T00:00:00Z", updatedAt: "2026-09-01T00:00:00Z", version: 1,
     lastSyncedAt: "2026-09-01T00:00:00Z",
   } as SalesOrder);

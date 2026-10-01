@@ -67,7 +67,9 @@ import type {
     SaleProductExchange,
     PaymentTransaction,
     PaymentTransactionSourceType,
-    OfflineMutation
+    OfflineMutation,
+    SalesOrder,
+    PurchaseOrder
 } from './models'
 import { isReservedUnitCode, normalizeUnitCode } from './models'
 import {
@@ -1957,6 +1959,10 @@ async function fetchTableFromSupabaseInternal<T extends { id: string, syncStatus
     const remoteIds = new Set(remoteRows.map((row) => row.id))
     const remoteItems = remoteRows.map((remoteItem) => {
         const localItem = toCamelCase(remoteItem as any) as unknown as T
+        if (tableName === 'sales_orders' || tableName === 'purchase_orders') {
+            const order = localItem as unknown as SalesOrder | PurchaseOrder
+            order.isArchived = order.isArchived === true
+        }
         if (tableName === 'products') {
             const product = localItem as unknown as Product
             product.isService = product.isService === true
