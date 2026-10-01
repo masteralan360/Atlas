@@ -83,6 +83,16 @@
         ]
       },
       {
+        "id": "purchase-receipt-rounding",
+        "titleKey": "devTesting.groups.purchaseReceiptRounding",
+        "layer": "live",
+        "isolatedGroupId": "purchase-receipt-rounding",
+        "timeoutMs": 300000,
+        "files": [
+          "src/dev/testing/suites/purchaseReceiptRoundingLive.test.ts"
+        ]
+      },
+      {
         "id": "hosted-prices",
         "titleKey": "devTesting.saleOrdersHostedGroups.h06",
         "layer": "live",
@@ -438,16 +448,25 @@
         "titleKey": "devTesting.groups.productUom",
         "layer": "business",
         "files": [
-            "src/dev/testing/suites/orderLineItemLayout.test.ts",
-            "src/dev/testing/suites/orderUom.test.ts",
+          "src/dev/testing/suites/orderLineItemLayout.test.ts",
+          "src/dev/testing/suites/orderUom.test.ts",
           "src/dev/testing/suites/orderUomTransactions.test.ts",
           "src/local-db/orders.test.ts",
           "src/lib/orderLineItems.test.ts",
-            "src/lib/orderUnitErrors.test.ts",
-            "src/local-db/productUoms.test.ts",
-            "src/lib/productUomMigration.test.ts",
-            "src/lib/revenueAnalysis.test.ts",
-            "src/lib/orderPrintReturnState.test.ts"
+          "src/lib/orderUnitErrors.test.ts",
+          "src/local-db/productUoms.test.ts",
+          "src/lib/productUomMigration.test.ts",
+          "src/lib/revenueAnalysis.test.ts",
+          "src/lib/orderPrintReturnState.test.ts"
+        ]
+      },
+      {
+        "id": "purchase-receipt-rounding",
+        "titleKey": "devTesting.groups.purchaseReceiptRounding",
+        "layer": "business",
+        "files": [
+          "src/dev/testing/suites/orderUomTransactions.test.ts",
+          "src/lib/productUomMigration.test.ts"
         ]
       },
       {

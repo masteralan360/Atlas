@@ -3,6 +3,7 @@ import 'fake-indexeddb/auto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { db } from '@/local-db/database'
+import type { PurchaseOrderItem } from '@/local-db/models'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 import { assertOrderFinancialEffects, assertStock } from '../assertions/saleOrders'
 import { installTestBrowser } from '../fixtures/browser'
@@ -323,5 +324,87 @@ describe('product UoM conversion in order transactions', () => {
       .first()
     expect(transaction).toMatchObject({ quantityDelta: 60, newQuantity: 60 })
     expect(batch).toMatchObject({ quantity: 60, costPrice: 1_333.333, currency: 'iqd' })
+  })
+
+  it('keeps fractional paid and bonus receipt quantities as the sum of their rounded base quantities', async () => {
+    const supplier = await createPartner('supplier', 'Fractional UoM supplier')
+    const { product, storage } = await createPackagedProduct(0)
+    const uoms = await replaceProductUoms(TEST_WORKSPACE_ID, product.id, [
+      { unitRef: 'builtin:sheet', unitCode: 'sheet', coefficient: 1, isBase: true, isActive: true,
+        isDefaultSelling: false, sellingPrice: 2250, costPrice: 1000, minimumSellingPrice: null },
+      { unitRef: 'builtin:meter', unitCode: 'Meter', coefficient: 0.333333, isBase: false, isActive: true,
+        isDefaultSelling: true, sellingPrice: 10, costPrice: 1, minimumSellingPrice: null },
+    ])
+    const uom = uoms.find((row) => row.unitRef === 'builtin:meter')!
+    const item: PurchaseOrderItem = {
+      id: crypto.randomUUID(),
+      productId: product.id,
+      storageId: storage.id,
+      productName: product.name,
+      productSku: product.sku,
+      unit: 'Meter',
+      uomId: uom.id,
+      uomNameSnapshot: 'Meter',
+      unitRef: uom.unitRef,
+      unitNameSnapshot: 'Meter',
+      baseUnitRef: 'builtin:sheet',
+      baseUnitCode: 'sheet',
+      baseUnitNameSnapshot: 'Sheet',
+      unitFactor: 0.333333,
+      quantity: 0.001,
+      freeBonusQuantity: 0.001,
+      inventoryQuantity: 0.000333,
+      freeBonusInventoryQuantity: 0.000333,
+      receivedQuantity: 0.000666,
+      lineTotal: 0,
+      originalCurrency: 'iqd',
+      originalUnitPrice: 0,
+      convertedUnitPrice: 0,
+      settlementCurrency: 'iqd',
+      batchNumber: null,
+      batchSalePrice: product.price,
+      batchExpiryDate: null,
+      batchManufacturingDate: null,
+    }
+    const order = await orders.createPurchaseOrder(TEST_WORKSPACE_ID, {
+      businessPartnerId: supplier.id,
+      supplierId: supplier.id,
+      supplierName: supplier.partnerName,
+      destinationStorageId: storage.id,
+      items: [item],
+      subtotal: 0,
+      discount: 0,
+      total: 0,
+      currency: 'iqd',
+      exchangeRate: null,
+      exchangeRateSource: null,
+      exchangeRateTimestamp: null,
+      exchangeRates: null,
+      status: 'received',
+      expectedDeliveryDate: null,
+      actualDeliveryDate: null,
+      isPaid: true,
+      paymentStatus: 'paid',
+      paidAmount: 0,
+      balanceAmount: 0,
+      paymentMethod: 'cash',
+      initialPaymentAmount: 0,
+      linkedLoanId: null,
+      isInstallmentBased: false,
+      installmentCount: 0,
+      installmentFrequency: null,
+      firstDueDate: null,
+      nextDueDate: null,
+      notes: '',
+      isLocked: false,
+      createdBy: null,
+    })
+    const received = order
+
+    expect(received.items[0].receivedQuantity).toBe(0.000666)
+    expect(await db.inventory.where('[productId+storageId]').equals([product.id, storage.id]).first())
+      .toMatchObject({ quantity: 0.000666 })
+    expect(await db.inventory_transactions.where('referenceId').equals(order.id).first())
+      .toMatchObject({ quantityDelta: 0.000666, newQuantity: 0.000666 })
   })
 })

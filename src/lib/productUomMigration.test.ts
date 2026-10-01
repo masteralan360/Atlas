@@ -11,8 +11,13 @@ const stageTwoPath = fileURLToPath(new URL(
   '../../supabase/migrations/20260930005105_product_uoms_transaction_validation.sql',
   import.meta.url,
 ))
+const purchaseReceiptRoundingPath = fileURLToPath(new URL(
+  '../../supabase/migrations/20261001130000_fix_purchase_received_quantity_rounding.sql',
+  import.meta.url,
+))
 const stageOneSql = readFileSync(stageOnePath, 'utf8')
 const stageTwoSql = readFileSync(stageTwoPath, 'utf8')
+const purchaseReceiptRoundingSql = readFileSync(purchaseReceiptRoundingPath, 'utf8')
 const localDatabaseSource = readFileSync(localDatabasePath, 'utf8')
 
 describe('product UoM migration stages', () => {
@@ -44,6 +49,12 @@ describe('product UoM migration stages', () => {
     expect(stageTwoSql).toContain("pending_item->>''unitFactor''")
     expect(stageTwoSql).toContain('v_original_cost_total / (v_required_quantity / v_unit_factor)')
     expect(stageTwoSql).not.toMatch(/RAISE EXCEPTION[^;]*quick_order_related_units_unsupported/i)
+  })
+
+  it('validates purchase receipts against separately rounded paid and free base quantities', () => {
+    expect(purchaseReceiptRoundingSql).toContain('v_inventory_quantity, round(v_quantity * v_factor, 6)')
+    expect(purchaseReceiptRoundingSql).toContain('+ v_free_inventory_quantity, 6)')
+    expect(purchaseReceiptRoundingSql).toContain("new_expression text := 'round(v_received_quantity, 6) IS DISTINCT FROM round(COALESCE(v_inventory_quantity, round(v_quantity * v_factor, 6)) + v_free_inventory_quantity, 6)'")
   })
 
   it('allows renaming a custom base unit without reinterpreting its historical stock', () => {

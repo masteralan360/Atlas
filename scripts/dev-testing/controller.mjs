@@ -134,7 +134,9 @@ export class TestController {
       ...(options.caseIds ? { caseIds: options.caseIds } : {}),
       startedAt: new Date().toISOString(), status: 'running', cancelRequested: false,
       fixtures: [],
-      ...(live && options.suiteId === 'sale-orders' ? { expectedTests: selectedDenominator(options.caseIds ?? options.groups.flatMap(group => saleOrdersCatalog.find(domain => domain.id === group.domainId)?.cases.map(family => family.id) ?? [])) } : {}),
+      ...(live && options.suiteId === 'sale-orders' && options.groups.every(group => group.domainId && !group.isolatedGroupId)
+        ? { expectedTests: selectedDenominator(options.caseIds ?? options.groups.flatMap(group => saleOrdersCatalog.find(domain => domain.id === group.domainId)?.cases.map(family => family.id) ?? [])) }
+        : {}),
       groups: options.groups.map((group) => ({ id: group.id, status: 'pending', tests: [], errors: [] })),
       unavailable: (live ? suites[options.suiteId].liveUnavailable : undefined) ?? suites[options.suiteId].unavailable
     }

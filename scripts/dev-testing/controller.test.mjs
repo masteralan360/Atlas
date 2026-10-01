@@ -205,6 +205,24 @@ describe('developer runner execution and reports', () => {
     expect(spawnChild).toHaveBeenCalledTimes(1)
   })
 
+  it('runs the paired purchase receipt isolated checks without applying the Sale Orders domain denominator', async () => {
+    const { controller, children, spawnChild } = await arrangeController()
+    controller.preflight = vi.fn(async () => ({ target: { host: 'project.supabase.co', workspaceId: 'test-workspace', workspaceName: 'DEV TEST Atlas' }, mode: 'cloud' }))
+    const options = validateRunOptions({ suiteId: 'sale-orders', environment: 'hosted-supabase', groupIds: ['purchase-receipt-rounding'] })
+    const config = { origin: 'https://project.supabase.co' }
+    const run = controller.startValidated(options, { config, readiness: await controller.preflight(config) })
+    expect(run.expectedTests).toBeUndefined()
+    await new Promise(resolve => setImmediate(resolve))
+    expect(spawnChild.mock.calls[0][1]).toContain('src/dev/testing/suites/orderUomTransactions.test.ts')
+    finishChild(children[0])
+    for (let attempt = 0; attempt < 50 && children.length < 2; attempt++) await new Promise(resolve => setTimeout(resolve, 10))
+    expect(spawnChild.mock.calls[1][1]).toContain('src/dev/testing/suites/purchaseReceiptRoundingLive.test.ts')
+    finishChild(children[1])
+    await controller.completion
+    expect(run.status).toBe('passed')
+    expect(run.groups[0].tests.map(test => test.environment)).toEqual(['isolated', 'hosted-supabase'])
+  })
+
   it('keeps a POS hosted selection with no server scenario labeled as isolated', async () => {
     const { controller, children, spawnChild } = await arrangeController()
     controller.preflight = vi.fn(async () => ({ target: { host: 'project.supabase.co', workspaceId: 'test-workspace', workspaceName: 'DEV TEST Atlas' }, mode: 'cloud' }))

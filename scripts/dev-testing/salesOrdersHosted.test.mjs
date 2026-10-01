@@ -90,17 +90,31 @@ describe('hosted Sales Orders enumeration and independent verifier', () => {
     expect(() => assertGraph(g)).toThrow('posted installment down payment')
   })
 
-  it('registers every live wrapper and localized group without falling back to isolated tests', () => {
+  it('registers live domains and paired isolated/live purchase receipt coverage', () => {
     const registry = JSON.parse(readFileSync(new URL('../../src/dev/testing/suites.json', import.meta.url), 'utf8'))['sale-orders']
     const locales = ['en', 'ar', 'ku'].map(locale => JSON.parse(readFileSync(new URL(`../../src/i18n/locales/${locale}.json`, import.meta.url), 'utf8')))
-    expect(registry.liveGroups).toHaveLength(hostedCatalog.length)
+    const liveDomains = registry.liveGroups.filter(group => group.domainId)
+    expect(liveDomains).toHaveLength(hostedCatalog.length)
+    const purchaseReceiptGroup = registry.liveGroups.find(group => group.id === 'purchase-receipt-rounding')
+    expect(purchaseReceiptGroup).toMatchObject({
+      isolatedGroupId: 'purchase-receipt-rounding',
+      files: ['src/dev/testing/suites/purchaseReceiptRoundingLive.test.ts']
+    })
+    expect(registry.groups.find(group => group.id === 'purchase-receipt-rounding')).toMatchObject({
+      files: expect.arrayContaining(['src/dev/testing/suites/orderUomTransactions.test.ts', 'src/lib/productUomMigration.test.ts'])
+    })
+    for (const locale of locales) expect(purchaseReceiptGroup.titleKey.split('.').reduce((value, key) => value?.[key], locale)).toEqual(expect.any(String))
     for (const group of registry.liveGroups) {
-      expect(group.isolatedGroupId).toBeUndefined()
       expect(group.isolatedOnly).toBeUndefined()
       expect(group.files).toHaveLength(1)
       expect(existsSync(new URL(`../../${group.files[0]}`, import.meta.url))).toBe(true)
-      const wrapper = readFileSync(new URL(`../../${group.files[0]}`, import.meta.url), 'utf8')
-      expect(wrapper).toContain(`registerHostedSalesOrderDomain('${group.domainId}')`)
+      if (group.domainId) {
+        expect(group.isolatedGroupId).toBeUndefined()
+        const wrapper = readFileSync(new URL(`../../${group.files[0]}`, import.meta.url), 'utf8')
+        expect(wrapper).toContain(`registerHostedSalesOrderDomain('${group.domainId}')`)
+      } else {
+        expect(registry.groups.some(isolated => isolated.id === group.isolatedGroupId)).toBe(true)
+      }
       for (const locale of locales) expect(group.titleKey.split('.').reduce((value, key) => value?.[key], locale)).toEqual(expect.any(String))
     }
     for (const locale of locales) { expect(locale.devTesting.status.blocked).toEqual(expect.any(String)); expect(locale.devTesting.runStatus.blocked).toEqual(expect.any(String)) }
