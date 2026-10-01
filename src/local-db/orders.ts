@@ -312,7 +312,11 @@ function getSyncMetadata(workspaceId: string, timestamp: string) {
     }
 }
 
-export function sanitizeSyncPayload(tableName: SyncableTableName, entity: Record<string, unknown>) {
+export function sanitizeSyncPayload(
+    tableName: SyncableTableName,
+    entity: Record<string, unknown>,
+    options: { omitFields?: readonly string[] } = {}
+) {
     const payload = { ...entity }
     delete payload.syncStatus
     delete payload.lastSyncedAt
@@ -327,6 +331,11 @@ export function sanitizeSyncPayload(tableName: SyncableTableName, entity: Record
     const snakePayload = Object.fromEntries(
         Object.entries(payload).map(([key, value]) => [key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`), value])
     )
+
+    for (const field of options.omitFields ?? []) {
+        const snakeField = field.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
+        delete snakePayload[snakeField]
+    }
 
     if (tableName === 'products') {
         // skuKey is a Dexie-only lookup field used for local duplicate-SKU checks.
@@ -383,6 +392,8 @@ type SyncUpsertOptions = {
     throwOnError?: boolean
     /** The caller must wait for remote order and payment-reference acknowledgement. */
     requireRemoteConfirmation?: boolean
+    /** Fields intentionally kept server-authoritative during narrow updates. */
+    omitFields?: readonly string[]
 }
 
 async function syncUpsertEntities(
@@ -405,7 +416,7 @@ async function syncUpsertEntities(
 
     try {
         const client = getSupabaseClientForTable(tableName)
-        const payload = entities.map((entity) => sanitizeSyncPayload(tableName, entity))
+        const payload = entities.map((entity) => sanitizeSyncPayload(tableName, entity, options))
         const partnerSyncWriteRpc = getPartnerSyncWriteRpc(tableName)
 
         if (partnerSyncWriteRpc) {
@@ -467,6 +478,8 @@ async function syncUpsertEntities(
             }
             await table.update(entity.id, {
                 ...(orderNumber ? { orderNumber } : {}),
+                // The server response is authoritative even when the update
+                // intentionally omitted this field from its request.
                 ...(items ? { items } : {}),
                 syncStatus: 'synced',
                 lastSyncedAt: syncedAt
@@ -4786,7 +4799,10 @@ async function returnUnpaidEcommerceOrder(order: SalesOrder, input: ReturnSalesO
     await syncUpsertEntities(
         'sales_orders',
         [updatedOrder] as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
-        order.workspaceId
+        order.workspaceId,
+        // Return item rows are the authoritative audit record. Keep the
+        // server's immutable order-line snapshots when updating the summary.
+        { omitFields: ['items'] }
     )
 
     await reverseSalesOrderCommissionForReturnBestEffort(
@@ -5025,7 +5041,10 @@ export async function returnSalesOrder(input: ReturnSalesOrderInput) {
     await syncUpsertEntities(
         'sales_orders',
         [finalOrder] as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
-        order.workspaceId
+        order.workspaceId,
+        // Return item rows are the authoritative audit record. Keep the
+        // server's immutable order-line snapshots when updating the summary.
+        { omitFields: ['items'] }
     )
 
     await reverseSalesOrderCommissionForReturnBestEffort(

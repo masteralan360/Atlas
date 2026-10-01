@@ -151,6 +151,26 @@ describe('order product UoM Cloud request contract', () => {
         expect(payload).not.toHaveProperty('sync_status')
         expect(payload).not.toHaveProperty('last_synced_at')
     })
+
+    it('omits item JSON when syncing a return summary so cached snapshots cannot replace server snapshots', () => {
+        const payload = sanitizeSyncPayload('sales_orders', {
+            id: 'order-return',
+            workspaceId: WORKSPACE_ID,
+            returnStatus: 'full',
+            returnedAmount: 80,
+            total: 0,
+            version: 3,
+            items: [{ id: 'line-return', uomId: 'stale-uom', unitFactor: 20 }]
+        }, { omitFields: ['items'] })
+
+        expect(payload).toMatchObject({
+            return_status: 'full',
+            returned_amount: 80,
+            total: 0,
+            version: 3
+        })
+        expect(payload).not.toHaveProperty('items')
+    })
 })
 
 describe('order counterparty summary sync', () => {

@@ -159,6 +159,11 @@ describe('product UoM conversion in order transactions', () => {
       refundAmount: 40_000,
     })
     expect(firstReturn.order.items[0]).toMatchObject({
+      uomId: carton.id,
+      unitRef: 'builtin:carton',
+      unitFactor: 20,
+      inventoryQuantity: 40,
+      freeBonusInventoryQuantity: 20,
       returnedQuantity: 40,
       returnedPaidInventoryQuantity: 20,
       returnedFreeInventoryQuantity: 20,

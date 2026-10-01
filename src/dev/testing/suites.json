@@ -124,8 +124,9 @@
         "files": [
             "src/dev/testing/suites/orderLineItemLayout.test.ts",
             "src/dev/testing/suites/orderUom.test.ts",
-            "src/dev/testing/suites/orderUomTransactions.test.ts",
-            "src/lib/orderLineItems.test.ts",
+          "src/dev/testing/suites/orderUomTransactions.test.ts",
+          "src/local-db/orders.test.ts",
+          "src/lib/orderLineItems.test.ts",
             "src/lib/orderUnitErrors.test.ts",
             "src/local-db/productUoms.test.ts",
             "src/lib/productUomMigration.test.ts",

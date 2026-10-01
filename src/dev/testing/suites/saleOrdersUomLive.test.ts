@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { db } from '@/local-db/database'
 import { saleOrderInput } from '../fixtures/saleOrder'
 import type { LiveSaleOrderFixture } from '../fixtures/saleOrdersLive'
 import type { ProductUom } from '@/local-db/models'
@@ -71,6 +72,15 @@ describe('Sale Orders · hosted product UoM conversion', () => {
                 expect(Number(stock.quantity)).toBe(40)
             } finally { await before.auth.signOut() }
 
+            // Model an older/offline client whose cached line has a stale UoM
+            // reference. A return updates the order summary and return audit
+            // rows, while the hosted order keeps its saved item snapshot.
+            const cachedOrder = await db.sales_orders.get(order.id)
+            if (!cachedOrder) throw new Error('cached_order_missing_before_return')
+            await db.sales_orders.update(order.id, {
+                items: cachedOrder.items.map((item) => ({ ...item, uomId: null }))
+            })
+
             const returned = await orders.returnSalesOrder({
                 orderId: order.id,
                 items: [{ orderItemId: order.items[0].id, paidQuantity: 2, freeQuantity: 1 }],
@@ -80,12 +90,29 @@ describe('Sale Orders · hosted product UoM conversion', () => {
             recordLiveFixture(ids)
             const fresh = await freshLiveClient()
             try {
+                const returnedOrder = requireLiveData<{ items: Array<Record<string, unknown>>; return_status: string }>(
+                    await fresh.schema('crm').from('sales_orders')
+                        .select('items,return_status').eq('id', order.id).single(), 'returned carton order')
+                const returnItems = requireLiveData<Array<Record<string, unknown>>>(
+                    await fresh.from('order_return_items')
+                        .select('quantity,selected_unit_quantity,paid_inventory_quantity,free_inventory_quantity,unit_factor,unit_ref')
+                        .eq('return_id', returned.return.id), 'carton return items')
                 const stock = requireLiveData(await fresh.from('inventory')
                     .select('quantity').eq('workspace_id', liveWorkspaceId)
                     .eq('product_id', product.id).eq('storage_id', storage.id).single(), 'returned carton stock')
                 const payments = requireLiveData<Array<{ id: string; amount: number; reversal_of_transaction_id: string | null }>>(await fresh.from('payment_transactions')
                     .select('id,amount,reversal_of_transaction_id').eq('workspace_id', liveWorkspaceId)
                     .eq('source_type', 'sales_order').eq('source_record_id', order.id), 'carton payments')
+                expect(returnedOrder.return_status).toBe('full')
+                expect(returnedOrder.items[0]).toMatchObject({
+                    uomId: carton.id, unitFactor: 20, inventoryQuantity: 40,
+                    freeBonusInventoryQuantity: 20,
+                })
+                expect(returnItems).toEqual([expect.objectContaining({
+                    quantity: 60, selected_unit_quantity: 3,
+                    paid_inventory_quantity: 40, free_inventory_quantity: 20,
+                    unit_factor: 20, unit_ref: 'builtin:carton',
+                })])
                 expect(Number(stock.quantity)).toBe(100)
                 expect(payments.reduce((sum, row) => sum + Number(row.amount), 0)).toBeCloseTo(0, 3)
                 for (const original of payments.filter((row) => Number(row.amount) > 0)) {
