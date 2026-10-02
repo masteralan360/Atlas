@@ -26,6 +26,8 @@ import { ORDER_DECIMAL_STEP, roundOrderValue } from '@/lib/orderPrecision'
 import { isBelowMinimumSellingPrice } from '@/lib/minimumSellingPrice'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { createSalesOrderModuleWideIntegrityAuditAdapter } from '@/lib/integrityAudit/salesOrderModuleWide'
+import { createPurchaseOrderModuleWideIntegrityAuditAdapter } from '@/lib/integrityAudit/purchaseOrderModuleWide'
+import { isPurchaseOrderIntegrityAuditEligible } from '@/lib/integrityAudit/purchaseOrderAudit'
 import {
     clampOrdersPagination,
     createOrdersPaginationState,
@@ -531,6 +533,10 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const [moduleWideAuditOpen, setModuleWideAuditOpen] = useState(false)
     const moduleWideAuditAdapter = useMemo(
         () => createSalesOrderModuleWideIntegrityAuditAdapter(workspaceId, getWorkspaceDataMode(workspaceId)),
+        [workspaceId]
+    )
+    const purchaseModuleWideAuditAdapter = useMemo(
+        () => createPurchaseOrderModuleWideIntegrityAuditAdapter(workspaceId, getWorkspaceDataMode(workspaceId)),
         [workspaceId]
     )
 
@@ -2313,7 +2319,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                 </div>
 
                                 <div className="flex flex-wrap items-center gap-2 self-start print:hidden sm:self-auto">
-                                    {activeTab === 'sales' && !isMobile() && (
+                                    {(activeTab === 'sales' || activeTab === 'purchase') && !isMobile() && (
                                       <UiAccessGate>
                                         <Button
                                             variant="outline"
@@ -2326,10 +2332,12 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                         </Button>
                                       </UiAccessGate>
                                     )}
-                                    <Button variant="outline" allowViewer={true} onClick={() => setArchivesOpen(true)} className="gap-2 rounded-xl">
-                                        <Archive className="h-4 w-4" />
-                                        {t('orders.archive.open')}
-                                    </Button>
+                                    {(activeTab === 'sales' ? archivedSalesOrders : archivedPurchaseOrders).length > 0 && (
+                                        <Button variant="outline" allowViewer={true} onClick={() => setArchivesOpen(true)} className="gap-2 rounded-xl">
+                                            <Archive className="h-4 w-4" />
+                                            {t('orders.archive.open')}
+                                        </Button>
+                                    )}
                                     <Button variant="outline" allowViewer={true} onClick={() => setShowPrintPreview(true)} className="gap-2 rounded-xl">
                                         <Printer className="h-4 w-4" />
                                         {t('common.print') || 'Print'}
@@ -3231,6 +3239,17 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                     transactions={filteredSalesOrders}
                     adapter={moduleWideAuditAdapter}
                     transactionLabel={t('orders.tabs.sales')}
+                />
+            )}
+            {activeTab === 'purchase' && !isMobile() && (
+                <ModuleWideIntegrityAuditDialog
+                    open={moduleWideAuditOpen}
+                    onOpenChange={setModuleWideAuditOpen}
+                    transactions={filteredPurchaseOrders.filter(isPurchaseOrderIntegrityAuditEligible)}
+                    adapter={purchaseModuleWideAuditAdapter}
+                    transactionLabel={t('orders.tabs.purchase')}
+                    scopeMessageKey="moduleWideIntegrityAudit.purchaseScope"
+                    emptyMessageKey="moduleWideIntegrityAudit.purchaseEmpty"
                 />
             )}
         </div>

@@ -7,6 +7,7 @@ import { Sale } from '@/types'
 import { applySalesOrderReturnQuantities, useCategories, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useDeliveryMerchantProfiles, useDeliveryShipments, useRentalContracts, useRentalVehicles } from '@/local-db'
 import { formatCurrency, formatDateTime, formatDate, formatTime } from '@/lib/utils'
 import { buildRevenueSourceSales } from '@/lib/revenueSourceSales'
+import { isActiveSale } from '@/lib/saleArchiving'
 import { cn } from '@/lib/utils'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
@@ -628,12 +629,13 @@ export function Revenue() {
         [workspaceUsers]
     )
     const salesOrders = useMemo(
-        () => applySalesOrderReturnQuantities(rawSalesOrders || [], salesOrderReturnItems),
+        () => applySalesOrderReturnQuantities(rawSalesOrders || [], salesOrderReturnItems)
+            .filter((order) => !order.isArchived),
         [rawSalesOrders, salesOrderReturnItems]
     )
 
     const allSales = useMemo<Sale[]>(() => buildRevenueSourceSales({
-        sales: rawSales || [], exchangeTransactions: rawExchangeTransactions || [], realEstateCommissionTransactions,
+        sales: (rawSales || []).filter(isActiveSale), exchangeTransactions: rawExchangeTransactions || [], realEstateCommissionTransactions,
         travelBookingPayments, clinicalAppointments, clinicalAppointmentTransactions, activityTransactions,
         activityTransactionLines, deliveryShipments, deliveryMerchantProfiles, rentalContracts, rentalVehicles,
         partnerNameById: new Map(deliveryBusinessPartners.map((partner) => [partner.id, partner.partnerName] as const)),

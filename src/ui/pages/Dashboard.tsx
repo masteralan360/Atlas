@@ -42,6 +42,7 @@ import { getLedgerCashMovementEntries } from '@/lib/ledgerCashMovementEntries'
 import { getLedgerPaymentTransactions } from '@/lib/ledgerPaymentTransactions'
 import { buildRevenueAnalysisRecords } from '@/lib/revenueAnalysis'
 import { buildRevenueSourceSales } from '@/lib/revenueSourceSales'
+import { isActiveSale } from '@/lib/saleArchiving'
 import {
     getDashboardCashSummaries,
     getDashboardCashTrend,
@@ -299,7 +300,7 @@ export function Dashboard() {
     const rawOrders = useSalesOrders(revenueWorkspaceId)
     const orderReturnItems = useSalesOrderReturnItemsForWorkspace(revenueWorkspaceId)
     const orders = useMemo(
-        () => applySalesOrderReturnQuantities(rawOrders, orderReturnItems),
+        () => applySalesOrderReturnQuantities(rawOrders, orderReturnItems).filter((order) => !order.isArchived),
         [rawOrders, orderReturnItems],
     )
     const partners = useBusinessPartners(revenueWorkspaceId, { includeAgentRoles: true })
@@ -387,7 +388,7 @@ export function Dashboard() {
     const uiSales = useMemo<Sale[]>(
         () =>
             buildRevenueSourceSales({
-                sales,
+                sales: sales.filter(isActiveSale),
                 exchangeTransactions: exchangeTransactions || [],
                 realEstateCommissionTransactions,
                 travelBookingPayments,

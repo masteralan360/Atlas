@@ -13,6 +13,8 @@ import { useProfileData } from '@/hooks/useProfileData'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { resolveOrderDetailsLookupStatus, type OrderDetailsRemoteLookupStatus } from '@/lib/orderDetailsLookup'
 import { runSalesOrderIntegrityAudit } from '@/lib/integrityAudit/salesOrderAudit'
+import { isPurchaseOrderIntegrityAuditEligible, runPurchaseOrderIntegrityAudit } from '@/lib/integrityAudit/purchaseOrderAudit'
+import type { IntegrityAuditResult } from '@/lib/integrityAudit/types'
 import { getTransactionIntegritySeverity } from '@/lib/integrityAudit/severity'
 import { getOrderLineCostPerInventoryUnit, getOrderLineSelectedUnitCost, getOrderLineFreeBonusInventoryQuantity, getOrderLineFreeBonusQuantity, getOrderLineFulfilledQuantity, getOrderLineInventoryQuantity, getOrderLinePaidInventoryQuantity, getOrderLinePaidQuantity, getOrderLineUnitFactor, hasOrderLineFreeBonus, isFulfilledUnitsAvailableForOrder } from '@/lib/orderLineItems'
 import {
@@ -377,12 +379,16 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         remoteStatus: remoteLookupStatus
     })
     const auditMode = getWorkspaceDataMode(workspaceId)
+    const orderAuditEligible = resolved?.kind === 'sales'
+        || (resolved?.kind === 'purchase' && isPurchaseOrderIntegrityAuditEligible(resolved.order))
     const runOrderIntegrityAudit = useCallback(
-        () => runSalesOrderIntegrityAudit(workspaceId, orderId, auditMode),
-        [auditMode, orderId, workspaceId]
+        async (): Promise<IntegrityAuditResult> => resolved?.kind === 'sales'
+            ? runSalesOrderIntegrityAudit(workspaceId, orderId, auditMode)
+            : runPurchaseOrderIntegrityAudit(workspaceId, orderId, auditMode),
+        [auditMode, orderId, resolved?.kind, workspaceId]
     )
     const orderIntegrityAudit = useDeferredTransactionIntegrityAudit({
-        enabled: resolved?.kind === 'sales' && orderLookupStatus === 'found' && remoteLookupStatus !== 'loading',
+        enabled: orderAuditEligible && orderLookupStatus === 'found' && remoteLookupStatus !== 'loading',
         auditKey: `${workspaceId}:${orderId}:${auditMode}`,
         runAudit: runOrderIntegrityAudit,
         getSeverity: result => getTransactionIntegritySeverity(result.summary)
@@ -1432,7 +1438,9 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                     <span>/</span>
                     <span className="inline-flex items-center gap-1 text-foreground">
                         <span className="font-semibold">{order.orderNumber}</span>
-                        {!order.isArchived && isSales && order.status === 'completed' && (
+                        {!order.isArchived && (isSales
+                            ? order.status === 'completed'
+                            : isPurchaseOrderIntegrityAuditEligible(order as PurchaseOrder)) && (
                             <SalesOrderAuditBreadcrumbAction
                                 phase={orderIntegrityAudit.phase}
                                 onClick={() => {
@@ -2640,10 +2648,11 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 </AppDialogContent>
             </AppDialog>
 
-            {isSales && <SalesOrderIntegrityAuditDialog open={auditOpen} onOpenChange={setAuditOpen}
+            <SalesOrderIntegrityAuditDialog open={auditOpen} onOpenChange={setAuditOpen}
                 orderId={order.id}
+                orderType={isSales ? 'sales' : 'purchase'}
                 result={orderIntegrityAudit.result} errorKey={orderIntegrityAudit.errorKey}
-                loading={orderIntegrityAudit.phase === 'scheduled' || orderIntegrityAudit.phase === 'running'} />}
+                loading={orderIntegrityAudit.phase === 'scheduled' || orderIntegrityAudit.phase === 'running'} />
             <PrintFlow
                 isOpen={showPrintPreview && !order.isArchived}
                 onClose={() => {

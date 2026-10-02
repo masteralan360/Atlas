@@ -2,8 +2,6 @@ Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain En
 
 Travel & Transportation Archive
 
-Sales History Archive
-
 ##
 
 all products button in the order and correspoding to the DateRangeFilter and status tab

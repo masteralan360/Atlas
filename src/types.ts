@@ -95,6 +95,7 @@ export interface Sale {
     cashier_name?: string
     items?: SaleItem[]
     is_returned?: boolean
+    is_archived?: boolean
     return_reason?: string
     returned_at?: string
     returned_by?: string

@@ -13,6 +13,7 @@ CREATE TABLE public.sales (
   currency_conversion_applied boolean NOT NULL DEFAULT true,
   payment_method text NULL DEFAULT 'cash'::text,
   is_returned boolean NULL DEFAULT false,
+  is_archived boolean NOT NULL DEFAULT false,
   return_reason text NULL,
   returned_at timestamp with time zone NULL,
   returned_by uuid NULL,

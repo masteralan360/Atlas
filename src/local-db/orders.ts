@@ -2396,6 +2396,49 @@ export function useSalesOrders(workspaceId: string | undefined, startDate?: stri
     return orders ?? []
 }
 
+export function useArchivedSalesOrders(workspaceId: string | undefined, enabled = true) {
+    const viewOwnScope = useViewOwnRecordScope('orders.view_own')
+    const permissions = useOptionalWorkspacePermissions()
+    const assignedOrderAccess = getCommissionAssignedOrderAccess(
+        workspaceId,
+        permissions?.permissionKeys
+    )
+    const storageAccess = useStorageAccess(workspaceId)
+
+    const orders = useLiveQuery(
+        async () => {
+            if (!workspaceId || !enabled) return []
+
+            const assignedOrderIds = await getSalesOrderIdsAssignedToLinkedFieldAgent(
+                workspaceId,
+                viewOwnScope.userId,
+                viewOwnScope.isRestricted ? assignedOrderAccess : 'none'
+            )
+            const rows = await db.sales_orders.where('workspaceId').equals(workspaceId).and((order) => (
+                !order.isDeleted
+                && order.isArchived === true
+                && (
+                    !viewOwnScope.isRestricted
+                    || order.createdBy === viewOwnScope.userId
+                    || assignedOrderIds.has(order.id)
+                )
+            )).toArray()
+            const visibility = await Promise.all(rows.map((order) => order.businessPartnerId
+                ? canAccessBusinessPartnerInLocalCache(workspaceId, order.businessPartnerId, 'customer')
+                : canAccessBusinessPartnerFacetInLocalCache(workspaceId, order.customerId, 'customer')
+            ))
+            return rows
+                .filter((_, index) => visibility[index])
+                .map((order) => redactSalesOrderForStorageAccess(order, storageAccess))
+                .filter((order): order is SalesOrder => !!order)
+                .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        },
+        [workspaceId, enabled, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, assignedOrderAccess]
+    )
+
+    return orders
+}
+
 export function usePurchaseOrders(workspaceId: string | undefined) {
     const online = useNetworkStatus()
     const viewOwnScope = useViewOwnRecordScope('orders.view_own')

@@ -1956,6 +1956,8 @@ export interface InvoiceVersion {
 }
 
 export interface Sale extends BaseEntity {
+  /** Archived sales remain stored and are hidden from normal sales summaries. */
+  isArchived?: boolean
   cashierId: string
   totalAmount: number
   originalTotalAmount?: number

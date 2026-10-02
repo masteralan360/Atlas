@@ -27,11 +27,12 @@ import {
     TooltipTrigger,
     TooltipProvider
 } from '@/ui/components'
-import { RotateCcw, ArrowRight, ArrowRightLeft, XCircle, MessageCircle, CircleDollarSign, TrendingUp, Download, CircleAlert, BookOpen } from 'lucide-react'
+import { RotateCcw, ArrowRight, ArrowRightLeft, XCircle, MessageCircle, CircleDollarSign, TrendingUp, Download, CircleAlert, BookOpen, Archive } from 'lucide-react'
 import { isMobile } from '@/lib/platform'
 import { useAuth } from '@/auth'
 import { useWorkspace } from '@/workspace'
 import { useHideCosts } from '@/permissions'
+import { isSaleFullyReturned } from '@/lib/saleArchiving'
 
 type EffectiveLoanStatus = 'pending' | 'active' | 'overdue' | 'completed'
 
@@ -73,9 +74,12 @@ interface SaleDetailsModalProps {
     onExchangeItem?: (item: SaleItem) => void
     onReturnSale?: (sale: Sale) => void
     onDownloadInvoice?: (sale: Sale) => void
+    canManageArchive?: boolean
+    onArchiveSale?: (sale: Sale) => void
+    onUnarchiveSale?: (sale: Sale) => void
 }
 
-export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchangeItem, onReturnSale, onDownloadInvoice }: SaleDetailsModalProps) {
+export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchangeItem, onReturnSale, onDownloadInvoice, canManageArchive = false, onArchiveSale, onUnarchiveSale }: SaleDetailsModalProps) {
     const { t, i18n } = useTranslation()
     const { user } = useAuth()
     const hideCosts = useHideCosts()
@@ -111,9 +115,8 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchan
 
     if (!sale) return null
 
-    const isFullyReturned = sale.is_returned || (sale.items && sale.items.length > 0 && sale.items.every(item =>
-        item.is_returned || (item.returned_quantity || 0) >= item.quantity
-    ))
+    const isFullyReturned = isSaleFullyReturned(sale)
+    const isArchived = sale.is_archived === true
 
     const returnedItemsCount = sale.items?.filter(item => item.is_returned).length || 0
     const partialReturnedItemsCount = sale.items?.filter(item => (item.returned_quantity || 0) > 0 && !item.is_returned).length || 0
@@ -561,7 +564,7 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchan
                                                                 </Tooltip>
                                                             </TooltipProvider>
                                                         )}
-                                                        {!isItemReturned && !item.is_returned && onReturnItem && (user?.role === 'admin' || user?.role === 'staff') && (
+                                                        {!isArchived && !isItemReturned && !item.is_returned && onReturnItem && (user?.role === 'admin' || user?.role === 'staff') && (
                                                             <Button
                                                                 size="sm"
                                                                 variant="ghost"
@@ -571,7 +574,7 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchan
                                                                 <RotateCcw className="h-3 w-3" />
                                                             </Button>
                                                         )}
-                                                        {!isItemReturned && !item.is_returned && netQuantity > 0 && sale.origin === 'pos' && onExchangeItem && (user?.role === 'admin' || user?.role === 'staff') && (
+                                                        {!isArchived && !isItemReturned && !item.is_returned && netQuantity > 0 && sale.origin === 'pos' && onExchangeItem && (user?.role === 'admin' || user?.role === 'staff') && (
                                                             <Button
                                                                 size="sm"
                                                                 variant="ghost"
@@ -819,7 +822,7 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchan
                                                                 </Tooltip>
                                                             </TooltipProvider>
                                                         )}
-                                                        {!isItemReturned && !item.is_returned && onReturnItem && (user?.role === 'admin' || user?.role === 'staff') && (
+                                                        {!isArchived && !isItemReturned && !item.is_returned && onReturnItem && (user?.role === 'admin' || user?.role === 'staff') && (
                                                             <Button
                                                                 size="sm"
                                                                 variant="ghost"
@@ -830,7 +833,7 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchan
                                                                 <RotateCcw className="h-3 w-3" />
                                                             </Button>
                                                         )}
-                                                        {!isItemReturned && !item.is_returned && netQuantity > 0 && sale.origin === 'pos' && onExchangeItem && (user?.role === 'admin' || user?.role === 'staff') && (
+                                                        {!isArchived && !isItemReturned && !item.is_returned && netQuantity > 0 && sale.origin === 'pos' && onExchangeItem && (user?.role === 'admin' || user?.role === 'staff') && (
                                                             <Button
                                                                 size="sm"
                                                                 variant="ghost"
@@ -1002,7 +1005,7 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchan
                 {/* ═══════════════ FOOTER ═══════════════ */}
                 <div className="flex items-center justify-between px-6 py-4 border-t border-border bg-card rounded-b-lg">
                     <div>
-                        {!isFullyReturned && onReturnSale && (user?.role === 'admin' || user?.role === 'staff') && (
+                        {!isArchived && !isFullyReturned && onReturnSale && (user?.role === 'admin' || user?.role === 'staff') && (
                             <button
                                 onClick={() => onReturnSale(sale)}
                                 className="text-sm font-medium text-muted-foreground hover:text-destructive transition-colors"
@@ -1022,7 +1025,19 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchan
                                 <MessageCircle className="w-4 h-4" />
                             </Button>
                         )}
-                        {canDownloadInvoice && (
+                        {isArchived ? (
+                            canManageArchive && onUnarchiveSale ? (
+                                <Button variant="outline" size="sm" className="gap-2" onClick={() => onUnarchiveSale(sale)}>
+                                    <RotateCcw className="w-4 h-4" />
+                                    {t('sales.archive.unarchiveAction')}
+                                </Button>
+                            ) : null
+                        ) : canManageArchive && isFullyReturned && onArchiveSale ? (
+                            <Button variant="outline" size="sm" className="gap-2" onClick={() => onArchiveSale(sale)}>
+                                <Archive className="w-4 h-4" />
+                                {t('sales.archive.archiveAction')}
+                            </Button>
+                        ) : canDownloadInvoice && (
                             <Button
                                 size="sm"
                                 className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"

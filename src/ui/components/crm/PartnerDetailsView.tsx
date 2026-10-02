@@ -8,6 +8,7 @@ import { isSupabaseConfigured, useAuth } from '@/auth'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { buildConversionRates } from '@/lib/budget'
 import { convertToStoreBase } from '@/lib/currency'
+import { isActiveSale } from '@/lib/saleArchiving'
 import {
     PARTNER_DETAILS_TEMPLATE_KEY,
     PARTNER_ORDER_ITEMS_TEMPLATE_KEY,
@@ -880,7 +881,7 @@ export function PartnerDetailsView({
     }, [agent, agentLinkedUserId, allSalesOrders, isSalesAccountProfile, salesAgentCommissionsEnabled, salesOrderAgentAssignments])
     const agentPosSales = useMemo(
         () => !isSalesAccountProfile && agentLinkedUserId
-            ? sales.filter((sale) => !sale.isDeleted && sale.cashierId === agentLinkedUserId)
+            ? sales.filter((sale) => isActiveSale(sale) && !sale.isDeleted && sale.cashierId === agentLinkedUserId)
             : [],
         [agentLinkedUserId, isSalesAccountProfile, sales]
     )

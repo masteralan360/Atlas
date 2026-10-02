@@ -240,9 +240,11 @@ export function buildRevenueAnalysisRecords(
     options: RevenueCategoryLookup = {}
 ): RevenueAnalysisRecord[] {
     return [
-        ...sales.map((sale) => toRevenueRecordFromSale(sale, options)),
+        ...sales
+            .filter((sale) => sale.is_archived !== true)
+            .map((sale) => toRevenueRecordFromSale(sale, options)),
         ...salesOrders
-            .filter((order) => !order.isDeleted && order.status === 'completed')
+            .filter((order) => !order.isDeleted && !order.isArchived && order.status === 'completed')
             .map((order) => toRevenueRecordFromSalesOrder(order, options))
     ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 }

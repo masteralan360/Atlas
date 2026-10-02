@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
-import { ArrowDownLeft, ArrowUpRight, Ban, HandCoins, RotateCcw, Search, ShieldCheck } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, Ban, HandCoins, Printer, RotateCcw, Search, ShieldCheck } from 'lucide-react'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 
@@ -23,6 +23,7 @@ import {
     useFinancialTransactionVoids,
     usePaymentObligations,
     usePaymentTransactions,
+    useWorkspaceContacts,
     voidFinancialTransaction,
     type BusinessPartner,
     type CurrencySettlementAmount,
@@ -67,6 +68,12 @@ import {
     type FinancialTransactionVoidDialogInput
 } from '@/ui/components/payments/FinancialTransactionVoidDialog'
 import { FinancialVoidAuditDialog } from '@/ui/components/payments/FinancialVoidAuditDialog'
+import { PaymentTransactionPrintTemplate, type PaymentTransactionPrintData, type PaymentTransactionPrintStatus } from '@/ui/components/payments/PaymentTransactionPrintTemplate'
+import { PrintFlow } from '@/ui/components/PrintFlow'
+import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
+import { getPaymentTransactionReversalState } from '@/lib/paymentReversals'
+import { generateTemplatePdf } from '@/services/pdfGenerator'
+import { printPdfBlob } from '@/services/pdfPrintService'
 import { useWorkspace } from '@/workspace'
 import { hasEffectiveSalesAgentCommissionPermission, useWorkspacePermissions } from '@/permissions'
 
@@ -251,10 +258,10 @@ function formatAmountSummary(
 }
 
 export function Payments() {
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const { user } = useAuth()
     const { toast } = useToast()
-    const { features, hasFeature } = useWorkspace()
+    const { features, hasFeature, workspaceName } = useWorkspace()
     const { hasPermission, permissionKeys } = useWorkspacePermissions()
     const { dateRange, customDates } = useDateRange()
     const [, setLocation] = useLocation()
@@ -273,9 +280,20 @@ export function Payments() {
     const [reversingTransactionId, setReversingTransactionId] = useState<string | null>(null)
     const [transactionToReverse, setTransactionToReverse] = useState<PaymentTransaction | null>(null)
     const [transactionToVoid, setTransactionToVoid] = useState<PaymentTransaction | null>(null)
+    const [paymentTransactionPrintData, setPaymentTransactionPrintData] = useState<PaymentTransactionPrintData | null>(null)
     const [voidingTransactionId, setVoidingTransactionId] = useState<string | null>(null)
     const [isVoidAuditOpen, setIsVoidAuditOpen] = useState(false)
     const [isPartnerSettlementOpen, setIsPartnerSettlementOpen] = useState(false)
+    const workspaceContacts = useWorkspaceContacts(workspaceId)
+    const printLang = features.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
+    const printT = useMemo(() => i18n.getFixedT(printLang), [i18n, printLang])
+    const printContactLine = useMemo(() => (['phone', 'email', 'address'] as const)
+        .map(type => workspaceContacts.find(contact => contact.type === type && contact.isPrimary)
+            || workspaceContacts.find(contact => contact.type === type))
+        .map(contact => contact?.value.trim())
+        .filter(Boolean)
+        .join(' · '), [workspaceContacts])
+    const paymentTransactionPrintTitle = printT('payments.transactionPrint.title', { defaultValue: 'Payment Transaction' })
 
     const settlementAction = useMemo(() => {
         if (activeTab === 'payable') {
@@ -371,6 +389,56 @@ export function Payments() {
             return [transactionToVoid]
         }
     }, [allTransactions, transactionToVoid])
+
+    const paymentTransactionPrintPreview = useMemo<TemplatePreview | undefined>(() => {
+        if (!paymentTransactionPrintData) return undefined
+        const { transaction } = paymentTransactionPrintData
+        return {
+            fields: [],
+            page: { widthMm: 210, heightMm: 297 },
+            createElement: (_fields, _effectiveId, printLangOverride) => {
+                const effectivePrintLang = printLangOverride || printLang
+                const tPrint = i18n.getFixedT(effectivePrintLang)
+                return <PaymentTransactionPrintTemplate
+                    data={paymentTransactionPrintData}
+                    workspaceName={workspaceName || workspaceId || 'Atlas'}
+                    logoUrl={features.logo_url}
+                    contactLine={printContactLine}
+                    printLang={effectivePrintLang}
+                    iqdPreference={features.iqd_display_preference}
+                    sourceLabel={sourceTypeLabel(transaction.sourceType, tPrint, transaction.metadata)}
+                    methodLabel={paymentMethodLabel(transaction.paymentMethod, tPrint)}
+                />
+            },
+            buildPdf: (element, printLangOverride) => generateTemplatePdf({
+                element, format: 'a4', printLang: printLangOverride || printLang
+            })
+        }
+    }, [features.iqd_display_preference, features.logo_url, i18n, paymentTransactionPrintData, printContactLine, printLang, workspaceId, workspaceName])
+
+    const handlePrintPaymentTransaction = (
+        transaction: PaymentTransaction,
+        displayAmount: number,
+        status: PaymentTransactionPrintStatus
+    ) => {
+        const originalTransaction = transaction.reversalOfTransactionId
+            ? allTransactions.find((item) => item.id === transaction.reversalOfTransactionId)
+            : transaction
+        const reversalState = originalTransaction
+            ? getPaymentTransactionReversalState(originalTransaction, allTransactions)
+            : null
+
+        setPaymentTransactionPrintData({
+            transaction,
+            displayAmount,
+            status,
+            reversalSummary: reversalState ? {
+                reversedAmount: reversalState.reversedAmount,
+                remainingAmount: reversalState.remainingAmount
+            } : null,
+            asOf: new Date().toISOString()
+        })
+    }
 
     const kpis = useMemo(() => ({
         totalOpen: formatAmountSummary(obligations, features.iqd_display_preference),
@@ -845,6 +913,15 @@ export function Payments() {
                                         const displayAmount = isReversal
                                             ? (item.direction === 'incoming' ? item.amount : -item.amount)
                                             : item.amount
+                                        const printStatus: PaymentTransactionPrintStatus = isReversal
+                                            ? 'reversal'
+                                            : hasPartialReversal
+                                                ? 'partialReversal'
+                                                : isLockedSource
+                                                    ? 'locked'
+                                                    : isReversed
+                                                        ? 'reversed'
+                                                        : 'posted'
 
                                         return (
                                             <TableRow key={item.id}>
@@ -903,6 +980,10 @@ export function Payments() {
                                                 </TableCell>
                                                 <TableCell className="text-end">
                                                     <div className="flex justify-end gap-2">
+                                                        <Button variant="outline" size="sm" onClick={() => handlePrintPaymentTransaction(item, displayAmount, printStatus)}>
+                                                            <Printer className="me-1 h-3.5 w-3.5" />
+                                                            {t('common.print', { defaultValue: 'Print' })}
+                                                        </Button>
                                                         <Button variant="outline" size="sm" onClick={() => setLocation(getPaymentTransactionRoutePath(item))}>
                                                             {t('common.view', { defaultValue: 'View' })}
                                                         </Button>
@@ -994,6 +1075,25 @@ export function Payments() {
                 rows={financialVoidAudits}
                 getSourceLabel={(row) => sourceTypeLabel(row.sourceType, t)}
             />
+
+            {paymentTransactionPrintData && paymentTransactionPrintPreview ? <PrintFlow
+                module="payment"
+                isOpen
+                onClose={() => setPaymentTransactionPrintData(null)}
+                onConfirm={() => setPaymentTransactionPrintData(null)}
+                title={paymentTransactionPrintTitle}
+                features={features}
+                workspaceName={workspaceName}
+                originId={paymentTransactionPrintData.transaction.id}
+                showSaveButton={false}
+                allowA4Document
+                templatePrimaryActionLabel={t('common.print', { defaultValue: 'Print' })}
+                templatePreview={paymentTransactionPrintPreview}
+                pdfBuilder={async ({ effectiveId, printLangOverride }) => paymentTransactionPrintPreview.buildPdf(
+                    paymentTransactionPrintPreview.createElement({}, effectiveId, printLangOverride), printLangOverride
+                )}
+                onPreviewPrint={blob => printPdfBlob(blob, { title: paymentTransactionPrintTitle })}
+            /> : null}
 
             {workspaceId ? (
                 <PartnerSettlementDialog

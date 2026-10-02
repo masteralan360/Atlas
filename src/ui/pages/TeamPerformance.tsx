@@ -125,6 +125,7 @@ export function TeamPerformance() {
                 const localSales = await db.sales.where('workspaceId').equals(workspaceId).toArray()
                 const { start: localRangeStart, end: localRangeEnd } = getDateRangeBounds(dateRange, customDates)
                 const filteredLocalSales = localSales.filter((sale) => {
+                    if (sale.isArchived) return false
                     if (salesViewOwnScope.isRestricted && sale.cashierId !== salesViewOwnScope.userId) {
                         return false
                     }
@@ -211,6 +212,7 @@ export function TeamPerformance() {
                 .eq('workspace_id', user?.workspaceId)
 
             const { start, end } = getDateRangeBounds(dateRange, customDates)
+            query = query.eq('is_archived', false)
             if (start) query = query.gte('created_at', start.toISOString())
             if (end) query = query.lt('created_at', end.toISOString())
 

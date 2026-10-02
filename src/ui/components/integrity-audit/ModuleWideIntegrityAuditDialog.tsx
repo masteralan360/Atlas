@@ -97,13 +97,17 @@ export function ModuleWideIntegrityAuditDialog<TTransaction, TAuditResult>({
   onOpenChange,
   transactions,
   adapter,
-  transactionLabel
+  transactionLabel,
+  scopeMessageKey = 'moduleWideIntegrityAudit.scope',
+  emptyMessageKey = 'moduleWideIntegrityAudit.empty'
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   transactions: readonly TTransaction[]
   adapter: ModuleWideIntegrityAuditAdapter<TTransaction, TAuditResult>
   transactionLabel: string
+  scopeMessageKey?: string
+  emptyMessageKey?: string
 }) {
   const { t } = useTranslation()
   const [rows, setRows] = useState<ModuleWideIntegrityAuditRow[] | null>(null)
@@ -205,12 +209,12 @@ export function ModuleWideIntegrityAuditDialog<TTransaction, TAuditResult>({
       </AppDialogHeader>
       <AppDialogBody className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          {t('moduleWideIntegrityAudit.scope', { count: transactions.length, moduleName: transactionLabel })}
+          {t(scopeMessageKey, { count: transactions.length, moduleName: transactionLabel })}
         </p>
 
         {transactions.length === 0 && (
           <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-            {t('moduleWideIntegrityAudit.empty')}
+            {t(emptyMessageKey)}
           </div>
         )}
 

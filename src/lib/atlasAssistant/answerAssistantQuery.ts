@@ -172,11 +172,14 @@ async function loadRevenueRecords(
       .between([context.workspaceId, range.startIso], [context.workspaceId, range.endIso], true, true)
       .toArray()
     : await db.sales.where("workspaceId").equals(context.workspaceId).toArray();
-  const enriched = await enrichSalesForUiRows(context.workspaceId, active(salesRows));
+  const enriched = await enrichSalesForUiRows(
+    context.workspaceId,
+    active(salesRows).filter((sale) => !sale.isArchived),
+  );
   const uiSales = enriched.map((sale) => toUISale(sale)) as unknown as Parameters<typeof buildRevenueAnalysisRecords>[0];
   const salesOrders = active(
     await db.sales_orders.where("workspaceId").equals(context.workspaceId).toArray(),
-  );
+  ).filter((order) => !order.isArchived);
 
   return buildRevenueAnalysisRecords(uiSales, salesOrders);
 }

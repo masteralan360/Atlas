@@ -13,9 +13,12 @@ import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { getSalesHistoryRowTotal } from '@/lib/salesHistoryTotals'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { getLoanDetailsPath } from '@/lib/loanPresentation'
+import { isActiveSale, isSaleFullyReturned } from '@/lib/saleArchiving'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
 import { adjustInventoryQuantity, applySalesOrderReturnQuantities, commitStockBatchAllocations, db, getActiveTravelBookingPayments, markPosLoanCancelledForFullSaleReturn, processSaleProductExchange, recordLoanPayment, resolveReturnStorageId, restoreStockBatchAllocations, splitStockBatchAllocationsForReturn, useLoanBySaleId, useLoanInstallments, useLoanPayments, useLoans, usePriceBookCatalogState, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useInventory, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useDeliveryMerchantProfiles, useDeliveryShipments, useRentalContracts, useRentalVehicles, toUISale, toUISaleFromOrder, toUISaleFromExchangeTransaction, toUISaleFromRealEstateCommissionTransaction, toUISaleFromPaidClinicalAppointment, toUISaleFromActivityTransaction, toUISaleFromDeliveryShipment, toUISaleFromRentalContract, toUISaleFromTravelBookingPayment, type Loan, type PaymentAccount, type StockBatchAllocation } from '@/local-db'
+import { useArchivedSales, syncSalesFromSupabase } from '@/local-db/hooks'
+import { setSaleArchived } from '@/local-db/saleArchiving'
 import { persistSaleReturnLedger, commitLocalSaleReturn, calculateSaleReturnAmount } from '@/local-db/posSaleReturns'
 import { persistLoanAggregateRpcResult } from '@/local-db/loanTransactions'
 import { hydrateInventoryTransactionsForReferences } from '@/local-db/inventoryTransactions'
@@ -60,6 +63,12 @@ import {
     TooltipTrigger,
     useToast,
     AppPagination,
+    AppDialog,
+    AppDialogBody,
+    AppDialogContent,
+    AppDialogFooter,
+    AppDialogHeader,
+    AppDialogTitle,
     Dialog,
     DialogContent,
     DialogHeader,
@@ -105,6 +114,7 @@ import {
     Loader2,
     Printer,
     RotateCcw,
+    Archive,
     StickyNote,
     FileSpreadsheet,
     LayoutGrid,
@@ -263,9 +273,7 @@ function getSaleReturnState(sale: Sale) {
         if (item.is_returned) return sum + (item.quantity || 0)
         return sum + Math.max(0, Number(item.returned_quantity || 0))
     }, 0)
-    const isFullyReturned = !!sale.is_returned
-        || sale.return_status === 'full'
-        || (items.length > 0 && items.every((item) => item.is_returned || (item.returned_quantity || 0) >= item.quantity))
+    const isFullyReturned = isSaleFullyReturned(sale)
     const hasAnyReturn = isFullyReturned
         || !!sale.has_partial_return
         || sale.return_status === 'partial'
@@ -279,6 +287,10 @@ function saleHasAnyReturnActivity(sale: Sale): boolean {
     return getSaleReturnState(sale).hasAnyReturn
 }
 
+function isArchivableSalesHistoryRecord(sale: Pick<Sale, 'origin'> | null | undefined): boolean {
+    return sale?.origin === 'pos' || sale?.origin === 'manual' || sale?.origin === 'instant_pos'
+}
+
 export function Sales() {
     const { user } = useAuth()
     const { t, i18n } = useTranslation()
@@ -286,6 +298,11 @@ export function Sales() {
     const { features, workspaceName, activeWorkspace, isLocalMode, isHybridMode, hasCapability } = useWorkspace()
     const { style } = useTheme()
     const { toast } = useToast()
+    const [archivesOpen, setArchivesOpen] = useState(false)
+    const [isRefreshingArchivedSales, setIsRefreshingArchivedSales] = useState(false)
+    const [saleArchiveConfirmation, setSaleArchiveConfirmation] = useState<{ sale: Sale; isArchived: boolean } | null>(null)
+    const [isUpdatingSaleArchive, setIsUpdatingSaleArchive] = useState(false)
+    const canManageSaleArchive = user?.role === 'admin' || user?.role === 'staff'
     const { dateRange, customDates } = useDateRange()
     const demoTutorial = useDemoTutorial()
     const tutorialSaleId = demoTutorial.state?.saleId
@@ -299,6 +316,7 @@ export function Sales() {
     }, [dateRange, customDates])
 
     const rawSales = useSales(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
+    const archivedSales = useArchivedSales(user?.workspaceId, true)
     const rawOrders = useSalesOrders(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
     const salesOrderReturnItems = useSalesOrderReturnItemsForWorkspace(user?.workspaceId)
     const deliveryShipments = useDeliveryShipments(user?.workspaceId)
@@ -355,9 +373,9 @@ export function Sales() {
     )
     const loans = useLoans(user?.workspaceId)
     const allSales = useMemo(() => {
-        const sales = (rawSales || []).map(toUISale)
+        const sales = (rawSales || []).map(toUISale).filter(isActiveSale)
         const orders = applySalesOrderReturnQuantities(rawOrders || [], salesOrderReturnItems)
-            .filter(order => !order.isDeleted && order.status === 'completed')
+            .filter(order => !order.isDeleted && !order.isArchived && order.status === 'completed')
             .map(toUISaleFromOrder)
         const exchangeSales = (rawExchangeTransactions || [])
             .filter(tx => !tx.isDeleted && !tx.isReversed && tx.transactionType === 'sell' && tx.profitAmount != null && tx.profitAmount > 0)
@@ -404,6 +422,11 @@ export function Sales() {
             }))
         return [...sales, ...orders, ...exchangeSales, ...realEstateCommissionSales, ...travelBookingProfitSales, ...clinicalSales, ...activitySales, ...deliverySales, ...rentalSales]
     }, [rawSales, rawOrders, salesOrderReturnItems, rawExchangeTransactions, realEstateCommissionTransactions, travelBookingPayments, clinicalAppointments, clinicalAppointmentTransactions, activityTransactions, activityTransactionLines, cashierNameById, dateBounds.endDate, dateBounds.startDate, deliveryMerchantBusinessPartnerIdByProfileId, deliveryMerchantNameByProfileId, deliveryShipments, rentalContracts, rentalVehicleById, t])
+
+    const isLoadingArchivedSales = archivesOpen && archivedSales === undefined
+    const archivedHistorySales = useMemo<Sale[]>(() => [
+        ...(archivedSales || [])
+    ].sort((left, right) => right.created_at.localeCompare(left.created_at)), [archivedSales])
 
     const isLoading = rawSales === undefined || rawOrders === undefined || rawExchangeTransactions === undefined || realEstateCommissionTransactions === undefined || clinicalAppointments === undefined
     const [isDateLoading, setIsDateLoading] = useState(false)
@@ -2336,6 +2359,52 @@ export function Sales() {
     }
 
 
+    const openArchivedSales = () => {
+        setArchivesOpen(true)
+        if (!user?.workspaceId || isLocalMode || !navigator.onLine) return
+        setIsRefreshingArchivedSales(true)
+        void syncSalesFromSupabase(user.workspaceId)
+            .catch((error) => {
+                console.error('[Sales] Failed to refresh archived sales', error)
+                toast({
+                    title: t('common.error') || 'Error',
+                    description: t('sales.archive.loadError'),
+                    variant: 'destructive'
+                })
+            })
+            .finally(() => setIsRefreshingArchivedSales(false))
+    }
+
+    const handleSaleArchiveConfirmation = async () => {
+        if (!saleArchiveConfirmation || isUpdatingSaleArchive) return
+        const { sale, isArchived } = saleArchiveConfirmation
+        setIsUpdatingSaleArchive(true)
+        try {
+            if (!isArchivableSalesHistoryRecord(sale)) throw new Error('sale_archive_not_allowed')
+            await setSaleArchived(sale.id, isArchived)
+            setSelectedSale((current) => current?.id === sale.id
+                ? { ...current, is_archived: isArchived }
+                : current)
+            setSaleArchiveConfirmation(null)
+            toast({ title: isArchived ? t('sales.archive.archiveSuccess') : t('sales.archive.unarchiveSuccess') })
+        } catch (error) {
+            const code = error instanceof Error ? error.message : ''
+            const fallback = isArchived ? t('sales.archive.archiveError') : t('sales.archive.unarchiveError')
+            const description = code === 'sale_archive_not_allowed'
+                ? t('sales.archive.notAllowed')
+                : code === 'sale_archive_not_found'
+                    ? t('sales.archive.notFound')
+                    : code === 'sale_archive_conflict'
+                        ? t('sales.archive.conflict')
+                        : code === 'sale_archive_wait_for_sync'
+                            ? t('sales.archive.waitForSync')
+                            : fallback
+            toast({ title: t('common.error') || 'Error', description, variant: 'destructive' })
+        } finally {
+            setIsUpdatingSaleArchive(false)
+        }
+    }
+
     if (isExportModalOpen) {
         return (
             <TooltipProvider>
@@ -2409,6 +2478,19 @@ export function Sales() {
 
                     <div className="flex flex-wrap items-center gap-3" data-tour-id="tutorial-sales-history-filters">
                         <DateRangeFilters />
+
+                        {archivedHistorySales.length > 0 && (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                allowViewer={true}
+                                onClick={openArchivedSales}
+                                className="h-11 rounded-2xl border-border/60 px-4"
+                            >
+                                <Archive className="me-2 h-4 w-4" />
+                                {t('sales.archive.open')}
+                            </Button>
+                        )}
 
                         <Button
                             type="button"
@@ -3154,11 +3236,120 @@ export function Sales() {
                     </CardContent>
                 </Card>
 
+                <AppDialog open={archivesOpen} onOpenChange={setArchivesOpen}>
+                    <AppDialogContent className="max-w-4xl">
+                        <AppDialogHeader>
+                            <AppDialogTitle className="flex items-center gap-2">
+                                <Archive className="h-5 w-5 text-primary" />
+                                {t('sales.archive.title')}
+                            </AppDialogTitle>
+                        </AppDialogHeader>
+                        <AppDialogBody className="space-y-3">
+                            {(isRefreshingArchivedSales || isLoadingArchivedSales) && (
+                                <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    {t('sales.archive.refreshing')}
+                                </div>
+                            )}
+                            {archivedHistorySales.length === 0 && !isRefreshingArchivedSales && !isLoadingArchivedSales ? (
+                                <div className="rounded-xl border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
+                                    {t('sales.archive.empty')}
+                                </div>
+                            ) : archivedHistorySales.map((sale) => (
+                                <div key={sale.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/70 bg-background p-3 sm:p-4">
+                                    <div className="min-w-0 flex-1 space-y-1">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span className="font-semibold">{getSaleReferenceLabel(sale)}</span>
+                                            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
+                                                <Archive className="h-3 w-3" />
+                                                {t('sales.archive.archivedBadge')}
+                                            </span>
+                                        </div>
+                                        <div className="truncate text-sm text-muted-foreground">{sale.cashier_name || t('workspace.roles.staff', { defaultValue: 'Staff' })}</div>
+                                        <div className="text-xs text-muted-foreground">
+                                            {formatDate(sale.created_at)} · {formatCurrency(sale.total_amount, sale.settlement_currency || 'usd', features.iqd_display_preference)}
+                                        </div>
+                                    </div>
+                                    <Button
+                                        variant="outline"
+                                        className="shrink-0 gap-2"
+                                        onClick={() => {
+                                            setSelectedSale(sale)
+                                            setArchivesOpen(false)
+                                        }}
+                                    >
+                                        <Eye className="h-4 w-4" />
+                                        {t('sales.archive.view')}
+                                    </Button>
+                                </div>
+                            ))}
+                        </AppDialogBody>
+                        <AppDialogFooter>
+                            <Button variant="outline" onClick={() => setArchivesOpen(false)}>
+                                {t('common.cancel')}
+                            </Button>
+                        </AppDialogFooter>
+                    </AppDialogContent>
+                </AppDialog>
+
+                <AppDialog
+                    open={saleArchiveConfirmation !== null}
+                    onOpenChange={(open) => {
+                        if (!open && !isUpdatingSaleArchive) setSaleArchiveConfirmation(null)
+                    }}
+                >
+                    <AppDialogContent className="max-w-md" showCloseButton={!isUpdatingSaleArchive}>
+                        <AppDialogHeader>
+                            <AppDialogTitle className="flex items-center gap-2">
+                                {saleArchiveConfirmation?.isArchived
+                                    ? <RotateCcw className="h-5 w-5 text-primary" />
+                                    : <Archive className="h-5 w-5 text-primary" />}
+                                {saleArchiveConfirmation?.isArchived
+                                    ? t('sales.archive.unarchiveConfirmTitle')
+                                    : t('sales.archive.archiveConfirmTitle')}
+                            </AppDialogTitle>
+                        </AppDialogHeader>
+                        <AppDialogBody>
+                            <p className="text-sm leading-relaxed text-muted-foreground">
+                                {saleArchiveConfirmation?.isArchived
+                                    ? t('sales.archive.unarchiveConfirm')
+                                    : t('sales.archive.archiveConfirm')}
+                            </p>
+                            {saleArchiveConfirmation && (
+                                <div className="mt-4 rounded-lg border bg-muted/30 px-3 py-2 text-sm font-semibold">
+                                    {getSaleReferenceLabel(saleArchiveConfirmation.sale)}
+                                </div>
+                            )}
+                        </AppDialogBody>
+                        <AppDialogFooter>
+                            <Button
+                                variant="outline"
+                                onClick={() => setSaleArchiveConfirmation(null)}
+                                disabled={isUpdatingSaleArchive}
+                            >
+                                {t('common.cancel')}
+                            </Button>
+                            <Button onClick={handleSaleArchiveConfirmation} disabled={isUpdatingSaleArchive}>
+                                {isUpdatingSaleArchive ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                                    : saleArchiveConfirmation?.isArchived
+                                        ? <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
+                                        : <Archive className="mr-2 h-4 w-4" aria-hidden="true" />}
+                                {saleArchiveConfirmation?.isArchived
+                                    ? t('sales.archive.unarchiveAction')
+                                    : t('sales.archive.archiveAction')}
+                            </Button>
+                        </AppDialogFooter>
+                    </AppDialogContent>
+                </AppDialog>
+
                 {/* Sale Details Modal */}
                 <SaleDetailsModal
                     isOpen={!!selectedSale}
                     onClose={() => setSelectedSale(null)}
                     sale={selectedSale}
+                    canManageArchive={canManageSaleArchive && isArchivableSalesHistoryRecord(selectedSale)}
+                    onArchiveSale={(sale) => setSaleArchiveConfirmation({ sale, isArchived: true })}
+                    onUnarchiveSale={(sale) => setSaleArchiveConfirmation({ sale, isArchived: false })}
                     onReturnItem={handleReturnItem}
                     onExchangeItem={handleProductExchangeFromDetails}
                     onReturnSale={handleReturnSale}

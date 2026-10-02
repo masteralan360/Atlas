@@ -2722,12 +2722,12 @@ async function performSalesSync(
 ): Promise<SalesSyncResult> {
   if (!await canReconcileCloudWorkspaceData(workspaceId)) return 'cancelled'
 
-  const remoteChecks: Array<{ id: string; version: number; updated_at: string }> = []
+  const remoteChecks: Array<{ id: string; version: number; updated_at: string; is_archived: boolean }> = []
 
   for (let from = 0; ; from += SALES_VERSION_PAGE_SIZE) {
     let versionQuery = supabase
       .from('sales')
-      .select('id, version, updated_at')
+      .select('id, version, updated_at, is_archived')
       .eq('workspace_id', workspaceId)
 
     if (options?.startDate) {
@@ -2777,19 +2777,24 @@ async function performSalesSync(
   )
 
   const staleIds: string[] = []
-  const remoteMap = new Map<string, { id: string; version: number; updated_at: string }>(
+  const remoteMap = new Map<string, { id: string; version: number; updated_at: string; is_archived: boolean }>(
     remoteChecks.map((value) => [value.id, value]),
   )
 
   for (const local of relevantLocalSales) {
     const remote = remoteMap.get(local.id)
     if (remote) {
+      if (local.syncStatus !== 'synced') {
+        remoteMap.delete(local.id)
+        continue
+      }
       const hasItemSnapshot = localSaleIdsWithItems.has(local.id) || Array.isArray(
         (local as Sale & { _enrichedItems?: unknown })._enrichedItems
       )
       if (
         remote.version !== local.version ||
         remote.updated_at !== local.updatedAt ||
+        remote.is_archived !== (local.isArchived === true) ||
         !hasItemSnapshot
       ) {
         staleIds.push(local.id)
@@ -3100,6 +3105,29 @@ export function useSales(
     return sales ?? []
 }
 
+export function useArchivedSales(workspaceId: string | undefined, enabled: boolean) {
+    const viewOwnScope = useViewOwnRecordScope('sales.view_own')
+    const storageAccess = useStorageAccess(workspaceId)
+    const sales = useLiveQuery(
+        async () => {
+            if (!workspaceId || !enabled) return []
+            const rows = await db.sales.where('workspaceId').equals(workspaceId)
+                .and((sale) => !sale.isDeleted && sale.isArchived === true)
+                .toArray()
+            const visibleRows = viewOwnScope.isRestricted
+                ? rows.filter((sale) => sale.cashierId === viewOwnScope.userId)
+                : rows
+            const enrichedRows = await enrichSalesForUiRows(workspaceId, visibleRows)
+            return enrichedRows
+                .map(toUISale)
+                .map((sale) => redactSaleForStorageAccess(sale as any, storageAccess))
+                .filter((sale): sale is NonNullable<typeof sale> => !!sale)
+        },
+        [workspaceId, enabled, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId]
+    )
+    return sales
+}
+
 /**
  * Maps a local-db Sale (camelCase) to the UI Sale type (snake_case) from @/types.
  * Includes enriched items and cashier name from background sync.
@@ -3142,6 +3170,7 @@ export function toUISale(localSale: any): any {
         returns: (localSale as Sale & { _returns?: unknown[] })._returns ?? [],
         product_exchanges: (localSale as Sale & { _productExchanges?: unknown[] })._productExchanges ?? [],
         is_returned: localSale.isReturned,
+        is_archived: localSale.isArchived === true,
         return_reason: localSale.returnReason,
         returned_at: localSale.returnedAt,
         returned_by: localSale.returnedBy,
@@ -3233,7 +3262,7 @@ export function useDashboardStats(workspaceId: string | undefined) {
                 || invoice.createdBy === invoicesViewOwnScope.userId
                 || invoice.userId === invoicesViewOwnScope.userId
             )).count(),
-            db.sales.where('workspaceId').equals(workspaceId).and((sale) => !sale.isDeleted && (
+            db.sales.where('workspaceId').equals(workspaceId).and((sale) => !sale.isDeleted && !sale.isArchived && (
                 !salesViewOwnScope.isRestricted || sale.cashierId === salesViewOwnScope.userId
             )).reverse().sortBy('createdAt').then(sales => sales.slice(0, 3)),
             db.invoices.where('workspaceId').equals(workspaceId).and((invoice) => !invoice.isDeleted && invoice.origin !== 'upload' && (
@@ -3242,7 +3271,7 @@ export function useDashboardStats(workspaceId: string | undefined) {
                 || invoice.userId === invoicesViewOwnScope.userId
             )).reverse().sortBy('createdAt').then(invoices => invoices.slice(0, 4)),
             db.products.where('workspaceId').equals(workspaceId).and(p => !p.isDeleted && !isService(p) && p.quantity <= p.minStockLevel).toArray(),
-            db.sales.where('workspaceId').equals(workspaceId).and((sale) => !sale.isDeleted && sale.createdAt >= thirtyDaysAgoStr && (
+            db.sales.where('workspaceId').equals(workspaceId).and((sale) => !sale.isDeleted && !sale.isArchived && sale.createdAt >= thirtyDaysAgoStr && (
                 !salesViewOwnScope.isRestricted || sale.cashierId === salesViewOwnScope.userId
             )).toArray()
         ])
@@ -3260,7 +3289,7 @@ export function useDashboardStats(workspaceId: string | undefined) {
         const statsByCurrency: Record<string, { revenue: number, cost: number, profit: number, dailyTrend: Record<string, { revenue: number, cost: number, profit: number }> }> = {}
 
         allSales.forEach(sale => {
-            if (sale.isReturned) return
+            if (sale.isArchived || sale.isReturned) return
 
             const curr = sale.settlementCurrency || 'usd'
             if (!statsByCurrency[curr]) {
@@ -6813,6 +6842,7 @@ export function toUISaleFromOrder(order: any): any {
         items,
         is_returned: (order.returnStatus ?? order.return_status) === 'full',
         has_partial_return: (order.returnStatus ?? order.return_status) === 'partial',
+        is_archived: order.isArchived === true || order.is_archived === true,
         sequenceId: order.orderNumber || order.order_number,
         notes: order.notes,
         _isOrder: true,

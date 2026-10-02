@@ -33,6 +33,7 @@ import {
 } from 'recharts'
 import { useAuth } from '@/auth'
 import { useWorkspace } from '@/workspace'
+import { isActiveSale } from '@/lib/saleArchiving'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { db } from '@/local-db/database'
 import { cn, formatCurrency } from '@/lib/utils'
@@ -1672,9 +1673,9 @@ export function MonthlyComparison() {
     ) ?? []
 
     const sales = useMemo<Sale[]>(() => {
-        const baseSales = rawSales.map(toUISale)
+        const baseSales = rawSales.map(toUISale).filter(isActiveSale)
         const orderSales = (rawOrders || [])
-            .filter(order => !order.isDeleted && order.status === 'completed')
+            .filter(order => !order.isDeleted && !order.isArchived && order.status === 'completed')
             .map(toUISaleFromOrder)
         const exchangeSales = (rawExchangeTransactions || [])
             .filter(tx => !tx.isDeleted && !tx.isReversed && tx.transactionType === 'sell' && tx.profitAmount != null && tx.profitAmount > 0)

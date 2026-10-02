@@ -22,10 +22,11 @@ function displayValue(value: unknown) {
   return serialized.length > 300 ? `${serialized.slice(0, 300)}…` : serialized
 }
 
-export function SalesOrderIntegrityAuditDialog({ open, onOpenChange, orderId, result, errorKey, loading }: {
+export function SalesOrderIntegrityAuditDialog({ open, onOpenChange, orderId, orderType = 'sales', result, errorKey, loading }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   orderId: string
+  orderType?: 'sales' | 'purchase'
   result: IntegrityAuditResult | null
   errorKey: string | null
   loading: boolean
@@ -41,7 +42,7 @@ export function SalesOrderIntegrityAuditDialog({ open, onOpenChange, orderId, re
         {result && <>
           <div className="rounded-lg border p-4">
             <div className="flex flex-wrap items-center gap-2 font-semibold"><StatusIcon status={result.integrityStatus} />{t('transactionAudit.transactionStatus')}: {t(`transactionAudit.status.${result.integrityStatus}`)}</div>
-            <div className="mt-1 text-sm text-muted-foreground">{t('transactionAudit.orderNumber', { number: result.transactionNumber ?? orderId })}</div>
+            <div className="mt-1 text-sm text-muted-foreground">{t(orderType === 'sales' ? 'transactionAudit.orderNumber' : 'transactionAudit.purchaseOrderNumber', { number: result.transactionNumber ?? orderId })}</div>
             <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><Database className="h-3 w-3" />{t('transactionAudit.source')}: {result.sourceOfTruth === 'supabase' ? 'Supabase' : 'SQLite'}</div>
             <div className="mt-2 text-sm">{t('transactionAudit.summary', result.summary)}</div>
             {result.mirrorStatus && <div className="mt-2 flex items-center gap-2 text-sm"><StatusIcon status={result.mirrorStatus} />{t('transactionAudit.mirrorStatus')}: {t(`transactionAudit.status.${result.mirrorStatus}`)}</div>}

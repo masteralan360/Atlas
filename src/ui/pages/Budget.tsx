@@ -57,6 +57,7 @@ import {
     type PaymentTransaction
 } from '@/local-db'
 import { db } from '@/local-db/database'
+import { isActiveSale } from '@/lib/saleArchiving'
 import type { BudgetStatus, CurrencyCode, ExpenseItem, ExpenseRecurrence, ExpenseSeries, IQDDisplayPreference, PaymentObligation, WorkspacePaymentMethod } from '@/local-db/models'
 import {
     buildConversionRates,
@@ -481,7 +482,7 @@ export function Budget() {
     const payrollStatuses = usePayrollStatuses(workspaceId)
     const dividendStatuses = useDividendStatuses(workspaceId)
     const rawSales = useSales(workspaceId)
-    const salesOrders = useSalesOrders(workspaceId)
+    const salesOrders = useSalesOrders(workspaceId).filter((order) => !order.isArchived)
     const rawExchangeTransactions = useExchangeTransactions(workspaceId)
     const realEstateCommissionTransactions = usePaymentTransactions(workspaceId, {
         direction: 'incoming',
@@ -490,7 +491,7 @@ export function Budget() {
         includeReversals: false
     })
     const sales = useMemo(() => {
-        const baseSales = rawSales.map(toUISale)
+        const baseSales = rawSales.map(toUISale).filter(isActiveSale)
         const exchangeSales = (rawExchangeTransactions || [])
             .filter(tx => !tx.isDeleted && !tx.isReversed && tx.transactionType === 'sell' && tx.profitAmount != null && tx.profitAmount > 0)
             .map(toUISaleFromExchangeTransaction)

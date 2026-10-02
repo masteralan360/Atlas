@@ -271,6 +271,7 @@ export function ExportPreviewModal({
                 })
 
                 const filteredSales = localSales.filter((sale) => {
+                    if (sale.isArchived) return false
                     if (salesViewOwnScope.isRestricted && sale.cashierId !== salesViewOwnScope.userId) {
                         return false
                     }
@@ -348,6 +349,7 @@ export function ExportPreviewModal({
             if (activeWorkspace?.id) {
                 query = query.eq('workspace_id', activeWorkspace.id)
             }
+            query = query.eq('is_archived', false)
 
             if (start) query = query.gte('created_at', start.toISOString())
             if (end) query = query.lt('created_at', end.toISOString())
