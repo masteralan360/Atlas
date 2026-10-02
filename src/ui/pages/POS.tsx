@@ -115,7 +115,6 @@ import {
     Popover,
     PopoverTrigger,
     PopoverContent,
-    PrintFlow,
 } from '@/ui/components'
 import { UiAccessGate } from '@/context/UiAccessContext'
 import {
@@ -162,6 +161,7 @@ import { PosPriceBookSelector } from '@/ui/components/pos/PosPriceBookSelector'
 import { CameraBarcodeScanner } from '@/ui/components/pos/CameraBarcodeScanner'
 import { MobileCatalogQuantityButton } from '@/ui/components/pos/MobileCatalogQuantityButton'
 import { mapSaleToUniversal } from '@/lib/mappings'
+import { printPosPreprintReceipt } from '@/lib/posPreprintReceipt'
 import { LoanRegistrationModal, type LoanRegistrationData } from '@/ui/components/pos/LoanRegistrationModal'
 import { SaveBorrowerAsPartnerDialog, usePendingSavePartnerPrompt } from '@/ui/components/loans/SaveBorrowerAsPartnerDialog'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
@@ -572,7 +572,7 @@ export function POS() {
     // start separate checkout transactions in that interval.
     const checkoutSubmissionInProgress = useRef(false)
     const posCheckoutAttempt = useRef(new PosCheckoutAttempt())
-    const [isPreprintFlowOpen, setIsPreprintFlowOpen] = useState(false)
+    const [isPreprinting, setIsPreprinting] = useState(false)
     const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false)
     const [isPosAdjustOpen, setIsPosAdjustOpen] = useState(false)
     const [isCameraScannerAutoEnabled, setIsCameraScannerAutoEnabled] = useState(() => {
@@ -1667,7 +1667,7 @@ export function POS() {
         tryRates,
         user,
     ])
-    const canPreprintReceipt = showPreprintReceipt && !!preprintReceiptData
+    const canPreprintReceipt = showPreprintReceipt && !!preprintReceiptData && hasPermission('global.print' as any)
     const {
         buildReceiptPdf: buildPreprintReceiptPdf,
         isLoadingPrimaryReceiptTemplate: isLoadingPreprintTemplate,
@@ -1678,9 +1678,25 @@ export function POS() {
         enabled: canPreprintReceipt,
     })
     const handlePreprintReceipt = useCallback(async () => {
-        if (!preprintReceiptData || isPreprintFlowOpen) return
-        setIsPreprintFlowOpen(true)
-    }, [isPreprintFlowOpen, preprintReceiptData])
+        if (!preprintReceiptData || !hasPermission('global.print' as any) || isPreprinting) return
+        setIsPreprinting(true)
+        try {
+            await printPosPreprintReceipt({
+                saleData: preprintReceiptData,
+                pdfBuilder: buildPreprintReceiptPdf,
+                printReceipt: printPreprintReceipt,
+            })
+        } catch (error) {
+            console.error('[POS] Failed to print pre-print receipt:', error)
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: t('pos.preprintReceiptFailed', { defaultValue: 'Could not print the pre-print receipt.' }),
+            })
+        } finally {
+            setIsPreprinting(false)
+        }
+    }, [buildPreprintReceiptPdf, hasPermission, isPreprinting, preprintReceiptData, printPreprintReceipt, t, toast])
 
     // Track originalSubtotal in a ref so the bulk discount effect doesn't
     // re-run (and wipe per-item negotiated prices) when the cart changes.
@@ -3534,7 +3550,7 @@ export function POS() {
                                 isLoading={isLoading}
                                 canPreprintReceipt={canPreprintReceipt}
                                 handlePreprintReceipt={handlePreprintReceipt}
-                                isPreprintFlowOpen={isPreprintFlowOpen}
+                                isPreprinting={isPreprinting}
                                 isLoadingPreprintTemplate={isLoadingPreprintTemplate}
                                 getDisplayImageUrl={getDisplayImageUrl}
                                 products={cartLookupProducts}
@@ -4436,11 +4452,11 @@ export function POS() {
                                         size="lg"
                                         className="w-14 h-14 rounded-2xl border-2 hover:bg-primary/5 hover:text-primary transition-all group flex-none px-0"
                                         onClick={handlePreprintReceipt}
-                                        disabled={cart.length === 0 || isLoading || isPreprintFlowOpen || isLoadingPreprintTemplate}
+                                        disabled={cart.length === 0 || isLoading || isPreprinting || isLoadingPreprintTemplate}
                                         title={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
                                         aria-label={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
                                     >
-                                        {isPreprintFlowOpen || isLoadingPreprintTemplate
+                                        {isPreprinting || isLoadingPreprintTemplate
                                             ? <Loader2 className="w-5 h-5 animate-spin" />
                                             : <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />}
                                     </Button>
@@ -4511,24 +4527,6 @@ export function POS() {
                 onShowCategoriesChange={setShowCategories}
                 showPreprintReceipt={showPreprintReceipt}
                 onShowPreprintReceiptChange={setShowPreprintReceipt}
-            />
-
-            <PrintFlow
-                isOpen={isPreprintFlowOpen}
-                onClose={() => setIsPreprintFlowOpen(false)}
-                title={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
-                showSaveButton={false}
-                features={features}
-                printSelectionOptions={[{
-                    format: 'receipt',
-                    label: t('pos.printReceipt', { defaultValue: 'Print Receipt' }),
-                    description: t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })
-                }]}
-                pdfBuilder={async () => buildPreprintReceiptPdf()}
-                onPreviewPrint={(blob) => printPreprintReceipt({
-                    pdfBuilder: async () => blob,
-                    title: `Receipt_${preprintReceiptData?.invoiceid || preprintReceiptData?.id || 'Sale'}`
-                })}
             />
 
             <Dialog
@@ -5991,7 +5989,7 @@ interface MobileCartProps {
     isLoading: boolean
     canPreprintReceipt: boolean
     handlePreprintReceipt: () => Promise<void>
-    isPreprintFlowOpen: boolean
+    isPreprinting: boolean
     isLoadingPreprintTemplate: boolean
     getDisplayImageUrl: (url?: string) => string
     products: PosCatalogProduct[]
@@ -6023,7 +6021,7 @@ function MobileCart({
     cart, removeFromCart, updateQuantity, features, totalAmount,
     settlementCurrency, paymentType, setPaymentType, isOrderPaymentLocked, isTutorialPosTask, tutorialProductId, digitalProvider,
     setDigitalProvider, workspaceId, paymentAccount, setPaymentAccount, quickOrderEnabled, handleCheckout, handleHoldSale, isLoading,
-    canPreprintReceipt, handlePreprintReceipt, isPreprintFlowOpen, isLoadingPreprintTemplate,
+    canPreprintReceipt, handlePreprintReceipt, isPreprinting, isLoadingPreprintTemplate,
     getDisplayImageUrl, products, showCartStorageLabels, getCartStorageName, fallbackStorageId,
     getCartMinimumPriceViolation, hasMinimumSellingPriceViolation, convertPrice, openPriceEdit,
     clearNegotiatedPrice, isAdmin,
@@ -6388,11 +6386,11 @@ function MobileCart({
                                         event.stopPropagation()
                                         void handlePreprintReceipt()
                                     }}
-                                    disabled={cart.length === 0 || isLoading || isPreprintFlowOpen || isLoadingPreprintTemplate}
+                                    disabled={cart.length === 0 || isLoading || isPreprinting || isLoadingPreprintTemplate}
                                     title={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
                                     aria-label={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
                                 >
-                                    {isPreprintFlowOpen || isLoadingPreprintTemplate
+                                    {isPreprinting || isLoadingPreprintTemplate
                                         ? <Loader2 className="w-5 h-5 animate-spin" />
                                         : <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />}
                                 </Button>
@@ -6648,11 +6646,11 @@ function MobileCart({
                                         variant="outline"
                                         className="h-14 w-14 rounded-2xl border-2 hover:bg-primary/5 hover:text-primary transition-all group flex-none px-0"
                                         onClick={handlePreprintReceipt}
-                                        disabled={cart.length === 0 || isLoading || isPreprintFlowOpen || isLoadingPreprintTemplate}
+                                        disabled={cart.length === 0 || isLoading || isPreprinting || isLoadingPreprintTemplate}
                                         title={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
                                         aria-label={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
                                     >
-                                        {isPreprintFlowOpen || isLoadingPreprintTemplate
+                                        {isPreprinting || isLoadingPreprintTemplate
                                             ? <Loader2 className="w-5 h-5 animate-spin" />
                                             : <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />}
                                     </Button>

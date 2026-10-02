@@ -191,10 +191,11 @@
       {
         "id": "cart",
         "titleKey": "devTesting.posGroups.cart",
-        "layer": "calculation",
+        "layer": "live",
         "isolatedGroupId": "cart",
-        "isolatedOnly": true,
-        "files": []
+        "files": [
+          "src/dev/testing/suites/posInstantServiceAggregationLive.test.ts"
+        ]
       },
       {
         "id": "pricing",
@@ -324,7 +325,8 @@
         "layer": "calculation",
         "files": [
           "src/dev/testing/suites/posCart.test.ts",
-          "src/lib/posServiceName.test.ts"
+          "src/lib/posServiceName.test.ts",
+          "src/lib/instantPosServiceItems.test.ts"
         ]
       },
       {

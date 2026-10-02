@@ -11,9 +11,10 @@ import type { CurrencyCode, UnitRef } from '@/local-db/models'
 import { useWorkspace } from '@/workspace'
 import { formatCompactDateTime, formatCurrency, generateId, cn, stylizeText } from '@/lib/utils'
 import { readInstantPosProductsPerRow, saveInstantPosProductsPerRow } from '@/lib/instantPosLayout'
-import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle, Button, Input, useToast, Textarea, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, StorageSelector, PrintFlow } from '@/ui/components'
+import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle, Button, Input, useToast, Textarea, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, StorageSelector } from '@/ui/components'
 import { AlertCircle, CheckCircle2, ChefHat, ChevronDown, ChevronRight, ChevronUp, Loader2, Menu, Minus, Package, Plus, Receipt, Search, ShoppingCart, StickyNote, Table2, Trash2 } from 'lucide-react'
 import { UiAccessGate } from '@/context/UiAccessContext'
+import { useWorkspacePermissions } from '@/permissions'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { useKdsStream } from '@/hooks/useKdsStream'
@@ -30,6 +31,8 @@ import { usePosReceiptPrinter } from '@/ui/components/pos/usePosReceiptPrinter'
 import { RestaurantTableGrid } from '@/ui/components/pos/RestaurantTableGrid'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { calculateRestaurantTicketTotal } from '@/lib/restaurantTableView'
+import { addInstantPosServiceItem, coalesceInstantPosServiceItems } from '@/lib/instantPosServiceItems'
+import { printPosPreprintReceipt } from '@/lib/posPreprintReceipt'
 import { getActiveProductUoms, getUomDescriptors, soldQuantityToInventoryQuantity } from '@/lib/productUoms'
 import type { ResolvedActiveDiscount } from '@/lib/discounts'
 import {
@@ -93,7 +96,10 @@ function restaurantTicketToInstantTicket(ticket: RestaurantPosTicket): InstantPo
         number: ticket.number,
         createdAt: ticket.createdAt,
         status: ticket.status,
-        items: ticket.items,
+        items: coalesceInstantPosServiceItems(
+            ticket.items,
+            (item) => item.storageId === SERVICES_VIRTUAL_STORAGE_ID,
+        ),
         note: ticket.note,
         tableNumber: String(ticket.tableNumber),
         kitchenRoutedAt: ticket.kitchenRoutedAt,
@@ -323,7 +329,10 @@ function loadTickets(): InstantPosTicket[] {
             const normalizedTicket = {
                 ...ticket,
                 status: storedStatus === 'paid' ? 'served' : ticket.status,
-                items: normalizedItems
+                items: coalesceInstantPosServiceItems(
+                    normalizedItems,
+                    (item) => item.storageId === SERVICES_VIRTUAL_STORAGE_ID,
+                )
             }
             if (ticket.expiresAt) return normalizedTicket
             if (!ticket.createdAt) return normalizedTicket
@@ -397,7 +406,7 @@ interface MobileTicketPanelProps {
     isPrintingCookOrderTicket: boolean
     getStorageLabel: (storageId?: string | null) => string | null
     checkoutTicket: () => void
-    handlePreprintReceipt: () => void
+    handlePreprintReceipt: () => Promise<void>
     handleCookOrderTicket: () => Promise<void>
     setTicketStatus: (status: InstantPosStatus) => void
     extendPendingExpiry: (id: string) => void
@@ -865,6 +874,7 @@ function MobileTicketPanel({
 export function InstantPOS() {
     const { t, i18n } = useTranslation()
     const { toast } = useToast()
+    const { hasPermission } = useWorkspacePermissions()
     const { user } = useAuth()
     const [, navigate] = useLocation()
     const [hasRestaurantTableRoute, restaurantTableRouteParams] = useRoute('/instant-pos/table/:tableNumber')
@@ -1164,7 +1174,13 @@ export function InstantPOS() {
         const handleRemoteSync = (event: any) => {
             const updatedTickets = event.detail
             if (updatedTickets && Array.isArray(updatedTickets)) {
-                setLocalTickets(updatedTickets)
+                setLocalTickets(updatedTickets.map((ticket: InstantPosTicket) => ({
+                    ...ticket,
+                    items: coalesceInstantPosServiceItems(
+                        ticket.items || [],
+                        (item) => item.storageId === SERVICES_VIRTUAL_STORAGE_ID,
+                    ),
+                })))
             }
         }
 
@@ -1395,7 +1411,7 @@ export function InstantPOS() {
         } as any)
     }, [activeTicket, activeTicketTotals.hasMixedCurrency, activeTicketTotals.total, resolveTicketProduct, settlementCurrency, user])
 
-    const canPreprintReceipt = !!preprintReceiptData
+    const canPreprintReceipt = !!preprintReceiptData && hasPermission('global.print' as any)
     const {
         buildReceiptPdf: buildPreprintReceiptPdf,
         isLoadingPrimaryReceiptTemplate: isLoadingPreprintTemplate,
@@ -1407,10 +1423,26 @@ export function InstantPOS() {
         receiptTemplateKey: INSTANT_HISTORY_RECEIPT_TEMPLATE_KEY,
     })
 
-    const handlePreprintReceipt = useCallback(() => {
-        if (!preprintReceiptData || isPreprinting) return
+    const handlePreprintReceipt = useCallback(async () => {
+        if (!preprintReceiptData || !hasPermission('global.print' as any) || isPreprinting) return
         setIsPreprinting(true)
-    }, [isPreprinting, preprintReceiptData])
+        try {
+            await printPosPreprintReceipt({
+                saleData: preprintReceiptData,
+                pdfBuilder: buildPreprintReceiptPdf,
+                printReceipt: printPreprintReceipt,
+            })
+        } catch (error) {
+            console.error('[Instant POS] Failed to print pre-print receipt:', error)
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: t('pos.preprintReceiptFailed', { defaultValue: 'Could not print the pre-print receipt.' }),
+            })
+        } finally {
+            setIsPreprinting(false)
+        }
+    }, [buildPreprintReceiptPdf, hasPermission, isPreprinting, preprintReceiptData, printPreprintReceipt, t, toast])
 
     const canCookOrderTicket = !!activeTicket && activeTicket.items.length > 0
     const cookTicketLocale = useMemo(() => (
@@ -1535,9 +1567,11 @@ export function InstantPOS() {
             return
         }
         const availableUoms = isService(product) ? [] : getActiveProductUoms(product, productUoms, uomDescriptors)
-        const selectedUom = selectedUomId
-            ? availableUoms.find((row) => row.id === selectedUomId) ?? getDefaultSellingUom(product)
-            : getDefaultSellingUom(product)
+        const selectedUom = isService(product)
+            ? undefined
+            : selectedUomId
+                ? availableUoms.find((row) => row.id === selectedUomId) ?? getDefaultSellingUom(product)
+                : getDefaultSellingUom(product)
         const effectiveCost = selectedUom?.costPrice ?? (product.costPrice == null
             ? null
             : product.costPrice * (selectedUom?.coefficient ?? 1))
@@ -1600,7 +1634,23 @@ export function InstantPOS() {
         }
 
         updateTicket(activeTicket.id, ticket => {
-            const existing = ticket.items.find(item =>
+            if (isService(product)) {
+                const items = coalesceInstantPosServiceItems(
+                    ticket.items,
+                    (item) => item.productId === product.id,
+                )
+                const existingIndex = items.findIndex((item) => item.productId === product.id)
+                if (existingIndex >= 0) {
+                    return {
+                        ...ticket,
+                        items: items.map((item, index) => index === existingIndex
+                            ? { ...item, quantity: item.quantity + 1, uomId: undefined }
+                            : item),
+                    }
+                }
+            }
+
+            const existing = isService(product) ? undefined : ticket.items.find(item =>
                 item.productId === product.id && item.storageId === product.storageId && item.uomId === selectedUom?.id
             )
             if (existing) {
@@ -1648,7 +1698,12 @@ export function InstantPOS() {
                 discountEndsAt: activeDiscount?.endsAt
             }
 
-            return { ...ticket, items: [...ticket.items, newItem] }
+            return {
+                ...ticket,
+                items: isService(product)
+                    ? addInstantPosServiceItem(ticket.items, newItem)
+                    : [...ticket.items, newItem],
+            }
         })
     }
 
@@ -2415,26 +2470,6 @@ export function InstantPOS() {
         />
     )
 
-    const preprintFlow = (
-        <PrintFlow
-            isOpen={isPreprinting}
-            onClose={() => setIsPreprinting(false)}
-            title={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
-            showSaveButton={false}
-            features={features}
-            printSelectionOptions={[{
-                format: 'receipt',
-                label: t('pos.printReceipt', { defaultValue: 'Print Receipt' }),
-                description: t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })
-            }]}
-            pdfBuilder={async () => buildPreprintReceiptPdf()}
-            onPreviewPrint={(blob) => printPreprintReceipt({
-                pdfBuilder: async () => blob,
-                title: `Receipt_${preprintReceiptData?.invoiceid || preprintReceiptData?.id || 'Sale'}`
-            })}
-        />
-    )
-
     if (restaurantMode && restaurantTableNumber === null) {
         return (
             <>
@@ -2454,7 +2489,6 @@ export function InstantPOS() {
                     onSaveActionVisibility={saveRestaurantActionVisibility}
                 />
                 {checkoutSuccessModal}
-                {preprintFlow}
             </>
         )
     }
@@ -3212,7 +3246,6 @@ export function InstantPOS() {
             />
 
             {checkoutSuccessModal}
-            {preprintFlow}
         </div>
     )
 }

@@ -14,11 +14,40 @@ import {
     snapshotPosCart
 } from '@/lib/posCart'
 import { getCartInventoryQuantity } from '@/lib/productUoms'
+import { addInstantPosServiceItem, coalesceInstantPosServiceItems } from '@/lib/instantPosServiceItems'
 
 const item: CartItem = { product_id: 'p', storageId: 's', sku: 'SKU', name: 'Item', price: 100,
     quantity: 2.25, max_stock: 20, negotiated_price: 90, price_book_id: 'book' }
 
 describe('POS held-cart snapshots and restoration', () => {
+    it('aggregates repeated Instant POS service additions into one quantity line', () => {
+        const service = { productId: 'service-1', storageId: SERVICES_VIRTUAL_STORAGE_ID, quantity: 1, unitPrice: 15000 }
+        const rows = Array.from({ length: 5 }).reduce<typeof service[]>(
+            (items) => addInstantPosServiceItem(items, service),
+            [],
+        )
+
+        expect(rows).toHaveLength(1)
+        expect(rows[0]).toMatchObject({ productId: 'service-1', quantity: 5, unitPrice: 15000 })
+    })
+
+    it('merges legacy duplicate service rows regardless of UoM while retaining other cart lines', () => {
+        const legacyLines = [
+            { productId: 'service-1', storageId: SERVICES_VIRTUAL_STORAGE_ID, uomId: 'legacy-base:service-1', quantity: 1 },
+            { productId: 'service-1', storageId: SERVICES_VIRTUAL_STORAGE_ID, quantity: 2 },
+            { productId: 'stock-1', storageId: 'store-a', quantity: 1 },
+            { productId: 'stock-1', storageId: 'store-a', quantity: 1 },
+        ]
+        const rows = coalesceInstantPosServiceItems(
+            legacyLines,
+            (item) => item.storageId === SERVICES_VIRTUAL_STORAGE_ID,
+        )
+
+        expect(rows.filter((item) => item.productId === 'service-1')).toHaveLength(1)
+        expect(rows.find((item) => item.productId === 'service-1')).toMatchObject({ quantity: 3, uomId: undefined })
+        expect(rows.filter((item) => item.productId === 'stock-1')).toHaveLength(2)
+    })
+
     it('shows storage labels only while multiple source locations remain in the cart', () => {
         const otherStorageItem = { ...item, product_id: 'other', storageId: 'storage-2' }
         expect(shouldShowPosCartStorageLabels([item])).toBe(false)

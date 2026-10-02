@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { printPosPreprintReceipt } from '@/lib/posPreprintReceipt'
 
 const harness = vi.hoisted(() => ({
     buttons: [] as Array<{ tourId?: string; onClick?: () => unknown }>,
@@ -104,8 +105,8 @@ beforeEach(() => {
     harness.printFlow.mockReset()
 })
 
-describe('POS checkout success receipt printing', () => {
-    it('prints directly through the POS receipt pipeline without opening PrintFlow', async () => {
+describe('POS receipt printing', () => {
+    it('prints completed sales and pre-prints directly without opening PrintFlow', async () => {
         renderToStaticMarkup(
             <CheckoutSuccessModal
                 isOpen
@@ -141,5 +142,18 @@ describe('POS checkout success receipt printing', () => {
         expect(syncPdfBuilder).toBe(printPdfBuilder)
         await printPdfBuilder()
         expect(harness.buildReceiptPdf).toHaveBeenCalledOnce()
+
+        const preprintPdfBuilder = vi.fn().mockResolvedValue(new Blob(['pre-print']))
+        const printPreprint = vi.fn().mockResolvedValue(undefined)
+        await printPosPreprintReceipt({
+            saleData: { id: 'preview-1', invoiceid: 'PRE-123' },
+            pdfBuilder: preprintPdfBuilder,
+            printReceipt: printPreprint,
+        })
+        expect(printPreprint).toHaveBeenCalledOnce()
+        expect(printPreprint).toHaveBeenCalledWith({
+            title: 'Receipt_PRE-123',
+            pdfBuilder: preprintPdfBuilder,
+        })
     })
 })
