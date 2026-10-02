@@ -2,7 +2,7 @@
 
 ## Scope and entry point
 
-The Loans details page and Installments details page display **Transaction Integrity Audit** beside the loan breadcrumb. It is available for standard and simple loans, including linked sales/order loans and cancelled loans that remain visible. The audit is read-only: it does not save a result, repair records, change a balance, or start synchronization.
+The Loans details page and Installments details page display **Transaction Integrity Audit** beside the loan breadcrumb. It is available for standard and simple loans, including linked sales/order loans and cancelled loans that remain visible. After the loan record is ready and the detail view has rendered, the shared audit hook schedules the existing audit for browser idle time (with a delayed timer fallback). This keeps it outside the page's critical loading path. The breadcrumb icon is yellow while the audit is queued or running, then reflects Failed > Warning > Passed severity. Opening the dialog shows that run's result; clicking the button again starts a fresh run. The audit is read-only: it does not save a result, repair records, change a balance, or start synchronization.
 
 ## Checks
 
@@ -34,5 +34,6 @@ The SQLite reader uses an existing connection and `SELECT` queries only. A denie
 | Expected-state reconstruction and checks | `src/lib/integrityAudit/loanAudit.ts` |
 | Shared inspectable JSON model | `src/lib/integrityAudit/auditModel.ts` |
 | Loan details action and result dialog | `src/ui/components/loans/LoanIntegrityAuditBreadcrumbAction.tsx`, `src/ui/components/loans/LoanIntegrityAuditDialog.tsx` |
+| Deferred auto-run and generic severity action | `src/ui/components/integrity-audit/useDeferredTransactionIntegrityAudit.ts`, `src/ui/components/integrity-audit/TransactionIntegrityAuditAction.tsx`, `src/lib/integrityAudit/severity.ts` |
 
 The audit is surfaced on the existing Loans and Installments detail routes, which share the same loan detail view. See [Developer Testing](./developer-testing.md#loan-integrity-audit-coverage) for isolated and hosted coverage.

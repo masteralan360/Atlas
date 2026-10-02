@@ -13,7 +13,7 @@ export default function Preview() {
     const [open, setOpen] = useState(true)
     const { t } = useTranslation()
     const requested = new URLSearchParams(window.location.search).get('suite')
-    const suiteId = requested && Object.prototype.hasOwnProperty.call(registry, requested) ? requested : 'sale-orders'
+    const suiteId = requested && Object.prototype.hasOwnProperty.call(registry, requested) ? requested : 'sales-order-resilience'
     return <main className="p-4">
         <nav className="mb-4 flex flex-wrap gap-4">{Object.entries(registry).map(([id, suite]) =>
             <a key={id} href={`?suite=${id}`}>{t(suite.titleKey)}</a>)}</nav>

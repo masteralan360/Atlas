@@ -1,6 +1,10 @@
 import type { TFunction } from 'i18next'
 
 const ORDER_ERROR_TRANSLATIONS: Record<string, { key: string; fallback: string }> = {
+    return_request_identity_mismatch: {
+        key: 'orders.form.errors.returnRequestIdentityMismatch',
+        fallback: 'This return request changed. Refresh the order before trying again.'
+    },
     non_financed_order_must_be_paid: {
         key: 'orders.form.errors.non_financed_order_must_be_paid',
         fallback: 'This order must be paid in full before it can be reserved. To reserve it with an outstanding balance, select Loans or Installments as the payment method.'

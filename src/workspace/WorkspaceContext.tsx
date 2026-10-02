@@ -27,6 +27,7 @@ import {
     writeWorkspaceModeSnapshot
 } from './workspaceMode'
 import { isWorkspaceResolutionPending } from './workspaceLoading'
+import { resolveWorkspaceAccess } from './workspaceAccessResolution'
 import { resolveFetchedWorkspaceLogo, resolvePersistedWorkspaceLogo } from './workspaceLogo'
 import {
     resolveFetchedWorkspaceName,
@@ -321,10 +322,7 @@ function mergeWorkspaceFeatures(
     overrides?: WorkspaceAccessOverride[] | null
 ): WorkspaceFeatures {
     const plan = normalizeWorkspacePlan(features?.plan ?? defaultFeatures.plan)
-    const planCapabilities = getPlanCapabilities(plan)
-    const resolvedCapabilities = overrides?.length
-        ? applyWorkspaceOverrides(planCapabilities, overrides)
-        : planCapabilities
+    const resolvedCapabilities = resolveWorkspaceAccess(plan, overrides ?? [])
     const allowedCurrencies = resolvedCapabilities.allowedCurrencies
     const requestedCurrency = String(features?.default_currency ?? defaultFeatures.default_currency).toLowerCase()
     const defaultCurrency = allowedCurrencies.includes(requestedCurrency as CurrencyCode)
@@ -530,7 +528,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const persistWorkspaceState = async (
         workspaceId: string,
         nextFeatures: WorkspaceFeatures,
-        nextWorkspaceName: string | null
+        nextWorkspaceName: string | null,
+        nextOverrides = overridesRef.current
     ) => {
         const existing = await db.workspaces.get(workspaceId)
         const timestamp = new Date().toISOString()
@@ -553,6 +552,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             name: nextWorkspaceName || existing?.name || user?.workspaceName || 'My Workspace',
             code: existing?.code || user?.workspaceCode || 'LOADED',
             plan: nextFeatures.plan,
+            cachedAccessOverrides: nextOverrides,
             data_mode: nextFeatures.data_mode,
             is_configured: nextFeatures.is_configured,
             pos: nextFeatures.pos,
@@ -625,7 +625,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     ) => {
         if (cachedSnapshot) {
             return {
-                features: mergeWorkspaceFeatures(cachedSnapshot.features),
+                features: mergeWorkspaceFeatures(cachedSnapshot.features, cachedSnapshot.overrides),
+                overrides: cachedSnapshot.overrides ?? [],
                 workspaceName: cachedSnapshot.workspaceName
             }
         }
@@ -641,7 +642,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
 
         return {
-            features: localFeatures,
+            features: mergeWorkspaceFeatures(localFeatures, localWorkspace.cachedAccessOverrides),
+            overrides: localWorkspace.cachedAccessOverrides ?? [],
             workspaceName: localWorkspace.name || null
         }
     }
@@ -678,9 +680,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             if (fallback) {
                 setFeatures(fallback.features)
                 setWorkspaceName(fallback.workspaceName)
-                if (cachedSnapshot?.overrides) {
-                    setOverrides(cachedSnapshot.overrides)
-                }
+                setOverrides(fallback.overrides)
             } else if (!silent) {
                 setFeatures(defaultFeatures)
                 setWorkspaceName(user?.workspaceName ?? null)
@@ -846,7 +846,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 workspaceName: resolvedNextWorkspaceName,
                 overrides: fetchedOverrides
             })
-            await persistWorkspaceState(workspaceId, fetchedFeatures, resolvedNextWorkspaceName)
+            await persistWorkspaceState(workspaceId, fetchedFeatures, resolvedNextWorkspaceName, fetchedOverrides)
         } catch (err) {
             console.error('Error fetching workspace features:', err)
             await applyFallback()
@@ -946,6 +946,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         branchFetchRequestRef.current += 1
         setLoadedWorkspaceId(null)
         setResolvedBranchInfoWorkspaceId(null)
+        setOverrides([])
 
         if (!workspaceId) {
             setFeatures(defaultFeatures)
@@ -967,7 +968,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
         const cachedSnapshot = readWorkspaceCache<WorkspaceFeatures>(workspaceId)
         if (cachedSnapshot) {
-            setFeatures(mergeWorkspaceFeatures(cachedSnapshot.features))
+            setFeatures(mergeWorkspaceFeatures(cachedSnapshot.features, cachedSnapshot.overrides))
             setWorkspaceName(cachedSnapshot.workspaceName)
             if (cachedSnapshot.overrides) {
                 setOverrides(cachedSnapshot.overrides)
@@ -1142,7 +1143,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                             workspaceName: workspaceNameRef.current ?? user.workspaceName ?? 'My Workspace',
                             overrides: nextOverrides
                         })
-                        await persistWorkspaceState(user.workspaceId, updatedFeatures, workspaceNameRef.current ?? user.workspaceName ?? 'My Workspace')
+                        await persistWorkspaceState(user.workspaceId, updatedFeatures, workspaceNameRef.current ?? user.workspaceName ?? 'My Workspace', nextOverrides)
                     } catch (error) {
                         console.error('[Workspace] Failed to apply override change:', error)
                     }

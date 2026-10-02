@@ -1,9 +1,8 @@
 # Developer module tests
 
 For architecture, contracts, isolation, and extension instructions, read the
-[agent extension guide](./developer-testing-agent-guide.md). Sale Orders is the
-first independent V1 suite using shared infrastructure; its business scenarios
-are a reference implementation, not a universal specification for other modules.
+[agent extension guide](./developer-testing-agent-guide.md). Sales Order Resilience Lab owns Sales Order stateful verification and preserves
+shared domain regressions. Other modules keep their own independent suites.
 
 Standalone Sales Order **Cloud / Hybrid request contracts**, Business Partners **Order
 summary refresh**, and POS **Checkout** include deferred sales-order summary
@@ -24,7 +23,7 @@ the transaction. Clearing application storage removes these device-local jobs.
 Local-mode saves still await their summaries. These are disposable IndexedDB and mocked request checks, not native
 SQLite or live Supabase integration tests.
 
-The Sale Orders **Payments** and POS **Checkout** groups also run payment-account
+The Resilience Lab **Focused domain contracts** and POS **Checkout** groups also run payment-account
 member-visibility checks. They verify workspace/member filtering, the
 `payment_accounts.account_member_restrictions` Cloud / Hybrid request contract,
 offline retry handoff, and hard deletion when access is restored. This is an
@@ -35,8 +34,9 @@ Start the development server with `npm run dev`, open its localhost URL, and go
 to **Products → Developer tests**, **Orders → Sale Orders → Developer tests**, **POS → Developer tests**, or **Post Service → Developer tests**. The button and runner are enabled
 automatically during development and excluded from production builds.
 
-If another development server occupies port 1420, use
-`npm run dev -- --port 1422`. The `npm run dev:testing` convenience command also
+The default frontend port is 5173, matching Tauri's development URL. If another
+web development server occupies it, use `npm run dev -- --port 5176`.
+The `npm run dev:testing` convenience command also
 works and binds the server to localhost. For reviewing the modal without logging
 into Atlas, open `/__atlas-dev-testing/preview` for Sale Orders or
 `/__atlas-dev-testing/preview?suite=pos` for regular POS on the local development server.
@@ -44,9 +44,9 @@ Use `/__atlas-dev-testing/preview?suite=post-service` for Post Service.
 Use `/__atlas-dev-testing/preview?suite=products` for Products.
 
 The modal selects test groups, accepts a reproducible unsigned 32-bit seed and
-1–100 generated cases, streams individual results, retains failed diagnostics,
+1–10,000 generated sequences for SORL (1–100 for other suites), streams individual results, retains failed diagnostics,
 reruns failed groups with the original seed, and exports a JSON report. Cancel
-finishes the current group and cancels the remaining groups. Reopening or
+terminates the active child process tree and cancels remaining groups. Reopening or
 reloading the modal attaches to the active runner; restarting Vite starts a new
 session. Only one run is allowed per server. Reports are saved under the ignored
 `.atlas-test-runs/<run-id>/report.json` directory. These contain disposable
@@ -55,8 +55,12 @@ fixture names and test diagnostics, not credentials or current-workspace data.
 The same registry and controller work from the command line and CI:
 
 ```sh
-npm run test:sale-orders
-npm run test:sale-orders -- --groups matrix,lifecycle --seed 42 --samples 100
+npm run test:sales-order-resilience
+npm run test:sales-order-resilience -- --groups generated,regressions --seed=42 --runs=100
+npm run test:sales-order-resilience:integration
+npm run test:sales-order-resilience:stress
+npm run test:sales-order-resilience:entitlements
+npm run test:sales-order-resilience:e2e
 npm run test:pos
 npm run test:pos -- --groups checkout,remote-contract,failure-recovery --seed 42 --samples 100
 npm run test:pos:live
@@ -73,132 +77,52 @@ checks passed; the report also records environment coverage gaps.
 
 ## Hosted Supabase checks
 
-Sale Orders, Products, and regular POS have a separate **Hosted Supabase** environment in
-their Developer Test dialogs. It signs in as a dedicated admin test user and
-runs production functions against a dedicated Cloud or Hybrid `DEV TEST`
-workspace. Sale Orders creates real partner, storage, product, financed order,
-loan and payment records. POS creates its own storage, product, batch, sale,
-payment, loan and return records. Some
-financial history remains for audit; use an empty test workspace, never a
-business workspace. A Hybrid selection checks its Supabase source of truth,
-but does not exercise the desktop SQLite mirror.
+The [Sales Order Resilience Lab](./sales-order-resilience.md) uses disposable,
+run-scoped workspaces and real admin, staff, viewer and observer users. Its five
+selectable groups each pair isolated checks with normal-JWT hosted checks.
+Provisioning and cleanup alone use a parent-only service key; business actions
+run through Atlas modules and normal authenticated clients. It includes actual
+SQLite restart and Hybrid mutation-journal recovery, and six curated Playwright
+journeys across desktop and mobile. Browser and native-device results are
+reported separately; WASM SQLite verifies SQL persistence but cannot establish
+OS or native-driver behavior.
 
-For the Products group map, hosted scenarios, fixture cleanup, and known
-coverage gaps, see [Products V1 coverage](./developer-testing-products.md).
+Configure `.env.atlas-live-tests.local` from the existing live example, then
+`.env.atlas-resilience.local` with `SORL_SUPABASE_URL` matching its origin and
+`SORL_PROVISIONING_KEY` for controlled provisioning. Deploy the checked-in SORL
+actor-permit and Sales Order authorization migrations first. Neither file is
+committed. See the lab guide for profiles, fixture ownership, cleanup, fault
+injection, shrinking and replay.
 
-Copy [the configuration example](./developer-testing-live.env.example) to
-`.env.atlas-live-tests.local` in the Atlas root, then set the project URL,
-publishable or legacy anon key, dedicated admin email/password, and exact
-workspace ID/name. Give this test account access to only that workspace. The
-filled file is gitignored. The local runner checks the account's current and
-only visible workspace, its `DEV TEST` name, Cloud/Hybrid mode, and the
-required Supabase schema before each live group. A mismatch blocks the run before
-scenario writes. The developer UI receives readiness and the target identity,
-never the credentials. Network requests in the live child are limited to the
-configured Supabase HTTPS origin. The isolated environment remains network
-blocked.
+Products and regular POS keep their existing guarded hosted runner and
+module-owned scenarios. Read [Products coverage](./developer-testing-products.md)
+and [POS coverage](./developer-testing-pos.md). Their Cloud/Hybrid checks use a
+normal dedicated admin and an exact `DEV TEST` workspace; the runner blocks
+mismatched targets and limits requests to the configured HTTPS Supabase origin.
+Their existing hosted checks do not prove native SQLite mirror behavior.
 
-The eight regular Sale Orders groups are also selectable in Hosted Supabase.
-Each selection runs its complete existing isolated group in a credential-free,
-network-blocked child, then runs a focused live scenario in a separate child.
-Results are labeled **Isolated checks** or **Hosted Supabase**. A group passes
-only if both parts pass; a local assertion is never presented as proof of a
-server effect. The hosted scenarios cover payment methods and overpayment,
-print source records, partner statements, draft and approval lifecycle,
-fractional prices and discounts, related-unit stock, payment account movements,
-and workspace-scoped order reads. Printing and UI role/layout cases still rely
-on their isolated checks; the live printing scenario verifies saved print input,
-and the access scenario verifies only the dedicated admin account's workspace.
-The Payments live case needs the Payment Accounts module enabled in the target
-workspace. Account and unit configuration created by passing scenarios may
-remain because financial and order history can refer to them.
+## Sales Order Resilience Lab coverage
 
-The independent `live-transactions` group completes a paid cash Quick Order through its authenticated workspace-scoped RPC, verifies a full return, and creates simple-loan and installment sale orders with and without a down payment. It uses production functions and fresh authenticated clients to
-check stored orders, returns, loans, installments, payment counter-entries and
-stock. It also completes a regular pending Sale Order through the atomic
-completion RPC and verifies one stock deduction with one sale-ledger entry.
-The group races that completion against financed cancellation and verifies
-that a cancelled order has no stock deduction or sale-ledger entry, while a
-completed order has exactly one of each. Earlier hosted checks tested pending
-cancellation and completed Quick Orders separately; they did not test those
-two transitions competing on the same order. The runner refreshes the
-workspace's storages into its local cache before creating test storages, so
-existing primary or marketplace locations remain respected.
-The target project must have the app's current Sale Orders migrations deployed,
-including `cancel_order_with_financing`, `complete_sales_order_with_inventory`,
-and `contain_sales_order_completion_conflicts`.
-The report records run and fixture IDs to aid investigation. A failed fixture
-is retained for inspection; the test may retire a successful catalog item.
-The hosted related-units group follows the supported Sale Order lifecycle for
-two paid packs and one free pack at a factor of 20. It verifies that stock moves
-from 100 base units to 40, then back to 100 after a full return, with linked
-payment reversals. A separate live check calls the atomic Quick Order RPC with
-an active product conversion and requires it to reject the request before an
-order, payment, or stock movement is created. This boundary requires the
-`reject_related_unit_quick_orders` migration on the target project.
-Run it from the dialog or with `npm run test:sale-orders:live`. This command is
-opt-in and is excluded from normal `npm test` and isolated developer runs.
+SORL replaces the exclusive Cartesian catalog and wrapper engine. The
+`generated` group runs preconditioned action sequences with an independent model,
+`regressions` preserves deterministic failure reproductions, `faults` covers
+interruption, concurrent retry and sync recovery, `entitlements` verifies plans,
+grants, staff permissions and RLS, and `domain-contracts` preserves focused
+production regressions for financing, UoM/free quantities, services, statements,
+printing, pricing and integrity audits. The last group is useful domain knowledge,
+not a replacement permutation catalog. All five IDs have matching `liveGroups`.
 
-Regular POS uses the same guarded hosted environment with POS-owned fixtures.
-Its hosted groups pair isolated checks with focused live checkout, payment,
-account, pricing, currency, batch, related-unit, financing, return, service,
-authorization and rollback scenarios. Cart, media uploads and UI access remain
-isolated-only selections and are labeled accordingly. Run
-`npm run test:pos:live`; its cases do not exercise Instant POS. Post Service,
-browser interaction and native SQLite still require separate live adapters or
-scenarios. Isolated request contracts remain useful for failures and retries,
-but only hosted cases prove their selected server effects.
-
-## Sale Orders V1 coverage
-
-The selectable **Integrity Audit** group runs isolated Sales Order graph,
-reconciliation, breadcrumb action, Audit Model JSON, request-contract, module-wide
-adapter, summary severity, failure, and summary-only UI checks. The paired hosted
-selection compares module-wide results with the same orders' individual audits and
-checks that persisted order and payment records stay unchanged. Native SQLite
-execution and Hybrid mirror parity require separate environment checks. Single-order
-audit behavior and evidence limits are documented in
-[Transaction Reconciliation & Integrity Audit](./transaction-reconciliation-integrity-audit.md);
-module-wide architecture, filter scope, and future module integration are documented
-in [Module-Wide Transaction Integrity Audit](./module-wide-transaction-integrity-audit.md).
-
-The generated matrix calls the production order, payment, return, and financing
-functions against disposable fake IndexedDB, with fresh data for every case.
-Payment methods come from the app's shared registries rather than a separate
-list. The fixed cases cover regular creation and Quick Orders, USD/IQD, optional
-payment accounts, unpaid obligations, partial/full payments, approval, edits,
-soft deletion, reservation, completion, reload, cancellation, partial/full
-returns, services, stable retry identities, and important validation failures.
-Assertions read saved orders, inventory, transactions, linked reversals, account
-movements/balances, loans/installments, and the ledger's production projection.
-Seeded cases add fractional prices/quantities with checkout and full return.
-The minimum-selling-price cases reject Staff creates and edits below the current
-product floor before recording payments or reserving stock, accept the exact
-boundary, and verify Admin bypass with payment and inventory assertions. The
-shared validation contract tests cover Local product reads and Cloud/Hybrid
-request payloads, server results, and friendly request failures.
-
-Existing regression groups add financing repayment/reversal, stock aggregation,
-commission mode snapshots, customer summaries, currency conversion, pricing,
-and rounding. Mocked Cloud/Hybrid request contract tests remain as standalone
-Vitest unit tests for client retry, offline queue, invalid server result, and
-friendly failure behavior; they are no longer a selectable Sale Orders group.
-The Hosted Supabase group covers the financed Sale Order cancellation server
-effect. The lifecycle group retains Local financing cancellation cases.
-Run the read-only manual SQL check in
-`supabase/manual_checks/check_cancelled_order_linked_loans.sql` separately; the
-suite does not change historical cancelled orders.
-
-Browser automation of the real order form, Hybrid desktop SQLite mirroring,
-Local native SQLite persistence/restart, and exhaustive live Supabase/RLS
-coverage remain outside these groups. The modal and report label those gaps.
-IndexedDB reopen verifies cache survival only; standalone remote mocks verify
-client contracts only. Hosted scenarios verify their selected server effects,
-not every module workflow or permission role.
+The integrity-audit contracts remain registered in `domain-contracts`. Read
+[Transaction Reconciliation & Integrity Audit](./transaction-reconciliation-integrity-audit.md)
+and [Module-Wide Transaction Integrity Audit](./module-wide-transaction-integrity-audit.md)
+for their evidence limits and production behavior. The Sales Order contract
+also checks idle-scheduled execution and severity-colored breadcrumb status.
+Exact files and localized
+coverage text are in the authoritative registry and en/ku/ar `devTesting.resilience`.
 
 ## Loan Integrity Audit coverage
 
-The selectable **Loan Transaction Integrity Audit** group covers Supabase and SQLite graph reads, loan balance reconstruction, repayment and reversal links, payment-account movement checks, installment reconciliation, linked partner scope, Hybrid mirror parity, the JSON snapshot, the Loans breadcrumb action, and friendly read failures. Its hosted selection creates and audits a simple POS loan in the verified DEV TEST workspace, then confirms that the same loan ID is not visible when queried under another workspace. The audit is read-only and its persisted payment-transaction set is checked before completion.
+The selectable **Loan Transaction Integrity Audit** group covers Supabase and SQLite graph reads, loan balance reconstruction, repayment and reversal links, payment-account movement checks, installment reconciliation, linked partner scope, Hybrid mirror parity, the JSON snapshot, the Loans breadcrumb action, idle scheduling after detail readiness, pending and completed icon colors, severity precedence, and friendly read failures. Its hosted selection creates and audits a simple POS loan in the verified DEV TEST workspace, then confirms that the same loan ID is not visible when queried under another workspace. The audit is read-only and its persisted payment-transaction set is checked before completion.
 
 Run the isolated selection with `node scripts/dev-testing/cli.mjs --suite loans --groups integrity-audit`. Run the paired hosted selection with `node scripts/dev-testing/cli.mjs --suite loans --groups integrity-audit --environment hosted-supabase`. Hosted execution is opt-in and requires the configured DEV TEST workspace. Browser interaction, other workspace roles, and Hybrid native SQLite parity remain separate checks.
 

@@ -25,7 +25,7 @@ import {
     getOrderLinePaidInventoryQuantity,
     getOrderLineUnitFactor
 } from '@/lib/orderLineItems'
-import { isPositiveQuantity, roundQuantity } from '@/lib/quantity'
+import { isPositiveQuantity, quantitiesEqual, roundQuantity } from '@/lib/quantity'
 import { getMissingPriceBookCostMessage, hasValidProductCost } from '@/lib/productCost'
 import { canBePurchased, isService } from '@/lib/catalogItem'
 import { getPartnerSyncWriteRpc, getSupabaseClientForTable } from '@/lib/supabaseSchema'
@@ -1602,7 +1602,9 @@ async function hasOrderLoanInitialRepayment(loanId: string, workspaceId: string)
 async function appendInitialOrderPaymentTransaction(
     orderType: OrderType,
     order: SalesOrder | PurchaseOrder,
-    options?: Pick<OrderFormSaveOptions, 'initialPaymentTransactionId' | 'requireRemoteConfirmation'>
+    options?: Pick<OrderFormSaveOptions, 'initialPaymentTransactionId' | 'requireRemoteConfirmation'> & {
+        initialSalesOrder?: Record<string, unknown>
+    }
 ) {
     if (isSimpleOrderLoan(order)) {
         return
@@ -1624,8 +1626,9 @@ async function appendInitialOrderPaymentTransaction(
 
     const { appendPaymentTransaction } = await import('./payments')
     await appendPaymentTransaction(order.workspaceId, {
-        id: options?.initialPaymentTransactionId,
-        idempotent: Boolean(options?.initialPaymentTransactionId),
+        id: options?.initialPaymentTransactionId ?? (options?.initialSalesOrder ? uuidv5(order.id, uuidv5.URL) : undefined),
+        idempotent: Boolean(options?.initialPaymentTransactionId || options?.initialSalesOrder),
+        initialSalesOrder: options?.initialSalesOrder,
         requireRemoteConfirmation: options?.requireRemoteConfirmation,
         sourceModule: 'orders',
         sourceType,
@@ -3013,6 +3016,29 @@ export async function createSalesOrder(
     options?: OrderFormSaveOptions
 ) {
     reportOrderSaveProgress(options, 'preparing')
+    if (options?.orderId) {
+        const saved = await db.sales_orders.get(options.orderId)
+        if (saved && saved.workspaceId !== workspaceId) throw new Error('Sales order workspace mismatch')
+        if (saved && !saved.isDeleted && saved.status === 'draft' && (data.status ?? 'draft') === 'draft') {
+            // A retry of creation must not reset a subsequently edited draft or its version.
+            if (saved.syncStatus !== 'synced' || options.requireRemoteConfirmation) {
+                await syncUpsertEntities('sales_orders', [saved as unknown as Record<string, unknown> & { id: string; version: number }], workspaceId,
+                    { requireRemoteConfirmation: options.requireRemoteConfirmation })
+            }
+            const confirmed = (await db.sales_orders.get(saved.id)) as SalesOrder
+            if (!isOrderApprovalRequested(confirmed)) {
+                await appendInitialOrderPaymentTransaction('sales', confirmed, {
+                    ...options,
+                    ...(shouldUseCloudBusinessData(workspaceId) && isOnline(workspaceId)
+                        ? { initialSalesOrder: sanitizeSyncPayload('sales_orders', confirmed as unknown as Record<string, unknown>) }
+                        : {})
+                })
+            }
+            await refreshSavedSalesOrderSummaries([confirmed], options)
+            reportOrderSaveProgress(options, 'complete')
+            return confirmed
+        }
+    }
     const order = await buildSalesOrderEntity(workspaceId, data, createdBy, options)
     const status = order.status
 
@@ -3029,12 +3055,19 @@ export async function createSalesOrder(
         await assertSalesStockAvailable(order)
     }
 
-    // Initial purchase/sale payments are posted first so an insufficient
-    // selected account cannot create an order that claims to be paid.
+    // The hosted parent and initial payment must commit together: payment
+    // guards require the parent, and account rejection must roll back both.
     if (!isOrderApprovalRequested(order)) {
         reportOrderSaveProgress(options, 'payment')
-        await appendInitialOrderPaymentTransaction('sales', order, options)
+        await appendInitialOrderPaymentTransaction('sales', order, {
+            ...options,
+            ...(shouldUseCloudBusinessData(workspaceId) && isOnline(workspaceId)
+                ? { initialSalesOrder: sanitizeSyncPayload('sales_orders', order as unknown as Record<string, unknown>) }
+                : {})
+        })
     }
+    const atomicallySavedOrder = await db.sales_orders.get(order.id)
+    if (atomicallySavedOrder?.syncStatus === 'synced') Object.assign(order, atomicallySavedOrder)
     await db.sales_orders.put(order)
 
     if (status === 'completed') {
@@ -3053,7 +3086,7 @@ export async function createSalesOrder(
     }
 
     reportOrderSaveProgress(options, 'saving')
-    await syncUpsertEntities(
+    if (atomicallySavedOrder?.syncStatus !== 'synced' || status !== 'draft') await syncUpsertEntities(
         'sales_orders',
         [order as unknown as Record<string, unknown> & { id: string; version: number }],
         workspaceId,
@@ -3958,6 +3991,8 @@ export type SalesOrderReturnLineInput = {
 
 export type ReturnSalesOrderInput = {
     orderId: string
+    /** Stable identity for retries of one user-confirmed return. */
+    idempotencyKey?: string
     items: SalesOrderReturnLineInput[]
     reason: string
     returnedBy?: string | null
@@ -4694,7 +4729,7 @@ async function returnUnpaidEcommerceOrder(order: SalesOrder, input: ReturnSalesO
         returnedAmount
     } = await prepareSalesOrderReturn(order, input)
 
-    const returnId = generateId()
+    const returnId = input.idempotencyKey || generateId()
     const timestamp = new Date().toISOString()
 
     const restoredLines = await restoreInventoryForSalesOrderReturn(order, preparedLines, timestamp, returnId)
@@ -4824,7 +4859,21 @@ async function returnUnpaidEcommerceOrder(order: SalesOrder, input: ReturnSalesO
     return { order: updatedOrder, return: orderReturn, items: orderReturnItems }
 }
 
-export async function returnSalesOrder(input: ReturnSalesOrderInput) {
+const salesOrderReturnRequestsInFlight = new Map<string, { fingerprint: string; task: Promise<Awaited<ReturnType<typeof returnSalesOrderOnce>>> }>()
+
+export function returnSalesOrder(input: ReturnSalesOrderInput) {
+    if (!input.idempotencyKey) return returnSalesOrderOnce(input)
+    const key = `${input.orderId}:${input.idempotencyKey}`
+    const fingerprint = JSON.stringify({ ...input, items: [...input.items].sort((left, right) => left.orderItemId.localeCompare(right.orderItemId)) })
+    const existing = salesOrderReturnRequestsInFlight.get(key)
+    if (existing) return existing.fingerprint === fingerprint ? existing.task : Promise.reject(new Error('return_request_identity_mismatch'))
+    const task = returnSalesOrderOnce(input)
+    salesOrderReturnRequestsInFlight.set(key, { fingerprint, task })
+    void task.finally(() => { if (salesOrderReturnRequestsInFlight.get(key)?.task === task) salesOrderReturnRequestsInFlight.delete(key) }).catch(() => undefined)
+    return task
+}
+
+async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
     const order = await db.sales_orders.get(input.orderId)
     if (!order || order.isDeleted) {
         throw new Error('Sales order not found')
@@ -4836,6 +4885,34 @@ export async function returnSalesOrder(input: ReturnSalesOrderInput) {
         permissionKeys: input.permissionKeys
     })) {
         throw new Error(SALES_ORDER_RETURN_NOT_ALLOWED)
+    }
+    if (input.idempotencyKey) {
+        let previous = await db.order_returns.get(input.idempotencyKey)
+        // A normal authenticated read recovers retry identity after a cache reset.
+        if (!previous && shouldUseCloudBusinessData(order.workspaceId) && isOnline(order.workspaceId)) {
+            const result = await runSupabaseAction('orders.returnRetry.read', () => getSupabaseClientForTable('order_returns')
+                .from('order_returns').select('*').eq('workspace_id', order.workspaceId).eq('id', input.idempotencyKey!).maybeSingle())
+            if (result.error) throw normalizeSupabaseActionError(result.error)
+            if (result.data) {
+                previous = toCamelCase(result.data) as unknown as OrderReturn
+                const lines = await runSupabaseAction('orders.returnRetry.readItems', () => getSupabaseClientForTable('order_return_items')
+                    .from('order_return_items').select('*').eq('workspace_id', order.workspaceId).eq('return_id', previous!.id))
+                if (lines.error) throw normalizeSupabaseActionError(lines.error)
+                await db.order_returns.put(previous)
+                await db.order_return_items.bulkPut((lines.data ?? []).map(row => toCamelCase(row) as unknown as OrderReturnItem))
+            }
+        }
+        if (previous) {
+            const items = await db.order_return_items.where('returnId').equals(previous.id).toArray()
+            const matches = previous.orderId === input.orderId && previous.workspaceId === order.workspaceId && previous.reason === input.reason.trim()
+                && items.length === input.items.length && input.items.every(line => items.some(item =>
+                    item.orderItemId === line.orderItemId && quantitiesEqual(item.quantity,
+                        (line.quantity ?? ((line.paidQuantity ?? 0) + (line.freeQuantity ?? 0))) * (item.unitFactor ?? 1))
+                    && (line.paidQuantity === undefined || quantitiesEqual(item.paidSelectedUnitQuantity ?? 0, line.paidQuantity))
+                    && (line.freeQuantity === undefined || quantitiesEqual(item.freeSelectedUnitQuantity ?? 0, line.freeQuantity))))
+            if (!matches) throw new Error('return_request_identity_mismatch')
+            return { order, return: previous, items }
+        }
     }
     if (order.status !== 'completed') {
         throw new Error('Only completed sales orders can be returned')
@@ -4872,7 +4949,7 @@ export async function returnSalesOrder(input: ReturnSalesOrderInput) {
         returnedAmount
     } = await prepareSalesOrderReturn(order, input)
 
-    const returnId = generateId()
+    const returnId = input.idempotencyKey || generateId()
     const timestamp = new Date().toISOString()
     const isFinanced = isOrderFinancingMethod(order.paymentMethod) || !!order.linkedLoanId
     const standardPaymentRows = !isFinanced

@@ -2260,7 +2260,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                     </TabsList>
 
                                     {activeTab === 'sales' && DeveloperTestButton && <Suspense fallback={null}>
-                                        <DeveloperTestButton suiteId="sale-orders" />
+                                        <DeveloperTestButton suiteId="sales-order-resilience" labelKey="devTesting.resilience.title" />
                                     </Suspense>}
 
                                     <div className="flex flex-wrap items-center gap-3 self-start sm:self-auto">

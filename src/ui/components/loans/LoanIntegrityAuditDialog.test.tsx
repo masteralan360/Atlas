@@ -1,6 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { LoanIntegrityAuditResult } from '@/lib/integrityAudit/loanAudit'
+import { getTransactionIntegritySeverity } from '@/lib/integrityAudit/severity'
+import { scheduleTransactionIntegrityAudit, type TransactionIntegrityAuditScheduler } from '@/ui/components/integrity-audit/useDeferredTransactionIntegrityAudit'
 
 vi.mock('react-i18next', async importOriginal => {
   const actual = await importOriginal<typeof import('react-i18next')>()
@@ -35,6 +37,33 @@ describe('Loan Transaction Integrity Audit UI', () => {
     expect(html).toContain('!h-3.5 !w-3.5')
     expect(html).toContain('<svg')
     expect(html).not.toContain('>transactionAudit.run</button>')
+
+    const running = renderToStaticMarkup(<LoanIntegrityAuditBreadcrumbAction onClick={() => undefined} phase="running" />)
+    expect(running).toContain('transactionAudit.iconStatus.running')
+    expect(running).toContain('text-amber-600')
+    expect(running).toContain('motion-safe:animate-pulse')
+    const failed = renderToStaticMarkup(<LoanIntegrityAuditBreadcrumbAction onClick={() => undefined} phase="failed" />)
+    expect(failed).toContain('text-destructive')
+
+    expect(getTransactionIntegritySeverity({ passed: 199, warnings: 1, failed: 0 })).toBe('warning')
+    expect(getTransactionIntegritySeverity({ passed: 199, warnings: 1, failed: 1 })).toBe('failed')
+    expect(getTransactionIntegritySeverity({ passed: 200, warnings: 0, failed: 0 })).toBe('passed')
+
+    let idleCallback: (() => void) | undefined
+    let wasCancelled = false
+    const scheduler: TransactionIntegrityAuditScheduler = {
+      requestIdleCallback: callback => { idleCallback = callback; return 1 },
+      cancelIdleCallback: () => { wasCancelled = true },
+      setTimeout: () => 2,
+      clearTimeout: () => undefined
+    }
+    let didRun = false
+    const cancelScheduledAudit = scheduleTransactionIntegrityAudit(() => { didRun = true }, scheduler)
+    expect(didRun).toBe(false)
+    idleCallback?.()
+    expect(didRun).toBe(true)
+    cancelScheduledAudit()
+    expect(wasCancelled).toBe(true)
   })
 
   it('renders a structured dialog and an inspectable loan snapshot', () => {
@@ -49,8 +78,9 @@ describe('Loan Transaction Integrity Audit UI', () => {
     expect(json).toContain('balanceAmount')
 
     const dialog = renderToStaticMarkup(<LoanIntegrityAuditDialog open onOpenChange={() => undefined}
-      workspaceId="workspace-1" loanId="loan-1" mode="local" />)
+      loanId="loan-1" result={result} errorKey={null} loading={false} />)
     expect(dialog).toContain('transactionAudit.title')
     expect(dialog).toContain('transactionAudit.close')
+    expect(dialog).toContain('transactionAudit.summary')
   })
 })

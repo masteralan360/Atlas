@@ -139,7 +139,8 @@ import { db } from './database'
 import { createCompletedSalesOrder, createQuickSalesOrder, createSalesOrder, recalculateCustomerSummary, updateSalesOrder } from './orders'
 import { recalculateBusinessPartnerSummary } from './businessPartners'
 import { enqueuePartnerSummaryJobs, processPartnerSummaryJobs } from './partnerSummaryJobs'
-import { assertOrderFinancialEffects } from '@/dev/testing/assertions/saleOrders'
+import { assertOrderFinancialEffects } from '@/dev/testing/assertions/orderEffects'
+import { initialPaymentRegression } from '@/dev/testing/salesOrderResilience/scenarios/regressionScenarios'
 import { createPosServiceNameMetadata } from '@/lib/posServiceName'
 
 const WORKSPACE_ID = '10000000-0000-4000-8000-000000000001'
@@ -172,11 +173,18 @@ function baseEntity(id: string) {
 function deferredSummaryWrites() {
     let release!: () => void
     const gate = new Promise<void>((resolve) => { release = resolve })
-    supabaseMock.rpc.mockImplementation(async (name: string) => {
+    supabaseMock.rpc.mockImplementation(async (name: string, args: Record<string, any>) => {
         if (name === 'sync_customer' || name === 'sync_business_partner') await gate
-        return { data: null, error: null }
+        return successfulInitialOrderResponse(name, args)
     })
     return release
+}
+
+function successfulInitialOrderResponse(name: string, args: Record<string, any>) {
+    return { data: name === 'create_sales_order_with_initial_payment' ? {
+        order: { ...args.p_order, order_number: 'SO-2026-00999' },
+        payment: { ...args.p_transaction, reference_label: 'SO-2026-00999' }
+    } : null, error: null }
 }
 
 async function finishSummaryRefresh(customerId = CUSTOMER_ID, partnerId = PARTNER_ID) {
@@ -427,7 +435,7 @@ describe('atomic POS Quick Order completion', () => {
         writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
         setNetworkStatus(true)
         vi.clearAllMocks()
-        supabaseMock.rpc.mockReset().mockResolvedValue({ data: null, error: null })
+        supabaseMock.rpc.mockReset().mockImplementation(async (name, args) => successfulInitialOrderResponse(name, args))
 
         await db.business_partners.put({
             ...baseEntity(PARTNER_ID),
@@ -565,10 +573,12 @@ describe('atomic POS Quick Order completion', () => {
                         expect(await db.partner_summary_jobs.count()).toBe(2)
                         expect(order).toMatchObject({ orderNumber: 'SO-2026-00999', syncStatus: 'synced', status: 'draft' })
                         expect(progress.at(-1)).toBe('orders.form.saveProgressComplete')
-                        expect(supabaseMock.upsert).toHaveBeenCalledWith([expect.objectContaining({
-                            id: order.id, workspace_id: WORKSPACE_ID, customer_id: CUSTOMER_ID,
-                            business_partner_id: PARTNER_ID, total: 100, paid_amount: paid ? 100 : 0
-                        })])
+                        const expectedOrder = expect.objectContaining({ id: order.id, workspace_id: WORKSPACE_ID,
+                            customer_id: CUSTOMER_ID, business_partner_id: PARTNER_ID, total: 100, paid_amount: paid ? 100 : 0 })
+                        if (paid) expect(supabaseMock.rpc).toHaveBeenCalledWith('create_sales_order_with_initial_payment',
+                            expect.objectContaining({ p_order: expectedOrder,
+                                p_transaction: expect.objectContaining({ source_record_id: order.id, amount: 100 }) }))
+                        else expect(supabaseMock.upsert).toHaveBeenCalledWith([expectedOrder])
                         expect(await assertOrderFinancialEffects(order.id, paid ? 100 : 0, paid ? 0 : 100))
                             .toHaveLength(paid ? 1 : 0)
                         expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(5)
@@ -860,36 +870,10 @@ describe('atomic POS Quick Order completion', () => {
         await finishSummaryRefresh()
     })
 
-    it('does not duplicate a remotely confirmed first payment when the linked order retry succeeds', async () => {
+    it(`${initialPaymentRegression.id}: rolls back a rejected initial save and retries one order and payment identity`, async () => {
         const orderId = crypto.randomUUID()
         const initialPaymentTransactionId = crypto.randomUUID()
-        let failFirstOrderWrite = true
-        const successfulUpsert = supabaseMock.upsert.getMockImplementation()
-        supabaseMock.upsert.mockImplementation((payload: unknown) => {
-            const rows = Array.isArray(payload) ? payload : [payload]
-            const row = rows[0] as Record<string, unknown>
-            const isOrder = 'customer_id' in row
-            const response = isOrder && failFirstOrderWrite
-                ? { data: null, error: new Error('Supabase order write failed') }
-                : { data: [], error: null }
-            if (isOrder) failFirstOrderWrite = false
-
-            return {
-                select: async () => response.error
-                    ? response
-                    : {
-                        data: rows.map((item) => ({
-                            id: (item as { id?: string }).id,
-                            order_number: 'SO-2026-01000'
-                        })),
-                        error: null
-                    },
-                then: <TResult1 = typeof response, TResult2 = never>(
-                    onfulfilled?: ((value: typeof response) => TResult1 | PromiseLike<TResult1>) | null,
-                    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
-                ) => Promise.resolve(response).then(onfulfilled, onrejected)
-            } as unknown as ReturnType<typeof supabaseMock.upsert>
-        })
+        supabaseMock.rpc.mockResolvedValueOnce({ data: null, error: new Error('Supabase order write failed') })
 
         const options = {
             orderId,
@@ -898,7 +882,10 @@ describe('atomic POS Quick Order completion', () => {
         }
         await expect(createSalesOrder(WORKSPACE_ID, quickOrderInput(), USER_ID, options))
             .rejects.toThrow('remote_order_save_confirmation_failed')
-        expect(await db.payment_transactions.where('sourceRecordId').equals(orderId).count()).toBe(1)
+        expect(await db.sales_orders.get(orderId)).toBeUndefined()
+        expect(await db.payment_transactions.where('sourceRecordId').equals(orderId).count()).toBe(0)
+        expect(await db.payment_account_movements.count()).toBe(0)
+        expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(5)
 
         await createSalesOrder(WORKSPACE_ID, quickOrderInput(), USER_ID, options)
 
@@ -906,9 +893,8 @@ describe('atomic POS Quick Order completion', () => {
         expect(await db.payment_transactions.where('sourceRecordId').equals(orderId).count()).toBe(1)
         expect(await db.payment_transactions.get(initialPaymentTransactionId)).toMatchObject({ syncStatus: 'synced' })
 
-        if (successfulUpsert) {
-            supabaseMock.upsert.mockImplementation(successfulUpsert)
-        }
+        expect(supabaseMock.rpc.mock.calls.filter(([name]) => name === 'create_sales_order_with_initial_payment'))
+            .toHaveLength(2)
     })
 
     it('uses the same atomic order flow for services without inventory movement', async () => {

@@ -99,8 +99,11 @@ import { FilterDropdown } from '@/ui/components/FilterDropdown'
 import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { getWorkspaceDataMode } from '@/workspace/workspaceMode'
+import { runLoanIntegrityAudit } from '@/lib/integrityAudit/loanAudit'
+import { getTransactionIntegritySeverity } from '@/lib/integrityAudit/severity'
 import { LoanIntegrityAuditDialog } from '@/ui/components/loans/LoanIntegrityAuditDialog'
 import { LoanIntegrityAuditBreadcrumbAction } from '@/ui/components/loans/LoanIntegrityAuditBreadcrumbAction'
+import { useDeferredTransactionIntegrityAudit } from '@/ui/components/integrity-audit/useDeferredTransactionIntegrityAudit'
 
 type LoanFilter = 'all' | 'active' | 'overdue' | 'completed'
 
@@ -996,6 +999,17 @@ function LoanDetailsView({
     const installments = useLoanInstallments(loanId, workspaceId)
     const payments = useLoanPayments(loanId, workspaceId)
     const settlementTransactions = useLoanSettlementTransactions(loanId, workspaceId)
+    const auditMode = getWorkspaceDataMode(workspaceId)
+    const runLoanAudit = useCallback(
+        () => runLoanIntegrityAudit(workspaceId, loanId, auditMode),
+        [auditMode, loanId, workspaceId]
+    )
+    const loanIntegrityAudit = useDeferredTransactionIntegrityAudit({
+        enabled: !!loan,
+        auditKey: `${workspaceId}:${loanId}:${auditMode}`,
+        runAudit: runLoanAudit,
+        getSeverity: result => getTransactionIntegritySeverity(result.summary)
+    })
     const partialSaleReturnSummary = useLiveQuery(async (): Promise<PartialSaleReturnSummary | null> => {
         if (!loan?.saleId || loan.source !== 'pos' || loan.status === 'cancelled') {
             return null
@@ -1375,7 +1389,13 @@ function LoanDetailsView({
                     </Link>
                     <span>/</span>
                     <LoanNoDisplay loanNo={loan.loanNo} className="text-foreground" />
-                    <LoanIntegrityAuditBreadcrumbAction onClick={() => setAuditOpen(true)} />
+                    <LoanIntegrityAuditBreadcrumbAction
+                        phase={loanIntegrityAudit.phase}
+                        onClick={() => {
+                            void loanIntegrityAudit.runNow()
+                            setAuditOpen(true)
+                        }}
+                    />
                     {loan.source === 'order' ? (
                         <LoanSourceBadge source={loan.source} className="text-[10px] ms-2" />
                     ) : null}
@@ -1857,7 +1877,9 @@ function LoanDetailsView({
                 description={getLoanDeleteWarning(loan, t)}
             />
             <LoanIntegrityAuditDialog open={auditOpen} onOpenChange={setAuditOpen}
-                workspaceId={workspaceId} loanId={loan.id} mode={getWorkspaceDataMode(workspaceId)} />
+                loanId={loan.id}
+                result={loanIntegrityAudit.result} errorKey={loanIntegrityAudit.errorKey}
+                loading={loanIntegrityAudit.phase === 'scheduled' || loanIntegrityAudit.phase === 'running'} />
             <PaymentReversalDialog
                 open={!!transactionToReverse}
                 onOpenChange={(open) => {

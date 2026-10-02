@@ -12,6 +12,8 @@ import { useDemoTutorial } from '@/demo'
 import { useProfileData } from '@/hooks/useProfileData'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { resolveOrderDetailsLookupStatus, type OrderDetailsRemoteLookupStatus } from '@/lib/orderDetailsLookup'
+import { runSalesOrderIntegrityAudit } from '@/lib/integrityAudit/salesOrderAudit'
+import { getTransactionIntegritySeverity } from '@/lib/integrityAudit/severity'
 import { getOrderLineCostPerInventoryUnit, getOrderLineSelectedUnitCost, getOrderLineFreeBonusInventoryQuantity, getOrderLineFreeBonusQuantity, getOrderLineFulfilledQuantity, getOrderLineInventoryQuantity, getOrderLinePaidInventoryQuantity, getOrderLinePaidQuantity, getOrderLineUnitFactor, hasOrderLineFreeBonus, isFulfilledUnitsAvailableForOrder } from '@/lib/orderLineItems'
 import {
     getOrderAdjustmentTotals,
@@ -116,6 +118,7 @@ import { getWorkspaceUsageLimitMessage, isWorkspaceUsageLimitError } from '@/lib
 import { getWorkspaceDataMode } from '@/workspace/workspaceMode'
 import { SalesOrderIntegrityAuditDialog } from './SalesOrderIntegrityAuditDialog'
 import { SalesOrderAuditBreadcrumbAction } from './SalesOrderAuditBreadcrumbAction'
+import { useDeferredTransactionIntegrityAudit } from '@/ui/components/integrity-audit/useDeferredTransactionIntegrityAudit'
 import {
     ORDER_PRINT_COMMON_FIELD_KEYS,
     ORDER_RECEIPT_TEMPLATE_FIELD_KEYS,
@@ -345,8 +348,10 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const [transactionToReverse, setTransactionToReverse] = useState<PaymentTransaction | null>(null)
     const [isReversingPayment, setIsReversingPayment] = useState(false)
     const [isLoadingOrderInvoice, setIsLoadingOrderInvoice] = useState(false)
-    const [returnTarget, setReturnTarget] = useState<{ orderItemId: string | null; maxQuantity: number; itemName: string; unitLabel: string } | null>(null)
+    const [returnTarget, setReturnTarget] = useState<{ requestId: string; orderItemId: string | null; maxQuantity: number; itemName: string; unitLabel: string } | null>(null)
     const [isReturning, setIsReturning] = useState(false)
+    const returnInFlight = useRef(false)
+    const submittedReturnItems = useRef<{ requestId: string; items: SalesOrderReturnLineInput[] } | null>(null)
     const [returnPaymentAccount, setReturnPaymentAccount] = useState<PaymentAccount | null>(null)
     const [isPostReturnAdjustmentOpen, setIsPostReturnAdjustmentOpen] = useState(false)
     const [isSavingPostReturnAdjustment, setIsSavingPostReturnAdjustment] = useState(false)
@@ -370,6 +375,17 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         salesOrderStatus: salesOrderLookup.status,
         purchaseOrderStatus: purchaseOrderLookup.status,
         remoteStatus: remoteLookupStatus
+    })
+    const auditMode = getWorkspaceDataMode(workspaceId)
+    const runOrderIntegrityAudit = useCallback(
+        () => runSalesOrderIntegrityAudit(workspaceId, orderId, auditMode),
+        [auditMode, orderId, workspaceId]
+    )
+    const orderIntegrityAudit = useDeferredTransactionIntegrityAudit({
+        enabled: resolved?.kind === 'sales' && orderLookupStatus === 'found' && remoteLookupStatus !== 'loading',
+        auditKey: `${workspaceId}:${orderId}:${auditMode}`,
+        runAudit: runOrderIntegrityAudit,
+        getSeverity: result => getTransactionIntegritySeverity(result.summary)
     })
     const retryOrderLookup = useCallback(() => {
         setLookupRetryVersion((version) => version + 1)
@@ -1282,7 +1298,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
             })
             return
         }
-        setReturnTarget({ orderItemId: null, maxQuantity: 0, itemName: '', unitLabel: '' })
+        setReturnTarget({ requestId: crypto.randomUUID(), orderItemId: null, maxQuantity: 0, itemName: '', unitLabel: '' })
     }
 
     const openItemReturn = (item: SalesOrderItem) => {
@@ -1290,6 +1306,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         if (maxQuantity <= 0) return
         const unitCode = item.unit?.trim() || productUnits[item.productId]?.trim() || ''
         setReturnTarget({
+            requestId: crypto.randomUUID(),
             orderItemId: item.id,
             maxQuantity,
             itemName: item.productName,
@@ -1300,7 +1317,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     }
 
     const handleOrderReturnConfirm = async (reason: string, quantity?: number) => {
-        if (!resolved || resolved.kind !== 'sales' || !returnTarget) return
+        if (!resolved || resolved.kind !== 'sales' || !returnTarget || returnInFlight.current) return
 
         let items: SalesOrderReturnLineInput[]
         if (returnTarget.orderItemId) {
@@ -1312,7 +1329,9 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
 
             items = [{ orderItemId: returnTarget.orderItemId, quantity }]
         } else {
-            items = resolved.order.items
+            items = submittedReturnItems.current?.requestId === returnTarget.requestId
+                ? submittedReturnItems.current.items
+                : resolved.order.items
                 .map((item) => {
                     const factor = getOrderLineUnitFactor(item)
                     return {
@@ -1327,10 +1346,13 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         }
         if (items.length === 0) return
 
+        returnInFlight.current = true
+        submittedReturnItems.current = { requestId: returnTarget.requestId, items }
         setIsReturning(true)
         try {
             const result = await returnSalesOrder({
                 orderId: resolved.order.id,
+                idempotencyKey: returnTarget.requestId,
                 items,
                 reason,
                 returnedBy: user?.id || null,
@@ -1358,6 +1380,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 variant: 'destructive'
             })
         } finally {
+            returnInFlight.current = false
             setIsReturning(false)
         }
     }
@@ -1410,7 +1433,13 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                     <span className="inline-flex items-center gap-1 text-foreground">
                         <span className="font-semibold">{order.orderNumber}</span>
                         {!order.isArchived && isSales && order.status === 'completed' && (
-                            <SalesOrderAuditBreadcrumbAction onClick={() => setAuditOpen(true)} />
+                            <SalesOrderAuditBreadcrumbAction
+                                phase={orderIntegrityAudit.phase}
+                                onClick={() => {
+                                    void orderIntegrityAudit.runNow()
+                                    setAuditOpen(true)
+                                }}
+                            />
                         )}
                     </span>
                     {order.isArchived ? (
@@ -2612,7 +2641,9 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
             </AppDialog>
 
             {isSales && <SalesOrderIntegrityAuditDialog open={auditOpen} onOpenChange={setAuditOpen}
-                workspaceId={workspaceId} orderId={order.id} mode={getWorkspaceDataMode(workspaceId)} />}
+                orderId={order.id}
+                result={orderIntegrityAudit.result} errorKey={orderIntegrityAudit.errorKey}
+                loading={orderIntegrityAudit.phase === 'scheduled' || orderIntegrityAudit.phase === 'running'} />}
             <PrintFlow
                 isOpen={showPrintPreview && !order.isArchived}
                 onClose={() => {

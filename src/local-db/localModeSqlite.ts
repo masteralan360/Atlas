@@ -126,6 +126,8 @@ export const LOCAL_MODE_SQLITE_TABLES = [
   "profiles",
   "local_account_credentials",
   "workspace_permissions",
+  // Hybrid recovery must restore the mutation journal alongside pending entities.
+  "offline_mutations",
   "manual_entry_templates",
   "manual_entries",
   "clinical_appointments",
@@ -530,12 +532,14 @@ export function setLocalModeSqliteConnectionForTests(
     throw new Error("The SQLite test connection can only be set in tests.");
   }
   testConnectionOverride = connection;
+  // Replacing the disposable connection represents a process/database restart.
+  hydratedWorkspaces.clear();
   sqlitePromise = connection ? Promise.resolve(connection) : null;
   sqliteWriteQueue = Promise.resolve();
 }
 
 function isSqliteMirrorEnabled(workspaceId?: string | null) {
-  if (isTauri()) {
+  if (isTauri() || testConnectionOverride !== undefined) {
     return shouldMirrorToSqlite(workspaceId);
   }
   return isStrictLocalWorkspaceMode(workspaceId);

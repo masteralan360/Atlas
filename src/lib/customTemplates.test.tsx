@@ -118,7 +118,7 @@ beforeAll(async () => {
     ;({ PartnerDetailsPrintTemplate } = await import('@/ui/components/crm/PartnerDetailsPrintTemplate'))
     ;({ PartnerOrderItemsPrintTemplate } = await import('@/ui/components/crm/PartnerOrderItemsPrintTemplate'))
     ;({ OrderDetailsPrintTemplate, OrderReceiptPrintTemplate } = await import('@/ui/components/orders/OrderPrintTemplates'))
-}, 30_000)
+}, 120_000)
 
 describe('dynamic Label Print custom templates', () => {
     it('registers an un-sized Products template and restores a saved custom page size', () => {

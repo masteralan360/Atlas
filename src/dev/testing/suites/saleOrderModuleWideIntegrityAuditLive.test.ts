@@ -4,11 +4,11 @@ import { runModuleWideIntegrityAudit } from '@/lib/integrityAudit/moduleWide'
 import { createSalesOrderModuleWideIntegrityAuditAdapter } from '@/lib/integrityAudit/salesOrderModuleWide'
 import { runSalesOrderIntegrityAudit } from '@/lib/integrityAudit/salesOrderAudit'
 import { liveSupabase } from '../liveSupabase'
-import { liveWorkspaceId, requireLiveData, setupHostedSaleOrders, withLiveSaleOrderFixture } from '../fixtures/saleOrdersLive'
-import { saleOrderInput } from '../fixtures/saleOrder'
+import { liveWorkspaceId, requireLiveData, setupHostedOrderFixture, withLiveSaleOrderFixture } from '../fixtures/orderLive'
+import { saleOrderInput } from '../fixtures/orderInput'
 
 describe('Sale Orders · hosted module-wide integrity audit', () => {
-  setupHostedSaleOrders()
+  setupHostedOrderFixture()
 
   it('audits every supplied filtered order through the existing audit and leaves persisted records unchanged', async () => {
     await withLiveSaleOrderFixture(async fixture => {

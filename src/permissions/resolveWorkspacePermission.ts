@@ -1,0 +1,18 @@
+import type { UserRole } from '@/local-db/models'
+import { isSupportedWorkspacePermissionKey, WORKSPACE_PERMISSION_DEFINITIONS, type WorkspacePermissionKey } from './workspacePermissionDefinitions'
+
+/** Shared permission decision for the provider and independently authenticated route checks. */
+export function resolveWorkspacePermission(role: UserRole | undefined, enabled: boolean, keys: ReadonlySet<WorkspacePermissionKey>, permission: WorkspacePermissionKey) {
+    if (permission === 'global.hideCosts') return role !== 'admin' && enabled && keys.has(permission)
+    const [module, action] = permission.split('.')
+    const print = permission === 'global.NOprint' || action === 'print'
+    if (print && keys.has('global.NOprint')) return false
+    if (role === 'admin' || !enabled || keys.has(permission)) return true
+    if (module !== 'global') {
+        if (action === 'print') return true
+        const fallback = `global.${action}` as WorkspacePermissionKey
+        return isSupportedWorkspacePermissionKey(fallback) && keys.has(fallback)
+            && !WORKSPACE_PERMISSION_DEFINITIONS.some(definition => definition.key === permission && definition.module !== 'global')
+    }
+    return false
+}

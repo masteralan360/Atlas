@@ -102,9 +102,12 @@ This check is forward-only. It does not scan or backfill transactions that preda
 | Expected-state reconstruction and checks | `src/lib/integrityAudit/salesOrderAudit.ts` |
 | Inspectable JSON model | `src/lib/integrityAudit/auditModel.ts` |
 | Result dialog | `src/ui/components/orders/SalesOrderIntegrityAuditDialog.tsx` |
+| Deferred auto-run and generic severity action | `src/ui/components/integrity-audit/useDeferredTransactionIntegrityAudit.ts`, `src/ui/components/integrity-audit/TransactionIntegrityAuditAction.tsx`, `src/lib/integrityAudit/severity.ts` |
+
+When the Sales Order detail data is ready and the authoritative detail refresh has completed or failed, the shared hook schedules the existing audit for browser idle time. This keeps the work outside the order page's critical loading path. The breadcrumb icon is yellow while queued or running, then reflects Failed > Warning > Passed severity. Opening the dialog displays the completed run; clicking the action again starts a fresh audit. The hook calls `runSalesOrderIntegrityAudit` directly and contains no transaction validation rules.
 
 The Loans details view now supplies its own graph resolver and validators while preserving the read-only, expected-versus-persisted approach and structured result model. See [Loan Transaction Integrity Audit](./loan-transaction-integrity-audit.md) for its scope. Other transaction types still require their own resolver, validators, entry point, and coverage.
 
 Sales Orders also has a module-wide summary runner that delegates every filtered order to `runSalesOrderIntegrityAudit`. It uses the page's active filters and all matching orders independent of pagination. See [Module-Wide Transaction Integrity Audit](./module-wide-transaction-integrity-audit.md) for the shared adapter contract and expansion guide.
 
-For the selectable test group and its environment coverage, see [Developer Testing](./developer-testing.md#sale-orders-v1-coverage).
+For the selectable test group and its environment coverage, see [Developer Testing](./developer-testing.md#sales-order-resilience-lab-coverage).

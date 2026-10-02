@@ -6,15 +6,14 @@ import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { liveChildEnv, loadLiveConfig, preflightLive, redactLiveText } from './live.mjs'
-import { hostedCatalog, selectedDenominator } from './salesOrdersManifest.mjs'
+import { provisionResilience, loadResilienceConfig } from './resilienceProvision.mjs'
 
 const registryUrl = new URL('../../src/dev/testing/suites.json', import.meta.url)
-const saleOrdersCatalog = hostedCatalog
 export const suites = JSON.parse(readFileSync(registryUrl, 'utf8'))
 const ROOT = fileURLToPath(new URL('../../', import.meta.url))
 const PREFIX = '/__atlas-dev-testing'
 
-function stopChild(child) {
+export function stopChild(child) {
   if (!child) return
   // On Windows, killing just the Vitest parent can strand its worker forks.
   // Target only the PID created by this controller, including its descendants.
@@ -35,24 +34,20 @@ export function validateRunOptions(input) {
   if (!['isolated', 'hosted-supabase'].includes(environment)) throw new Error('invalid_options')
   const availableGroups = environment === 'isolated' ? suite.groups : suite.liveGroups ?? []
   if (!availableGroups.length) throw new Error('live_suite_unavailable')
-  const caseIds = input.caseIds
-  if (caseIds !== undefined && (environment !== 'hosted-supabase' || input.suiteId !== 'sale-orders'
-    || !Array.isArray(caseIds) || !caseIds.length || new Set(caseIds).size !== caseIds.length
-    || caseIds.some(id => !saleOrdersCatalog.some(domain => domain.cases.some(family => family.id === id))))) throw new Error('invalid_cases')
+  if (input.caseIds !== undefined) throw new Error('invalid_cases')
   const requestedGroups = input.groupIds ?? availableGroups.map((group) => group.id)
   if (!Array.isArray(requestedGroups) || !requestedGroups.length || requestedGroups.length > availableGroups.length
     || requestedGroups.some(id => typeof id !== 'string' || !availableGroups.some(group => group.id === id))
     || new Set(requestedGroups).size !== requestedGroups.length) throw new Error('invalid_groups')
-  const groups = caseIds ? requestedGroups.filter(id => availableGroups.some(group => group.id === id && caseIds.some(family => family.slice(4, 6) === group.domainId))) : requestedGroups
+  const groups = requestedGroups
   if (!Array.isArray(groups) || !groups.length || groups.length > availableGroups.length
     || groups.some((id) => typeof id !== 'string' || !availableGroups.some((group) => group.id === id))
     || new Set(groups).size !== groups.length) throw new Error('invalid_groups')
   const seed = input.seed ?? 20260918
   const samples = input.samples ?? 16
   if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff
-    || !Number.isInteger(samples) || samples < 1 || samples > 100) throw new Error('invalid_options')
-  if (caseIds?.some(id => !availableGroups.some(group => groups.includes(group.id) && group.domainId === id.slice(4, 6)))) throw new Error('invalid_cases')
-  return { suiteId: input.suiteId, environment, groups: availableGroups.filter((group) => groups.includes(group.id)), seed, samples, caseIds }
+    || !Number.isInteger(samples) || samples < 1 || samples > (input.suiteId === 'sales-order-resilience' ? 10000 : 100)) throw new Error('invalid_options')
+  return { suiteId: input.suiteId, environment, groups: availableGroups.filter((group) => groups.includes(group.id)), seed, samples }
 }
 
 export function isolatedChildEnv(seed, samples) {
@@ -77,10 +72,11 @@ export function isLocalRequest(req) {
 }
 
 export class TestController {
-  constructor({ root = ROOT, spawnChild = spawn, preflight = preflightLive, timeoutMs = 180_000, onGroupResult = () => {} } = {}) {
+  constructor({ root = ROOT, spawnChild = spawn, preflight = preflightLive, provision = provisionResilience, timeoutMs, onGroupResult = () => {} } = {}) {
     this.root = root
     this.spawnChild = spawnChild
     this.preflight = preflight
+    this.provision = provision
     this.timeoutMs = timeoutMs
     this.onGroupResult = onGroupResult
     this.token = randomBytes(32).toString('hex')
@@ -106,7 +102,7 @@ export class TestController {
     if (options.environment !== 'hosted-supabase') throw new Error('invalid_options')
     this.preflighting = true
     try {
-      const config = loadLiveConfig(this.root)
+      const config = options.suiteId === 'sales-order-resilience' ? loadResilienceConfig(this.root).bootstrap : loadLiveConfig(this.root)
       let readiness
       try { readiness = await this.preflight(config, { suiteId: options.suiteId }) }
       catch (error) { throw new Error(String(error.message || error).startsWith('live_') ? error.message : 'live_preflight_failed') }
@@ -115,10 +111,10 @@ export class TestController {
     } finally { this.preflighting = false }
   }
 
-  async liveReadiness(suiteId = 'sale-orders') {
+  async liveReadiness(suiteId = 'sales-order-resilience') {
     try {
       if (!suites[suiteId]?.liveGroups?.length) throw new Error('live_suite_unavailable')
-      const config = loadLiveConfig(this.root)
+      const config = suiteId === 'sales-order-resilience' ? loadResilienceConfig(this.root).bootstrap : loadLiveConfig(this.root)
       const readiness = await this.preflight(config, { suiteId })
       return { status: 'ready', target: readiness.target, mode: readiness.mode }
     } catch (error) {
@@ -131,12 +127,8 @@ export class TestController {
       id: randomUUID(), suiteId: options.suiteId, environment: options.environment,
       ...(live ? { target: live.readiness.target, mode: live.readiness.mode } : {}),
       seed: options.seed, samples: options.samples,
-      ...(options.caseIds ? { caseIds: options.caseIds } : {}),
       startedAt: new Date().toISOString(), status: 'running', cancelRequested: false,
       fixtures: [],
-      ...(live && options.suiteId === 'sale-orders' && options.groups.every(group => group.domainId && !group.isolatedGroupId)
-        ? { expectedTests: selectedDenominator(options.caseIds ?? options.groups.flatMap(group => saleOrdersCatalog.find(domain => domain.id === group.domainId)?.cases.map(family => family.id) ?? [])) }
-        : {}),
       groups: options.groups.map((group) => ({ id: group.id, status: 'pending', tests: [], errors: [] })),
       unavailable: (live ? suites[options.suiteId].liveUnavailable : undefined) ?? suites[options.suiteId].unavailable
     }
@@ -153,12 +145,22 @@ export class TestController {
     if (this.run?.id !== id) throw new Error('run_not_found')
     if (this.run.status === 'running') {
       this.run.cancelRequested = true
-      if (this.run.environment === 'hosted-supabase') stopChild(this.child)
+      stopChild(this.child)
     }
     return this.run
   }
 
   async execute(run, options, live) {
+    let fixture
+    if (live && options.suiteId === 'sales-order-resilience') {
+      fixture = await this.provision(this.root, { runId: run.id, entitlements: true, services: options.groups.some(group => group.id === 'domain-contracts'), mode: live.readiness.mode })
+      const actor = fixture.manifest.actors['business.admin']
+      live = { ...live, manifest: fixture.manifest, config: { ...live.config,
+        ATLAS_LIVE_TEST_EMAIL: actor.email, ATLAS_LIVE_TEST_PASSWORD: actor.password,
+        resilienceActors: fixture.manifest.actors,
+        ATLAS_LIVE_WORKSPACE_ID: actor.workspaceId, ATLAS_LIVE_WORKSPACE_NAME: actor.workspaceName } }
+      run.target = { host: new URL(fixture.manifest.url).host, workspaceId: actor.workspaceId, workspaceName: actor.workspaceName }
+    }
     for (const group of options.groups) {
       const result = run.groups.find((row) => row.id === group.id)
       if (run.cancelRequested || this.disposed) { result.status = 'cancelled'; continue }
@@ -185,7 +187,7 @@ export class TestController {
         continue
       }
       if (live) {
-        try { await this.preflight(live.config, { suiteId: options.suiteId }) }
+        try { live.readiness = await this.preflight(live.config, { suiteId: options.suiteId }) }
         catch (error) {
           result.status = 'failed'
           result.errors.push(String(error.message || error).startsWith('live_') ? error.message : 'live_preflight_failed')
@@ -198,15 +200,11 @@ export class TestController {
       await this.saveReport(run)
     }
     await this.checkpoint
-    if (!run.cancelRequested && !this.disposed && run.expectedTests !== undefined
-      && run.groups.reduce((count, group) => count + group.tests.length, 0) !== run.expectedTests) {
-      run.groups[0].errors.push(`hosted_denominator_mismatch:expected:${run.expectedTests}`)
-      run.groups[0].status = 'failed'
-    }
     run.status = run.cancelRequested || this.disposed ? 'cancelled'
       : run.groups.some((group) => group.status === 'failed') ? 'failed'
         : run.groups.some((group) => group.status === 'blocked') ? 'blocked' : 'passed'
     run.finishedAt = new Date().toISOString()
+    if (fixture) await fixture.cleanup(run.status === 'passed')
     await this.saveReport(run)
   }
 
@@ -262,27 +260,23 @@ export class TestController {
             && result.tests.every((test) => test.status === 'passed') ? 'passed' : 'failed'
         resolve()
       }
-      const timer = setTimeout(() => { timedOut = true; stopChild(child) }, live ? Math.max(this.timeoutMs, group.timeoutMs ?? 900_000) : this.timeoutMs)
+      const timer = setTimeout(() => { timedOut = true; stopChild(child) }, this.timeoutMs ?? group.timeoutMs ?? (live ? 900_000 : 180_000))
       try {
         child = this.spawnChild(process.execPath, [
           join(this.root, 'node_modules/vitest/vitest.mjs'), 'run',
-          '--config', join(this.root, live ? 'scripts/dev-testing/vitest.live.config.mts' : 'scripts/dev-testing/vitest.config.mts'),
+          '--config', join(this.root, run.suiteId === 'sales-order-resilience'
+            ? (live ? 'scripts/dev-testing/resilience.live.config.mts' : group.id === 'domain-contracts' ? 'scripts/dev-testing/resilience.domain.config.mts' : 'scripts/dev-testing/resilience.config.mts')
+            : (live ? 'scripts/dev-testing/vitest.live.config.mts' : 'scripts/dev-testing/vitest.config.mts')),
           '--reporter', join(this.root, 'scripts/dev-testing/reporter.mjs'),
           '--maxWorkers', '1', ...group.files
         ], { cwd: this.root, env: live
-          ? { ...liveChildEnv(live.config, isolatedChildEnv(run.seed, run.samples), run.id, live.readiness), ATLAS_LIVE_CASE_IDS: JSON.stringify(run.caseIds ?? []) }
+          ? { ...liveChildEnv(live.config, isolatedChildEnv(run.seed, run.samples), run.id, live.readiness), ...(live.manifest ? { SORL_MANIFEST: JSON.stringify(live.manifest) } : {}) }
           : isolatedChildEnv(run.seed, run.samples), shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
         this.child = child
         createInterface({ input: child.stdout }).on('line', (line) => {
           if (!line.startsWith('ATLAS_TEST_EVENT ')) return
           try {
             const event = JSON.parse(line.slice(17))
-            if (live && event.type === 'evidence') {
-              if (event.evidence && typeof event.evidence.caseId === 'string' && /^SO-H\d{2}-\d{2}(?:\/|$)/.test(event.evidence.caseId)) {
-                result.evidence ??= []
-                result.evidence.push(JSON.parse(redactLiveText(JSON.stringify(event.evidence), live.config)))
-              } else result.errors.push('invalid_evidence_event')
-            }
             if (live && event.type === 'fixture') {
               const fixture = event.fixture
               if (fixture?.runId === run.id && fixture?.workspaceId === run.target.workspaceId
@@ -349,7 +343,7 @@ export function testingMiddleware(controller) {
       if (req.method === 'POST' && path === `${PREFIX}/runs`) return json(res, 202, controller.start(await readBody(req)))
       if (req.method === 'POST' && path === `${PREFIX}/live-runs`) return json(res, 202, await controller.startLive(await readBody(req)))
       if (req.method === 'GET' && path === `${PREFIX}/live-readiness`) {
-        const suiteId = new URL(req.url, 'http://localhost').searchParams.get('suite') ?? 'sale-orders'
+        const suiteId = new URL(req.url, 'http://localhost').searchParams.get('suite') ?? 'sales-order-resilience'
         return json(res, 200, await controller.liveReadiness(suiteId))
       }
       if (req.method === 'GET' && path === `${PREFIX}/run`) return json(res, 200, controller.run)

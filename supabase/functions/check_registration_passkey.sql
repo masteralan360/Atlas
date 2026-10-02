@@ -21,6 +21,21 @@ begin
         raise exception 'Invalid role requested: %. Meta: %', requested_role, NEW.raw_user_meta_data;
     end if;
 
+    -- A single-use permit is created only by the controlled service-role provisioner.
+    -- Auth applies app_metadata after INSERT, so editable metadata is never trusted.
+    delete from sorl_private.actor_permits p
+    using public.workspaces w
+    where p.user_id = NEW.id and p.email = NEW.email
+      and p.role = requested_role
+      and p.workspace_id::text = NEW.raw_user_meta_data->>'workspace_id'
+      and p.expires_at > now() and w.id = p.workspace_id
+      and w.name like ('DEV TEST SORL ' || p.run_id::text || ' %')
+      and w.deleted_at is null;
+    if found then
+        NEW.raw_user_meta_data = coalesce(NEW.raw_user_meta_data, '{}'::jsonb) - 'passkey';
+        return NEW;
+    end if;
+
     if provided_key is null then
         raise exception 'Registration passkey is required.';
     end if;

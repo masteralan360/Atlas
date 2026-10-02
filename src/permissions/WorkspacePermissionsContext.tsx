@@ -12,7 +12,6 @@ import { isSupabaseConfigured, supabase } from "@/auth/supabase";
 import { useWorkspace } from "@/workspace";
 import {
   isSupportedWorkspacePermissionKey,
-  WORKSPACE_PERMISSION_DEFINITIONS,
   type WorkspacePermissionKey,
 } from "./workspacePermissionDefinitions";
 import {
@@ -27,6 +26,8 @@ import { getLocalModeSqliteConnection } from "@/local-db/localModeSqlite";
 import {
   WorkspacePermissionsContext,
 } from "./workspacePermissionsState";
+
+import { resolveWorkspacePermission } from "./resolveWorkspacePermission";
 
 export function WorkspacePermissionsProvider({
   children,
@@ -186,74 +187,7 @@ export function WorkspacePermissionsProvider({
 
   const hasPermission = useCallback(
     (permission: WorkspacePermissionKey) => {
-      // This is a restrictive global permission, unlike the normal allow-list
-      // permissions below. Administrators always retain financial visibility.
-      if (permission === "global.hideCosts") {
-        return userRole !== "admin"
-          && permissionsEnabled
-          && permissionSet.has("global.hideCosts");
-      }
-
-      // 1. Check for global.NOprint restriction first for any print-related checks
-      const isPrintAction = permission === 'global.NOprint' || (permission.split('.').length === 2 && permission.split('.')[1] === 'print')
-
-      if (isPrintAction) {
-        // If they have the explicit NOprint restriction, they don't have permission
-        if (permissionSet.has('global.NOprint')) {
-          return false
-        }
-
-        // For above staff roles (admin), print is always ON by default if not restricted
-        if (userRole === "admin") {
-          return true
-        }
-
-        // For other roles, they might still need explicit module-specific grant?
-        // Actually, the user's logic says "global print is always ON" for above staff.
-        // What about Staff? The user didn't explicitly say, but mentioned "for above staff".
-        // I'll keep the existing fallback logic but oriented around NOprint for non-admins too?
-        // No, I'll stick to the prompt: above staff = always ON unless NOprint.
-      }
-
-      if (userRole === "admin") {
-        return true;
-      }
-
-      if (!permissionsEnabled) {
-        return true;
-      }
-
-      // 2. Check direct permission
-      if (permissionSet.has(permission)) {
-        return true;
-      }
-
-      // 3. Check global fallback (non-print actions)
-      const parts = permission.split(".");
-      if (parts.length === 2 && parts[0] !== "global") {
-        const action = parts[1];
-        if (action === 'print') {
-          // We already handled print above, but just to be sure
-          return !permissionSet.has('global.NOprint')
-        }
-
-        const globalKey = `global.${action}` as WorkspacePermissionKey;
-
-        // Check if globalFallback exists and is granted
-        if (isSupportedWorkspacePermissionKey(globalKey) && permissionSet.has(globalKey)) {
-          // Precedence rule: Module-specific permission wins if it exists in definitions
-          const hasModuleSpecificDefinition = WORKSPACE_PERMISSION_DEFINITIONS.some(
-            (d) => d.key === permission && d.module !== "global",
-          );
-
-          // If no module-specific definition exists for this permission, allow global fallback
-          if (!hasModuleSpecificDefinition) {
-            return true;
-          }
-        }
-      }
-
-      return false;
+      return resolveWorkspacePermission(userRole, permissionsEnabled, permissionSet, permission);
     },
     [permissionSet, permissionsEnabled, userRole],
   );

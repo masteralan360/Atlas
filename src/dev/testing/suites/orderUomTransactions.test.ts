@@ -5,9 +5,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { db } from '@/local-db/database'
 import type { PurchaseOrderItem } from '@/local-db/models'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
-import { assertOrderFinancialEffects, assertStock } from '../assertions/saleOrders'
+import { assertOrderFinancialEffects, assertStock } from '../assertions/orderEffects'
 import { installTestBrowser } from '../fixtures/browser'
-import { saleOrderInput, TEST_TIME, TEST_WORKSPACE_ID } from '../fixtures/saleOrder'
+import { saleOrderInput, TEST_TIME, TEST_WORKSPACE_ID } from '../fixtures/orderInput'
 
 vi.mock('@/auth/supabase', () => {
   const remote = () => { throw new Error('Unexpected remote request in a Local product UoM scenario') }

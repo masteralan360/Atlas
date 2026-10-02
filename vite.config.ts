@@ -136,15 +136,16 @@ export default defineConfig(({ mode, command, isPreview }) => {
         ],
         // Fallback or explicit host parsing for Tauri mobile dev
         server: {
-            // Tauri expects a fixed port, fail if that port is not available
-            port: 1420,
+            // Keep this fixed port aligned with src-tauri/tauri.conf.json.
+            // Windows can reserve the 1400 range for virtual networking.
+            port: 5173,
             strictPort: true,
             // If the host is provided by Tauri CLI, tell Vite to listen on it
             host: process.env.TAURI_DEV_HOST || true,
             hmr: process.env.TAURI_DEV_HOST ? {
                 protocol: 'ws',
                 host: process.env.TAURI_DEV_HOST,
-                port: 1421,
+                port: 5174,
             } : undefined,
             // Setup watch to ignore Tauri files
             watch: {

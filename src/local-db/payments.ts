@@ -223,6 +223,8 @@ export interface AppendPaymentTransactionInput {
     idempotent?: boolean
     /** Posts an order payment through the row-locked Supabase RPC when online. */
     atomicOrderPayment?: boolean
+    /** Creates the parent Sales Order and its first payment in one server transaction. */
+    initialSalesOrder?: Record<string, unknown>
     /** Aggregate workflows own remote replay and must not enqueue a second row mutation. */
     deferRemoteSync?: boolean
     /** The caller cannot report success until Supabase confirms this payment write. */
@@ -1925,6 +1927,31 @@ export async function appendPaymentTransaction(
   try {
     const client = getSupabaseClientForTable('payment_transactions')
     const payload = sanitizeSyncPayload(transaction as unknown as Record<string, unknown>)
+    if (input.initialSalesOrder) {
+      const { data, error } = await runMutation<{
+        data: { order?: Record<string, unknown>; payment?: Record<string, unknown> } | null; error: unknown
+      }>('sales_orders.create_with_initial_payment', () =>
+        client.rpc('create_sales_order_with_initial_payment', {
+          p_order: input.initialSalesOrder, p_transaction: payload
+        })
+      )
+      if (error) throw error
+      if (!data?.order || !data?.payment
+        || data.order.id !== transaction.sourceRecordId || data.order.workspace_id !== workspaceId
+        || data.payment.id !== transaction.id || data.payment.workspace_id !== workspaceId
+        || data.payment.source_record_id !== transaction.sourceRecordId) {
+        throw new Error('The order and initial payment could not be confirmed by the server')
+      }
+      const syncedAt = new Date().toISOString()
+      const order = { ...toCamelCase(data.order), syncStatus: 'synced', lastSyncedAt: syncedAt } as SalesOrder
+      const payment = { ...transaction, ...toCamelCase(data.payment), syncStatus: 'synced', lastSyncedAt: syncedAt } as PaymentTransaction
+      await db.transaction('rw', [db.sales_orders, db.payment_transactions], async () => {
+        await db.sales_orders.put(order)
+        await db.payment_transactions.put(payment)
+      })
+      await mirrorPaymentAccountTransactionLocally(payment)
+      return payment
+    }
     if (input.atomicOrderPayment) {
       const { data, error } = await runMutation<{ data: unknown; error: unknown }>('payment_transactions.create_order_payment', () =>
         (client as any).rpc('record_order_payment', { p_transaction: payload })

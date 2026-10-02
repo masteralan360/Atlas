@@ -42,26 +42,6 @@ export function loadLiveConfig(root) {
   try { source = readFileSync(join(root, LIVE_CONFIG_FILE), 'utf8') }
   catch { throw new Error('live_config_missing') }
   const config = parseLiveConfig(source)
-  let extended
-  try { extended = readFileSync(join(root, '.atlas-sales-order-hosted.local.json'), 'utf8') }
-  catch (error) { if (error.code !== 'ENOENT') throw new Error('live_sales_config_invalid') }
-  if (extended !== undefined) {
-    let parsed
-    try { parsed = JSON.parse(extended) } catch { throw new Error('live_sales_config_invalid') }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
-      || Object.keys(parsed).some(key => !['personas', 'fixtures', 'observer'].includes(key))) throw new Error('live_sales_config_invalid')
-    for (const persona of Object.values(parsed.personas ?? {})) {
-      if (!persona || !uuid.test(persona.workspaceId ?? '') || !/^DEV TEST\b/i.test(persona.workspaceName ?? '')
-        || !['admin', 'staff', 'viewer'].includes(persona.role) || !persona.email || !persona.password) throw new Error('live_sales_persona_invalid')
-    }
-    if (parsed.observer) {
-      let observerUrl
-      try { observerUrl = new URL(parsed.observer.url) } catch { throw new Error('live_sales_observer_invalid') }
-      if (observerUrl.origin !== config.origin || !observerUrl.pathname.startsWith('/functions/v1/')
-        || observerUrl.username || observerUrl.password || !parsed.observer.bearer) throw new Error('live_sales_observer_invalid')
-    }
-    config.ATLAS_LIVE_SALES_CONFIG = JSON.stringify(parsed)
-  }
   return config
 }
 
@@ -79,25 +59,16 @@ export function liveChildEnv(config, baseEnv, runId, capabilities = {}) {
     ATLAS_LIVE_WORKSPACE_ID: config.ATLAS_LIVE_WORKSPACE_ID,
     ATLAS_LIVE_WORKSPACE_NAME: config.ATLAS_LIVE_WORKSPACE_NAME,
     ATLAS_LIVE_RUN_ID: runId,
-    ATLAS_LIVE_SERVICES_ENABLED: String(capabilities.servicesEnabled === true),
-    ATLAS_LIVE_SALES_CONFIG: config.ATLAS_LIVE_SALES_CONFIG ?? '{}'
+    ATLAS_LIVE_SERVICES_ENABLED: String(capabilities.servicesEnabled === true)
   }
 }
 
 export function redactLiveText(value, config) {
   let result = String(value)
-  for (const secret of [config.ATLAS_LIVE_SUPABASE_KEY, config.ATLAS_LIVE_TEST_PASSWORD, config.ATLAS_LIVE_TEST_EMAIL]) {
+  const actors = Object.values(config.resilienceActors ?? {})
+  for (const secret of [config.ATLAS_LIVE_SUPABASE_KEY, config.ATLAS_LIVE_TEST_PASSWORD, config.ATLAS_LIVE_TEST_EMAIL,
+    ...actors.flatMap(actor => [actor.email, actor.password])]) {
     if (secret) result = result.replaceAll(secret, '[redacted]')
-  }
-  if (config.ATLAS_LIVE_SALES_CONFIG) {
-    const walk = (value) => {
-      if (!value || typeof value !== 'object') return
-      for (const [key, item] of Object.entries(value)) {
-        if (typeof item === 'string' && /password|email|bearer|token|secret/i.test(key)) result = result.replaceAll(item, '[redacted]')
-        else if (typeof item === 'object') walk(item)
-      }
-    }
-    walk(JSON.parse(config.ATLAS_LIVE_SALES_CONFIG))
   }
   return result.replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer [redacted]')
     .replace(/eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted token]')
@@ -115,7 +86,7 @@ export function createLiveFetch(origin, fetchImpl = globalThis.fetch) {
   }
 }
 
-export async function preflightLive(config, { fetchImpl = globalThis.fetch, suiteId = 'sale-orders' } = {}) {
+export async function preflightLive(config, { fetchImpl = globalThis.fetch, suiteId = 'sales-order-resilience' } = {}) {
   const client = createClient(config.origin, config.ATLAS_LIVE_SUPABASE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     global: { fetch: createLiveFetch(config.origin, fetchImpl) }
@@ -137,7 +108,7 @@ export async function preflightLive(config, { fetchImpl = globalThis.fetch, suit
       .select('id').limit(2)
     if (accessError || !Array.isArray(accessible) || accessible.length !== 1
       || accessible[0].id !== config.ATLAS_LIVE_WORKSPACE_ID) throw new Error('live_workspace_mismatch')
-    if (suiteId === 'sale-orders') {
+    if (suiteId === 'sales-order-resilience') {
       const { error } = await client.schema('crm').from('sales_orders')
         .select('id').eq('workspace_id', config.ATLAS_LIVE_WORKSPACE_ID).limit(1)
       if (error) throw new Error('live_schema_unavailable')

@@ -32,7 +32,7 @@ const typescriptRules = {
 
 export default tseslint.config(
   {
-    ignores: ['dist', 'node_modules', 'coverage', 'src-tauri/target'],
+    ignores: ['dist', 'node_modules', 'coverage', 'src-tauri/target', '.atlas-dev-testing', '.atlas-test-runs'],
   },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],

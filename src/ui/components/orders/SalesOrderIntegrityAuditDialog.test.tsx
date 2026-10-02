@@ -2,7 +2,10 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { IntegrityAuditResult } from '@/lib/integrityAudit/salesOrderAudit'
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock('react-i18next', async (importOriginal) => ({
+  ...await importOriginal<typeof import('react-i18next')>(),
+  useTranslation: () => ({ t: (key: string) => key })
+}))
 vi.mock('@/ui/components', async () => {
   const React = await import('react')
   return {
@@ -44,5 +47,13 @@ describe('Sales Order audit breadcrumb action', () => {
     expect(html).toContain('!h-3.5 !w-3.5')
     expect(html).toContain('<svg')
     expect(html).not.toContain('>transactionAudit.run</button>')
+
+    const warning = renderToStaticMarkup(<SalesOrderAuditBreadcrumbAction onClick={() => undefined} phase="warning" />)
+    expect(warning).toContain('transactionAudit.iconStatus.warning')
+    expect(warning).toContain('text-amber-600')
+    const passed = renderToStaticMarkup(<SalesOrderAuditBreadcrumbAction onClick={() => undefined} phase="passed" />)
+    expect(passed).toContain('text-emerald-600')
+    const failed = renderToStaticMarkup(<SalesOrderAuditBreadcrumbAction onClick={() => undefined} phase="failed" />)
+    expect(failed).toContain('text-destructive')
   })
 })

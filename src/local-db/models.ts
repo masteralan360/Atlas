@@ -2836,6 +2836,8 @@ export interface Workspace extends BaseEntity {
   name: string
   code: string
   plan?: WorkspacePlan
+  /** Local entitlement snapshot; never sent as a workspaces Data API column. */
+  cachedAccessOverrides?: import('@/plans/workspacePlans').WorkspaceAccessOverride[]
   data_mode: WorkspaceDataMode
   is_configured?: boolean
   // Module toggles

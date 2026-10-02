@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Database, Loader2, XCircle } from 'lucide-react'
-import { IntegrityAuditReadError, runSalesOrderIntegrityAudit, type AuditCategory, type AuditStatus, type IntegrityAuditResult } from '@/lib/integrityAudit/salesOrderAudit'
+import type { AuditCategory, AuditStatus, IntegrityAuditResult } from '@/lib/integrityAudit/salesOrderAudit'
 import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle, Button } from '@/ui/components'
 import { AuditModelJsonPanel } from '@/ui/components/integrity-audit/AuditModelJsonPanel'
 import { IntegrityAuditCategoryIcon } from '@/ui/components/integrity-audit/IntegrityAuditCategoryIcon'
@@ -23,29 +22,15 @@ function displayValue(value: unknown) {
   return serialized.length > 300 ? `${serialized.slice(0, 300)}…` : serialized
 }
 
-export function SalesOrderIntegrityAuditDialog({ open, onOpenChange, workspaceId, orderId, mode }: {
+export function SalesOrderIntegrityAuditDialog({ open, onOpenChange, orderId, result, errorKey, loading }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  workspaceId: string
   orderId: string
-  mode: 'cloud' | 'hybrid' | 'local' | 'demo'
+  result: IntegrityAuditResult | null
+  errorKey: string | null
+  loading: boolean
 }) {
   const { t } = useTranslation()
-  const [result, setResult] = useState<IntegrityAuditResult | null>(null)
-  const [errorKey, setErrorKey] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    setResult(null)
-    setErrorKey(null)
-    setLoading(true)
-    void runSalesOrderIntegrityAudit(workspaceId, orderId, mode)
-      .then(value => { if (!cancelled) setResult(value) })
-      .catch(error => { if (!cancelled) setErrorKey(error instanceof IntegrityAuditReadError ? error.messageKey : 'transactionAudit.loadFailed') })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [open, workspaceId, orderId, mode])
 
   return <AppDialog open={open} onOpenChange={next => { if (!loading) onOpenChange(next) }}>
     <AppDialogContent className="max-w-3xl" showCloseButton={!loading} onEscapeKeyDown={event => { if (loading) event.preventDefault() }} onPointerDownOutside={event => { if (loading) event.preventDefault() }}>

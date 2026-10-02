@@ -3,6 +3,14 @@
     "run": "Run Integrity Audit",
     "title": "Transaction Integrity Audit",
     "running": "Inspecting transaction records…",
+    "iconStatus": {
+      "scheduled": "Waiting to run",
+      "running": "Running",
+      "passed": "Passed",
+      "warning": "Warning",
+      "failed": "Failed",
+      "error": "Could not complete"
+    },
     "loadFailed": "The audit could not read all required records. Please try again when the database is available.",
     "transactionStatus": "Transaction integrity",
     "mirrorStatus": "SQLite mirror integrity",
@@ -55,8 +63,22 @@
       "ORIGINAL_DISCOUNT_TAX_HISTORY_UNAVAILABLE": "The original discount and tax were not retained after the return."
     },
     "close": "Close",
-    "status": { "PASS": "Passed", "WARNING": "Warnings", "FAIL": "Failed", "NOT_APPLICABLE": "Not applicable" },
-    "categories": { "order": "Order integrity", "items": "Item calculations", "inventory": "Inventory integrity", "payments": "Payment integrity", "loan": "Loan and receivable integrity", "installments": "Installment schedule integrity", "relationships": "Relationship integrity", "mirror": "Cloud / local mirror" }
+    "status": {
+      "PASS": "Passed",
+      "WARNING": "Warnings",
+      "FAIL": "Failed",
+      "NOT_APPLICABLE": "Not applicable"
+    },
+    "categories": {
+      "order": "Order integrity",
+      "items": "Item calculations",
+      "inventory": "Inventory integrity",
+      "payments": "Payment integrity",
+      "loan": "Loan and receivable integrity",
+      "installments": "Installment schedule integrity",
+      "relationships": "Relationship integrity",
+      "mirror": "Cloud / local mirror"
+    }
   },
   "moduleWideIntegrityAudit": {
     "open": "Module-Wide Integrity Audit",
@@ -82,53 +104,29 @@
       "warnings": "{{count}} warnings",
       "failed": "{{count}} failed"
     },
-    "status": { "PASS": "Passed", "WARNING": "Warning", "FAIL": "Failed" }
+    "status": {
+      "PASS": "Passed",
+      "WARNING": "Warning",
+      "FAIL": "Failed"
+    }
   },
   "devTesting": {
-    "saleOrdersHostedGroups": {
-      "h01": "Authentication & workspace isolation",
-      "h02": "Module grants, capabilities & permissions",
-      "h03": "Customer, partner & sales-account choices",
-      "h04": "Line composition & catalog snapshots",
-      "h05": "Units, conversion factors & free bonuses",
-      "h06": "Prices, price books, costs & floors",
-      "h07": "Currencies & exchange snapshots",
-      "h08": "Totals, discounts, taxes & adjustments",
-      "h09": "Create, edit, retry & numbering",
-      "h10": "Approval request lifecycle",
-      "h11": "Reservation & stock availability",
-      "h12": "Atomic completion & inventory costing",
-      "h13": "Quick Order method × status matrix",
-      "h14": "Collections, settlements & reversals",
-      "h15": "Payment accounts & cashier shifts",
-      "h16": "Financing activation & initial money",
-      "h17": "Schedules & linked-loan repayments",
-      "h18": "Cancellation & financial unwinding",
-      "h19": "Standard returns & exact refunds",
-      "h20": "Financed returns & debt reduction",
-      "h21": "Post-return corrections",
-      "h22": "Commission sources, plans & snapshots",
-      "h23": "Commission payout, tracking & recovery",
-      "h24": "Marketplace state and delivery integration",
-      "h25": "Locking, deletion, archive & terminal states",
-      "h26": "Reads, projections & invoice metadata",
-      "h27": "Remote contracts & direct bypass probes",
-      "h28": "Concurrency, transport faults & recovery",
-      "h29": "Historical records & integrity detection",
-      "h30": "Runner isolation, evidence & final reconciliation"
-    },
     "button": "Developer tests",
     "accountSwitcher": "Account switching",
     "accountSwitcherCoverageHelp": "Covers the authenticated workspace member request, email roster filtering, isolated Supabase password validation, online-only enforcement, outgoing then incoming cashier-shift handoff, and restoring the original session after an incoming-shift cancellation or failure.",
     "printingWorkflow": "Printing workflow",
     "printingWorkflowGroup": "Selection to print editor",
     "printingWorkflowCoverageHelp": "Checks that A4, receipt, and label selections open PrintPreviewEditorPage directly, that the editor waits until a format is selected, and that one selection opens the editor only once. Browser rendering and native print-dialog behavior require separate checks.",
-    "accountSwitcherGroups": { "cloudHybrid": "Cloud / Hybrid account switching" },
+    "accountSwitcherGroups": {
+      "cloudHybrid": "Cloud / Hybrid account switching"
+    },
     "saleOrders": "Sale Orders",
     "loans": "Loans",
-    "loansCoverageHelp": "The Integrity Audit group checks read-only loan graph resolution from Supabase and SQLite, expected paid and remaining amounts, repayment reversals, payment-account movements, installment schedules, linked-partner scope, Hybrid mirror comparison, the JSON snapshot, breadcrumb action, and user-friendly read failures. Hosted Supabase coverage audits a newly persisted test loan and confirms another workspace cannot expose it. Native SQLite parity and browser interaction remain separate checks.",
+    "loansCoverageHelp": "The Integrity Audit group checks read-only loan graph resolution from Supabase and SQLite, expected paid and remaining amounts, repayment reversals, payment-account movements, installment schedules, linked-partner scope, Hybrid mirror comparison, the JSON snapshot, idle scheduling after detail readiness, pending and completed breadcrumb icon colors with Failed > Warning > Passed precedence, and user-friendly read failures. Hosted Supabase coverage audits a newly persisted test loan and confirms another workspace cannot expose it. Native SQLite parity and browser interaction remain separate checks.",
     "loansLiveCoverageHelp": "Hosted Supabase coverage creates a simple POS loan in the verified DEV TEST workspace, audits its persisted loan and installment records, and confirms an audit under a different workspace returns no loan data. It also verifies the persisted payment-transaction set remains unchanged by the read-only audit. Fixture IDs appear in the report. Other workspace roles, Hybrid native SQLite parity, and browser interaction need separate checks.",
-    "loansGroups": { "integrityAudit": "Loan Transaction Integrity Audit" },
+    "loansGroups": {
+      "integrityAudit": "Loan Transaction Integrity Audit"
+    },
     "businessPartners": "Business Partners",
     "products": "Products",
     "productsSamplesHelp": "Generated catalog cases use the configured sample count and seed. All other checks use fixed scenarios.",
@@ -169,13 +167,14 @@
     "coverageLimit": "Full environment coverage is incomplete",
     "blocked": "Not covered · adapter or scenario unavailable",
     "environment": "Test environment",
-    "adapters": { "isolated": "Isolated checks", "hosted-supabase": "Hosted Supabase" },
+    "adapters": {
+      "isolated": "Isolated checks",
+      "hosted-supabase": "Hosted Supabase"
+    },
     "liveWrites": "These checks create real records in the configured DEV TEST workspace. Financial history may remain for audit. Review the target below before running.",
     "liveChecking": "Checking test workspace, sign-in, and database access…",
     "liveReady": "Ready: {{name}} ({{id}}) · {{mode}} · {{host}}",
     "liveFixtureCount": "{{count}} fixture checkpoints recorded in the report",
-    "saleOrdersIsolatedCoverageHelp": "Runs Sale Orders calculations, Local business flows, UI contracts and regression checks with disposable IndexedDB. The Integrity Audit group tests its compact breadcrumb action, historical item, inventory, payment, loan, return and relationship reconciliation, unpaid-order derived outstanding amounts, the displayed Audit Model JSON, and read-only Supabase request contracts. The lifecycle group also verifies cloud completion of service-only orders with no inventory changes. Native SQLite and live parity remain separate checks. Select Hosted Supabase for these same isolated groups plus focused real-database scenarios. The product UoM group also verifies Local order fulfillment and returns write canonical inventory movements. This coverage starts after deployment; historical movements are not backfilled. The Payment Accounts group also verifies internal transfers create one linked sender and receiver record, atomically update both balances, enforce same-currency and available-funds rules, retry without duplication, include hidden destination accounts, and leave ledger totals unchanged. The Cloud / Hybrid transfer contract also checks the submitted request, successful result, and friendly insufficient-funds failure. Required transfer reason validation and Reference ID display are covered. Settle Balance coverage also checks full and partial payments share one operation header, preserve partial-failure status, and leave legacy payments ungrouped. Minimum Selling Price covers staff-only create/edit checks, exact-boundary acceptance, Admin bypass, server preflight, and saved-order rollback before payment or stock effects. Quick Order multi-storage coverage also verifies that completed lines retain their individual source storages and deduct stock from each matching position. Order saves also verify that database-normalized UoM snapshots return to the local cache before later completion. Order archiving verifies eligibility for cancelled and returned sales and purchase orders, flag-only Cloud / Hybrid requests, unchanged order details, active-list filtering, and successful or rejected updates. Return sync coverage also verifies that a stale cached item UoM cannot overwrite the hosted immutable snapshot; return audit rows preserve the converted quantities. The integrity audit also accepts inventory movements linked to posted returns by return ID and checks returned quantities only when they exist in the immutable order snapshot. Purchase receipt rounding also verifies fractional paid and bonus quantities agree with separately rounded base-unit snapshots. The Module-Wide Integrity Audit reuses the existing single-order audit for every current-filter match, independent of table pagination, and displays the summary counts for each order.",
-    "saleOrdersLiveCoverageHelp": "Supabase-only coverage: 30 hosted domains and 418 stable scenario families, with exhaustive finite Quick Order combinations and seeded long action sequences. Production actions run against the dedicated DEV TEST account; a separate authenticated reader verifies the full persisted graph after each step: order snapshots, inventory and batch deltas, returns, original payments and linked counter-entries, payment-account movements and balances, loans and schedules, commission sources and settlements, marketplace delivery, invoice metadata, and terminal-state integrity. Other hosted domains run no isolated tests; purchase receipt rounding runs its linked isolated checks. Missing personas, disabled capabilities, prepared historical/storefront fixtures, and a private read-only observer are reported as blocked, never passed or silently skipped. Interrupted multi-write operations retain their committed prefix and fail when integrity or recovery is incomplete. Failed fixtures and per-step request/hash evidence remain in the run report. Cash, FIB, QiCard, ZainCash, FastPay, bank transfer, loans, installments, USD/EUR/IQD/TRY, optional payment accounts, approval requests, physical/service/mixed/free lines, unit factors, paid/free returns, retries, collisions and concurrent actions are included. External exchange-rate availability, SQLite/Dexie assertions, PDF appearance, OS printing and R2 file bytes are outside this Supabase selection. Historical return audit fixtures verify valid posted-return inventory references and omitted returned-quantity snapshots without changing hosted rows. Hosted Sale Orders coverage verifies that a return-payment reversal remains in payment history while its debit is omitted only from the linked sales-account agent statement; regular customer refunds remain visible. The sales-agent payment credit allocation group also creates two DEV TEST order loans and a persisted partner-account credit, checks oldest-first reduction to the statement balance, rejects a hosted overpayment without adding repayment records, and confirms Collect persists the adjusted amount as a matching loan payment and payment transaction. Hosted purchase receipt coverage verifies fractional paid and bonus quantities, persisted base-unit receipt and inventory records, and rejection of a mismatched received-quantity snapshot. Its paired hosted group compares module-wide summaries with individual audits and checks that persisted order and payment records remain unchanged.",
     "coverageHelp": "Financed sale and purchase cancellation checks cover loans and installments, linked payment reversals, offline replay, and rejected server results. V1 checks production business functions with disposable IndexedDB and mocked remote contracts, including financing-return and loan-integrity sync contracts. It verifies staff sales-order return authorization for Sales Order Access, the request restriction, and View Own ownership. Reservation coverage verifies that insufficient-stock errors identify every pending sales order consuming the product's available stock, including canonical base-unit quantities. Product UoM covers selling and buying unit selection, immutable conversion snapshots, canonical stock quantities, independent prices and costs, purchase-cost allocation across free stock, return-unit preservation, and responsive order-line layouts. It also covers saved custom Atlas Standard order layouts and the shared role-based sales-account selector visibility. It does not yet execute the real Supabase or native SQLite stacks. The Payments group also checks direct-transaction voucher numbering, linked reversals, A4 pagination, signatures, and mocked Cloud / Hybrid request contracts. A passing run applies only to the selected checks. Order-save coverage verifies Cloud / Hybrid saves complete after authoritative confirmation while derived customer and partner summaries refresh in the background, including paid/unpaid records, ledger and stock effects, customer changes, queued sync failures, serialized refreshes, and unchanged Local-mode completion. Recovery checks cover persisted refresh jobs before save success, database reopen, unchanged cached totals with interrupted uploads, reconnect and wake retries, workspace isolation, newer saves during refresh, and failure to store a recovery job without duplicate payment. Statement printing also checks same-day sale and purchase payments in one order row, unchanged ledger totals, later payments, reversals, and itemized sales. Payment-account visibility coverage checks member-specific filtering, Cloud / Hybrid writes and offline retries, and hard deletion when access is restored.",
     "results": "Test results",
     "progress": "{{done}} / {{total}} collected checks finished",
@@ -261,7 +260,9 @@
       "live_auth_failed": "The dedicated test account could not sign in.",
       "live_workspace_mismatch": "The signed-in account, workspace name, ID, or data mode does not match the dedicated test workspace.",
       "live_schema_unavailable": "The required Sale Orders Supabase schema is unavailable to this test account.",
-      "live_preflight_failed": "Could not verify the hosted test workspace. No scenario started."
+      "live_preflight_failed": "Could not verify the hosted test workspace. No scenario started.",
+      "live_resilience_provisioning_missing": "Add the local Resilience Lab provisioning configuration before running hosted checks.",
+      "live_resilience_config_invalid": "The Resilience Lab provisioning target must match the verified DEV TEST origin."
     },
     "businessPartnersSamplesHelp": "Runs fixed workspace-access, offline-sync, and safe-discard recovery scenarios.",
     "businessPartnersLiveCoverageHelp": "Hosted statement checks create real sales-account-agent and regular-customer return records, read the persisted orders and linked payment reversals from Supabase, and verify only the agent partner statement omits the return-reversal debit. Regular customer refunds remain visible; the underlying payment history is preserved. Hosted Payment checks also verify that sales-agent account credits reduce Open Payments and partner collection balances oldest-first, rejected overpayments leave persisted loan and payment records unchanged, and collecting the adjusted amount writes the expected loan payment and payment transaction.",
@@ -317,6 +318,29 @@
     "travelTransportationCoverageHelp": "Checks optional passenger phone numbers through create, edit, local persistence, and Cloud / Hybrid upsert synchronization. The print check verifies the booking A4 table columns appear in No., Name, Phone Number, Transportation Type, and Price order, with travel date kept in the booking summary only. A failed remote upsert must leave the phone in the local record and retry queue. Hosted Supabase, full browser entry, and native SQLite parity require separate checks.",
     "travelTransportationGroups": {
       "passengerRecords": "Passenger phone storage, sync, details, and print"
+    },
+    "resilience": {
+      "title": "Sales Order Resilience Lab",
+      "description": "Generate valid user actions, inject failures, and verify the business state after every step.",
+      "banner": "SORL · Stateful generation → independent invariants → shrinking → replay",
+      "replayHelp": "The seed and minimized action sequence are saved on failure. Run the replay command from the report to reproduce it.",
+      "samplesHelp": "1–10,000 generated action sequences. Start with 100; the stress profile runs 2,000. No Cartesian matrix.",
+      "coverage": "Generated valid order edits, approval, payments, fulfillment, returns, cancellation and deletion. Independent commercial rounding, stock conservation, payment/reversal/ledger/account balances, tenancy, persistence and identity invariants run after each step. Local uses disposable real SQLite and IndexedDB, including storage restart. Fixed reproductions preserve discovered bugs. Select Domain contracts for focused calculation, UoM, financing, printing, audit and request regressions, including idle-scheduled Sales Order audits and severity-colored breadcrumb icons. Browser journeys run separately with npm run test:sales-order-resilience:e2e.",
+      "liveCoverage": "The same selectable groups have hosted coverage. Provisioned Business/Enterprise/Basic users authenticate with real JWTs; admin has no permission rows. Stored Orders grants/revokes and Enterprise staff Sales Orders Access are resolved, with cross-tenant and viewer-write rejection. Normal production calls write Supabase; a separate user independently reads the graph. Tests cover before-request failure, committed response loss, retries, offline/reconnect, double sync and stale conditional writes. Domain contracts also verify an atomic initial paid save, account rejection rollback, one payment and account movement after lost-response retries, unchanged draft stock, and conflicting receipt rejection. Use --mode=hybrid for Hybrid convergence. Failed fixtures retain their run namespace; immutable account-linked history remains explicitly marked after successful runs. Native desktop filesystem and PDF appearance are separate checks.",
+      "layers": {
+        "generated": "Stateful generation · real Local SQLite",
+        "regressions": "Fixed reproductions · actual module calls",
+        "faults": "Retries, interruption and storage recovery",
+        "entitlements": "Plans and permissions · persisted access state",
+        "domain-contracts": "Focused domain and request regressions"
+      },
+      "groups": {
+        "generated": "Generated state-machine sequences",
+        "regressions": "Permanent minimized reproductions",
+        "faults": "Network, retry and persistence faults",
+        "entitlements": "Plans, grants, permissions and RLS",
+        "contracts": "Focused domain contracts"
+      }
     }
   },
   "lockedWorkspace": {
@@ -3647,7 +3671,8 @@
         "installmentCountInvalid": "Enter a number of installments from 1 to 120.",
         "initialPaymentRequired": "Enter an initial payment amount. Use 0 if there is no initial payment.",
         "initialPaymentMustBeLessThanTotal": "The initial payment must be less than the order total.",
-        "loanRepaymentTransactionUnavailable": "The original transaction for this loan repayment is unavailable."
+        "loanRepaymentTransactionUnavailable": "The original transaction for this loan repayment is unavailable.",
+        "returnRequestIdentityMismatch": "This return request changed. Refresh the order before trying again."
       }
     },
     "adjustments": {
@@ -3851,7 +3876,12 @@
   "dashboard": {
     "cashOverviewDescription": "Cash activity and recent sales at a glance",
     "period": "Dashboard period",
-    "periods": { "today": "Today", "thisWeek": "This Week", "lastMonth": "Last Month", "thisMonth": "This Month" },
+    "periods": {
+      "today": "Today",
+      "thisWeek": "This Week",
+      "lastMonth": "Last Month",
+      "thisMonth": "This Month"
+    },
     "currency": "Chart currency",
     "cashTrend": "Cash flow trend",
     "cashTrendDescription": "Completed ledger cash movements in the selected period",
@@ -3867,7 +3897,14 @@
     "viewTransaction": "View transaction {{id}}",
     "noTransactions": "No transactions yet",
     "noAccess": "No dashboard data is available for your access level.",
-    "transactionStatus": { "sold": "Sold", "returned": "Returned", "draft": "Draft", "pending": "Pending", "completed": "Completed", "cancelled": "Cancelled" },
+    "transactionStatus": {
+      "sold": "Sold",
+      "returned": "Returned",
+      "draft": "Draft",
+      "pending": "Pending",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
     "title": "Dashboard",
     "subtitle": "Overview of your business metrics",
     "totalRevenue": "Total Revenue",
@@ -5287,7 +5324,6 @@
     "printReceipt": "Print Receipt",
     "continueSale": "Continue Sale",
     "outOfStock": "Out of Stock",
-    "unknownStorage": "Unknown storage",
     "insufficientStock": "{{productName}} does not have enough stock in {{storageName}}.",
     "available": "Available",
     "inCart": "In Cart",

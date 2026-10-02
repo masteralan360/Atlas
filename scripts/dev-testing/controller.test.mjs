@@ -26,7 +26,12 @@ async function arrangeController() {
     children.push(child)
     return child
   })
-  const controller = new TestController({ root, spawnChild, timeoutMs: 1000 })
+  const cleanup = vi.fn(async () => {})
+  const provision = vi.fn(async (_root, options) => ({ manifest: {
+    runId: options.runId, namespace: `DEV TEST SORL ${options.runId}`, url: 'https://project.supabase.co', key: 'public-test-key',
+    actors: { 'business.admin': { email: 'dev-test@example.com', password: 'test-password', workspaceId: 'test-workspace', workspaceName: 'DEV TEST Atlas' }, 'business.observer': { email: 'observer@example.com', password: 'observer-secret' } }
+  }, cleanup }))
+  const controller = new TestController({ root, spawnChild, provision, timeoutMs: 1000 })
   controllers.push(controller)
   return { controller, children, spawnChild }
 }
@@ -40,27 +45,23 @@ function finishChild(child, { state = 'passed', errors = [], code = 0, finished 
   child.emit('close', code)
 }
 
-const input = { suiteId: 'sale-orders', groupIds: ['matrix'], seed: 0, samples: 1 }
+const input = { suiteId: 'sales-order-resilience', groupIds: ['generated'], seed: 0, samples: 1 }
 
 describe('developer runner boundaries', () => {
-  it('filters stable hosted case IDs without hiding invalid group requests', () => {
-    const base = { suiteId: 'sale-orders', environment: 'hosted-supabase' }
-    expect(validateRunOptions({ ...base, caseIds: ['SO-H12-01', 'SO-H19-02'] }).groups.map(group => group.id))
-      .toEqual(['hosted-completion', 'hosted-standard-returns'])
-    for (const patch of [
-      { caseIds: ['SO-H12-99'] }, { caseIds: ['SO-H12-01', 'SO-H12-01'] },
-      { caseIds: ['SO-H12-01'], groupIds: ['hosted-completion', '../../evil'] },
-      { caseIds: ['SO-H12-01'], groupIds: ['hosted-standard-returns'] },
-      { caseIds: ['SO-H12-01'], groupIds: ['hosted-completion', 'hosted-completion'] }
-    ]) expect(() => validateRunOptions({ ...base, ...patch })).toThrow()
-    expect(() => validateRunOptions({ ...base, environment: 'isolated', caseIds: ['SO-H12-01'] })).toThrow('invalid_cases')
+  it('rejects legacy case selection and registers matching isolated and hosted lab groups', () => {
+    const base = { suiteId: 'sales-order-resilience', environment: 'hosted-supabase' }
+    expect(() => validateRunOptions({ ...base, caseIds: ['removed-case'] })).toThrow('invalid_cases')
+    expect(() => validateRunOptions({ suiteId: 'sale-orders' })).toThrow('invalid_suite')
+    const lab = suites['sales-order-resilience']
+    expect(lab.liveGroups.map(group => group.id)).toEqual(lab.groups.map(group => group.id))
+    expect(lab.liveGroups.every(group => group.isolatedGroupId === group.id && group.files.length > 0)).toBe(true)
   })
   it('accepts only registered suites, groups, and bounded numeric inputs', () => {
     expect(validateRunOptions(input).seed).toBe(0)
-    for (const options of [null, {}, { ...input, suiteId: ['sale-orders'] }, { ...input, suiteId: '__proto__' }, { ...input, suiteId: 'toString' }, { ...input, groupIds: ['../../arbitrary'] }, { ...input, groupIds: [] }, { ...input, groupIds: ['matrix', 'matrix'] }, { ...input, seed: -1 }, { ...input, seed: 0x100000000 }, { ...input, seed: '1' }, { ...input, samples: 0 }, { ...input, samples: 101 }]) {
+    for (const options of [null, {}, { ...input, suiteId: ['sales-order-resilience'] }, { ...input, suiteId: '__proto__' }, { ...input, suiteId: 'toString' }, { ...input, groupIds: ['../../arbitrary'] }, { ...input, groupIds: [] }, { ...input, groupIds: ['generated', 'generated'] }, { ...input, seed: -1 }, { ...input, seed: 0x100000000 }, { ...input, seed: '1' }, { ...input, samples: 0 }, { ...input, samples: 10001 }]) {
       expect(() => validateRunOptions(options)).toThrow()
     }
-    expect(validateRunOptions({ suiteId: 'sale-orders' }).groups.length).toBe(suites['sale-orders'].groups.length)
+    expect(validateRunOptions({ suiteId: 'sales-order-resilience' }).groups.length).toBe(suites['sales-order-resilience'].groups.length)
     expect(validateRunOptions({ suiteId: 'business-partners', groupIds: ['workspace-access-and-sync'] }).groups).toEqual([
       expect.objectContaining({
         id: 'workspace-access-and-sync',
@@ -134,37 +135,40 @@ describe('developer runner boundaries', () => {
 })
 
 describe('developer runner execution and reports', () => {
-  it('preserves missing hosted prerequisites as blocked and redacts their evidence', async () => {
+  it('redacts all provisioned actor credentials from hosted failures and reports', async () => {
     const { controller, children } = await arrangeController()
-    const config = { origin: 'https://project.supabase.co', ATLAS_LIVE_TEST_PASSWORD: 'secret-password', ATLAS_LIVE_TEST_EMAIL: 'person@example.com', ATLAS_LIVE_SALES_CONFIG: JSON.stringify({ observer: { bearer: 'observer-secret' } }) }
     controller.preflight = vi.fn(async () => ({ target: { host: 'project.supabase.co', workspaceId: 'test-workspace' }, mode: 'cloud' }))
-    const options = validateRunOptions({ suiteId: 'sale-orders', environment: 'hosted-supabase', groupIds: ['hosted-authentication'], caseIds: ['SO-H01-03'] })
+    const config = { origin: 'https://project.supabase.co' }
+    const options = validateRunOptions({ suiteId: 'sales-order-resilience', environment: 'hosted-supabase', groupIds: ['generated'] })
     const run = controller.startValidated(options, { config, readiness: await controller.preflight(config) })
     await new Promise(resolve => setImmediate(resolve))
-    children[0].stdout.write(`ATLAS_TEST_EVENT ${JSON.stringify({ type: 'evidence', evidence: { caseId: 'SO-H01-03', error: 'secret-password person@example.com observer-secret' } })}\n`)
-    finishChild(children[0], { state: 'blocked', code: 1, errors: ['hosted_blocked: viewer persona is not configured'] })
+    finishChild(children[0])
+    await new Promise(resolve => setImmediate(resolve))
+    finishChild(children[1], { state: 'failed', code: 1, errors: ['test-password dev-test@example.com observer-secret observer@example.com'] })
     await controller.completion
-    expect(run.status).toBe('blocked')
-    expect(run.groups[0].status).toBe('blocked')
-    expect(run.groups[0].evidence[0].error).toBe('[redacted] [redacted] [redacted]')
+    expect(run.status).toBe('failed')
+    expect(run.groups[0].errors).toContain('[redacted] [redacted] [redacted] [redacted]')
     const saved = await readFile(run.reportPath, 'utf8')
-    expect(saved).not.toMatch(/secret-password|person@example|observer-secret/)
-    expect(JSON.parse(saved).groups[0].tests[0].status).toBe('blocked')
+    expect(saved).not.toMatch(/test-password|dev-test@example|observer-secret|observer@example/)
   })
 
   it('saves a checkpoint after each hosted group while subsequent checks continue', async () => {
     const { controller, children } = await arrangeController()
     controller.preflight = vi.fn(async () => ({ target: { host: 'project.supabase.co', workspaceId: 'test-workspace' }, mode: 'cloud' }))
     const config = { origin: 'https://project.supabase.co' }
-    const options = validateRunOptions({ suiteId: 'sale-orders', environment: 'hosted-supabase', groupIds: ['hosted-completion', 'hosted-collections'], caseIds: ['SO-H12-01', 'SO-H14-01'] })
+    const options = validateRunOptions({ suiteId: 'sales-order-resilience', environment: 'hosted-supabase', groupIds: ['generated', 'regressions'] })
     const run = controller.startValidated(options, { config, readiness: await controller.preflight(config) })
     await new Promise(resolve => setImmediate(resolve))
     finishChild(children[0])
     for (let attempt = 0; attempt < 50 && children.length < 2; attempt++) await new Promise(resolve => setTimeout(resolve, 10))
+    finishChild(children[1])
+    for (let attempt = 0; attempt < 50 && children.length < 3; attempt++) await new Promise(resolve => setTimeout(resolve, 10))
     const checkpoint = JSON.parse(await readFile(run.reportPath, 'utf8'))
     expect(checkpoint.status).toBe('running')
     expect(checkpoint.groups[0].status).toBe('passed')
-    finishChild(children[1])
+    finishChild(children[2])
+    await new Promise(resolve => setImmediate(resolve))
+    finishChild(children[3])
     await controller.completion
     expect(JSON.parse(await readFile(run.reportPath, 'utf8')).status).toBe('passed')
   })
@@ -172,7 +176,7 @@ describe('developer runner execution and reports', () => {
     const { controller, children, spawnChild } = await arrangeController()
     const run = controller.start(input)
     expect(() => controller.start(input)).toThrow('run_busy')
-    expect(spawnChild.mock.calls[0][1]).toContain('src/dev/testing/suites/saleOrders.test.ts')
+    expect(spawnChild.mock.calls[0][1]).toContain('src/dev/testing/salesOrderResilience/resilience.test.ts')
     expect(spawnChild.mock.calls[0][2]).toMatchObject({ shell: false, windowsHide: true })
     finishChild(children[0])
     await controller.completion
@@ -180,43 +184,34 @@ describe('developer runner execution and reports', () => {
     expect(run.groups[0].tests[0].status).toBe('passed')
     const saved = JSON.parse(await readFile(run.reportPath, 'utf8'))
     expect(saved).toMatchObject({ seed: 0, samples: 1, status: 'passed' })
-    expect(saved.unavailable).toContain('local-native')
+    expect(saved.suiteId).toBe('sales-order-resilience')
   })
 
-  it('runs Sale Orders hosted selections only in authenticated hosted children', async () => {
+  it('runs the complete domain registry with the domain config and its own time budget', async () => {
     const { controller, children, spawnChild } = await arrangeController()
-    controller.preflight = vi.fn(async () => ({ target: { host: 'project.supabase.co', workspaceId: 'test-workspace', workspaceName: 'DEV TEST Atlas' }, mode: 'cloud' }))
-    const options = validateRunOptions({ suiteId: 'sale-orders', environment: 'hosted-supabase', groupIds: ['hosted-completion'], caseIds: ['SO-H12-01'], seed: 0, samples: 1 })
-    const config = {
-      origin: 'https://project.supabase.co', ATLAS_LIVE_SUPABASE_KEY: 'public-test-key',
-      ATLAS_LIVE_TEST_EMAIL: 'dev-test@example.com', ATLAS_LIVE_TEST_PASSWORD: 'test-password',
-      ATLAS_LIVE_WORKSPACE_ID: 'test-workspace', ATLAS_LIVE_WORKSPACE_NAME: 'DEV TEST Atlas'
-    }
-    const run = controller.startValidated(options, { config, readiness: await controller.preflight(config) })
-    await new Promise(resolve => setImmediate(resolve))
-    expect(spawnChild.mock.calls[0][1]).toContain('src/dev/testing/suites/saleOrdersHosted12Live.test.ts')
-    expect(spawnChild.mock.calls[0][1]).toContain(join(controller.root, 'scripts/dev-testing/vitest.live.config.mts'))
-    expect(spawnChild.mock.calls[0][2].env.ATLAS_LIVE_TEST_PASSWORD).toBe('test-password')
-    expect(JSON.parse(spawnChild.mock.calls[0][2].env.ATLAS_LIVE_CASE_IDS)).toEqual(['SO-H12-01'])
+    const domain = suites['sales-order-resilience'].groups.find(group => group.id === 'domain-contracts')
+    expect(domain.timeoutMs).toBe(900000)
+    controller.start({ ...input, groupIds: ['domain-contracts'] })
+    expect(spawnChild.mock.calls[0][1]).toContain(join(controller.root, 'scripts/dev-testing/resilience.domain.config.mts'))
+    expect(spawnChild.mock.calls[0][1]).toEqual(expect.arrayContaining(domain.files))
     finishChild(children[0])
     await controller.completion
-    expect(run.status).toBe('passed')
-    expect(run.groups[0].tests.map(test => test.environment)).toEqual(['hosted-supabase'])
-    expect(spawnChild).toHaveBeenCalledTimes(1)
   })
 
-  it('runs the paired purchase receipt isolated checks without applying the Sale Orders domain denominator', async () => {
+  it('runs paired hosted lab selections with normal actors and no provisioning key in children', async () => {
     const { controller, children, spawnChild } = await arrangeController()
-    controller.preflight = vi.fn(async () => ({ target: { host: 'project.supabase.co', workspaceId: 'test-workspace', workspaceName: 'DEV TEST Atlas' }, mode: 'cloud' }))
-    const options = validateRunOptions({ suiteId: 'sale-orders', environment: 'hosted-supabase', groupIds: ['purchase-receipt-rounding'] })
-    const config = { origin: 'https://project.supabase.co' }
+    controller.preflight = vi.fn(async () => ({ target: { host: 'project.supabase.co', workspaceId: 'test-workspace' }, mode: 'cloud' }))
+    const config = { origin: 'https://project.supabase.co', ATLAS_LIVE_SUPABASE_KEY: 'public-test-key' }
+    const options = validateRunOptions({ suiteId: 'sales-order-resilience', environment: 'hosted-supabase', groupIds: ['generated'], seed: 0, samples: 1 })
     const run = controller.startValidated(options, { config, readiness: await controller.preflight(config) })
-    expect(run.expectedTests).toBeUndefined()
     await new Promise(resolve => setImmediate(resolve))
-    expect(spawnChild.mock.calls[0][1]).toContain('src/dev/testing/suites/orderUomTransactions.test.ts')
+    expect(spawnChild.mock.calls[0][1]).toContain('src/dev/testing/salesOrderResilience/resilience.test.ts')
+    expect(spawnChild.mock.calls[0][2].env).not.toHaveProperty('SORL_MANIFEST')
     finishChild(children[0])
-    for (let attempt = 0; attempt < 50 && children.length < 2; attempt++) await new Promise(resolve => setTimeout(resolve, 10))
-    expect(spawnChild.mock.calls[1][1]).toContain('src/dev/testing/suites/purchaseReceiptRoundingLive.test.ts')
+    await new Promise(resolve => setImmediate(resolve))
+    expect(spawnChild.mock.calls[1][1]).toContain('src/dev/testing/salesOrderResilience/resilienceLive.test.ts')
+    expect(spawnChild.mock.calls[1][2].env).not.toHaveProperty('SORL_PROVISIONING_KEY')
+    expect(JSON.parse(spawnChild.mock.calls[1][2].env.SORL_MANIFEST).actors['business.admin'].password).toBe('test-password')
     finishChild(children[1])
     await controller.completion
     expect(run.status).toBe('passed')
@@ -273,11 +268,11 @@ describe('developer runner execution and reports', () => {
     expect(run.status).toBe('failed')
   })
 
-  it('cancels after the active group settles and never spawns remaining groups', async () => {
+  it('terminates the active child on cancellation and settles and never spawns remaining groups', async () => {
     const { controller, children, spawnChild } = await arrangeController()
-    const run = controller.start({ ...input, groupIds: ['matrix', 'lifecycle'] })
+    const run = controller.start({ ...input, groupIds: ['generated', 'regressions'] })
     controller.cancel(run.id)
-    expect(children[0].kill).not.toHaveBeenCalled()
+    expect(children[0].kill).toHaveBeenCalledWith('SIGTERM')
     finishChild(children[0])
     await controller.completion
     expect(run.status).toBe('cancelled')

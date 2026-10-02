@@ -22,12 +22,13 @@ function StatusIcon({ status }: { status: TestStatus }) {
 export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { suiteId: string; open: boolean; onOpenChange: (open: boolean) => void }) {
     const { t, i18n } = useTranslation()
     const suite = suites[suiteId]
+    const resilience = suiteId === 'sales-order-resilience'
     const [environment, setEnvironment] = useState<'isolated' | 'hosted-supabase'>('isolated')
     const [liveReadiness, setLiveReadiness] = useState<LiveReadiness | null>(null)
     const availableGroups = environment === 'hosted-supabase' ? suite?.liveGroups ?? [] : suite?.groups ?? []
     const [selected, setSelected] = useState(() => suite?.groups.map((group) => group.id) ?? [])
     const [seed, setSeed] = useState('20,260,918')
-    const [samples, setSamples] = useState('16')
+    const [samples, setSamples] = useState(resilience ? '100' : '16')
     const [run, setRun] = useState<TestRun | null>(null)
     const [ready, setReady] = useState(false)
     const [submitting, setSubmitting] = useState(false)
@@ -44,7 +45,7 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
     const parsedSamples = Number(samples.replace(/,/g, ''))
     const valid = !!suite && selected.length > 0 && seed !== '' && samples !== ''
         && Number.isInteger(parsedSeed) && parsedSeed >= 0 && parsedSeed <= 0xffffffff
-        && Number.isInteger(parsedSamples) && parsedSamples >= 1 && parsedSamples <= 100
+        && Number.isInteger(parsedSamples) && parsedSamples >= 1 && parsedSamples <= (resilience ? 10000 : 100)
         && (environment === 'isolated' || liveReadiness?.status === 'ready')
 
     useEffect(() => {
@@ -152,10 +153,11 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
     return <AppDialog open={open} onOpenChange={(next) => { if (!busy) onOpenChange(next) }}>
         <AppDialogContent className="max-w-5xl" showCloseButton={!busy} onInteractOutside={blockClose} onEscapeKeyDown={blockClose}>
             <AppDialogHeader>
-                <AppDialogTitle className="flex items-center gap-2"><FlaskConical className="h-5 w-5" />{t('devTesting.title', { module: t(suite?.titleKey ?? 'devTesting.checks') })}</AppDialogTitle>
-                <AppDialogDescription>{t('devTesting.description')}</AppDialogDescription>
+                <AppDialogTitle className="flex items-center gap-2"><FlaskConical className="h-5 w-5" />{resilience ? t(suite.titleKey) : t('devTesting.title', { module: t(suite?.titleKey ?? 'devTesting.checks') })}</AppDialogTitle>
+                <AppDialogDescription>{t(resilience ? 'devTesting.resilience.description' : 'devTesting.description')}</AppDialogDescription>
             </AppDialogHeader>
             <AppDialogBody className="space-y-5">
+                {resilience && <div className="rounded-xl border border-violet-500/40 bg-violet-500/10 p-4 text-sm"><p className="font-semibold">{t('devTesting.resilience.banner')}</p><p className="mt-1 text-muted-foreground">{t('devTesting.resilience.replayHelp')}</p></div>}
                 <div className="space-y-2">
                     <p className="font-medium">{t('devTesting.environment')} *</p>
                     <div className="flex flex-wrap gap-2">
@@ -180,10 +182,10 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
                     <div className="grid gap-2 sm:grid-cols-2">
                         {availableGroups.map((group) => <label key={group.id} className="flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm">
                             <Checkbox allowViewer aria-label={t(group.titleKey)} checked={selected.includes(group.id)} onCheckedChange={(checked) => setSelected((previous) => checked ? [...previous, group.id] : previous.filter((id) => id !== group.id))} disabled={busy} />
-                            <span><span className="block font-medium">{t(group.titleKey)}</span><span className="text-xs text-muted-foreground">{t(environment === 'hosted-supabase' && group.isolatedOnly ? 'devTesting.adapters.isolated' : `devTesting.layers.${group.layer}`)}</span></span>
+                            <span><span className="block font-medium">{t(group.titleKey)}</span><span className="text-xs text-muted-foreground">{t(environment === 'hosted-supabase' && group.isolatedOnly ? 'devTesting.adapters.isolated' : resilience && environment === 'isolated' ? `devTesting.resilience.layers.${group.id}` : `devTesting.layers.${group.layer}`)}</span></span>
                         </label>)}
                     </div>
-                    {environment === 'isolated' && <div className="grid gap-3 sm:grid-cols-2">
+                    {(environment === 'isolated' || resilience) && <div className="grid gap-3 sm:grid-cols-2">
                         <div className="space-y-1">
                             <Label htmlFor="dev-test-seed">{t('devTesting.seed')} *</Label>
                             <Input allowViewer id="dev-test-seed" value={seed} inputMode="numeric" placeholder="0" disabled={busy} onChange={(event) => {

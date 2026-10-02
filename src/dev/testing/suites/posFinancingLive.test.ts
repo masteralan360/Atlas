@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { saleOrderInput } from '../fixtures/saleOrder'
+import { saleOrderInput } from '../fixtures/orderInput'
 import {
     financeLivePosInput, freshPosClient, livePosWorkspaceId, recordPosFixture, requirePosLiveData,
     setupHostedPos, withLivePosFixture, livePosCurrency

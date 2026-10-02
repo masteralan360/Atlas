@@ -4,6 +4,7 @@ import { decrypt, encrypt } from '@/lib/encryption'
 import { createWorkspaceUsageFetch } from '@/lib/workspaceUsageFetch'
 import { isTauri } from '@/lib/platform'
 import { createAuthSessionManager } from './sessionManager'
+import { isSupabasePublicKey } from './supabasePublicKey'
 
 // Custom storage adapter that encrypts everything in local storage
 const EncryptedStorage = {
@@ -42,7 +43,7 @@ export const resolvedSupabaseAnonKey = isBackendConfigurationRequired
 
 // Check if Supabase is configured with valid values
 const isUrlValid = resolvedSupabaseUrl && resolvedSupabaseUrl.startsWith('https://') && !resolvedSupabaseUrl.includes('your_supabase_url')
-const isKeyValid = resolvedSupabaseAnonKey && resolvedSupabaseAnonKey.length > 50 && !resolvedSupabaseAnonKey.includes('your_supabase_anon')
+const isKeyValid = isSupabasePublicKey(resolvedSupabaseAnonKey)
 
 export const isSupabaseConfigured = Boolean(isUrlValid && isKeyValid)
 

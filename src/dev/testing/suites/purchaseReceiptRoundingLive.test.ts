@@ -4,9 +4,9 @@ import { describe, expect, it } from 'vitest'
 import type { PurchaseOrderItem } from '@/local-db/models'
 import { db } from '@/local-db/database'
 import { liveSupabase } from '../liveSupabase'
-import { setupHostedSaleOrders, withLiveSaleOrderFixture, liveWorkspaceId, recordLiveFixture, requireLiveData } from '../fixtures/saleOrdersLive'
+import { setupHostedOrderFixture, withLiveSaleOrderFixture, liveWorkspaceId, recordLiveFixture, requireLiveData } from '../fixtures/orderLive'
 
-setupHostedSaleOrders()
+setupHostedOrderFixture()
 
 describe('purchase receipt base-unit rounding on hosted Supabase', () => {
   it('accepts rounded paid and bonus base quantities, posts stock, and rejects a mismatched snapshot', async () => {
@@ -111,7 +111,7 @@ describe('purchase receipt base-unit rounding on hosted Supabase', () => {
 
       expect(order.items[0].receivedQuantity).toBe(0.000666)
       const persistedOrder = requireLiveData<any>(
-        await liveSupabase.from('purchase_orders').select('status,items').eq('id', order.id).single(),
+        await liveSupabase.schema('crm').from('purchase_orders').select('status,items').eq('id', order.id).single(),
         'fractional purchase order',
       )
       expect(persistedOrder.status).toBe('received')
@@ -137,7 +137,7 @@ describe('purchase receipt base-unit rounding on hosted Supabase', () => {
       await expect(orders.createPurchaseOrder(liveWorkspaceId, invalidInput, null, {
         orderId: invalidOrderId,
       })).rejects.toThrow()
-      const rejectedOrder = await liveSupabase.from('purchase_orders').select('id').eq('id', invalidOrderId).maybeSingle()
+      const rejectedOrder = await liveSupabase.schema('crm').from('purchase_orders').select('id').eq('id', invalidOrderId).maybeSingle()
       expect(rejectedOrder.error).toBeNull()
       expect(rejectedOrder.data).toBeNull()
       expect(await db.inventory.where('[productId+storageId]').equals([fixture.product.id, fixture.storage.id]).first())

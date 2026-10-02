@@ -7,10 +7,16 @@
         "id": "cloud-hybrid",
         "titleKey": "devTesting.accountSwitcherGroups.cloudHybrid",
         "layer": "contract",
-        "files": ["src/auth/cloudAccountSwitcher.test.ts"]
+        "files": [
+          "src/auth/cloudAccountSwitcher.test.ts"
+        ]
       }
     ],
-    "unavailable": ["hosted-supabase", "browser-workflow", "native-session-storage"]
+    "unavailable": [
+      "hosted-supabase",
+      "browser-workflow",
+      "native-session-storage"
+    ]
   },
   "printing-workflow": {
     "titleKey": "devTesting.printingWorkflow",
@@ -25,516 +31,9 @@
         ]
       }
     ],
-    "unavailable": ["browser-workflow"]
-  },
-  "sale-orders": {
-    "titleKey": "devTesting.saleOrders",
-    "coverageHelpKey": "devTesting.saleOrdersIsolatedCoverageHelp",
-    "liveCoverageHelpKey": "devTesting.saleOrdersLiveCoverageHelp",
-    "liveGroups": [
-      {
-        "id": "hosted-authentication",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h01",
-        "layer": "live",
-        "domainId": "01",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted01Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-permissions",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h02",
-        "layer": "live",
-        "domainId": "02",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted02Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-customers",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h03",
-        "layer": "live",
-        "domainId": "03",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted03Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-lines",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h04",
-        "layer": "live",
-        "domainId": "04",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted04Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-units",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h05",
-        "layer": "live",
-        "domainId": "05",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted05Live.test.ts"
-        ]
-      },
-      {
-        "id": "purchase-receipt-rounding",
-        "titleKey": "devTesting.groups.purchaseReceiptRounding",
-        "layer": "live",
-        "isolatedGroupId": "purchase-receipt-rounding",
-        "timeoutMs": 300000,
-        "files": [
-          "src/dev/testing/suites/purchaseReceiptRoundingLive.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-prices",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h06",
-        "layer": "live",
-        "domainId": "06",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted06Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-currencies",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h07",
-        "layer": "live",
-        "domainId": "07",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted07Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-totals",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h08",
-        "layer": "live",
-        "domainId": "08",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted08Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-creation",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h09",
-        "layer": "live",
-        "domainId": "09",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted09Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-approval",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h10",
-        "layer": "live",
-        "domainId": "10",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted10Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-reservation",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h11",
-        "layer": "live",
-        "domainId": "11",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted11Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-completion",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h12",
-        "layer": "live",
-        "domainId": "12",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted12Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-quick-order",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h13",
-        "layer": "live",
-        "domainId": "13",
-        "timeoutMs": 604800000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted13Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-collections",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h14",
-        "layer": "live",
-        "domainId": "14",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted14Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-payment-accounts",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h15",
-        "layer": "live",
-        "domainId": "15",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted15Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-financing",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h16",
-        "layer": "live",
-        "domainId": "16",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted16Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-repayments",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h17",
-        "layer": "live",
-        "domainId": "17",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted17Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-cancellation",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h18",
-        "layer": "live",
-        "domainId": "18",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted18Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-standard-returns",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h19",
-        "layer": "live",
-        "domainId": "19",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted19Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-financed-returns",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h20",
-        "layer": "live",
-        "domainId": "20",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted20Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-corrections",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h21",
-        "layer": "live",
-        "domainId": "21",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted21Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-commission-sources",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h22",
-        "layer": "live",
-        "domainId": "22",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted22Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-commission-settlements",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h23",
-        "layer": "live",
-        "domainId": "23",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted23Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-marketplace",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h24",
-        "layer": "live",
-        "domainId": "24",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted24Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-terminal-states",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h25",
-        "layer": "live",
-        "domainId": "25",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted25Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-reads",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h26",
-        "layer": "live",
-        "domainId": "26",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted26Live.test.ts"
-        ]
-      },
-      {
-        "id": "agent-refund-statement",
-        "titleKey": "devTesting.groups.agentRefundStatement",
-        "layer": "live",
-        "isolatedGroupId": "agent-refund-statement",
-        "files": [
-          "src/dev/testing/suites/saleOrdersAgentRefundStatementLive.test.ts"
-        ]
-      },
-      {
-        "id": "agent-account-netting",
-        "titleKey": "devTesting.groups.agentAccountPaymentNetting",
-        "layer": "live",
-        "isolatedGroupId": "agent-account-netting",
-        "timeoutMs": 300000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersAgentAccountPaymentNettingLive.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-remote-contracts",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h27",
-        "layer": "live",
-        "domainId": "27",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted27Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-recovery",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h28",
-        "layer": "live",
-        "domainId": "28",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted28Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-historical",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h29",
-        "layer": "live",
-        "domainId": "29",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted29Live.test.ts"
-        ]
-      },
-      {
-        "id": "hosted-runner",
-        "titleKey": "devTesting.saleOrdersHostedGroups.h30",
-        "layer": "live",
-        "domainId": "30",
-        "timeoutMs": 86400000,
-        "files": [
-          "src/dev/testing/suites/saleOrdersHosted30Live.test.ts"
-        ]
-      },
-      {
-        "id": "integrity-audit",
-        "titleKey": "devTesting.groups.integrityAudit",
-        "layer": "live",
-        "isolatedGroupId": "integrity-audit",
-        "timeoutMs": 300000,
-        "files": [
-          "src/dev/testing/suites/saleOrderModuleWideIntegrityAuditLive.test.ts"
-        ]
-      }
-    ],
-    "groups": [
-      {
-        "id": "matrix",
-        "titleKey": "devTesting.groups.matrix",
-        "layer": "business",
-        "files": [
-          "src/dev/testing/suites/saleOrders.test.ts",
-          "src/local-db/minimumSellingPrice.test.ts"
-        ]
-      },
-      {
-        "id": "printing",
-        "titleKey": "devTesting.groups.printing",
-        "layer": "business",
-        "files": [
-          "src/lib/customTemplates.test.tsx"
-        ]
-      },
-      {
-        "id": "account-statement",
-        "titleKey": "devTesting.groups.accountStatement",
-        "layer": "calculation",
-        "files": [
-          "src/lib/partnerAccountStatementDisplay.test.ts",
-          "src/ui/components/crm/PartnerAccountStatementPrintTemplate.test.ts"
-        ]
-      },
-      {
-        "id": "agent-refund-statement",
-        "titleKey": "devTesting.groups.agentRefundStatement",
-        "layer": "calculation",
-        "files": [
-          "src/lib/partnerAccountStatementAgentRefund.test.ts",
-          "scripts/dev-testing/partnerStatementPreflight.test.mjs"
-        ]
-      },
-      {
-        "id": "agent-account-netting",
-        "titleKey": "devTesting.groups.agentAccountPaymentNetting",
-        "layer": "business",
-        "files": [
-          "src/lib/partnerAccountStatementAgentPaymentNetting.test.ts",
-          "src/local-db/payments.test.ts"
-        ]
-      },
-      {
-        "id": "lifecycle",
-        "titleKey": "devTesting.groups.lifecycle",
-        "layer": "business",
-        "files": [
-          "src/local-db/orderFinancing.test.ts",
-          "src/local-db/orderInstallments.test.ts",
-          "src/local-db/inventorySnapshotSync.test.ts",
-          "src/local-db/quickOrderAtomic.test.ts"
-        ]
-      },
-      {
-        "id": "archiving",
-        "titleKey": "devTesting.groups.archiving",
-        "layer": "business",
-        "files": [
-          "src/lib/orderArchiving.test.ts",
-          "src/local-db/orderArchiving.test.ts"
-        ]
-      },
-      {
-        "id": "pricing",
-        "titleKey": "devTesting.groups.pricing",
-        "layer": "calculation",
-        "files": [
-          "src/lib/minimumSellingPrice.test.ts",
-          "src/lib/orderAdjustments.test.ts",
-          "src/lib/orderLineItems.test.ts",
-          "src/lib/salesExchange.test.ts",
-          "src/lib/orderPartnerBalance.test.ts",
-          "src/lib/priceBooks.test.ts",
-          "src/local-db/orderPriceBooks.test.ts",
-          "src/local-db/priceBookUomPrices.test.ts",
-          "src/ui/components/orders/SalesOrderFormPage.test.ts"
-        ]
-      },
-      {
-        "id": "unit-of-measure",
-        "titleKey": "devTesting.groups.productUom",
-        "layer": "business",
-        "files": [
-          "src/dev/testing/suites/orderLineItemLayout.test.ts",
-          "src/dev/testing/suites/orderUom.test.ts",
-          "src/dev/testing/suites/orderUomTransactions.test.ts",
-          "src/local-db/orders.test.ts",
-          "src/lib/orderLineItems.test.ts",
-          "src/lib/orderUnitErrors.test.ts",
-          "src/local-db/productUoms.test.ts",
-          "src/lib/productUomMigration.test.ts",
-          "src/lib/revenueAnalysis.test.ts",
-          "src/lib/orderPrintReturnState.test.ts"
-        ]
-      },
-      {
-        "id": "purchase-receipt-rounding",
-        "titleKey": "devTesting.groups.purchaseReceiptRounding",
-        "layer": "business",
-        "files": [
-          "src/dev/testing/suites/orderUomTransactions.test.ts",
-          "src/lib/productUomMigration.test.ts"
-        ]
-      },
-      {
-        "id": "payments",
-        "titleKey": "devTesting.groups.payments",
-        "layer": "business",
-        "files": [
-          "src/local-db/partnerSettlement.test.ts",
-          "src/local-db/partnerSettlementOperations.test.ts",
-          "src/local-db/paymentAccounts.test.ts",
-          "src/local-db/paymentAccountTransfersRemote.test.ts",
-          "src/local-db/paymentAccountAccess.test.ts",
-          "src/local-db/payments.test.ts",
-          "src/local-db/directTransactionVoucher.test.tsx",
-          "src/local-db/directTransactionVoucherRemote.test.ts",
-          "src/local-db/directTransactionVoucherSqlite.test.ts",
-          "src/services/directTransactionVoucherSave.test.ts",
-          "src/services/directTransactionVoucherRemoteSave.test.ts",
-          "src/ui/components/PrintSelectionModal.test.tsx",
-          "src/local-db/paymentReversalState.test.ts",
-          "src/lib/ledgerPaymentTransactions.test.ts",
-          "src/lib/ledgerOrderLoan.test.ts",
-          "src/lib/ledgerCashSummary.test.ts",
-          "src/lib/ledgerFlow.test.ts",
-          "src/lib/ledgerSettlement.test.ts",
-          "src/lib/ledgerCashMovementEntries.test.ts"
-        ]
-      },
-      {
-        "id": "ui-access",
-        "titleKey": "devTesting.groups.uiAccess",
-        "layer": "calculation",
-        "files": [
-          "src/ui/components/commissions/oldSalesAgentConfiguration.test.ts"
-        ]
-      },
-      {
-        "id": "integrity-audit",
-        "titleKey": "devTesting.groups.integrityAudit",
-        "layer": "contract",
-        "files": [
-          "src/lib/integrityAudit/salesOrderAudit.test.ts",
-          "src/lib/integrityAudit/salesOrderGraph.test.ts",
-          "src/lib/integrityAudit/moduleWide.test.ts",
-          "src/lib/integrityAudit/salesOrderModuleWide.test.ts",
-          "src/ui/components/orders/SalesOrderIntegrityAuditDialog.test.tsx",
-          "src/ui/components/integrity-audit/ModuleWideIntegrityAuditDialog.test.tsx"
-        ]
-      }
-    ],
-    "liveUnavailable": ["browser-workflow", "hybrid-native", "local-native"],
     "unavailable": [
-      "browser-workflow",
-      "cloud-database-broad",
-      "hybrid-native",
-      "local-native"
-    ],
-    "samplesHelpKey": "devTesting.samplesHelp"
+      "browser-workflow"
+    ]
   },
   "loans": {
     "titleKey": "devTesting.loans",
@@ -546,7 +45,9 @@
         "titleKey": "devTesting.loansGroups.integrityAudit",
         "layer": "live",
         "isolatedGroupId": "integrity-audit",
-        "files": ["src/dev/testing/suites/loanIntegrityAuditLive.test.ts"]
+        "files": [
+          "src/dev/testing/suites/loanIntegrityAuditLive.test.ts"
+        ]
       }
     ],
     "groups": [
@@ -561,8 +62,17 @@
         ]
       }
     ],
-    "liveUnavailable": ["browser-workflow", "hybrid-native", "local-native"],
-    "unavailable": ["browser-workflow", "cloud-database-broad", "hybrid-native", "local-native"]
+    "liveUnavailable": [
+      "browser-workflow",
+      "hybrid-native",
+      "local-native"
+    ],
+    "unavailable": [
+      "browser-workflow",
+      "cloud-database-broad",
+      "hybrid-native",
+      "local-native"
+    ]
   },
   "business-partners": {
     "titleKey": "devTesting.businessPartners",
@@ -576,7 +86,7 @@
         "layer": "live",
         "isolatedGroupId": "agent-refund-statement",
         "files": [
-          "src/dev/testing/suites/saleOrdersAgentRefundStatementLive.test.ts"
+          "src/dev/testing/suites/agentRefundStatementLive.test.ts"
         ]
       },
       {
@@ -585,7 +95,7 @@
         "layer": "live",
         "isolatedGroupId": "agent-account-netting",
         "files": [
-          "src/dev/testing/suites/saleOrdersAgentAccountPaymentNettingLive.test.ts"
+          "src/dev/testing/suites/agentAccountPaymentNettingLive.test.ts"
         ]
       }
     ],
@@ -669,19 +179,120 @@
     "coverageHelpKey": "devTesting.posCoverageHelp",
     "liveCoverageHelpKey": "devTesting.posLiveCoverageHelp",
     "liveGroups": [
-      { "id": "checkout", "titleKey": "devTesting.posGroups.checkout", "layer": "live", "isolatedGroupId": "checkout", "files": ["src/dev/testing/suites/posCheckoutLive.test.ts"] },
-      { "id": "cart", "titleKey": "devTesting.posGroups.cart", "layer": "calculation", "isolatedGroupId": "cart", "isolatedOnly": true, "files": [] },
-      { "id": "pricing", "titleKey": "devTesting.posGroups.pricing", "layer": "live", "isolatedGroupId": "pricing", "files": ["src/dev/testing/suites/posPricingLive.test.ts"] },
-      { "id": "currency", "titleKey": "devTesting.posGroups.currency", "layer": "live", "isolatedGroupId": "currency", "files": ["src/dev/testing/suites/posCurrencyLive.test.ts"] },
-      { "id": "inventory", "titleKey": "devTesting.posGroups.inventory", "layer": "live", "isolatedGroupId": "inventory", "files": ["src/dev/testing/suites/posInventoryLive.test.ts"] },
-      { "id": "unit-of-measure", "titleKey": "devTesting.posGroups.productUom", "layer": "live", "isolatedGroupId": "unit-of-measure", "files": ["src/dev/testing/suites/posUomLive.test.ts"] },
-      { "id": "financing", "titleKey": "devTesting.posGroups.financing", "layer": "live", "isolatedGroupId": "financing", "files": ["src/dev/testing/suites/posFinancingLive.test.ts"] },
-      { "id": "returns-exchanges", "titleKey": "devTesting.posGroups.returns", "layer": "live", "isolatedGroupId": "returns-exchanges", "files": ["src/dev/testing/suites/posReturnsLive.test.ts"] },
-      { "id": "entry-routing", "titleKey": "devTesting.posGroups.routing", "layer": "live", "isolatedGroupId": "entry-routing", "files": ["src/dev/testing/suites/posRoutingLive.test.ts"] },
-      { "id": "remote-contract", "titleKey": "devTesting.posGroups.remote", "layer": "live", "isolatedGroupId": "remote-contract", "files": ["src/dev/testing/suites/posRemoteLive.test.ts"] },
-      { "id": "media-uploads", "titleKey": "devTesting.posGroups.mediaUploads", "layer": "contract", "isolatedGroupId": "media-uploads", "isolatedOnly": true, "files": [] },
-      { "id": "failure-recovery", "titleKey": "devTesting.posGroups.recovery", "layer": "live", "isolatedGroupId": "failure-recovery", "files": ["src/dev/testing/suites/posRecoveryLive.test.ts"] },
-      { "id": "ui-access", "titleKey": "devTesting.groups.uiAccess", "layer": "calculation", "isolatedGroupId": "ui-access", "isolatedOnly": true, "files": [] }
+      {
+        "id": "checkout",
+        "titleKey": "devTesting.posGroups.checkout",
+        "layer": "live",
+        "isolatedGroupId": "checkout",
+        "files": [
+          "src/dev/testing/suites/posCheckoutLive.test.ts"
+        ]
+      },
+      {
+        "id": "cart",
+        "titleKey": "devTesting.posGroups.cart",
+        "layer": "calculation",
+        "isolatedGroupId": "cart",
+        "isolatedOnly": true,
+        "files": []
+      },
+      {
+        "id": "pricing",
+        "titleKey": "devTesting.posGroups.pricing",
+        "layer": "live",
+        "isolatedGroupId": "pricing",
+        "files": [
+          "src/dev/testing/suites/posPricingLive.test.ts"
+        ]
+      },
+      {
+        "id": "currency",
+        "titleKey": "devTesting.posGroups.currency",
+        "layer": "live",
+        "isolatedGroupId": "currency",
+        "files": [
+          "src/dev/testing/suites/posCurrencyLive.test.ts"
+        ]
+      },
+      {
+        "id": "inventory",
+        "titleKey": "devTesting.posGroups.inventory",
+        "layer": "live",
+        "isolatedGroupId": "inventory",
+        "files": [
+          "src/dev/testing/suites/posInventoryLive.test.ts"
+        ]
+      },
+      {
+        "id": "unit-of-measure",
+        "titleKey": "devTesting.posGroups.productUom",
+        "layer": "live",
+        "isolatedGroupId": "unit-of-measure",
+        "files": [
+          "src/dev/testing/suites/posUomLive.test.ts"
+        ]
+      },
+      {
+        "id": "financing",
+        "titleKey": "devTesting.posGroups.financing",
+        "layer": "live",
+        "isolatedGroupId": "financing",
+        "files": [
+          "src/dev/testing/suites/posFinancingLive.test.ts"
+        ]
+      },
+      {
+        "id": "returns-exchanges",
+        "titleKey": "devTesting.posGroups.returns",
+        "layer": "live",
+        "isolatedGroupId": "returns-exchanges",
+        "files": [
+          "src/dev/testing/suites/posReturnsLive.test.ts"
+        ]
+      },
+      {
+        "id": "entry-routing",
+        "titleKey": "devTesting.posGroups.routing",
+        "layer": "live",
+        "isolatedGroupId": "entry-routing",
+        "files": [
+          "src/dev/testing/suites/posRoutingLive.test.ts"
+        ]
+      },
+      {
+        "id": "remote-contract",
+        "titleKey": "devTesting.posGroups.remote",
+        "layer": "live",
+        "isolatedGroupId": "remote-contract",
+        "files": [
+          "src/dev/testing/suites/posRemoteLive.test.ts"
+        ]
+      },
+      {
+        "id": "media-uploads",
+        "titleKey": "devTesting.posGroups.mediaUploads",
+        "layer": "contract",
+        "isolatedGroupId": "media-uploads",
+        "isolatedOnly": true,
+        "files": []
+      },
+      {
+        "id": "failure-recovery",
+        "titleKey": "devTesting.posGroups.recovery",
+        "layer": "live",
+        "isolatedGroupId": "failure-recovery",
+        "files": [
+          "src/dev/testing/suites/posRecoveryLive.test.ts"
+        ]
+      },
+      {
+        "id": "ui-access",
+        "titleKey": "devTesting.groups.uiAccess",
+        "layer": "calculation",
+        "isolatedGroupId": "ui-access",
+        "isolatedOnly": true,
+        "files": []
+      }
     ],
     "groups": [
       {
@@ -1005,10 +616,17 @@
         "id": "jumla-tracking-contract",
         "titleKey": "devTesting.ecommerceGroups.jumlaTrackingContract",
         "layer": "contract",
-        "files": ["src/lib/jumlaKhaleejInquiryPdf.test.ts"]
+        "files": [
+          "src/lib/jumlaKhaleejInquiryPdf.test.ts"
+        ]
       }
     ],
-    "unavailable": ["cloud-database", "browser-workflow", "hybrid-native", "local-native"]
+    "unavailable": [
+      "cloud-database",
+      "browser-workflow",
+      "hybrid-native",
+      "local-native"
+    ]
   },
   "platform": {
     "titleKey": "devTesting.platform",
@@ -1169,28 +787,36 @@
         "titleKey": "devTesting.productsGroups.catalogLifecycle",
         "layer": "live",
         "isolatedGroupId": "catalog-lifecycle",
-        "files": ["src/dev/testing/suites/productsCatalogLive.test.ts"]
+        "files": [
+          "src/dev/testing/suites/productsCatalogLive.test.ts"
+        ]
       },
       {
         "id": "identifiers-variants",
         "titleKey": "devTesting.productsGroups.identifiersVariants",
         "layer": "live",
         "isolatedGroupId": "identifiers-variants",
-        "files": ["src/dev/testing/suites/productsIdentifiersLive.test.ts"]
+        "files": [
+          "src/dev/testing/suites/productsIdentifiersLive.test.ts"
+        ]
       },
       {
         "id": "units-stock",
         "titleKey": "devTesting.productsGroups.unitsStock",
         "layer": "live",
         "isolatedGroupId": "units-stock",
-        "files": ["src/dev/testing/suites/productsInventoryLive.test.ts"]
+        "files": [
+          "src/dev/testing/suites/productsInventoryLive.test.ts"
+        ]
       },
       {
         "id": "pricing-rules",
         "titleKey": "devTesting.productsGroups.pricingRules",
         "layer": "live",
         "isolatedGroupId": "pricing-rules",
-        "files": ["src/dev/testing/suites/productsPricingLive.test.ts"]
+        "files": [
+          "src/dev/testing/suites/productsPricingLive.test.ts"
+        ]
       },
       {
         "id": "import-export-assets",
@@ -1240,6 +866,187 @@
         ]
       }
     ],
-    "unavailable": ["hosted-supabase", "browser-workflow", "hybrid-native", "local-native"]
+    "unavailable": [
+      "hosted-supabase",
+      "browser-workflow",
+      "hybrid-native",
+      "local-native"
+    ]
+  },
+  "sales-order-resilience": {
+    "titleKey": "devTesting.resilience.title",
+    "samplesHelpKey": "devTesting.resilience.samplesHelp",
+    "coverageHelpKey": "devTesting.resilience.coverage",
+    "liveCoverageHelpKey": "devTesting.resilience.liveCoverage",
+    "groups": [
+      {
+        "id": "generated",
+        "titleKey": "devTesting.resilience.groups.generated",
+        "layer": "model",
+        "files": [
+          "src/dev/testing/salesOrderResilience/resilience.test.ts"
+        ]
+      },
+      {
+        "id": "regressions",
+        "titleKey": "devTesting.resilience.groups.regressions",
+        "layer": "contract",
+        "files": [
+          "src/dev/testing/salesOrderResilience/regressions.test.ts"
+        ]
+      },
+      {
+        "id": "faults",
+        "titleKey": "devTesting.resilience.groups.faults",
+        "layer": "contract",
+        "files": [
+          "src/dev/testing/salesOrderResilience/faults.test.ts"
+        ]
+      },
+      {
+        "id": "entitlements",
+        "titleKey": "devTesting.resilience.groups.entitlements",
+        "layer": "contract",
+        "files": [
+          "src/dev/testing/salesOrderResilience/entitlements.test.ts"
+        ]
+      },
+      {
+        "id": "domain-contracts",
+        "titleKey": "devTesting.resilience.groups.contracts",
+        "layer": "contract",
+        "timeoutMs": 900000,
+        "files": [
+          "src/dev/testing/salesOrderResilience/initialPayment.test.ts",
+          "scripts/dev-testing/partnerStatementPreflight.test.mjs",
+          "src/dev/testing/suites/orderLineItemLayout.test.ts",
+          "src/dev/testing/suites/orderUom.test.ts",
+          "src/dev/testing/suites/orderUomTransactions.test.ts",
+          "src/lib/customTemplates.test.tsx",
+          "src/lib/integrityAudit/moduleWide.test.ts",
+          "src/lib/integrityAudit/salesOrderAudit.test.ts",
+          "src/lib/integrityAudit/salesOrderGraph.test.ts",
+          "src/lib/integrityAudit/salesOrderModuleWide.test.ts",
+          "src/lib/ledgerCashMovementEntries.test.ts",
+          "src/lib/ledgerCashSummary.test.ts",
+          "src/lib/ledgerFlow.test.ts",
+          "src/lib/ledgerOrderLoan.test.ts",
+          "src/lib/ledgerPaymentTransactions.test.ts",
+          "src/lib/ledgerSettlement.test.ts",
+          "src/lib/minimumSellingPrice.test.ts",
+          "src/lib/orderAdjustments.test.ts",
+          "src/lib/orderArchiving.test.ts",
+          "src/lib/orderLineItems.test.ts",
+          "src/lib/orderPartnerBalance.test.ts",
+          "src/lib/orderPrintReturnState.test.ts",
+          "src/lib/orderUnitErrors.test.ts",
+          "src/lib/partnerAccountStatementAgentPaymentNetting.test.ts",
+          "src/lib/partnerAccountStatementAgentRefund.test.ts",
+          "src/lib/partnerAccountStatementDisplay.test.ts",
+          "src/lib/priceBooks.test.ts",
+          "src/lib/productUomMigration.test.ts",
+          "src/lib/revenueAnalysis.test.ts",
+          "src/lib/salesExchange.test.ts",
+          "src/local-db/directTransactionVoucher.test.tsx",
+          "src/local-db/directTransactionVoucherRemote.test.ts",
+          "src/local-db/directTransactionVoucherSqlite.test.ts",
+          "src/local-db/inventorySnapshotSync.test.ts",
+          "src/local-db/minimumSellingPrice.test.ts",
+          "src/local-db/orderArchiving.test.ts",
+          "src/local-db/orderFinancing.test.ts",
+          "src/local-db/orderInstallments.test.ts",
+          "src/local-db/orderPriceBooks.test.ts",
+          "src/local-db/orders.test.ts",
+          "src/local-db/partnerSettlement.test.ts",
+          "src/local-db/partnerSettlementOperations.test.ts",
+          "src/local-db/paymentAccountAccess.test.ts",
+          "src/local-db/paymentAccountTransfersRemote.test.ts",
+          "src/local-db/paymentAccounts.test.ts",
+          "src/local-db/paymentReversalState.test.ts",
+          "src/local-db/payments.test.ts",
+          "src/local-db/priceBookUomPrices.test.ts",
+          "src/local-db/productUoms.test.ts",
+          "src/local-db/quickOrderAtomic.test.ts",
+          "src/services/directTransactionVoucherRemoteSave.test.ts",
+          "src/services/directTransactionVoucherSave.test.ts",
+          "src/ui/components/PrintSelectionModal.test.tsx",
+          "src/ui/components/commissions/oldSalesAgentConfiguration.test.ts",
+          "src/ui/components/crm/PartnerAccountStatementPrintTemplate.test.ts",
+          "src/ui/components/integrity-audit/ModuleWideIntegrityAuditDialog.test.tsx",
+          "src/ui/components/orders/SalesOrderFormPage.test.ts",
+          "src/ui/components/orders/SalesOrderIntegrityAuditDialog.test.tsx"
+        ]
+      }
+    ],
+    "liveGroups": [
+      {
+        "id": "generated",
+        "isolatedGroupId": "generated",
+        "titleKey": "devTesting.resilience.groups.generated",
+        "layer": "contract",
+        "files": [
+          "src/dev/testing/salesOrderResilience/resilienceLive.test.ts"
+        ],
+        "timeoutMs": 3600000
+      },
+      {
+        "id": "regressions",
+        "isolatedGroupId": "regressions",
+        "titleKey": "devTesting.resilience.groups.regressions",
+        "layer": "contract",
+        "files": [
+          "src/dev/testing/salesOrderResilience/regressionsLive.test.ts"
+        ],
+        "timeoutMs": 900000
+      },
+      {
+        "id": "faults",
+        "isolatedGroupId": "faults",
+        "titleKey": "devTesting.resilience.groups.faults",
+        "layer": "contract",
+        "files": [
+          "src/dev/testing/salesOrderResilience/faultsLive.test.ts"
+        ],
+        "timeoutMs": 900000
+      },
+      {
+        "id": "entitlements",
+        "isolatedGroupId": "entitlements",
+        "titleKey": "devTesting.resilience.groups.entitlements",
+        "layer": "contract",
+        "files": [
+          "src/dev/testing/salesOrderResilience/entitlementsLive.test.ts"
+        ],
+        "timeoutMs": 900000
+      },
+      {
+        "id": "domain-contracts",
+        "isolatedGroupId": "domain-contracts",
+        "titleKey": "devTesting.resilience.groups.contracts",
+        "layer": "contract",
+        "files": [
+          "src/dev/testing/salesOrderResilience/contracts/domainAccessLive.test.ts",
+          "src/dev/testing/salesOrderResilience/contracts/domainArchivingLive.test.ts",
+          "src/dev/testing/salesOrderResilience/contracts/domainCompletionLive.test.ts",
+          "src/dev/testing/salesOrderResilience/contracts/domainLifecycleLive.test.ts",
+          "src/dev/testing/salesOrderResilience/contracts/domainPaymentsLive.test.ts",
+          "src/dev/testing/salesOrderResilience/contracts/domainPricingLive.test.ts",
+          "src/dev/testing/salesOrderResilience/contracts/domainPrintingLive.test.ts",
+          "src/dev/testing/salesOrderResilience/contracts/domainStatementLive.test.ts",
+          "src/dev/testing/salesOrderResilience/contracts/domainUomLive.test.ts",
+          "src/dev/testing/suites/purchaseReceiptRoundingLive.test.ts",
+          "src/dev/testing/suites/saleOrderModuleWideIntegrityAuditLive.test.ts",
+          "src/dev/testing/suites/agentAccountPaymentNettingLive.test.ts",
+          "src/dev/testing/suites/agentRefundStatementLive.test.ts"
+        ],
+        "timeoutMs": 1800000
+      }
+    ],
+    "unavailable": [
+      "browser-workflow"
+    ],
+    "liveUnavailable": [
+      "browser-workflow"
+    ]
   }
 }

@@ -9,7 +9,7 @@ export default defineConfig({
     },
     test: {
         environment: 'node',
-        exclude: ['src/dev/testing/suites/*Live.test.ts', '**/node_modules/**', '**/dist/**'],
+        exclude: ['src/dev/testing/**/*Live.test.ts', 'src/dev/testing/salesOrderResilience/e2e/**', '**/node_modules/**', '**/dist/**'],
         include: [
             'src/**/*.{test,spec}.{ts,tsx}',
             'cloudflare-worker/src/**/*.{test,spec}.js',

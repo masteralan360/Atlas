@@ -1,7 +1,7 @@
 {
   "name": "atlas",
   "private": true,
-  "version": "0.13.1",
+  "version": "0.13.2",
   "main": "electron/main.cjs",
   "type": "module",
   "repository": {
@@ -34,8 +34,6 @@
     "prebuild": "npm run optimize:tips",
     "dev": "vite --host",
     "dev:testing": "node scripts/dev-testing/dev.mjs",
-    "test:sale-orders": "node scripts/dev-testing/cli.mjs",
-    "test:sale-orders:live": "node scripts/dev-testing/cli.mjs --suite sale-orders --environment hosted-supabase",
     "test:products": "node scripts/dev-testing/cli.mjs --suite products",
     "test:products:live": "node scripts/dev-testing/cli.mjs --suite products --environment hosted-supabase",
     "test:pos": "node scripts/dev-testing/cli.mjs --suite pos",
@@ -54,7 +52,13 @@
     "android:dev": "tauri android dev",
     "android:build": "tauri android build --debug",
     "android:build:release": "tauri android build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:sales-order-resilience": "node scripts/dev-testing/resilience.mjs --profile module",
+    "test:sales-order-resilience:integration": "node scripts/dev-testing/resilience.mjs --profile integration",
+    "test:sales-order-resilience:stress": "node scripts/dev-testing/resilience.mjs --profile stress",
+    "test:sales-order-resilience:entitlements": "node scripts/dev-testing/resilience.mjs --profile entitlements",
+    "test:sales-order-resilience:replay": "node scripts/dev-testing/resilience.mjs --profile replay",
+    "test:sales-order-resilience:e2e": "node scripts/dev-testing/resilience.mjs --profile e2e"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -145,6 +149,7 @@
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",
     "@eslint/js": "^9.13.0",
+    "@playwright/test": "1.63.0",
     "@tauri-apps/cli": "2.11.4",
     "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
@@ -157,6 +162,7 @@
     "eslint-plugin-react-hooks": "^5.0.0",
     "eslint-plugin-react-refresh": "^0.4.14",
     "fake-indexeddb": "^6.2.5",
+    "fast-check": "4.10.2",
     "globals": "^15.11.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.14",
@@ -168,5 +174,5 @@
     "workbox-window": "^7.1.0",
     "wrangler": "^4.72.0"
   },
-  "min_version": "0.13.1"
+  "min_version": "0.13.2"
 }

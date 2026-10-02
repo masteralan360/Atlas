@@ -45,18 +45,13 @@ describe('hosted Supabase test boundary', () => {
     await expect(guarded('https://project.supabase.co/auth/v1/token')).rejects.toThrow('live_network_redirect_blocked')
   })
 
-  it('registers Sales Orders hosted domains and the paired sales-agent refund statement selection', () => {
-    const hosted = validateRunOptions({ suiteId: 'sale-orders', environment: 'hosted-supabase' }).groups
-    const domains = hosted.filter(group => group.domainId)
-    expect(domains).toHaveLength(30)
-    expect(domains.map(group => group.domainId)).toEqual(Array.from({ length: 30 }, (_, i) => String(i + 1).padStart(2, '0')))
-    expect(domains.every(group => !group.isolatedGroupId && !group.isolatedOnly && group.files.length === 1)).toBe(true)
-    expect(domains[0].files).toEqual(['src/dev/testing/suites/saleOrdersHosted01Live.test.ts'])
-    expect(domains.at(-1).files).toEqual(['src/dev/testing/suites/saleOrdersHosted30Live.test.ts'])
-    expect(hosted.find(group => group.id === 'agent-refund-statement')).toMatchObject({
-      isolatedGroupId: 'agent-refund-statement',
-      files: ['src/dev/testing/suites/saleOrdersAgentRefundStatementLive.test.ts']
-    })
+  it('registers paired generated, regression, fault, entitlement and focused contract lab selections', () => {
+    const hosted = validateRunOptions({ suiteId: 'sales-order-resilience', environment: 'hosted-supabase' }).groups
+    const isolated = validateRunOptions({ suiteId: 'sales-order-resilience' }).groups
+    expect(hosted.map(group => group.id)).toEqual(isolated.map(group => group.id))
+    expect(hosted.every(group => group.isolatedGroupId === group.id && !group.isolatedOnly)).toBe(true)
+    expect(hosted.find(group => group.id === 'generated').files).toContain('src/dev/testing/salesOrderResilience/resilienceLive.test.ts')
+    expect(hosted.find(group => group.id === 'domain-contracts').files).toContain('src/dev/testing/suites/agentRefundStatementLive.test.ts')
   })
 
   it('registers the same paired refund statement selection in Business Partners', () => {
@@ -64,7 +59,7 @@ describe('hosted Supabase test boundary', () => {
     expect(group).toMatchObject({
       id: 'agent-refund-statement',
       isolatedGroupId: 'agent-refund-statement',
-      files: ['src/dev/testing/suites/saleOrdersAgentRefundStatementLive.test.ts']
+      files: ['src/dev/testing/suites/agentRefundStatementLive.test.ts']
     })
     expect(validateRunOptions({ suiteId: 'business-partners', groupIds: ['agent-refund-statement'] }).groups[0].files)
       .toContain('src/lib/partnerAccountStatementAgentRefund.test.ts')
@@ -95,7 +90,7 @@ describe('hosted Supabase test boundary', () => {
 
     const productsIsolated = validateRunOptions({ suiteId: 'products' }).groups
     const productsHosted = validateRunOptions({ suiteId: 'products', environment: 'hosted-supabase' }).groups
-    expect(productsHosted.map((group) => group.id)).toEqual(productsIsolated.filter((group) => group.id !== 'printing').map((group) => group.id))
+    expect(productsHosted.map((group) => group.id)).toEqual(productsIsolated.filter((group) => !['printing', 'minimum-price-disclosure'].includes(group.id)).map((group) => group.id))
     expect(productsHosted.filter((group) => group.isolatedOnly).map((group) => group.id))
       .toEqual(['import-export-assets', 'product-consumers', 'cloud-hybrid-contracts'])
     expect(productsHosted.filter((group) => !group.isolatedOnly).every((group) => group.files.length > 0)).toBe(true)
@@ -219,7 +214,7 @@ describe('hosted Supabase test boundary', () => {
       if (target.pathname === '/rest/v1/sales_orders') return Response.json([])
       throw new Error(`unexpected request: ${target.pathname}`)
     })
-    const result = await preflightLive(parseLiveConfig(source), { fetchImpl, suiteId: 'sale-orders' })
+    const result = await preflightLive(parseLiveConfig(source), { fetchImpl, suiteId: 'sales-order-resilience' })
     expect(result.servicesEnabled).toBe(true)
     expect(paths).toContain('/rest/v1/rpc/services_module_allowed')
   })

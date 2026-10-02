@@ -236,6 +236,9 @@ describe('Sales Order integrity reconciliation', () => {
     value.returnItems = [{ id: 'return-item-1', workspaceId, returnId: 'return-1', orderId,
       orderItemId: 'item-a', quantity: 1, inventoryQuantity: 1, paidInventoryQuantity: 1,
       freeInventoryQuantity: 0, restoredStorageId: 'storage-1', refundAmount: 10 }] as any
+    value.inventoryMovements.push({ id: 'return-movement-1', workspaceId, referenceId: 'return-1',
+      referenceType: 'sales_order_return', productId: 'product-a', storageId: 'storage-1',
+      transactionType: 'return', quantityDelta: 1, previousQuantity: 5, newQuantity: 6 } as any)
 
     const audit = auditSalesOrderGraph(value, workspaceId, orderId)
     expect(audit.checks.some(check => check.code === 'ITEM_RETURNED_QUANTITY_MISMATCH' && check.entityId === 'item-a')).toBe(false)

@@ -1,8 +1,6 @@
-import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Database, Loader2, XCircle } from 'lucide-react'
-import { IntegrityAuditReadError } from '@/lib/integrityAudit/types'
-import { runLoanIntegrityAudit, type LoanIntegrityAuditResult } from '@/lib/integrityAudit/loanAudit'
+import type { LoanIntegrityAuditResult } from '@/lib/integrityAudit/loanAudit'
 import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle, Button } from '@/ui/components'
 import { AuditModelJsonPanel } from '@/ui/components/integrity-audit/AuditModelJsonPanel'
 import { IntegrityAuditCategoryIcon } from '@/ui/components/integrity-audit/IntegrityAuditCategoryIcon'
@@ -23,30 +21,15 @@ function displayValue(value: unknown) {
   return serialized.length > 300 ? `${serialized.slice(0, 300)}…` : serialized
 }
 
-export function LoanIntegrityAuditDialog({ open, onOpenChange, workspaceId, loanId, mode }: {
+export function LoanIntegrityAuditDialog({ open, onOpenChange, loanId, result, errorKey, loading }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  workspaceId: string
   loanId: string
-  mode: 'cloud' | 'hybrid' | 'local' | 'demo'
+  result: LoanIntegrityAuditResult | null
+  errorKey: string | null
+  loading: boolean
 }) {
   const { t } = useTranslation()
-  const [result, setResult] = useState<LoanIntegrityAuditResult | null>(null)
-  const [errorKey, setErrorKey] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    setResult(null)
-    setErrorKey(null)
-    setLoading(true)
-    void runLoanIntegrityAudit(workspaceId, loanId, mode)
-      .then(value => { if (!cancelled) setResult(value) })
-      .catch(error => { if (!cancelled) setErrorKey(error instanceof IntegrityAuditReadError ? error.messageKey : 'transactionAudit.loadFailed') })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [open, workspaceId, loanId, mode])
 
   return <AppDialog open={open} onOpenChange={next => { if (!loading) onOpenChange(next) }}>
     <AppDialogContent className="max-w-3xl" showCloseButton={!loading}

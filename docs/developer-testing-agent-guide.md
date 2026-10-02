@@ -5,13 +5,11 @@ testing system. Read the repository's `AGENTS.md` first and use
 [developer-testing.md](./developer-testing.md) for the operator quick start.
 The source files referenced here are authoritative when implementation changes.
 
-**Sale Orders is the first independent module suite, implemented in V1.** It
-uses shared testing infrastructure, but its fixtures, scenarios, lifecycle,
-financial assertions, and coverage choices belong to Sale Orders. Other modules
-should follow the same architectural pattern and define coverage around their
-own behavior. They do not inherit Sale Orders' business rules or need to copy
-its group structure. Think of it as a reference implementation of the shared
-runner architecture, rather than a universal test specification.
+**Sales Order Resilience Lab (SORL)** owns Sales Order testing. Its primary
+engine generates preconditioned action sequences, checks an independent model,
+and shrinks failures. Shared infrastructure still serves the regular module
+suites. Other modules define their own behavior and do not inherit Sales Order
+rules or need to copy the lab's group structure.
 
 ## 1. What exists today
 
@@ -26,11 +24,12 @@ runner architecture, rather than a universal test specification.
   The browser never substitutes its current workspace database with test data.
 - UI runs and CLI runs share the registry, execution controller, and reporter.
   The selected environment chooses the isolated or hosted Vitest configuration.
-- Sale Orders V1, regular POS and Post Service are independent suites. Sale Orders
+- Sales Order Resilience Lab, regular POS and Post Service are independent suites. Sale Orders
   and POS have opt-in hosted Supabase groups; Post Service retains isolated
   request contract groups. POS cart, media uploads and UI access are local-only
-  selections even in a hosted run. Complete browser, Hybrid native, and Local
-  native adapters remain unavailable.
+  selections even in a hosted run. SORL has a separate small Playwright profile
+  and real WASM SQLite restart tests; Hybrid and Local native-device verification
+  remains unavailable.
 
 "Selected checks passed" means precisely that. It is not a guarantee of no
 bugs, every possible scenario, or coverage of the unimplemented adapters.
@@ -59,11 +58,11 @@ CLI → the same TestController and registered suite
 | CLI and localhost convenience server | `scripts/dev-testing/cli.mjs`, `dev.mjs` | CLI already accepts any registered suite |
 | Button, modal, HTTP client | `src/dev/testing/DeveloperTestButton.tsx`, `DeveloperTestDialog.tsx`, `client.ts` | Reusable components with suite-specific description metadata |
 | Runner/client regression tests | `scripts/dev-testing/controller.test.mjs`, `src/dev/testing/client.test.ts` | Test the infrastructure independently of business coverage |
-| Browser visual harness | `src/dev/testing/preview.tsx` | Registry-driven navigation; Sale Orders by default, `?suite=pos` or `?suite=post-service` |
+| Browser visual harness | `src/dev/testing/preview.tsx` | Registry-driven navigation; SORL by default, `?suite=pos` or `?suite=post-service` |
 | Minimal browser import stubs | `src/dev/testing/fixtures/browser.ts` | Reuse only for compatible Node tests; not a rendered browser |
-| Sale Orders scenario suite | `src/dev/testing/suites/saleOrders.test.ts` | Sale Orders-specific |
-| Sale Orders inputs and generation | `src/dev/testing/fixtures/saleOrder.ts` | Sale Orders-specific |
-| Order financial/stock assertions | `src/dev/testing/assertions/saleOrders.ts` | Sale Orders-specific |
+| Sale Orders scenario suite | `src/dev/testing/salesOrderResilience/resilience.test.ts` | Sale Orders-specific |
+| Shared order inputs | `src/dev/testing/fixtures/orderInput.ts` | Neutral domain fixture retained for Orders and POS |
+| Order financial/stock assertions | `src/dev/testing/assertions/orderEffects.ts` | Shared focused regressions; SORL has a separate independent model oracle |
 | Page integration | `src/ui/pages/Orders.tsx` | Entry point on the sales tab only |
 | Regular POS scenario suites | `src/dev/testing/suites/pos*.test.ts` | POS-specific, excluding Instant POS |
 | POS fixtures and assertions | `src/dev/testing/fixtures/pos.ts`, `posLive.ts`, `src/dev/testing/assertions/pos.ts` | Independent of Sale Orders fixtures and business rules; hosted fixture verifies the workspace and records IDs |
@@ -198,8 +197,8 @@ zero, a terminal event, no group errors, at least one collected test, and every
 test passed. Skipped, empty, unfinished, timed-out, malformed-event, and hook-error
 groups fail. Preserve this rule: a successful process exit alone is insufficient.
 
-Cancel is cooperative at the group boundary: finish the current group, then
-mark remaining groups cancelled. Ctrl+C in the CLI requests the same behavior.
+Cancel terminates the active child process tree and marks remaining groups
+cancelled. Ctrl+C in the CLI requests the same behavior.
 Disposal/server shutdown or a group timeout terminates the spawned child; Windows
 termination targets only that child PID and its descendants. Do not replace this
 with machine-wide process termination. Failed groups do not prevent subsequent
@@ -230,7 +229,7 @@ Reopening/reloading attaches to the controller's current run. Starting another
 run replaces that in-memory run; disk reports remain. Vite restart loses active
 session state and creates a new token. There is no history API or automatic disk
 report restoration. `/__atlas-dev-testing/preview?suite=pos` opens the regular POS
-suite; the default preview opens Sale Orders. Registry file changes restart Vite
+suite; the default preview opens SORL. Registry file changes restart Vite
 and create a fresh runner session, so finish a run before editing its registry.
 
 ## 5. Isolation and Atlas data modes
@@ -264,7 +263,7 @@ database, load app secrets, start business synchronization, or contact a live
 workspace. The hosted adapter may contact only its verified dedicated test
 workspace. Do not weaken the shared guard to make a missing mock pass.
 
-The Sale Orders matrix uses `fake-indexeddb/auto`, deletes/reopens its disposable
+The isolated Sales Order module adapter uses `fake-indexeddb/auto`, deletes/reopens its disposable
 database before each case, uses a test-only workspace ID and Local mode snapshot,
 clears mode state afterward, and deletes the test database at teardown. It
 installs minimal browser stubs before dynamically importing production functions
@@ -290,76 +289,37 @@ deliberately rather than smuggling credentials or live endpoints through suite
 options. A browser adapter must run the actual UI against isolated test data,
 not click the user's current workspace to create test transactions.
 
-## 6. Sale Orders: independent V1 coverage
+## 6. Sales Order Resilience Lab
 
-The `sale-orders` registry entry owns these groups:
+The authoritative architecture is `sales-order-resilience` (SORL). Read the
+[lab implementation guide](./sales-order-resilience.md) before extending it.
+`generated`, `regressions`, `faults`, `entitlements`, and `domain-contracts` have
+matching isolated and hosted IDs. Do not resurrect the removed family catalog,
+wrapper engine, manifest, fixed denominator or Cartesian matrix.
 
-| Group | Scope |
-| --- | --- |
-| `matrix` | Production order/payment/return functions with fixed and generated scenarios |
-| `lifecycle` | Existing financing and installment regressions, the Cloud / Hybrid inventory completion RPC contract, and Local multi-storage Quick Order fulfillment across stock and Services lines |
-| `live-transactions` (hosted) | Real Supabase cash checkout/full return, regular Sale Order atomic completion, and a concurrent financed cancellation/completion race with persisted inventory and sale-ledger effects |
-| `pricing` | Existing pricing, exchange, rounding, customer-balance, and line-storage checks |
-| `payments` | Payment transactions, accounts, reversals, ledger effects, and direct-transaction voucher numbering and A4 layout |
+Extend the independent state model, preconditions, command arbitraries and
+invariants together. Drivers execute real module operations and observe the
+resulting graph. Add permanent deterministic scenarios for minimized failures.
+Each new isolated case/group needs corresponding normal-JWT hosted coverage,
+registry pairing, localized en/ku/ar coverage, and both selections run.
 
-All eight isolated Sale Orders groups (`matrix`, `printing`,
-`account-statement`, `lifecycle`, `pricing`, `related-units`, `payments`, and
-`ui-access`) have corresponding hosted selections. Each retains its full
-isolated checks and adds a scoped live scenario: method checkout and return;
-persisted print inputs; partner statement balance; draft edit/deletion and
-approval; fractional pricing and discount; regular Sale Order product unit
-conversion, stock, return, and atomic Quick Order rejection;
-selected/unselected payment account movements; or workspace-scoped access.
-Do not infer full live parity from the paired selection. Extend the live file
-when a new behavior needs database verification, and extend the isolated file
-for its local or contract behavior. Keep their expectations independent.
+Local runs use disposable Dexie and actual WASM SQLite, including export/reopen
+and cache reconstruction. Hybrid hosted runs exercise the same mirror and
+mutation-journal recovery alongside real Supabase acknowledgement. This does not
+prove native OS startup or hardware failures. Browser runs use real login, forms,
+route access and disconnected reload at desktop and mobile widths. See the lab
+report for verified boundaries and remaining limits.
 
-Use the registry for the exact current file list. The matrix draws payment
-methods from the shared app registries. It covers standard methods, USD/IQD,
-optional payment accounts, draft/payment/pending/completion paths, paid and
-unpaid Quick Orders, partial payments, approval, editing, soft deletion,
-cancellation, partial/full returns, services, financing with/without down payment,
-stable save identities, overpayment/reversal validation, locked orders, and
-workspace mismatch. Generated inputs vary fractional quantities/prices, currency,
-and payment method through checkout and full return.
-
-Assertions read saved records and verify expected stock, paid/outstanding amounts,
-payment transactions, linked reversal counter-entries, ledger projections,
-account movements/balances, and financing records where relevant. Expected values
-must be independently derived; calling the calculation under test to generate
-its own expected result cannot demonstrate correctness.
-
-The Payments group also checks Local direct-transaction voucher assignment,
-partial reversal history and remaining amount, legacy ID fallback, A4 table
-chunking, and signature lines. Mocked Cloud / Hybrid checks verify the insert
-return value, workspace-scoped chain read, pending offline state, and read failure.
-The Print & Save check verifies that the edited A4 PDF and voucher identity are
-passed to the standard document snapshot and immutable PDF-version persistence
-flow, including validation and failure propagation. A separate Cloud / Hybrid
-contract check verifies the workspace-scoped invoice parent request, PDF upload,
-version RPC response, and cleanup when version creation fails.
-The SQLite adapter check verifies atomic local counter allocation and rollback
-when the payment row cannot be persisted.
-Cloud / Hybrid numbering depends on the database
-trigger in `20260923063458_direct_transaction_voucher_number.sql`; real Supabase
-and native SQLite behavior require integration verification outside this suite.
-
-Initial V1 validation with the default 16 generated cases passed 229 suite checks
-and 22 runner/client checks. These are historical validation counts, not a target
-for every suite or a fixed count after future changes. Even the existing
-`SalesOrderFormPage.test.ts` registry entry tests utilities, not a rendered form
-workflow. Broader Supabase SQL/RLS, order-form automation, Hybrid native
-mirroring, and Local native persistence remain explicitly unavailable.
-
-Do not reuse `saleOrderInput`, `seededCases`, or order-stock/payment assertions in
-unrelated modules merely because they already exist. Extract a shared helper only
-when its semantics actually apply to multiple independently defined suites.
+Shared order input, assertions and hosted helpers have neutral names and remain
+because POS, Business Partners and focused order contracts legitimately use them.
+Useful financing, service, UoM, pricing, print and audit regressions remain under
+`domain-contracts`; they do not generate Cartesian scenarios.
 
 ### Independent regular POS suite
 
 Regular POS is registered as `pos` and mounted on `/pos`, without an Instant POS
 entry point. Its fixtures, assertions, generator and thirteen groups are independent
-from Sale Orders V1. Cash, FIB, QiCard, ZainCash and FastPay use the shared immediate
+from Sales Order Resilience Lab. Cash, FIB, QiCard, ZainCash and FastPay use the shared immediate
 payment registry; loans create obligations. POS Quick Orders remain normal Sales
 Orders and Activities retain their own transaction domain.
 
@@ -479,9 +439,12 @@ npm run dev -- --port 1422
 npm run dev:testing -- --port 1422
 
 # Sale Orders, default seed and generated-case count
-npm run test:sale-orders
-npm run test:sale-orders -- --groups matrix,lifecycle --seed 42 --samples 100
-npm run test:sale-orders:live
+npm run test:sales-order-resilience
+npm run test:sales-order-resilience -- --groups generated,regressions --seed=42 --runs=100
+npm run test:sales-order-resilience:integration
+npm run test:sales-order-resilience:stress
+npm run test:sales-order-resilience:entitlements
+npm run test:sales-order-resilience:e2e
 
 # Regular POS, including its own generated checkout cases
 npm run test:pos
@@ -495,7 +458,7 @@ node scripts/dev-testing/cli.mjs --suite purchase-orders --groups receiving --se
 npm test -- scripts/dev-testing/controller.test.mjs src/dev/testing/client.test.ts
 
 # Direct isolated test execution for diagnosis; final verification uses the controller
-npx vitest run --config scripts/dev-testing/vitest.config.mts src/dev/testing/suites/saleOrders.test.ts
+npx vitest run --config scripts/dev-testing/vitest.config.mts src/dev/testing/salesOrderResilience/resilience.test.ts
 
 # TypeScript and relevant UI/config lint
 npx tsc -p tsconfig.app.json --noEmit
@@ -505,7 +468,7 @@ npm run lint:dialogs
 git diff --check
 ```
 
-The CLI defaults to `sale-orders`; `--suite` selects another registered suite.
+The shared CLI defaults to `sales-order-resilience`; `--suite` selects another registered suite.
 `--groups` is comma-separated. It exits nonzero unless the run passed, logs each
 group result, and prints unavailable coverage and the report path. There is no
 new per-suite npm script requirement. Direct Vitest execution bypasses controller
