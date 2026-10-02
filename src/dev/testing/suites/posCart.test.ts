@@ -14,11 +14,32 @@ import {
     snapshotPosCart
 } from '@/lib/posCart'
 import { getCartInventoryQuantity } from '@/lib/productUoms'
+import { appendInstantPosServiceLine, normalizeInstantPosServiceLines, splitInstantPosServiceLine } from '@/lib/instantPosServiceLines'
 
 const item: CartItem = { product_id: 'p', storageId: 's', sku: 'SKU', name: 'Item', price: 100,
     quantity: 2.25, max_stock: 20, negotiated_price: 90, price_book_id: 'book' }
 
 describe('POS held-cart snapshots and restoration', () => {
+    it('keeps Instant POS service quantities as separate quantity-one cart lines', () => {
+        let nextId = 0
+        const service = { productId: 'service-1', storageId: SERVICES_VIRTUAL_STORAGE_ID, quantity: 5 }
+        type ServiceLine = typeof service & { lineId?: string }
+        const lines = Array.from({ length: 5 }).reduce<ServiceLine[]>(
+            (current) => appendInstantPosServiceLine(current, service, () => `service-line-${++nextId}`),
+            [],
+        )
+
+        expect(lines).toHaveLength(5)
+        expect(lines.map((row) => row.quantity)).toEqual([1, 1, 1, 1, 1])
+        expect(new Set(lines.map((row) => row.lineId)).size).toBe(5)
+        expect(normalizeInstantPosServiceLines(
+            [{ ...service, lineId: 'legacy', quantity: 5 }],
+            (row) => row.storageId === SERVICES_VIRTUAL_STORAGE_ID,
+            () => `legacy-service-line-${++nextId}`,
+        )).toHaveLength(5)
+        expect(splitInstantPosServiceLine({ quantity: 0 }, () => 'line')).toEqual([])
+    })
+
     it('shows storage labels only while multiple source locations remain in the cart', () => {
         const otherStorageItem = { ...item, product_id: 'other', storageId: 'storage-2' }
         expect(shouldShowPosCartStorageLabels([item])).toBe(false)

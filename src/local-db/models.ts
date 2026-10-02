@@ -2912,6 +2912,7 @@ export interface WorkspaceContact extends Omit<BaseEntity, 'isDeleted'> {
 export type RestaurantPosTicketStatus = 'pending' | 'preparing' | 'ready' | 'served'
 
 export interface RestaurantPosTicketItem {
+  lineId?: string
   productId: string
   storageId?: string
   name: string

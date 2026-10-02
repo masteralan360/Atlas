@@ -30,6 +30,7 @@ import { usePosReceiptPrinter } from '@/ui/components/pos/usePosReceiptPrinter'
 import { RestaurantTableGrid } from '@/ui/components/pos/RestaurantTableGrid'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { calculateRestaurantTicketTotal } from '@/lib/restaurantTableView'
+import { appendInstantPosServiceLine, normalizeInstantPosServiceLines, splitInstantPosServiceLine } from '@/lib/instantPosServiceLines'
 import { getActiveProductUoms, getUomDescriptors, soldQuantityToInventoryQuantity } from '@/lib/productUoms'
 import type { ResolvedActiveDiscount } from '@/lib/discounts'
 import {
@@ -52,6 +53,7 @@ const TABLE_NUMBER_PRESETS = Array.from({ length: 20 }, (_, index) => String(ind
 type InstantPosStatus = 'pending' | 'preparing' | 'ready' | 'served'
 
 type InstantPosItem = {
+    lineId?: string
     productId: string
     storageId?: string
     name: string
@@ -93,7 +95,11 @@ function restaurantTicketToInstantTicket(ticket: RestaurantPosTicket): InstantPo
         number: ticket.number,
         createdAt: ticket.createdAt,
         status: ticket.status,
-        items: ticket.items,
+        items: normalizeInstantPosServiceLines(
+            ticket.items,
+            (item) => item.storageId === SERVICES_VIRTUAL_STORAGE_ID,
+            generateId,
+        ),
         note: ticket.note,
         tableNumber: String(ticket.tableNumber),
         kitchenRoutedAt: ticket.kitchenRoutedAt,
@@ -323,7 +329,11 @@ function loadTickets(): InstantPosTicket[] {
             const normalizedTicket = {
                 ...ticket,
                 status: storedStatus === 'paid' ? 'served' : ticket.status,
-                items: normalizedItems
+                items: normalizeInstantPosServiceLines(
+                    normalizedItems,
+                    (item) => item.storageId === SERVICES_VIRTUAL_STORAGE_ID,
+                    generateId,
+                )
             }
             if (ticket.expiresAt) return normalizedTicket
             if (!ticket.createdAt) return normalizedTicket
@@ -402,10 +412,10 @@ interface MobileTicketPanelProps {
     setTicketStatus: (status: InstantPosStatus) => void
     extendPendingExpiry: (id: string) => void
     clearActiveTicket: () => void
-    updateItemQuantity: (productId: string, storageId: string | undefined, delta: number, uomId?: string) => void
-    setItemQuantity: (productId: string, storageId: string | undefined, quantity: number, uomId?: string) => void
-    removeItem: (productId: string, storageId: string | undefined, uomId?: string) => void
-    setNoteItem: (item: { productId: string, storageId?: string, name: string, note: string } | null) => void
+    updateItemQuantity: (productId: string, storageId: string | undefined, delta: number, uomId?: string, lineId?: string) => void
+    setItemQuantity: (productId: string, storageId: string | undefined, quantity: number, uomId?: string, lineId?: string) => void
+    removeItem: (productId: string, storageId: string | undefined, uomId?: string, lineId?: string) => void
+    setNoteItem: (item: { productId: string, storageId?: string, name: string, note: string, lineId?: string } | null) => void
     hasTicketNote: boolean
     openTicketNoteEditor: () => void
     openTablePicker: () => void
@@ -698,8 +708,8 @@ function MobileTicketPanel({
                                         {t('instantPos.emptyTicket') || 'Add items to start this ticket.'}
                                     </div>
                                 ) : (
-                                    activeTicket.items.map(item => (
-                                        <div key={buildInstantPosItemKey(item.productId, item.storageId, item.uomId)} className={cn('rounded-2xl border border-border/60 bg-muted/30 p-4', minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId, item.uomId)) && 'border-destructive bg-destructive/5 ring-1 ring-destructive/25')}>
+                                    activeTicket.items.map((item, itemIndex) => (
+                                        <div key={item.lineId ?? `${buildInstantPosItemKey(item.productId, item.storageId, item.uomId)}:${itemIndex}`} className={cn('rounded-2xl border border-border/60 bg-muted/30 p-4', minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId, item.uomId)) && 'border-destructive bg-destructive/5 ring-1 ring-destructive/25')}>
                                             {minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId, item.uomId)) && (() => {
                                                 const violation = minimumPriceViolations.get(buildInstantPosItemKey(item.productId, item.storageId, item.uomId))!
                                                 return <p role="alert" className="mb-2 text-xs font-semibold text-destructive">{violation.currencyUnavailable
@@ -739,18 +749,18 @@ function MobileTicketPanel({
                                             </div>
                                             <div className="mt-4 flex items-center justify-between">
                                                 <div className="flex items-center gap-3">
-                                                    <button onClick={() => updateItemQuantity(item.productId, item.storageId, -1, item.uomId)} className="p-2 bg-background rounded-full border border-border/60"><Minus className="w-3 h-3" /></button>
-                                                    {item.storageId === SERVICES_VIRTUAL_STORAGE_ID && <Input type="number" min="0.001" step="0.001" value={item.quantity} onChange={(event) => setItemQuantity(item.productId, item.storageId, Number(event.target.value), item.uomId)} className="h-8 w-20 text-center" aria-label="Service quantity" />}
-                                                    <button onClick={() => updateItemQuantity(item.productId, item.storageId, 1, item.uomId)} className="p-2 bg-background rounded-full border border-border/60"><Plus className="w-3 h-3" /></button>
+                                                    <button onClick={() => updateItemQuantity(item.productId, item.storageId, -1, item.uomId, item.lineId)} className="p-2 bg-background rounded-full border border-border/60"><Minus className="w-3 h-3" /></button>
+                                                    {item.storageId === SERVICES_VIRTUAL_STORAGE_ID && <Input type="number" min="0.001" step="0.001" value={item.quantity} onChange={(event) => setItemQuantity(item.productId, item.storageId, Number(event.target.value), item.uomId, item.lineId)} className="h-8 w-20 text-center" aria-label="Service quantity" />}
+                                                    <button onClick={() => updateItemQuantity(item.productId, item.storageId, 1, item.uomId, item.lineId)} className="p-2 bg-background rounded-full border border-border/60"><Plus className="w-3 h-3" /></button>
                                                     <button
-                                                        onClick={() => setNoteItem({ productId: item.productId, storageId: item.storageId, name: item.name, note: item.note || '' })}
+                                                        onClick={() => setNoteItem({ productId: item.productId, storageId: item.storageId, name: item.name, note: item.note || '', lineId: item.lineId })}
                                                         className={cn("h-8 px-3 rounded-full border border-border/60 text-[10px] font-bold uppercase flex items-center gap-1.5", item.note ? "bg-primary/10 text-primary border-primary/40" : "bg-background")}
                                                     >
                                                         <StickyNote className="w-3.5 h-3.5" /> {t('common.note')}
                                                     </button>
                                                 </div>
                                                 {!hideItemDelete && (
-                                                    <button onClick={() => removeItem(item.productId, item.storageId, item.uomId)} className="text-destructive p-2"><Trash2 className="w-4 h-4" /></button>
+                                                    <button onClick={() => removeItem(item.productId, item.storageId, item.uomId, item.lineId)} className="text-destructive p-2"><Trash2 className="w-4 h-4" /></button>
                                                 )}
                                             </div>
                                         </div>
@@ -1085,7 +1095,7 @@ export function InstantPOS() {
     const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false)
     const [completedSaleData, setCompletedSaleData] = useState<any>(null)
     const [now, setNow] = useState(() => Date.now())
-    const [noteItem, setNoteItem] = useState<{ productId: string, storageId?: string, name: string, note: string } | null>(null)
+    const [noteItem, setNoteItem] = useState<{ productId: string, storageId?: string, name: string, note: string, lineId?: string } | null>(null)
     const [ticketNoteEditor, setTicketNoteEditor] = useState<{ ticketId: string, note: string } | null>(null)
     const [isTablePickerOpen, setIsTablePickerOpen] = useState(false)
     const [tableNumberInput, setTableNumberInput] = useState('')
@@ -1164,7 +1174,14 @@ export function InstantPOS() {
         const handleRemoteSync = (event: any) => {
             const updatedTickets = event.detail
             if (updatedTickets && Array.isArray(updatedTickets)) {
-                setLocalTickets(updatedTickets)
+                setLocalTickets(updatedTickets.map((ticket: InstantPosTicket) => ({
+                    ...ticket,
+                    items: normalizeInstantPosServiceLines(
+                        ticket.items || [],
+                        (item) => item.storageId === SERVICES_VIRTUAL_STORAGE_ID,
+                        generateId,
+                    ),
+                })))
             }
         }
 
@@ -1569,6 +1586,7 @@ export function InstantPOS() {
                 createdAt: createdAt.toISOString(),
                 status: 'pending',
                 items: [{
+                    lineId: isService(product) ? generateId() : undefined,
                     productId: product.id,
                     storageId: product.storageId ?? undefined,
                     name: product.name,
@@ -1600,7 +1618,7 @@ export function InstantPOS() {
         }
 
         updateTicket(activeTicket.id, ticket => {
-            const existing = ticket.items.find(item =>
+            const existing = isService(product) ? undefined : ticket.items.find(item =>
                 item.productId === product.id && item.storageId === product.storageId && item.uomId === selectedUom?.id
             )
             if (existing) {
@@ -1625,6 +1643,7 @@ export function InstantPOS() {
             }
 
             const newItem: InstantPosItem = {
+                lineId: isService(product) ? generateId() : undefined,
                 productId: product.id,
                 storageId: product.storageId ?? undefined,
                 name: product.name,
@@ -1648,7 +1667,12 @@ export function InstantPOS() {
                 discountEndsAt: activeDiscount?.endsAt
             }
 
-            return { ...ticket, items: [...ticket.items, newItem] }
+            return {
+                ...ticket,
+                items: isService(product)
+                    ? appendInstantPosServiceLine(ticket.items, newItem, generateId)
+                    : [...ticket.items, newItem],
+            }
         })
     }
 
@@ -1666,13 +1690,38 @@ export function InstantPOS() {
         addItemToTicket(productId, options[0]?.id)
     }
 
-    const updateItemQuantity = (productId: string, storageId: string | undefined, delta: number, uomId?: string) => {
+    const updateItemQuantity = (productId: string, storageId: string | undefined, delta: number, uomId?: string, lineId?: string) => {
         if (!activeTicket) return
         updateTicket(activeTicket.id, ticket => {
             const product = resolveTicketProduct({ productId, storageId })
+            const isServiceLine = storageId === SERVICES_VIRTUAL_STORAGE_ID || isService(product)
+            const matchesLine = (item: InstantPosItem) => lineId
+                ? item.lineId === lineId
+                : item.productId === productId && item.storageId === storageId && item.uomId === uomId
+
+            if (isServiceLine) {
+                const targetIndex = ticket.items.findIndex(matchesLine)
+                if (targetIndex < 0) return ticket
+                const target = ticket.items[targetIndex]
+
+                if (delta > 0) {
+                    const additionalLines = splitInstantPosServiceLine({ ...target, lineId: undefined, quantity: delta }, generateId)
+                    const items = [...ticket.items]
+                    items.splice(targetIndex + 1, 0, ...additionalLines)
+                    return { ...ticket, items }
+                }
+
+                const siblingCount = ticket.items.filter((item) => (
+                    item.productId === productId && item.storageId === storageId && item.uomId === uomId
+                )).length
+                return siblingCount > 1
+                    ? { ...ticket, items: ticket.items.filter((_, index) => index !== targetIndex) }
+                    : ticket
+            }
+
             const items = ticket.items
                 .map(item => {
-                    if (item.productId !== productId || item.storageId !== storageId || item.uomId !== uomId) return item
+                    if (!matchesLine(item)) return item
                     const nextQuantity = Math.max(1, item.quantity + delta)
                     const reservedByOtherUnits = ticket.items
                         .filter((other) => other.productId === productId && other.storageId === storageId && other.uomId !== item.uomId)
@@ -1688,22 +1737,37 @@ export function InstantPOS() {
         })
     }
 
-    const setItemQuantity = (productId: string, storageId: string | undefined, quantity: number, uomId?: string) => {
+    const setItemQuantity = (productId: string, storageId: string | undefined, quantity: number, uomId?: string, lineId?: string) => {
         if (!activeTicket || !Number.isFinite(quantity) || quantity <= 0) return
-        updateTicket(activeTicket.id, (ticket) => ({
-            ...ticket,
-            items: ticket.items.map((item) => item.productId === productId && item.storageId === storageId && item.uomId === uomId
-                ? { ...item, quantity: isService(resolveTicketProduct(item)) ? quantity : Math.min(quantity, (resolveTicketProduct(item)?.quantity ?? quantity) / getTicketItemFactor(item)) }
-                : item)
-        }))
+        updateTicket(activeTicket.id, (ticket) => {
+            const matchesLine = (item: InstantPosItem) => lineId
+                ? item.lineId === lineId
+                : item.productId === productId && item.storageId === storageId && item.uomId === uomId
+            const target = ticket.items.find(matchesLine)
+            if (target && (storageId === SERVICES_VIRTUAL_STORAGE_ID || isService(resolveTicketProduct(target)))) {
+                return {
+                    ...ticket,
+                    items: ticket.items.flatMap((item) => matchesLine(item)
+                        ? splitInstantPosServiceLine({ ...item, quantity }, generateId)
+                        : [item])
+                }
+            }
+            return {
+                ...ticket,
+                items: ticket.items.map((item) => matchesLine(item)
+                    ? { ...item, quantity: Math.min(quantity, (resolveTicketProduct(item)?.quantity ?? quantity) / getTicketItemFactor(item)) }
+                    : item)
+            }
+        })
     }
 
-    const removeItem = (productId: string, storageId: string | undefined, uomId?: string) => {
+    const removeItem = (productId: string, storageId: string | undefined, uomId?: string, lineId?: string) => {
         if (!activeTicket) return
+        const matchesLine = (item: InstantPosItem) => lineId
+            ? item.lineId === lineId
+            : item.productId === productId && item.storageId === storageId && item.uomId === uomId
         if (restaurantMode && activeTicket.items.length === 1
-            && activeTicket.items[0].productId === productId
-            && activeTicket.items[0].storageId === storageId
-            && activeTicket.items[0].uomId === uomId) {
+            && matchesLine(activeTicket.items[0])) {
             const storedTicket = restaurantPosTickets.find((ticket) => ticket.id === activeTicket.id)
             if (storedTicket) {
                 void hardDeleteRestaurantPosTicket(storedTicket, restaurantLiveSyncEnabled)
@@ -1714,16 +1778,19 @@ export function InstantPOS() {
         }
         updateTicket(activeTicket.id, ticket => ({
             ...ticket,
-            items: ticket.items.filter(item => item.productId !== productId || item.storageId !== storageId || item.uomId !== uomId)
+            items: ticket.items.filter(item => !matchesLine(item))
         }))
     }
 
-    const updateItemNote = (productId: string, storageId: string | undefined, note: string) => {
+    const updateItemNote = (productId: string, storageId: string | undefined, note: string, lineId?: string) => {
         if (!activeTicket) return
+        const matchesLine = (item: InstantPosItem) => lineId
+            ? item.lineId === lineId
+            : item.productId === productId && item.storageId === storageId
         updateTicket(activeTicket.id, ticket => ({
             ...ticket,
             items: ticket.items.map(item =>
-                item.productId === productId && item.storageId === storageId ? { ...item, note } : item
+                matchesLine(item) ? { ...item, note } : item
             )
         }))
         setNoteItem(null)
@@ -2852,8 +2919,8 @@ export function InstantPOS() {
                                         {t('instantPos.emptyTicket') || 'Add items to start this ticket.'}
                                     </div>
                                 ) : (
-                                    activeTicket.items.map(item => (
-                                        <div key={buildInstantPosItemKey(item.productId, item.storageId, item.uomId)} className={cn('group flex flex-col rounded-lg border border-border bg-background p-3 transition-all duration-200', minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId, item.uomId)) && 'border-destructive bg-destructive/5 ring-1 ring-destructive/25')}>
+                                    activeTicket.items.map((item, itemIndex) => (
+                                        <div key={item.lineId ?? `${buildInstantPosItemKey(item.productId, item.storageId, item.uomId)}:${itemIndex}`} className={cn('group flex flex-col rounded-lg border border-border bg-background p-3 transition-all duration-200', minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId, item.uomId)) && 'border-destructive bg-destructive/5 ring-1 ring-destructive/25')}>
                                             {minimumPriceViolations.has(buildInstantPosItemKey(item.productId, item.storageId, item.uomId)) && (() => {
                                                 const violation = minimumPriceViolations.get(buildInstantPosItemKey(item.productId, item.storageId, item.uomId))!
                                                 return <p role="alert" className="mb-2 text-xs font-semibold text-destructive">{violation.currencyUnavailable
@@ -2889,20 +2956,20 @@ export function InstantPOS() {
                                             <div className="mt-3 flex items-center justify-between">
                                                 <div className="flex items-center gap-2">
                                                     <button
-                                                        onClick={() => updateItemQuantity(item.productId, item.storageId, -1, item.uomId)}
+                                                        onClick={() => updateItemQuantity(item.productId, item.storageId, -1, item.uomId, item.lineId)}
                                                         className="flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background text-foreground hover:bg-muted/60"
                                                     >
                                                         <Minus className="h-3 w-3" />
                                                     </button>
-                                                    {item.storageId === SERVICES_VIRTUAL_STORAGE_ID && <Input type="number" min="0.001" step="0.001" value={item.quantity} onChange={(event) => setItemQuantity(item.productId, item.storageId, Number(event.target.value), item.uomId)} className="h-7 w-14 border-0 bg-transparent p-0 text-center text-xs" aria-label="Service quantity" />}
+                                                    {item.storageId === SERVICES_VIRTUAL_STORAGE_ID && <Input type="number" min="0.001" step="0.001" value={item.quantity} onChange={(event) => setItemQuantity(item.productId, item.storageId, Number(event.target.value), item.uomId, item.lineId)} className="h-7 w-14 border-0 bg-transparent p-0 text-center text-xs" aria-label="Service quantity" />}
                                                     <button
-                                                        onClick={() => updateItemQuantity(item.productId, item.storageId, 1, item.uomId)}
+                                                        onClick={() => updateItemQuantity(item.productId, item.storageId, 1, item.uomId, item.lineId)}
                                                         className="flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background text-foreground hover:bg-muted/60"
                                                     >
                                                         <Plus className="h-3 w-3" />
                                                     </button>
                                                     <button
-                                                        onClick={() => setNoteItem({ productId: item.productId, storageId: item.storageId, name: item.name, note: item.note || '' })}
+                                                        onClick={() => setNoteItem({ productId: item.productId, storageId: item.storageId, name: item.name, note: item.note || '', lineId: item.lineId })}
                                                         className={cn(
                                                             "flex h-7 items-center justify-center rounded-md border px-2 text-[10px] font-bold uppercase transition",
                                                             item.note ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground hover:bg-muted/60"
@@ -2914,7 +2981,7 @@ export function InstantPOS() {
                                                 </div>
                                                 {!hideRestaurantItemDelete && (
                                                     <button
-                                                        onClick={() => removeItem(item.productId, item.storageId, item.uomId)}
+                                                        onClick={() => removeItem(item.productId, item.storageId, item.uomId, item.lineId)}
                                                         className="ml-1 flex h-7 w-7 items-center justify-center rounded-md border border-destructive/20 bg-destructive/10 text-destructive transition-opacity hover:bg-destructive/20"
                                                     >
                                                         <Trash2 className="h-4 w-4" />
@@ -3097,7 +3164,7 @@ export function InstantPOS() {
                         <Button variant="outline" onClick={() => setNoteItem(null)}>
                             {t('common.cancel') || 'Cancel'}
                         </Button>
-                        <Button onClick={() => noteItem && updateItemNote(noteItem.productId, noteItem.storageId, noteItem.note)}>
+                        <Button onClick={() => noteItem && updateItemNote(noteItem.productId, noteItem.storageId, noteItem.note, noteItem.lineId)}>
                             {t('common.save') || 'Save Note'}
                         </Button>
                     </DialogFooter>
