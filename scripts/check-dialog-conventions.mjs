@@ -7,7 +7,6 @@ const sourceRoot = path.join(process.cwd(), 'src')
 // This is filled from the current codebase once. Existing generic dialogs are
 // tolerated, but this guard prevents adding another one anywhere in `src`.
 const legacyGenericDialogBaseline = {
-  'src/demo/tutorial/DemoOrderTypeChoiceModal.tsx': 1,
   'src/marketplace/components/StoreQrDialog.tsx': 1,
   'src/ui/components/budget/BudgetLockPromptModal.tsx': 1,
   'src/ui/components/budget/BudgetSnoozeModal.tsx': 1,

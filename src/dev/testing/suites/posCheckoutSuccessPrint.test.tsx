@@ -3,7 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { printPosPreprintReceipt } from '@/lib/posPreprintReceipt'
 
 const harness = vi.hoisted(() => ({
-    buttons: [] as Array<{ tourId?: string; onClick?: () => unknown }>,
+    buttons: [] as Array<{ label?: string; onClick?: () => unknown }>,
     printReceipt: vi.fn(),
     buildReceiptPdf: vi.fn(),
     triggerInvoiceSync: vi.fn(),
@@ -24,11 +24,9 @@ vi.mock('@/ui/components', async () => {
         Dialog: Container,
         DialogContent: Container,
         DialogTitle: Container,
-        Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-            'data-tour-id'?: string
-        }) => {
+        Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => {
             harness.buttons.push({
-                tourId: props['data-tour-id'],
+                label: React.Children.toArray(children).find((child) => typeof child === 'string') as string | undefined,
                 onClick: props.onClick as (() => unknown) | undefined
             })
             return React.createElement('button', null, children)
@@ -122,7 +120,7 @@ describe('POS receipt printing', () => {
             />
         )
 
-        const printButton = harness.buttons.find((button) => button.tourId === 'tutorial-pos-print-receipt')
+        const printButton = harness.buttons.find((button) => button.label === 'pos.printReceipt')
         expect(printButton?.onClick).toBeTypeOf('function')
         await printButton?.onClick?.()
 

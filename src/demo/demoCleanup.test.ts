@@ -65,7 +65,7 @@ describe('demo workspace cleanup', () => {
         id: 'demo-workspace',
         workspaceId: 'demo-workspace',
         name: 'Demo',
-        code: 'demo.market.15.abc123',
+        code: 'demo.general.15.abc123',
         plan: 'enterprise',
         data_mode: 'demo',
         is_configured: true,

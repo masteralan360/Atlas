@@ -168,7 +168,6 @@ import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAc
 import { isOnline } from '@/lib/network'
 import { useWebHaptics } from 'web-haptics/react'
 import { getLanguageDirection } from '@/lib/i18nRouting'
-import { useDemoTutorial } from '@/demo'
 import { ActivityReceiptPrintTemplate, createActivityReceiptLabels } from '@/ui/components/activities/ActivityReceiptPrintTemplate'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import { generateTemplatePdf } from '@/services/pdfGenerator'
@@ -463,7 +462,6 @@ export function POS() {
     const { trigger: hapticTrigger } = useWebHaptics({ debug: true })
     const { toast } = useToast()
     const { user } = useAuth()
-    const demoTutorial = useDemoTutorial()
     const { t, i18n } = useTranslation()
     const { features, hasCapability, hasFeature, workspaceName, isLocalMode, isLoading: isWorkspaceLoading, refreshFeatures } = useWorkspace()
     const isRTL = getLanguageDirection(i18n.resolvedLanguage || i18n.language) === 'rtl'
@@ -1041,7 +1039,6 @@ export function POS() {
     const [freeBonusUnitInput, setFreeBonusUnitInput] = useState('')
     const [mobileFreeOnlyProduct, setMobileFreeOnlyProduct] = useState<PosCatalogProduct | null>(null)
     const [isAddingMobileFreeOnlyProduct, setIsAddingMobileFreeOnlyProduct] = useState(false)
-    const isTutorialPosTask = demoTutorial.isCurrentTask('pos-sale')
     const [digitalProvider, setDigitalProvider] = useState<'fib' | 'qicard' | 'zaincash' | 'fastpay'>('fib')
     const [paymentAccount, setPaymentAccount] = useState<PaymentAccount | null>(null)
     const paymentAccounts = usePaymentAccounts(user?.workspaceId, user?.id)
@@ -1076,12 +1073,6 @@ export function POS() {
             return current
         })
     }, [isActivitiesCheckout, quickOrderEnabled])
-
-    useEffect(() => {
-        if (isTutorialPosTask && paymentType === 'loan') {
-            setPaymentType('cash')
-        }
-    }, [isTutorialPosTask, paymentType])
 
     useEffect(() => {
         if (isActivitiesStorage || isServicesStorage) {
@@ -3189,7 +3180,6 @@ export function POS() {
             setIsLoanRegistrationModalOpen(false)
             setCompletedActivityCheckout(null)
             setCompletedSaleData(saleData)
-            demoTutorial.recordPosSaleCreated(checkoutInput.payload.id)
             setIsSuccessModalOpen(true)
             hapticTrigger('success')
             playCheckoutSound()
@@ -3524,7 +3514,6 @@ export function POS() {
                                 getPriceBookPricing={getPriceBookPricing}
                                 showQuantityIndicator={showQuantityIndicator}
                                 showCategories={showCategories}
-                                tutorialProductId={demoTutorial.state?.productId}
                             />
                         ) : (
                             <MobileCart
@@ -3540,8 +3529,6 @@ export function POS() {
                                 workspaceId={user?.workspaceId}
                                 paymentAccount={paymentAccount}
                                 setPaymentAccount={setPaymentAccount}
-                                isTutorialPosTask={isTutorialPosTask}
-                                tutorialProductId={demoTutorial.state?.productId}
                                 digitalProvider={digitalProvider}
                                 setDigitalProvider={selectDigitalProvider}
                                 quickOrderEnabled={quickOrderEnabled}
@@ -3707,7 +3694,6 @@ export function POS() {
                                         <button
                                             key={product.id}
                                             ref={el => productRefs.current[index] = el}
-                                            data-tour-id={demoTutorial.state?.productId === product.id ? 'tutorial-pos-product-card' : undefined}
                                             onClick={() => addToCart(product)}
                                             disabled={!isInfiniteActivity && !isServiceProduct && remainingQuantity <= 0}
                                             className={cn(
@@ -3827,7 +3813,6 @@ export function POS() {
                     {/* Cart Sidebar */}
                     <div
                         ref={sidebarRef}
-                        data-tour-id="tutorial-pos-cart"
                         className={cn(
                             "bg-card border border-border rounded-xl flex shrink-0 flex-col shadow-xl relative",
                             isResizing ? "transition-none will-change-[width]" : "transition-all duration-300"
@@ -3920,7 +3905,6 @@ export function POS() {
                                                 <div
                                                     key={itemKey}
                                                     ref={el => cartItemRefs.current[index] = el}
-                                                    data-tour-id={demoTutorial.state?.productId === item.product_id ? 'tutorial-pos-cart-quantity' : undefined}
                                                     className={cn(
                                                         "bg-background border border-border p-3 rounded-lg flex gap-3 group transition-all duration-200 scroll-m-2",
                                                         (isPosKeyboardSelectionEnabled && focusedSection === 'cart' && focusedCartIndex === index) ? "ring-2 ring-primary ring-offset-2 ring-offset-background border-primary/50 shadow-md transform scale-[1.01]" : "",
@@ -4245,12 +4229,11 @@ export function POS() {
                             </div>
 
                             {/* Payment Method Toggle */}
-                            <div className="space-y-2" data-tour-id="tutorial-pos-payment-area">
+                            <div className="space-y-2">
                                 <div className="flex items-center justify-between">
                                     <span className="text-xs text-muted-foreground font-medium">{t('pos.paymentMethod') || 'Payment Method'}</span>
                                     <div className="flex bg-muted rounded-lg p-0.5 gap-0.5">
                                         <button
-                                            data-tour-id="tutorial-pos-payment-cash"
                                             onClick={() => {
                                                 setPaymentType('cash')
                                                 setPaymentAccount((current) => current?.accountType === 'cash_drawer' ? current : null)
@@ -4281,7 +4264,6 @@ export function POS() {
                                             {t('orders.actions.order', { defaultValue: 'Order' })}
                                         </button> : null}
                                         <button
-                                            data-tour-id="tutorial-pos-payment-digital"
                                             onClick={() => {
                                                 setPaymentType('digital')
                                                 selectDigitalProvider(digitalProvider)
@@ -4300,22 +4282,21 @@ export function POS() {
                                             {t('pos.digital') || 'Digital'}
                                         </button>
                                         {shouldShowPosLoanPaymentOption(paymentType, isActivitiesCheckout) && <button
-                                            data-tour-id="tutorial-pos-payment-loan"
                                             onClick={() => {
-                                                if (!isTutorialPosTask && !hasFreeOrderBonus) setPaymentType('loan')
+                                                if (!hasFreeOrderBonus) setPaymentType('loan')
                                             }}
-                                            disabled={isTutorialPosTask || hasFreeOrderBonus}
+                                            disabled={hasFreeOrderBonus}
                                             title={hasFreeOrderBonus ? t('pos.freeBonusOrderOnly') : undefined}
                                             className={cn(
                                                 "px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 border transition-all",
-                                                isTutorialPosTask || hasFreeOrderBonus
+                                                hasFreeOrderBonus
                                                     ? "cursor-not-allowed border-border bg-muted text-muted-foreground opacity-80"
                                                     : paymentType === 'loan'
                                                     ? "bg-rose-100 text-rose-900 shadow-sm border-rose-200 dark:bg-rose-900/40 dark:text-rose-300 dark:border-rose-800"
                                                     : "bg-rose-50/30 text-rose-700 border-rose-100/30 hover:bg-rose-100/50 dark:bg-rose-500/5 dark:text-rose-400 dark:border-rose-500/10 dark:hover:bg-rose-500/10"
                                             )}
                                         >
-                                            <Coins className={cn("w-3 h-3 transition-colors", isTutorialPosTask ? "text-muted-foreground" : paymentType === 'loan' ? "text-rose-600 dark:text-rose-400" : "text-rose-600/80")} />
+                                            <Coins className={cn("w-3 h-3 transition-colors", paymentType === 'loan' ? "text-rose-600 dark:text-rose-400" : "text-rose-600/80")} />
                                             {t('pos.loan') || 'Loan'}
                                         </button>}
                                     </div>
@@ -4323,7 +4304,7 @@ export function POS() {
 
                                 {/* Digital Provider Sub-toggle */}
                                 {paymentType === 'digital' && (
-                                    <div className="flex justify-end" data-tour-id="tutorial-pos-digital-provider">
+                                    <div className="flex justify-end">
                                         <div className="flex bg-muted/50 rounded-lg p-0.5 gap-1">
                                             <button
                                                 onClick={() => selectDigitalProvider('fib')}
@@ -4420,7 +4401,6 @@ export function POS() {
                             <div className="flex gap-2">
                                 <Button
                                     size="lg"
-                                    data-tour-id="tutorial-pos-checkout"
                                     className="flex-[3] h-14 text-xl shadow-lg shadow-primary/20 rounded-2xl"
                                     onClick={() => handleCheckout()}
                                     disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates || hasMinimumSellingPriceViolation}
@@ -5116,7 +5096,6 @@ export function POS() {
             <CheckoutSuccessModal
                 isOpen={isSuccessModalOpen}
                 onClose={() => {
-                    demoTutorial.completePosSuccessModal()
                     setIsSuccessModalOpen(false)
                     setCompletedSaleData(null)
                     setCompletedActivityCheckout(null)
@@ -5125,7 +5104,6 @@ export function POS() {
                 }}
                 saleData={completedSaleData}
                 features={features}
-                tutorialDisablePrint={isTutorialPosTask}
                 receiptPdfBuilder={completedActivityCheckout ? buildActivityCheckoutReceiptPdf : undefined}
                 onSaveNote={completedActivityCheckout ? saveCompletedActivityNote : undefined}
             />
@@ -5676,10 +5654,9 @@ interface MobileGridProps {
     } | null
     showQuantityIndicator: boolean
     showCategories: boolean
-    tutorialProductId?: string
 }
 
-function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModalOpen, isDeviceScannerAutoEnabled, filteredProducts, cart, addToCart, onHoldForFreeOnlyOrder, canUseOrderFreeBonus, quickOrderEnabled, updateQuantity, features, getDisplayImageUrl, categories, selectedCategory, setSelectedCategory, getActiveDiscount, getPriceBookPricing, showQuantityIndicator, showCategories, tutorialProductId }: MobileGridProps) {
+function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModalOpen, isDeviceScannerAutoEnabled, filteredProducts, cart, addToCart, onHoldForFreeOnlyOrder, canUseOrderFreeBonus, quickOrderEnabled, updateQuantity, features, getDisplayImageUrl, categories, selectedCategory, setSelectedCategory, getActiveDiscount, getPriceBookPricing, showQuantityIndicator, showCategories }: MobileGridProps) {
     const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const suppressCatalogClickRef = useRef(false)
 
@@ -5786,7 +5763,6 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                     return (
                         <div
                             key={product.id}
-                            data-tour-id={tutorialProductId === product.id ? 'tutorial-pos-product-card' : undefined}
                             className={cn(
                                 "bg-card rounded-[2rem] border border-border p-3 shadow-sm flex flex-col gap-3 group active:scale-[0.98] transition-all",
                                 product.hasBatches && "border-sky-300/70 bg-gradient-to-br from-sky-50/70 via-card to-card shadow-[0_10px_30px_rgba(14,165,233,0.08)] dark:border-sky-500/25 dark:from-sky-500/10"
@@ -5979,8 +5955,6 @@ interface MobileCartProps {
     workspaceId?: string
     paymentAccount: PaymentAccount | null
     setPaymentAccount: (account: PaymentAccount | null) => void
-    isTutorialPosTask: boolean
-    tutorialProductId?: string
     digitalProvider: 'fib' | 'qicard' | 'zaincash' | 'fastpay'
     setDigitalProvider: (p: 'fib' | 'qicard' | 'zaincash' | 'fastpay') => void
     quickOrderEnabled: boolean
@@ -6019,7 +5993,7 @@ interface MobileCartProps {
 
 function MobileCart({
     cart, removeFromCart, updateQuantity, features, totalAmount,
-    settlementCurrency, paymentType, setPaymentType, isOrderPaymentLocked, isTutorialPosTask, tutorialProductId, digitalProvider,
+    settlementCurrency, paymentType, setPaymentType, isOrderPaymentLocked, digitalProvider,
     setDigitalProvider, workspaceId, paymentAccount, setPaymentAccount, quickOrderEnabled, handleCheckout, handleHoldSale, isLoading,
     canPreprintReceipt, handlePreprintReceipt, isPreprinting, isLoadingPreprintTemplate,
     getDisplayImageUrl, products, showCartStorageLabels, getCartStorageName, fallbackStorageId,
@@ -6122,7 +6096,6 @@ function MobileCart({
 
             <div
                 ref={scrollContainerRef}
-                data-tour-id="tutorial-pos-cart"
                 className={cn(
                     "flex-1 overflow-y-auto p-4 space-y-4 transition-all duration-300 overscroll-contain relative",
                     "pb-40 text-sm" // Increased padding to clear the 120px fixed checkout bar
@@ -6152,7 +6125,6 @@ function MobileCart({
                         return (
                             <div
                                 key={itemKey}
-                                data-tour-id={tutorialProductId === item.product_id ? 'tutorial-pos-cart-quantity' : undefined}
                                 className={cn(
                                     'flex gap-4 bg-card p-4 rounded-[2rem] border border-border shadow-sm group',
                                     minimumViolation && 'border-destructive bg-destructive/5 ring-1 ring-destructive/25'
@@ -6396,7 +6368,6 @@ function MobileCart({
                                 </Button>
                             )}
                             <Button
-                                data-tour-id="tutorial-pos-checkout"
                                 className="h-12 px-6 rounded-2xl font-black shadow-lg shadow-primary/20 active:scale-95 transition-all text-primary-foreground"
                                 onClick={(e) => {
                                     e.stopPropagation();
@@ -6445,9 +6416,8 @@ function MobileCart({
                 >
                     <div className="space-y-6 pb-8">
                         {/* Payment Method Toggle */}
-                        <div className="flex bg-muted p-1 rounded-2xl gap-1" data-tour-id="tutorial-pos-payment-area">
+                        <div className="flex bg-muted p-1 rounded-2xl gap-1">
                             <button
-                                data-tour-id="tutorial-pos-payment-cash"
                                 onClick={() => {
                                     setPaymentType('cash')
                                     setPaymentAccount(paymentAccount?.accountType === 'cash_drawer' ? paymentAccount : null)
@@ -6476,7 +6446,6 @@ function MobileCart({
                                 <ClipboardCheck className={cn("w-4 h-4 transition-colors", paymentType === 'order' ? "text-violet-600 dark:text-violet-400" : "text-violet-600/80")} /> {t('orders.actions.order', { defaultValue: 'Order' })}
                             </button> : null}
                             <button
-                                data-tour-id="tutorial-pos-payment-digital"
                                 onClick={() => {
                                     setPaymentType('digital')
                                     setDigitalProvider(digitalProvider)
@@ -6494,28 +6463,27 @@ function MobileCart({
                                 <Zap className={cn("w-4 h-4 transition-colors", paymentType === 'digital' ? "text-blue-600 dark:text-blue-400" : "text-blue-600/80")} /> {t('pos.digital') || 'Digital'}
                             </button>
                             {shouldShowPosLoanPaymentOption(paymentType, isActivitiesCheckout) && <button
-                                data-tour-id="tutorial-pos-payment-loan"
                                 onClick={() => {
-                                    if (!isTutorialPosTask && !isOrderPaymentLocked) setPaymentType('loan')
+                                    if (!isOrderPaymentLocked) setPaymentType('loan')
                                 }}
-                                disabled={isTutorialPosTask || isOrderPaymentLocked}
+                                disabled={isOrderPaymentLocked}
                                 title={isOrderPaymentLocked ? t('pos.freeBonusOrderOnly') : undefined}
                                 className={cn(
                                     "flex-1 py-3.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all border",
-                                    isTutorialPosTask || isOrderPaymentLocked
+                                    isOrderPaymentLocked
                                         ? "cursor-not-allowed border-border bg-muted text-muted-foreground opacity-80"
                                         : paymentType === 'loan'
                                         ? "bg-rose-100 text-rose-900 shadow-lg border-rose-200 dark:bg-rose-900/40 dark:text-rose-300 dark:border-rose-800"
                                         : "bg-rose-50/30 text-rose-700 border-rose-100/30 dark:bg-rose-500/5 dark:text-rose-400 dark:border-rose-500/10"
                                 )}
                             >
-                                <Coins className={cn("w-4 h-4 transition-colors", isTutorialPosTask ? "text-muted-foreground" : paymentType === 'loan' ? "text-rose-600 dark:text-rose-400" : "text-rose-600/80")} /> {t('pos.loan') || 'Loan'}
+                                <Coins className={cn("w-4 h-4 transition-colors", paymentType === 'loan' ? "text-rose-600 dark:text-rose-400" : "text-rose-600/80")} /> {t('pos.loan') || 'Loan'}
                             </button>}
                         </div>
 
                         {/* Digital Provider Sub-toggle */}
                         {paymentType === 'digital' && (
-                            <div className="flex justify-center gap-3 animate-in zoom-in duration-200" data-tour-id="tutorial-pos-digital-provider">
+                            <div className="flex justify-center gap-3 animate-in zoom-in duration-200">
                                 {['fib', 'qicard', 'zaincash', 'fastpay'].map((provider) => (
                                     <button
                                         key={provider}
@@ -6613,7 +6581,6 @@ function MobileCart({
 
                             <div className="flex gap-2 pt-2">
                                 <Button
-                                    data-tour-id="tutorial-pos-checkout"
                                     className="flex-[4] h-14 rounded-2xl text-lg font-black shadow-xl shadow-primary/20 active:scale-95 transition-all text-primary-foreground"
                                     onClick={() => handleCheckout()}
                                 disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates || hasMinimumSellingPriceViolation}

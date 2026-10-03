@@ -475,7 +475,7 @@ export function Dashboard() {
     }
 
     return (
-        <div className="min-w-0 space-y-5 pb-12 md:space-y-6" data-tour-id="demo-basic-dashboard">
+        <div className="min-w-0 space-y-5 pb-12 md:space-y-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                     <p className="text-xs font-bold uppercase tracking-[0.22em] text-primary">{t('dashboard.title')}</p>

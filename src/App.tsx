@@ -29,7 +29,7 @@ import {
   isSupabaseConfigured,
 } from "@/auth/supabase";
 import { isMobile, isDesktop } from "./lib/platform";
-import { DemoTutorialProvider, isDemoEnabled } from "@/demo";
+import { isDemoEnabled } from "@/demo";
 import { getPathWithLang } from "@/lib/i18nRouting";
 import i18n from "@/i18n/config";
 import { ClinicalRegistryLocaleSync } from "@/i18n/ClinicalRegistryLocaleSync";
@@ -1441,7 +1441,6 @@ function App() {
                   <KdsSecurityGuard>
                     <Suspense fallback={<LoadingState />}>
                       <Router hook={useHashLocation}>
-                        <DemoTutorialProvider>
                         <Switch>
                       {/* Guest Routes */}
                       <Route path="/login">
@@ -2532,10 +2531,9 @@ function App() {
                           </div>
                         </div>
                       </Route>
-                    </Switch>
-                  <PostSaveInvoiceDialog />
-                  </DemoTutorialProvider>
-                  </Router>
+                        </Switch>
+                        <PostSaveInvoiceDialog />
+                      </Router>
                 </Suspense>
               </KdsSecurityGuard>
             </ExchangeRateProvider>

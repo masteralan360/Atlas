@@ -60,7 +60,7 @@ describe('createDemoWorkspace', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     mocks.rpc.mockResolvedValueOnce({ error: serverError })
 
-    await expect(createDemoWorkspace('Offline-safe demo', 'market', 5)).resolves.toMatchObject({
+    await expect(createDemoWorkspace('Offline-safe demo', 'general', 5)).resolves.toMatchObject({
       workspaceName: 'Offline-safe demo',
     })
     await Promise.resolve()

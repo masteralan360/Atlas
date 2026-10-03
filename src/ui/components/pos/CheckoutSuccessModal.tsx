@@ -25,7 +25,6 @@ interface CheckoutSuccessModalProps {
     onClose: () => void
     saleData: any // Universal format expected by SaleReceipt
     features: WorkspaceFeatures
-    tutorialDisablePrint?: boolean
     /** Uses a source-specific receipt while retaining the normal POS direct-print flow. */
     receiptPdfBuilder?: () => Promise<Blob>
     /** Custom Template target used for the receipt's primary-layout lookup. */
@@ -41,7 +40,6 @@ export function CheckoutSuccessModal({
     onClose,
     saleData,
     features,
-    tutorialDisablePrint = false,
     receiptPdfBuilder,
     receiptTemplateKey = SALES_HISTORY_RECEIPT_TEMPLATE_KEY,
     onSaveNote,
@@ -77,7 +75,7 @@ export function CheckoutSuccessModal({
         receiptPdfBuilder,
         receiptTemplateKey,
     })
-    const isPrintDisabled = isProcessing || isLoadingPrimaryReceiptTemplate || tutorialDisablePrint
+    const isPrintDisabled = isProcessing || isLoadingPrimaryReceiptTemplate
 
     useEffect(() => {
         if (!isOpen) {
@@ -214,7 +212,6 @@ export function CheckoutSuccessModal({
         if (
             !isOpen
             || hasAutoPrintedRef.current
-            || tutorialDisablePrint
             || isProcessing
             || isLoadingPrimaryReceiptTemplate
             || !saleData
@@ -233,14 +230,12 @@ export function CheckoutSuccessModal({
         isOpen,
         isProcessing,
         saleData,
-        tutorialDisablePrint,
         workspaceId,
     ])
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
             <DialogContent
-                data-tour-id="tutorial-pos-success-modal"
                 onOpenAutoFocus={(e) => e.preventDefault()}
                 className="max-w-sm rounded-[2.5rem] p-0 overflow-hidden border-none shadow-2xl animate-in fade-in zoom-in duration-300"
             >
@@ -322,7 +317,6 @@ export function CheckoutSuccessModal({
                     {/* Action Buttons */}
                     <div className="flex flex-col gap-3">
                         <Button
-                            data-tour-id="tutorial-pos-print-receipt"
                             size="lg"
                             className={cn(
                                 "w-full text-lg h-14 rounded-xl transition-all active:scale-95 group",
@@ -338,7 +332,6 @@ export function CheckoutSuccessModal({
                         </Button>
 
                         <Button
-                            data-tour-id="tutorial-pos-success-continue"
                             variant="outline"
                             size="lg"
                             className="w-full text-lg h-14 border-2 rounded-xl hover:bg-gray-50 dark:hover:bg-slate-800 transition-all active:scale-95"

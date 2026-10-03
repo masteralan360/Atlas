@@ -20,7 +20,6 @@ import { useToast } from '@/ui/components/use-toast'
 import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle, StorageSelector, Switch, Tabs, TabsList, TabsTrigger, TabsContent, Select, SelectContent, SelectTrigger, SelectValue, SelectItem, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/components'
 import { formatCurrency, cn } from '@/lib/utils'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
-import { useDemoTutorial } from '@/demo'
 import { useProductQuantityFormatter } from '@/ui/hooks/useProductQuantityFormatter'
 
 export default function Storages() {
@@ -30,7 +29,6 @@ export default function Storages() {
     const formatProductQuantity = useProductQuantityFormatter(activeWorkspace?.id)
     const storages = useStorages(activeWorkspace?.id)
     const { toast } = useToast()
-    const demoTutorial = useDemoTutorial()
     const [searchQuery, setSearchQuery] = useState('')
     const [isDialogOpen, setIsDialogOpen] = useState(false)
     const [editingStorage, setEditingStorage] = useState<Storage | undefined>(undefined)
@@ -271,10 +269,9 @@ const totalStorageValue = useMemo(() => {
 
     const handleCreate = async () => {
         if (!activeWorkspace || !storageName.trim()) return
-        const createdStorage = await createStorage(activeWorkspace.id, { name: storageName.trim() })
+        await createStorage(activeWorkspace.id, { name: storageName.trim() })
         setStorageName('')
         setIsDialogOpen(false)
-        demoTutorial.completeStorageCreated(createdStorage)
         toast({ title: t('storages.created', 'Storage created successfully') })
     }
 
@@ -369,7 +366,7 @@ const totalStorageValue = useMemo(() => {
                     </p>
                 </div>
                 {(user?.role === 'admin' || user?.role === 'staff') && (
-                    <Button onClick={openCreateDialog} className="rounded-xl shadow-lg transition-all active:scale-95" data-tour-id="tutorial-storage-new-button">
+                    <Button onClick={openCreateDialog} className="rounded-xl shadow-lg transition-all active:scale-95">
                         <Plus className="mr-2 h-4 w-4" /> {t('storages.addStorage', 'New Storage')}
                     </Button>
                 )}
@@ -418,7 +415,7 @@ const totalStorageValue = useMemo(() => {
                             </CardTitle>
                         </CardHeader>
                         <CardContent className="p-0">
-                            <Table data-tour-id="tutorial-storage-list">
+                            <Table>
                                 <TableHeader className="bg-muted/20">
                                     <TableRow className="hover:bg-transparent border-b">
                                         <TableHead className="font-bold py-4 pl-6 text-primary/80">{t('storages.table.name', 'Name')}</TableHead>
@@ -825,7 +822,6 @@ const totalStorageValue = useMemo(() => {
                             <Label htmlFor="storage-name">{t('storages.form.name', 'Storage Name')}</Label>
                             <Input
                                 id="storage-name"
-                                data-tour-id="tutorial-storage-name-input"
                                 value={storageName}
                                 onChange={(e) => setStorageName(e.target.value)}
                                 placeholder={t('storages.form.namePlaceholder', 'e.g. Warehouse A')}
@@ -837,7 +833,7 @@ const totalStorageValue = useMemo(() => {
                         <Button variant="outline" onClick={() => setIsDialogOpen(false)} className="rounded-xl">
                             {t('common.cancel', 'Cancel')}
                         </Button>
-                        <Button onClick={editingStorage ? handleUpdate : handleCreate} className="rounded-xl" data-tour-id="tutorial-storage-save-button">
+                        <Button onClick={editingStorage ? handleUpdate : handleCreate} className="rounded-xl">
                             {editingStorage ? t('common.save', 'Save') : t('common.create', 'Create')}
                         </Button>
                     </DialogFooter>

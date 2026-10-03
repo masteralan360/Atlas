@@ -401,7 +401,6 @@ export function BusinessPartnerFormDialog({
                                 <div className="relative">
                                     <Input
                                         ref={nameInputRef}
-                                        data-tour-id="tutorial-business-partner-name"
                                         id="business-partner-name"
                                         value={formState.partnerName}
                                         onChange={(event) => updateDuplicateCheckedValue('partnerName', event.target.value)}
@@ -420,7 +419,6 @@ export function BusinessPartnerFormDialog({
                                 <div className="relative">
                                     <Input
                                         ref={phoneInputRef}
-                                        data-tour-id="tutorial-business-partner-phone"
                                         id="business-partner-phone"
                                         value={formState.phone}
                                         onChange={(event) => updateDuplicateCheckedValue('phone', event.target.value)}
@@ -449,7 +447,7 @@ export function BusinessPartnerFormDialog({
                                     </Select>
                                 </div>
                             ) : (
-                                <div className="space-y-2" data-tour-id="tutorial-business-partner-role-locked">
+                                <div className="space-y-2">
                                     <Label>{t('businessPartners.form.role') || 'Role'}</Label>
                                     <div className="rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-sm font-bold text-primary">
                                         {lockedRoleLabel}
@@ -671,7 +669,7 @@ export function BusinessPartnerFormDialog({
                                     </div>
                                 </>
                             ) : null}
-                            <div className="space-y-2" data-tour-id="tutorial-business-partner-currency">
+                            <div className="space-y-2">
                                 <CurrencySelector
                                     value={formState.defaultCurrency}
                                     onChange={(value) => setFormState((current) => ({ ...current, defaultCurrency: value }))}
@@ -691,7 +689,6 @@ export function BusinessPartnerFormDialog({
                             <div className="space-y-2 md:col-span-2">
                                 <Label htmlFor="business-partner-address">{t('customers.form.address') || 'Address'} <span className="text-destructive">*</span></Label>
                                 <Input
-                                    data-tour-id="tutorial-business-partner-address"
                                     id="business-partner-address"
                                     value={formState.address}
                                     onChange={(event) => setFormState((current) => ({ ...current, address: event.target.value }))}
@@ -743,7 +740,7 @@ export function BusinessPartnerFormDialog({
                         <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)}>
                             {t('common.cancel') || 'Cancel'}
                         </Button>
-                        <Button type="submit" className="w-full sm:w-auto" disabled={isSaving || !canSubmit} data-tour-id="tutorial-business-partner-save">
+                        <Button type="submit" className="w-full sm:w-auto" disabled={isSaving || !canSubmit}>
                             {isSaving
                                 ? (t('common.loading') || 'Loading...')
                                 : (submitLabel || (partner ? (t('common.save') || 'Save') : (t('common.create') || 'Create')))}

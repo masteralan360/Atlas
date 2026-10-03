@@ -1997,7 +1997,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     }
 
     return (
-        <div className="space-y-6" dir={pageDirection} data-tour-id="tutorial-orders-landing">
+        <div className="space-y-6" dir={pageDirection}>
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                     <h1 className="flex flex-wrap items-center gap-2 text-2xl font-bold">

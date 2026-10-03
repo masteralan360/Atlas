@@ -8,7 +8,6 @@ import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
 import { Link, useLocation } from 'wouter'
 
 import { useAuth } from '@/auth'
-import { useDemoTutorial } from '@/demo'
 import { useProfileData } from '@/hooks/useProfileData'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { resolveOrderDetailsLookupStatus, type OrderDetailsRemoteLookupStatus } from '@/lib/orderDetailsLookup'
@@ -272,7 +271,6 @@ export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string
     const { features, workspaceName, isLocalMode, hasFeature } = useWorkspace()
     const [, navigate] = useLocation()
     const { toast } = useToast()
-    const demoTutorial = useDemoTutorial()
     const isOnline = useNetworkStatus()
     const [lookupRetryVersion, setLookupRetryVersion] = useState(0)
     const lookupKey = `${workspaceId}:${orderId}:${lookupRetryVersion}:${isLocalMode ? 'local' : 'cloud'}`
@@ -1427,7 +1425,6 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     return (
         <div
             className="space-y-4"
-            data-tour-id={demoTutorial.state?.orderId === order.id ? 'tutorial-order-created' : undefined}
         >
             <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">

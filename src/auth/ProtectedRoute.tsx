@@ -6,7 +6,6 @@ import { useWorkspace, type ModuleFeatureKey } from '@/workspace/WorkspaceContex
 import { useWorkspacePermissions, type WorkspacePermissionKey } from '@/permissions'
 import type { PlanCapabilityKey } from '@/plans/workspacePlans'
 import { BiometricLock } from '@/ui/components'
-import { isDemoWorkspace, parseDemoCode } from '@/demo'
 
 interface ProtectedRouteProps {
     children: ReactNode
@@ -119,22 +118,6 @@ export function ProtectedRoute({
                 </div>
             </div>
         )
-    }
-
-    // Check demo-specific restrictions (e.g. Shop demo blocks ecommerce access)
-    if (user?.workspaceCode && isDemoWorkspace(user.workspaceCode)) {
-        const parsed = parseDemoCode(user.workspaceCode)
-        if (parsed && parsed.job === 'shop' && (requiredFeature === 'ecommerce' || requiredAnyFeature?.includes('ecommerce'))) {
-            return (
-                <div className="min-h-screen flex items-center justify-center bg-background">
-                    <div className="text-center max-w-md p-8">
-                        <h1 className="text-4xl font-bold text-amber-500 mb-4">Demo Restriction</h1>
-                        <p className="text-muted-foreground mb-6">This module is not available in the current demo type.</p>
-                        <Link href="/" className="text-primary hover:underline">Return to Dashboard</Link>
-                    </div>
-                </div>
-            )
-        }
     }
 
     if (requiredPermission && !hasPermission(requiredPermission)) {

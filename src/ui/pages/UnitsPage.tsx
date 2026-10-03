@@ -141,7 +141,7 @@ export default function UnitsPage() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                     {canEdit && (
-                        <Button onClick={openCreateDialog} className="rounded-xl shadow-lg transition-all active:scale-95" data-tour-id="tutorial-units-new-button">
+                        <Button onClick={openCreateDialog} className="rounded-xl shadow-lg transition-all active:scale-95">
                             <Plus className="mr-2 h-4 w-4" /> {t('units.addUnit', 'New Unit')}
                         </Button>
                     )}
@@ -169,7 +169,7 @@ export default function UnitsPage() {
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
-                    <Table data-tour-id="tutorial-units-list">
+                    <Table>
                         <TableHeader className="bg-muted/20">
                             <TableRow className="hover:bg-transparent border-b">
                                 <TableHead className="font-bold py-4 pl-6 text-primary/80">{t('units.table.unit', 'Unit')}</TableHead>

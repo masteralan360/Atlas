@@ -106,7 +106,6 @@ export function ReturnConfirmationModal({
                 "max-w-lg w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in duration-300",
                 "rounded-[2rem] border-[3px] border-primary/50 bg-background/95 backdrop-blur-3xl"
             )}
-                data-tour-id="tutorial-return-confirmation-modal"
             >
                 <DialogHeader>
                     <DialogTitle className="text-xl font-black text-foreground tracking-tight flex items-center gap-2">
@@ -236,7 +235,7 @@ export function ReturnConfirmationModal({
                                 <Label className="text-lg font-bold text-foreground block">
                                     {t('sales.return.selectReason') || 'Specify reason for return'}
                                 </Label>
-                                <div className="grid grid-cols-1 gap-2" data-tour-id="tutorial-return-reason">
+                                <div className="grid grid-cols-1 gap-2">
                                     {returnReasons.map((reason) => (
                                         <label
                                             key={reason.value}
@@ -297,7 +296,6 @@ export function ReturnConfirmationModal({
                                     {t('common.back') || 'Back'}
                                 </Button>
                                 <Button
-                                    data-tour-id="tutorial-return-confirm-button"
                                     onClick={handleReturnConfirm}
                                     disabled={selectedReason === 'other' && !otherReason.trim()}
                                     className="w-full sm:w-auto h-11 px-8 text-sm font-black shadow-lg shadow-primary/20 order-1 sm:order-2"

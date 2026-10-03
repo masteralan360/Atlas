@@ -3,7 +3,6 @@ import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 import { isSupabaseConfigured, useAuth } from '@/auth'
-import { useDemoTutorial } from '@/demo'
 import { supabase } from '@/auth/supabase'
 import { Sale } from '@/types'
 import { mapSaleToUniversal } from '@/lib/mappings'
@@ -304,8 +303,6 @@ export function Sales() {
     const [isUpdatingSaleArchive, setIsUpdatingSaleArchive] = useState(false)
     const canManageSaleArchive = user?.role === 'admin' || user?.role === 'staff'
     const { dateRange, customDates } = useDateRange()
-    const demoTutorial = useDemoTutorial()
-    const tutorialSaleId = demoTutorial.state?.saleId
 
     const dateBounds = useMemo<{ startDate?: string; endDate?: string }>(() => {
         const { start, end } = getDateRangeBounds(dateRange, customDates)
@@ -1931,9 +1928,6 @@ export function Sales() {
 
                 }, { reorderProductIds: (saleToReturn.items || []).map((item) => item.product_id) })
                 if (nextSelectedSale) setSelectedSale(nextSelectedSale)
-                if (tutorialSaleId === saleToReturn.id) {
-                    demoTutorial.completeSaleReturned()
-                }
                 setReturnModalOpen(false)
                 setSaleToReturn(null)
                 return
@@ -2197,9 +2191,6 @@ export function Sales() {
         
             if (error) throw normalizeSupabaseActionError(error)
 
-            if (tutorialSaleId === saleToReturn.id) {
-                demoTutorial.completeSaleReturned()
-            }
 
             // Close modal and refresh — local-db handles reactivity via useLiveQuery
             setReturnModalOpen(false)
@@ -2476,7 +2467,7 @@ export function Sales() {
                         </Button>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-3" data-tour-id="tutorial-sales-history-filters">
+                    <div className="flex flex-wrap items-center gap-3">
                         <DateRangeFilters />
 
                         {archivedHistorySales.length > 0 && (
@@ -2582,7 +2573,6 @@ export function Sales() {
                                     const { isFullyReturned, hasAnyReturn, totalReturnedQuantity } = getSaleReturnState(sale)
                                     const loanIndicator = getLoanIndicator(sale)
                                     const hasProductExchange = (sale.product_exchanges || []).some((exchange: { status?: string }) => exchange.status === 'posted')
-                                    const isTutorialSale = tutorialSaleId === sale.id
 
                                     return (
                                         <ContextMenu
@@ -2590,7 +2580,6 @@ export function Sales() {
                                         >
                                             <ContextMenuTrigger asChild>
                                                 <div
-                                                    data-tour-id={isTutorialSale ? 'tutorial-sales-created-sale' : undefined}
                                                     className={cn(
                                                         "p-4 border shadow-sm space-y-4 transition-all active:scale-[0.98]",
                                                         style === 'neo-orange' ? "rounded-[var(--radius)] border-2 border-black dark:border-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]" : "rounded-[2rem] md:rounded-2xl border-border",
@@ -2599,7 +2588,6 @@ export function Sales() {
                                                 >
                                                     <div
                                                         className="flex justify-between items-start"
-                                                        data-tour-id={isTutorialSale ? 'tutorial-sales-sale-fields' : undefined}
                                                     >
                                                         <div className="space-y-2">
                                                             <div className="flex flex-col gap-1">
@@ -2623,7 +2611,6 @@ export function Sales() {
                                                                             "px-2 py-0.5 text-[9px] font-bold bg-destructive/10 text-destructive border border-destructive/20 uppercase",
                                                                             style === 'neo-orange' ? "rounded-[var(--radius)]" : "rounded-full"
                                                                         )}
-                                                                            data-tour-id={isTutorialSale ? 'tutorial-returned-status' : undefined}
                                                                         >
                                                                             {t('sales.return.returnedStatus') || 'RETURNED'}
                                                                         </span>
@@ -2729,7 +2716,6 @@ export function Sales() {
 
                                                     <div
                                                         className="flex items-center justify-between pt-3 border-t border-border/50 gap-2"
-                                                        data-tour-id={isTutorialSale ? 'tutorial-sales-sale-actions' : undefined}
                                                     >
                                                         <div className="flex gap-2">
                                                             <Button
@@ -2786,7 +2772,6 @@ export function Sales() {
                                                         <div className="flex gap-1">
                                                             {!isFullyReturned && !getExternalSaleDetailsPath(sale) && (user?.role === 'admin' || user?.role === 'staff') && (
                                                                 <Button
-                                                                    data-tour-id={isTutorialSale ? 'tutorial-return-sale-action' : undefined}
                                                                     variant="ghost"
                                                                     size="icon"
                                                                     className={cn(
@@ -2966,7 +2951,6 @@ export function Sales() {
                                         const { isFullyReturned, hasAnyReturn, totalReturnedQuantity } = getSaleReturnState(sale)
                                         const loanIndicator = getLoanIndicator(sale)
                                         const hasProductExchange = (sale.product_exchanges || []).some((exchange: { status?: string }) => exchange.status === 'posted')
-                                        const isTutorialSale = tutorialSaleId === sale.id
 
                                         return (
                                             <ContextMenu
@@ -2974,7 +2958,6 @@ export function Sales() {
                                             >
                                                 <ContextMenuTrigger asChild>
                                                     <TableRow
-                                                        data-tour-id={isTutorialSale ? 'tutorial-sales-created-sale' : undefined}
                                                         className={isFullyReturned ? 'bg-destructive/10 border-destructive/20' : hasAnyReturn ? 'bg-orange-500/10 border-orange-500/20 dark:bg-orange-500/5 dark:border-orange-500/10' : ''}
                                                     >
                                                         <TableCell className="font-mono text-sm font-bold text-primary">
@@ -2984,7 +2967,7 @@ export function Sales() {
                                                                 <span className="text-muted-foreground/40 text-xs">{getSaleReferenceLabel(sale)}</span>
                                                             )}
                                                         </TableCell>
-                                                        <TableCell className="text-start font-mono text-sm" data-tour-id={isTutorialSale ? 'tutorial-sales-sale-fields' : undefined}>
+                                                        <TableCell className="text-start font-mono text-sm">
                                                             <div className="flex flex-col gap-1">
                                                                 <span className="text-muted-foreground">
                                                                     {formatDateTime(sale.created_at)}
@@ -2995,7 +2978,6 @@ export function Sales() {
                                                                             "px-2 py-0.5 text-[10px] font-bold bg-destructive/20 text-destructive dark:bg-destructive/30 dark:text-destructive-foreground border border-destructive/30",
                                                                             style === 'neo-orange' ? "rounded-[var(--radius)]" : "rounded-full"
                                                                         )}
-                                                                            data-tour-id={isTutorialSale ? 'tutorial-returned-status' : undefined}
                                                                         >
                                                                             {(t('sales.return.returnedStatus') || 'RETURNED').toUpperCase()}
                                                                         </span>
@@ -3116,7 +3098,7 @@ export function Sales() {
                                                         <TableCell className="text-end font-bold">
                                                             {formatCurrency(getSalesHistoryRowTotal(sale), sale.settlement_currency || 'usd', features.iqd_display_preference)}
                                                         </TableCell>
-                                                        <TableCell className="text-end" data-tour-id={isTutorialSale ? 'tutorial-sales-sale-actions' : undefined}>
+                                                        <TableCell className="text-end">
                                                             <Button
                                                                 variant="ghost"
                                                                 size="icon"
@@ -3145,7 +3127,6 @@ export function Sales() {
                                                                     </Button>
                                                                     {!sale.is_returned && (user?.role === 'admin' || user?.role === 'staff') && (
                                                                         <Button
-                                                                            data-tour-id={isTutorialSale ? 'tutorial-return-sale-action' : undefined}
                                                                             variant="ghost"
                                                                             size="icon"
                                                                             onClick={() => openSaleReturnAction(sale)}

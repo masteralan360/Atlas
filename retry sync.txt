@@ -1,5 +1,7 @@
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide
 
+POS
+
 purchase order error, order_payment_source_not_found
 
 SQLite Syncing indicator

@@ -102,7 +102,6 @@ import { ProductAdditionalImagesModal } from '@/ui/components/ProductAdditionalI
 import { ProductVariantParentNotice, ProductVariantsSection } from '@/ui/components/ProductVariantsSection'
 import { ProductMinimumSellingPriceDisclosure } from '@/ui/components/products/ProductMinimumSellingPriceDisclosure'
 import { useUnitRegistry } from '@/ui/components/unitRegistry'
-import { useDemoTutorial } from '@/demo'
 import {
     ProductPriceBookItemsEditor,
     type ProductPriceBookDraft
@@ -337,7 +336,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const hideCosts = useHideCosts()
     const [, navigate] = useLocation()
     const { toast } = useToast()
-    const demoTutorial = useDemoTutorial()
     const categories = useCategories(user?.workspaceId)
     const storages = useStorages(user?.workspaceId)
     const workspaceUsers = useWorkspaceUsers(user?.workspaceId)
@@ -1356,7 +1354,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                 })
                 createdProductIdRef.current = createdProduct.id
                 savedProductId = createdProduct.id
-                demoTutorial.completeProductCreated(createdProduct)
             }
 
             // The database now owns this imported object even if a later
@@ -1487,18 +1484,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             setStorageError(true)
             storageTriggerRef.current?.focus()
             storageTriggerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-            return
-        }
-
-        if (demoTutorial.isCurrentTask('product') && (Number(formData.quantity) || 0) <= 0) {
-            const quantityInput = document.getElementById('product-quantity') as HTMLInputElement | null
-            quantityInput?.focus()
-            quantityInput?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-            toast({
-                title: t('products.form.stock') || 'Stock',
-                description: 'Enter initial stock greater than 0 to continue the tutorial.',
-                variant: 'destructive'
-            })
             return
         }
 
@@ -1695,7 +1680,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                             form="product-form-page"
                             disabled={isProductSaveDisabled}
                             className="h-10 gap-2 px-4 font-bold"
-                            data-tour-id="tutorial-product-save"
                         >
                             <Save className="h-4 w-4" />
                             {isSaving
@@ -1850,7 +1834,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                             <Input
                                                 ref={skuInputRef}
                                                 id="product-sku"
-                                                data-tour-id="tutorial-product-sku"
                                                 value={formData.sku}
                                                 onChange={(event) => setFormData((current) => ({
                                                     ...current,
@@ -1895,7 +1878,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                         </Label>
                                         <Input
                                             id="product-name"
-                                            data-tour-id="tutorial-product-name"
                                             value={formData.name}
                                             onChange={(event) => setFormData((current) => ({ ...current, name: event.target.value }))}
                                             placeholder={t('products.form.name') || 'Product name'}
@@ -1964,7 +1946,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                             onValueChange={handleUnitSelectionChange}
                                             disabled={isReadOnly}
                                         >
-                                            <SelectTrigger id="product-unit" data-tour-id="tutorial-product-unit" className="h-12 rounded-xl border-border/80 bg-background/80 shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50" allowViewer={true}>
+                                            <SelectTrigger id="product-unit" className="h-12 rounded-xl border-border/80 bg-background/80 shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50" allowViewer={true}>
                                                 <SelectValue placeholder={t('units.selectPlaceholder', { defaultValue: 'Select unit' })}>
                                                     {normalizedUnit ? (
                                                         <span className="flex min-w-0 items-center gap-2">
@@ -2037,7 +2019,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                 <SelectTrigger
                                                     ref={storageTriggerRef}
                                                     id="product-storage"
-                                                    data-tour-id="tutorial-product-storage"
                                                     className={cn('h-12 rounded-xl bg-background/80 shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50', storageError ? 'border-destructive ring-2 ring-destructive/50' : 'border-border/80')}
                                                     allowViewer={true}
                                                 >
@@ -2300,7 +2281,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                         <div className="relative min-w-0 flex-1">
                                                             <NumericInput
                                                                 id="product-price"
-                                                                data-tour-id="tutorial-product-price"
                                                                 value={formData.price}
                                                                 onValueChange={(price) => setFormData((current) => ({ ...current, price }))}
                                                                 maxFractionDigits={4}
@@ -2343,7 +2323,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                     <div className="relative min-w-0 flex-1">
                                                         <NumericInput
                                                             id="product-price"
-                                                            data-tour-id="tutorial-product-price"
                                                             value={formData.price}
                                                             onValueChange={(price) => setFormData((current) => ({ ...current, price }))}
                                                             maxFractionDigits={4}
@@ -2364,7 +2343,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                             )}
                                         </ProductMinimumSellingPriceDisclosure>
                                     </div>
-                                    <div className="space-y-2" data-tour-id="tutorial-product-currency">
+                                    <div className="space-y-2">
                                         <CurrencySelector
                                             label={t('products.form.currency') || 'Currency'}
                                             value={formData.currency}
@@ -2382,7 +2361,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                             <div className="relative">
                                                 <NumericInput
                                                     id="product-cost-price"
-                                                    data-tour-id="tutorial-product-cost-price"
                                                     value={formData.costPrice}
                                                     onValueChange={(costPrice) => setFormData((current) => ({ ...current, costPrice }))}
                                                     maxFractionDigits={4}
@@ -2551,7 +2529,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                 <div className="relative">
                                                     <Input
                                                         id="product-quantity"
-                                                        data-tour-id="tutorial-product-initial-stock"
                                                         type="number"
                                                         inputMode="decimal"
                                                         min="0"
@@ -2630,7 +2607,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                         : (t('products.form.goodStockNotice') || 'Current stock is above the minimum threshold.')}
                                 </div>
 
-                                <div className="rounded-2xl border border-border/60 bg-muted/30 p-5" data-tour-id="tutorial-product-returnable">
+                                <div className="rounded-2xl border border-border/60 bg-muted/30 p-5">
                                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                                         <div className="space-y-1 text-start">
                                             <Label htmlFor="product-can-be-returned" className="flex cursor-pointer items-center gap-2 text-base font-black text-foreground/90">
@@ -2963,7 +2940,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                     form="product-form-page"
                                     disabled={isProductSaveDisabled}
                                     className="h-12 w-full rounded-xl font-black"
-                                    data-tour-id="tutorial-product-save"
                                 >
                                     {isSaving
                                         ? (t('common.loading') || 'Loading...')
