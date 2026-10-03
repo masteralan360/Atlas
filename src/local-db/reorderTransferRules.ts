@@ -12,7 +12,6 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
-import { createInventoryTransferTransactions } from './inventoryTransferTransactions'
 import {
     getInventoryQuantityForProductStorage,
     transferInventoryQuantityWithBatches
@@ -282,7 +281,7 @@ export async function evaluateReorderTransferRule(ruleId: string) {
         }
 
         const now = new Date().toISOString()
-        const transferResult = await transferInventoryQuantityWithBatches({
+        await transferInventoryQuantityWithBatches({
             workspaceId: rule.workspaceId,
             productId: rule.productId,
             sourceStorageId: rule.sourceStorageId,
@@ -291,43 +290,10 @@ export async function evaluateReorderTransferRule(ruleId: string) {
             timestamp: now,
             referenceType: 'reorder_transfer',
             notes: `Automatic reorder transfer rule ${rule.id}.`,
+            transferType: 'automation',
+            reorderRuleId: rule.id,
             skipReorderCheck: true
         })
-
-        try {
-            await createInventoryTransferTransactions(
-                rule.workspaceId,
-                [{
-                    id: transferResult.referenceId,
-                    productId: rule.productId,
-                    sourceStorageId: rule.sourceStorageId,
-                    destinationStorageId: rule.destinationStorageId,
-                    quantity: rule.transferQuantity,
-                    batchAllocations: transferResult.batchAllocations,
-                    transferType: 'automation',
-                    reorderRuleId: rule.id
-                }],
-                { timestamp: now }
-            )
-        } catch (error) {
-            try {
-                await transferInventoryQuantityWithBatches({
-                    workspaceId: rule.workspaceId,
-                    productId: rule.productId,
-                    sourceStorageId: rule.destinationStorageId,
-                    targetStorageId: rule.sourceStorageId,
-                    quantity: rule.transferQuantity,
-                    batchSelections: transferResult.reverseBatchSelections,
-                    timestamp: new Date().toISOString(),
-                    skipReorderCheck: true,
-                    skipTransactionLog: true
-                })
-            } catch (rollbackError) {
-                console.error('[ReorderTransferRules] Failed to rollback automated transfer:', rollbackError)
-            }
-
-            throw error
-        }
 
         await persistRuleUpdate(rule, {
             lastTriggeredAt: now

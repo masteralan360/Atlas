@@ -284,6 +284,7 @@ export async function createTravelBooking(workspaceId: string, input: CreateTrav
         outstandingProfitAmount: paidOnSave ? 0 : profitAmount,
         paymentMethod: input.paymentMethod,
         status,
+        isArchived: false,
         notes: normalizeOptionalText(input.notes),
         createdBy: input.createdBy || null,
         createdAt: now,
@@ -565,6 +566,27 @@ export async function cancelTravelBooking(bookingId: string) {
     const updated: TravelBooking = {
         ...booking,
         status: 'cancelled',
+        updatedAt: now,
+        version: booking.version + 1,
+        ...getSyncMetadata(booking.workspaceId, now)
+    }
+    await db.travel_bookings.put(updated)
+    await syncUpsertEntities(BOOKINGS_TABLE, [updated as unknown as TravelSyncEntity], booking.workspaceId)
+    return updated
+}
+
+export async function setTravelBookingArchived(bookingId: string, isArchived: boolean) {
+    const booking = await db.travel_bookings.get(bookingId)
+    if (!booking || booking.isDeleted) throw new Error('Booking not found')
+    if (isArchived && booking.status !== 'completed') {
+        throw new Error('Only completed bookings can be moved to history')
+    }
+    if ((booking.isArchived === true) === isArchived) return booking
+
+    const now = new Date().toISOString()
+    const updated: TravelBooking = {
+        ...booking,
+        isArchived,
         updatedAt: now,
         version: booking.version + 1,
         ...getSyncMetadata(booking.workspaceId, now)

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { CalendarDays, CircleDollarSign, CreditCard, Eye, Plane, Plus, Search, UsersRound } from 'lucide-react'
+import { CalendarDays, CircleDollarSign, CreditCard, Eye, History, Plane, Plus, Search, UsersRound } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useRoute } from 'wouter'
 
@@ -23,6 +23,12 @@ import {
     CardContent,
     CardHeader,
     CardTitle,
+    AppDialog,
+    AppDialogBody,
+    AppDialogContent,
+    AppDialogFooter,
+    AppDialogHeader,
+    AppDialogTitle,
     DateRangeFilters,
     Input,
     Table,
@@ -96,6 +102,7 @@ export function TravelTransportation() {
     const payments = useTravelBookingPayments(bookingId, workspace?.id)
     const { dateRange, customDates } = useDateRange()
     const [search, setSearch] = useState('')
+    const [historyOpen, setHistoryOpen] = useState(false)
 
     const passengerNamesByBookingId = useMemo(() => {
         const result = new Map<string, string[]>()
@@ -109,9 +116,13 @@ export function TravelTransportation() {
     const passengerCountByBookingId = useMemo(() => new Map<string, number>(
         [...passengerNamesByBookingId].map(([id, names]) => [id, names.length] as const)
     ), [passengerNamesByBookingId])
+    const archivedBookings = useMemo(() => bookings
+        .filter((candidate) => candidate.isArchived === true)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt)), [bookings])
     const visibleBookings = useMemo(() => {
         const query = search.trim().toLowerCase()
         return bookings.filter((candidate) => {
+            if (candidate.isArchived === true) return false
             const passengerNames = passengerNamesByBookingId.get(candidate.id) ?? []
             const searchable = [candidate.bookingNumber, candidate.notes || '', ...passengerNames].join(' ').toLowerCase()
             return (!query || searchable.includes(query)) && matchesCreatedDate(candidate.createdAt, dateRange, customDates)
@@ -180,6 +191,10 @@ export function TravelTransportation() {
                 </div>
                 <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
                     <DateRangeFilters label={t('travelTransportation.table.created')} className="w-full lg:w-auto" />
+                    {archivedBookings.length > 0 ? <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => setHistoryOpen(true)}>
+                        <History className="mr-2 h-4 w-4" />{t('travelTransportation.history.open')}
+                        <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold">{new Intl.NumberFormat(i18n.language).format(archivedBookings.length)}</span>
+                    </Button> : null}
                     <Button type="button" className="w-full sm:w-auto" onClick={() => setLocation('/travel-transportation/new')}>
                         <Plus className="mr-2 h-4 w-4" />{t('travelTransportation.newBooking')}
                     </Button>
@@ -267,6 +282,52 @@ export function TravelTransportation() {
                     </div>
                 </CardContent>
             </Card>
+
+            <AppDialog open={historyOpen} onOpenChange={setHistoryOpen}>
+                <AppDialogContent className="max-w-4xl">
+                    <AppDialogHeader>
+                        <AppDialogTitle className="flex items-center gap-2">
+                            <History className="h-5 w-5 text-primary" />
+                            {t('travelTransportation.history.title')}
+                        </AppDialogTitle>
+                    </AppDialogHeader>
+                    <AppDialogBody className="space-y-3">
+                        {archivedBookings.length === 0 ? (
+                            <div className="rounded-xl border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
+                                {t('travelTransportation.history.empty')}
+                            </div>
+                        ) : archivedBookings.map((archivedBooking) => {
+                            const passengerCount = passengerNamesByBookingId.get(archivedBooking.id)?.length ?? 0
+                            return <div key={archivedBooking.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/70 bg-background p-3 sm:p-4">
+                                <div className="min-w-0 flex-1 space-y-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <span className="font-semibold">{archivedBooking.bookingNumber}</span>
+                                        <Badge className={cn('capitalize', statusClass(archivedBooking.status))}>{t(`travelTransportation.statuses.${archivedBooking.status}`)}</Badge>
+                                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
+                                            <History className="h-3 w-3" />{t('travelTransportation.history.badge')}
+                                        </span>
+                                    </div>
+                                    <div className="text-sm text-muted-foreground">
+                                        {t('travelTransportation.history.passengerCount', { count: passengerCount })}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                        {formatDate(archivedBooking.createdAt)} · {formatCurrency(archivedBooking.profitAmount, archivedBooking.currency, features.iqd_display_preference)}
+                                    </div>
+                                </div>
+                                <Button type="button" variant="outline" className="shrink-0 gap-2" onClick={() => {
+                                    setHistoryOpen(false)
+                                    setLocation(`/travel-transportation/${archivedBooking.id}`)
+                                }}>
+                                    <Eye className="h-4 w-4" />{t('travelTransportation.history.view')}
+                                </Button>
+                            </div>
+                        })}
+                    </AppDialogBody>
+                    <AppDialogFooter>
+                        <Button type="button" variant="outline" onClick={() => setHistoryOpen(false)}>{t('common.cancel')}</Button>
+                    </AppDialogFooter>
+                </AppDialogContent>
+            </AppDialog>
         </div>
     )
 }

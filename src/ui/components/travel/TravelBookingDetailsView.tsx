@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Ban, CheckCircle2, CircleDollarSign, CreditCard, FilePenLine, Printer, ReceiptText, RotateCcw, Trash2, UsersRound } from 'lucide-react'
+import { Archive, ArrowLeft, Ban, CheckCircle2, CircleDollarSign, CreditCard, FilePenLine, History, Loader2, Printer, ReceiptText, RotateCcw, Trash2, UsersRound } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { isSupabaseConfigured, useAuth } from '@/auth'
@@ -26,6 +26,7 @@ import {
     deleteTravelBooking,
     getActiveTravelBookingPayments,
     reversePaymentTransaction,
+    setTravelBookingArchived,
     type PaymentTransaction,
     type TravelBooking,
     type TravelPassenger
@@ -81,10 +82,12 @@ export function TravelBookingDetailsView({ booking, passengers, payments, onBack
     const { toast } = useToast()
     const { user } = useAuth()
     const { features, workspaceName, isLocalMode } = useWorkspace()
+    const canManageBookingHistory = user?.role === 'admin' || user?.role === 'staff'
     const [isProcessing, setIsProcessing] = useState(false)
     const [isPaymentOpen, setIsPaymentOpen] = useState(false)
     const [isDeleteOpen, setIsDeleteOpen] = useState(false)
     const [isCancelOpen, setIsCancelOpen] = useState(false)
+    const [historyConfirmation, setHistoryConfirmation] = useState<'move' | 'restore' | null>(null)
     const [isPrintOpen, setIsPrintOpen] = useState(false)
     const [customPrintTemplates, setCustomPrintTemplates] = useState<StoredCustomTemplateRow[]>([])
     const [selectedPrintTemplate, setSelectedPrintTemplate] = useState<StoredCustomTemplateRow | null>(null)
@@ -229,6 +232,32 @@ export function TravelBookingDetailsView({ booking, passengers, payments, onBack
         }
     }
 
+    const handleHistoryConfirmation = async () => {
+        if (!historyConfirmation || isProcessing) return
+        const movingToHistory = historyConfirmation === 'move'
+        setIsProcessing(true)
+        try {
+            await setTravelBookingArchived(booking.id, movingToHistory)
+            setHistoryConfirmation(null)
+            toast({
+                title: t('common.success'),
+                description: movingToHistory
+                    ? t('travelTransportation.history.moveSuccess')
+                    : t('travelTransportation.history.restoreSuccess')
+            })
+        } catch {
+            toast({
+                title: t('common.error'),
+                description: movingToHistory
+                    ? t('travelTransportation.history.moveError')
+                    : t('travelTransportation.history.restoreError'),
+                variant: 'destructive'
+            })
+        } finally {
+            setIsProcessing(false)
+        }
+    }
+
     const handlePaymentReversal = async (input: PaymentReversalDialogInput) => {
         if (!transactionToReverse || isProcessing) return
         setIsProcessing(true)
@@ -282,6 +311,7 @@ export function TravelBookingDetailsView({ booking, passengers, payments, onBack
                         <div className="flex flex-wrap items-center gap-2">
                             <h1 className="text-2xl font-bold tracking-tight">{booking.bookingNumber}</h1>
                             <Badge className={statusClass(booking.status)}>{t(`travelTransportation.statuses.${booking.status}`)}</Badge>
+                            {booking.isArchived === true ? <Badge className="gap-1 border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"><History className="h-3 w-3" />{t('travelTransportation.history.badge')}</Badge> : null}
                         </div>
                         <p className="text-sm text-muted-foreground">{t('travelTransportation.bookingDetails')}</p>
                     </div>
@@ -290,6 +320,14 @@ export function TravelBookingDetailsView({ booking, passengers, payments, onBack
                     <Button type="button" variant="outline" onClick={() => setIsPrintOpen(true)} disabled={isProcessing}>
                         <Printer className="mr-2 h-4 w-4" />{t('common.print')}
                     </Button>
+                    {canManageBookingHistory && (booking.isArchived === true || booking.status === 'completed') ? <Button type="button" variant="outline" onClick={() => setHistoryConfirmation(booking.isArchived === true ? 'restore' : 'move')} disabled={isProcessing}>
+                        {booking.isArchived === true
+                            ? <RotateCcw className="mr-2 h-4 w-4" />
+                            : <Archive className="mr-2 h-4 w-4" />}
+                        {booking.isArchived === true
+                            ? t('travelTransportation.history.restoreAction')
+                            : t('travelTransportation.history.moveAction')}
+                    </Button> : null}
                     {canEdit ? <Button type="button" variant="outline" onClick={onEdit} disabled={isProcessing}><FilePenLine className="mr-2 h-4 w-4" />{t('travelTransportation.editBooking')}</Button> : null}
                     {booking.status === 'draft' ? <div className="relative">
                         <PressAndHoldButton
@@ -481,6 +519,54 @@ export function TravelBookingDetailsView({ booking, passengers, payments, onBack
                             await cancelTravelBooking(booking.id)
                             setIsCancelOpen(false)
                         }, t('travelTransportation.bookingCancelled'))}>{isProcessing ? t('common.loading') : t('travelTransportation.cancelBooking')}</Button>
+                    </AppDialogFooter>
+                </AppDialogContent>
+            </AppDialog>
+            <AppDialog
+                open={historyConfirmation !== null}
+                onOpenChange={(open) => {
+                    if (!open && !isProcessing) setHistoryConfirmation(null)
+                }}
+            >
+                <AppDialogContent
+                    className="max-w-md"
+                    showCloseButton={!isProcessing}
+                    onPointerDownOutside={(event) => { if (isProcessing) event.preventDefault() }}
+                >
+                    <AppDialogHeader>
+                        <AppDialogTitle className="flex items-center gap-2">
+                            {historyConfirmation === 'restore'
+                                ? <RotateCcw className="h-5 w-5 text-primary" />
+                                : <Archive className="h-5 w-5 text-primary" />}
+                            {historyConfirmation === 'restore'
+                                ? t('travelTransportation.history.restoreConfirmTitle')
+                                : t('travelTransportation.history.moveConfirmTitle')}
+                        </AppDialogTitle>
+                    </AppDialogHeader>
+                    <AppDialogBody>
+                        <p className="text-sm leading-relaxed text-muted-foreground">
+                            {historyConfirmation === 'restore'
+                                ? t('travelTransportation.history.restoreConfirm')
+                                : t('travelTransportation.history.moveConfirm')}
+                        </p>
+                        <div className="mt-4 rounded-lg border bg-muted/30 px-3 py-2 text-sm font-semibold">
+                            {booking.bookingNumber}
+                        </div>
+                    </AppDialogBody>
+                    <AppDialogFooter>
+                        <Button type="button" variant="outline" onClick={() => setHistoryConfirmation(null)} disabled={isProcessing}>
+                            {t('common.cancel')}
+                        </Button>
+                        <Button type="button" onClick={() => void handleHistoryConfirmation()} disabled={isProcessing}>
+                            {isProcessing
+                                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                                : historyConfirmation === 'restore'
+                                    ? <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
+                                    : <Archive className="mr-2 h-4 w-4" aria-hidden="true" />}
+                            {historyConfirmation === 'restore'
+                                ? t('travelTransportation.history.restoreAction')
+                                : t('travelTransportation.history.moveAction')}
+                        </Button>
                     </AppDialogFooter>
                 </AppDialogContent>
             </AppDialog>

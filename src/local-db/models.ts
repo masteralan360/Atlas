@@ -343,6 +343,8 @@ export type InventoryTransactionType =
 export interface InventoryTransaction extends BaseEntity {
   productId: string
   storageId: string
+  /** Parent operation for newly created transfer movements; historical rows remain unlinked. */
+  transferBatchId?: string | null
   transactionType: InventoryTransactionType
   quantityDelta: number
   previousQuantity: number
@@ -436,6 +438,32 @@ export interface ReorderTransferRule extends BaseEntity {
 }
 
 export type InventoryTransferTransactionType = 'manual' | 'automation'
+
+export type InventoryTransferBatchStatus = 'completed' | 'cancelled'
+
+/** One completed transfer operation, shared by every product movement it contains. */
+export interface InventoryTransferBatch extends BaseEntity {
+  transferNumber: string
+  sourceWorkspaceId: string | null
+  sourceWorkspaceName?: string | null
+  sourceStorageId: string | null
+  sourceStorageName?: string | null
+  destinationWorkspaceId: string | null
+  destinationWorkspaceName?: string | null
+  destinationStorageId: string | null
+  destinationStorageName?: string | null
+  performedBy?: string | null
+  transferredAt: string
+  status: InventoryTransferBatchStatus
+  notes?: string | null
+}
+
+/** Local-only counter row; Cloud and Hybrid allocate numbers in PostgreSQL. */
+export interface InventoryTransferSequence {
+  workspaceId: string
+  lastSequence: number
+  updatedAt: string
+}
 
 export interface InventoryTransferTransaction extends BaseEntity {
   productId: string
@@ -1493,6 +1521,8 @@ export interface TravelBooking extends BaseEntity {
   outstandingProfitAmount: number
   paymentMethod: WorkspacePaymentMethod
   status: TravelBookingStatus
+  /** Keeps completed bookings out of the active list while preserving their record. */
+  isArchived?: boolean
   notes?: string | null
   createdBy?: string | null
 }

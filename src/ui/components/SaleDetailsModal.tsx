@@ -9,7 +9,8 @@ import { whatsappManager } from '@/lib/whatsappWebviewManager'
 import { WhatsAppNumberInputModal } from '@/ui/components/modals/WhatsAppNumberInputModal'
 import { PartialReturnInfoModal } from '@/ui/components/PartialReturnInfoModal'
 import { useTheme } from '@/ui/components/theme-provider'
-import { type Loan, useLoanBySaleId, usePriceBookCatalogState } from '@/local-db'
+import { type Loan, useLoanBySaleId, usePriceBookCatalogState, useProductsByIds } from '@/local-db'
+import { ProductAvatar } from '@/ui/components/ProductAvatars'
 import {
     Table,
     TableBody,
@@ -90,6 +91,11 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchan
     const { style } = useTheme()
     const linkedLoan = useLoanBySaleId(sale?.id, user?.workspaceId)
     const priceBookCatalog = usePriceBookCatalogState(user?.workspaceId, { enabled: !!user?.workspaceId })
+    const saleProducts = useProductsByIds(user?.workspaceId, sale?.items?.map((item) => item.product_id) ?? [])
+    const productImageUrlById = useMemo(
+        () => new Map(saleProducts.map((product) => [product.id, product.imageUrl] as const)),
+        [saleProducts]
+    )
     const priceBookNameById = useMemo(() => {
         const map = new Map<string, string>()
         for (const priceBook of priceBookCatalog.priceBooks) {
@@ -491,6 +497,10 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchan
                                             <div className="flex justify-between items-start gap-2">
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2 flex-wrap">
+                                                        <ProductAvatar
+                                                            productName={item.product_name || item.product?.name || ''}
+                                                            imageUrl={productImageUrlById.get(item.product_id)}
+                                                        />
                                                         <div className={cn("font-bold text-sm", isItemReturned && "line-through opacity-50")}>
                                                             {item.product_name}
                                                         </div>
@@ -755,6 +765,10 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchan
                                                 {/* Product Name */}
                                                 <TableCell className="text-start">
                                                     <div className="flex items-center gap-2 flex-wrap">
+                                                        <ProductAvatar
+                                                            productName={item.product_name || item.product?.name || ''}
+                                                            imageUrl={productImageUrlById.get(item.product_id)}
+                                                        />
                                                         <div className={cn("font-medium text-sm", isItemReturned && "line-through opacity-50")}>
                                                             {item.product_name}
                                                         </div>

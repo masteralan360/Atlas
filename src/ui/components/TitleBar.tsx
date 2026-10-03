@@ -15,6 +15,7 @@ import { WorkspacePaygChargeButton, WorkspaceUsageButton, WorkspaceUsageCircleBu
 import { useWorkspaceUsageMeter } from './workspaceUsageMeter'
 import { useNavigationHistory } from '@/hooks/useNavigationHistory'
 import { WorkspaceResourceSyncPill } from './WorkspaceResourceSyncPill'
+import { getLanguageDirection } from '@/lib/i18nRouting'
 
 export function TitleBar() {
     const [isMaximized, setIsMaximized] = useState(false)
@@ -25,8 +26,8 @@ export function TitleBar() {
     const { t, i18n } = useTranslation()
     // @ts-ignore
     const isTauri = !!window.__TAURI_INTERNALS__
-    const showNavigationRail = isNavigationRailEnabled && viewportWidth >= 1024
-    const isRtl = i18n.dir() === 'rtl'
+    const showNavigationRail = isNavigationRailEnabled(viewportWidth)
+    const isRtl = getLanguageDirection(i18n.resolvedLanguage || i18n.language) === 'rtl'
     const subscriptionWarning = useSubscriptionExpiryWarning(
         isTauri && !isDemoMode ? features.subscription_expires_at : null
     )
@@ -128,12 +129,29 @@ export function TitleBar() {
 
     return (
         <>
-        <div dir="ltr" data-tauri-drag-region className={cn(
+        {showNavigationRail && (
+            <div
+                aria-hidden="true"
+                dir={isRtl ? 'rtl' : 'ltr'}
+                className={cn(
+                    'pointer-events-none fixed top-0 z-[101] flex h-12 w-14 items-center justify-center transition-all duration-300',
+                    isFullscreen && 'opacity-0 -translate-y-full'
+                )}
+                style={{ insetInlineStart: 0 }}
+            >
+                <ThemeAwareTitleLogo className="h-7 w-7 opacity-90" />
+            </div>
+        )}
+        <div dir={isRtl ? 'rtl' : 'ltr'} data-tauri-drag-region className={cn(
             "fixed top-0 left-0 right-0 h-[48px] z-[100] flex items-center justify-between px-3 select-none bg-background/80 backdrop-blur-md transition-all duration-300 dark:bg-background",
             isFullscreen && "opacity-0 pointer-events-none -translate-y-full"
         )} style={{
-            left: showNavigationRail && !isRtl ? NAVIGATION_RAIL_WIDTH : 0,
-            right: showNavigationRail && isRtl ? NAVIGATION_RAIL_WIDTH : 0
+            left: showNavigationRail && !isRtl
+                ? `var(--navigation-rail-current-width, ${NAVIGATION_RAIL_WIDTH}px)`
+                : 0,
+            right: showNavigationRail && isRtl
+                ? `var(--navigation-rail-current-width, ${NAVIGATION_RAIL_WIDTH}px)`
+                : 0
         }}>
             <div data-tauri-drag-region className="flex items-center gap-3 w-1/3 min-w-0">
                 {!showNavigationRail && <ThemeAwareTitleLogo className="w-10 h-10 opacity-90" />}
@@ -155,7 +173,7 @@ export function TitleBar() {
                             <span className="truncate">{workspaceName || branchInfo.branchName || t('branches.title')}</span>
                             {branchInfo.sourceWorkspaceName && (
                                 <>
-                                    <span className="opacity-60">\u2190</span>
+                                    <span className="opacity-60">{isRtl ? '\u2192' : '\u2190'}</span>
                                     <span className="truncate">{branchInfo.sourceWorkspaceName}</span>
                                 </>
                             )}
@@ -175,7 +193,7 @@ export function TitleBar() {
                         title="Back"
                         aria-label="Back"
                     >
-                        <ArrowLeft className="w-4 h-4" />
+                        {isRtl ? <ArrowRight className="w-4 h-4" /> : <ArrowLeft className="w-4 h-4" />}
                     </button>
                     <button
                         onClick={forward}
@@ -189,7 +207,7 @@ export function TitleBar() {
                         title="Forward"
                         aria-label="Forward"
                     >
-                        <ArrowRight className="w-4 h-4" />
+                        {isRtl ? <ArrowLeft className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
                     </button>
                 </div>
                 <WorkspaceResourceSyncPill />
@@ -216,7 +234,7 @@ export function TitleBar() {
                             <WorkspaceUsageCircleButton
                                 usageMeter={usageMeter}
                                 onClick={() => setUsageModalOpen(true)}
-                                className="relative z-10 mr-1 h-8 w-8 xl:hidden"
+                                className="relative z-10 me-1 h-8 w-8 xl:hidden"
                             />
                         )}
                         {paygSummary && (
@@ -230,7 +248,7 @@ export function TitleBar() {
                             <WorkspaceUsageButton
                                 usageMeter={usageMeter}
                                 onClick={() => setUsageModalOpen(true)}
-                                className="relative z-10 mr-2 hidden h-7 min-w-[150px] w-[240px] max-w-[22vw] shrink xl:flex"
+                                className="relative z-10 me-2 hidden h-7 min-w-[150px] w-[240px] max-w-[22vw] shrink xl:flex"
                             />
                         )}
                     </div>
@@ -238,7 +256,7 @@ export function TitleBar() {
                 {subscriptionWarning && (
                     <button
                         onClick={() => window.dispatchEvent(new CustomEvent('open-subscription-expiry-warning'))}
-                        className="mr-2 flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-400/15 px-2.5 py-1.5 text-amber-700 transition-colors hover:bg-amber-400/25 dark:text-amber-300"
+                        className="me-2 flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-400/15 px-2.5 py-1.5 text-amber-700 transition-colors hover:bg-amber-400/25 dark:text-amber-300"
                         title={t('subscriptionExpiryWarning.indicatorTooltip', {
                             count: subscriptionWarning.daysRemaining,
                             date: formatDate(subscriptionWarning.expiresAt),
@@ -262,7 +280,7 @@ export function TitleBar() {
                 {pendingUpdate && (
                     <button
                         onClick={() => window.dispatchEvent(new CustomEvent('open-pending-update'))}
-                        className="flex items-center gap-1.5 px-3 py-1.5 mr-2 rounded-full bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 transition-all border border-blue-500/20 group"
+                        className="flex items-center gap-1.5 px-3 py-1.5 me-2 rounded-full bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 transition-all border border-blue-500/20 group"
                         title={t('updater.available')}
                     >
                         <ArrowUpCircle className="w-3.5 h-3.5 group-hover:animate-bounce" />
@@ -270,14 +288,14 @@ export function TitleBar() {
                     </button>
                 )}
                 {import.meta.env.DEV && (
-                    <div className="mr-2">
+                    <div className="me-2">
                         <LanguageSwitcher className="h-8 w-[118px] text-xs" />
                     </div>
                 )}
                 <button
                     onClick={() => window.location.reload()}
                     className={cn(
-                        "p-2 transition-colors mr-1",
+                        "p-2 transition-colors me-1",
                         style === 'neo-orange' ? "neo-indicator" : "hover:bg-secondary rounded-md text-muted-foreground hover:text-foreground"
                     )}
                     title={t('common.refresh') || "Refresh"}
@@ -287,7 +305,7 @@ export function TitleBar() {
                 <button
                     onClick={toggleTheme}
                     className={cn(
-                        "p-2 transition-colors mr-1",
+                        "p-2 transition-colors me-1",
                         style === 'neo-orange' ? "neo-indicator" : "hover:bg-secondary rounded-md text-muted-foreground hover:text-foreground"
                     )}
                     title={theme === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}
@@ -301,7 +319,7 @@ export function TitleBar() {
                 <button
                     onClick={() => window.dispatchEvent(new CustomEvent('toggle-atlas-assistant'))}
                     className={cn(
-                        "p-2 transition-colors mr-1",
+                        "p-2 transition-colors me-1",
                         style === 'neo-orange' ? "neo-indicator" : "hover:bg-secondary rounded-md text-muted-foreground hover:text-primary"
                     )}
                     title={t('assistant.title', 'Atlas Assistant')}

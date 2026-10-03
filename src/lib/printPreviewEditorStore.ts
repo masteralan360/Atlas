@@ -100,6 +100,8 @@ export type TemplatePreview = {
         printLangOverride?: string,
         renderOptions?: TemplatePreviewRenderOptions
     ) => ReactElement
+    /** Resolves document-specific data tokens inserted into custom layout text. */
+    resolveLayoutText?: (text: string) => string
     buildPdf: (
         element: ReactElement,
         printLangOverride?: string,

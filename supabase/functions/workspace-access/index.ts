@@ -68,6 +68,7 @@ type ListInventoryTransferSourceProductsRequest = {
 
 type TransferInventoryBetweenWorkspacesRequest = {
     action: 'transfer-inventory-between-workspaces'
+    transferBatchId?: string
     sourceWorkspaceId?: string
     sourceStorageId?: string
     destinationWorkspaceId?: string
@@ -1238,10 +1239,6 @@ async function handleListProductCloneTargets(
     })
 }
 
-function buildWorkspaceProductKey(workspaceId: string, productId: string) {
-    return `${workspaceId}::${productId}`
-}
-
 function buildWorkspaceStorageProductKey(workspaceId: string, productId: string, storageId: string) {
     return `${workspaceId}::${productId}::${storageId}`
 }
@@ -1598,10 +1595,14 @@ async function handleTransferInventoryBetweenWorkspaces(
     user: User,
     body: TransferInventoryBetweenWorkspacesRequest
 ) {
+    const transferBatchId = body.transferBatchId?.trim() || crypto.randomUUID()
     const sourceWorkspaceId = body.sourceWorkspaceId?.trim() ?? ''
     const sourceStorageId = body.sourceStorageId?.trim() ?? ''
     const destinationWorkspaceId = body.destinationWorkspaceId?.trim() ?? ''
     const destinationStorageId = body.destinationStorageId?.trim() ?? ''
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(transferBatchId)) {
+        return errorResponse('Transfer batch identifier is invalid', 400)
+    }
     const normalizedItems = Array.from(
         new Map(
             (Array.isArray(body.items) ? body.items : [])
@@ -1741,9 +1742,6 @@ async function handleTransferInventoryBetweenWorkspaces(
 
     const sourceProductsById = new Map(sourceProducts.map((product) => [product.id, product] as const))
     const quantityBySourceProductId = new Map(normalizedItems.map((item) => [item.productId, item.quantity] as const))
-    const previousSourceProducts = sourceProducts.map((product) => ({ ...product }))
-    let previousDestinationProducts: SourceProductRow[] = []
-
     const destinationProductIdBySourceProductId = new Map<string, string>()
     const destinationProductsById = new Map<string, SourceProductRow>()
     const insertedDestinationCategoryIds = new Set<string>()
@@ -1810,8 +1808,6 @@ async function handleTransferInventoryBetweenWorkspaces(
         }
 
         const destinationProductRowsList = (destinationProductRows ?? []) as SourceProductRow[]
-        previousDestinationProducts = destinationProductRowsList.map((product) => ({ ...product }))
-
         const {
             productBySku: destinationProductBySku,
             duplicateActiveSkus: duplicateDestinationSkus
@@ -2188,43 +2184,17 @@ async function handleTransferInventoryBetweenWorkspaces(
     }
 
     const inventoryRowsByPositionKey = new Map<string, SourceInventoryRow>()
-    const activeInventoryRowsByWorkspaceProductKey = new Map<string, SourceInventoryRow[]>()
-
     for (const [workspaceId, inventoryRows] of inventoryRowsByWorkspaceId.entries()) {
         for (const row of inventoryRows) {
-            const productKey = buildWorkspaceProductKey(workspaceId, row.product_id)
             const positionKey = buildWorkspaceStorageProductKey(workspaceId, row.product_id, row.storage_id)
             const existingPositionRow = inventoryRowsByPositionKey.get(positionKey)
             if (!existingPositionRow || (existingPositionRow.is_deleted && !row.is_deleted)) {
                 inventoryRowsByPositionKey.set(positionKey, row)
             }
-
-            if (!row.is_deleted && Number(row.quantity ?? 0) > 0) {
-                const rows = activeInventoryRowsByWorkspaceProductKey.get(productKey) ?? []
-                rows.push({ ...row })
-                activeInventoryRowsByWorkspaceProductKey.set(productKey, rows)
-            }
         }
     }
 
     const inventoryRowsToUpsert = new Map<string, SourceInventoryRow>()
-    const insertedInventoryRowIds = new Set<string>()
-    const applyInventoryState = (
-        workspaceId: string,
-        productId: string,
-        storageId: string,
-        nextRow: SourceInventoryRow
-    ) => {
-        const productKey = buildWorkspaceProductKey(workspaceId, productId)
-        const currentRows = activeInventoryRowsByWorkspaceProductKey.get(productKey) ?? []
-        const remainingRows = currentRows.filter((row) => row.storage_id !== storageId)
-
-        if (!nextRow.is_deleted && Number(nextRow.quantity ?? 0) > 0) {
-            remainingRows.push({ ...nextRow })
-        }
-
-        activeInventoryRowsByWorkspaceProductKey.set(productKey, remainingRows)
-    }
 
     const { data: destinationBatchRows, error: destinationBatchesError } = await adminClient
         .from('stock_batches')
@@ -2248,17 +2218,16 @@ async function handleTransferInventoryBetweenWorkspaces(
         }
     }
     const stockBatchRowsToUpsert = new Map<string, SourceStockBatchRow>()
-    const insertedStockBatchIds = new Set<string>()
     const previousStockBatchRows = Array.from(
         new Map(
             [...sourceBatches, ...destinationBatches].map((batch) => [batch.id, { ...batch }] as const)
         ).values()
     )
 
-    const transferTransactionSeedId = crypto.randomUUID()
+    const transferTransactionSeedId = transferBatchId
     const inventoryTransactionRows: Record<string, unknown>[] = []
     const inventoryTransferTransactionRows: Record<string, unknown>[] = []
-    const changedProductKeys = new Set<string>()
+    const transferItemIdByPositionKey = new Map<string, string>()
     const transactionTimestamp = new Date().toISOString()
 
     for (const item of normalizedItems) {
@@ -2298,13 +2267,11 @@ async function handleTransferInventoryBetweenWorkspaces(
                 is_deleted: nextSourceQuantity <= QUANTITY_EPSILON
             }
 
-        if (!previousSourceRow) {
-            insertedInventoryRowIds.add(String(updatedSourceRow.id))
-        }
-
         inventoryRowsToUpsert.set(String(updatedSourceRow.id), updatedSourceRow)
-        applyInventoryState(sourceWorkspaceId, sourceProduct.id, sourceStorageId, updatedSourceRow)
-        changedProductKeys.add(buildWorkspaceProductKey(sourceWorkspaceId, sourceProduct.id))
+        transferItemIdByPositionKey.set(
+            buildWorkspaceStorageProductKey(sourceWorkspaceId, sourceProduct.id, sourceStorageId),
+            sourceProduct.id
+        )
 
         const destinationPositionKey = buildWorkspaceStorageProductKey(destinationWorkspaceId, destinationProductId, destinationStorageId)
         const previousDestinationRow = inventoryRowsByPositionKey.get(destinationPositionKey)
@@ -2331,13 +2298,11 @@ async function handleTransferInventoryBetweenWorkspaces(
                 is_deleted: false
             }
 
-        if (!previousDestinationRow) {
-            insertedInventoryRowIds.add(String(updatedDestinationRow.id))
-        }
-
         inventoryRowsToUpsert.set(String(updatedDestinationRow.id), updatedDestinationRow)
-        applyInventoryState(destinationWorkspaceId, destinationProductId, destinationStorageId, updatedDestinationRow)
-        changedProductKeys.add(buildWorkspaceProductKey(destinationWorkspaceId, destinationProductId))
+        transferItemIdByPositionKey.set(
+            buildWorkspaceStorageProductKey(destinationWorkspaceId, destinationProductId, destinationStorageId),
+            sourceProduct.id
+        )
 
         const batchPlan = batchPlansBySourceProductId.get(item.productId)
         if (!batchPlan) {
@@ -2411,10 +2376,6 @@ async function handleTransferInventoryBetweenWorkspaces(
                     version: 1,
                     is_deleted: false
                 }
-
-            if (!existingDestinationBatch) {
-                insertedStockBatchIds.add(destinationBatch.id)
-            }
 
             destinationBatchByKey.set(destinationBatchKey, destinationBatch)
             stockBatchRowsToUpsert.set(destinationBatch.id, destinationBatch)
@@ -2536,131 +2497,81 @@ async function handleTransferInventoryBetweenWorkspaces(
         }
     }
 
-    const productIdsByWorkspaceKey = new Map<string, SourceProductRow>()
-    for (const product of sourceProducts) {
-        productIdsByWorkspaceKey.set(buildWorkspaceProductKey(sourceWorkspaceId, product.id), product)
+        const inventoryChanges = Array.from(inventoryRowsToUpsert.values()).map((row) => {
+        const positionKey = buildWorkspaceStorageProductKey(row.workspace_id, row.product_id, row.storage_id)
+        const previousRow = inventoryRowsByPositionKey.get(positionKey)
+        const auditRow = inventoryTransactionRows.find((transaction) =>
+            transaction.workspace_id === row.workspace_id
+            && transaction.product_id === row.product_id
+            && transaction.storage_id === row.storage_id
+        )
+
+        if (!auditRow) {
+            throw new Error('Transfer could not prepare an inventory audit movement')
+        }
+
+        return {
+            id: row.id,
+            workspace_id: row.workspace_id,
+            product_id: row.product_id,
+            storage_id: row.storage_id,
+            quantity: row.quantity,
+            expected_version: Number(previousRow?.version ?? 0),
+            transfer_item_id: transferItemIdByPositionKey.get(positionKey),
+            transfer_side: row.storage_id === sourceStorageId ? 'source' : 'destination',
+            quantity_delta: Number(auditRow.quantity_delta),
+            audit_transaction_type: auditRow.transaction_type,
+            audit_reference_id: transferBatchId,
+            audit_reference_type: 'inventory_transfer',
+            audit_notes: auditRow.notes,
+            audit_created_by: user.id
+        }
+    })
+
+    const stockBatchChanges = Array.from(stockBatchRowsToUpsert.values()).map((row) => ({
+        expected_version: Number(previousStockBatchRows.find((previous) => previous.id === row.id)?.version ?? 0),
+        row
+    }))
+
+    const payload = {
+        batch: {
+            id: transferBatchId,
+            workspace_id: currentWorkspaceId,
+            source_workspace_id: sourceWorkspaceId,
+            source_workspace_name: sourceWorkspace.workspaceName,
+            source_storage_id: sourceStorageId,
+            source_storage_name: sourceStorage.name,
+            destination_workspace_id: destinationWorkspaceId,
+            destination_workspace_name: destinationWorkspace.workspaceName,
+            destination_storage_id: destinationStorageId,
+            destination_storage_name: destinationStorage.name,
+            transferred_at: transactionTimestamp,
+            status: 'completed',
+            notes: null,
+            created_by: user.id
+        },
+        inventory_changes: inventoryChanges,
+        stock_batch_changes: stockBatchChanges
     }
-    for (const product of destinationProductsById.values()) {
-        productIdsByWorkspaceKey.set(buildWorkspaceProductKey(destinationWorkspaceId, product.id), product)
-    }
 
-    const updatedProductsToUpsert: Record<string, unknown>[] = []
-    for (const productKey of changedProductKeys) {
-        const product = productIdsByWorkspaceKey.get(productKey)
-        if (!product) {
-            continue
+    const { data: commitData, error: commitError } = await adminClient.rpc(
+        'apply_inventory_transfer_batch',
+        {
+            p_operation_id: transferBatchId,
+            p_payload: payload
         }
+    )
 
-        const activeRows = activeInventoryRowsByWorkspaceProductKey.get(productKey) ?? []
-        const totalQuantity = roundQuantity(activeRows.reduce((sum, row) => sum + Number(row.quantity ?? 0), 0))
-        const resolvedStorageId = activeRows.length === 1 ? activeRows[0].storage_id : null
-        updatedProductsToUpsert.push({
-            id: product.id,
-            workspace_id: product.workspace_id ?? (productKey.startsWith(`${sourceWorkspaceId}::`) ? sourceWorkspaceId : destinationWorkspaceId),
-            sku: product.sku,
-            name: product.name,
-            description: product.description ?? '',
-            category: product.category ?? null,
-            category_id: product.category_id ?? null,
-            price: Number(product.price ?? 0),
-            cost_price: Number(product.cost_price ?? 0),
-            quantity: totalQuantity,
-            min_stock_level: Number(product.min_stock_level ?? 0),
-            unit: product.unit ?? 'pcs',
-            currency: product.currency ?? 'usd',
-            image_url: product.image_url ?? null,
-            can_be_returned: product.can_be_returned ?? true,
-            return_rules: product.return_rules ?? null,
-            storage_id: resolvedStorageId,
-            is_deleted: product.is_deleted ?? false,
-            updated_at: transactionTimestamp,
-            version: Number(product.version ?? 0) + 1
-        })
-    }
-
-    const previousInventoryRows = Array.from(inventoryRowsByPositionKey.values()).map((row) => ({ ...row }))
-    const inventoryRowsInserted = Array.from(insertedInventoryRowIds)
-    const rollbackChanges = async () => {
-        if (insertedStockBatchIds.size > 0) {
-            await adminClient
-                .from('stock_batches')
-                .delete()
-                .in('id', Array.from(insertedStockBatchIds))
-        }
-
-        if (previousStockBatchRows.length > 0) {
-            await adminClient
-                .from('stock_batches')
-                .upsert(previousStockBatchRows)
-        }
-
-        if (previousInventoryRows.length > 0) {
-            await adminClient
-                .from('inventory')
-                .upsert(previousInventoryRows)
-        }
-
-        if (inventoryRowsInserted.length > 0) {
-            await adminClient
-                .from('inventory')
-                .delete()
-                .in('id', inventoryRowsInserted)
-        }
-
-        const previousProductsToRestore = sourceWorkspaceId === destinationWorkspaceId
-            ? previousSourceProducts
-            : [...previousSourceProducts, ...previousDestinationProducts]
-
-        if (previousProductsToRestore.length > 0) {
-            await adminClient
-                .from('products')
-                .upsert(previousProductsToRestore)
-        }
-
+    if (commitError) {
+        console.error('[workspace-access] atomic transfer batch commit failed', commitError)
         await cleanupInsertedDestinationEntities()
+        return errorResponse(commitError.message, 500)
     }
 
-    try {
-        if (inventoryRowsToUpsert.size > 0) {
-            const { error: inventoryUpsertError } = await adminClient
-                .from('inventory')
-                .upsert(Array.from(inventoryRowsToUpsert.values()))
-
-            if (inventoryUpsertError) {
-                console.error('[workspace-access] transfer inventory upsert failed', inventoryUpsertError)
-                await rollbackChanges()
-                return errorResponse(inventoryUpsertError.message, 500)
-            }
-        }
-
-        if (updatedProductsToUpsert.length > 0) {
-            const { error: productsUpsertError } = await adminClient
-                .from('products')
-                .upsert(updatedProductsToUpsert)
-
-            if (productsUpsertError) {
-                console.error('[workspace-access] transfer products upsert failed', productsUpsertError)
-                await rollbackChanges()
-                return errorResponse(productsUpsertError.message, 500)
-            }
-        }
-
-        if (stockBatchRowsToUpsert.size > 0) {
-            const { error: stockBatchesUpsertError } = await adminClient
-                .from('stock_batches')
-                .upsert(Array.from(stockBatchRowsToUpsert.values()))
-
-            if (stockBatchesUpsertError) {
-                console.error('[workspace-access] transfer stock batch upsert failed', stockBatchesUpsertError)
-                await rollbackChanges()
-                return errorResponse(stockBatchesUpsertError.message, 500)
-            }
-        }
-
-    } catch (error) {
-        console.error('[workspace-access] transfer-inventory-between-workspaces failed', error)
-        await rollbackChanges()
-        return errorResponse(error instanceof Error ? error.message : 'Failed to transfer inventory', 500)
+    const commitResult = commitData as Record<string, unknown> | null
+    if (!commitResult?.batch || !Array.isArray(commitResult.inventory_transactions)) {
+        await cleanupInsertedDestinationEntities()
+        return errorResponse('The transfer could not be confirmed by the database', 500)
     }
 
     return jsonResponse({
@@ -2668,12 +2579,11 @@ async function handleTransferInventoryBetweenWorkspaces(
         moved_products_count: normalizedItems.length,
         source_workspace_id: sourceWorkspaceId,
         destination_workspace_id: destinationWorkspaceId,
-        // The client persists these records locally; this function no longer writes either log table.
-        inventory_transaction_records: inventoryTransactionRows,
+        inventory_transfer_batch_record: commitResult.batch,
+        inventory_transaction_records: commitResult.inventory_transactions,
         inventory_transfer_transaction_records: inventoryTransferTransactionRows
     })
 }
-
 async function handleCloneProductsToBranch(
     adminClient: AdminClient,
     user: User,

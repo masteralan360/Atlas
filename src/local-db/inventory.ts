@@ -20,7 +20,6 @@ import { isAllowedInventoryQuantityTransition, isValidNewInventoryQuantity } fro
 import type {
   Inventory,
   InventoryTransaction,
-  InventoryTransferBatchAllocation,
   Product
 } from './models'
 import {
@@ -1261,6 +1260,8 @@ export interface TransferInventoryQuantityInput {
     referenceType?: string | null
     notes?: string | null
     createdBy?: string | null
+    transferType?: 'manual' | 'automation'
+    reorderRuleId?: string | null
     operationId?: string | null
     timestamp?: string
     syncSource?: InventorySyncSource
@@ -1270,330 +1271,46 @@ export interface TransferInventoryQuantityInput {
     skipTransactionLog?: boolean
 }
 
-async function transferInventoryQuantityCore(
-    input: Omit<
-        TransferInventoryQuantityInput,
-        'batchSelections' | 'skipBatchRefresh' | 'skipReorderCheck'
-    >
-) {
-    if (input.sourceStorageId === input.targetStorageId) {
-        throw new Error('Source and target storages must be different')
-    }
-
-    if (!isPositiveQuantity(input.quantity)) {
-        throw new Error('Transfer quantity must be greater than zero')
-    }
-
-    const timestamp = input.timestamp || new Date().toISOString()
-    const syncSource = input.syncSource || 'local'
-    if (syncSource === 'local') {
-        await Promise.all([
-            assertCurrentUserCanAccessStorage(input.workspaceId, input.sourceStorageId),
-            assertCurrentUserCanAccessStorage(input.workspaceId, input.targetStorageId)
-        ])
-        await hydrateInventoryProductStoragesFromSupabase(
-            input.workspaceId,
-            input.productId,
-            [input.sourceStorageId, input.targetStorageId]
-        )
-    }
-
-    const {
-        updatedProduct,
-        sourcePreviousQuantity,
-        targetPreviousQuantity,
-        sourceRow,
-        targetRow,
-    } = await db.transaction('rw', [db.inventory, db.inventory_transactions, db.products, db.storages], async () => {
-        const sourceQuantity = await getInventoryQuantityForProductStorage(input.productId, input.sourceStorageId)
-        if (input.quantity - sourceQuantity > QUANTITY_EPSILON) {
-            throw new Error('Insufficient inventory in source storage')
-        }
-
-        const targetQuantity = await getInventoryQuantityForProductStorage(input.productId, input.targetStorageId)
-
-        const sourceRow = await putInventoryQuantity(
-            input.workspaceId,
-            input.productId,
-            input.sourceStorageId,
-            roundQuantity(sourceQuantity - input.quantity),
-            timestamp,
-            syncSource
-        )
-        const targetRow = await putInventoryQuantity(
-            input.workspaceId,
-            input.productId,
-            input.targetStorageId,
-            roundQuantity(targetQuantity + input.quantity),
-            timestamp,
-            syncSource
-        )
-
-        if (syncSource !== 'remote' && isLocalWorkspaceMode(input.workspaceId)) {
-            if (sourceRow) {
-                await persistLocalInventoryMovement({
-                    workspaceId: input.workspaceId,
-                    productId: input.productId,
-                    storageId: input.sourceStorageId,
-                    previousQuantity: sourceQuantity,
-                    newQuantity: roundQuantity(Math.max(sourceQuantity - input.quantity, 0)),
-                    inventoryVersion: sourceRow.version,
-                    movement: {
-                        productId: input.productId,
-                        storageId: input.sourceStorageId,
-                        transactionType: 'transfer_out',
-                        referenceId: input.referenceId ?? null,
-                        referenceType: input.referenceType || 'inventory_transfer',
-                        notes: input.notes ?? null,
-                        createdBy: input.createdBy ?? null,
-                    },
-                    timestamp,
-                })
-            }
-            if (targetRow) {
-                await persistLocalInventoryMovement({
-                    workspaceId: input.workspaceId,
-                    productId: input.productId,
-                    storageId: input.targetStorageId,
-                    previousQuantity: targetQuantity,
-                    newQuantity: roundQuantity(targetQuantity + input.quantity),
-                    inventoryVersion: targetRow.version,
-                    movement: {
-                        productId: input.productId,
-                        storageId: input.targetStorageId,
-                        transactionType: 'transfer_in',
-                        referenceId: input.referenceId ?? null,
-                        referenceType: input.referenceType || 'inventory_transfer',
-                        notes: input.notes ?? null,
-                        createdBy: input.createdBy ?? null,
-                    },
-                    timestamp,
-                })
-            }
-        }
-
-        const updatedProduct = await syncProductStockSnapshot(input.productId, timestamp, syncSource)
-        return {
-            updatedProduct,
-            sourcePreviousQuantity: sourceQuantity,
-            targetPreviousQuantity: targetQuantity,
-            sourceRow,
-            targetRow,
-        }
-    })
-
-    if (!input.skipRemoteSync && syncSource !== 'remote') {
-        const sourceMovement: InventoryTransaction = {
-            id: buildInventoryMovementTransactionId(input.workspaceId, input.productId, input.sourceStorageId, sourceRow?.version ?? 1),
-            workspaceId: input.workspaceId,
-            productId: input.productId,
-            storageId: input.sourceStorageId,
-            transactionType: 'transfer_out',
-            quantityDelta: -roundQuantity(input.quantity),
-            previousQuantity: sourcePreviousQuantity,
-            newQuantity: roundQuantity(Math.max(sourcePreviousQuantity - input.quantity, 0)),
-            referenceId: input.referenceId ?? null,
-            referenceType: input.referenceType || 'inventory_transfer',
-            notes: input.notes ?? null,
-            createdBy: input.createdBy ?? null,
-            createdAt: timestamp,
-            updatedAt: timestamp,
-            version: 1,
-            isDeleted: false,
-            syncStatus: 'pending',
-            lastSyncedAt: null,
-        }
-        const targetMovement: InventoryTransaction = {
-            id: buildInventoryMovementTransactionId(input.workspaceId, input.productId, input.targetStorageId, targetRow?.version ?? 1),
-            workspaceId: input.workspaceId,
-            productId: input.productId,
-            storageId: input.targetStorageId,
-            transactionType: 'transfer_in',
-            quantityDelta: roundQuantity(input.quantity),
-            previousQuantity: targetPreviousQuantity,
-            newQuantity: roundQuantity(targetPreviousQuantity + input.quantity),
-            referenceId: input.referenceId ?? null,
-            referenceType: input.referenceType || 'inventory_transfer',
-            notes: input.notes ?? null,
-            createdBy: input.createdBy ?? null,
-            createdAt: timestamp,
-            updatedAt: timestamp,
-            version: 1,
-            isDeleted: false,
-            syncStatus: 'pending',
-            lastSyncedAt: null,
-        }
-        await syncInventoryRowsBestEffort([sourceRow, targetRow], input.workspaceId, {
-            operationId: input.operationId || input.referenceId || generateId(),
-            operationKind: 'inventory_transfer',
-            inventoryTransactions: [sourceMovement, targetMovement],
-        })
-    }
-
-    return {
-        updatedProduct,
-        timestamp,
-        syncSource,
-        sourcePreviousQuantity,
-        targetPreviousQuantity,
-        sourceRow,
-        targetRow
-    }
-}
-
-function toReverseBatchSelections(
-    allocations: InventoryTransferBatchAllocation[]
-): StockBatchTransferSelection[] {
-    return allocations.map((allocation) => ({
-        batchId: allocation.destinationBatchId,
-        quantity: allocation.quantity
-    }))
-}
-
 export async function transferInventoryQuantityWithBatches(
     input: TransferInventoryQuantityInput
 ) {
-    const {
-        getStockBatchTransferPlan,
-        refreshStockBatchesFromSupabase,
-        transferStockBatchAllocations
-    } = await import('./stockBatches')
-
-    if (!input.skipBatchRefresh && (input.syncSource || 'local') === 'local') {
-        await refreshStockBatchesFromSupabase(input.workspaceId)
-    }
-
-    const batchPlan = await getStockBatchTransferPlan(
-        input.productId,
-        input.sourceStorageId,
-        input.quantity,
-        input.batchSelections
-    )
-    const transferReferenceId = input.referenceId?.trim() || generateId()
-    const transferInput: TransferInventoryQuantityInput = {
-        ...input,
-        referenceId: transferReferenceId,
-        referenceType: input.referenceType || 'inventory_transfer',
-        operationId: input.operationId || transferReferenceId,
-    }
-    const coreResult = await transferInventoryQuantityCore(transferInput)
-    let batchAllocations: InventoryTransferBatchAllocation[] = []
-
-    try {
-        batchAllocations = await transferStockBatchAllocations({
-            workspaceId: input.workspaceId,
-            productId: input.productId,
-            sourceStorageId: input.sourceStorageId,
-            targetStorageId: input.targetStorageId,
-            allocations: batchPlan.batchAllocations,
-            timestamp: coreResult.timestamp
-        })
-    } catch (error) {
-        try {
-            await transferInventoryQuantityCore({
-                ...transferInput,
-                sourceStorageId: input.targetStorageId,
-                targetStorageId: input.sourceStorageId,
-                timestamp: new Date().toISOString(),
-                operationId: generateId(),
-                referenceId: transferReferenceId,
-                referenceType: 'inventory_transfer_rollback',
-                notes: 'Inventory transfer was rolled back after a later step failed.'
-            })
-        } catch (rollbackError) {
-            console.error('[InventoryTransfer] Failed to rollback inventory quantity:', rollbackError)
-        }
-        throw error
-    }
-
-    try {
-        if (!input.skipTransactionLog) {
-            const referenceType = transferInput.referenceType || 'inventory_transfer'
-            await Promise.all([
-            createInventoryTransaction(input.workspaceId, {
-                    productId: input.productId,
-                    storageId: input.sourceStorageId,
-                    transactionType: 'transfer_out',
-                    quantityDelta: -input.quantity,
-                    previousQuantity: coreResult.sourcePreviousQuantity,
-                    newQuantity: roundQuantity(Math.max(coreResult.sourcePreviousQuantity - input.quantity, 0)),
-                    referenceId: transferReferenceId,
-                    referenceType,
-                    notes: input.notes ?? null,
-                    createdBy: input.createdBy ?? null
-                }, {
-                    id: buildInventoryMovementTransactionId(input.workspaceId, input.productId, input.sourceStorageId, coreResult.sourceRow?.version ?? 1),
-                    timestamp: coreResult.timestamp,
-                    skipRemoteSync: true,
-                }),
-                createInventoryTransaction(input.workspaceId, {
-                    productId: input.productId,
-                    storageId: input.targetStorageId,
-                    transactionType: 'transfer_in',
-                    quantityDelta: input.quantity,
-                    previousQuantity: coreResult.targetPreviousQuantity,
-                    newQuantity: roundQuantity(coreResult.targetPreviousQuantity + input.quantity),
-                    referenceId: transferReferenceId,
-                    referenceType,
-                    notes: input.notes ?? null,
-                    createdBy: input.createdBy ?? null
-                }, {
-                    id: buildInventoryMovementTransactionId(input.workspaceId, input.productId, input.targetStorageId, coreResult.targetRow?.version ?? 1),
-                    timestamp: coreResult.timestamp,
-                    skipRemoteSync: true,
-                })
-            ])
-        }
-    } catch (error) {
-        try {
-            if (batchAllocations.length > 0) {
-                await transferStockBatchAllocations({
-                    workspaceId: input.workspaceId,
-                    productId: input.productId,
-                    sourceStorageId: input.targetStorageId,
-                    targetStorageId: input.sourceStorageId,
-                    allocations: batchAllocations.map((allocation) => ({
-                        batchId: allocation.destinationBatchId,
-                        batchNumber: allocation.batchNumber,
-                        quantity: allocation.quantity,
-                        price: allocation.price,
-                        costPrice: allocation.costPrice,
-                        currency: allocation.currency,
-                        expiryDate: allocation.expiryDate,
-                        manufacturingDate: allocation.manufacturingDate
-                    })),
-                    timestamp: new Date().toISOString()
-                })
-            }
-
-            await transferInventoryQuantityCore({
-                ...transferInput,
-                sourceStorageId: input.targetStorageId,
-                targetStorageId: input.sourceStorageId,
-                timestamp: new Date().toISOString(),
-                operationId: generateId(),
-                referenceId: transferReferenceId,
-                referenceType: 'inventory_transfer_rollback',
-                notes: 'Inventory transfer was rolled back after a logging step failed.'
-            })
-        } catch (rollbackError) {
-            console.error('[InventoryTransfer] Failed to rollback transfer after logging error:', rollbackError)
-        }
-        throw error
-    }
-
-    await evaluateReorderRulesIfNeeded({
+    const { createInventoryTransferBatch } = await import('./inventoryTransferBatches')
+    const result = await createInventoryTransferBatch({
         workspaceId: input.workspaceId,
-        productId: input.productId,
-        syncSource: coreResult.syncSource,
-        skipReorderCheck: input.skipReorderCheck
+        sourceStorageId: input.sourceStorageId,
+        destinationStorageId: input.targetStorageId,
+        items: [{
+            productId: input.productId,
+            quantity: input.quantity,
+            batchSelections: input.batchSelections
+        }],
+        transferType: input.transferType ?? 'manual',
+        reorderRuleId: input.reorderRuleId ?? null,
+        referenceType: input.referenceType || 'inventory_transfer',
+        notes: input.notes ?? null,
+        createdBy: input.createdBy ?? null,
+        transferredAt: input.timestamp
     })
 
+    const item = result.items[0]
+    try {
+        await evaluateReorderRulesIfNeeded({
+            workspaceId: input.workspaceId,
+            productId: input.productId,
+            syncSource: 'local',
+            skipReorderCheck: input.skipReorderCheck
+        })
+    } catch (error) {
+        console.error('[InventoryTransfer] Failed to evaluate reorder rules after transfer:', error)
+    }
+
     return {
-        updatedProduct: coreResult.updatedProduct,
-        referenceId: transferReferenceId,
-        batchAllocations,
-        reverseBatchSelections: toReverseBatchSelections(batchAllocations)
+        updatedProduct: await db.products.get(input.productId) ?? null,
+        referenceId: result.batch.id,
+        transferBatchId: result.batch.id,
+        transferNumber: result.batch.transferNumber,
+        batchAllocations: item?.batchAllocations ?? [],
+        reverseBatchSelections: item?.reverseBatchSelections ?? []
     }
 }
 
@@ -1601,7 +1318,6 @@ export async function transferInventoryQuantity(input: TransferInventoryQuantity
     const result = await transferInventoryQuantityWithBatches(input)
     return result.updatedProduct
 }
-
 export async function deleteInventoryForProduct(
     productId: string,
     timestamp: string = new Date().toISOString(),

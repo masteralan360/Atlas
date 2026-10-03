@@ -38,6 +38,8 @@ import type {
   Inventory,
   InventoryTransaction,
   StockBatch,
+  InventoryTransferBatch,
+  InventoryTransferSequence,
   InventoryTransferTransaction,
   ReorderTransferRule,
   Supplier,
@@ -437,6 +439,8 @@ export class AtlasDatabase extends Dexie {
   storage_member_exclusions!: EntityTable<StorageMemberExclusion, 'id'>
   inventory!: EntityTable<Inventory, 'id'>
   inventory_transactions!: EntityTable<InventoryTransaction, 'id'>
+  inventory_transfer_batches!: EntityTable<InventoryTransferBatch, 'id'>
+  inventory_transfer_sequences!: EntityTable<InventoryTransferSequence, 'workspaceId'>
   stock_batches!: EntityTable<StockBatch, 'id'>
   product_discounts!: EntityTable<ProductDiscount, 'id'>
   category_discounts!: EntityTable<CategoryDiscount, 'id'>
@@ -3662,6 +3666,14 @@ export class AtlasDatabase extends Dexie {
       ])
     })
 
+    this.version(142).stores({
+      inventory_transactions:
+        'id, workspaceId, productId, storageId, transactionType, adjustmentReason, referenceId, transferBatchId, createdAt, isDeleted, [workspaceId+productId], [workspaceId+createdAt], [workspaceId+transactionType], [workspaceId+adjustmentReason], [workspaceId+transferBatchId]',
+      inventory_transfer_batches:
+        'id, workspaceId, transferNumber, sourceWorkspaceId, sourceStorageId, destinationWorkspaceId, destinationStorageId, transferredAt, status, updatedAt, isDeleted, syncStatus, &[workspaceId+transferNumber], [workspaceId+transferredAt]',
+      inventory_transfer_sequences: 'workspaceId'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
@@ -3852,6 +3864,7 @@ export class AtlasDatabase extends Dexie {
       'storage_member_exclusions',
       'inventory',
       'inventory_transactions',
+      'inventory_transfer_batches',
       'stock_batches',
       'product_discounts',
       'category_discounts',
@@ -4046,6 +4059,8 @@ export async function clearDatabase(): Promise<void> {
       db.price_book_items,
       db.inventory,
       db.inventory_transactions,
+      db.inventory_transfer_batches,
+      db.inventory_transfer_sequences,
       db.stock_batches,
       db.product_discounts,
       db.category_discounts,
@@ -4123,6 +4138,8 @@ export async function clearDatabase(): Promise<void> {
       await db.price_book_items.clear()
       await db.inventory.clear()
       await db.inventory_transactions.clear()
+      await db.inventory_transfer_batches.clear()
+      await db.inventory_transfer_sequences.clear()
       await db.stock_batches.clear()
       await db.product_discounts.clear()
       await db.category_discounts.clear()

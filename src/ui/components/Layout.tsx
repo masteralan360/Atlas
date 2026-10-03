@@ -46,7 +46,6 @@ import { UnifiedSnoozedRemindersBell } from './reminders/UnifiedSnoozedReminders
 import { WorkspacePaygChargeButton, WorkspaceUsageButton, WorkspaceUsageCircleButton, WorkspaceUsageModal } from './WorkspaceUsageModal'
 import { useWorkspaceUsageMeter } from './workspaceUsageMeter'
 import { ThemeAwareLogo } from './ThemeAwareLogo'
-import { ThemeAwareTitleLogo } from './ThemeAwareTitleLogo'
 import { LocalAccountSwitcher } from './LocalAccountSwitcher'
 import { DeploymentRefreshVersion } from './DeploymentRefreshVersion'
 import { ModuleLockerOverlay } from './module-locker/ModuleLockerOverlay'
@@ -59,6 +58,7 @@ import {
   NAVIGATION_RAIL_CORNER_RADIUS,
   NAVIGATION_RAIL_WIDTH
 } from '@/ui/navigation/navigationRail'
+import { NavigationRail } from '@/ui/navigation/NavigationRailView'
 import { launcherSectionOrder, type NavigationSectionKey } from '@/ui/navigation/navigationMeta'
 import {
   createSidebarSectionOrderStorageValue,
@@ -128,8 +128,6 @@ import {
   ListOrdered,
   RotateCcw,
   Settings2,
-  Settings,
-  LayoutDashboard,
   Star,
   Search
 } from 'lucide-react'
@@ -423,7 +421,7 @@ export function Layout({ children }: LayoutProps) {
   const [isSidebarHeaderCompact, setIsSidebarHeaderCompact] = useState(false)
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1440))
   const desktopStickyBarCollapseProgress = isTauri && viewportWidth >= 1024 ? desktopStickyBarProgress : 0
-  const showNavigationRail = isNavigationRailEnabled && isTauri && !isMobile() && viewportWidth >= 1024
+  const showNavigationRail = isNavigationRailEnabled(viewportWidth) && isTauri && !isMobile()
   const navigationRailIsRtl = i18n.dir() === 'rtl'
   const sidebarTopCornerMask = `radial-gradient(circle at ${navigationRailIsRtl ? 'left' : 'right'} bottom, transparent ${NAVIGATION_RAIL_CORNER_RADIUS}px, black ${NAVIGATION_RAIL_CORNER_RADIUS + 0.5}px)`
   const sidebarBottomCornerMask = `radial-gradient(circle at ${navigationRailIsRtl ? 'left' : 'right'} top, transparent ${NAVIGATION_RAIL_CORNER_RADIUS}px, black ${NAVIGATION_RAIL_CORNER_RADIUS + 0.5}px)`
@@ -925,7 +923,7 @@ export function Layout({ children }: LayoutProps) {
       .filter((group) => !group.sectionKey)
       .map((group) => ({
         ...group,
-        items: group.items.filter((item) => !showNavigationRail || item.href !== '/')
+        items: group.items.filter((item) => !showNavigationRail || (item.href !== '/' && item.href !== '/help'))
       }))
       .filter((group) => group.items.length > 0)
     const groupsBySectionKey = new Map(
@@ -1606,48 +1604,11 @@ export function Layout({ children }: LayoutProps) {
           )}
 
           {showNavigationRail && (
-            <aside
-              className="fixed inset-y-0 z-50 flex w-14 flex-col bg-background/90 shadow-sm backdrop-blur-xl sidebar-gradient"
-              style={{ insetInlineStart: 0 }}
-            >
-              <div className="flex h-12 shrink-0 items-center justify-center">
-                <ThemeAwareTitleLogo className="h-7 w-7 opacity-90" />
-              </div>
-              <nav className="flex flex-1 flex-col items-center gap-2 px-2 py-3">
-                <Link
-                  href="/"
-                  onClick={() => triggerHaptic('selection')}
-                  className={cn(
-                    'flex h-10 w-10 items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-                    location === '/' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-primary/5 hover:text-primary'
-                  )}
-                  title={t('nav.dashboard')}
-                  aria-label={t('nav.dashboard')}
-                  aria-current={location === '/' ? 'page' : undefined}
-                >
-                  <LayoutDashboard className="h-5 w-5" />
-                </Link>
-              </nav>
-              {navigation.some((group) => group.items.some((item) => item.href === '/settings')) && (
-                <div className="flex shrink-0 justify-center border-t border-border/70 px-2 py-3">
-                  <Link
-                    href="/settings"
-                    onClick={() => triggerHaptic('selection')}
-                    className={cn(
-                      'flex h-10 w-10 items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-                      location === '/settings' || location.startsWith('/settings/')
-                        ? 'bg-primary/10 text-primary'
-                        : 'text-muted-foreground hover:bg-primary/5 hover:text-primary'
-                    )}
-                    title={t('nav.settings')}
-                    aria-label={t('nav.settings')}
-                    aria-current={location === '/settings' || location.startsWith('/settings/') ? 'page' : undefined}
-                  >
-                    <Settings className="h-5 w-5" />
-                  </Link>
-                </div>
-              )}
-            </aside>
+            <NavigationRail
+              location={location}
+              hasSettings={navigation.some((group) => group.items.some((item) => item.href === '/settings'))}
+              onNavigate={() => triggerHaptic('selection')}
+            />
           )}
 
           {/* Match the navigation rail only in the sidebar's rounded start-side cutouts. */}
@@ -1655,9 +1616,9 @@ export function Layout({ children }: LayoutProps) {
             <>
               <div
                 aria-hidden="true"
-                className="pointer-events-none fixed z-40 h-4 w-4 bg-background sidebar-gradient"
+                className="pointer-events-none fixed z-40 h-4 w-4 bg-background sidebar-gradient transition-[inset-inline-start] duration-300 ease-in-out"
                 style={{
-                  insetInlineStart: NAVIGATION_RAIL_WIDTH,
+                  insetInlineStart: `var(--navigation-rail-current-width, ${NAVIGATION_RAIL_WIDTH}px)`,
                   top: 'var(--titlebar-height)',
                   backgroundSize: '100% 100vh',
                   backgroundPositionY: 'calc(0px - var(--titlebar-height))',
@@ -1667,9 +1628,9 @@ export function Layout({ children }: LayoutProps) {
               />
               <div
                 aria-hidden="true"
-                className="pointer-events-none fixed z-40 h-4 w-4 bg-background sidebar-gradient"
+                className="pointer-events-none fixed z-40 h-4 w-4 bg-background sidebar-gradient transition-[inset-inline-start] duration-300 ease-in-out"
                 style={{
-                  insetInlineStart: NAVIGATION_RAIL_WIDTH,
+                  insetInlineStart: `var(--navigation-rail-current-width, ${NAVIGATION_RAIL_WIDTH}px)`,
                   bottom: 0,
                   backgroundSize: '100% 100vh',
                   backgroundPositionY: `calc(${NAVIGATION_RAIL_CORNER_RADIUS}px - 100vh)`,
@@ -1715,7 +1676,9 @@ export function Layout({ children }: LayoutProps) {
                   : 'translate-x-0 w-64'
                 : '-translate-x-full rtl:translate-x-full'
             )}
-            style={showNavigationRail ? { insetInlineStart: NAVIGATION_RAIL_WIDTH } : undefined}
+            style={showNavigationRail
+              ? { insetInlineStart: `var(--navigation-rail-current-width, ${NAVIGATION_RAIL_WIDTH}px)` }
+              : undefined}
           >
             {/* Logo */}
             <div
@@ -3450,7 +3413,7 @@ export function Layout({ children }: LayoutProps) {
             )}
             style={{
               paddingInlineStart: showNavigationRail
-                ? NAVIGATION_RAIL_WIDTH + (desktopSidebarOpen ? (isSidebarMini ? 70 : isSidebarCustomizationMode ? 320 : 256) : 0)
+                ? `calc(var(--navigation-rail-current-width, ${NAVIGATION_RAIL_WIDTH}px) + ${desktopSidebarOpen ? (isSidebarMini ? 70 : isSidebarCustomizationMode ? 320 : 256) : 0}px)`
                 : undefined
             }}
           >

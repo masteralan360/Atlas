@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { ArrowDownLeft, ArrowUpRight, Ban, HandCoins, Printer, RotateCcw, Search, ShieldCheck } from 'lucide-react'
 import { useLocation } from 'wouter'
@@ -36,6 +36,7 @@ import { isDateInDateRange } from '@/lib/dateRangeFilters'
 import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import {
     Button,
+    AppPagination,
     Card,
     CardContent,
     CardHeader,
@@ -78,9 +79,18 @@ import { useWorkspace } from '@/workspace'
 import { hasEffectiveSalesAgentCommissionPermission, useWorkspacePermissions } from '@/permissions'
 
 type PaymentsTab = 'open-items' | 'payable' | 'collectable' | 'transactions'
+type ObligationTab = Exclude<PaymentsTab, 'transactions'>
 type DirectionFilter = 'all' | 'incoming' | 'outgoing'
 type SourceFilter = 'all' | 'loans' | 'orders' | 'budget' | 'real_estate' | 'activities' | 'clinical_appointments' | 'car_rental' | 'travel_transportation' | 'payments' | 'payment_accounts'
 type OpenStatusFilter = 'all' | 'open' | 'overdue'
+
+const PAYMENT_PAGE_SIZE_STORAGE_KEY = 'payments_rows_per_page'
+const INITIAL_PAYMENT_PAGES: Record<PaymentsTab, number> = {
+    'open-items': 1,
+    payable: 1,
+    collectable: 1,
+    transactions: 1
+}
 
 function sourceTypeLabel(
     value: PaymentObligation['sourceType'] | PaymentTransaction['sourceType'],
@@ -271,6 +281,11 @@ export function Payments() {
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.pay')
 
     const [activeTab, setActiveTab] = useState<PaymentsTab>('open-items')
+    const [currentPages, setCurrentPages] = useState<Record<PaymentsTab, number>>(INITIAL_PAYMENT_PAGES)
+    const [pageSize, setPageSize] = useState(() => {
+        const savedPageSize = Number(localStorage.getItem(PAYMENT_PAGE_SIZE_STORAGE_KEY))
+        return [5, 10, 20, 50, 100].includes(savedPageSize) ? savedPageSize : 20
+    })
     const [search, setSearch] = useState('')
     const [directionFilter, setDirectionFilter] = useState<DirectionFilter>('all')
     const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
@@ -284,6 +299,19 @@ export function Payments() {
     const [voidingTransactionId, setVoidingTransactionId] = useState<string | null>(null)
     const [isVoidAuditOpen, setIsVoidAuditOpen] = useState(false)
     const [isPartnerSettlementOpen, setIsPartnerSettlementOpen] = useState(false)
+
+    useEffect(() => {
+        localStorage.setItem(PAYMENT_PAGE_SIZE_STORAGE_KEY, String(pageSize))
+    }, [pageSize])
+
+    useEffect(() => {
+        setCurrentPages(INITIAL_PAYMENT_PAGES)
+    }, [search, directionFilter, sourceFilter, statusFilter, dateRange, customDates])
+
+    const handlePageSizeChange = (nextPageSize: number) => {
+        setPageSize(nextPageSize)
+        setCurrentPages(INITIAL_PAYMENT_PAGES)
+    }
     const workspaceContacts = useWorkspaceContacts(workspaceId)
     const printLang = features.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
     const printT = useMemo(() => i18n.getFixedT(printLang), [i18n, printLang])
@@ -321,15 +349,11 @@ export function Payments() {
         search,
         applySalesAgentAccountCredits: true
     })
-    const visibleObligations = useMemo(() => {
-        if (activeTab === 'payable') {
-            return obligations.filter((item) => item.direction === 'outgoing')
-        }
-        if (activeTab === 'collectable') {
-            return obligations.filter((item) => item.direction === 'incoming')
-        }
-        return obligations
-    }, [obligations, activeTab])
+    const obligationsByTab = useMemo<Record<ObligationTab, PaymentObligation[]>>(() => ({
+        'open-items': obligations,
+        payable: obligations.filter((item) => item.direction === 'outgoing'),
+        collectable: obligations.filter((item) => item.direction === 'incoming')
+    }), [obligations])
     const lockedSourceKeys = useLockedPaymentSourceKeys(workspaceId)
 
     const allTransactions = usePaymentTransactions(workspaceId, { includeReversals: true })
@@ -380,6 +404,12 @@ export function Payments() {
             latestUnreversedBySource
         ),
         [customDates, dateRange, transactions, latestUnreversedBySource]
+    )
+    const transactionsPageCount = Math.max(1, Math.ceil(visibleTransactions.length / pageSize))
+    const transactionsCurrentPage = Math.min(currentPages.transactions, transactionsPageCount)
+    const paginatedTransactions = visibleTransactions.slice(
+        (transactionsCurrentPage - 1) * pageSize,
+        transactionsCurrentPage * pageSize
     )
     const voidTransactionChain = useMemo(() => {
         if (!transactionToVoid) return []
@@ -737,13 +767,27 @@ export function Payments() {
                 </TabsList>
 
                 {(() => {
-                    const renderOpenItemsTable = (title: string) => (
+                    const renderOpenItemsTable = (title: string, tab: ObligationTab, rows: PaymentObligation[]) => {
+                        const pageCount = Math.max(1, Math.ceil(rows.length / pageSize))
+                        const currentPage = Math.min(currentPages[tab], pageCount)
+                        const paginatedRows = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+
+                        return (
                         <Card>
-                            <CardHeader>
+                            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
                                 <CardTitle>{title}</CardTitle>
+                                <AppPagination
+                                    currentPage={currentPage}
+                                    totalCount={rows.length}
+                                    pageSize={pageSize}
+                                    onPageChange={(page) => setCurrentPages((current) => ({ ...current, [tab]: page }))}
+                                    onPageSizeChange={handlePageSizeChange}
+                                    className="ms-auto w-fit justify-end"
+                                />
                             </CardHeader>
-                            <CardContent className="overflow-x-auto">
-                                <Table>
+                            <CardContent>
+                                <div className="overflow-x-auto">
+                                    <Table>
                                     <TableHeader>
                                         <TableRow>
                                             <TableHead>{t('payments.table.source', { defaultValue: 'Source' })}</TableHead>
@@ -757,13 +801,13 @@ export function Payments() {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {visibleObligations.length === 0 ? (
+                                        {rows.length === 0 ? (
                                             <TableRow>
                                                 <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">
                                                     {t('payments.noOpenItems', { defaultValue: 'No open items match the current filters.' })}
                                                 </TableCell>
                                             </TableRow>
-                                        ) : visibleObligations.map((item) => (
+                                        ) : paginatedRows.map((item) => (
                                         <TableRow key={item.id}>
                                             {(() => {
                                                 const isLockedSource = lockedSourceKeys.has(getPaymentSourceKey(item))
@@ -836,10 +880,12 @@ export function Payments() {
                                         </TableRow>
                                     ))}
                                 </TableBody>
-                            </Table>
-                        </CardContent>
-                    </Card>
-                    )
+                                    </Table>
+                                </div>
+                            </CardContent>
+                        </Card>
+                        )
+                    }
 
                     const openItemsTitle = t('payments.tabs.openItems', { defaultValue: 'Open Items' })
                     const payableTitle = t('payments.tabs.payable', { defaultValue: 'Payable' })
@@ -847,9 +893,9 @@ export function Payments() {
 
                     return (
                         <>
-                            <TabsContent value="open-items">{renderOpenItemsTable(openItemsTitle)}</TabsContent>
-                            <TabsContent value="payable">{renderOpenItemsTable(payableTitle)}</TabsContent>
-                            <TabsContent value="collectable">{renderOpenItemsTable(collectableTitle)}</TabsContent>
+                            <TabsContent value="open-items">{renderOpenItemsTable(openItemsTitle, 'open-items', obligationsByTab['open-items'])}</TabsContent>
+                            <TabsContent value="payable">{renderOpenItemsTable(payableTitle, 'payable', obligationsByTab.payable)}</TabsContent>
+                            <TabsContent value="collectable">{renderOpenItemsTable(collectableTitle, 'collectable', obligationsByTab.collectable)}</TabsContent>
                         </>
                     )
                 })()}
@@ -858,26 +904,37 @@ export function Payments() {
                     <Card>
                         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
                             <CardTitle>{t('payments.tabs.transactions', { defaultValue: 'Transactions' })}</CardTitle>
-                            {user?.role === 'admin' ? (
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setIsVoidAuditOpen(true)}
-                                    className="border-destructive/30 text-destructive hover:bg-destructive/5 hover:text-destructive"
-                                >
-                                    <ShieldCheck className="me-1.5 h-4 w-4" />
-                                    {t('financialVoid.auditTitle')}
-                                    {financialVoidAudits.length ? (
-                                        <span className="ms-2 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-bold">
-                                            {financialVoidAudits.length}
-                                        </span>
-                                    ) : null}
-                                </Button>
-                            ) : null}
+                            <div className="ms-auto flex flex-wrap items-center justify-end gap-3">
+                                <AppPagination
+                                    currentPage={transactionsCurrentPage}
+                                    totalCount={visibleTransactions.length}
+                                    pageSize={pageSize}
+                                    onPageChange={(page) => setCurrentPages((current) => ({ ...current, transactions: page }))}
+                                    onPageSizeChange={handlePageSizeChange}
+                                    className="w-fit justify-end"
+                                />
+                                {user?.role === 'admin' ? (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => setIsVoidAuditOpen(true)}
+                                        className="border-destructive/30 text-destructive hover:bg-destructive/5 hover:text-destructive"
+                                    >
+                                        <ShieldCheck className="me-1.5 h-4 w-4" />
+                                        {t('financialVoid.auditTitle')}
+                                        {financialVoidAudits.length ? (
+                                            <span className="ms-2 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-bold">
+                                                {financialVoidAudits.length}
+                                            </span>
+                                        ) : null}
+                                    </Button>
+                                ) : null}
+                            </div>
                         </CardHeader>
-                        <CardContent className="overflow-x-auto">
-                            <Table>
+                        <CardContent>
+                            <div className="overflow-x-auto">
+                                <Table>
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>{t('payments.table.time', { defaultValue: 'Time' })}</TableHead>
@@ -899,7 +956,7 @@ export function Payments() {
                                                 {t('payments.noTransactions', { defaultValue: 'No transactions match the current filters.' })}
                                             </TableCell>
                                         </TableRow>
-                                    ) : visibleTransactions.map((item) => {
+                                    ) : paginatedTransactions.map((item) => {
                                         const isReversal = !!item.reversalOfTransactionId
                                         const reversedAmount = reversalAmountsByTransactionId.get(item.id) || 0
                                         const hasPartialReversal = !isReversal && reversedAmount > 0.000001 && !fullyReversedIds.has(item.id)
@@ -1018,7 +1075,8 @@ export function Payments() {
                                         )
                                     })}
                                 </TableBody>
-                            </Table>
+                                </Table>
+                            </div>
                         </CardContent>
                     </Card>
                 </TabsContent>

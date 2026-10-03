@@ -39,6 +39,8 @@ export const LOCAL_MODE_SQLITE_TABLES = [
   "storage_member_exclusions",
   "inventory",
   "inventory_transactions",
+  "inventory_transfer_batches",
+  "inventory_transfer_sequences",
   "stock_batches",
   "product_discounts",
   "category_discounts",

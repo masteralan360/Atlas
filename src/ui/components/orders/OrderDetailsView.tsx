@@ -137,7 +137,7 @@ import {
     resetAtlasStandardPartnerBalancePrintState
 } from '@/lib/atlasStandardPartnerBalancePrintState'
 import { OrderStatusBadge } from './OrderStatusBadge'
-import { OrderProductAvatar } from './OrderProductAvatars'
+import { ProductAvatar } from '@/ui/components/ProductAvatars'
 import { useOrderCustomPrint } from './useOrderCustomPrint'
 import { PostReturnAdjustmentDialog } from './PostReturnAdjustmentDialog'
 import {
@@ -2278,10 +2278,9 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                                     )}>
                                                         <TableCell>
                                                             <div className="flex min-w-[12rem] items-start gap-3">
-                                                                <OrderProductAvatar
-                                                                    productId={item.productId}
+                                                                <ProductAvatar
                                                                     productName={item.productName}
-                                                                    productImageUrls={productImageUrls}
+                                                                    imageUrl={productImageUrls[item.productId]}
                                                                 />
                                                                 <div className="min-w-0">
                                                                     <div className={cn('font-semibold', isItemFullyReturned && 'line-through opacity-50')}>{item.productName}</div>

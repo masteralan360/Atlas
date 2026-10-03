@@ -82,6 +82,11 @@ import {
     SelectItem,
     SelectTrigger,
     SelectValue,
+    DropdownMenu,
+    DropdownMenuCheckboxItem,
+    DropdownMenuContent,
+    DropdownMenuTrigger,
+    CurrencySelector,
     StockAdjustmentDialog,
     Table,
     TableBody,
@@ -125,9 +130,9 @@ type PreparedProductImport = {
 export type ProductSortOption = 'name_asc' | 'name_desc' | 'sku_asc' | 'sku_desc' | 'price_asc' | 'price_desc' | 'stock_asc' | 'stock_desc' | 'date_asc' | 'date_desc'
 
 export interface ProductFilterState {
-    category: string
-    storage: string
-    currency: string
+    category: string[]
+    storage: string[]
+    currency: CurrencyCode[]
     minPrice: string
     maxPrice: string
     minStock: string
@@ -136,9 +141,9 @@ export interface ProductFilterState {
 }
 
 export const DEFAULT_PRODUCT_FILTERS: ProductFilterState = {
-    category: 'all',
-    storage: 'all',
-    currency: 'all',
+    category: [],
+    storage: [],
+    currency: [],
     minPrice: '',
     maxPrice: '',
     minStock: '',
@@ -161,15 +166,74 @@ type ProductTableRow = {
 
 function countActiveProductFilters(filters: ProductFilterState) {
     return [
-        filters.category !== 'all',
-        filters.storage !== 'all',
-        filters.currency !== 'all',
+        filters.category.length > 0,
+        filters.storage.length > 0,
+        filters.currency.length > 0,
         !!filters.minPrice,
         !!filters.maxPrice,
         !!filters.minStock,
         !!filters.maxStock,
         filters.sort !== 'name_asc'
     ].filter(Boolean).length
+}
+
+interface ProductFilterMultiSelectOption {
+    value: string
+    label: string
+}
+
+function ProductFilterMultiSelect({
+    value,
+    options,
+    allLabel,
+    multipleLabel,
+    onChange,
+}: {
+    value: string[]
+    options: ProductFilterMultiSelectOption[]
+    allLabel: string
+    multipleLabel: string
+    onChange: (value: string[]) => void
+}) {
+    const selectionLabel = value.length === 0
+        ? allLabel
+        : value.length === 1
+            ? options.find((option) => option.value === value[0])?.label || value[0]
+            : multipleLabel
+
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <Button type="button" variant="outline" className="w-full justify-between font-normal" title={selectionLabel}>
+                    <span className="truncate">{selectionLabel}</span>
+                    <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="max-h-64 w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto">
+                <DropdownMenuCheckboxItem
+                    checked={value.length === 0}
+                    onCheckedChange={() => onChange([])}
+                    onSelect={(event) => event.preventDefault()}
+                >
+                    {allLabel}
+                </DropdownMenuCheckboxItem>
+                {options.map((option) => (
+                    <DropdownMenuCheckboxItem
+                        key={option.value}
+                        checked={value.includes(option.value)}
+                        onCheckedChange={(checked) => onChange(
+                            checked
+                                ? value.includes(option.value) ? value : [...value, option.value]
+                                : value.filter((selectedValue) => selectedValue !== option.value),
+                        )}
+                        onSelect={(event) => event.preventDefault()}
+                    >
+                        <span className="truncate">{option.label}</span>
+                    </DropdownMenuCheckboxItem>
+                ))}
+            </DropdownMenuContent>
+        </DropdownMenu>
+    )
 }
 
 export function Products() {
@@ -592,14 +656,14 @@ export function Products() {
             )
         )
 
-        if (filters.category !== 'all') {
-            result = result.filter((product) => product.categoryId === filters.category)
+        if (filters.category.length > 0) {
+            result = result.filter((product) => !!product.categoryId && filters.category.includes(product.categoryId))
         }
-        if (filters.storage !== 'all') {
-            result = result.filter((product) => product.storageId === filters.storage)
+        if (filters.storage.length > 0) {
+            result = result.filter((product) => !!product.storageId && filters.storage.includes(product.storageId))
         }
-        if (filters.currency !== 'all') {
-            result = result.filter((product) => product.currency === filters.currency)
+        if (filters.currency.length > 0) {
+            result = result.filter((product) => filters.currency.includes(product.currency))
         }
         const minPrice = filters.minPrice ? Number(filters.minPrice) : null
         const maxPrice = filters.maxPrice ? Number(filters.maxPrice) : null
@@ -2218,32 +2282,34 @@ export function Products() {
 
                                     <div className="space-y-2">
                                         <Label>{t('products.filters.category', { defaultValue: 'Category' })}</Label>
-                                        <Select value={draftFilters.category} onValueChange={(value) => setDraftFilters((current) => ({ ...current, category: value }))}>
-                                            <SelectTrigger>
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all">{t('products.filters.allCategories', { defaultValue: 'All Categories' })}</SelectItem>
-                                                {categories.map((cat) => (
-                                                    <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
+                                        <ProductFilterMultiSelect
+                                            value={draftFilters.category}
+                                            options={[
+                                                ...categories.map((category) => ({ value: category.id, label: category.name })),
+                                                ...draftFilters.category
+                                                    .filter((categoryId) => !categories.some((category) => category.id === categoryId))
+                                                    .map((categoryId) => ({ value: categoryId, label: categoryId })),
+                                            ]}
+                                            allLabel={t('products.filters.allCategories', { defaultValue: 'All Categories' })}
+                                            multipleLabel={t('products.filters.selectedCount', { count: draftFilters.category.length, defaultValue: '{{count}} selected' })}
+                                            onChange={(category) => setDraftFilters((current) => ({ ...current, category }))}
+                                        />
                                     </div>
 
                                     <div className="space-y-2">
                                         <Label>{t('products.filters.storage', { defaultValue: 'Storage' })}</Label>
-                                        <Select value={draftFilters.storage} onValueChange={(value) => setDraftFilters((current) => ({ ...current, storage: value }))}>
-                                            <SelectTrigger>
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all">{t('products.filters.allStorages', { defaultValue: 'All Storages' })}</SelectItem>
-                                                {storages.map((storage) => (
-                                                    <SelectItem key={storage.id} value={storage.id}>{storage.name}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
+                                        <ProductFilterMultiSelect
+                                            value={draftFilters.storage}
+                                            options={[
+                                                ...storages.map((storage) => ({ value: storage.id, label: storage.name })),
+                                                ...draftFilters.storage
+                                                    .filter((storageId) => !storages.some((storage) => storage.id === storageId))
+                                                    .map((storageId) => ({ value: storageId, label: storageId })),
+                                            ]}
+                                            allLabel={t('products.filters.allStorages', { defaultValue: 'All Storages' })}
+                                            multipleLabel={t('products.filters.selectedCount', { count: draftFilters.storage.length, defaultValue: '{{count}} selected' })}
+                                            onChange={(storage) => setDraftFilters((current) => ({ ...current, storage }))}
+                                        />
                                     </div>
                                 </div>
 
@@ -2253,18 +2319,18 @@ export function Products() {
                                     </div>
 
                                     <div className="space-y-2">
-                                        <Label>{t('products.filters.currency', { defaultValue: 'Currency' })}</Label>
-                                        <Select value={draftFilters.currency} onValueChange={(value) => setDraftFilters((current) => ({ ...current, currency: value }))}>
-                                            <SelectTrigger>
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all">{t('products.filters.all', { defaultValue: 'All' })}</SelectItem>
-                                                {Array.from(new Set(products.map((p) => p.currency).filter(Boolean))).map((curr) => (
-                                                    <SelectItem key={curr} value={curr}>{curr.toUpperCase()}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
+                                        <CurrencySelector
+                                            multiple
+                                            label={t('products.filters.currency', { defaultValue: 'Currency' })}
+                                            value={draftFilters.currency}
+                                            allowedCurrencies={Array.from(new Set([
+                                                ...products.map((product) => product.currency),
+                                                ...draftFilters.currency,
+                                            ]))}
+                                            allLabel={t('products.filters.allCurrencies', { defaultValue: 'All Currencies' })}
+                                            multipleLabel={t('products.filters.selectedCount', { count: draftFilters.currency.length, defaultValue: '{{count}} selected' })}
+                                            onChange={(currency) => setDraftFilters((current) => ({ ...current, currency }))}
+                                        />
                                     </div>
 
                                     <div className="grid gap-4 sm:grid-cols-2">

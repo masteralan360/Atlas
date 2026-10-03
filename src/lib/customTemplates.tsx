@@ -103,6 +103,11 @@ import {
     PROFESSIONAL_A4_TABLE_ROW_COUNT
 } from '@/ui/components/ProfessionalA4InvoiceTemplate'
 import { TravelBookingPrintTemplate } from '@/ui/components/travel/TravelBookingPrintTemplate'
+import {
+    InventoryTransferBatchPrintTemplate,
+    getInventoryTransferBatchPrintTokenValues,
+    type InventoryTransferBatchPrintData
+} from '@/ui/components/inventory/InventoryTransferBatchPrintTemplate'
 
 export const SALES_HISTORY_RECEIPT_TEMPLATE_KEY = 'salesHistory.Receipt'
 export const INSTANT_HISTORY_RECEIPT_TEMPLATE_KEY = 'instantHistory.Receipt'
@@ -126,6 +131,7 @@ export const ORDER_ATLAS_STANDARD_RETURN_TEMPLATE_KEY = 'orders.AtlasStandardRet
 export const ORDER_DETAILS_TEMPLATE_KEY = 'orders.Details'
 export const ORDER_RECEIPT_TEMPLATE_KEY = 'orders.Receipt'
 export const TRAVEL_BOOKING_TEMPLATE_KEY = 'travelTransportation.Booking'
+export const INVENTORY_TRANSFER_BATCH_TEMPLATE_KEY = 'inventoryTransfer.Batch'
 export const PARTNER_DETAILS_TEMPLATE_FIELD_KEYS = {
     showWhoOwesWhom: 'showWhoOwesWhom',
     showOrders: 'showOrders'
@@ -145,7 +151,7 @@ export const PARTNER_ORDER_ITEMS_TEMPLATE_FIELD_KEYS = {
 
 export type CustomTemplateTarget = {
     moduleTypeKey: string
-    workspaceModuleKey: 'instant_pos' | 'real_estate' | 'sales_history' | 'crm' | 'loans' | 'products' | 'travel_transportation'
+    workspaceModuleKey: 'instant_pos' | 'real_estate' | 'sales_history' | 'crm' | 'loans' | 'products' | 'travel_transportation' | 'inventory_transfer'
     moduleLabel: string
     typeLabel: string
     description: string
@@ -361,6 +367,17 @@ export const CUSTOM_TEMPLATE_TARGETS: CustomTemplateTarget[] = [
         get typeLabel() { return i18n.t('travelTransportation.print.title') },
         get description() { return i18n.t('travelTransportation.print.a4Description') },
         nativeTemplateKey: TRAVEL_BOOKING_TEMPLATE_KEY,
+        nativeTemplateAvailable: true,
+        printFormat: 'a4',
+        page: { widthMm: 210, heightMm: 297 }
+    },
+    {
+        moduleTypeKey: INVENTORY_TRANSFER_BATCH_TEMPLATE_KEY,
+        workspaceModuleKey: 'inventory_transfer',
+        get moduleLabel() { return i18n.t('inventoryTransfer.title', { defaultValue: 'Inventory Transfer' }) },
+        get typeLabel() { return i18n.t('inventoryTransfer.batch.template', { defaultValue: 'Inventory Transfer Batch' }) },
+        get description() { return i18n.t('inventoryTransfer.batch.templateDescription', { defaultValue: 'Inventory transfer batch A4 print layout.' }) },
+        nativeTemplateKey: INVENTORY_TRANSFER_BATCH_TEMPLATE_KEY,
         nativeTemplateAvailable: true,
         printFormat: 'a4',
         page: { widthMm: 210, heightMm: 297 }
@@ -683,6 +700,7 @@ export type CustomTemplatePreviewOptions = {
     printLang?: string
     barcodeLabel?: BarcodeLabelData
     labelPageSizeMm?: LabelPrintPageSize
+    inventoryTransferBatchData?: InventoryTransferBatchPrintData
 }
 
 const SAMPLE_TRAVEL_BOOKING_DATA = {
@@ -1928,6 +1946,121 @@ function createPartnerAccountStatementPreview(options: CustomTemplatePreviewOpti
     }
 }
 
+function createInventoryTransferBatchPreview(options: CustomTemplatePreviewOptions): TemplatePreview {
+    const inventoryTransferBatchData = options.inventoryTransferBatchData || ({
+        batch: {
+            id: 'sample-transfer-batch',
+            workspaceId: 'sample-workspace',
+            transferNumber: 'TRF-00001',
+            sourceWorkspaceId: 'sample-workspace',
+            sourceWorkspaceName: 'Sample Workspace',
+            sourceStorageId: 'sample-main-storage',
+            sourceStorageName: 'Main Storage',
+            destinationWorkspaceId: 'sample-workspace',
+            destinationWorkspaceName: 'Sample Workspace',
+            destinationStorageId: 'sample-reserve-storage',
+            destinationStorageName: 'Reserve Storage',
+            performedBy: null,
+            transferredAt: '2026-10-01T10:30:00.000Z',
+            status: 'completed',
+            notes: 'Sample transfer',
+            createdAt: '2026-10-01T10:30:00.000Z',
+            updatedAt: '2026-10-01T10:30:00.000Z',
+            version: 1,
+            isDeleted: false,
+            syncStatus: 'synced',
+            lastSyncedAt: null,
+        },
+        productCount: 2,
+        performedByName: 'Sample User',
+        sourceIsBranch: true,
+        destinationIsBranch: true,
+        products: [
+            { transactionId: 'sample-out-a', productId: 'sample-product-a', productName: 'Product A', sku: 'SKU-A', quantity: 15, unit: 'pcs', batchAllocations: [] },
+            { transactionId: 'sample-out-b', productId: 'sample-product-b', productName: 'Product B', sku: 'SKU-B', quantity: 12, unit: 'pcs', batchAllocations: [] },
+        ],
+        printedAt: '2026-10-01T10:32:00.000Z',
+    } satisfies InventoryTransferBatchPrintData)
+    const configuredPrintLang = options.features?.print_lang
+    const printLang = options.printLang
+        || (configuredPrintLang && configuredPrintLang !== 'auto' ? configuredPrintLang : 'en')
+    const fixedPrintLang: TemplatePreview['fixedPrintLang'] = printLang.startsWith('ar')
+        ? 'ar'
+        : printLang.startsWith('ku')
+            ? 'ku'
+            : 'en'
+    const printT = i18n.getFixedT(fixedPrintLang)
+    const tokenValues = getInventoryTransferBatchPrintTokenValues(
+        inventoryTransferBatchData,
+        options.workspaceName,
+        (key, translationOptions) => printT(key, translationOptions),
+    )
+    const fixedKeys: Array<[string, string]> = [
+        ['workspaceName', i18n.t('inventoryTransfer.batch.workspace', { defaultValue: 'Workspace' })],
+        ['transferNumber', i18n.t('inventoryTransfer.batch.transferNumber', { defaultValue: 'Transfer Number' })],
+        ['transferDate', i18n.t('inventoryTransfer.batch.date', { defaultValue: 'Transfer Date / Time' })],
+        ['sourceWorkspace', i18n.t('inventoryTransfer.batch.fromWorkspace', { defaultValue: 'From Workspace' })],
+        ['sourceStorage', i18n.t('inventoryTransfer.batch.fromStorage', { defaultValue: 'From Storage' })],
+        ['destinationWorkspace', i18n.t('inventoryTransfer.batch.toWorkspace', { defaultValue: 'To Workspace' })],
+        ['destinationStorage', i18n.t('inventoryTransfer.batch.toStorage', { defaultValue: 'To Storage' })],
+        ['performedBy', i18n.t('inventoryTransfer.batch.performedBy', { defaultValue: 'Performed By' })],
+        ['status', i18n.t('inventoryTransfer.batch.statusLabel', { defaultValue: 'Status' })],
+        ['notes', i18n.t('inventoryTransfer.batch.notes', { defaultValue: 'Notes' })],
+        ['productCount', i18n.t('inventoryTransfer.batch.productCount', { defaultValue: 'Number of Products' })],
+        ['printedAt', i18n.t('inventoryTransfer.batch.printedAt', { defaultValue: 'Printed' })],
+        ['sharedWorkspace', i18n.t(
+            inventoryTransferBatchData.sourceIsBranch || inventoryTransferBatchData.destinationIsBranch
+                ? 'inventoryTransfer.batch.branch'
+                : 'inventoryTransfer.batch.workspace',
+            { defaultValue: inventoryTransferBatchData.sourceIsBranch || inventoryTransferBatchData.destinationIsBranch ? 'Branch' : 'Workspace' },
+        )],
+    ]
+    const productKeys = inventoryTransferBatchData.products.flatMap((_, index) => {
+        const row = index + 1
+        const label = i18n.t('inventoryTransfer.batch.productToken', { defaultValue: 'Product {{number}}', number: row })
+        return [
+            [`product${row}Name`, `${label} · ${i18n.t('inventoryTransfer.batch.product', { defaultValue: 'Product' })}`],
+            [`product${row}Sku`, `${label} · SKU`],
+            [`product${row}Quantity`, `${label} · ${i18n.t('inventoryTransfer.batch.quantity', { defaultValue: 'Quantity' })}`],
+            [`product${row}Unit`, `${label} · ${i18n.t('inventoryTransfer.batch.unit', { defaultValue: 'Unit' })}`],
+            [`product${row}Batch`, `${label} · ${i18n.t('inventoryTransfer.batch.batchLot', { defaultValue: 'Batch / Lot' })}`],
+        ] as Array<[string, string]>
+    })
+    const dataKeys: TemplatePreview['dataKeys'] = [...fixedKeys, ...productKeys].map(([key, label]) => ({
+        key,
+        label,
+        token: `{{${key}}}`,
+        group: key.startsWith('product') ? i18n.t('inventoryTransfer.batch.products', { defaultValue: 'Products' })
+            : i18n.t('inventoryTransfer.batch.template', { defaultValue: 'Inventory Transfer Batch' }),
+    }))
+
+    return {
+        fields: [],
+        dataKeys,
+        movableComponents: [],
+        supportsBackgroundEdit: true,
+        page: { widthMm: 210, heightMm: 297 },
+        fixedPrintLang,
+        resolveLayoutText: (text) => text.replace(/\{\{([A-Za-z0-9_]+)\}\}/g, (token, key: string) => tokenValues[key] ?? token),
+        createElement: (_values, _effectiveId, printLangOverride) => (
+            <InventoryTransferBatchPrintTemplate
+                data={inventoryTransferBatchData}
+                workspaceName={options.workspaceName}
+                workspaceDescription={options.features?.store_description}
+                logoUrl={options.features?.logo_url}
+                printLang={printLangOverride || fixedPrintLang}
+                sourceIsBranch={inventoryTransferBatchData.sourceIsBranch}
+                destinationIsBranch={inventoryTransferBatchData.destinationIsBranch}
+            />
+        ),
+        buildPdf: (element, printLangOverride) => generateTemplatePdf({
+            element,
+            format: 'a4',
+            printLang: printLangOverride || fixedPrintLang,
+        }),
+    }
+}
+
 function createPartnerProductMovementsPreview(options: CustomTemplatePreviewOptions): TemplatePreview {
     const partnerProductMovementsData = options.partnerProductMovementsData || {
         statement: { entries: [{ id: 'sample-product-movement', date: '2026-09-01T10:00:00Z', productId: 'sample-product', item: 'Product A', unit: 'Box', quantity: 5,
@@ -2318,6 +2451,10 @@ export function createCustomTemplatePreview(
         return createPartnerAccountStatementPreview(options)
     }
 
+    if (target.moduleTypeKey === INVENTORY_TRANSFER_BATCH_TEMPLATE_KEY) {
+        return createInventoryTransferBatchPreview(options)
+    }
+
     if (target.moduleTypeKey === PARTNER_PRODUCT_MOVEMENTS_TEMPLATE_KEY) {
         return createPartnerProductMovementsPreview(options)
     }
@@ -2387,11 +2524,13 @@ function nonBlankFields(fields: Record<string, string>) {
 function CustomTemplateLayoutOverlay({
     layout,
     heightMm,
-    reflowLowerPageText = false
+    reflowLowerPageText = false,
+    resolveLayoutText
 }: {
     layout: CustomTemplateLayout
     heightMm: number
     reflowLowerPageText?: boolean
+    resolveLayoutText?: (text: string) => string
 }) {
     const pageWidth = layout.page.widthMm
     const pageHeight = layout.page.heightMm
@@ -2473,7 +2612,7 @@ function CustomTemplateLayoutOverlay({
                             color: text.color || '#000000'
                         }}
                     >
-                        {text.text}
+                        {resolveLayoutText ? resolveLayoutText(text.text) : text.text}
                     </div>
                 )
             })}
@@ -2565,6 +2704,7 @@ export function renderCustomTemplateLayoutElement({
                         ? pageHeight
                     : Math.max(layoutHeight, getCustomTemplateLayoutHeightMm(layout))}
                 reflowLowerPageText={isTemplateTextFlowEnabled(preview, fieldValues)}
+                resolveLayoutText={preview.resolveLayoutText}
             />
         </div>
     )

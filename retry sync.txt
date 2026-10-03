@@ -1,6 +1,8 @@
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide
 
-Travel & Transportation Archive
+purchase order error, order_payment_source_not_found
+
+SQLite Syncing indicator
 
 ##
 
@@ -10,10 +12,6 @@ Overdue Loans
 
 ##
 Easy Expire Product 
-
-Navigation Rail Hover to expand
-
-Expand Testing Suite to Loans
 
 Fix POS Quick Order Time
 

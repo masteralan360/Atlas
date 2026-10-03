@@ -149,7 +149,7 @@ import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountS
 import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
 import { OrderDetailsView } from '@/ui/components/orders/OrderDetailsView'
 import { ModuleWideIntegrityAuditDialog } from '@/ui/components/integrity-audit/ModuleWideIntegrityAuditDialog'
-import { OrderProductMosaic } from '@/ui/components/orders/OrderProductAvatars'
+import { ProductMosaic } from '@/ui/components/ProductAvatars'
 import { OrderListPrintTemplate } from '@/ui/components/orders/OrderPrintTemplates'
 import { OrderStatusBadge } from '@/ui/components/orders/OrderStatusBadge'
 import { useUnitRegistry } from '@/ui/components/unitRegistry'
@@ -1696,7 +1696,11 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                 <TableRow key={row.id} className={isApprovalRequested ? 'bg-violet-50/70 hover:bg-violet-50 dark:bg-violet-950/20 dark:hover:bg-violet-950/30' : undefined}>
                                     <TableCell className="font-semibold">
                                         <div className="flex min-w-[11rem] items-center gap-3">
-                                            <OrderProductMosaic items={row.items} productImageUrls={productImageUrls} />
+                                            <ProductMosaic items={row.items.map((item) => ({
+                                                productId: item.productId,
+                                                productName: item.productName,
+                                                imageUrl: productImageUrls[item.productId],
+                                            }))} />
                                             <div className="min-w-0">
                                                 <div className="flex flex-wrap items-center gap-2">
                                                     <span>{row.orderNumber}</span>
@@ -1838,7 +1842,11 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                         >
                             <div className="flex justify-between items-start">
                                 <div className="flex min-w-0 items-start gap-3">
-                                    <OrderProductMosaic items={row.items} productImageUrls={productImageUrls} />
+                                    <ProductMosaic items={row.items.map((item) => ({
+                                        productId: item.productId,
+                                        productName: item.productName,
+                                        imageUrl: productImageUrls[item.productId],
+                                    }))} />
                                     <div className="min-w-0 space-y-1">
                                         <div className="flex flex-wrap items-center gap-2">
                                             <span className="text-sm font-bold text-primary">{row.orderNumber}</span>

@@ -15,6 +15,7 @@ import { Clock3, Download, LoaderCircle, RotateCw, Upload } from "lucide-react";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { useTranslation } from "react-i18next";
 import { useWorkspace } from "@/workspace";
+import { NavigationRailDisplayProvider } from "@/ui/navigation/NavigationRailDisplayContext";
 import { ExchangeRateProvider } from "@/context/ExchangeRateContext";
 import { DateRangeProvider } from "@/context/DateRangeContext";
 import { UiAccessProvider } from "@/context/UiAccessContext";
@@ -1401,6 +1402,7 @@ function App() {
   }, []);
 
   return (
+    <NavigationRailDisplayProvider>
     <AuthProvider>
       <DeviceTokenBootstrap />
       <WorkspaceProvider>
@@ -2555,6 +2557,7 @@ function App() {
         </WorkspacePermissionsProvider>
       </WorkspaceProvider>
     </AuthProvider>
+    </NavigationRailDisplayProvider>
   );
 }
 

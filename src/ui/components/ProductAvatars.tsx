@@ -4,16 +4,17 @@ import { Package } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 
-export type OrderMosaicItem = {
+export type ProductMosaicItem = {
     productId: string
     productName: string
+    imageUrl?: string | null
 }
 
-function getOrderProductImageSource(imageUrl?: string) {
+function getProductImageSource(imageUrl?: string | null) {
     return getProductImageDisplayUrl(imageUrl)
 }
 
-export function OrderProductMosaic({ items, productImageUrls }: { items: OrderMosaicItem[]; productImageUrls: Record<string, string> }) {
+export function ProductMosaic({ items }: { items: ProductMosaicItem[] }) {
     const [failedProductIds, setFailedProductIds] = useState<Set<string>>(() => new Set())
     const products = Array.from(new Map(items.map((item) => [item.productId, item])).values()).slice(0, 4)
     const layoutClass = products.length === 1
@@ -29,7 +30,7 @@ export function OrderProductMosaic({ items, productImageUrls }: { items: OrderMo
             aria-label={products.map((item) => item.productName).join(', ')}
         >
             {products.map((item, index) => {
-                const imageSource = getOrderProductImageSource(productImageUrls[item.productId])
+                const imageSource = getProductImageSource(item.imageUrl)
                 const hasImage = Boolean(imageSource && !failedProductIds.has(item.productId))
                 const hasStartDivider = products.length === 2
                     ? index === 1
@@ -67,17 +68,15 @@ export function OrderProductMosaic({ items, productImageUrls }: { items: OrderMo
     )
 }
 
-export function OrderProductAvatar({
-    productId,
+export function ProductAvatar({
     productName,
-    productImageUrls
+    imageUrl
 }: {
-    productId: string
     productName: string
-    productImageUrls: Record<string, string>
+    imageUrl?: string | null
 }) {
     const [imageFailed, setImageFailed] = useState(false)
-    const imageSource = getOrderProductImageSource(productImageUrls[productId])
+    const imageSource = getProductImageSource(imageUrl)
     const hasImage = Boolean(imageSource && !imageFailed)
 
     return (

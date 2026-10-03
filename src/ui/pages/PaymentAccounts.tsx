@@ -92,7 +92,7 @@ import {
 } from '@/ui/components'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
-import { CurrencySelector } from '@/ui/components/CurrencySelector'
+import { CurrencySelector } from '@/ui/components/CurrencySelector.tsx'
 import { CapitalPoolsPanel } from '@/ui/components/payments/CapitalPoolsPanel'
 import { defaultPaymentAccountIcon, PAYMENT_ACCOUNT_ICON_OPTIONS, PaymentAccountIcon } from '@/ui/components/payments/PaymentAccountIcon'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
