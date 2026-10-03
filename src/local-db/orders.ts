@@ -368,14 +368,20 @@ async function markEntitiesSynced(tableName: SyncableTableName, ids: string[]) {
     await Promise.all(ids.map((id) => table.update(id, { syncStatus: 'synced', lastSyncedAt: syncedAt })))
 }
 
-async function queueOfflineUpserts(tableName: SyncableTableName, entities: Array<{ id: string; version: number } & Record<string, unknown>>, workspaceId: string) {
+async function queueOfflineUpserts(
+    tableName: SyncableTableName,
+    entities: Array<{ id: string; version: number } & Record<string, unknown>>,
+    workspaceId: string,
+    options: Pick<SyncUpsertOptions, 'omitFields'> = {}
+) {
     await Promise.all(entities.map((entity) =>
         addToOfflineMutations(
             tableName,
             entity.id,
             entity.version > 1 ? 'update' : 'create',
             entity,
-            workspaceId
+            workspaceId,
+            options
         )
     ))
 }
@@ -410,7 +416,7 @@ async function syncUpsertEntities(
         if (options.requireRemoteConfirmation) {
             throw createRemoteOrderSaveConfirmationError()
         }
-        await queueOfflineUpserts(tableName, entities, workspaceId)
+        await queueOfflineUpserts(tableName, entities, workspaceId, options)
         return
     }
 
@@ -506,7 +512,7 @@ async function syncUpsertEntities(
             throw normalizeSupabaseActionError(error)
         }
 
-        await queueOfflineUpserts(tableName, entities, workspaceId)
+        await queueOfflineUpserts(tableName, entities, workspaceId, options)
     }
 }
 
@@ -2758,7 +2764,12 @@ export function useWorkspaceOrderInstallments(workspaceId: string | undefined) {
 export async function rebuildOrderPaymentState(
     orderType: OrderType,
     orderId: string,
-    options: { throwOnOrderSyncError?: boolean; skipCommissionReconcile?: boolean; deferOrderSync?: boolean } = {}
+    options: {
+        throwOnOrderSyncError?: boolean
+        skipCommissionReconcile?: boolean
+        deferOrderSync?: boolean
+        preserveRemoteItemSnapshots?: boolean
+    } = {}
 ) {
     const orderTable = orderType === 'sales' ? db.sales_orders : db.purchase_orders
     const sourceType = orderType === 'sales' ? 'sales_order' : 'purchase_order'
@@ -2811,6 +2822,9 @@ export async function rebuildOrderPaymentState(
         ...getSyncMetadata(order.workspaceId, now)
     }))
     const nextDueDate = rebuiltInstallments.find((item) => item.balanceAmount > 0)?.dueDate || null
+    const hasRemoteOrderSnapshot = options.preserveRemoteItemSnapshots
+        ?? (order.syncStatus === 'synced' || activePayments.some((payment) => payment.syncStatus === 'synced'))
+    const preserveRemoteItemSnapshots = order.status !== 'draft' && hasRemoteOrderSnapshot
     const updated = {
         ...order,
         isPaid: paymentStatus === 'paid',
@@ -2839,7 +2853,13 @@ export async function rebuildOrderPaymentState(
             orderType === 'sales' ? 'sales_orders' : 'purchase_orders',
             [updated as unknown as Record<string, unknown> & { id: string; version: number }],
             order.workspaceId,
-            { throwOnNonRetriableError: options.throwOnOrderSyncError }
+            {
+                throwOnNonRetriableError: options.throwOnOrderSyncError,
+                // A synced order past Draft has immutable lines. Payment-state
+                // writes should keep those server snapshots; unsynced orders
+                // still need their pending item payload.
+                ...(preserveRemoteItemSnapshots ? { omitFields: ['items'] } : {})
+            }
         )]),
         syncUpsertEntities(
             'order_installments',
@@ -2979,7 +2999,8 @@ export async function recordOrderPayment(
     })
     try {
         const updatedOrder = await rebuildOrderPaymentState(input.orderType, order.id, {
-            throwOnOrderSyncError: true
+            throwOnOrderSyncError: true,
+            preserveRemoteItemSnapshots: transaction.syncStatus === 'synced'
         })
         return { order: updatedOrder, transaction }
     } catch (error) {

@@ -3768,7 +3768,9 @@ export async function reversePaymentTransaction(
         }
       })
       const { rebuildOrderPaymentState } = await import('./orders')
-      await rebuildOrderPaymentState('sales', transaction.sourceRecordId)
+      await rebuildOrderPaymentState('sales', transaction.sourceRecordId, {
+        preserveRemoteItemSnapshots: reversal.syncStatus === 'synced'
+      })
       return reversal
     }
 
@@ -3795,7 +3797,9 @@ export async function reversePaymentTransaction(
         }
       })
       const { rebuildOrderPaymentState } = await import('./orders')
-      await rebuildOrderPaymentState('purchase', transaction.sourceRecordId)
+      await rebuildOrderPaymentState('purchase', transaction.sourceRecordId, {
+        preserveRemoteItemSnapshots: reversal.syncStatus === 'synced'
+      })
       return reversal
     }
 

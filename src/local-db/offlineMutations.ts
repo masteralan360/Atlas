@@ -205,7 +205,8 @@ export async function addToOfflineMutations(
     entityId: string,
     operation: OfflineMutation['operation'],
     payload: Record<string, unknown>,
-    workspaceId: string
+    workspaceId: string,
+    options: { omitFields?: readonly string[] } = {}
 ): Promise<void> {
     if (
         isLocalWorkspaceMode(workspaceId)
@@ -213,6 +214,11 @@ export async function addToOfflineMutations(
         || !isCloudInventoryTransactionMutation(entityType, payload)
     ) {
         return
+    }
+
+    const queuedPayload = { ...payload }
+    for (const field of options.omitFields ?? []) {
+        delete queuedPayload[field]
     }
 
     const existing = await db.offline_mutations
@@ -229,16 +235,20 @@ export async function addToOfflineMutations(
 
             await db.offline_mutations.update(existing.id, {
                 operation: 'delete',
-                payload: { ...payload, id: entityId },
+                payload: { ...queuedPayload, id: entityId },
                 createdAt: new Date().toISOString()
             })
             return
         }
 
         if (operation === 'update' || operation === 'create') {
+            const mergedPayload = { ...existing.payload, ...queuedPayload }
+            for (const field of options.omitFields ?? []) {
+                delete mergedPayload[field]
+            }
             await db.offline_mutations.update(existing.id, {
                 operation: existing.operation === 'delete' ? 'update' : existing.operation,
-                payload: { ...existing.payload, ...payload },
+                payload: mergedPayload,
                 createdAt: new Date().toISOString()
             })
             return
@@ -251,7 +261,7 @@ export async function addToOfflineMutations(
         entityType,
         entityId,
         operation,
-        payload,
+        payload: queuedPayload,
         createdAt: new Date().toISOString(),
         status: 'pending'
     })
