@@ -110,6 +110,7 @@ export function WorkspaceWarmup() {
         }
         if (hasFeature('post_service')) tasks.push(() => import('@/ui/pages/PostService'))
         if (hasFeature('car_rental')) tasks.push(() => import('@/ui/pages/CarRental'))
+        if (hasFeature('garden_management')) tasks.push(() => import('@/ui/pages/GardenManagement'))
         if (hasFeature('clinical_appointments')) {
           tasks.push(
             () => import('@/ui/pages/ClinicalAppointments'),

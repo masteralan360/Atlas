@@ -559,6 +559,101 @@ export interface AgentFacetInput {
   status: AgentStatus
 }
 
+export type GardenSiteStatus = 'active' | 'inactive'
+export type GardenProjectStatus = 'draft' | 'quoted' | 'approved' | 'in_progress' | 'on_hold' | 'completed' | 'cancelled'
+export type GardenMaintenanceContractStatus = 'draft' | 'active' | 'paused' | 'completed' | 'cancelled'
+export type GardenJobKind = 'construction' | 'maintenance' | 'ad_hoc'
+export type GardenJobStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled'
+export type GardenJobOutcome = 'ok' | 'needs_follow_up'
+
+export interface GardenSite extends BaseEntity {
+  name: string
+  businessPartnerId?: string | null
+  homeownerName: string
+  homeownerPhone?: string | null
+  address: string
+  city?: string | null
+  latitude?: number | null
+  longitude?: number | null
+  accessNotes?: string | null
+  status: GardenSiteStatus
+  createdBy?: string | null
+}
+
+export interface GardenConstructionProject extends BaseEntity {
+  siteId: string
+  businessPartnerId?: string | null
+  projectNo: string
+  title: string
+  scope?: string | null
+  status: GardenProjectStatus
+  quotedAmount?: number | null
+  agreedAmount?: number | null
+  estimatedCost?: number | null
+  actualCost?: number | null
+  currency: CurrencyCode
+  startsOn?: string | null
+  targetCompletionOn?: string | null
+  completedAt?: string | null
+  notes?: string | null
+  createdBy?: string | null
+}
+
+export interface GardenMaintenanceContract extends BaseEntity {
+  siteId: string
+  businessPartnerId?: string | null
+  contractNo: string
+  status: GardenMaintenanceContractStatus
+  startsOn: string
+  endsOn: string
+  monthlyFee: number
+  currency: CurrencyCode
+  visitsPerMonth: number
+  /** Local month days used for recurring visit slots, for example [1, 8, 15, 22]. */
+  visitDays: number[]
+  serviceTime: string
+  timeZone: string
+  notes?: string | null
+  createdBy?: string | null
+}
+
+export interface GardenJob extends BaseEntity {
+  siteId: string
+  projectId?: string | null
+  contractId?: string | null
+  sourceKey?: string | null
+  kind: GardenJobKind
+  title: string
+  scheduledAt: string
+  timeZone: string
+  plannedDurationMinutes?: number | null
+  status: GardenJobStatus
+  outcome?: GardenJobOutcome | null
+  routeOrder: number
+  instructions?: string | null
+  completedAt?: string | null
+  completedBy?: string | null
+  completionNote?: string | null
+  createdBy?: string | null
+}
+
+export interface GardenJobAssignment extends BaseEntity {
+  jobId: string
+  userId: string
+  userNameSnapshot: string
+  routeOrder: number
+  assignedBy?: string | null
+  unassignedAt?: string | null
+}
+
+export interface GardenJobActivity extends BaseEntity {
+  jobId: string
+  actorUserId?: string | null
+  activityType: 'created' | 'scheduled' | 'rescheduled' | 'assigned' | 'unassigned' | 'started' | 'completed' | 'reopened' | 'cancelled'
+  summary: string
+  payload?: Record<string, unknown>
+}
+
 export type FleetVehicleStatus = 'active' | 'maintenance' | 'inactive'
 export type FleetAssignmentStatus = 'active' | 'ended'
 
@@ -2816,6 +2911,12 @@ export interface SyncQueueItem {
     | 'sales_agent_commission_reconciliation'
     | 'fleet_vehicles'
     | 'fleet_vehicle_assignments'
+    | 'garden_sites'
+    | 'garden_construction_projects'
+    | 'garden_maintenance_contracts'
+    | 'garden_jobs'
+    | 'garden_job_assignments'
+    | 'garden_job_activity'
     | 'delivery_merchant_profiles'
     | 'delivery_shipments'
     | 'delivery_shipment_events'
@@ -3057,6 +3158,12 @@ export interface OfflineMutation {
     | 'sales_agent_commission_reconciliation'
     | 'fleet_vehicles'
     | 'fleet_vehicle_assignments'
+    | 'garden_sites'
+    | 'garden_construction_projects'
+    | 'garden_maintenance_contracts'
+    | 'garden_jobs'
+    | 'garden_job_assignments'
+    | 'garden_job_activity'
     | 'delivery_merchant_profiles'
     | 'delivery_shipments'
     | 'delivery_shipment_events'

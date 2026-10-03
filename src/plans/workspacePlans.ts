@@ -26,6 +26,7 @@ export type PlanModuleKey =
     | 'agent_sales_accounts'
     | 'post_service'
     | 'car_rental'
+    | 'garden_management'
     | 'travel_transportation'
     | 'customers'
     | 'suppliers'
@@ -60,6 +61,7 @@ export type WorkspaceFeatureKey =
     | 'agent_sales_accounts'
     | 'post_service'
     | 'car_rental'
+    | 'garden_management'
     | 'travel_transportation'
     | 'ecommerce'
     | 'real_estate'
@@ -253,6 +255,7 @@ export const WORKSPACE_FEATURE_MODULE_MAP: Record<WorkspaceFeatureKey, PlanModul
     agent_sales_accounts: 'agent_sales_accounts',
     post_service: 'post_service',
     car_rental: 'car_rental',
+    garden_management: 'garden_management',
     travel_transportation: 'travel_transportation',
     ecommerce: 'ecommerce',
     orders: 'orders',

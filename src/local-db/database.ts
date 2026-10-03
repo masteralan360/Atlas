@@ -55,6 +55,12 @@ import type {
   AgentProductCommissionEntry,
   FleetVehicle,
   FleetVehicleAssignment,
+  GardenSite,
+  GardenConstructionProject,
+  GardenMaintenanceContract,
+  GardenJob,
+  GardenJobAssignment,
+  GardenJobActivity,
   RentalVehicle,
   RentalRequest,
   RentalContract,
@@ -459,6 +465,12 @@ export class AtlasDatabase extends Dexie {
   agent_product_commission_entries!: EntityTable<AgentProductCommissionEntry, 'id'>
   fleet_vehicles!: EntityTable<FleetVehicle, 'id'>
   fleet_vehicle_assignments!: EntityTable<FleetVehicleAssignment, 'id'>
+  garden_sites!: EntityTable<GardenSite, 'id'>
+  garden_construction_projects!: EntityTable<GardenConstructionProject, 'id'>
+  garden_maintenance_contracts!: EntityTable<GardenMaintenanceContract, 'id'>
+  garden_jobs!: EntityTable<GardenJob, 'id'>
+  garden_job_assignments!: EntityTable<GardenJobAssignment, 'id'>
+  garden_job_activity!: EntityTable<GardenJobActivity, 'id'>
   rental_vehicles!: EntityTable<RentalVehicle, 'id'>
   rental_requests!: EntityTable<RentalRequest, 'id'>
   rental_contracts!: EntityTable<RentalContract, 'id'>
@@ -3674,6 +3686,21 @@ export class AtlasDatabase extends Dexie {
       inventory_transfer_sequences: 'workspaceId'
     })
 
+    this.version(143).stores({
+      garden_sites:
+        'id, workspaceId, name, businessPartnerId, status, updatedAt, isDeleted, syncStatus, [workspaceId+status], [workspaceId+updatedAt]',
+      garden_construction_projects:
+        'id, workspaceId, siteId, businessPartnerId, projectNo, status, updatedAt, isDeleted, syncStatus, [workspaceId+status], [workspaceId+siteId], [workspaceId+updatedAt]',
+      garden_maintenance_contracts:
+        'id, workspaceId, siteId, businessPartnerId, contractNo, status, startsOn, endsOn, updatedAt, isDeleted, syncStatus, [workspaceId+status], [workspaceId+siteId], [workspaceId+updatedAt]',
+      garden_jobs:
+        'id, workspaceId, siteId, projectId, contractId, sourceKey, kind, scheduledAt, status, updatedAt, isDeleted, syncStatus, [workspaceId+scheduledAt], [workspaceId+status], [workspaceId+projectId], [workspaceId+contractId], [workspaceId+updatedAt]',
+      garden_job_assignments:
+        'id, workspaceId, jobId, userId, unassignedAt, updatedAt, isDeleted, syncStatus, [workspaceId+jobId], [workspaceId+userId], [userId+unassignedAt]',
+      garden_job_activity:
+        'id, workspaceId, jobId, activityType, createdAt, updatedAt, isDeleted, syncStatus, [workspaceId+jobId], [workspaceId+createdAt]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
@@ -3882,6 +3909,12 @@ export class AtlasDatabase extends Dexie {
       'agent_product_commission_entries',
       'fleet_vehicles',
       'fleet_vehicle_assignments',
+      'garden_sites',
+      'garden_construction_projects',
+      'garden_maintenance_contracts',
+      'garden_jobs',
+      'garden_job_assignments',
+      'garden_job_activity',
       'rental_vehicles',
       'rental_requests',
       'rental_contracts',
@@ -4089,6 +4122,12 @@ export async function clearDatabase(): Promise<void> {
       db.manual_entries,
       db.fleet_vehicles,
       db.fleet_vehicle_assignments,
+      db.garden_sites,
+      db.garden_construction_projects,
+      db.garden_maintenance_contracts,
+      db.garden_jobs,
+      db.garden_job_assignments,
+      db.garden_job_activity,
       db.rental_vehicles,
       db.rental_requests,
       db.rental_contracts,
@@ -4168,6 +4207,12 @@ export async function clearDatabase(): Promise<void> {
       await db.manual_entries.clear()
       await db.fleet_vehicles.clear()
       await db.fleet_vehicle_assignments.clear()
+      await db.garden_sites.clear()
+      await db.garden_construction_projects.clear()
+      await db.garden_maintenance_contracts.clear()
+      await db.garden_jobs.clear()
+      await db.garden_job_assignments.clear()
+      await db.garden_job_activity.clear()
       await db.rental_vehicles.clear()
       await db.rental_requests.clear()
       await db.rental_contracts.clear()

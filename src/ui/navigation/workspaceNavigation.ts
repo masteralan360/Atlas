@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import {
   ArrowRightLeft,
   Car,
+  Leaf,
   Plane,
   BarChart3,
   Boxes,
@@ -327,6 +328,13 @@ export function buildWorkspaceNavigation({
           ],
         },
       ]
+      : []),
+    ...(isCoreRole && hasFeature("garden_management")
+      ? [{
+        name: t("gardenManagement.title"),
+        href: "/garden",
+        icon: Leaf,
+      }]
       : []),
     ...(isCoreRole && hasFeature("travel_transportation") && canAccessPermission("travelTransportation.access")
       ? [

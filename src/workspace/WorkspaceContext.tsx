@@ -79,6 +79,7 @@ export interface WorkspaceFeatures {
     agent_sales_accounts: boolean
     post_service: boolean
     car_rental: boolean
+    garden_management: boolean
     travel_transportation: boolean
     ecommerce: boolean
     real_estate: boolean
@@ -186,6 +187,7 @@ const PLAN_DERIVED_FEATURE_KEYS: ModuleFeatureKey[] = [
     'agent_sales_accounts',
     'post_service',
     'car_rental',
+    'garden_management',
     'travel_transportation',
     'ecommerce',
     'real_estate',
@@ -269,6 +271,7 @@ const defaultFeatures: WorkspaceFeatures = {
     agents: false,
     post_service: false,
     car_rental: false,
+    garden_management: false,
     travel_transportation: false,
     clinical_appointments: false,
     print_lang: 'auto',

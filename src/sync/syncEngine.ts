@@ -76,6 +76,12 @@ const SYNC_PULL_TABLES = [
   "agent_product_commission_entries",
   "fleet_vehicles",
   "fleet_vehicle_assignments",
+  "garden_sites",
+  "garden_construction_projects",
+  "garden_maintenance_contracts",
+  "garden_jobs",
+  "garden_job_assignments",
+  "garden_job_activity",
   "rental_vehicles",
   "rental_requests",
   "rental_contracts",
@@ -362,6 +368,19 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
       break;
     case "agents":
       addParent("business_partners", "businessPartnerId", "business_partner_id");
+      break;
+    case "garden_construction_projects":
+    case "garden_maintenance_contracts":
+      addParent("garden_sites", "siteId", "site_id");
+      break;
+    case "garden_jobs":
+      addParent("garden_sites", "siteId", "site_id");
+      addParent("garden_construction_projects", "projectId", "project_id");
+      addParent("garden_maintenance_contracts", "contractId", "contract_id");
+      break;
+    case "garden_job_assignments":
+    case "garden_job_activity":
+      addParent("garden_jobs", "jobId", "job_id");
       break;
     case "agent_commission_memberships":
       addParent("agents", "agentId", "agent_id");
@@ -1698,6 +1717,16 @@ export async function processMutationQueue(
           } else {
             throw error;
           }
+        } else if (entityType === "garden_jobs" && operation === "update") {
+          const { data, error } = await client
+            .from(remoteTableName)
+            .update(dbPayload)
+            .eq("id", entityId)
+            .eq("workspace_id", workspaceId)
+            .select("id")
+            .maybeSingle();
+          if (error) throw error;
+          if (!data) throw new Error("Garden job update was not applied.");
         } else {
           const { error } = await client.from(remoteTableName).upsert(dbPayload);
           if (error) throw error;

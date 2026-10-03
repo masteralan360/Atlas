@@ -73,6 +73,15 @@ const rentalTables = new Set([
     'rental_contracts'
 ])
 
+const gardenTables = new Set([
+    'garden_sites',
+    'garden_construction_projects',
+    'garden_maintenance_contracts',
+    'garden_jobs',
+    'garden_job_assignments',
+    'garden_job_activity'
+])
+
 const paymentAccountTables = new Set([
     'payment_accounts',
     'payment_account_member_restrictions',
@@ -127,6 +136,7 @@ const fxClient = supabase.schema('fx')
 const clinicsClient = supabase.schema('clinics')
 const fleetClient = supabase.schema('fleet')
 const rentalClient = supabase.schema('car_rental')
+const gardenClient = supabase.schema('garden')
 const deliveryClient = supabase.schema('delivery')
 const paymentAccountsClient = supabase.schema('payment_accounts')
 
@@ -180,6 +190,10 @@ export function isFleetTable(tableName: string): boolean {
 
 export function isRentalTable(tableName: string): boolean {
     return rentalTables.has(tableName)
+}
+
+export function isGardenTable(tableName: string): boolean {
+    return gardenTables.has(tableName)
 }
 
 export function isDeliveryTable(tableName: string): boolean {
@@ -241,6 +255,10 @@ export function getSupabaseClientForTable(tableName: string) {
 
     if (isRentalTable(tableName)) {
         return rentalClient
+    }
+
+    if (isGardenTable(tableName)) {
+        return gardenClient
     }
 
     if (isDeliveryTable(tableName)) {

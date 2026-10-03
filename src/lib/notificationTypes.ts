@@ -6,6 +6,9 @@ export const WORKSPACE_NOTIFICATION_TYPES = [
     'expense_item_overdue',
     'payroll_overdue',
     'inventory_low_stock',
+    'garden_job_assigned',
+    'garden_job_rescheduled',
+    'garden_job_completed',
 ] as const
 
 export type WorkspaceNotificationType = typeof WORKSPACE_NOTIFICATION_TYPES[number]
