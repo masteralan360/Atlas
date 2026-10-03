@@ -103,10 +103,31 @@ async function syncUpsertEntities(tableName: TravelTableName, entities: TravelSy
 
     try {
         const client = getSupabaseClientForTable(tableName)
-        const { error } = await runSupabaseAction(`${tableName}.sync`, () =>
-            client.from(tableName).upsert(entities.map(sanitizeSyncPayload), { onConflict: 'id' })
-        )
-        if (error) throw error
+        if (tableName === BOOKINGS_TABLE) {
+            const { data, error } = await runSupabaseAction(`${tableName}.sync`, () =>
+                client.from(tableName)
+                    .upsert(entities.map(sanitizeSyncPayload), { onConflict: 'id' })
+                    .select('id, booking_number')
+            )
+            if (error) throw error
+
+            const bookingNumbers = new Map<string, string>()
+            for (const row of Array.isArray(data) ? data : []) {
+                if (!row || typeof row !== 'object') continue
+                const record = row as Record<string, unknown>
+                if (typeof record.id === 'string' && typeof record.booking_number === 'string') {
+                    bookingNumbers.set(record.id, record.booking_number)
+                }
+            }
+            await Promise.all([...bookingNumbers].map(([id, bookingNumber]) =>
+                db.travel_bookings.update(id, { bookingNumber })
+            ))
+        } else {
+            const { error } = await runSupabaseAction(`${tableName}.sync`, () =>
+                client.from(tableName).upsert(entities.map(sanitizeSyncPayload), { onConflict: 'id' })
+            )
+            if (error) throw error
+        }
         await markEntitiesSynced(tableName, entities.map((entity) => entity.id))
     } catch (error) {
         console.error(`[Travel & Transportation] Failed to sync ${tableName}:`, error)

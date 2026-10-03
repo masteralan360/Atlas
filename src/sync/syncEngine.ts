@@ -1655,6 +1655,33 @@ export async function processMutationQueue(
             });
             entityHandledInline = true;
           }
+        } else if (entityType === "travel_bookings") {
+          const { data: remoteBookings, error } = await client
+            .from(remoteTableName)
+            .upsert(dbPayload)
+            .select("id, booking_number");
+
+          if (error) throw error;
+
+          const remoteBooking = Array.isArray(remoteBookings)
+            ? remoteBookings.find(
+              (row) =>
+                row &&
+                typeof row === "object" &&
+                (row as { id?: unknown }).id === entityId,
+            ) as { booking_number?: unknown } | undefined
+            : undefined;
+          const bookingNumber = remoteBooking?.booking_number;
+
+          if (typeof bookingNumber === "string" && bookingNumber.length > 0) {
+            const syncedAt = new Date().toISOString();
+            await db.travel_bookings.update(entityId, {
+              bookingNumber,
+              syncStatus: "synced",
+              lastSyncedAt: syncedAt,
+            });
+            entityHandledInline = true;
+          }
         } else if (entityType === "sales_order_agent_assignments") {
           const { error } = await client.from(remoteTableName).upsert(dbPayload);
           if (!error) {

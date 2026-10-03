@@ -98,6 +98,121 @@ async function repairSalesOrderAgentAssignmentWorkspaceMutations(
     return unrepairedMutationIds
 }
 
+/**
+ * Older Travel & Transportation queue items can retain the workspace that was
+ * active when they were queued, even when the passenger and its booking are a
+ * valid pair in the currently selected workspace. Only repair from the local
+ * relationship when both records agree; never move a passenger across workspaces.
+ */
+async function repairTravelPassengerWorkspaceMutations(
+    workspaceId: string,
+    mutations: OfflineMutation[]
+) {
+    const unrepairedMutationIds = new Set<string>()
+    for (const mutation of mutations) {
+        if (
+            mutation.entityType !== 'travel_passengers'
+            || mutation.operation === 'delete'
+            || !/passenger booking must belong to the same active workspace/i.test(mutation.error ?? '')
+        ) {
+            continue
+        }
+
+        const bookingId = payloadId(mutation.payload, 'bookingId', 'booking_id')
+        if (!bookingId) {
+            unrepairedMutationIds.add(mutation.id)
+            continue
+        }
+
+        const [passenger, booking] = await Promise.all([
+            db.travel_passengers.get(mutation.entityId),
+            db.travel_bookings.get(bookingId),
+        ])
+        const queuedBookingDelete = mutations.some((candidate) => (
+            candidate.entityType === 'travel_bookings'
+            && candidate.entityId === bookingId
+            && candidate.operation === 'delete'
+        ))
+        if (
+            !passenger
+            || passenger.isDeleted
+            || passenger.bookingId !== bookingId
+            || !booking
+            || booking.isDeleted
+            || booking.id !== bookingId
+            || passenger.workspaceId !== booking.workspaceId
+            || booking.workspaceId !== workspaceId
+            || queuedBookingDelete
+        ) {
+            unrepairedMutationIds.add(mutation.id)
+            continue
+        }
+
+        const payload = {
+            ...mutation.payload,
+            workspaceId,
+            workspace_id: workspaceId,
+            bookingId,
+            booking_id: bookingId,
+        }
+        await db.travel_passengers.update(passenger.id, {
+            workspaceId,
+            syncStatus: 'pending',
+            lastSyncedAt: null,
+        })
+        await db.offline_mutations.update(mutation.id, { workspaceId, payload })
+
+        const queuedBookingMutation = mutations.find((candidate) => (
+            candidate.entityType === 'travel_bookings'
+            && candidate.entityId === booking.id
+            && candidate.operation !== 'delete'
+        ))
+        if (queuedBookingMutation) {
+            const bookingPayload = {
+                ...queuedBookingMutation.payload,
+                workspaceId,
+                workspace_id: workspaceId,
+            }
+            await db.offline_mutations.update(queuedBookingMutation.id, {
+                workspaceId,
+                payload: bookingPayload,
+            })
+            queuedBookingMutation.workspaceId = workspaceId
+            queuedBookingMutation.payload = bookingPayload
+        } else {
+            const alreadyPending = await db.offline_mutations
+                .where('[entityType+entityId+status]')
+                .equals(['travel_bookings', booking.id, 'pending'])
+                .first()
+            if (alreadyPending) {
+                const bookingPayload = {
+                    ...alreadyPending.payload,
+                    workspaceId,
+                    workspace_id: workspaceId,
+                }
+                await db.offline_mutations.update(alreadyPending.id, {
+                    workspaceId,
+                    payload: bookingPayload,
+                })
+            } else {
+                await addToOfflineMutations(
+                    'travel_bookings',
+                    booking.id,
+                    booking.version > 1 ? 'update' : 'create',
+                    booking as unknown as Record<string, unknown>,
+                    workspaceId,
+                )
+            }
+        }
+        await db.travel_bookings.update(booking.id, {
+            syncStatus: 'pending',
+            lastSyncedAt: null,
+        })
+    }
+
+    return unrepairedMutationIds
+}
+
 async function queueRedispatchedPostponedVoiceCleanup(
     workspaceId: string,
     mutations: OfflineMutation[]
@@ -307,7 +422,11 @@ export async function retrySyncIntegrityMutations(workspaceId: string): Promise<
     await requeueDeliveryShipmentParents(workspaceId, rows)
     await queueRedispatchedPostponedVoiceCleanup(workspaceId, rows)
     const unrepairedAssignmentMutationIds = await repairSalesOrderAgentAssignmentWorkspaceMutations(rows)
-    const rowsToRetry = rows.filter((mutation) => !unrepairedAssignmentMutationIds.has(mutation.id))
+    const unrepairedTravelPassengerMutationIds = await repairTravelPassengerWorkspaceMutations(workspaceId, rows)
+    const rowsToRetry = rows.filter((mutation) => (
+        !unrepairedAssignmentMutationIds.has(mutation.id)
+        && !unrepairedTravelPassengerMutationIds.has(mutation.id)
+    ))
 
     await db.offline_mutations.bulkUpdate(rowsToRetry.map((mutation) => ({
         key: mutation.id,
