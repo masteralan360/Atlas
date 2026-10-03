@@ -56,8 +56,11 @@ function ledgerData(overrides: Partial<PartnerAccountStatementData> = {}): Partn
     salesOrders: [order],
     purchaseOrders: [purchaseOrder],
     statementOrders: [order, purchaseOrder],
-    salesAccountAgentIds: [agentId],
     settlementTransactions: [
+      payment('agent-original-receipt', {
+        amount: 100,
+        reversalOfTransactionId: null
+      }),
       payment('agent-return-refund', {
         reversalOfTransactionId: 'agent-original-receipt',
         metadata: { orderReturnId: 'return-agent-1', returnReason: 'customer_returned' }
@@ -79,15 +82,19 @@ function ledgerData(overrides: Partial<PartnerAccountStatementData> = {}): Partn
 }
 
 describe('sales-account agent return refunds in partner statements', () => {
-  it('omits only linked agent return-reversal debits and keeps corrections and supplier refunds', () => {
+  it('keeps linked return counter-entries so they net against the original receipt', () => {
     const [ledger] = buildPartnerAccountStatementLedger(ledgerData())
 
     expect(ledger.entries.map((entry) => entry.id)).toEqual([
       'purchase-order:purchase-order',
       'sales-order:agent-order',
       'payment:agent-correction-reversal',
+      'payment:agent-original-receipt',
+      'payment:agent-return-refund',
       'payment:supplier-refund'
     ])
+    expect(ledger.entries.find((entry) => entry.id === 'payment:agent-original-receipt')?.delta).toBe(-100)
+    expect(ledger.entries.find((entry) => entry.id === 'payment:agent-return-refund')?.delta).toBe(100)
     expect(ledger.entries.find((entry) => entry.id === 'payment:agent-correction-reversal')?.delta).toBe(20)
     expect(ledger.entries.find((entry) => entry.id === 'payment:supplier-refund')?.delta).toBe(-50)
     expect(ledger.closingBalance).toBe(0)

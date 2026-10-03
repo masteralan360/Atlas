@@ -52,7 +52,7 @@ export type PartnerAccountStatementData = {
   itemizePosSaleLoans?: boolean
   /** Enables product-commission columns on an eligible agent statement. */
   isAgentCommissionStatement?: boolean
-  /** Agent IDs linked to the selected partner, used to keep agent-only refund rules scoped. */
+  /** Agent IDs linked to the selected partner, used to apply agent return-refund balance rules. */
   salesAccountAgentIds?: string[]
   salesOrders: SalesOrder[]
   salesOrderReturns?: OrderReturn[]
@@ -285,7 +285,7 @@ function metadataFlag(metadata: PaymentTransaction['metadata'], key: string) {
   return metadata?.[key] === true
 }
 
-function isSalesAccountAgentReturnReversal(
+function isSalesAccountAgentPartialReturnReversal(
   transaction: PaymentTransaction,
   salesOrdersById: Map<string, SalesOrder>,
   salesAccountAgentIds: Set<string>
@@ -303,7 +303,11 @@ function isSalesAccountAgentReturnReversal(
   if (!hasOrderReturnReference) return false
 
   const order = salesOrdersById.get(transaction.sourceRecordId)
-  return Boolean(order?.salesAccountAgentId && salesAccountAgentIds.has(order.salesAccountAgentId))
+  if (!order?.salesAccountAgentId || !salesAccountAgentIds.has(order.salesAccountAgentId)) return false
+
+  const hasPartialReturnTotals =
+    Number(order.total || 0) > 0.000001 && Number(order.returnedAmount || 0) > 0.000001
+  return order.returnStatus === 'partial' || (order.returnStatus !== 'full' && hasPartialReturnTotals)
 }
 
 function getLegacyReturnReason(note: string | null | undefined) {
@@ -752,10 +756,7 @@ function createPaymentEntries(data: PartnerAccountStatementData): PartnerAccount
   return (data.settlementTransactions || [])
     .filter((transaction) => !transaction.isDeleted)
     .filter((transaction) => !collapsedPayoutIds.has(transaction.sourceSubrecordId || ''))
-    // Returned customer cash is not a new amount due from the sales-account agent.
-    // Keep the immutable reversal in payment_transactions and the general ledger;
-    // omit only its partner-statement debit for that order's linked agent.
-    .filter((transaction) => !isSalesAccountAgentReturnReversal(transaction, salesOrdersById, salesAccountAgentIds))
+    .filter((transaction) => !isSalesAccountAgentPartialReturnReversal(transaction, salesOrdersById, salesAccountAgentIds))
     .map((transaction) => {
       const rawAmount = Number(transaction.amount || 0)
       const multiplier = transaction.direction === 'incoming' ? -1 : 1

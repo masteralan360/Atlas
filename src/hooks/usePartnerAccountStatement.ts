@@ -130,9 +130,7 @@ export function usePartnerAccountStatement(
   workspaceId: string | undefined,
   partnerId: string | null | undefined,
   period: PartnerAccountStatementData['period'],
-  refreshToken?: string | number,
-  /** Applies this presentation rule only to the Account Statements screen and its printout. */
-  omitSalesAccountAgentReturnReversalDebits = false
+  refreshToken?: string | number
 ) {
   const online = useNetworkStatus()
   const [liveRefreshGeneration, setLiveRefreshGeneration] = useState(0)
@@ -468,9 +466,7 @@ export function usePartnerAccountStatement(
       salesOrders: partnerSalesOrders,
       salesOrderReturns: partnerSalesOrderReturns,
       salesOrderReturnItems: partnerSalesOrderReturnItems,
-      salesAccountAgentIds: omitSalesAccountAgentReturnReversalDebits
-        ? commissionAgents.map((agent) => agent.id)
-        : [],
+      salesAccountAgentIds: commissionAgents.map((agent) => agent.id),
       purchaseOrders: partnerPurchaseOrders,
       statementOrders: allOrders,
       loans: partnerLoans,
@@ -509,7 +505,6 @@ export function usePartnerAccountStatement(
     loanPaymentTransactions,
     merchantDeliveryEntries,
     commissionAgents,
-    omitSalesAccountAgentReturnReversalDebits,
     partner,
     partnerInstallmentSales,
     partnerLoans,
