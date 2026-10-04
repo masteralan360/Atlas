@@ -51,7 +51,10 @@ vi.mock('@/services/invoiceSyncService', () => ({
 }))
 
 vi.mock('@/services/printService', () => ({
-    printService: { isAutoPrintUponCheckoutEnabled: harness.isAutoPrintUponCheckoutEnabled }
+    printService: {
+        isAutoPrintUponCheckoutEnabled: harness.isAutoPrintUponCheckoutEnabled,
+        getPosReceiptPrintQuality: () => 'high'
+    }
 }))
 
 vi.mock('@/ui/components/textarea', async () => {

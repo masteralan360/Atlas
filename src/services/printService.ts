@@ -20,6 +20,11 @@ import type { UniversalInvoice } from '@/types'
 import type { WorkspaceFeatures } from '@/workspace'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import {
+    DEFAULT_POS_RECEIPT_PRINT_QUALITY,
+    normalizePosReceiptPrintQuality,
+    type PosReceiptPrintQuality
+} from '@/services/posReceiptPrintQuality'
+import {
     list_thermal_printers,
     print_thermal_printer,
     test_thermal_printer,
@@ -179,6 +184,10 @@ function getThermalPrinterSettingKey(workspaceId: string) {
 
 function getAutoPrintUponCheckoutSettingKey(workspaceId: string) {
     return `auto_print_upon_checkout_${workspaceId}`
+}
+
+function getPosReceiptPrintQualitySettingKey(workspaceId: string) {
+    return `pos_receipt_print_quality_${workspaceId}`
 }
 
 interface AndroidBluetoothThermalPrinterInfo {
@@ -403,6 +412,20 @@ export const printService = {
     async setAutoPrintUponCheckoutEnabled(workspaceId: string, enabled: boolean): Promise<void> {
         if (!workspaceId) return
         await setAppSetting(getAutoPrintUponCheckoutSettingKey(workspaceId), String(enabled))
+    },
+
+    /** Keeps completed-sale receipt quality specific to this workspace and device. */
+    getPosReceiptPrintQuality(workspaceId: string): PosReceiptPrintQuality {
+        if (!workspaceId) return DEFAULT_POS_RECEIPT_PRINT_QUALITY
+        return normalizePosReceiptPrintQuality(getAppSettingSync(getPosReceiptPrintQualitySettingKey(workspaceId)))
+    },
+
+    async setPosReceiptPrintQuality(workspaceId: string, quality: PosReceiptPrintQuality): Promise<void> {
+        if (!workspaceId) return
+        await setAppSetting(
+            getPosReceiptPrintQualitySettingKey(workspaceId),
+            normalizePosReceiptPrintQuality(quality)
+        )
     },
 
     async listThermalPrinters(): Promise<ThermalPrinterInfo[]> {

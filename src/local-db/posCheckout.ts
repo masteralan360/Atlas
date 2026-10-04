@@ -12,7 +12,7 @@ import type { CurrencyCode, ExchangeRateSnapshot, StockBatchAllocation, UserRole
 import { assertStaffMinimumSellingPrices } from './minimumSellingPrice'
 import type { MinimumSellingPriceCheckItem } from './minimumSellingPrice'
 import { createLoanFromPosSale, generateLocalSaleSequenceId } from './hooks'
-import { appendPaymentTransaction } from './payments'
+import { appendPaymentTransaction, cacheConfirmedPaymentTransaction } from './payments'
 import { adjustInventoryQuantity } from './inventory'
 import { commitStockBatchAllocations, refreshStockBatchesFromSupabase } from './stockBatches'
 import { applyOfflinePosStockEffects } from './offlinePosStock'
@@ -288,13 +288,13 @@ export async function commitPosCheckout(input: PosCheckoutInput) {
     try {
         validate(input)
         const { payload: p } = input
-        const minimumPriceValidationItems = input.minimumPriceValidationItems ?? p.items.map((item) => ({
-            productId: item.product_id,
-            effectiveSellingPrice: item.unit_price,
-            unitFactor: item.unit_factor ?? 1,
-            currency: item.original_currency
-        }))
         if (isLocalWorkspaceMode(p.workspace_id)) {
+            const minimumPriceValidationItems = input.minimumPriceValidationItems ?? p.items.map((item) => ({
+                productId: item.product_id,
+                effectiveSellingPrice: item.unit_price,
+                unitFactor: item.unit_factor ?? 1,
+                currency: item.original_currency
+            }))
             await assertStaffMinimumSellingPrices({
                 workspaceId: p.workspace_id,
                 actingUserRole: input.user.role,
@@ -308,14 +308,15 @@ export async function commitPosCheckout(input: PosCheckoutInput) {
             return result
         }
         if (!isOnline(p.workspace_id)) throw new Error(i18n.t('inventory.errors.onlineRequired'))
-        await assertStaffMinimumSellingPrices({
-            workspaceId: p.workspace_id,
-            actingUserRole: input.user.role,
-            items: minimumPriceValidationItems
-        })
         const call = () => input.atomicLoanPayload
             ? supabase.rpc('complete_sale_with_loan', { payload: p, p_loan: input.atomicLoanPayload })
-            : supabase.rpc('complete_sale', { payload: p })
+            : p.payment_method === 'loan'
+                ? supabase.rpc('complete_sale', { payload: p })
+                : supabase.rpc('complete_pos_checkout', {
+                    payload: p,
+                    p_account_id: input.account?.id ?? null,
+                    p_account_name_snapshot: input.account?.name ?? null
+                })
         let response = await runSupabaseAction('pos.completeSale', call)
         if (response.error && isRetriableWebRequestError(response.error)) {
             response = await runSupabaseAction('pos.completeSale.verify', call)
@@ -323,18 +324,45 @@ export async function commitPosCheckout(input: PosCheckoutInput) {
         if (response.error) throw response.error
         // A transport success with an invalid result is also an uncertain commit.
         committed = true
-        const result = response.data as { sequence_id?: number; loan_aggregate?: unknown } | null
+        const result = response.data as {
+            sequence_id?: number
+            loan_aggregate?: unknown
+            payment_transaction?: Record<string, unknown> | null
+        } | null
         if (!result || !Number.isInteger(result.sequence_id) || Number(result.sequence_id) < 1
             || (p.payment_method === 'loan' && !result.loan_aggregate)) throw new Error('Invalid checkout result')
-        await hydrateInventoryTransactionsForReferences(p.workspace_id, [p.id])
+        if (p.payment_method !== 'loan' && p.total_amount > 0) {
+            const paymentRow = result.payment_transaction
+            if (!paymentRow
+                || paymentRow.id !== p.id || paymentRow.workspace_id !== p.workspace_id
+                || paymentRow.source_type !== 'pos_sale' || paymentRow.source_record_id !== p.id
+                || paymentRow.direction !== 'incoming' || Number(paymentRow.amount) !== p.total_amount
+                || paymentRow.currency !== p.settlement_currency || paymentRow.payment_method !== p.payment_method
+                || paymentRow.account_id !== (input.account?.id ?? null)) {
+                throw new Error('Invalid checkout payment result')
+            }
+            try {
+                await cacheConfirmedPaymentTransaction(paymentRow, p.workspace_id)
+            } catch (cacheError) {
+                // The atomic RPC is authoritative; a local cache failure must
+                // not turn a completed sale into a retryable checkout error.
+                console.warn('[POS] Confirmed payment cache update failed:', cacheError)
+            }
+        }
+        const scheduleReconciliation = () => {
+            void hydrateInventoryTransactionsForReferences(p.workspace_id, [p.id])
+                .catch(error => console.warn('[POS] Inventory movement reconciliation failed:', error))
+            void refreshStockBatchesFromSupabase(p.workspace_id)
+                .catch(error => console.warn('[POS] Stock batch reconciliation failed:', error))
+        }
         // A completed projection is safe to reattach after an idempotent replay.
         const existingInvoice = await db.invoices.get(p.id)
         if (existingInvoice?.workspaceId === p.workspace_id) {
             const loan = await db.loans.where('saleId').equals(p.id).first()
+            scheduleReconciliation()
             return { sequenceId: result.sequence_id, loanId: loan?.id ?? null }
         }
         const aggregate = result.loan_aggregate ? await persistLoanAggregateRpcResult(result.loan_aggregate) : null
-        await postPayment(input, `#${String(result.sequence_id).padStart(5, '0')}`)
         await db.transaction('rw', db.tables, async () => {
             if (await db.invoices.get(p.id)) return
             for (const item of p.items) if (item.storage_id) await adjustInventoryQuantity({
@@ -354,9 +382,9 @@ export async function commitPosCheckout(input: PosCheckoutInput) {
                 syncStatus: 'synced', lastSyncedAt: input.timestamp, version: 1, isDeleted: false
             })
         })
-        // Reconciliation is follow-up work; the projection transaction already
-        // contains an invoice checkpoint preventing duplicate stock effects.
-        await refreshStockBatchesFromSupabase(p.workspace_id)
+        // Remote hydration is follow-up work; the local invoice checkpoint is
+        // written before checkout returns, preventing duplicate stock effects.
+        scheduleReconciliation()
         return { sequenceId: result.sequence_id, loanId: aggregate?.loan.id ?? null }
     } catch (cause) {
         throw new PosCheckoutError(committed, input.payload.id, cause)

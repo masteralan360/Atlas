@@ -1,4 +1,5 @@
 import { generateTemplatePdf } from '@/services/pdfGenerator'
+import type { PosReceiptPrintQuality } from '@/services/posReceiptPrintQuality'
 import i18n from '@/i18n/config'
 import type {
     CustomTemplateBackground,
@@ -2717,7 +2718,8 @@ export async function buildCustomTemplateLayoutPdf({
     options,
     effectiveId,
     barcodeLabels,
-    fieldMode = 'nonBlankLayoutOverrides'
+    fieldMode = 'nonBlankLayoutOverrides',
+    receiptQuality
 }: {
     target: CustomTemplateTarget
     layout: CustomTemplateLayout
@@ -2726,6 +2728,7 @@ export async function buildCustomTemplateLayoutPdf({
     effectiveId?: string
     barcodeLabels?: BarcodeLabelData[]
     fieldMode?: 'nonBlankLayoutOverrides' | 'layoutOverrides'
+    receiptQuality?: PosReceiptPrintQuality
 }) {
     const preview = createCustomTemplatePreview(target, options)
     const printableLayout = fieldMode === 'layoutOverrides'
@@ -2756,6 +2759,7 @@ export async function buildCustomTemplateLayoutPdf({
         pages,
         format: target.printFormat,
         printLang: preview.fixedPrintLang,
-        pageSizeMm: target.printFormat === 'label' ? printableLayout.page : undefined
+        pageSizeMm: target.printFormat === 'label' ? printableLayout.page : undefined,
+        receiptQuality
     })
 }

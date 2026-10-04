@@ -3,16 +3,17 @@ import { useTranslation } from 'react-i18next'
 import { useLocation, useRoute } from 'wouter'
 import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
-import { addToOfflineMutations, adjustInventoryQuantity, assertStaffMinimumSellingPrices, calculateStockBatchUnitCost, commitStockBatchAllocations, generateLocalSaleSequenceId, getPrimaryStorageFromList, getStockBatchSalePlans, refreshStockBatchesFromSupabase, useActiveDiscountMap, useBatchAwareInventoryProducts, useCategories, useProductSelectionAccess, useProductUoms, useProducts, useStorages, useUnits } from '@/local-db'
-import { hydrateInventoryTransactionsForReferences } from '@/local-db/inventoryTransactions'
+import { addToOfflineMutations, adjustInventoryQuantity, assertStaffMinimumSellingPrices, calculateStockBatchUnitCost, commitStockBatchAllocations, generateLocalSaleSequenceId, getPrimaryStorageFromList, getStockBatchSalePlans, useActiveDiscountMap, useBatchAwareInventoryProducts, useCategories, useProductSelectionAccess, useProductUoms, useProducts, useStorages, useUnits } from '@/local-db'
 import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { db } from '@/local-db/database'
-import type { CurrencyCode, UnitRef } from '@/local-db/models'
+import type { CurrencyCode, PaymentAccount, UnitRef } from '@/local-db/models'
+import { appendPaymentTransaction, cacheConfirmedPaymentTransaction } from '@/local-db/payments'
 import { useWorkspace } from '@/workspace'
 import { formatCompactDateTime, formatCurrency, generateId, cn, stylizeText } from '@/lib/utils'
 import { readInstantPosProductsPerRow, saveInstantPosProductsPerRow } from '@/lib/instantPosLayout'
 import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle, Button, Input, useToast, Textarea, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, StorageSelector } from '@/ui/components'
-import { AlertCircle, CheckCircle2, ChefHat, ChevronDown, ChevronRight, ChevronUp, Loader2, Menu, Minus, Package, Plus, Receipt, Search, ShoppingCart, StickyNote, Table2, Trash2 } from 'lucide-react'
+import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
+import { AlertCircle, CheckCircle2, ChefHat, ChevronDown, ChevronRight, ChevronUp, Loader2, Menu, Minus, Package, Plus, Receipt, Search, ShoppingCart, StickyNote, Table2, Trash2, Wallet, X } from 'lucide-react'
 import { UiAccessGate } from '@/context/UiAccessContext'
 import { useWorkspacePermissions } from '@/permissions'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
@@ -1089,6 +1090,8 @@ export function InstantPOS() {
     const [productsPerRow, setProductsPerRow] = useState(readInstantPosProductsPerRow)
     const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
     const [isCheckoutLoading, setIsCheckoutLoading] = useState(false)
+    const [isCheckoutPaymentAccountSelectorOpen, setIsCheckoutPaymentAccountSelectorOpen] = useState(false)
+    const [checkoutPaymentAccount, setCheckoutPaymentAccount] = useState<PaymentAccount | null>(null)
     const [unitPickerProductId, setUnitPickerProductId] = useState<string | null>(null)
     const [isPreprinting, setIsPreprinting] = useState(false)
     const [isPrintingCookOrderTicket, setIsPrintingCookOrderTicket] = useState(false)
@@ -1827,7 +1830,11 @@ export function InstantPOS() {
         if (restaurantMode) {
             const ticket = restaurantPosTickets.find((current) => current.id === ticketId)
             if (ticket) {
-                await closeRestaurantPosTicket(ticket, restaurantLiveSyncEnabled)
+                // Persist the local close and queue any live sync without
+                // making the cash receipt wait for the restaurant-ticket RPC.
+                void closeRestaurantPosTicket(ticket, restaurantLiveSyncEnabled).catch(error =>
+                    console.warn('[Instant POS] Restaurant ticket close needs reconciliation:', error)
+                )
             }
             returnToRestaurantTableGrid()
             setActiveTicketId(null)
@@ -1848,35 +1855,51 @@ export function InstantPOS() {
         finalizeTicket(ticketId)
     }
 
-    const checkoutTicket = async () => {
-        if (!activeTicket || !user?.workspaceId || !user?.id) return
-        if (activeTicket.items.length === 0) return
+    const checkoutTicket = () => {
+        if (
+            !activeTicket
+            || activeTicket.items.length === 0
+            || isCheckoutLoading
+            || activeTicketTotals.hasMixedCurrency
+            || minimumPriceViolations.size > 0
+        ) return
+        void confirmCheckoutTicket()
+    }
 
-        try {
-            await assertStaffMinimumSellingPrices({
-                workspaceId: user.workspaceId,
-                actingUserRole: user.role,
-                items: activeTicket.items.flatMap((item) => {
-                    const product = resolveTicketProduct(item)
-                    return product
-                        ? [{
-                            productId: product.id,
-                            effectiveSellingPrice: item.unitPrice,
-                            currency: item.currency as CurrencyCode,
-                            unitFactor: getTicketItemFactor(item),
-                            minimumSellingPrice: item.minimumSellingPriceSnapshot,
-                            sellingUomId: item.uomId,
-                        }]
-                        : []
+    const confirmCheckoutTicket = async () => {
+        if (!activeTicket || !user?.workspaceId || !user?.id) return
+        if (activeTicket.items.length === 0 || isCheckoutLoading) return
+        setIsCheckoutPaymentAccountSelectorOpen(false)
+        setIsCheckoutLoading(true)
+
+        if (isLocalMode) {
+            try {
+                await assertStaffMinimumSellingPrices({
+                    workspaceId: user.workspaceId,
+                    actingUserRole: user.role,
+                    items: activeTicket.items.flatMap((item) => {
+                        const product = resolveTicketProduct(item)
+                        return product
+                            ? [{
+                                productId: product.id,
+                                effectiveSellingPrice: item.unitPrice,
+                                currency: item.currency as CurrencyCode,
+                                unitFactor: getTicketItemFactor(item),
+                                minimumSellingPrice: item.minimumSellingPriceSnapshot,
+                                sellingUomId: item.uomId,
+                            }]
+                            : []
+                    })
                 })
-            })
-        } catch (error) {
-            toast({
-                title: t('common.error') || 'Error',
-                description: error instanceof Error ? error.message : (t('instantPos.checkoutError') || 'Unable to complete checkout.'),
-                variant: 'destructive'
-            })
-            return
+            } catch (error) {
+                toast({
+                    title: t('common.error') || 'Error',
+                    description: error instanceof Error ? error.message : (t('instantPos.checkoutError') || 'Unable to complete checkout.'),
+                    variant: 'destructive'
+                })
+                setIsCheckoutLoading(false)
+                return
+            }
         }
 
         const restrictedItem = activeTicket.items.find((item) => {
@@ -1889,6 +1912,7 @@ export function InstantPOS() {
                 description: t('businessPartners.agent.productCategoryExcluded', { defaultValue: 'This product category is not available to this user.' }),
                 variant: 'destructive'
             })
+            setIsCheckoutLoading(false)
             return
         }
 
@@ -1903,6 +1927,7 @@ export function InstantPOS() {
                 description: getMissingProductCostMessage(product?.name || missingCostItem.name),
                 variant: 'destructive'
             })
+            setIsCheckoutLoading(false)
             return
         }
 
@@ -1911,10 +1936,10 @@ export function InstantPOS() {
                 title: t('common.error') || 'Error',
                 description: t('instantPos.currencyMismatch') || 'Instant POS supports one settlement currency per ticket.'
             })
+            setIsCheckoutLoading(false)
             return
         }
 
-        setIsCheckoutLoading(true)
         const saleId = generateId()
         const snapshotTimestamp = new Date().toISOString()
 
@@ -2084,31 +2109,30 @@ export function InstantPOS() {
             notes: ticketNote
         }
 
+        let remoteSaleCommitted = false
+        let confirmedSequenceId: number | null = null
+        let confirmedSaleData: ReturnType<typeof mapSaleToUniversal> | null = null
+
         try {
             if (isLocalMode) {
                 throw new Error('local_workspace_sale')
             }
 
-            await assertStaffMinimumSellingPrices({
-                workspaceId: user.workspaceId,
-                actingUserRole: user.role,
-                items: itemsWithMetadata.map((item) => ({
-                    productId: item.product_id,
-                    effectiveSellingPrice: item.unit_price,
-                    currency: item.original_currency as CurrencyCode,
-                    unitFactor: item.unit_factor,
-                    minimumSellingPrice: item.minimum_selling_price_snapshot,
-                    sellingUomId: item.selling_uom_id
-                }))
-            })
-
             let completeSaleResponse = await runSupabaseAction('instantPos.completeSale', () =>
-                supabase.rpc('complete_sale', { payload: checkoutPayload })
+                supabase.rpc('complete_pos_checkout', {
+                    payload: checkoutPayload,
+                    p_account_id: checkoutPaymentAccount?.id ?? null,
+                    p_account_name_snapshot: checkoutPaymentAccount?.name ?? null
+                })
             )
 
             if (completeSaleResponse.error && isRetriableWebRequestError(completeSaleResponse.error)) {
                 completeSaleResponse = await runSupabaseAction('instantPos.completeSale.verify', () =>
-                    supabase.rpc('complete_sale', { payload: checkoutPayload })
+                    supabase.rpc('complete_pos_checkout', {
+                        payload: checkoutPayload,
+                        p_account_id: checkoutPaymentAccount?.id ?? null,
+                        p_account_name_snapshot: checkoutPaymentAccount?.name ?? null
+                    })
                 )
             }
 
@@ -2116,44 +2140,39 @@ export function InstantPOS() {
 
             if (error) throw normalizeSupabaseActionError(error)
 
-            await hydrateInventoryTransactionsForReferences(user.workspaceId, [saleId])
-
             const serverResult = data as any
             const sequenceId = serverResult?.sequence_id
+            if (!Number.isInteger(sequenceId) || sequenceId < 1) {
+                throw new Error('The completed sale could not be confirmed')
+            }
+            remoteSaleCommitted = true
+            confirmedSequenceId = sequenceId
+            confirmedSaleData = mapSaleToUniversal({
+                ...checkoutPayload,
+                sequenceId,
+                created_at: snapshotTimestamp,
+                workspace_id: user.workspaceId,
+                cashier_id: user.id,
+                cashier_name: user.name || 'System'
+            } as any)
+            const paymentRow = serverResult?.payment_transaction
+            if (totalAmount > 0) {
+                if (!paymentRow || paymentRow.id !== saleId || paymentRow.workspace_id !== user.workspaceId
+                    || paymentRow.source_type !== 'pos_sale' || paymentRow.source_record_id !== saleId
+                    || paymentRow.direction !== 'incoming' || Number(paymentRow.amount) !== totalAmount
+                    || paymentRow.currency !== settlementCurrency || paymentRow.payment_method !== 'cash'
+                    || paymentRow.account_id !== (checkoutPaymentAccount?.id ?? null)) {
+                    throw new Error('The completed payment could not be confirmed')
+                }
+                try {
+                    await cacheConfirmedPaymentTransaction(paymentRow, user.workspaceId)
+                } catch (cacheError) {
+                    console.warn('[Instant POS] Confirmed payment cache update failed:', cacheError)
+                }
+            }
             const formattedInvoiceId = sequenceId ? `#${String(sequenceId).padStart(5, '0')}` : `#${saleId.slice(0, 8)}`
 
-            await Promise.all(physicalItems.map(async (item) => {
-                const resolvedStorageId = item.storageId || resolveTicketProduct(item)?.storageId
-                if (resolvedStorageId) {
-                    await adjustInventoryQuantity({
-                        workspaceId: user.workspaceId,
-                        productId: item.productId,
-                        storageId: resolvedStorageId,
-                        quantityDelta: -soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item)),
-                        timestamp: snapshotTimestamp,
-                        syncSource: 'remote',
-                        skipRemoteSync: true,
-                        movement: null
-                    })
-                }
-            }))
-
-            await Promise.all(batchSalePlans.map((plan) =>
-                commitStockBatchAllocations(
-                    user.workspaceId,
-                    plan.productId,
-                    plan.storageId,
-                    plan.allocations,
-                    {
-                        timestamp: snapshotTimestamp,
-                        syncSource: 'remote',
-                        skipRemoteSync: true
-                    }
-                )
-            ))
-            await refreshStockBatchesFromSupabase(user.workspaceId)
-
-            await db.invoices.add({
+            await db.invoices.put({
                 id: saleId,
                 invoiceid: formattedInvoiceId,
                 sequenceId: sequenceId,
@@ -2168,22 +2187,50 @@ export function InstantPOS() {
                 createdAt: snapshotTimestamp,
                 updatedAt: snapshotTimestamp,
                 syncStatus: 'synced',
-                lastSyncedAt: new Date().toISOString(),
+                lastSyncedAt: snapshotTimestamp,
                 version: 1,
                 isDeleted: false
             })
 
-            const saleData = mapSaleToUniversal({
-                ...checkoutPayload,
-                sequenceId,
-                created_at: snapshotTimestamp,
-                workspace_id: user.workspaceId,
-                cashier_id: user.id,
-                cashier_name: user.name || 'System'
-            } as any)
+            // The sale and payment are already committed. Local stock updates
+            // and remote inventory reconciliation must not hold the receipt.
+            void (async () => {
+                await Promise.all(physicalItems.map(async (item) => {
+                    const resolvedStorageId = item.storageId || resolveTicketProduct(item)?.storageId
+                    if (resolvedStorageId) {
+                        await adjustInventoryQuantity({
+                            workspaceId: user.workspaceId,
+                            productId: item.productId,
+                            storageId: resolvedStorageId,
+                            quantityDelta: -soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item)),
+                            timestamp: snapshotTimestamp,
+                            syncSource: 'remote',
+                            skipRemoteSync: true,
+                            movement: null
+                        })
+                    }
+                }))
+                await Promise.all(batchSalePlans.map((plan) =>
+                    commitStockBatchAllocations(
+                        user.workspaceId,
+                        plan.productId,
+                        plan.storageId,
+                        plan.allocations,
+                        { timestamp: snapshotTimestamp, syncSource: 'remote', skipRemoteSync: true }
+                    )
+                ))
+                const [{ hydrateInventoryTransactionsForReferences }, { refreshStockBatchesFromSupabase }] = await Promise.all([
+                    import('@/local-db/inventoryTransactions'),
+                    import('@/local-db/stockBatches')
+                ])
+                await hydrateInventoryTransactionsForReferences(user.workspaceId, [saleId])
+                await refreshStockBatchesFromSupabase(user.workspaceId)
+            })().catch(error => console.warn('[Instant POS] Local inventory reconciliation failed:', error))
 
             await finalizeTicket(activeTicket.id)
-            setCompletedSaleData(saleData)
+            setIsCheckoutPaymentAccountSelectorOpen(false)
+            setCheckoutPaymentAccount(null)
+            setCompletedSaleData(confirmedSaleData)
             setIsSuccessModalOpen(true)
 
             toast({
@@ -2192,7 +2239,29 @@ export function InstantPOS() {
             })
         } catch (err) {
             const normalized = normalizeSupabaseActionError(err)
-            console.error('[Instant POS] Checkout failed, saving offline:', normalized)
+
+            if (remoteSaleCommitted && confirmedSequenceId) {
+                // The sale and payment committed on the server. Never create a
+                // second offline sale when only a local projection or ticket
+                // close failed; recover the local ticket asynchronously.
+                console.error('[Instant POS] Sale committed; local post-checkout recovery is continuing:', normalized)
+                void finalizeTicket(activeTicket.id).catch(error =>
+                    console.warn('[Instant POS] Committed ticket close needs reconciliation:', error)
+                )
+                setIsCheckoutPaymentAccountSelectorOpen(false)
+                setCheckoutPaymentAccount(null)
+                if (confirmedSaleData) {
+                    setCompletedSaleData(confirmedSaleData)
+                    setIsSuccessModalOpen(true)
+                }
+                toast({
+                    title: t('instantPos.checkoutComplete') || 'Order closed',
+                    description: t('instantPos.checkoutCompleteDesc') || 'Sale recorded in Sales History.'
+                })
+                return
+            }
+
+            console.error('[Instant POS] Checkout failed:', normalized)
 
             if (isLocalMode) {
                 try {
@@ -2309,6 +2378,29 @@ export function InstantPOS() {
                         )
                     ))
 
+                    if (totalAmount > 0) {
+                        await appendPaymentTransaction(user.workspaceId, {
+                            id: saleId,
+                            idempotent: true,
+                            sourceModule: 'sales',
+                            sourceType: 'pos_sale',
+                            sourceRecordId: saleId,
+                            sourceSubrecordId: null,
+                            direction: 'incoming',
+                            amount: totalAmount,
+                            currency: settlementCurrency as CurrencyCode,
+                            paymentMethod: 'cash',
+                            paidAt: snapshotTimestamp,
+                            counterpartyName: null,
+                            referenceLabel: `#${String(localSequenceId).padStart(5, '0')}`,
+                            note: null,
+                            createdBy: user.id,
+                            accountId: checkoutPaymentAccount?.id ?? null,
+                            accountNameSnapshot: checkoutPaymentAccount?.name ?? null,
+                            metadata: { saleId, origin: 'instant_pos' }
+                        })
+                    }
+
                     if (!isLocalMode) {
                         await db.invoices.add({
                             id: saleId,
@@ -2343,6 +2435,8 @@ export function InstantPOS() {
                     await addToOfflineMutations('sales', saleId, 'create', checkoutPayload, user.workspaceId)
 
                     await finalizeTicket(activeTicket.id)
+                    setIsCheckoutPaymentAccountSelectorOpen(false)
+                    setCheckoutPaymentAccount(null)
                     setCompletedSaleData(saleDataOffline)
                     setIsSuccessModalOpen(true)
 
@@ -2526,6 +2620,55 @@ export function InstantPOS() {
                         onSelect={handleStorageSelect}
                         className="h-12 w-full bg-background/80 sm:w-[220px]"
                     />
+                    <div className="relative">
+                        <UiAccessGate>
+                            <Button
+                                variant="outline"
+                                type="button"
+                                className="h-12 max-w-56 rounded-xl border-dashed border-amber-400/70 bg-amber-500/5 px-4 font-bold"
+                                onClick={() => setIsCheckoutPaymentAccountSelectorOpen((open) => !open)}
+                                disabled={isCheckoutLoading}
+                                aria-expanded={isCheckoutPaymentAccountSelectorOpen}
+                                aria-controls="instant-pos-payment-account-selector"
+                                title={t('instantPos.paymentAccount')}
+                            >
+                                <Wallet className="h-4 w-4 shrink-0 text-amber-600" />
+                                <span className="truncate">
+                                    {checkoutPaymentAccount?.name ?? t('instantPos.paymentAccount')}
+                                </span>
+                                {isCheckoutPaymentAccountSelectorOpen
+                                    ? <ChevronUp className="h-4 w-4 shrink-0" />
+                                    : <ChevronDown className="h-4 w-4 shrink-0" />}
+                            </Button>
+                        </UiAccessGate>
+                        {isCheckoutPaymentAccountSelectorOpen && (
+                            <div
+                                id="instant-pos-payment-account-selector"
+                                className="absolute end-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card p-3 shadow-xl"
+                            >
+                                <div className="mb-2 flex justify-end">
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        type="button"
+                                        onClick={() => setIsCheckoutPaymentAccountSelectorOpen(false)}
+                                        disabled={isCheckoutLoading}
+                                        title={t('common.close')}
+                                        aria-label={t('common.close')}
+                                    >
+                                        <X className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                                <PaymentAccountSelector
+                                    workspaceId={user?.workspaceId}
+                                    value={checkoutPaymentAccount?.id ?? null}
+                                    onValueChange={setCheckoutPaymentAccount}
+                                    disabled={isCheckoutLoading}
+                                    cashDrawerOnly
+                                />
+                            </div>
+                        )}
+                    </div>
                     <UiAccessGate>
                         <div className="flex items-center gap-2 animate-in fade-in zoom-in duration-300">
                             <Button

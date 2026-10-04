@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '@/ui/components'
 import { isSupabaseConfigured, useAuth } from '@/auth'
@@ -8,6 +8,11 @@ import { generateInvoicePdf } from '@/services/pdfGenerator'
 import { printPdfBlob } from '@/services/pdfPrintService'
 import { renderPdfPageToPngDataUrl } from '@/services/pdfRasterizer'
 import { printService } from '@/services/printService'
+import {
+    DEFAULT_POS_RECEIPT_PRINT_QUALITY,
+    resolvePosReceiptThermalWidth,
+    type PosReceiptPrintQuality
+} from '@/services/posReceiptPrintQuality'
 import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
 import {
     SALES_HISTORY_RECEIPT_TEMPLATE_KEY,
@@ -26,15 +31,32 @@ interface UsePosReceiptPrinterOptions {
     /** Enables loading the primary receipt template while the caller is active. */
     enabled: boolean
     /** Uses a source-specific receipt while retaining the normal POS direct-print flow. */
-    receiptPdfBuilder?: () => Promise<Blob>
+    receiptPdfBuilder?: (quality?: PosReceiptPrintQuality) => Promise<Blob>
     /** Custom Template target used to resolve the active primary receipt layout. */
     receiptTemplateKey?: string
+    /** Prepare a completed-sale receipt in the background before the user requests printing. */
+    prewarmPrint?: boolean
+    /** Delay preparation until this many milliseconds after receipt data changes. */
+    prewarmDelayMs?: number
+    /** Quality profile used by Checkout Success receipt printing. */
+    receiptQuality?: PosReceiptPrintQuality
 }
 
 interface PrintPosReceiptOptions {
     title?: string
     /** Allows callers to share one PDF between receipt sync and printing. */
     pdfBuilder?: () => Promise<Blob>
+}
+
+interface PreparedThermalReceipt {
+    imageBase64: string
+    maxWidth: number
+}
+
+interface ReceiptPrintPreparation {
+    pdfBuilder: () => Promise<Blob>
+    pdfPromise: Promise<Blob>
+    thermalImagePromise?: Promise<PreparedThermalReceipt>
 }
 
 /**
@@ -46,7 +68,10 @@ export function usePosReceiptPrinter({
     features,
     enabled,
     receiptPdfBuilder,
-    receiptTemplateKey = SALES_HISTORY_RECEIPT_TEMPLATE_KEY
+    receiptTemplateKey = SALES_HISTORY_RECEIPT_TEMPLATE_KEY,
+    prewarmPrint = false,
+    prewarmDelayMs = 0,
+    receiptQuality = DEFAULT_POS_RECEIPT_PRINT_QUALITY
 }: UsePosReceiptPrinterOptions) {
     const { t, i18n } = useTranslation()
     const { user } = useAuth()
@@ -55,6 +80,8 @@ export function usePosReceiptPrinter({
     const [primaryReceiptTemplate, setPrimaryReceiptTemplate] = useState<StoredCustomTemplateRow | null>(null)
     const [isLoadingPrimaryReceiptTemplate, setIsLoadingPrimaryReceiptTemplate] = useState(false)
     const [resolvedPrimaryTemplateKey, setResolvedPrimaryTemplateKey] = useState<string | null>(null)
+    const [isPreparingReceiptPrint, setIsPreparingReceiptPrint] = useState(false)
+    const receiptPrintPreparationRef = useRef<ReceiptPrintPreparation | null>(null)
 
     const workspaceId = activeWorkspace?.id || user?.workspaceId || ''
     const resolvedWorkspaceName = workspaceName || workspaceId || 'Atlas'
@@ -71,6 +98,8 @@ export function usePosReceiptPrinter({
         && !!workspaceId
         && (isLocalMode || isSupabaseConfigured)
     const primaryTemplateLookupKey = `${receiptTemplateKey}:${workspaceId}:${currentTemplatePrintLanguage}`
+    const isPrimaryReceiptTemplateLoading = isLoadingPrimaryReceiptTemplate
+        || (shouldLoadPrimaryReceiptTemplate && resolvedPrimaryTemplateKey !== primaryTemplateLookupKey)
 
     useEffect(() => {
         if (!shouldLoadPrimaryReceiptTemplate) {
@@ -126,7 +155,7 @@ export function usePosReceiptPrinter({
 
     const buildReceiptPdf = useCallback(async () => {
         if (receiptPdfBuilder) {
-            return receiptPdfBuilder()
+            return receiptPdfBuilder(receiptQuality)
         }
 
         if (!saleData) {
@@ -144,7 +173,8 @@ export function usePosReceiptPrinter({
                     features: printFeatures,
                     receiptData: saleData
                 },
-                effectiveId: saleData.id
+                effectiveId: saleData.id,
+                receiptQuality
             })
         }
 
@@ -153,21 +183,98 @@ export function usePosReceiptPrinter({
             format: 'receipt',
             features: printFeatures,
             workspaceName: resolvedWorkspaceName,
-            workspaceId
+            workspaceId,
+            receiptQuality
         })
-    }, [primaryReceiptLayout, primaryReceiptTarget, printFeatures, receiptPdfBuilder, resolvedWorkspaceName, saleData, workspaceId, workspaceName])
+    }, [primaryReceiptLayout, primaryReceiptTarget, printFeatures, receiptPdfBuilder, receiptQuality, resolvedWorkspaceName, saleData, workspaceId, workspaceName])
+
+    const getReceiptPrintPreparation = useCallback((pdfBuilder = buildReceiptPdf) => {
+        const current = receiptPrintPreparationRef.current
+        if (current?.pdfBuilder === pdfBuilder) return current
+
+        const pdfPromise = Promise.resolve().then(pdfBuilder)
+        const thermalImagePromise = features.thermal_printing
+            ? (async () => {
+                const [maxWidth, receiptPdf] = await Promise.all([
+                    printService.getThermalPrinterMaxWidth(workspaceId),
+                    pdfPromise
+                ])
+                const qualityWidth = resolvePosReceiptThermalWidth(maxWidth, receiptQuality)
+                const imageBase64 = await renderPdfPageToPngDataUrl(receiptPdf, { maxWidthPx: qualityWidth })
+                return { imageBase64, maxWidth: qualityWidth }
+            })()
+            : undefined
+
+        const preparation: ReceiptPrintPreparation = {
+            pdfBuilder,
+            pdfPromise,
+            thermalImagePromise
+        }
+        receiptPrintPreparationRef.current = preparation
+        void pdfPromise.catch(() => {
+            if (receiptPrintPreparationRef.current === preparation) {
+                receiptPrintPreparationRef.current = null
+            }
+        })
+        if (thermalImagePromise) void thermalImagePromise.catch(() => undefined)
+        return preparation
+    }, [buildReceiptPdf, features.thermal_printing, receiptQuality, workspaceId])
+
+    const preparedReceiptPdfBuilder = useCallback(
+        () => getReceiptPrintPreparation().pdfPromise,
+        [getReceiptPrintPreparation]
+    )
+
+    const prepareReceiptPrint = useCallback(async (pdfBuilder = buildReceiptPdf) => {
+        const preparation = getReceiptPrintPreparation(pdfBuilder)
+        await preparation.pdfPromise
+        if (preparation.thermalImagePromise) {
+            await preparation.thermalImagePromise.catch(() => undefined)
+        }
+    }, [buildReceiptPdf, getReceiptPrintPreparation])
+
+    useEffect(() => {
+        if (!prewarmPrint || !enabled || !saleData || isPrimaryReceiptTemplateLoading) {
+            setIsPreparingReceiptPrint(false)
+            return
+        }
+
+        // Let the success modal paint first, then build the PDF (and thermal
+        // raster, when needed) while the cashier reviews the sale summary.
+        let cancelled = false
+        setIsPreparingReceiptPrint(true)
+        let frame: number | null = null
+        const timer = window.setTimeout(() => {
+            frame = window.requestAnimationFrame(() => {
+                void prepareReceiptPrint().catch((error) => {
+                    console.warn('[usePosReceiptPrinter] Receipt prewarm failed:', error)
+                }).finally(() => {
+                    if (!cancelled) setIsPreparingReceiptPrint(false)
+                })
+            })
+        }, Math.max(0, prewarmDelayMs))
+        return () => {
+            cancelled = true
+            window.clearTimeout(timer)
+            if (frame !== null) window.cancelAnimationFrame(frame)
+        }
+    }, [enabled, isPrimaryReceiptTemplateLoading, prepareReceiptPrint, prewarmDelayMs, prewarmPrint, saleData])
+
+    useEffect(() => {
+        if (!enabled) receiptPrintPreparationRef.current = null
+    }, [enabled])
 
     const printReceipt = useCallback(async ({
         title = `Receipt_${saleData?.invoiceid || saleData?.id || 'Sale'}`,
-        pdfBuilder = buildReceiptPdf
+        pdfBuilder = preparedReceiptPdfBuilder
     }: PrintPosReceiptOptions = {}) => {
         let handledByThermalPrinter = false
+        const preparation = getReceiptPrintPreparation(
+            pdfBuilder === preparedReceiptPdfBuilder ? buildReceiptPdf : pdfBuilder
+        )
         if (features.thermal_printing) {
             try {
-                const maxWidth = await printService.getThermalPrinterMaxWidth(workspaceId)
-                const receiptPdf = await pdfBuilder()
-                const imageBase64 = await renderPdfPageToPngDataUrl(receiptPdf, { maxWidthPx: maxWidth })
-
+                const { imageBase64, maxWidth } = await preparation.thermalImagePromise!
                 handledByThermalPrinter = await printService.silentPrintImage({
                     imageBase64,
                     workspaceId,
@@ -186,14 +293,14 @@ export function usePosReceiptPrinter({
         }
 
         if (!handledByThermalPrinter) {
-            await printPdfBlob(await pdfBuilder(), { title })
+            await printPdfBlob(await preparation.pdfPromise, { title })
         }
-    }, [buildReceiptPdf, features.thermal_printing, saleData?.id, saleData?.invoiceid, t, toast, workspaceId])
+    }, [buildReceiptPdf, features.thermal_printing, getReceiptPrintPreparation, preparedReceiptPdfBuilder, saleData?.id, saleData?.invoiceid, t, toast, workspaceId])
 
     return {
-        buildReceiptPdf,
-        isLoadingPrimaryReceiptTemplate: isLoadingPrimaryReceiptTemplate
-            || (shouldLoadPrimaryReceiptTemplate && resolvedPrimaryTemplateKey !== primaryTemplateLookupKey),
+        buildReceiptPdf: preparedReceiptPdfBuilder,
+        isLoadingPrimaryReceiptTemplate: isPrimaryReceiptTemplateLoading,
+        isPreparingReceiptPrint,
         printFeatures,
         printReceipt,
         resolvedWorkspaceName,

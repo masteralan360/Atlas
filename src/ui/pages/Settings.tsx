@@ -10,7 +10,7 @@ import { AdditionalStorefrontsManager } from '@/ui/components/marketplace/Additi
 import { useWorkspace } from '@/workspace'
 import { Coins } from 'lucide-react'
 import type { IQDDisplayPreference, CurrencyCode } from '@/local-db/models'
-import { Settings as SettingsIcon, Database, Cloud, Trash2, RefreshCw, User, Copy, Check, CreditCard, Globe, Download, Upload, AlertCircle, Printer, Contact, Fingerprint, Store, ExternalLink, Usb, Bluetooth, CalendarClock, Menu, Table2, Crown } from 'lucide-react'
+import { Settings as SettingsIcon, Database, Cloud, Trash2, RefreshCw, User, Copy, Check, CreditCard, Globe, Download, Upload, AlertCircle, Printer, Contact, Fingerprint, Store, ExternalLink, Usb, Bluetooth, CalendarClock, Menu, Table2, Crown, Loader2 } from 'lucide-react'
 import { formatDate, formatDateTime, formatTime, cn, generateId, getHourDisplayPreference, setHourDisplayPreference, type HourDisplayPreference } from '@/lib/utils'
 import { useTheme } from '@/ui/components/theme-provider'
 import { Moon, Sun, Monitor, Unlock, Server, MessageSquare, Bell, MonitorPlay, Wifi } from 'lucide-react'
@@ -35,6 +35,7 @@ import { getManualRateSource, getManualRateValue, setExchangeRateSource as setSt
 import type { ExchangeRateSource } from '@/lib/exchangeRate'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { DEFAULT_THERMAL_ROLL_WIDTH, THERMAL_ROLL_WIDTHS, isLikelyThermalPrinter, isVirtualPrinter, printService, type StoredThermalPrinter, type ThermalPrinterInfo, type ThermalRollWidth } from '@/services/printService'
+import type { PosReceiptPrintQuality } from '@/services/posReceiptPrintQuality'
 // Notification imports moved to dynamic imports for cross-platform support
 import { registerDeviceTokenIfNeeded } from '@/services/notificationDevice'
 import { useKdsStream } from '@/hooks/useKdsStream'
@@ -238,6 +239,10 @@ export function Settings() {
         printService.isAutoPrintUponCheckoutEnabled(user?.workspaceId || '')
     )
     const [isAutoPrintUponCheckoutSaving, setIsAutoPrintUponCheckoutSaving] = useState(false)
+    const [posReceiptPrintQuality, setPosReceiptPrintQuality] = useState<PosReceiptPrintQuality>(() =>
+        printService.getPosReceiptPrintQuality(user?.workspaceId || '')
+    )
+    const [isPosReceiptPrintQualitySaving, setIsPosReceiptPrintQualitySaving] = useState(false)
     const [bleServiceUuid, setBleServiceUuid] = useState('')
     const [bleCharacteristicUuid, setBleCharacteristicUuid] = useState('')
     const [isInvoicePdfExporting, setIsInvoicePdfExporting] = useState(false)
@@ -322,6 +327,10 @@ export function Settings() {
         setAutoPrintUponCheckout(printService.isAutoPrintUponCheckoutEnabled(user?.workspaceId || ''))
     }, [user?.workspaceId])
 
+    useEffect(() => {
+        setPosReceiptPrintQuality(printService.getPosReceiptPrintQuality(user?.workspaceId || ''))
+    }, [user?.workspaceId])
+
     const handleAutoPrintUponCheckoutChange = async (enabled: boolean) => {
         if (!user?.workspaceId || isAutoPrintUponCheckoutSaving) return
 
@@ -336,6 +345,23 @@ export function Settings() {
             showActionError(error, t('settings.printing.autoPrintUponCheckoutSaveError'))
         } finally {
             setIsAutoPrintUponCheckoutSaving(false)
+        }
+    }
+
+    const handlePosReceiptPrintQualityChange = async (quality: PosReceiptPrintQuality) => {
+        if (!user?.workspaceId || isPosReceiptPrintQualitySaving) return
+
+        const previousValue = posReceiptPrintQuality
+        setPosReceiptPrintQuality(quality)
+        setIsPosReceiptPrintQualitySaving(true)
+
+        try {
+            await printService.setPosReceiptPrintQuality(user.workspaceId, quality)
+        } catch (error) {
+            setPosReceiptPrintQuality(previousValue)
+            showActionError(error, t('settings.printing.posReceiptQualitySaveError'))
+        } finally {
+            setIsPosReceiptPrintQualitySaving(false)
         }
     }
 
@@ -3073,6 +3099,33 @@ export function Settings() {
                                 </>)}
 
                                 <div className="grid gap-4 md:grid-cols-2 max-w-3xl">
+                                    {canUseReceiptPrinting && (
+                                    <div className="flex flex-col gap-2 p-4 bg-muted/50 rounded-lg border border-border">
+                                        <div className="space-y-0.5">
+                                            <Label className="text-sm font-medium">
+                                                {t('settings.printing.posReceiptQuality')}
+                                                {isPosReceiptPrintQualitySaving && <Loader2 className="ml-2 inline h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+                                            </Label>
+                                            <p className="text-xs text-muted-foreground">
+                                                {t('settings.printing.posReceiptQualityDesc')}
+                                            </p>
+                                        </div>
+                                        <Select
+                                            value={posReceiptPrintQuality}
+                                            onValueChange={(value) => void handlePosReceiptPrintQualityChange(value as PosReceiptPrintQuality)}
+                                            disabled={!user?.workspaceId || isPosReceiptPrintQualitySaving}
+                                        >
+                                            <SelectTrigger aria-label={t('settings.printing.posReceiptQuality')}>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="high">{t('settings.printing.posReceiptQualityHigh')}</SelectItem>
+                                                <SelectItem value="fast">{t('settings.printing.posReceiptQualityFast')}</SelectItem>
+                                                <SelectItem value="fastest">{t('settings.printing.posReceiptQualityFastest')}</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    )}
                                     {canUseReceiptPrinting && (
                                     <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg border border-border">
                                         <div className="space-y-0.5 pr-4">

@@ -2023,6 +2023,26 @@ export async function appendPaymentTransaction(
   }
 }
 
+/** Cache a payment already committed by an atomic business-record RPC. */
+export async function cacheConfirmedPaymentTransaction(
+  raw: Record<string, unknown>,
+  workspaceId: string
+): Promise<PaymentTransaction> {
+  const row = toCamelCase(raw) as unknown as PaymentTransaction
+  if (!row.id || row.workspaceId !== workspaceId) {
+    throw new Error('The confirmed payment could not be attached to this workspace')
+  }
+  const syncedAt = new Date().toISOString()
+  const transaction: PaymentTransaction = {
+    ...row,
+    syncStatus: 'synced',
+    lastSyncedAt: syncedAt
+  }
+  await db.payment_transactions.put(transaction)
+  await mirrorPaymentAccountTransactionLocally(transaction)
+  return transaction
+}
+
 /** Read a complete, current direct-transaction chain for printing, independent of page filters. */
 export async function loadDirectTransactionVoucher(workspaceId: string, transactionId: string) {
   const local = await db.payment_transactions.get(transactionId)

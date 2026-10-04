@@ -19,6 +19,7 @@ import { useDebounce } from '@/lib/hooks'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { SALES_HISTORY_RECEIPT_TEMPLATE_KEY } from '@/lib/customTemplates'
 import { usePosReceiptPrinter } from './usePosReceiptPrinter'
+import type { PosReceiptPrintQuality } from '@/services/posReceiptPrintQuality'
 
 interface CheckoutSuccessModalProps {
     isOpen: boolean
@@ -26,7 +27,7 @@ interface CheckoutSuccessModalProps {
     saleData: any // Universal format expected by SaleReceipt
     features: WorkspaceFeatures
     /** Uses a source-specific receipt while retaining the normal POS direct-print flow. */
-    receiptPdfBuilder?: () => Promise<Blob>
+    receiptPdfBuilder?: (quality?: PosReceiptPrintQuality) => Promise<Blob>
     /** Custom Template target used for the receipt's primary-layout lookup. */
     receiptTemplateKey?: string
     /** Persists the note to the underlying source record instead of the POS sales table. */
@@ -47,7 +48,8 @@ export function CheckoutSuccessModal({
 }: CheckoutSuccessModalProps) {
     const { t } = useTranslation()
     const { user } = useAuth()
-    const { isLocalMode } = useWorkspace()
+    const { isLocalMode, activeWorkspace } = useWorkspace()
+    const receiptQuality = printService.getPosReceiptPrintQuality(activeWorkspace?.id || user?.workspaceId || '')
 
     const [timeLeft, setTimeLeft] = useState(15)
     const [isPaused, setIsPaused] = useState(false)
@@ -64,6 +66,7 @@ export function CheckoutSuccessModal({
     const {
         buildReceiptPdf,
         isLoadingPrimaryReceiptTemplate,
+        isPreparingReceiptPrint,
         printFeatures,
         printReceipt,
         resolvedWorkspaceName,
@@ -74,8 +77,11 @@ export function CheckoutSuccessModal({
         enabled: isOpen,
         receiptPdfBuilder,
         receiptTemplateKey,
+        prewarmPrint: true,
+        prewarmDelayMs: note === (saleData?.notes || '') ? 0 : 1000,
+        receiptQuality,
     })
-    const isPrintDisabled = isProcessing || isLoadingPrimaryReceiptTemplate
+    const isPrintDisabled = isProcessing || isLoadingPrimaryReceiptTemplate || isPreparingReceiptPrint
 
     useEffect(() => {
         if (!isOpen) {
@@ -153,12 +159,6 @@ export function CheckoutSuccessModal({
                 console.error('[CheckoutSuccessModal] Failed to save note before printing:', error)
             })
 
-            let receiptPdfPromise: Promise<Blob> | null = null
-            const getReceiptPdf = () => {
-                receiptPdfPromise ||= buildReceiptPdf()
-                return receiptPdfPromise
-            }
-
             // 1. Trigger background sync with the same receipt PDF used for printing.
             triggerInvoiceSync({
                 saleData: receiptSaleData,
@@ -170,12 +170,12 @@ export function CheckoutSuccessModal({
                     name: user.name || 'System'
                 },
                 format: 'receipt',
-                pdfBuilder: getReceiptPdf
+                pdfBuilder: buildReceiptPdf
             });
 
             // 2. Print with the same thermal-printer-first fallback used by cart pre-prints.
             await printReceipt({
-                pdfBuilder: getReceiptPdf,
+                pdfBuilder: buildReceiptPdf,
                 title: `Receipt_${receiptSaleData?.invoiceid || receiptSaleData?.id || 'Sale'}`
             })
 
@@ -328,7 +328,7 @@ export function CheckoutSuccessModal({
                             disabled={isPrintDisabled}
                         >
                             <Printer className={cn("w-6 h-6 mr-3 transition-transform", !isPrintDisabled && "group-hover:rotate-12")} />
-                            {isProcessing || isLoadingPrimaryReceiptTemplate ? t('common.loading') : t('pos.printReceipt')}
+                            {isPrintDisabled ? t('common.loading') : t('pos.printReceipt')}
                         </Button>
 
                         <Button

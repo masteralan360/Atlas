@@ -17,6 +17,11 @@ import { reportPdfProgress } from '@/services/pdfProgress'
 import { inlineCaptureableImages, waitForPdfImages } from '@/services/pdfImageCapture'
 import { preparePdfPageCapture } from '@/services/pdfPageCapture'
 import { resolvePdfPageRenderScale, streamPdfPages } from '@/services/pdfPageStream'
+import {
+    DEFAULT_POS_RECEIPT_PRINT_QUALITY,
+    resolvePosReceiptRenderScale,
+    type PosReceiptPrintQuality
+} from '@/services/posReceiptPrintQuality'
 
 /** Formats that can be stored as invoice versions. */
 export type InvoicePrintFormat = 'a4' | 'receipt'
@@ -58,6 +63,8 @@ interface PDFGeneratorOptions {
     }
     workspaceName?: string
     workspaceId?: string
+    /** Resolution profile for receipts printed from the POS success modal. */
+    receiptQuality?: PosReceiptPrintQuality
     translations?: Record<string, string>
     workspaceFooterContacts?: WorkspaceFooterContacts
 }
@@ -69,6 +76,8 @@ interface TemplatePdfOptions {
     printLang?: string
     /** Exact physical page size for custom label output. */
     pageSizeMm?: { widthMm: number; heightMm: number }
+    /** Resolution profile for receipts printed from the POS success modal. */
+    receiptQuality?: PosReceiptPrintQuality
 }
 
 const A4_WIDTH_MM = 210
@@ -297,7 +306,11 @@ function collectA4KeepTogetherBlocks(container: HTMLElement, widthMm: number): A
  * foreignObject), allowing the browser to paint the clone consistently across
  * desktop, Android, and iOS/iPadOS.
  */
-async function renderTemplateToPdf(element: ReturnType<typeof createElement>, widthMm: number): Promise<Blob> {
+async function renderTemplateToPdf(
+    element: ReturnType<typeof createElement>,
+    widthMm: number,
+    receiptQuality: PosReceiptPrintQuality = DEFAULT_POS_RECEIPT_PRINT_QUALITY
+): Promise<Blob> {
     const { jsPDF } = await import('jspdf')
     const container = document.createElement('div')
     container.id = 'pdf-render-container'
@@ -324,7 +337,9 @@ async function renderTemplateToPdf(element: ReturnType<typeof createElement>, wi
         root.render(element)
 
         await new Promise(requestAnimationFrame)
-        await new Promise((resolve) => setTimeout(resolve, 300))
+        if (widthMm !== RECEIPT_WIDTH_MM) {
+            await new Promise((resolve) => setTimeout(resolve, 300))
+        }
         if (document.fonts?.ready) {
             await document.fonts.ready
         }
@@ -367,7 +382,10 @@ async function renderTemplateToPdf(element: ReturnType<typeof createElement>, wi
 
         const containerPixelWidth = container.offsetWidth
         const containerPixelHeight = Math.max(container.scrollHeight, container.offsetHeight, 1)
-        const renderScale = resolveRenderScale(containerPixelWidth)
+        const baseRenderScale = resolveRenderScale(containerPixelWidth)
+        const renderScale = widthMm === RECEIPT_WIDTH_MM
+            ? resolvePosReceiptRenderScale(baseRenderScale, receiptQuality)
+            : baseRenderScale
         const { toCanvas } = await import('html-to-image')
 
         if (widthMm === A4_WIDTH_MM) {
@@ -585,7 +603,7 @@ async function preprocessLogoUrl(logoUrl?: string | null) {
  * Generates a PDF blob from invoice data using the HTML templates.
  */
 export async function generateInvoicePdf(options: PDFGeneratorOptions): Promise<Blob> {
-    const { data, format, features = {} as any, workspaceName, workspaceId, workspaceFooterContacts } = options
+    const { data, format, features = {} as any, workspaceName, workspaceId, workspaceFooterContacts, receiptQuality } = options
 
     // Inject workspaceId into data for QR codes
     if (workspaceId && !data.workspaceId) {
@@ -631,7 +649,7 @@ export async function generateInvoicePdf(options: PDFGeneratorOptions): Promise<
                 })
             )
         )
-        return renderTemplateToPdf(element, RECEIPT_WIDTH_MM)
+        return renderTemplateToPdf(element, RECEIPT_WIDTH_MM, receiptQuality)
     }
 
     const isRefundA4 = !!data.is_refund_invoice
@@ -691,7 +709,8 @@ export async function generateTemplatePdf({
     pages,
     format = 'a4',
     printLang,
-    pageSizeMm
+    pageSizeMm,
+    receiptQuality = DEFAULT_POS_RECEIPT_PRINT_QUALITY
 }: TemplatePdfOptions): Promise<Blob> {
     if (!i18n.isInitialized) {
         await new Promise(resolve => i18n.on('initialized', resolve))
@@ -719,7 +738,7 @@ export async function generateTemplatePdf({
     }
 
     const widthMm = format === 'receipt' ? RECEIPT_WIDTH_MM : A4_WIDTH_MM
-    return renderTemplateToPdf(wrappedElements[0], widthMm)
+    return renderTemplateToPdf(wrappedElements[0], widthMm, receiptQuality)
 }
 
 /**

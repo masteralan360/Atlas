@@ -171,6 +171,7 @@ import { getLanguageDirection } from '@/lib/i18nRouting'
 import { ActivityReceiptPrintTemplate, createActivityReceiptLabels } from '@/ui/components/activities/ActivityReceiptPrintTemplate'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import { generateTemplatePdf } from '@/services/pdfGenerator'
+import type { PosReceiptPrintQuality } from '@/services/posReceiptPrintQuality'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
 import { useUnitRegistry, getDynamicUnitAdjustmentLabel, type UnitRegistry } from '@/ui/components/unitRegistry'
 import { hasEffectiveSalesAgentCommissionPermission } from '@/permissions/salesAgentCommissionPermissions'
@@ -1145,7 +1146,7 @@ export function POS() {
     const [completedActivityCheckout, setCompletedActivityCheckout] = useState<CompletedActivityCheckout | null>(null)
     const [completedQuickOrder, setCompletedQuickOrder] = useState<CompletedQuickOrder | null>(null)
     const [isQuickOrderSuccessModalOpen, setIsQuickOrderSuccessModalOpen] = useState(false)
-    const buildActivityCheckoutReceiptPdf = useCallback(async () => {
+    const buildActivityCheckoutReceiptPdf = useCallback(async (receiptQuality?: PosReceiptPrintQuality) => {
         if (!completedActivityCheckout) throw new Error('Activity transaction is not available.')
 
         const printLanguage = features.print_lang !== 'auto' ? features.print_lang : i18n.language
@@ -1161,7 +1162,8 @@ export function POS() {
                 locale={printLanguage}
             />,
             format: 'receipt',
-            printLang: printLanguage
+            printLang: printLanguage,
+            receiptQuality
         })
     }, [completedActivityCheckout, features.iqd_display_preference, features.logo_url, features.print_lang, i18n, infiniteActivityIds, workspaceName])
 

@@ -8,9 +8,16 @@ import { cn } from '@/lib/utils'
 import { useFavicon } from '@/hooks/useFavicon'
 import { useAuth } from '@/auth'
 import type { CurrencyCode } from '@/local-db/models'
-import { DEMO_JOBS, DEMO_TIME_DEFAULT } from './demoConfig'
+import {
+  DEMO_JOBS,
+  DEMO_OPTIONAL_MODULE_CODES,
+  DEMO_TIME_DEFAULT,
+  inspectDemoOptionalModuleCodes,
+  parseDemoOptionalModuleCodes,
+} from './demoConfig'
 import { createDemoWorkspace } from './demoService'
 import { captureDemoBrowserState, clearStoredDemoWorkspaces } from './demoCleanup'
+import { OptionalModuleCodesInput } from './OptionalModuleCodesInput'
 
 export function DemoConfigPage() {
   const [, setLocation] = useLocation()
@@ -18,23 +25,38 @@ export function DemoConfigPage() {
   const { t } = useTranslation()
 
   const [workspaceName, setWorkspaceName] = useState('')
+  const [optionalModuleCodes, setOptionalModuleCodes] = useState('')
   const [timeLimit, setTimeLimit] = useState(DEMO_TIME_DEFAULT)
   const [currency, setCurrency] = useState<CurrencyCode>('iqd')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const optionalModuleCodeIssues = inspectDemoOptionalModuleCodes(optionalModuleCodes)
+  let optionalModuleCodesValid = true
+  try {
+    parseDemoOptionalModuleCodes(optionalModuleCodes)
+  } catch {
+    optionalModuleCodesValid = false
+  }
 
   useFavicon()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    try {
+      // Validate before starting, then demoService validates again before persistence.
+      parseDemoOptionalModuleCodes(optionalModuleCodes)
+    } catch {
+      return
+    }
+
     setIsLoading(true)
 
     const name = workspaceName.trim() || t('demo.job.general', { defaultValue: 'General Demo' })
 
     try {
       await clearStoredDemoWorkspaces()
-      const result = await createDemoWorkspace(name, 'general', timeLimit, currency)
+      const result = await createDemoWorkspace(name, 'general', timeLimit, currency, optionalModuleCodes)
       await captureDemoBrowserState(result.workspaceId)
       await signInWithDemo(result)
       setLocation('/')
@@ -184,6 +206,50 @@ export function DemoConfigPage() {
               </div>
 
               <div className="space-y-2">
+                <Label htmlFor="optional-module-codes" className="text-xs font-semibold text-gray-700 dark:text-slate-300 uppercase tracking-wider pl-1">
+                  {t('demo.optionalModules', 'Optional Modules')}
+                </Label>
+                <OptionalModuleCodesInput
+                  id="optional-module-codes"
+                  value={optionalModuleCodes}
+                  onChange={setOptionalModuleCodes}
+                  placeholder={t('demo.optionalModulesPlaceholder', 'CE-CA-OFB')}
+                  invalidDescriptionId="optional-module-codes-help"
+                  invalid={!optionalModuleCodesValid}
+                />
+                <p
+                  id="optional-module-codes-help"
+                  className={cn(
+                    'text-xs leading-relaxed pl-1',
+                    optionalModuleCodesValid
+                      ? 'text-gray-500 dark:text-slate-400'
+                      : 'text-red-600/70 dark:text-red-400/70',
+                  )}
+                >
+                  {optionalModuleCodeIssues.invalidCodes.length
+                    ? t('demo.optionalModulesInvalidCodes', {
+                      codes: optionalModuleCodeIssues.invalidCodes.join(', '),
+                      defaultValue: 'Unsupported module code(s): {{codes}}.',
+                    })
+                    : optionalModuleCodeIssues.incompleteCode
+                      ? t('demo.optionalModulesIncompleteCode', {
+                        code: optionalModuleCodeIssues.incompleteCode,
+                        defaultValue: 'Complete the module code: {{code}}.',
+                      })
+                      : optionalModuleCodeIssues.hasMalformedSeparator
+                        ? t('demo.optionalModulesMalformedSeparator', {
+                          defaultValue: 'Remove the extra or trailing hyphen.',
+                        })
+                        : optionalModuleCodeIssues.requiresAgentCode
+                          ? t('demo.agentModuleRequired', 'SAC and ASA require the AGENT code.')
+                          : t('demo.optionalModulesHelp', 'Enter supported module codes separated by hyphens or spaces. Each code must be complete.')}
+                </p>
+                <p className="text-xs leading-relaxed text-gray-400 dark:text-slate-500 pl-1">
+                  {t('demo.optionalModulesSupported', 'Supported codes')}: {DEMO_OPTIONAL_MODULE_CODES.join(', ')}
+                </p>
+              </div>
+
+              <div className="space-y-2">
                 <Label className="text-xs font-semibold text-gray-700 dark:text-slate-300 uppercase tracking-wider pl-1">
                   {t('demo.timeLimit', 'Demo Time Limit')}
                 </Label>
@@ -213,7 +279,7 @@ export function DemoConfigPage() {
             <Button
               type="submit"
               className="w-full h-12 bg-teal-600 hover:bg-teal-700 dark:bg-teal-500 dark:hover:bg-teal-600 text-white font-semibold rounded-xl shadow-md hover:shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={isLoading}
+              disabled={isLoading || !optionalModuleCodesValid}
             >
               {isLoading ? (
                 <>
