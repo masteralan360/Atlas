@@ -726,7 +726,7 @@ export function Payments() {
                                     <SelectItem value="all">{t('payments.filters.allSources', { defaultValue: 'All Sources' })}</SelectItem>
                                     <SelectItem value="loans">{t('payments.filters.loans', { defaultValue: 'Loans' })}</SelectItem>
                                     <SelectItem value="orders">{t('payments.filters.orders', { defaultValue: 'Orders' })}</SelectItem>
-                                    <SelectItem value="budget">{t('payments.filters.accountingHr', { defaultValue: 'Accounting / HR' })}</SelectItem>
+                                    <SelectItem value="budget">{t('payments.filters.accountingHr', { defaultValue: 'Accounting and Expenses / HR' })}</SelectItem>
                                     <SelectItem value="real_estate">{t('payments.filters.realEstate', { defaultValue: 'Real Estate' })}</SelectItem>
                                     <SelectItem value="activities">{t('payments.filters.activities', { defaultValue: 'Activities' })}</SelectItem>
                                     <SelectItem value="clinical_appointments">{t('payments.filters.appointments', { defaultValue: 'Appointments' })}</SelectItem>

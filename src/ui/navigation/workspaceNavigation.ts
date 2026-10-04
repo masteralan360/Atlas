@@ -548,7 +548,7 @@ export function buildWorkspaceNavigation({
         ...(hasFeature("budget") && canAccessPermission("budget.access")
           ? [
             {
-              name: t("nav.budget", { defaultValue: "Accounting" }),
+              name: t("nav.budget", { defaultValue: "Accounting and Expenses" }),
               href: "/budget",
               icon: FileSpreadsheet,
             },

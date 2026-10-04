@@ -482,7 +482,7 @@ export function formatOriginLabel(origin?: string | null, sourceChannel?: string
     if (normalized === 'activities' || normalized === 'activity') return 'Activities'
     if (normalized === 'clinical_appointment' || normalized === 'clinical-appointment' || normalized === 'clinical appointment') return 'Appointments'
     if (normalized === 'agents' || normalized === 'agent') return 'Agents'
-    if (normalized === 'accounting' || normalized === 'budget') return 'Accounting'
+    if (normalized === 'accounting' || normalized === 'budget') return 'Accounting and Expenses'
     if (normalized === 'manual') return 'Manual'
     if (normalized === 'business_partner' || normalized === 'business-partner') return 'Business Partner'
     if (normalized === 'loans' || normalized === 'loan') return 'Loans'

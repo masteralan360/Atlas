@@ -252,7 +252,7 @@ export function DirectTransactions() {
                         <CardTitle>{t('directTransactions.notAvailable', { defaultValue: 'Direct Transactions is not available in this workspace' })}</CardTitle>
                     </CardHeader>
                     <CardContent className="text-sm text-muted-foreground">
-                        {t('directTransactions.enableModules', { defaultValue: 'Enable Loans, CRM, Accounting, or HR to use the central payments surface.' })}
+                        {t('directTransactions.enableModules', { defaultValue: 'Enable Loans, CRM, Accounting and Expenses, or HR to use the central payments surface.' })}
                     </CardContent>
                 </Card>
             </div>

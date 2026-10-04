@@ -144,7 +144,7 @@ export function Register() {
                                         <div className="space-y-1">
                                             <h3 className="text-lg font-semibold text-white">{t('auth.benefits.suiteTitle', 'Complete Enterprise Suite')}</h3>
                                             <p className="text-sm text-teal-100/60 leading-relaxed font-light">
-                                                {t('auth.benefits.suiteDesc', 'Access POS, Inventory, Accounting, and HR in one seamless platform.')}
+                                                {t('auth.benefits.suiteDesc', 'Access POS, Inventory, Accounting and Expenses, and HR in one seamless platform.')}
                                             </p>
                                         </div>
                                     </div>

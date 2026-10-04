@@ -1318,7 +1318,7 @@ export function Budget() {
         <div className="space-y-6" dir={pageDirection}>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="text-4xl font-bold tracking-tight">{t('budget.title') || 'Accounting'}</h1>
+                    <h1 className="text-4xl font-bold tracking-tight">{t('budget.title') || 'Accounting and Expenses'}</h1>
                     <p className="text-base font-medium text-muted-foreground">
                         {t('budget.subtitle') || 'Track and manage your expenses'} <ModulePageFreshness className="ms-2" />
                     </p>

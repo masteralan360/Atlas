@@ -3596,7 +3596,7 @@ export function Ledger() {
                     </CardHeader>
                     <CardContent className="text-sm text-muted-foreground">
                         {t('ledger.enableModules', {
-                            defaultValue: 'Enable POS, CRM, Loans, Accounting, or HR to use the central ledger.',
+                            defaultValue: 'Enable POS, CRM, Loans, Accounting and Expenses, or HR to use the central ledger.',
                         })}
                     </CardContent>
                 </Card>

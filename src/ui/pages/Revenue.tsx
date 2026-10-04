@@ -324,7 +324,7 @@ function revenueOriginLabel(origin: string | null | undefined, sourceChannel: st
             return t('revenue.filters.origins.agents', { defaultValue: 'Agents' })
         case 'accounting':
         case 'budget':
-            return t('revenue.filters.origins.accounting', { defaultValue: 'Accounting' })
+            return t('revenue.filters.origins.accounting', { defaultValue: 'Accounting and Expenses' })
         case 'manual':
             return t('revenue.filters.origins.manual', { defaultValue: 'Manual' })
         case 'business_partner':

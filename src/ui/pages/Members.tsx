@@ -123,7 +123,7 @@ const PERMISSION_MODULE_DEFAULT_LABELS: Record<string, string> = {
     suppliers: 'Suppliers',
     orders: 'Orders',
     ecommerce: 'E-Commerce',
-    accounting: 'Accounting',
+    accounting: 'Accounting and Expenses',
     invoiceHistory: 'Invoice History',
     loans: 'Loans',
     realEstate: 'Real Estate',
