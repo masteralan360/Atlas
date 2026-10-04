@@ -44,6 +44,7 @@ export const DEMO_OPTIONAL_MODULE_GRANTS = {
   POST: { type: 'module', key: 'post_service' },
   CRS: { type: 'module', key: 'car_rental' },
   TT: { type: 'module', key: 'travel_transportation' },
+  CP: { type: 'module', key: 'customer_profitability' },
 } as const satisfies Record<string, DemoOptionalModuleGrant>
 
 export type DemoOptionalModuleCode = keyof typeof DEMO_OPTIONAL_MODULE_GRANTS
