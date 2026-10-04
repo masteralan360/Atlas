@@ -3674,6 +3674,17 @@ export class AtlasDatabase extends Dexie {
       inventory_transfer_sequences: 'workspaceId'
     })
 
+    // Repair identity and storage-access stores for installations whose
+    // IndexedDB version is current but whose physical schema is incomplete.
+    // Staff mutations consult these stores; admins bypass the lookup, which
+    // otherwise makes the schema issue appear limited to staff accounts.
+    this.version(143).stores({
+      users: 'id, email, role, workspaceId, syncStatus, updatedAt, isDeleted, monthlyTarget',
+      profiles: 'id, workspaceId, currentWorkspaceId, name, role, [workspaceId+name], [currentWorkspaceId+name]',
+      storage_member_exclusions:
+        'id, workspaceId, storageId, userId, updatedAt, isDeleted, syncStatus, [workspaceId+storageId], [workspaceId+userId], [storageId+userId]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()

@@ -11,6 +11,7 @@ import { buildInventoryMovementTransactionId, createInventoryTransaction } from 
 import { hydrateInventoryTransactionsForReferences } from './inventoryTransactions'
 import { refreshStockBatchesFromSupabase, getStockBatchSalePlan, splitStockBatchAllocationsForReturn } from './stockBatches'
 import { resolveReturnStorageId } from './storageUtils'
+import { assertCurrentUserCanAccessStorage } from './storagePermissions'
 import {
     assertPaymentAccountTransactionCanBeAppliedLocally,
     mirrorPaymentAccountTransactionLocally,
@@ -230,6 +231,13 @@ async function applyLocalSaleProductExchange(input: ProcessSaleProductExchangeIn
         input.replacementStorageId,
         replacementQuantity,
     )
+    // Resolve storage permissions before opening the write transaction. The
+    // inventory writer also guards ordinary callers, but that async preflight
+    // would otherwise let this transaction expire while it waits for IndexedDB.
+    await Promise.all([
+        assertCurrentUserCanAccessStorage(input.workspaceId, returnStorageId),
+        assertCurrentUserCanAccessStorage(input.workspaceId, input.replacementStorageId),
+    ])
     const returnSplit = splitStockBatchAllocationsForReturn(returnItem.batchAllocations || [], returnInventoryQuantity)
     const returnUnitAmount = Number(returnItem.convertedUnitPrice ?? returnItem.unitPrice ?? 0)
     const returnAmount = returnUnitAmount * returnQuantity
@@ -253,6 +261,7 @@ async function applyLocalSaleProductExchange(input: ProcessSaleProductExchangeIn
         db.sales, db.sale_items, db.sale_returns, db.sale_return_items,
         db.sale_product_exchanges, db.inventory, db.inventory_transactions, db.products, db.stock_batches,
         db.storages, db.loans, db.loan_installments, db.loan_payments, db.payment_transactions,
+        db.payment_accounts, db.payment_account_movements, db.payment_account_balances,
     ], async () => {
         const existingExchange = await db.sale_product_exchanges.get(ids.exchangeId)
         if (existingExchange) {
@@ -282,6 +291,8 @@ async function applyLocalSaleProductExchange(input: ProcessSaleProductExchangeIn
             returnStorageId,
             returnNewQuantity,
             timestamp,
+            'local',
+            { storageAccessPrevalidated: true },
         )
         const replacementPreviousQuantity = await getInventoryQuantityForProductStorage(input.replacementProductId, input.replacementStorageId)
         const replacementNewQuantity = roundQuantity(replacementPreviousQuantity - replacementQuantity)
@@ -291,6 +302,8 @@ async function applyLocalSaleProductExchange(input: ProcessSaleProductExchangeIn
             input.replacementStorageId,
             replacementNewQuantity,
             timestamp,
+            'local',
+            { storageAccessPrevalidated: true },
         )
         if (returnInventoryRow) {
             await createInventoryTransaction(input.workspaceId, {

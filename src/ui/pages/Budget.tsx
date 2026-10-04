@@ -16,6 +16,7 @@ import {
     Trash2,
     Printer,
     Loader2,
+    Search,
     Tags,
     Repeat
 } from 'lucide-react'
@@ -122,6 +123,12 @@ import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountS
 interface ExpenseRow {
     item: ExpenseItem
     series: ExpenseSeries | null
+}
+
+function matchesMonthlySearch(query: string, ...values: unknown[]) {
+    const normalizedQuery = query.trim().toLocaleLowerCase()
+    if (!normalizedQuery) return true
+    return values.some(value => value != null && String(value).toLocaleLowerCase().includes(normalizedQuery))
 }
 
 interface SnoozeTarget {
@@ -509,6 +516,7 @@ export function Budget() {
 
     const currentMonthKey = monthKeyFromDate(new Date())
     const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthKey)
+    const [budgetSearchQuery, setBudgetSearchQuery] = useState('')
 
     const [isStartMonthModalOpen, setIsStartMonthModalOpen] = useState(false)
     const [startMonthInput, setStartMonthInput] = useState(currentMonthKey)
@@ -650,6 +658,23 @@ export function Budget() {
         }))
     }, [expenseItems, seriesById])
 
+    const filteredExpenseRows = useMemo(
+        () => expenseRows.filter(({ item, series }) => matchesMonthlySearch(
+            budgetSearchQuery,
+            series?.name,
+            getExpenseCategoryName(series),
+            series?.category,
+            item.amount,
+            formatCurrency(item.amount, item.currency, iqdPreference),
+            item.currency,
+            item.status,
+            t(`budget.status.${item.status}`, { defaultValue: item.status }),
+            item.dueDate,
+            formatDate(item.dueDate)
+        )),
+        [budgetSearchQuery, expenseRows, getExpenseCategoryName, iqdPreference, t]
+    )
+
     const operationalTotals = useMemo(() => {
         let totalBase = 0
         let paidBase = 0
@@ -675,6 +700,21 @@ export function Budget() {
     const payrollItems = useMemo(
         () => buildPayrollItems(employees, payrollStatuses, selectedMonth as any),
         [employees, payrollStatuses, selectedMonth]
+    )
+    const filteredPayrollItems = useMemo(
+        () => payrollItems.filter(item => matchesMonthlySearch(
+            budgetSearchQuery,
+            item.employee.name,
+            item.employee.role,
+            item.amount,
+            formatCurrency(item.amount, item.currency, iqdPreference),
+            item.currency,
+            item.status,
+            t(`budget.status.${item.status}`, { defaultValue: item.status }),
+            item.dueDate,
+            formatDate(item.dueDate)
+        )),
+        [budgetSearchQuery, iqdPreference, payrollItems, t]
     )
 
     const payrollTotals = useMemo(() => {
@@ -706,6 +746,23 @@ export function Budget() {
         () => buildDividendItems(employees, dividendStatuses, selectedMonth as any, baseCurrency, rates, surplusPoolBase),
         [employees, dividendStatuses, selectedMonth, baseCurrency, rates, surplusPoolBase]
     )
+    const filteredDividendItems = useMemo(
+        () => dividendResult.items.filter(item => matchesMonthlySearch(
+            budgetSearchQuery,
+            item.employee.name,
+            item.employee.role,
+            item.amount,
+            formatCurrency(item.amount, item.currency, iqdPreference),
+            item.currency,
+            item.status,
+            t(`budget.status.${item.status}`, { defaultValue: item.status }),
+            item.dueDate,
+            formatDate(item.dueDate),
+            item.type === 'fixed' ? t('budget.fixedDividend') : item.type,
+            item.employee.dividendAmount
+        )),
+        [budgetSearchQuery, dividendResult.items, iqdPreference, t]
+    )
 
     const totalItemsCount = expenseRows.length + payrollItems.length
     const totalAllocatedBase = operationalTotals.totalBase + payrollTotals.totalBase
@@ -732,6 +789,7 @@ export function Budget() {
         () => formatMonthLabel(selectedMonth as any, printLang),
         [printLang, selectedMonth]
     )
+    const selectedMonthSearchLabel = monthOptions.find(option => option.value === selectedMonth)?.label || selectedMonth
     const budgetPrintMetrics = useMemo(() => ({
         netProfitBase,
         budgetLimitBase: calculatedBudgetLimitBase,
@@ -1373,6 +1431,17 @@ export function Budget() {
                 </div>
             </div>
 
+            <div className="relative w-full md:max-w-md">
+                <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                    aria-label={t('budget.searchPlaceholder', { month: selectedMonthSearchLabel })}
+                    placeholder={t('budget.searchPlaceholder', { month: selectedMonthSearchLabel })}
+                    value={budgetSearchQuery}
+                    onChange={event => setBudgetSearchQuery(event.target.value)}
+                    className="ps-10"
+                />
+            </div>
+
             <ExpenseCategoryManagerDialog
                 open={isExpenseCategoryManagerOpen}
                 onOpenChange={setIsExpenseCategoryManagerOpen}
@@ -1468,7 +1537,10 @@ export function Budget() {
                             {expenseRows.length === 0 && (
                                 <div className="text-base font-medium text-muted-foreground">{t('budget.emptyExpenses') || 'No expenses for this month.'}</div>
                             )}
-                            {expenseRows.map(({ item, series }) => (
+                            {expenseRows.length > 0 && filteredExpenseRows.length === 0 && budgetSearchQuery.trim() && (
+                                <div className="text-base font-medium text-muted-foreground">{t('common.noResults') || 'No results'}</div>
+                            )}
+                            {filteredExpenseRows.map(({ item, series }) => (
                                 <BudgetItemRow
                                     key={item.id}
                                     title={series?.name || t('budget.deletedSeries') || 'Deleted Series'}
@@ -1514,7 +1586,10 @@ export function Budget() {
                             {payrollItems.length === 0 && (
                                 <div className="text-base font-medium text-muted-foreground">{t('budget.emptyPayroll') || 'No payroll entries for this month.'}</div>
                             )}
-                            {payrollItems.map(item => (
+                            {payrollItems.length > 0 && filteredPayrollItems.length === 0 && budgetSearchQuery.trim() && (
+                                <div className="text-base font-medium text-muted-foreground">{t('common.noResults') || 'No results'}</div>
+                            )}
+                            {filteredPayrollItems.map(item => (
                                 <BudgetItemRow
                                     key={item.employee.id}
                                     title={item.employee.name}
@@ -1551,7 +1626,10 @@ export function Budget() {
                             {dividendResult.items.length === 0 && (
                                 <div className="text-base font-medium text-muted-foreground">{t('budget.dividend.empty') || 'No dividend withdrawals for this month'}</div>
                             )}
-                            {dividendResult.items.map(item => (
+                            {dividendResult.items.length > 0 && filteredDividendItems.length === 0 && budgetSearchQuery.trim() && (
+                                <div className="text-base font-medium text-muted-foreground">{t('common.noResults') || 'No results'}</div>
+                            )}
+                            {filteredDividendItems.map(item => (
                                 <BudgetItemRow
                                     key={item.employee.id}
                                     title={item.employee.name}

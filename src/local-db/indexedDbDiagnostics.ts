@@ -36,10 +36,8 @@ function getErrorMessage(error: unknown) {
 function isObjectStoreNotFoundError(error: unknown) {
   if (error instanceof IndexedDbSchemaMismatchError) return true
 
-  const name = getErrorName(error).toLowerCase()
   const message = getErrorMessage(error).toLowerCase()
-  return name === 'notfounderror'
-    || message.includes("failed to execute 'objectstore'")
+  return message.includes("failed to execute 'objectstore'")
     || (message.includes('object store') && message.includes('not found'))
 }
 
@@ -89,7 +87,11 @@ export function enrichIndexedDbError(error: unknown, context: IndexedDbDiagnosti
     : []
   const missingStores = missingRequestedStores.length > 0 ? missingRequestedStores : missingExpectedStores
 
-  if (!isObjectStoreNotFoundError(error)) return error
+  // Dexie also uses NotFoundError for transaction-scope violations (for
+  // example, a table not included in the active transaction). Only label an
+  // error as a physical schema mismatch when the requested/expected stores
+  // actually differ from the database's installed stores.
+  if (!isObjectStoreNotFoundError(error) || missingStores.length === 0) return error
 
   const physicalVersion = normalizePhysicalVersion(context.physicalVersion)
   const details: IndexedDbSchemaMismatchDetails = {

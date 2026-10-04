@@ -789,11 +789,12 @@ export async function putInventoryQuantity(
     storageId: string,
     quantity: number,
     timestamp: string,
-    syncSource: InventorySyncSource = 'local'
+    syncSource: InventorySyncSource = 'local',
+    options: { storageAccessPrevalidated?: boolean } = {}
 ) {
     if (syncSource === 'local') {
         assertInventoryMutationConnectivity(workspaceId)
-        if (!assertRecentCurrentUserCanAccessStorage(workspaceId, storageId)) {
+        if (!options.storageAccessPrevalidated && !assertRecentCurrentUserCanAccessStorage(workspaceId, storageId)) {
             await assertCurrentUserCanAccessStorage(workspaceId, storageId)
         }
     }

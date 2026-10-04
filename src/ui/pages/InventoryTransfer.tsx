@@ -539,6 +539,8 @@ export default function InventoryTransfer() {
   const shiftProductSelectionRef = useRef(false);
   const [productSearch, setProductSearch] = useState("");
   const [isTransferring, setIsTransferring] = useState(false);
+  const [isTransferConfirmationOpen, setIsTransferConfirmationOpen] =
+    useState(false);
 
   const [isRuleDialogOpen, setIsRuleDialogOpen] = useState(false);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
@@ -814,6 +816,7 @@ export default function InventoryTransfer() {
             return {
               productId: product.productId,
               productName: product.name,
+              imageUrl: product.imageUrl,
               unit: product.unit,
               availableQuantity: product.availableQuantity,
               quantity: selectedProductLine.quantity,
@@ -824,6 +827,7 @@ export default function InventoryTransfer() {
           return {
             productId: product.productId,
             productName: product.name,
+            imageUrl: product.imageUrl,
             unit: product.unit,
             availableQuantity: product.availableQuantity,
             quantity: selectedLines.reduce(
@@ -1617,7 +1621,7 @@ export default function InventoryTransfer() {
               className={`flex ${pageDirection === "rtl" ? "justify-start lg:col-start-1 lg:justify-self-start" : "justify-end lg:col-start-2 lg:justify-self-end"}`}
             >
               <Button
-                onClick={handleTransfer}
+                onClick={() => setIsTransferConfirmationOpen(true)}
                 disabled={
                   !sourceWorkspaceId ||
                   !targetWorkspaceId ||
@@ -1638,8 +1642,8 @@ export default function InventoryTransfer() {
                   </>
                 ) : (
                   <>
-                    <Check className="h-5 w-5" />
-                    {t("inventoryTransfer.confirmTransfer", "Confirm Transfer")}
+                    <ArrowRightLeft className="h-5 w-5" />
+                    {t("inventoryTransfer.transferInventory", "Transfer Inventory")}
                   </>
                 )}
               </Button>
@@ -2453,6 +2457,86 @@ export default function InventoryTransfer() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <Dialog
+        open={isTransferConfirmationOpen}
+        onOpenChange={setIsTransferConfirmationOpen}
+      >
+        <DialogContent className="flex max-h-[min(85dvh,48rem)] flex-col sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="h-5 w-5 text-primary" />
+              {t(
+                "inventoryTransfer.transferConfirmationTitle",
+                "Confirm Inventory Transfer",
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              {t(
+                "inventoryTransfer.transferConfirmationDescription",
+                "Review the products and quantities below before starting the transfer.",
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div
+            role="list"
+            className="min-h-0 flex-1 grid-cols-1 gap-2 overflow-y-auto py-2 md:grid md:grid-cols-2"
+          >
+            {selectedTransferItems.map((item, index) => (
+              <div
+                key={item.productId}
+                role="listitem"
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border bg-muted/20 p-3"
+              >
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="shrink-0 rounded-full bg-muted px-2 py-1 text-xs font-semibold text-muted-foreground">
+                    #{index + 1}
+                  </span>
+                  <ProductAvatar
+                    productName={item.productName}
+                    imageUrl={item.imageUrl}
+                  />
+                  <span className="truncate font-medium">{item.productName}</span>
+                </div>
+                <span
+                  dir="ltr"
+                  className="shrink-0 rounded-full bg-primary/10 px-2.5 py-1 text-sm font-semibold text-primary"
+                >
+                  {transferQuantityFormatter.format(item.quantity)}
+                  {item.unit ? ` ${item.unit}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsTransferConfirmationOpen(false)}
+            >
+              {t("common.cancel", "Cancel")}
+            </Button>
+            <Button
+              type="button"
+              disabled={
+                selectedTransferItems.length === 0 ||
+                hasInvalidTransferQuantity ||
+                isTransferring
+              }
+              onClick={() => {
+                setIsTransferConfirmationOpen(false);
+                void handleTransfer();
+              }}
+              className="gap-2"
+            >
+              <Check className="h-4 w-4" />
+              {t("inventoryTransfer.confirmTransfer", "Confirm Transfer")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isRuleDialogOpen} onOpenChange={handleRuleDialogChange}>
         <DialogContent className="left-0 top-0 flex h-[100dvh] max-h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden rounded-none border-0 p-0 sm:left-[50%] sm:top-[calc(50%+var(--titlebar-height)/2+var(--safe-area-top)/2)] sm:h-auto sm:max-h-[min(calc(100dvh-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-2rem),920px)] sm:w-[calc(100vw-2rem)] sm:max-w-5xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-3xl sm:border-border/60">
