@@ -1,6 +1,6 @@
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide
 
-POS
+Remove Splash screen PWA
 
 purchase order error, order_payment_source_not_found
 

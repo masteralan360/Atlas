@@ -13,6 +13,7 @@ import { assertStaffMinimumSellingPrices } from './minimumSellingPrice'
 import type { MinimumSellingPriceCheckItem } from './minimumSellingPrice'
 import { createLoanFromPosSale, generateLocalSaleSequenceId } from './hooks'
 import { appendPaymentTransaction, cacheConfirmedPaymentTransaction } from './payments'
+import { assertCurrentUserCanAccessStorage } from './storagePermissions'
 import { adjustInventoryQuantity } from './inventory'
 import { commitStockBatchAllocations, refreshStockBatchesFromSupabase } from './stockBatches'
 import { applyOfflinePosStockEffects } from './offlinePosStock'
@@ -270,7 +271,10 @@ async function saveLocal(input: PosCheckoutInput) {
             workspaceId: p.workspace_id,
             saleId: p.id,
             items: p.items.flatMap(item => item.storage_id ? [{ productId: item.product_id, storageId: item.storage_id, quantity: item.inventory_quantity ?? item.quantity }] : []),
-            batchPlans: input.batchPlans, timestamp: input.timestamp, skipReorderCheck: true
+            batchPlans: input.batchPlans,
+            timestamp: input.timestamp,
+            skipReorderCheck: true,
+            storageAccessPrevalidated: true
         })
         await postPayment(input, `#${String(sequenceId).padStart(5, '0')}`)
         const r = input.loanRegistration
@@ -300,6 +304,13 @@ export async function commitPosCheckout(input: PosCheckoutInput) {
                 actingUserRole: input.user.role,
                 items: minimumPriceValidationItems
             })
+            const storageIds = [...new Set([
+                ...p.items.flatMap((item) => item.storage_id ? [item.storage_id] : []),
+                ...input.batchPlans.map((plan) => plan.storageId)
+            ])]
+            await Promise.all(storageIds.map((storageId) =>
+                assertCurrentUserCanAccessStorage(p.workspace_id, storageId)
+            ))
             const result = await saveLocal(input)
             // Automatic reorder transfers are follow-up work, outside the sale.
             const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')

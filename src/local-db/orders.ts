@@ -1267,6 +1267,10 @@ async function deductInventoryForSalesOrder(
         })
     }
 
+    // Permission reads must happen before the inventory transaction below;
+    // that transaction intentionally does not include the member mirror stores.
+    await assertOrderStorageAccess(order)
+
     await refreshStockBatchesFromSupabase(order.workspaceId)
     const authoritativeInventoryRows = await Promise.all(Array.from(inventoryDeductions.values()).map(async ({ productId, storageId }) =>
         hydrateInventoryProductStoragesFromSupabase(
@@ -1349,7 +1353,8 @@ async function deductInventoryForSalesOrder(
                     salePlan.allocations,
                     {
                         timestamp: now,
-                        skipRemoteSync: true
+                        skipRemoteSync: true,
+                        storageAccessPrevalidated: true
                     }
                 )
                 changedBatches.push(...committedBatches)
@@ -1375,7 +1380,9 @@ async function deductInventoryForSalesOrder(
                     deduction.productId,
                     deduction.storageId,
                     roundQuantity(currentInventoryQuantity - deduction.quantity),
-                    now
+                    now,
+                    'local',
+                    { storageAccessPrevalidated: true }
                 )
                 if (changedInventoryRow) {
                     changedInventoryRows.push(changedInventoryRow)

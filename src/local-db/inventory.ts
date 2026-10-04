@@ -1124,6 +1124,7 @@ export async function adjustInventoryQuantity(input: {
     skipRemoteHydration?: boolean
     skipRemoteSync?: boolean
     skipReorderCheck?: boolean
+    storageAccessPrevalidated?: boolean
     movementTransactionId?: string
     movement: InventoryMovementContext | null
 }) {
@@ -1166,7 +1167,8 @@ export async function adjustInventoryQuantity(input: {
             input.storageId,
             computedNextQuantity,
             timestamp,
-            syncSource
+            syncSource,
+            { storageAccessPrevalidated: input.storageAccessPrevalidated }
         )
 
         let localMovement: InventoryTransaction | null = null

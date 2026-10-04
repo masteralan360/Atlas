@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import Dexie from 'dexie'
 
 import { supabase } from '@/auth/supabase'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
@@ -256,15 +255,11 @@ export function redactSaleForStorageAccess<T extends Sale & { _enrichedItems?: A
 
 async function getStorageAccessSnapshot(
   workspaceId: string | undefined,
-  userId = getActiveBusinessUserId(),
-  ignoreAmbientTransaction = false
+  userId = getActiveBusinessUserId()
 ): Promise<StorageAccess | undefined> {
   if (!workspaceId || !userId) {
     return unrestrictedStorageAccess
   }
-  const read = <T>(task: () => T): T => ignoreAmbientTransaction
-    ? Dexie.ignoreTransaction(task)
-    : task()
 
   // The authenticated identity is authoritative for the active workspace;
   // local membership mirrors can lag or be unavailable while the cache is
@@ -280,8 +275,8 @@ async function getStorageAccessSnapshot(
     // Either identity mirror can independently establish workspace membership.
     // A damaged mirror must not mask a valid row in the other one.
     const [userResult, profileResult] = await Promise.allSettled([
-      read(() => db.users.get(userId)),
-      read(() => db.profiles.get(userId))
+      db.users.get(userId),
+      db.profiles.get(userId)
     ])
     const user = userResult.status === 'fulfilled' ? userResult.value : undefined
     const profile = profileResult.status === 'fulfilled' ? profileResult.value : undefined
@@ -305,11 +300,11 @@ async function getStorageAccessSnapshot(
     return unrestrictedStorageAccess
   }
 
-  const exclusions = await read(() => db.storage_member_exclusions
+  const exclusions = await db.storage_member_exclusions
     .where('[workspaceId+userId]')
     .equals([workspaceId, userId])
     .and((row) => !row.isDeleted)
-    .toArray())
+    .toArray()
 
   return {
     isAdmin: false,
@@ -354,7 +349,7 @@ export async function getCurrentStorageAccess(workspaceId: string): Promise<Stor
     }
   }
 
-  const cachedAccess = await getStorageAccessSnapshot(workspaceId, userId, true)
+  const cachedAccess = await getStorageAccessSnapshot(workspaceId, userId)
   if (cachedAccess?.isAdmin) {
     return unrestrictedStorageAccess
   }
@@ -369,7 +364,7 @@ export async function getCurrentStorageAccess(workspaceId: string): Promise<Stor
       return unresolvedStorageAccess
     }
   }
-  return (await getStorageAccessSnapshot(workspaceId, userId, true)) ?? unresolvedStorageAccess
+  return (await getStorageAccessSnapshot(workspaceId, userId)) ?? unresolvedStorageAccess
 }
 
 /** Guard local/offline mutations where server-side RLS is not present. */

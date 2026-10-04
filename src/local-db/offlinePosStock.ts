@@ -24,6 +24,8 @@ export async function applyOfflinePosStockEffects(input: {
   items: OfflinePosStockItem[];
   batchPlans: OfflinePosBatchPlan[];
   timestamp: string;
+  /** Storage access was checked before the enclosing checkout transaction. */
+  storageAccessPrevalidated?: boolean;
   /** A larger sale transaction schedules reorder rules after it commits. */
   skipReorderCheck?: boolean;
 }) {
@@ -49,6 +51,7 @@ export async function applyOfflinePosStockEffects(input: {
           skipRemoteHydration: true,
           skipRemoteSync: true,
           skipReorderCheck: true,
+          storageAccessPrevalidated: input.storageAccessPrevalidated,
           movement: {
             productId: item.productId,
             storageId: item.storageId,
@@ -68,6 +71,7 @@ export async function applyOfflinePosStockEffects(input: {
           {
             timestamp: input.timestamp,
             skipRemoteSync: true,
+            storageAccessPrevalidated: input.storageAccessPrevalidated,
           },
         );
       }

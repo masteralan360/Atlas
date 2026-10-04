@@ -820,6 +820,7 @@ export async function commitStockBatchAllocations(
         timestamp?: string
         syncSource?: 'local' | 'remote'
         skipRemoteSync?: boolean
+        storageAccessPrevalidated?: boolean
     }
 ) {
     const normalizedAllocations = normalizeAllocationList(allocations)
@@ -829,7 +830,7 @@ export async function commitStockBatchAllocations(
 
     const timestamp = options?.timestamp || new Date().toISOString()
     const syncSource = options?.syncSource || 'local'
-    if (syncSource === 'local') {
+    if (syncSource === 'local' && !options?.storageAccessPrevalidated) {
         if (!assertRecentCurrentUserCanAccessStorage(workspaceId, storageId)) {
             await assertCurrentUserCanAccessStorage(workspaceId, storageId)
         }
