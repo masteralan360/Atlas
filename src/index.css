@@ -389,7 +389,15 @@ html[lang] pre {
   height: var(--pos-mobile-cart-sheet-height);
 }
 
+:root {
+  --atlas-dialog-viewport-height: 100vh;
+}
+
 @supports (height: 100dvh) {
+  :root {
+    --atlas-dialog-viewport-height: 100dvh;
+  }
+
   .atlas-dynamic-viewport {
     height: 100dvh;
   }

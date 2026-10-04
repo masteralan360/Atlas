@@ -1616,9 +1616,10 @@ export function Layout({ children }: LayoutProps) {
             <>
               <div
                 aria-hidden="true"
-                className="pointer-events-none fixed z-40 h-4 w-4 bg-background sidebar-gradient transition-[inset-inline-start] duration-300 ease-in-out"
+                className="pointer-events-none fixed z-40 h-4 w-4 bg-background/90 backdrop-blur-xl sidebar-gradient transition-[left,right] duration-300 ease-in-out"
                 style={{
-                  insetInlineStart: `var(--navigation-rail-current-width, ${NAVIGATION_RAIL_WIDTH}px)`,
+                  left: navigationRailIsRtl ? undefined : `var(--navigation-rail-current-width, ${NAVIGATION_RAIL_WIDTH}px)`,
+                  right: navigationRailIsRtl ? `var(--navigation-rail-current-width, ${NAVIGATION_RAIL_WIDTH}px)` : undefined,
                   top: 'var(--titlebar-height)',
                   backgroundSize: '100% 100vh',
                   backgroundPositionY: 'calc(0px - var(--titlebar-height))',
@@ -1628,9 +1629,10 @@ export function Layout({ children }: LayoutProps) {
               />
               <div
                 aria-hidden="true"
-                className="pointer-events-none fixed z-40 h-4 w-4 bg-background sidebar-gradient transition-[inset-inline-start] duration-300 ease-in-out"
+                className="pointer-events-none fixed z-40 h-4 w-4 bg-background/90 backdrop-blur-xl sidebar-gradient transition-[left,right] duration-300 ease-in-out"
                 style={{
-                  insetInlineStart: `var(--navigation-rail-current-width, ${NAVIGATION_RAIL_WIDTH}px)`,
+                  left: navigationRailIsRtl ? undefined : `var(--navigation-rail-current-width, ${NAVIGATION_RAIL_WIDTH}px)`,
+                  right: navigationRailIsRtl ? `var(--navigation-rail-current-width, ${NAVIGATION_RAIL_WIDTH}px)` : undefined,
                   bottom: 0,
                   backgroundSize: '100% 100vh',
                   backgroundPositionY: `calc(${NAVIGATION_RAIL_CORNER_RADIUS}px - 100vh)`,
