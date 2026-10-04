@@ -39,6 +39,7 @@ export type PlanModuleKey =
     | 'installments'
     | 'discounts'
     | 'revenue_analytics'
+    | 'customer_profitability'
     | 'team_performance'
     | 'invoice_history'
     | 'accounting'
@@ -69,6 +70,7 @@ export type WorkspaceFeatureKey =
     | 'loans'
     | 'installments'
     | 'net_revenue'
+    | 'customer_profitability'
     | 'budget'
     | 'monthly_comparison'
     | 'team_performance'
@@ -264,6 +266,7 @@ export const WORKSPACE_FEATURE_MODULE_MAP: Record<WorkspaceFeatureKey, PlanModul
     loans: 'loans',
     installments: 'installments',
     net_revenue: 'revenue_analytics',
+    customer_profitability: 'customer_profitability',
     budget: 'accounting',
     monthly_comparison: 'revenue_analytics',
     team_performance: 'team_performance',

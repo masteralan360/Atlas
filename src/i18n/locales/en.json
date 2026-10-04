@@ -10292,5 +10292,103 @@
     "reloadToApply": "Reload to apply",
     "downloadNeedsAttention": "Resource download needs attention",
     "retry": "Retry"
+  },
+  "customerProfitability": {
+    "title": "Customer Profitability",
+    "description": "See customer revenue and the operating costs assigned to each customer, contract, and vehicle.",
+    "reportingOnlyNotice": "Reporting links only. These values do not create accounting entries or change year-end Profit & Loss.",
+    "sourcesIncluded": "Revenue uses completed sales orders. Costs use received supplier orders, paid expense items, and unreversed payroll or direct vouchers. Standalone voucher direction determines revenue or cost; invoice settlement payments are excluded to prevent double counting.",
+    "permissionCoverage": "Some source types are hidden because you do not have access to their source modules. Totals may be partial.",
+    "actions": {
+      "refresh": "Refresh",
+      "newEngagement": "New contract / engagement",
+      "link": "Link to customer",
+      "editLink": "Edit link",
+      "unlink": "Unlink",
+      "saveLink": "Save reporting link",
+      "createEngagement": "Create engagement"
+    },
+    "fields": {
+      "customer": "Customer",
+      "customerRequired": "Customer *",
+      "selectCustomer": "Search customers…",
+      "engagement": "Contract / engagement",
+      "allEngagements": "All contracts / engagements",
+      "optionalEngagement": "Optional engagement",
+      "noEngagement": "No contract / engagement",
+      "vehicle": "Vehicle",
+      "optionalVehicle": "Optional vehicle",
+      "noVehicle": "No vehicle",
+      "allSources": "All source types",
+      "engagementNameRequired": "Contract / engagement name *",
+      "engagementNamePlaceholder": "Example: North Site Security",
+      "notes": "Notes"
+    },
+    "metrics": {
+      "revenue": "Revenue",
+      "expenses": "Expenses",
+      "net": "Net result"
+    },
+    "sections": {
+      "customerLedger": "Customer profitability detail",
+      "byEngagement": "Profitability by contract / engagement",
+      "byVehicle": "Profitability by vehicle",
+      "sourceTransactions": "Transactions available to link",
+      "sourceTransactionsDescription": "Choose recorded invoices, expenses, and eligible payments to include in a customer's management report."
+    },
+    "table": {
+      "date": "Date",
+      "source": "Source",
+      "description": "Description",
+      "counterparty": "Supplier / payee",
+      "category": "Category",
+      "engagement": "Contract / engagement",
+      "vehicle": "Vehicle",
+      "amount": "Amount",
+      "action": "Action"
+    },
+    "sources": {
+      "sales_order": "Completed sales order",
+      "purchase_order": "Received supplier order",
+      "expense_item": "Recorded expense",
+      "payroll_payment": "Payroll payment",
+      "direct_transaction": "Direct voucher"
+    },
+    "categories": {
+      "supplierPurchase": "Supplier purchase",
+      "payroll": "Payroll",
+      "directVoucher": "Direct voucher",
+      "other": "Other expense"
+    },
+    "labels": {
+      "linked": "Linked",
+      "unassigned": "Unassigned",
+      "showingFirst100": "Showing the first 100 of {{count}} transactions. Use the date and source filters to narrow the list."
+    },
+    "empty": {
+      "selectCustomerTitle": "Choose a customer to see profitability",
+      "selectCustomerDescription": "The report includes only financial records that someone explicitly links to this customer. Create an engagement for a contract, then link its revenue and operating costs.",
+      "noLinkedActivity": "No linked activity for this customer in the selected date range.",
+      "noSources": "No eligible transactions found for the selected date range and source filter."
+    },
+    "dialogs": {
+      "linkTitle": "Link transaction to customer",
+      "editLink": "Edit customer reporting link",
+      "newEngagement": "Create a contract / engagement",
+      "unlinkTitle": "Remove customer reporting link?",
+      "unlinkDescription": "This removes the transaction from the customer's profitability report. The source transaction and its accounting entries are unchanged."
+    },
+    "messages": {
+      "refreshFailed": "Could not refresh profitability data",
+      "refreshFailedDescription": "Some report data could not be updated. Check your connection and try again.",
+      "linkSaved": "Reporting link saved",
+      "linkSavedDescription": "The transaction is now included in the selected customer's report.",
+      "engagementSaved": "Engagement created",
+      "engagementSavedDescription": "You can now link transactions to this customer contract.",
+      "linkRemoved": "Reporting link removed",
+      "linkRemovedDescription": "The source transaction remains unchanged.",
+      "saveFailed": "Could not save this change",
+      "saveFailedDescription": "Please try again. No accounting entries were changed."
+    }
   }
 }

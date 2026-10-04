@@ -491,6 +491,11 @@ export const moduleMetaByHref: Record<string, ModuleMeta> = {
     description: "Analyze revenue behavior, inflows, and reporting trends.",
     badge: "Revenue",
   },
+  "/customer-profitability": {
+    section: "insights-and-trends",
+    description: "Review customer and service-contract revenue and costs.",
+    badge: "Profitability",
+  },
   "/monthly-comparison": {
     section: "insights-and-trends",
     description:

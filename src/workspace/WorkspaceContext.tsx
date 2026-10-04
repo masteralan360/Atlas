@@ -88,6 +88,7 @@ export interface WorkspaceFeatures {
     loans: boolean
     installments: boolean
     net_revenue: boolean
+    customer_profitability: boolean
     budget: boolean
     monthly_comparison: boolean
     team_performance: boolean
@@ -195,6 +196,7 @@ const PLAN_DERIVED_FEATURE_KEYS: ModuleFeatureKey[] = [
     'loans',
     'installments',
     'net_revenue',
+    'customer_profitability',
     'budget',
     'monthly_comparison',
     'team_performance',
@@ -569,6 +571,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             clinical_appointments: nextFeatures.clinical_appointments,
             loans: nextFeatures.loans,
             net_revenue: nextFeatures.net_revenue,
+            customer_profitability: nextFeatures.customer_profitability,
             budget: nextFeatures.budget,
             monthly_comparison: nextFeatures.monthly_comparison,
             team_performance: nextFeatures.team_performance,

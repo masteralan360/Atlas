@@ -1837,6 +1837,34 @@ export interface ExpenseCategory extends BaseEntity {
   name: string
 }
 
+export type CustomerProfitabilitySourceType =
+  | 'sales_order'
+  | 'purchase_order'
+  | 'expense_item'
+  | 'payroll_payment'
+  | 'direct_transaction'
+
+export type CustomerProfitabilityFinancialKind = 'revenue' | 'expense'
+
+/** Reporting-only grouping for one customer contract or service engagement. */
+export interface CustomerProfitabilityEngagement extends BaseEntity {
+  businessPartnerId: string
+  name: string
+  notes?: string | null
+  isActive: boolean
+}
+
+/** A reporting link to an existing financial source; it never posts money. */
+export interface CustomerProfitabilityAttribution extends BaseEntity {
+  sourceType: CustomerProfitabilitySourceType
+  sourceRecordId: string
+  sourceSubrecordId?: string | null
+  financialKind: CustomerProfitabilityFinancialKind
+  businessPartnerId: string
+  engagementId?: string | null
+  vehicleId?: string | null
+}
+
 export interface ExpenseSeries extends BaseEntity {
   name: string
   amount: number
@@ -2836,6 +2864,8 @@ export interface SyncQueueItem {
     | 'business_partner_group_users'
     | 'business_partner_group_partners'
     | 'business_partner_merge_candidates'
+    | 'customer_profitability_engagements'
+    | 'customer_profitability_attributions'
     | 'sales_orders'
     | 'purchase_orders'
     | 'order_installments'
@@ -2887,6 +2917,7 @@ export interface Workspace extends BaseEntity {
   loans?: boolean
   installments?: boolean
   net_revenue?: boolean
+  customer_profitability?: boolean
   budget?: boolean
   monthly_comparison?: boolean
   team_performance?: boolean
@@ -3077,6 +3108,8 @@ export interface OfflineMutation {
     | 'business_partner_group_users'
     | 'business_partner_group_partners'
     | 'business_partner_merge_candidates'
+    | 'customer_profitability_engagements'
+    | 'customer_profitability_attributions'
     | 'sales_orders'
     | 'purchase_orders'
     | 'order_installments'

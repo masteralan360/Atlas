@@ -9996,5 +9996,103 @@
     "reloadToApply": "أعد التحميل للتطبيق",
     "downloadNeedsAttention": "تنزيل الموارد يحتاج إلى انتباه",
     "retry": "إعادة المحاولة"
+  },
+  "customerProfitability": {
+    "title": "ربحية العملاء",
+    "description": "اعرض إيرادات العميل وتكاليف التشغيل المرتبطة به وبالعقد والمركبة.",
+    "reportingOnlyNotice": "روابط للتقارير فقط. لا تنشئ قيوداً محاسبية ولا تغيّر حساب الأرباح والخسائر في نهاية السنة.",
+    "sourcesIncluded": "تُحتسب الإيرادات من طلبات البيع المكتملة. وتشمل التكاليف طلبات الشراء المستلمة وبنود المصروفات المدفوعة وسندات الرواتب والسندات المباشرة غير المعكوسة. يحدد اتجاه السند المباشر ما إذا كان إيراداً أم تكلفة، وتُستبعد دفعات تسوية الفواتير لمنع احتسابها مرتين.",
+    "permissionCoverage": "بعض أنواع المصادر مخفية لعدم امتلاكك صلاحية وحداتها. قد تكون الإجماليات غير مكتملة.",
+    "actions": {
+      "refresh": "تحديث",
+      "newEngagement": "عقد / مهمة جديدة",
+      "link": "ربط بعميل",
+      "editLink": "تعديل الربط",
+      "unlink": "إلغاء الربط",
+      "saveLink": "حفظ رابط التقرير",
+      "createEngagement": "إنشاء مهمة"
+    },
+    "fields": {
+      "customer": "العميل",
+      "customerRequired": "العميل *",
+      "selectCustomer": "ابحث عن العملاء…",
+      "engagement": "العقد / المهمة",
+      "allEngagements": "كل العقود / المهام",
+      "optionalEngagement": "مهمة اختيارية",
+      "noEngagement": "بدون عقد / مهمة",
+      "vehicle": "المركبة",
+      "optionalVehicle": "مركبة اختيارية",
+      "noVehicle": "بدون مركبة",
+      "allSources": "كل أنواع المصادر",
+      "engagementNameRequired": "اسم العقد / المهمة *",
+      "engagementNamePlaceholder": "مثال: حراسة الموقع الشمالي",
+      "notes": "ملاحظات"
+    },
+    "metrics": {
+      "revenue": "الإيرادات",
+      "expenses": "المصروفات",
+      "net": "النتيجة الصافية"
+    },
+    "sections": {
+      "customerLedger": "تفاصيل ربحية العميل",
+      "byEngagement": "الربحية حسب العقد / المهمة",
+      "byVehicle": "الربحية حسب المركبة",
+      "sourceTransactions": "المعاملات المتاحة للربط",
+      "sourceTransactionsDescription": "اختر الفواتير والمصروفات والمدفوعات المؤهلة المسجلة لإضافتها إلى تقرير الإدارة الخاص بالعميل."
+    },
+    "table": {
+      "date": "التاريخ",
+      "source": "المصدر",
+      "description": "الوصف",
+      "counterparty": "المورد / المستفيد",
+      "category": "الفئة",
+      "engagement": "العقد / المهمة",
+      "vehicle": "المركبة",
+      "amount": "المبلغ",
+      "action": "الإجراء"
+    },
+    "sources": {
+      "sales_order": "طلب بيع مكتمل",
+      "purchase_order": "طلب شراء مستلم",
+      "expense_item": "مصروف مسجل",
+      "payroll_payment": "دفعة رواتب",
+      "direct_transaction": "سند مباشر"
+    },
+    "categories": {
+      "supplierPurchase": "شراء من مورد",
+      "payroll": "رواتب",
+      "directVoucher": "سند مباشر",
+      "other": "مصروف آخر"
+    },
+    "labels": {
+      "linked": "مرتبط",
+      "unassigned": "غير محدد",
+      "showingFirst100": "يتم عرض أول 100 معاملة من أصل {{count}}. استخدم مرشحات التاريخ والمصدر لتضييق القائمة."
+    },
+    "empty": {
+      "selectCustomerTitle": "اختر عميلاً لعرض ربحيته",
+      "selectCustomerDescription": "يتضمن التقرير السجلات المالية التي يربطها المستخدم صراحةً بهذا العميل فقط. أنشئ مهمة للعقد ثم اربط الإيرادات وتكاليف التشغيل بها.",
+      "noLinkedActivity": "لا توجد معاملات مرتبطة بهذا العميل خلال الفترة المحددة.",
+      "noSources": "لم يتم العثور على معاملات مؤهلة للفترة ومرشح المصدر المحددين."
+    },
+    "dialogs": {
+      "linkTitle": "ربط معاملة بعميل",
+      "editLink": "تعديل رابط تقرير العميل",
+      "newEngagement": "إنشاء عقد / مهمة",
+      "unlinkTitle": "إزالة رابط تقرير العميل؟",
+      "unlinkDescription": "سيؤدي ذلك إلى إزالة المعاملة من تقرير ربحية العميل. لن تتغير المعاملة المصدر أو قيودها المحاسبية."
+    },
+    "messages": {
+      "refreshFailed": "تعذر تحديث بيانات الربحية",
+      "refreshFailedDescription": "تعذر تحديث بعض بيانات التقرير. تحقق من الاتصال وحاول مرة أخرى.",
+      "linkSaved": "تم حفظ رابط التقرير",
+      "linkSavedDescription": "ستظهر المعاملة الآن في تقرير العميل المحدد.",
+      "engagementSaved": "تم إنشاء المهمة",
+      "engagementSavedDescription": "يمكنك الآن ربط المعاملات بعقد هذا العميل.",
+      "linkRemoved": "تمت إزالة رابط التقرير",
+      "linkRemovedDescription": "بقيت المعاملة المصدر دون تغيير.",
+      "saveFailed": "تعذر حفظ هذا التغيير",
+      "saveFailedDescription": "حاول مرة أخرى. لم تتغير أي قيود محاسبية."
+    }
   }
 }

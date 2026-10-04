@@ -122,6 +122,7 @@ export function WorkspaceWarmup() {
         if (hasFeature('payments')) tasks.push(() => import('@/ui/pages/Payments'))
         if (hasFeature('direct_transactions')) tasks.push(() => import('@/ui/pages/DirectTransactions'))
         if (hasFeature('net_revenue')) tasks.push(() => import('@/ui/pages/Revenue'))
+        if (hasFeature('customer_profitability')) tasks.push(() => import('@/ui/pages/CustomerProfitability'))
         if (hasFeature('budget')) tasks.push(() => import('@/ui/pages/Budget'))
         if (hasFeature('monthly_comparison')) tasks.push(() => import('@/ui/pages/MonthlyComparison'))
         if (hasFeature('team_performance')) tasks.push(() => import('@/ui/pages/TeamPerformance'))

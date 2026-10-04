@@ -102,6 +102,8 @@ import type {
   CashierShiftPausePeriod,
   BudgetSettings,
   BudgetAllocation,
+  CustomerProfitabilityEngagement,
+  CustomerProfitabilityAttribution,
   ExpenseCategory,
   ExpenseSeries,
   ExpenseItem,
@@ -481,6 +483,8 @@ export class AtlasDatabase extends Dexie {
   business_partner_group_users!: EntityTable<BusinessPartnerGroupUser, 'id'>
   business_partner_group_partners!: EntityTable<BusinessPartnerGroupPartner, 'id'>
   business_partner_merge_candidates!: EntityTable<BusinessPartnerMergeCandidate, 'id'>
+  customer_profitability_engagements!: EntityTable<CustomerProfitabilityEngagement, 'id'>
+  customer_profitability_attributions!: EntityTable<CustomerProfitabilityAttribution, 'id'>
   employees!: EntityTable<Employee, 'id'>
   budget_settings!: EntityTable<BudgetSettings, 'id'>
   budget_allocations!: EntityTable<BudgetAllocation, 'id'>
@@ -3683,6 +3687,13 @@ export class AtlasDatabase extends Dexie {
       profiles: 'id, workspaceId, currentWorkspaceId, name, role, [workspaceId+name], [currentWorkspaceId+name]',
       storage_member_exclusions:
         'id, workspaceId, storageId, userId, updatedAt, isDeleted, syncStatus, [workspaceId+storageId], [workspaceId+userId], [storageId+userId]'
+    })
+
+    this.version(144).stores({
+      customer_profitability_engagements:
+        'id, workspaceId, businessPartnerId, name, isActive, updatedAt, isDeleted, syncStatus, [workspaceId+businessPartnerId], [workspaceId+updatedAt]',
+      customer_profitability_attributions:
+        'id, workspaceId, sourceType, sourceRecordId, sourceSubrecordId, financialKind, businessPartnerId, engagementId, vehicleId, updatedAt, isDeleted, syncStatus, &[workspaceId+sourceType+sourceRecordId+sourceSubrecordId], [workspaceId+businessPartnerId], [workspaceId+engagementId], [workspaceId+vehicleId]'
     })
 
     this.registerIndexedDbDiagnostics()

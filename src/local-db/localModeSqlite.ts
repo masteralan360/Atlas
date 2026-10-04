@@ -77,6 +77,8 @@ export const LOCAL_MODE_SQLITE_TABLES = [
   "business_partner_groups",
   "business_partner_group_users",
   "business_partner_group_partners",
+  "customer_profitability_engagements",
+  "customer_profitability_attributions",
   "employees",
   "budget_settings",
   "budget_allocations",
@@ -145,6 +147,8 @@ const LEGACY_HYBRID_MIRROR_SEED_TABLES = [
   "activity_catalog",
   "activity_transactions",
   "activity_transaction_lines",
+  "customer_profitability_engagements",
+  "customer_profitability_attributions",
 ] as const satisfies readonly LocalModeSqliteTableName[];
 
 export interface SqliteConnection {

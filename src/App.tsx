@@ -150,6 +150,9 @@ const WorkspaceRegistration = lazy(() =>
 const Revenue = lazy(() =>
   import("@/ui/pages/Revenue").then((m) => ({ default: m.Revenue })),
 );
+const CustomerProfitability = lazy(() =>
+  import("@/ui/pages/CustomerProfitability").then((m) => ({ default: m.CustomerProfitability })),
+);
 const Budget = lazy(() =>
   import("@/ui/pages/Budget").then((m) => ({ default: m.Budget })),
 );
@@ -2174,6 +2177,17 @@ function App() {
                         >
                           <Layout>
                             <Revenue />
+                          </Layout>
+                        </ProtectedRoute>
+                      </Route>
+                      <Route path="/customer-profitability">
+                        <ProtectedRoute
+                          allowedRoles={["admin", "staff", "viewer"]}
+                          requiredFeature="customer_profitability"
+                          requiredPermission="revenueAnalytics.access"
+                        >
+                          <Layout>
+                            <CustomerProfitability />
                           </Layout>
                         </ProtectedRoute>
                       </Route>

@@ -545,6 +545,15 @@ export function buildWorkspaceNavigation({
             },
           ]
           : []),
+        ...(hasFeature("customer_profitability") && canAccessPermission("revenueAnalytics.access")
+          ? [
+            {
+              name: t("customerProfitability.title"),
+              href: "/customer-profitability",
+              icon: BarChart3,
+            },
+          ]
+          : []),
         ...(hasFeature("budget") && canAccessPermission("budget.access")
           ? [
             {

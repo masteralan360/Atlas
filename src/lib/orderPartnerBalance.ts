@@ -48,12 +48,23 @@ function isLinkedLoanPosting(entry: PartnerAccountStatementEntry, order: Stateme
   )
 }
 
+function isLinkedLoanRepayment(entry: PartnerAccountStatementEntry, order: StatementOrder) {
+  return Boolean(
+    order.linkedLoanId
+      && entry.kind === 'loan_repayment'
+      && entry.source?.recordType === 'loan'
+      && entry.source.recordId === order.linkedLoanId
+  )
+}
+
 /**
  * Reconstructs an order's before/after balances from the chronological
  * Partner Account Statement ledger. A financed order uses its linked loan
- * disbursal; other orders use their document posting. Later collections,
- * returns, and other linked activity are excluded so "after" means
- * immediately after the order's original posting.
+ * disbursal; other orders use their document posting. Repayments against the
+ * linked financing loan are treated as part of that order even if their
+ * timestamps precede loan creation, so they do not reduce the pre-order
+ * balance. Later collections, returns, and other linked activity are excluded
+ * so "after" means immediately after the order's original posting.
  */
 export function deriveOrderPartnerBalanceAtPosting(
   data: PartnerAccountStatementData,
@@ -87,7 +98,10 @@ export function deriveOrderPartnerBalanceAtPosting(
 
         if (demand.before) {
           const before = entries
-            .filter((entry) => compareStatementEntries(entry, firstPosting) < 0)
+            .filter((entry) => (
+              compareStatementEntries(entry, firstPosting) < 0
+              && !isLinkedLoanRepayment(entry, order)
+            ))
             .reduce((total, entry) => total + entry.delta, 0)
           balance.before = roundBalanceAmount(before)
         }
