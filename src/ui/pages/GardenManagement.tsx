@@ -447,7 +447,6 @@ export default function GardenManagement() {
     [workspaceUsers],
   )
   const activeSites = sites.filter((site) => !site.isDeleted && site.status === 'active')
-  const activeSiteIds = new Set(activeSites.map((site) => site.id))
   const locale = i18n.resolvedLanguage || i18n.language
   const visibleJobs = jobs
     .filter((job) => !job.isDeleted)

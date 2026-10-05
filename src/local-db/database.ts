@@ -104,6 +104,12 @@ import type {
   BudgetAllocation,
   CustomerProfitabilityEngagement,
   CustomerProfitabilityAttribution,
+  GardenSite,
+  GardenConstructionProject,
+  GardenMaintenanceContract,
+  GardenJob,
+  GardenJobAssignment,
+  GardenJobActivity,
   ExpenseCategory,
   ExpenseSeries,
   ExpenseItem,
@@ -464,6 +470,12 @@ export class AtlasDatabase extends Dexie {
   rental_vehicles!: EntityTable<RentalVehicle, 'id'>
   rental_requests!: EntityTable<RentalRequest, 'id'>
   rental_contracts!: EntityTable<RentalContract, 'id'>
+  garden_sites!: EntityTable<GardenSite, 'id'>
+  garden_construction_projects!: EntityTable<GardenConstructionProject, 'id'>
+  garden_maintenance_contracts!: EntityTable<GardenMaintenanceContract, 'id'>
+  garden_jobs!: EntityTable<GardenJob, 'id'>
+  garden_job_assignments!: EntityTable<GardenJobAssignment, 'id'>
+  garden_job_activity!: EntityTable<GardenJobActivity, 'id'>
   delivery_merchant_profiles!: EntityTable<DeliveryMerchantProfile, 'id'>
   delivery_shipments!: EntityTable<DeliveryShipment, 'id'>
   delivery_shipment_events!: EntityTable<DeliveryShipmentEvent, 'id'>

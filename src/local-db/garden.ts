@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { generateId, toSnakeCase } from '@/lib/utils'
+import { supabase } from '@/auth/supabase'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { isOnline } from '@/lib/network'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
@@ -13,6 +14,7 @@ import type {
   GardenMaintenanceContract,
   GardenSite,
   CurrencyCode,
+  BaseEntity,
 } from './models'
 import { db } from './database'
 import { addToOfflineMutations, fetchTableFromSupabase } from './hooks'
@@ -41,7 +43,7 @@ function makeMetadata(workspaceId: string, now: string, version = 1) {
   }
 }
 
-async function persistGardenRow<T extends { id: string; workspaceId: string; version: number }>(
+async function persistGardenRow<T extends BaseEntity>(
   tableName: GardenTableName,
   table: { put: (row: T) => Promise<unknown>; update: (id: string, changes: Partial<T>) => Promise<unknown> },
   row: T,
@@ -166,8 +168,7 @@ export function useGardenData(workspaceId?: string) {
 
   useEffect(() => {
     if (!workspaceId || isLocalWorkspaceMode(workspaceId) || !isOnline(workspaceId)) return
-    const client = getSupabaseClientForTable('garden_jobs')
-    const channel = client
+    const channel = supabase
       .channel('garden-jobs-' + workspaceId)
       .on('postgres_changes', {
         event: '*',
@@ -194,7 +195,7 @@ export function useGardenData(workspaceId?: string) {
       })
       .subscribe()
     return () => {
-      void client.removeChannel(channel)
+      void supabase.removeChannel(channel)
     }
   }, [workspaceId])
 
