@@ -251,6 +251,11 @@ export const moduleMetaByHref: Record<string, ModuleMeta> = {
     description: "Manage rental vehicles, availability, customer requests, and rental contracts.",
     badge: "Rental",
   },
+  "/garden": {
+    section: "people-and-workspace",
+    description: "Manage garden construction projects, maintenance visits, and staff jobs.",
+    badge: "Garden",
+  },
   "/car-rental/vehicles": {
     section: "sell-and-serve",
     description: "Register rental vehicles, rates, condition, and availability.",

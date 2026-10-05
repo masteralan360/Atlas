@@ -10094,5 +10094,174 @@
       "saveFailed": "تعذر حفظ هذا التغيير",
       "saveFailedDescription": "حاول مرة أخرى. لم تتغير أي قيود محاسبية."
     }
+  },
+  "gardenManagement": {
+    "title": "إدارة الحدائق",
+    "description": {
+      "admin": "إدارة مشاريع الإنشاء والصيانة الدورية وجداول فرق العمل.",
+      "staff": "اعرض زيارات الحدائق المسندة إليك وحدّث حالة العمل عند الانتهاء."
+    },
+    "tabs": {
+      "overview": "نظرة عامة",
+      "projects": "مشاريع إنشاء الحدائق",
+      "contracts": "عقود الصيانة",
+      "schedule": "الجدول",
+      "myJobs": "مهامي"
+    },
+    "filters": {
+      "activityDate": "تاريخ الزيارة والسجل"
+    },
+    "actions": {
+      "newSite": "إضافة موقع حديقة",
+      "newProject": "مشروع إنشاء جديد",
+      "newContract": "عقد صيانة جديد",
+      "newJob": "جدولة مهمة",
+      "editSchedule": "تعديل الجدول",
+      "startJob": "بدء المهمة",
+      "completeJob": "إنهاء المهمة",
+      "confirmComplete": "تأكيد الإنجاز",
+      "save": "حفظ",
+      "saving": "جارٍ الحفظ…",
+      "cancel": "إلغاء",
+      "unlinkCustomer": "إلغاء ربط العميل"
+    },
+    "fields": {
+      "site": "موقع الحديقة",
+      "jobType": "نوع المهمة",
+      "project": "مشروع الإنشاء",
+      "contract": "عقد الصيانة",
+      "jobTitle": "عنوان المهمة",
+      "scheduledAt": "تاريخ ووقت الزيارة",
+      "routeOrder": "ترتيب التوقف",
+      "assignedStaff": "إسناد إلى الموظفين",
+      "instructions": "تعليمات العمل",
+      "completionNote": "ملاحظة الإنجاز",
+      "siteName": "اسم الموقع",
+      "linkedCustomer": "ربط بشريك أعمال",
+      "homeowner": "اسم صاحب المنزل",
+      "phone": "رقم الهاتف",
+      "address": "العنوان",
+      "city": "المدينة",
+      "accessNotes": "ملاحظات الوصول",
+      "projectNo": "رقم المشروع",
+      "projectTitle": "عنوان المشروع",
+      "scope": "نطاق المشروع",
+      "currency": "العملة",
+      "quotedAmount": "السعر المعروض",
+      "agreedAmount": "السعر المتفق عليه",
+      "estimatedCost": "التكلفة التقديرية",
+      "actualCost": "التكلفة الفعلية",
+      "startDate": "تاريخ البدء",
+      "targetDate": "تاريخ الإنجاز المستهدف",
+      "contractNo": "رقم العقد",
+      "monthlyFee": "رسوم الخدمة الشهرية",
+      "endDate": "تاريخ الانتهاء",
+      "visitsPerMonth": "الزيارات في الشهر",
+      "visitDays": "أيام الزيارة من الشهر",
+      "serviceTime": "وقت الزيارة المعتاد",
+      "notes": "ملاحظات"
+    },
+    "placeholders": {
+      "chooseSite": "اختر موقع حديقة",
+      "chooseProject": "اختر مشروع إنشاء",
+      "chooseContract": "اختر عقد صيانة",
+      "jobTitle": "مثال: صيانة الحديقة الشهرية",
+      "siteName": "مثال: المنزل الرئيسي",
+      "searchCustomer": "ابحث عن شركاء الأعمال"
+    },
+    "validation": {
+      "required": "هذا الحقل مطلوب.",
+      "siteRequired": "اختر موقع الحديقة.",
+      "titleRequired": "أدخل عنوان المهمة.",
+      "projectRequired": "اختر مشروع إنشاء.",
+      "contractRequired": "اختر عقد صيانة.",
+      "scheduleRequired": "اختر تاريخ ووقت الزيارة.",
+      "amountRequired": "أدخل رسوم الخدمة الشهرية.",
+      "visitDays": "أدخل أيام زيارة فريدة وكافية بين 1 و31.",
+      "contractDates": "يجب أن يكون تاريخ انتهاء العقد في يوم البدء أو بعده."
+    },
+    "status": {
+      "scheduled": "مجدولة",
+      "in_progress": "قيد التنفيذ",
+      "completed": "مكتملة",
+      "cancelled": "ملغاة"
+    },
+    "kind": {
+      "maintenance": "صيانة",
+      "construction": "إنشاء",
+      "ad_hoc": "أخرى"
+    },
+    "outcome": {
+      "ok": "تمت بنجاح",
+      "needs_follow_up": "تحتاج إلى متابعة"
+    },
+    "projectStatus": {
+      "draft": "مسودة",
+      "quoted": "تم تقديم عرض",
+      "approved": "معتمد",
+      "in_progress": "قيد التنفيذ",
+      "on_hold": "متوقف مؤقتاً",
+      "completed": "مكتمل",
+      "cancelled": "ملغى"
+    },
+    "contractStatus": {
+      "draft": "مسودة",
+      "active": "نشط",
+      "paused": "متوقف مؤقتاً",
+      "completed": "مكتمل",
+      "cancelled": "ملغى"
+    },
+    "labels": {
+      "unknownSite": "موقع الحديقة",
+      "addressUnavailable": "العنوان غير متوفر",
+      "unassigned": "غير مسندة",
+      "routeStop": "التوقف {{count}}",
+      "created": "تاريخ الإنشاء",
+      "linked": "مرتبط",
+      "perMonth": "/ شهرياً",
+      "visitsMonthly": "{{count}} زيارات في الشهر",
+      "completed": "مكتملة"
+    },
+    "empty": {
+      "noStaff": "لم يتم العثور على موظفي مساحة العمل.",
+      "noMyJobs": "لا توجد مهام حدائق مسندة إليك.",
+      "noJobs": "لا توجد مهام ضمن هذه التواريخ.",
+      "jobsHelp": "جدول مهمة وأسندها إلى موظف واحد أو أكثر.",
+      "noProjects": "لا توجد مشاريع إنشاء ضمن هذه التواريخ.",
+      "projectsHelp": "أضف موقع حديقة أولاً ثم أضف مشروع الإنشاء.",
+      "noContracts": "لا توجد عقود صيانة ضمن هذه التواريخ.",
+      "contractsHelp": "تنشئ العقود النشطة مهام الزيارات الدورية تلقائياً.",
+      "noSites": "لم تتم إضافة مواقع حدائق بعد."
+    },
+    "toast": {
+      "siteCreated": "تم حفظ موقع الحديقة.",
+      "projectCreated": "تم حفظ مشروع الإنشاء.",
+      "contractCreated": "تم حفظ عقد الصيانة وجدول الزيارات.",
+      "jobCreated": "تمت جدولة مهمة الحديقة.",
+      "jobUpdated": "تم تحديث مهمة الحديقة.",
+      "jobCompleted": "تم حفظ إنجاز المهمة.",
+      "saveFailed": "تعذر حفظ سجل الحديقة. يرجى المحاولة مرة أخرى."
+    },
+    "hints": {
+      "contractGeneration": "ينشئ العقد النشط الزيارات المخططة طوال مدته. الجدول الافتراضي: أربع زيارات شهرياً في الأيام 1 و8 و15 و22."
+    },
+    "summary": {
+      "sites": "مواقع الحدائق النشطة",
+      "projects": "مشاريع الإنشاء المفتوحة",
+      "activeContracts": "عقود الصيانة النشطة",
+      "upcomingJobs": "الزيارات القادمة"
+    },
+    "sections": {
+      "nextVisits": "مهام الحدائق القادمة",
+      "sites": "مواقع الحدائق"
+    },
+    "dialog": {
+      "newSite": "إضافة موقع حديقة",
+      "newProject": "مشروع إنشاء جديد",
+      "newContract": "عقد صيانة جديد",
+      "newJob": "جدولة مهمة حديقة",
+      "editJob": "تعديل مهمة الحديقة",
+      "completeJob": "إنهاء مهمة الحديقة"
+    }
   }
 }

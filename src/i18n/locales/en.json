@@ -10390,5 +10390,174 @@
       "saveFailed": "Could not save this change",
       "saveFailedDescription": "Please try again. No accounting entries were changed."
     }
+  },
+  "gardenManagement": {
+    "title": "Garden Management",
+    "description": {
+      "admin": "Manage construction projects, recurring maintenance, and field team schedules.",
+      "staff": "See your assigned garden visits and update each job when work is complete."
+    },
+    "tabs": {
+      "overview": "Overview",
+      "projects": "Construction projects",
+      "contracts": "Maintenance contracts",
+      "schedule": "Schedule",
+      "myJobs": "My jobs"
+    },
+    "filters": {
+      "activityDate": "Visit and record dates"
+    },
+    "actions": {
+      "newSite": "Add garden site",
+      "newProject": "New construction project",
+      "newContract": "New maintenance contract",
+      "newJob": "Schedule a job",
+      "editSchedule": "Edit schedule",
+      "startJob": "Start job",
+      "completeJob": "Complete job",
+      "confirmComplete": "Confirm completion",
+      "save": "Save",
+      "saving": "Saving…",
+      "cancel": "Cancel",
+      "unlinkCustomer": "Unlink customer"
+    },
+    "fields": {
+      "site": "Garden site",
+      "jobType": "Job type",
+      "project": "Construction project",
+      "contract": "Maintenance contract",
+      "jobTitle": "Job title",
+      "scheduledAt": "Visit date and time",
+      "routeOrder": "Route stop order",
+      "assignedStaff": "Assign staff",
+      "instructions": "Work instructions",
+      "completionNote": "Completion note",
+      "siteName": "Site name",
+      "linkedCustomer": "Link business partner",
+      "homeowner": "Homeowner name",
+      "phone": "Phone number",
+      "address": "Address",
+      "city": "City",
+      "accessNotes": "Access notes",
+      "projectNo": "Project number",
+      "projectTitle": "Project title",
+      "scope": "Project scope",
+      "currency": "Currency",
+      "quotedAmount": "Quoted amount",
+      "agreedAmount": "Agreed amount",
+      "estimatedCost": "Estimated cost",
+      "actualCost": "Actual cost",
+      "startDate": "Start date",
+      "targetDate": "Target completion date",
+      "contractNo": "Contract number",
+      "monthlyFee": "Monthly service fee",
+      "endDate": "End date",
+      "visitsPerMonth": "Visits per month",
+      "visitDays": "Days of month for visits",
+      "serviceTime": "Usual visit time",
+      "notes": "Notes"
+    },
+    "placeholders": {
+      "chooseSite": "Choose a garden site",
+      "chooseProject": "Choose a construction project",
+      "chooseContract": "Choose a maintenance contract",
+      "jobTitle": "For example, monthly garden maintenance",
+      "siteName": "For example, Main residence",
+      "searchCustomer": "Search business partners"
+    },
+    "validation": {
+      "required": "This field is required.",
+      "siteRequired": "Choose a garden site.",
+      "titleRequired": "Enter a job title.",
+      "projectRequired": "Choose a construction project.",
+      "contractRequired": "Choose a maintenance contract.",
+      "scheduleRequired": "Choose a visit date and time.",
+      "amountRequired": "Enter a monthly service fee.",
+      "visitDays": "Enter enough unique visit days between 1 and 31.",
+      "contractDates": "The contract end date must be on or after its start date."
+    },
+    "status": {
+      "scheduled": "Scheduled",
+      "in_progress": "In progress",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
+    "kind": {
+      "maintenance": "Maintenance",
+      "construction": "Construction",
+      "ad_hoc": "Other"
+    },
+    "outcome": {
+      "ok": "Completed OK",
+      "needs_follow_up": "Needs follow-up"
+    },
+    "projectStatus": {
+      "draft": "Draft",
+      "quoted": "Quoted",
+      "approved": "Approved",
+      "in_progress": "In progress",
+      "on_hold": "On hold",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
+    "contractStatus": {
+      "draft": "Draft",
+      "active": "Active",
+      "paused": "Paused",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
+    "labels": {
+      "unknownSite": "Garden site",
+      "addressUnavailable": "Address not available",
+      "unassigned": "Unassigned",
+      "routeStop": "Stop {{count}}",
+      "created": "Created",
+      "linked": "Linked",
+      "perMonth": "/ month",
+      "visitsMonthly": "{{count}} visits per month",
+      "completed": "completed"
+    },
+    "empty": {
+      "noStaff": "No workspace staff found.",
+      "noMyJobs": "You have no assigned garden jobs.",
+      "noJobs": "No jobs match these dates.",
+      "jobsHelp": "Schedule a job and assign one or more staff members.",
+      "noProjects": "No construction projects match these dates.",
+      "projectsHelp": "Create a garden site first, then add a construction project.",
+      "noContracts": "No maintenance contracts match these dates.",
+      "contractsHelp": "Active contracts create recurring visit jobs automatically.",
+      "noSites": "No garden sites have been added yet."
+    },
+    "toast": {
+      "siteCreated": "Garden site saved.",
+      "projectCreated": "Construction project saved.",
+      "contractCreated": "Maintenance contract and visit schedule saved.",
+      "jobCreated": "Garden job scheduled.",
+      "jobUpdated": "Garden job updated.",
+      "jobCompleted": "Job completion saved.",
+      "saveFailed": "Could not save this garden record. Please try again."
+    },
+    "hints": {
+      "contractGeneration": "An active contract creates the planned visits for its term. Default schedule: four visits each month on days 1, 8, 15, and 22."
+    },
+    "summary": {
+      "sites": "Active garden sites",
+      "projects": "Open construction projects",
+      "activeContracts": "Active maintenance contracts",
+      "upcomingJobs": "Upcoming visits"
+    },
+    "sections": {
+      "nextVisits": "Upcoming garden jobs",
+      "sites": "Garden sites"
+    },
+    "dialog": {
+      "newSite": "Add garden site",
+      "newProject": "New construction project",
+      "newContract": "New maintenance contract",
+      "newJob": "Schedule garden job",
+      "editJob": "Edit garden job",
+      "completeJob": "Complete garden job"
+    }
   }
 }

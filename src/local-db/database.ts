@@ -3696,6 +3696,21 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, sourceType, sourceRecordId, sourceSubrecordId, financialKind, businessPartnerId, engagementId, vehicleId, updatedAt, isDeleted, syncStatus, &[workspaceId+sourceType+sourceRecordId+sourceSubrecordId], [workspaceId+businessPartnerId], [workspaceId+engagementId], [workspaceId+vehicleId]'
     })
 
+    this.version(145).stores({
+      garden_sites:
+        'id, workspaceId, name, businessPartnerId, status, updatedAt, isDeleted, syncStatus, [workspaceId+status], [workspaceId+updatedAt]',
+      garden_construction_projects:
+        'id, workspaceId, siteId, businessPartnerId, projectNo, status, updatedAt, isDeleted, syncStatus, [workspaceId+status], [workspaceId+siteId], [workspaceId+updatedAt]',
+      garden_maintenance_contracts:
+        'id, workspaceId, siteId, businessPartnerId, contractNo, status, startsOn, endsOn, updatedAt, isDeleted, syncStatus, [workspaceId+status], [workspaceId+siteId], [workspaceId+updatedAt]',
+      garden_jobs:
+        'id, workspaceId, siteId, projectId, contractId, sourceKey, kind, scheduledAt, status, updatedAt, isDeleted, syncStatus, [workspaceId+scheduledAt], [workspaceId+status], [workspaceId+projectId], [workspaceId+contractId], [workspaceId+updatedAt]',
+      garden_job_assignments:
+        'id, workspaceId, jobId, userId, unassignedAt, updatedAt, isDeleted, syncStatus, [workspaceId+jobId], [workspaceId+userId], [userId+unassignedAt]',
+      garden_job_activity:
+        'id, workspaceId, jobId, activityType, createdAt, updatedAt, isDeleted, syncStatus, [workspaceId+jobId], [workspaceId+createdAt]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()

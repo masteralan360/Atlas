@@ -289,6 +289,7 @@ const PostService = lazy(() =>
 const CarRental = lazy(() =>
   import("@/ui/pages/CarRental").then((m) => ({ default: m.CarRental })),
 );
+const GardenManagement = lazy(() => import("@/ui/pages/GardenManagement"));
 const AgentDetails = lazy(() =>
   import("@/ui/pages/AgentDetails").then((m) => ({ default: m.AgentDetails })),
 );
@@ -1673,6 +1674,16 @@ function App() {
                         >
                           <Layout>
                             <CarRental />
+                          </Layout>
+                        </ProtectedRoute>
+                      </Route>
+                      <Route path="/garden">
+                        <ProtectedRoute
+                          allowedRoles={["admin", "staff"]}
+                          requiredFeature="garden_management"
+                        >
+                          <Layout>
+                            <GardenManagement />
                           </Layout>
                         </ProtectedRoute>
                       </Route>

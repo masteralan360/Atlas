@@ -483,6 +483,79 @@ export function localizeNotification(input: NotificationLocalizationInput, reque
     }
   }
 
+  if (
+    notificationType === 'garden_job_assigned'
+    || notificationType === 'garden_job_rescheduled'
+    || notificationType === 'garden_job_completed'
+  ) {
+    const jobTitle = readString(payload.job_title) || fallbackTitle
+    const siteName = readString(payload.site_name)
+    const siteAddress = readString(payload.site_address)
+    const scheduledAt = readString(payload.scheduled_at)
+    const outcome = readString(payload.outcome)
+    const isAssigned = notificationType === 'garden_job_assigned'
+    const isRescheduled = notificationType === 'garden_job_rescheduled'
+
+    if (language === 'ar') {
+      const title = isAssigned
+        ? '\u062a\u0645 \u062a\u0639\u064a\u064a\u0646 \u0645\u0647\u0645\u0629 \u062d\u062f\u064a\u0642\u0629'
+        : isRescheduled
+          ? '\u062a\u063a\u064a\u0651\u0631 \u0645\u0648\u0639\u062f \u0645\u0647\u0645\u0629 \u062d\u062f\u064a\u0642\u0629'
+          : '\u0627\u0643\u062a\u0645\u0644\u062a \u0645\u0647\u0645\u0629 \u062d\u062f\u064a\u0642\u0629'
+      return {
+        language,
+        title,
+        body: joinParts([
+          jobTitle,
+          siteName,
+          siteAddress,
+          scheduledAt,
+          outcome === 'needs_follow_up' ? '\u062a\u062d\u062a\u0627\u062c \u0645\u062a\u0627\u0628\u0639\u0629' : outcome === 'ok' ? '\u062a\u0645\u062a \u0628\u0646\u062c\u0627\u062d' : '',
+        ]) || fallbackBody,
+        actionLabel: '\u0641\u062a\u062d \u0627\u0644\u0645\u0647\u0645\u0629',
+        actionUrl,
+        typeLabel: '\u0645\u0647\u0627\u0645 \u0627\u0644\u062d\u062f\u0627\u0626\u0642',
+      }
+    }
+
+    if (language === 'ku') {
+      const title = isAssigned
+        ? '\u0626\u06d5\u0631\u06a9\u06cc \u0628\u0627\u062e\u0686\u06d5 \u062f\u0627\u0628\u06d5\u0634\u06a9\u0631\u0627'
+        : isRescheduled
+          ? '\u06a9\u0627\u062a\u06cc \u0626\u06d5\u0631\u06a9\u06cc \u0628\u0627\u062e\u0686\u06d5 \u06af\u06c6\u0695\u0627'
+          : '\u0626\u06d5\u0631\u06a9\u06cc \u0628\u0627\u062e\u0686\u06d5 \u062a\u06d5\u0648\u0627\u0648 \u0628\u0648\u0648'
+      return {
+        language,
+        title,
+        body: joinParts([
+          jobTitle,
+          siteName,
+          siteAddress,
+          scheduledAt,
+          outcome === 'needs_follow_up' ? '\u067e\u06ce\u0648\u06cc\u0633\u062a\u06cc \u0628\u06d5 \u0628\u06d5\u062f\u0648\u0627\u0686\u0648\u0648\u0646\u06d5\u0648\u06d5 \u0647\u06d5\u06cc\u06d5' : outcome === 'ok' ? '\u0628\u06d5 \u0633\u06d5\u0631\u06a9\u06d5\u0648\u062a\u0648\u0648\u06cc\u06cc \u062a\u06d5\u0648\u0627\u0648 \u0628\u0648\u0648' : '',
+        ]) || fallbackBody,
+        actionLabel: '\u06a9\u0631\u062f\u0646\u06d5\u0648\u06d5\u06cc \u0626\u06d5\u0631\u06a9',
+        actionUrl,
+        typeLabel: '\u0626\u06d5\u0631\u06a9\u06d5\u06a9\u0627\u0646\u06cc \u0628\u0627\u062e\u0686\u06d5',
+      }
+    }
+
+    return {
+      language,
+      title: isAssigned ? 'Garden job assigned' : isRescheduled ? 'Garden job rescheduled' : 'Garden job completed',
+      body: joinParts([
+        jobTitle,
+        siteName,
+        siteAddress,
+        scheduledAt,
+        outcome === 'needs_follow_up' ? 'Follow-up needed' : outcome === 'ok' ? 'Completed successfully' : '',
+      ]) || fallbackBody,
+      actionLabel: 'Open job',
+      actionUrl,
+      typeLabel: 'Garden jobs',
+    }
+  }
+
   return {
     language,
     title: fallbackTitle,

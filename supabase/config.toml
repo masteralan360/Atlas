@@ -1,7 +1,7 @@
 project_id = "eboispangcayxxheoufy"
 
 [api]
-schemas = ["public", "graphql_public", "budget", "crm", "real_estate", "activities", "fx", "clinics", "fleet", "car_rental", "delivery", "payment_accounts"]
+schemas = ["public", "graphql_public", "budget", "crm", "real_estate", "activities", "fx", "clinics", "fleet", "car_rental", "delivery", "payment_accounts", "garden"]
 
 [functions.dispatch-notifications]
 verify_jwt = false
