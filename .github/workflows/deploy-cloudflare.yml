@@ -26,7 +26,7 @@ jobs:
   schedule-gate:
     runs-on: ubuntu-latest
     outputs:
-      proceed: ${{ steps.gate.outputs.proceed }}
+      hold: ${{ steps.gate.outputs.hold }}
     steps:
       - name: Checkout deployment metadata
         uses: actions/checkout@v4
@@ -36,10 +36,11 @@ jobs:
         run: python .github/scripts/release_schedule_gate.py
         env:
           SCHEDULE_ID: ${{ github.event.inputs.schedule_id || '' }}
+          SCHEDULE_GATE_SCOPE: cloudflare
 
   deploy:
     needs: schedule-gate
-    if: needs.schedule-gate.outputs.proceed == 'true'
+    if: needs.schedule-gate.result == 'success' && needs.schedule-gate.outputs.hold != 'true'
     runs-on: ubuntu-latest
     environment: production
     steps:

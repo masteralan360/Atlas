@@ -48,8 +48,11 @@ def has_pending_scheduled_release():
         with open(RELEASE_CONFIG, 'r', encoding='utf-8') as f:
             release_config = json.load(f)
         return (
-            release_config.get('schedule_enabled', False)
+            release_config.get('schedule_enabled') is True
             and release_config.get('schedule_status') in ('pending', 'dispatching')
+            and bool(release_config.get('schedule_id'))
+            and bool(release_config.get('scheduled_tag'))
+            and bool(release_config.get('scheduled_at_utc'))
         )
     except (OSError, json.JSONDecodeError):
         return False

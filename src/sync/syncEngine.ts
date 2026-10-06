@@ -45,6 +45,7 @@ async function deleteQueuedDeliveryVoiceReasons(paths: readonly string[]) {
   if (error) throw error;
 }
 
+// Temporarily exclude these tables because the Garden schema migration is not deployed yet.
 const SYNC_PULL_TABLES = [
   "products",
   "product_uoms",
@@ -76,12 +77,12 @@ const SYNC_PULL_TABLES = [
   "agent_product_commission_entries",
   "fleet_vehicles",
   "fleet_vehicle_assignments",
-  "garden_sites",
-  "garden_construction_projects",
-  "garden_maintenance_contracts",
-  "garden_jobs",
-  "garden_job_assignments",
-  "garden_job_activity",
+  // "garden_sites",
+  // "garden_construction_projects",
+  // "garden_maintenance_contracts",
+  // "garden_jobs",
+  // "garden_job_assignments",
+  // "garden_job_activity",
   "rental_vehicles",
   "rental_requests",
   "rental_contracts",
