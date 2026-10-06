@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness';
 import { useUnitRegistry, getQuantityStep } from '@/ui/components/unitRegistry';
+import { getProductUnitLabel } from '@/lib/productUnitPresentation';
 import {
   db,
   fetchInventoryWorkspaceFromSupabase,
@@ -278,8 +279,9 @@ function TransferImpactSummary({
   const totalsByUnit = new Map<string, { unit: string; quantity: number }>();
 
   for (const item of rows) {
-    const unit = item.unit.trim() || "—";
-    const key = unit.toLocaleLowerCase();
+    const unitCode = item.unit.trim() || "—";
+    const unit = getProductUnitLabel(unitCode, t) || "—";
+    const key = unitCode.toLocaleLowerCase();
     const current = totalsByUnit.get(key);
     totalsByUnit.set(key, {
       unit: current?.unit ?? unit,
@@ -330,7 +332,7 @@ function TransferImpactSummary({
                 >
                   <span className="min-w-0 truncate">{item.productName}</span>
                   <span dir="ltr" className="shrink-0 font-medium tabular-nums">
-                    {quantityFormatter.format(item.quantity)} {item.unit}
+                    {quantityFormatter.format(item.quantity)} {getProductUnitLabel(item.unit, t) || "—"}
                   </span>
                 </div>
               ))}
@@ -360,6 +362,7 @@ function TransferImpactList({
   quantityFormatter: Intl.NumberFormat;
 }) {
   const isSource = kind === "source";
+  const { t } = useTranslation();
 
   return (
     <Virtuoso
@@ -404,7 +407,7 @@ function TransferImpactList({
                   isSource ? item.sourceAfter : item.destinationAfter,
                 )}
               </span>
-              <span className="text-xs text-muted-foreground">{item.unit}</span>
+              <span className="text-xs text-muted-foreground">{getProductUnitLabel(item.unit, t) || "—"}</span>
             </div>
           </div>
         </div>
@@ -1397,6 +1400,7 @@ export default function InventoryTransfer() {
       const product = productsById.get(line.productId);
       const productName = product?.name ?? line.productId;
       const unit = product?.unit ?? "";
+      const unitLabel = getProductUnitLabel(unit, t);
       if (line.availableQuantity <= QUANTITY_EPSILON) {
         return t(
           line.selectionType === "batch"
@@ -1445,8 +1449,8 @@ export default function InventoryTransfer() {
 
         return t("inventoryTransfer.productQuantityExceedsStock", {
           product: productName,
-          quantity: `${transferQuantityFormatter.format(quantity)}${unit ? ` ${unit}` : ""}`,
-          available: `${transferQuantityFormatter.format(line.availableQuantity)}${unit ? ` ${unit}` : ""}`,
+          quantity: `${transferQuantityFormatter.format(quantity)}${unitLabel ? ` ${unitLabel}` : ""}`,
+          available: `${transferQuantityFormatter.format(line.availableQuantity)}${unitLabel ? ` ${unitLabel}` : ""}`,
           defaultValue: "Requested {{quantity}} for {{product}}, but only {{available}} is available in the source storage.",
         });
       }
@@ -1454,10 +1458,11 @@ export default function InventoryTransfer() {
 
     for (const item of selectedTransferItems) {
       if (item.quantity - item.availableQuantity > QUANTITY_EPSILON) {
+        const unitLabel = getProductUnitLabel(item.unit, t);
         return t("inventoryTransfer.productQuantityExceedsStock", {
           product: item.productName,
-          quantity: `${transferQuantityFormatter.format(item.quantity)}${item.unit ? ` ${item.unit}` : ""}`,
-          available: `${transferQuantityFormatter.format(item.availableQuantity)}${item.unit ? ` ${item.unit}` : ""}`,
+          quantity: `${transferQuantityFormatter.format(item.quantity)}${unitLabel ? ` ${unitLabel}` : ""}`,
+          available: `${transferQuantityFormatter.format(item.availableQuantity)}${unitLabel ? ` ${unitLabel}` : ""}`,
           defaultValue: "Requested {{quantity}} for {{product}}, but only {{available}} is available in the source storage.",
         });
       }
@@ -2242,7 +2247,7 @@ export default function InventoryTransfer() {
                                             {product.name}
                                           </span>
                                           <span className="shrink-0 text-xs text-muted-foreground">
-                                            {product.availableQuantity} {product.unit}
+                                            {product.availableQuantity} {getProductUnitLabel(product.unit, t)}
                                           </span>
                                         </div>
                                         <div className="text-xs text-muted-foreground">
@@ -2300,7 +2305,7 @@ export default function InventoryTransfer() {
                                                   {`${t("sales.batchNumber", "Batch")} ${batch?.batchNumber}`}
                                                 </span>
                                                 <span className="shrink-0 text-[11px] text-muted-foreground">
-                                                  {line.availableQuantity} {product.unit}
+                                                  {line.availableQuantity} {getProductUnitLabel(product.unit, t)}
                                                 </span>
                                               </div>
                                               {batch && (
@@ -2825,31 +2830,34 @@ export default function InventoryTransfer() {
             role="list"
             className="min-h-0 flex-1 grid-cols-1 gap-2 overflow-y-auto py-2 md:grid md:grid-cols-2"
           >
-            {selectedTransferItems.map((item, index) => (
-              <div
-                key={item.productId}
-                role="listitem"
-                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border bg-muted/20 p-3"
-              >
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <span className="shrink-0 rounded-full bg-muted px-2 py-1 text-xs font-semibold text-muted-foreground">
-                    #{index + 1}
-                  </span>
-                  <ProductAvatar
-                    productName={item.productName}
-                    imageUrl={item.imageUrl}
-                  />
-                  <span className="truncate font-medium">{item.productName}</span>
-                </div>
-                <span
-                  dir="ltr"
-                  className="shrink-0 rounded-full bg-primary/10 px-2.5 py-1 text-sm font-semibold text-primary"
+            {selectedTransferItems.map((item, index) => {
+              const unitLabel = getProductUnitLabel(item.unit, t);
+              return (
+                <div
+                  key={item.productId}
+                  role="listitem"
+                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border bg-muted/20 p-3"
                 >
-                  {transferQuantityFormatter.format(item.quantity)}
-                  {item.unit ? ` ${item.unit}` : ""}
-                </span>
-              </div>
-            ))}
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span className="shrink-0 rounded-full bg-muted px-2 py-1 text-xs font-semibold text-muted-foreground">
+                      #{index + 1}
+                    </span>
+                    <ProductAvatar
+                      productName={item.productName}
+                      imageUrl={item.imageUrl}
+                    />
+                    <span className="truncate font-medium">{item.productName}</span>
+                  </div>
+                  <span
+                    dir="ltr"
+                    className="shrink-0 rounded-full bg-primary/10 px-2.5 py-1 text-sm font-semibold text-primary"
+                  >
+                    {transferQuantityFormatter.format(item.quantity)}
+                    {unitLabel ? ` ${unitLabel}` : ""}
+                  </span>
+                </div>
+              );
+            })}
           </div>
 
           <DialogFooter className="gap-2 sm:gap-2">
@@ -3004,7 +3012,7 @@ export default function InventoryTransfer() {
                               className={`text-right text-xs ${ruleForm.productId === product.id ? "text-primary-foreground/80" : "text-muted-foreground"}`}
                             >
                               <div>
-                                {row.quantity} {product.unit}
+                                {row.quantity} {getProductUnitLabel(product.unit, t)}
                               </div>
                               <div>
                                 {t("inventoryTransfer.available", "Available")}

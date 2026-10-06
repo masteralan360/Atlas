@@ -58,6 +58,7 @@ import { createCustomTemplatePreview } from '@/lib/customTemplates'
 import type { PrintFormat } from '@/services/pdfGenerator'
 import { printPdfBlob } from '@/services/pdfPrintService'
 import { formatDateTime, parseLocalDateValue } from '@/lib/utils'
+import { getProductUnitLabel } from '@/lib/productUnitPresentation'
 import { useWorkspace, type WorkspaceFeatures } from '@/workspace'
 import type { PrintSelectionTemplateOption } from '@/ui/components/PrintSelectionModal'
 import { areTransferBatchWorkspacesSame, type InventoryTransferBatchPrintData } from './InventoryTransferBatchPrintTemplate'
@@ -536,7 +537,7 @@ export function InventoryTransferBatchesTab({
                             <TableCell className="font-medium">{product.productName || t('inventoryTransfer.transactions.unknownProduct', { defaultValue: 'Unknown product' })}</TableCell>
                             <TableCell>{product.sku || '—'}</TableCell>
                             <TableCell className="text-end tabular-nums">{quantityFormatter.format(product.quantity)}</TableCell>
-                            <TableCell>{product.unit || '—'}</TableCell>
+                            <TableCell>{getProductUnitLabel(product.unit, t) || '—'}</TableCell>
                             <TableCell>{product.batchAllocations.map((allocation) => allocation.batchNumber).filter(Boolean).join(', ') || '—'}</TableCell>
                           </TableRow>
                         ))}

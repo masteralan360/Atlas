@@ -1948,6 +1948,7 @@ function createPartnerAccountStatementPreview(options: CustomTemplatePreviewOpti
 }
 
 function createInventoryTransferBatchPreview(options: CustomTemplatePreviewOptions): TemplatePreview {
+    const sampleProductCount = 50
     const inventoryTransferBatchData = options.inventoryTransferBatchData || ({
         batch: {
             id: 'sample-transfer-batch',
@@ -1972,14 +1973,22 @@ function createInventoryTransferBatchPreview(options: CustomTemplatePreviewOptio
             syncStatus: 'synced',
             lastSyncedAt: null,
         },
-        productCount: 2,
+        productCount: sampleProductCount,
         performedByName: 'Sample User',
         sourceIsBranch: true,
         destinationIsBranch: true,
-        products: [
-            { transactionId: 'sample-out-a', productId: 'sample-product-a', productName: 'Product A', sku: 'SKU-A', quantity: 15, unit: 'pcs', batchAllocations: [] },
-            { transactionId: 'sample-out-b', productId: 'sample-product-b', productName: 'Product B', sku: 'SKU-B', quantity: 12, unit: 'pcs', batchAllocations: [] },
-        ],
+        products: Array.from({ length: sampleProductCount }, (_, index) => {
+            const row = index + 1
+            return {
+                transactionId: `sample-transfer-row-${row}`,
+                productId: `sample-product-${row}`,
+                productName: `Product ${row}`,
+                sku: `SKU-${String(row).padStart(3, '0')}`,
+                quantity: row * 3,
+                unit: 'pcs',
+                batchAllocations: [],
+            }
+        }),
         printedAt: '2026-10-01T10:32:00.000Z',
     } satisfies InventoryTransferBatchPrintData)
     const configuredPrintLang = options.features?.print_lang
