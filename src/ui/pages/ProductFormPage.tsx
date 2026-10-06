@@ -59,7 +59,6 @@ import {
     useProducts,
     useProductVariants,
     useStorages,
-    useWorkspaceUsers,
     useUnits,
     useProductUomCatalogState,
     type Product,
@@ -338,7 +337,6 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const { toast } = useToast()
     const categories = useCategories(user?.workspaceId)
     const storages = useStorages(user?.workspaceId)
-    const workspaceUsers = useWorkspaceUsers(user?.workspaceId)
     const product = useProduct(productId)
     const parentProduct = useProduct(product?.parentProductId || undefined)
     const isOnline = useNetworkStatus()
