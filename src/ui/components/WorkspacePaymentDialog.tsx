@@ -19,6 +19,13 @@ import { Button } from '@/ui/components/button'
 import { Label } from '@/ui/components/label'
 import { PaymentAccountHolderNameAutocomplete } from '@/ui/components/PaymentAccountHolderNameAutocomplete'
 import {
+    AppDialog,
+    AppDialogBody,
+    AppDialogContent,
+    AppDialogDescription,
+    AppDialogFooter,
+    AppDialogHeader,
+    AppDialogTitle,
     Dialog,
     DialogContent,
     DialogDescription,
@@ -26,7 +33,6 @@ import {
     DialogHeader,
     DialogTitle
 } from '@/ui/components/dialog'
-import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
 import { cn } from '@/lib/utils'
 import {
     OPEN_WORKSPACE_PAYMENT_DIALOG_EVENT,
@@ -55,14 +61,6 @@ import {
 
 const PENDING_PAYMENT_POLL_INTERVAL_MS = 10_000
 const PAYMENT_SUMMARY_REFRESH_INTERVAL_MS = 60_000
-const PAYMENT_CONFIRMATION_DELAY_MS = 15_000
-
-let hasUsedPaymentConfirmationDelay = false
-let paymentConfirmationDelayEndsAtForSession: number | null = null
-
-function getPaymentConfirmationDelayRemaining(endsAt: number | null) {
-    return endsAt ? Math.max(0, endsAt - Date.now()) : 0
-}
 
 function getWorkspacePaymentCurrencyLabel(iqdDisplayPreference: string) {
     return iqdDisplayPreference === 'د.ع' ? 'د.ع' : WORKSPACE_PAYMENT_CURRENCY
@@ -74,28 +72,16 @@ function getErrorMessage(error: unknown) {
     return 'Unable to submit the payment. Please try again.'
 }
 
-function getAlertCopy(kind: WorkspacePaymentAlertKind | null, t: ReturnType<typeof useTranslation>['t']) {
+function getAlertTitle(kind: WorkspacePaymentAlertKind | null, t: ReturnType<typeof useTranslation>['t']) {
     switch (kind) {
         case 'payg_renewal_due':
-            return {
-                title: t('workspacePayments.payg.renewalDueTitle'),
-                description: t('workspacePayments.payg.renewalDueDescription')
-            }
+            return t('workspacePayments.payg.renewalDueTitle')
         case 'subscription_expired':
-            return {
-                title: t('workspacePayments.subscriptionExpiredTitle'),
-                description: t('workspacePayments.subscriptionExpiredDescription')
-            }
+            return t('workspacePayments.subscriptionExpiredTitle')
         case 'usage_exhausted':
-            return {
-                title: t('workspacePayments.usageExhaustedTitle'),
-                description: t('workspacePayments.usageExhaustedDescription')
-            }
+            return t('workspacePayments.usageExhaustedTitle')
         default:
-            return {
-                title: t('workspacePayments.dialogTitle'),
-                description: t('workspacePayments.dialogDescription')
-            }
+            return t('workspacePayments.dialogTitle')
     }
 }
 
@@ -401,6 +387,7 @@ export function WorkspacePaymentController() {
     const [open, setOpen] = useState(false)
     const [selectedProvider, setSelectedProvider] = useState<WorkspacePaymentProvider | null>(null)
     const [isSubmitting, setIsSubmitting] = useState(false)
+    const [isPaymentConfirmationOpen, setIsPaymentConfirmationOpen] = useState(false)
     const [submitted, setSubmitted] = useState(false)
     const [submittedTransactionId, setSubmittedTransactionId] = useState<string | null>(null)
     const [loadError, setLoadError] = useState<string | null>(null)
@@ -409,12 +396,6 @@ export function WorkspacePaymentController() {
     const [savedAccountHolderNames, setSavedAccountHolderNames] = useState<string[]>([])
     const [isSavedAccountHolderNamesLoading, setIsSavedAccountHolderNamesLoading] = useState(false)
     const [isConfirmationHighlighted, setIsConfirmationHighlighted] = useState(false)
-    const [confirmationDelayEndsAt, setConfirmationDelayEndsAt] = useState<number | null>(
-        () => paymentConfirmationDelayEndsAtForSession
-    )
-    const [confirmationDelayRemainingMs, setConfirmationDelayRemainingMs] = useState(
-        () => getPaymentConfirmationDelayRemaining(paymentConfirmationDelayEndsAtForSession)
-    )
     const [paygSummary, setPaygSummary] = useState<WorkspacePaygSummary | null>(null)
     const submissionGuardRef = useRef(false)
     const previousSummaryRef = useRef<WorkspacePaymentSummary | null>(null)
@@ -440,6 +421,7 @@ export function WorkspacePaymentController() {
 
     useEffect(() => {
         setOpen(false)
+        setIsPaymentConfirmationOpen(false)
         setSelectedProvider(null)
         setSubmitted(false)
         setSubmittedTransactionId(null)
@@ -523,27 +505,6 @@ export function WorkspacePaymentController() {
         }
     }, [paymentSummary, submittedTransactionId])
 
-    useEffect(() => {
-        if (!confirmationDelayEndsAt) {
-            setConfirmationDelayRemainingMs(0)
-            return
-        }
-
-        const updateRemainingTime = () => {
-            const remainingMs = getPaymentConfirmationDelayRemaining(confirmationDelayEndsAt)
-            setConfirmationDelayRemainingMs(remainingMs)
-
-            if (remainingMs === 0) {
-                paymentConfirmationDelayEndsAtForSession = null
-                setConfirmationDelayEndsAt(null)
-            }
-        }
-
-        updateRemainingTime()
-        const intervalId = window.setInterval(updateRemainingTime, 250)
-        return () => window.clearInterval(intervalId)
-    }, [confirmationDelayEndsAt])
-
     const loadSavedAccountHolderNames = useCallback(() => {
         setIsSavedAccountHolderNamesLoading(true)
         void getSavedWorkspacePaymentAccountHolderNames()
@@ -564,17 +525,11 @@ export function WorkspacePaymentController() {
     const paygPaymentDue = Boolean(paygMode && paygSummary?.enabled && paygSummary.cycleStatus === 'awaiting_payment')
     const isFreeRenewal = Boolean(!paygMode && configuration && Number(configuration.subscriptionAmount) === 0)
     const alertKind = getWorkspacePaymentAlertKind(paymentSummary)
-    const alertCopy = prepaidTermActive
-        ? {
-            title: t('workspacePayments.prepaidTerm.title'),
-            description: t('workspacePayments.prepaidTerm.description')
-        }
+    const alertTitle = prepaidTermActive
+        ? t('workspacePayments.prepaidTerm.title')
         : paygPaymentDue
-            ? {
-            title: t('workspacePayments.payg.paymentSubmission'),
-            description: t('workspacePayments.payg.paymentSubmissionDescription')
-            }
-            : getAlertCopy(alertKind, t)
+            ? t('workspacePayments.payg.paymentSubmission')
+            : getAlertTitle(alertKind, t)
     const pendingTransaction = paymentSummary?.pendingTransaction ?? null
     const hasWorkspacePendingTransaction = paymentSummary?.hasWorkspacePendingTransaction ?? false
     const paymentEnabled = paygMode
@@ -588,8 +543,6 @@ export function WorkspacePaymentController() {
     const paymentAmount = paygMode
         ? paygSummary?.amountIqd ?? configuration?.subscriptionAmount ?? '0'
         : configuration?.subscriptionAmount ?? '0'
-    const isConfirmationDelayActive = confirmationDelayRemainingMs > 0
-    const confirmationDelaySeconds = Math.ceil(confirmationDelayRemainingMs / 1000)
     const normalizedAccountHolderName = normalizeWorkspacePaymentAccountHolderName(accountHolderName)
     const isAccountHolderNameIncomplete = Boolean(normalizedAccountHolderName)
         && !isValidWorkspacePaymentAccountHolderName(normalizedAccountHolderName)
@@ -610,7 +563,7 @@ export function WorkspacePaymentController() {
             return
         }
 
-        if (isConfirmationDelayActive || submissionGuardRef.current || !canSubmitWorkspacePayment({
+        if (submissionGuardRef.current || !canSubmitWorkspacePayment({
             provider: selectedProvider,
             accountHolderName: normalizedAccountHolderName,
             isSubmitting,
@@ -662,20 +615,11 @@ export function WorkspacePaymentController() {
         } finally {
             submissionGuardRef.current = false
             setIsSubmitting(false)
+            setIsPaymentConfirmationOpen(false)
         }
     }
 
-    const handleProviderSelect = (provider: WorkspacePaymentProvider) => {
-        setSelectedProvider(provider)
-
-        if (provider === 'free' || hasUsedPaymentConfirmationDelay) return
-
-        const endsAt = Date.now() + PAYMENT_CONFIRMATION_DELAY_MS
-        hasUsedPaymentConfirmationDelay = true
-        paymentConfirmationDelayEndsAtForSession = endsAt
-        setConfirmationDelayEndsAt(endsAt)
-        setConfirmationDelayRemainingMs(PAYMENT_CONFIRMATION_DELAY_MS)
-    }
+    const handleProviderSelect = (provider: WorkspacePaymentProvider) => setSelectedProvider(provider)
 
     const retryLoad = () => {
         setLoadError(null)
@@ -685,33 +629,41 @@ export function WorkspacePaymentController() {
     }
 
     return (
-        <Dialog open={open} onOpenChange={(nextOpen) => {
+        <AppDialog open={open} onOpenChange={(nextOpen) => {
+            if (!nextOpen && (isSubmitting || submissionGuardRef.current)) return
             setOpen(nextOpen)
             if (!nextOpen) {
+                setIsPaymentConfirmationOpen(false)
                 setSelectedProvider(null)
                 setSubmitError(null)
                 setAccountHolderName('')
                 setIsConfirmationHighlighted(false)
             }
         }}>
-            <DialogContent className="max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1rem)] max-w-6xl overflow-y-auto rounded-[28px] p-0 shadow-2xl">
-                <div className="border-b border-border/60 bg-gradient-to-br from-primary/[0.12] via-background to-amber-500/[0.07] px-5 py-5 sm:px-8 sm:py-6">
-                    <DialogHeader className="pe-10 text-start">
-                        <div className="flex items-start gap-4">
-                            <span className="flex h-[3.25rem] w-[3.25rem] shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/20">
-                                <CreditCard className="h-6 w-6" />
-                            </span>
-                            <div className="space-y-1.5">
-                                <DialogTitle className="text-xl sm:text-2xl">{alertCopy.title}</DialogTitle>
-                                <DialogDescription className="max-w-2xl leading-relaxed">
-                                    {alertCopy.description}
-                                </DialogDescription>
-                            </div>
-                        </div>
-                    </DialogHeader>
-                </div>
+            <AppDialogContent
+                className={cn(
+                    'max-w-6xl shadow-2xl sm:w-[calc(100vw-2rem)]',
+                    'max-h-[calc(var(--atlas-dialog-viewport-height)-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-1rem)]',
+                    'sm:max-h-[calc(var(--atlas-dialog-viewport-height)-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-1rem)]'
+                )}
+                showCloseButton={!isSubmitting && !submissionGuardRef.current}
+                onPointerDownOutside={(event) => {
+                    if (isSubmitting || submissionGuardRef.current) event.preventDefault()
+                }}
+                onEscapeKeyDown={(event) => {
+                    if (isSubmitting || submissionGuardRef.current) event.preventDefault()
+                }}
+            >
+                <AppDialogHeader className="border-b border-border/60 bg-gradient-to-br from-primary/[0.12] via-background to-amber-500/[0.07] px-5 py-5 pe-14 sm:px-8 sm:py-6">
+                    <div className="flex items-center gap-4">
+                        <span className="flex h-[3.25rem] w-[3.25rem] shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/20">
+                            <CreditCard className="h-6 w-6" />
+                        </span>
+                        <AppDialogTitle className="text-xl sm:text-2xl">{alertTitle}</AppDialogTitle>
+                    </div>
+                </AppDialogHeader>
 
-                <div className="space-y-6 px-5 py-5 sm:px-8 sm:py-7">
+                <AppDialogBody className="space-y-6 px-5 py-5 sm:px-8 sm:py-7">
                     {isPaymentSummaryLoading && !paymentSummary ? (
                         <div className="flex min-h-44 flex-col items-center justify-center gap-3 text-muted-foreground">
                             <RefreshCw className="h-6 w-6 animate-spin" />
@@ -817,7 +769,7 @@ export function WorkspacePaymentController() {
                                             )}
                                         </div>
 
-                                        <div className="mt-6 flex flex-1 flex-col items-center justify-center">
+                                        <div className="mt-4 flex flex-1 flex-col items-center justify-start">
                                             {selectedProvider === 'free' ? (
                                                 <div className="flex aspect-square w-full max-w-[20rem] flex-col items-center justify-center rounded-3xl border border-dashed border-primary/30 bg-background/70 p-6 text-center">
                                                     <Gift className="h-10 w-10 text-primary" />
@@ -871,9 +823,6 @@ export function WorkspacePaymentController() {
                                             <h3 className="text-xl font-bold text-foreground">
                                                 {t('workspacePayments.paymentInstructions')}
                                             </h3>
-                                            <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                                                {t('workspacePayments.dialogDescription')}
-                                            </p>
                                         </div>
 
                                         {selectedProvider ? (
@@ -938,32 +887,28 @@ export function WorkspacePaymentController() {
                                                 )}
 
                                                 <div className="mt-6 space-y-2">
-                                                    <PressAndHoldButton
-                                                        onComplete={() => void handleSubmit()}
-                                                        idleLabel={isConfirmationDelayActive
-                                                            ? t('workspacePayments.completePaymentBeforeConfirm', {
-                                                                seconds: confirmationDelaySeconds
-                                                            })
-                                                            : t('workspacePayments.holdToConfirm')}
-                                                        holdingLabel={t('workspacePayments.keepHolding')}
-                                                        loadingLabel={t('workspacePayments.submitting')}
-                                                        isLoading={isSubmitting}
-                                                        disabled={isConfirmationDelayActive || !canSubmitWorkspacePayment({
+                                                    <Button
+                                                        type="button"
+                                                        disabled={!canSubmitWorkspacePayment({
                                                             provider: selectedProvider,
                                                             accountHolderName: normalizedAccountHolderName,
                                                             isSubmitting,
                                                             hasWorkspacePendingTransaction,
                                                             pendingTransaction
                                                         })}
-                                                        className={cn(
-                                                            'h-[3.25rem] w-full rounded-2xl font-bold shadow-sm',
-                                                            isConfirmationDelayActive && 'bg-muted text-muted-foreground shadow-none hover:bg-muted'
-                                                        )}
+                                                        className="h-[3.25rem] w-full rounded-2xl font-bold shadow-sm"
+                                                        onClick={() => {
+                                                            setSubmitError(null)
+                                                            setIsPaymentConfirmationOpen(true)
+                                                        }}
                                                         onMouseEnter={() => setIsConfirmationHighlighted(true)}
                                                         onMouseLeave={() => setIsConfirmationHighlighted(false)}
                                                         onFocus={() => setIsConfirmationHighlighted(true)}
                                                         onBlur={() => setIsConfirmationHighlighted(false)}
-                                                    />
+                                                    >
+                                                        <CheckCircle2 className="h-4 w-4" />
+                                                        {t('common.continue')}
+                                                    </Button>
                                                     <p className="text-center text-xs text-muted-foreground">
                                                         {t('workspacePayments.pendingMessage')}
                                                     </p>
@@ -980,37 +925,80 @@ export function WorkspacePaymentController() {
                                             </div>
                                         )}
 
-                                        <div className="mt-6">
-                                            <TransactionHistory
-                                                transactions={paymentSummary?.transactions ?? []}
-                                                locale={locale}
-                                                iqdDisplayPreference={features.iqd_display_preference}
-                                                t={t}
-                                            />
-                                        </div>
                                     </section>
                                 </div>
                             )}
-
-                            {(hasWorkspacePendingTransaction || !paymentEnabled) && (
-                                <TransactionHistory
-                                    transactions={paymentSummary?.transactions ?? []}
-                                    locale={locale}
-                                    iqdDisplayPreference={features.iqd_display_preference}
-                                    t={t}
-                                />
-                            )}
                         </>
                     )}
-                </div>
+                </AppDialogBody>
 
-                <DialogFooter className="border-t border-border/60 bg-muted/[0.12] px-5 py-4 sm:px-8">
-                    <Button allowViewer={true} variant="outline" onClick={() => setOpen(false)}>
+                <AppDialogFooter className="border-border/60 bg-muted/[0.12] px-5 py-4 sm:px-8">
+                    <Button allowViewer={true} variant="outline" disabled={isSubmitting} onClick={() => setOpen(false)}>
                         {t('workspacePayments.close')}
                     </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+                </AppDialogFooter>
+            </AppDialogContent>
+            <AppDialog
+                open={isPaymentConfirmationOpen}
+                onOpenChange={(nextOpen) => {
+                    if (!nextOpen && (isSubmitting || submissionGuardRef.current)) return
+                    setIsPaymentConfirmationOpen(nextOpen)
+                }}
+            >
+                <AppDialogContent
+                    className="max-w-lg"
+                    showCloseButton={!isSubmitting && !submissionGuardRef.current}
+                    onPointerDownOutside={(event) => {
+                        if (isSubmitting || submissionGuardRef.current) event.preventDefault()
+                    }}
+                    onEscapeKeyDown={(event) => {
+                        if (isSubmitting || submissionGuardRef.current) event.preventDefault()
+                    }}
+                >
+                    <AppDialogHeader className="flex-row items-start gap-3 text-start">
+                        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-300" />
+                        <AppDialogTitle>
+                            {t(isFreeRenewal
+                                ? 'workspacePayments.freeRenewalConfirmationTitle'
+                                : 'workspacePayments.paymentConfirmationTitle')}
+                        </AppDialogTitle>
+                    </AppDialogHeader>
+                    <AppDialogBody>
+                        <AppDialogDescription className="leading-relaxed">
+                            {t(isFreeRenewal
+                                ? 'workspacePayments.freeRenewalConfirmationMessage'
+                                : 'workspacePayments.paymentMustBeSentFirst')}
+                        </AppDialogDescription>
+                    </AppDialogBody>
+                    <AppDialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="w-full sm:w-auto"
+                            disabled={isSubmitting}
+                            onClick={() => setIsPaymentConfirmationOpen(false)}
+                        >
+                            {t('common.cancel')}
+                        </Button>
+                        <Button
+                            type="button"
+                            className="w-full sm:w-auto"
+                            disabled={isSubmitting}
+                            onClick={() => void handleSubmit()}
+                        >
+                            {isSubmitting
+                                ? <RefreshCw className="h-4 w-4 animate-spin" />
+                                : <CheckCircle2 className="h-4 w-4" />}
+                            {t(isSubmitting
+                                ? 'workspacePayments.submitting'
+                                : isFreeRenewal
+                                    ? 'workspacePayments.confirmFreeRenewal'
+                                    : 'workspacePayments.confirmPayment')}
+                        </Button>
+                    </AppDialogFooter>
+                </AppDialogContent>
+            </AppDialog>
+        </AppDialog>
     )
 }
 

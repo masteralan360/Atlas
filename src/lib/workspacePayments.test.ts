@@ -561,6 +561,22 @@ describe('workspace payments', () => {
                 { gb: 1, amount_iqd: 0, protected: true },
                 { gb: 15, amount_iqd: 10000, protected: true }
             ],
+            payg_limit_state: {
+                workspace_id: 'branch-1',
+                billing_workspace_id: 'source-1',
+                enabled: true,
+                has_limit: true,
+                locked: true,
+                limit: {
+                    metric: 'changed_usage',
+                    threshold: '3',
+                    current_value: '3.0003',
+                    locked: true,
+                    created_at: '2026-09-01T00:00:00.000Z',
+                    updated_at: '2026-09-01T00:00:00.000Z'
+                },
+                metrics: { accrued_charge: '3334', changed_usage: '3.0003' }
+            },
             last_updated_at: '2026-09-01T01:00:00.000Z',
             history: []
         })
@@ -572,7 +588,19 @@ describe('workspace payments', () => {
             chargedUsageBytes: 3_000_300_000,
             chargedUsageGb: '3.0003',
             amountIqd: '3334',
-            pricingVersion: 4
+            pricingVersion: 4,
+            paygLimitState: {
+                enabled: true,
+                hasLimit: true,
+                locked: true,
+                limit: {
+                    metric: 'changed_usage',
+                    threshold: '3',
+                    currentValue: '3.0003',
+                    locked: true
+                },
+                metrics: { accrued_charge: '3334', changed_usage: '3.0003' }
+            }
         })
         expect(result.pricingCheckpoints.map(({ gb }) => gb)).toEqual([1, 15, 100])
     })

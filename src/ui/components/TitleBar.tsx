@@ -11,7 +11,7 @@ import { NotificationCenter } from './NotificationCenter'
 import { ThemeAwareTitleLogo } from './ThemeAwareTitleLogo'
 import { LanguageSwitcher } from './LanguageSwitcher'
 import { useSubscriptionExpiryWarning } from '@/hooks/useSubscriptionExpiryWarning'
-import { WorkspacePaygChargeButton, WorkspaceUsageButton, WorkspaceUsageCircleButton, WorkspaceUsageModal } from './WorkspaceUsageModal'
+import { WorkspacePaygChargeButton, WorkspacePaygLimitGaugeButton, WorkspaceUsageButton, WorkspaceUsageCircleButton, WorkspaceUsageModal } from './WorkspaceUsageModal'
 import { useWorkspaceUsageMeter } from './workspaceUsageMeter'
 import { useNavigationHistory } from '@/hooks/useNavigationHistory'
 import { WorkspaceResourceSyncPill } from './WorkspaceResourceSyncPill'
@@ -222,6 +222,13 @@ export function TitleBar() {
             <div data-tauri-drag-region className="flex min-w-0 w-1/3 items-center justify-end gap-1">
                 {(usageMeter || paygSummary) && (
                     <div className="flex min-w-0 flex-1 items-center justify-end">
+                        {paygSummary?.paygLimitState?.hasLimit && (
+                            <WorkspacePaygLimitGaugeButton
+                                summary={paygSummary}
+                                onClick={() => setUsageModalOpen(true)}
+                                className="me-1 xl:hidden"
+                            />
+                        )}
                         {paygSummary && (
                             <WorkspacePaygChargeButton
                                 summary={paygSummary}
@@ -235,6 +242,13 @@ export function TitleBar() {
                                 usageMeter={usageMeter}
                                 onClick={() => setUsageModalOpen(true)}
                                 className="relative z-10 me-1 h-8 w-8 xl:hidden"
+                            />
+                        )}
+                        {paygSummary?.paygLimitState?.hasLimit && (
+                            <WorkspacePaygLimitGaugeButton
+                                summary={paygSummary}
+                                onClick={() => setUsageModalOpen(true)}
+                                className="me-1 hidden xl:inline-flex"
                             />
                         )}
                         {paygSummary && (

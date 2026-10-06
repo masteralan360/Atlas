@@ -94,6 +94,26 @@ export interface WorkspacePaymentSummary {
 }
 
 export type WorkspacePaygCycleStatus = 'open' | 'awaiting_payment' | 'paid' | 'no_payment_required'
+export type WorkspacePaygLimitMetric = 'accrued_charge' | 'changed_usage'
+
+export interface WorkspacePaygLimit {
+    metric: WorkspacePaygLimitMetric
+    threshold: string
+    currentValue: string
+    locked: boolean
+    createdAt: string | null
+    updatedAt: string | null
+}
+
+export interface WorkspacePaygLimitState {
+    workspaceId: string
+    billingWorkspaceId: string
+    enabled: boolean
+    hasLimit: boolean
+    locked: boolean
+    limit: WorkspacePaygLimit | null
+    metrics: Record<WorkspacePaygLimitMetric, string>
+}
 
 export interface WorkspacePaygCheckpoint {
     gb: number
@@ -138,6 +158,7 @@ export interface WorkspacePaygSummary {
     lastUpdatedAt: string | null
     history: WorkspacePaygCycleHistory[]
     paymentHistory: WorkspacePaymentTransaction[]
+    paygLimitState: WorkspacePaygLimitState | null
 }
 
 type UnknownRecord = Record<string, unknown>
@@ -493,6 +514,38 @@ export function normalizeWorkspacePaygSummary(value: unknown): WorkspacePaygSumm
     const paymentHistory = (Array.isArray(unwrapped.payment_history) ? unwrapped.payment_history : [])
         .map(normalizeWorkspacePaymentTransaction)
         .filter((transaction): transaction is WorkspacePaymentTransaction => Boolean(transaction))
+    const limitStateValue = isRecord(unwrapped.payg_limit_state) ? unwrapped.payg_limit_state : null
+    const limitValue = limitStateValue && isRecord(limitStateValue.limit) ? limitStateValue.limit : null
+    const limitMetric = limitValue?.metric === 'accrued_charge' || limitValue?.metric === 'changed_usage'
+        ? limitValue.metric
+        : null
+    const paygLimitState: WorkspacePaygLimitState | null = limitStateValue
+        ? {
+            workspaceId: getText(limitStateValue.workspace_id),
+            billingWorkspaceId: getText(limitStateValue.billing_workspace_id),
+            enabled: getBoolean(limitStateValue.enabled),
+            hasLimit: getBoolean(limitStateValue.has_limit) && Boolean(limitMetric),
+            locked: getBoolean(limitStateValue.locked),
+            limit: limitMetric && limitValue
+                ? {
+                    metric: limitMetric,
+                    threshold: getDecimalText(limitValue.threshold),
+                    currentValue: getDecimalText(limitValue.current_value),
+                    locked: getBoolean(limitValue.locked),
+                    createdAt: getNullableText(limitValue.created_at),
+                    updatedAt: getNullableText(limitValue.updated_at)
+                }
+                : null,
+            metrics: {
+                accrued_charge: getDecimalText(
+                    isRecord(limitStateValue.metrics) ? limitStateValue.metrics.accrued_charge : undefined
+                ),
+                changed_usage: getDecimalText(
+                    isRecord(limitStateValue.metrics) ? limitStateValue.metrics.changed_usage : undefined
+                )
+            }
+        }
+        : null
 
     return {
         enabled: getBoolean(unwrapped.enabled),
@@ -520,7 +573,8 @@ export function normalizeWorkspacePaygSummary(value: unknown): WorkspacePaygSumm
             : null,
         lastUpdatedAt: getNullableText(unwrapped.last_updated_at),
         history,
-        paymentHistory
+        paymentHistory,
+        paygLimitState
     }
 }
 
@@ -693,7 +747,37 @@ export async function getWorkspacePaymentSummary(): Promise<WorkspacePaymentSumm
 export async function getWorkspacePaygSummary(): Promise<WorkspacePaygSummary> {
     const result = await runSupabaseAction(
         'workspacePayments.getPaygSummary',
-        () => supabase.rpc('get_workspace_payg_summary'),
+        () => supabase.rpc('get_workspace_payg_summary_with_limit'),
+        { timeoutMs: 12_000, platform: 'all' }
+    ) as { data: unknown; error?: unknown }
+    if (result.error) throw normalizeSupabaseActionError(result.error)
+    return normalizeWorkspacePaygSummary(result.data)
+}
+
+export async function saveWorkspacePaygLimit(
+    metric: WorkspacePaygLimitMetric,
+    threshold: string
+): Promise<WorkspacePaygSummary> {
+    const normalizedThreshold = threshold.trim().replace(/,/g, '')
+    if (!Number.isFinite(Number(normalizedThreshold)) || Number(normalizedThreshold) <= 0) {
+        throw new Error('invalid_workspace_payg_limit_threshold')
+    }
+    const result = await runSupabaseAction(
+        'workspacePayments.savePaygLimit',
+        () => supabase.rpc('admin_upsert_workspace_payg_limit', {
+            p_metric: metric,
+            p_threshold: normalizedThreshold
+        }),
+        { timeoutMs: 12_000, platform: 'all' }
+    ) as { data: unknown; error?: unknown }
+    if (result.error) throw normalizeSupabaseActionError(result.error)
+    return normalizeWorkspacePaygSummary(result.data)
+}
+
+export async function removeWorkspacePaygLimit(): Promise<WorkspacePaygSummary> {
+    const result = await runSupabaseAction(
+        'workspacePayments.removePaygLimit',
+        () => supabase.rpc('admin_delete_workspace_payg_limit'),
         { timeoutMs: 12_000, platform: 'all' }
     ) as { data: unknown; error?: unknown }
     if (result.error) throw normalizeSupabaseActionError(result.error)

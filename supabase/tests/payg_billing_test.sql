@@ -441,5 +441,149 @@ SELECT results_eq(
   'a free immediate termination disables PAYG at once'
 );
 
+-- PAYG limiter configuration is owned by the existing billing workspace and
+-- evaluates the values returned by the canonical PAYG summary.
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', true);
+SELECT lives_ok(
+  $$SELECT public.admin_upsert_workspace_payment_configuration_v2(
+    '93000000-0000-0000-0000-000000000006', '0', true, false, true,
+    '0', (now() + interval '1 month')::text, 'PAYG limiter test'
+  )$$,
+  'PAYG can be re-enabled for limiter coverage'
+);
+UPDATE public.workspace_usage
+SET data_transfer_bytes = 15000000000
+WHERE workspace_id = '93000000-0000-0000-0000-000000000006';
+UPDATE public.profiles
+SET workspace_id = '93000000-0000-0000-0000-000000000006', role = 'admin'
+WHERE id = '94000000-0000-0000-0000-000000000001';
+INSERT INTO crm.customers (id, workspace_id, partner_name, name)
+VALUES (
+  '95000000-0000-0000-0000-000000000006',
+  '93000000-0000-0000-0000-000000000006',
+  'PAYG limiter customer',
+  'PAYG limiter customer'
+);
+
+SET LOCAL ROLE authenticated;
+SELECT set_config(
+  'request.jwt.claims',
+  '{"sub":"94000000-0000-0000-0000-000000000001","role":"authenticated"}',
+  true
+);
+SELECT is(
+  public.admin_upsert_workspace_payg_limit('accrued_charge', 1)
+    ->'payg_limit_state'->>'locked',
+  'true',
+  'the inclusive accrued-charge threshold locks at or above the configured value'
+);
+SELECT throws_ok(
+  $$SELECT public.admin_upsert_workspace_payg_limit('accrued_charge', 'NaN'::numeric)$$,
+  '22023', 'invalid_workspace_payg_limit_threshold',
+  'non-finite thresholds are rejected by the backend'
+);
+SELECT throws_ok(
+  $$SELECT public.admin_upsert_workspace_payg_limit('accrued_charge', 10000)$$,
+  '23514', 'workspace_payg_limit_must_exceed_current_usage',
+  'a locked admin cannot choose a threshold equal to current accrued charge'
+);
+SELECT is(
+  public.admin_upsert_workspace_payg_limit('accrued_charge', 10001)
+    ->'payg_limit_state'->>'locked',
+  'false',
+  'raising the accrued-charge threshold above current usage clears the lock'
+);
+SELECT is(
+  public.admin_upsert_workspace_payg_limit('changed_usage', 16)
+    ->'payg_limit_state'->>'locked',
+  'false',
+  'an unselected accrued charge above 16 does not lock the changed-usage metric'
+);
+SELECT is(
+  public.admin_upsert_workspace_payg_limit('changed_usage', 15)
+    ->'payg_limit_state'->>'locked',
+  'true',
+  'changed usage locks at equality when it is the selected metric'
+);
+SELECT throws_ok(
+  $$UPDATE crm.customers
+    SET name = name
+    WHERE id = '95000000-0000-0000-0000-000000000006'$$,
+  '42501', 'workspace_payg_limit_reached',
+  'workspace business-data writes are rejected while the PAYG limit is reached'
+);
+SELECT lives_ok(
+  $$SELECT public.apply_workspace_charged_usage(
+    '93000000-0000-0000-0000-000000000006', 1, 'tauri', 'payg-limit-test', gen_random_uuid()
+  )$$,
+  'the PAYG metering counter continues to record usage after the lock is reached'
+);
+
+RESET ROLE;
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', true);
+UPDATE public.profiles
+SET role = 'staff'
+WHERE id = '94000000-0000-0000-0000-000000000001';
+SET LOCAL ROLE authenticated;
+SELECT set_config(
+  'request.jwt.claims',
+  '{"sub":"94000000-0000-0000-0000-000000000001","role":"authenticated"}',
+  true
+);
+SELECT throws_ok(
+  $$SELECT public.admin_upsert_workspace_payg_limit('changed_usage', 20)$$,
+  '42501', 'workspace_payg_limit_admin_required',
+  'staff cannot change the PAYG threshold through the backend RPC'
+);
+RESET ROLE;
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', true);
+UPDATE public.profiles
+SET role = 'admin'
+WHERE id = '94000000-0000-0000-0000-000000000001';
+SET LOCAL ROLE authenticated;
+SELECT set_config(
+  'request.jwt.claims',
+  '{"sub":"94000000-0000-0000-0000-000000000001","role":"authenticated"}',
+  true
+);
+SELECT lives_ok(
+  $$SELECT public.admin_delete_workspace_payg_limit()$$,
+  'an administrator can remove the active PAYG limit'
+);
+SELECT is(
+  (public.get_workspace_payg_limit_state()->>'locked')::boolean,
+  false,
+  'removing a PAYG limit disables this lock condition'
+);
+SELECT is(
+  (SELECT count(*) FROM billing.workspace_payg_limits
+   WHERE workspace_id = '93000000-0000-0000-0000-000000000006'),
+  0::bigint,
+  'removal hard-deletes the PAYG limit row'
+);
+SELECT is(
+  (SELECT count(*) FROM pg_catalog.pg_trigger
+   WHERE tgrelid = 'billing.workspace_payg_limits'::regclass
+     AND NOT tgisinternal
+     AND tgname ILIKE '%audit%'),
+  0::bigint,
+  'PAYG limit changes have no audit trigger'
+);
+RESET ROLE;
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', true);
+SELECT lives_ok(
+  $$INSERT INTO billing.workspace_payg_limits (workspace_id, threshold)
+    VALUES ('93000000-0000-0000-0000-000000000006', 100000)$$,
+  'a new PAYG limit can omit its metric'
+);
+SELECT is(
+  (SELECT metric FROM billing.workspace_payg_limits
+   WHERE workspace_id = '93000000-0000-0000-0000-000000000006'),
+  'accrued_charge',
+  'Accrued Charge is the database default metric'
+);
+DELETE FROM billing.workspace_payg_limits
+WHERE workspace_id = '93000000-0000-0000-0000-000000000006';
+
 SELECT * FROM finish();
 ROLLBACK;

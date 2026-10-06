@@ -1,7 +1,7 @@
 {
   "name": "atlas",
   "private": true,
-  "version": "0.13.18",
+  "version": "0.13.19",
   "main": "electron/main.cjs",
   "type": "module",
   "repository": {
@@ -129,6 +129,7 @@
     "react-glass-ui": "^1.2.2",
     "react-i18next": "^16.5.1",
     "react-is": "^18.3.1",
+    "react-liquid-gauge": "^1.2.4",
     "react-native-country-flag": "^2.0.2",
     "react-spreadsheet": "^0.10.1",
     "react-to-print": "^3.2.0",
@@ -174,5 +175,5 @@
     "workbox-window": "^7.1.0",
     "wrangler": "^4.72.0"
   },
-  "min_version": "0.13.18"
+  "min_version": "0.13.19"
 }

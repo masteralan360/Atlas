@@ -16,6 +16,10 @@ const RPC_METHODS = new Set(['GET', 'POST'])
 const UNMETERED_RPC_NAMES = new Set([
     'get_workspace_usage_status',
     'get_workspace_payg_summary',
+    'get_workspace_payg_summary_with_limit',
+    'get_workspace_payg_limit_state',
+    'admin_upsert_workspace_payg_limit',
+    'admin_delete_workspace_payg_limit',
     'get_current_workspace_usage_access',
     'record_workspace_data_transfer',
     // Renewal must remain reachable after charged usage is exhausted. Metering

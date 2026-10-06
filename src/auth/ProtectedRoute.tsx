@@ -31,7 +31,7 @@ export function ProtectedRoute({
     requiredAnyPermission
 }: ProtectedRouteProps) {
     const { isAuthenticated, isLoading, hasRole, isKicked, user } = useAuth()
-    const { hasFeature, hasCapability, features, isLoading: featuresLoading, isLocked } = useWorkspace()
+    const { hasFeature, hasCapability, features, isLoading: featuresLoading, isLocked, paygSummary } = useWorkspace()
     const { hasPermission, isLoading: permissionsLoading } = useWorkspacePermissions()
     const [location] = useLocation()
     if (isLoading) {
@@ -73,6 +73,12 @@ export function ProtectedRoute({
     // Redirect admins away from workspace configuration once the workspace is configured.
     if (user?.role === 'admin' && features.is_configured && location === '/workspace-configuration') {
         return <Redirect to="/" />
+    }
+
+    // PAYG limits block regular workspace pages for admins as well. The lock
+    // page itself exposes the admin-only recovery action.
+    if (paygSummary?.paygLimitState?.locked && location !== '/locked-workspace') {
+        return <Redirect to="/locked-workspace" />
     }
 
     // Redirect locked workspace members to locked workspace page

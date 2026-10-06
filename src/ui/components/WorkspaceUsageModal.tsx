@@ -1,13 +1,19 @@
-import type { ReactNode } from 'react'
+import { lazy, Suspense, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useAuth } from '@/auth'
+import { useTheme } from '@/ui/components/theme-provider'
 import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Scatter, Tooltip as RechartsTooltip, XAxis, YAxis, Bar, BarChart } from 'recharts'
-import { Activity, CalendarDays, CircleDollarSign, Database, Gauge, HardDrive, RefreshCw, TrendingUp } from 'lucide-react'
+import { Activity, CalendarDays, CircleDollarSign, Database, Gauge, HardDrive, RefreshCw, TrendingUp, SlidersHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { WorkspaceUsageInsights } from '@/lib/workspaceUsageHistory'
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './dialog'
 import type { WorkspacePaygSummary } from '@/lib/workspacePayments'
 import { openWorkspacePaymentDialog } from '@/lib/workspacePayments'
 import { getPaygInterpolationSegment } from '@/lib/paygPricing'
+import { WorkspacePaygLimitDialog } from './WorkspacePaygLimitDialog'
+import { getWorkspacePaygMetricCurrentValue } from '@/lib/workspacePaygLimit'
+
+const LiquidFillGauge = lazy(() => import('react-liquid-gauge'))
 
 export type WorkspaceUsageMeterSegment = {
     key: 'storage' | 'chargedUsage'
@@ -265,6 +271,100 @@ export function WorkspacePaygChargeButton({
     )
 }
 
+type WorkspacePaygLimitGaugeButtonProps = {
+    summary: WorkspacePaygSummary
+    onClick: () => void
+    className?: string
+}
+
+export function WorkspacePaygLimitGaugeButton({
+    summary,
+    onClick,
+    className
+}: WorkspacePaygLimitGaugeButtonProps) {
+    const { t, i18n } = useTranslation()
+    const { theme } = useTheme()
+    const limitState = summary.paygLimitState
+    const limit = limitState?.hasLimit ? limitState.limit : null
+
+    if (!limit || !limitState) return null
+
+    const currentValue = getWorkspacePaygMetricCurrentValue(limitState, limit.metric)
+    const threshold = Number(limit.threshold)
+    const percent = threshold > 0 && Number.isFinite(threshold)
+        ? Math.min(100, Math.max(0, currentValue / threshold * 100))
+        : 0
+    const locale = i18n.resolvedLanguage || i18n.language || 'en'
+    const isDarkTheme = theme === 'dark'
+        || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+    const gaugeTextColor = isDarkTheme ? '#ffffff' : '#27272a'
+    const metricLabel = t(limit.metric === 'accrued_charge'
+        ? 'workspaceUsage.payg.accruedCharge'
+        : 'workspaceUsage.payg.limit.changedUsage')
+    const unit = limit.metric === 'accrued_charge' ? summary.currency : 'GB'
+    const valueFormatter = new Intl.NumberFormat(locale, {
+        maximumFractionDigits: limit.metric === 'accrued_charge' ? 0 : 2
+    })
+    const currentLabel = `${valueFormatter.format(currentValue)} ${unit}`
+    const thresholdLabel = `${valueFormatter.format(threshold)} ${unit}`
+    const accessibleLabel = t('workspaceUsage.payg.limit.gaugeAccessibleLabel', {
+        percent: new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(percent),
+        metric: metricLabel,
+        current: currentLabel,
+        threshold: thresholdLabel
+    })
+    const gaugePercentLabel = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(percent)
+
+    return (
+        <div className={cn(
+            'group relative inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-600/30 bg-amber-500/10 shadow-sm transition-colors hover:bg-amber-500/15',
+            className
+        )}>
+            <span aria-hidden="true" className="pointer-events-none inline-flex h-6 w-6 items-center justify-center">
+                <Suspense fallback={<Gauge className="h-3 w-3 text-amber-700 dark:text-amber-300" />}>
+                    <LiquidFillGauge
+                        width={24}
+                        height={24}
+                        value={percent}
+                        percent="%"
+                        textSize={1.2}
+                        textOffsetY={2}
+                        textRenderer={(props) => {
+                            const radius = Math.min(props.height / 2, props.width / 2)
+                            const valueFontSize = props.textSize * radius / 2
+                            return (
+                                <tspan>
+                                    <tspan style={{ fontSize: valueFontSize, fontWeight: 800 }}>{gaugePercentLabel}</tspan>
+                                    <tspan style={{ fontSize: valueFontSize * 0.6, fontWeight: 800 }}>%</tspan>
+                                </tspan>
+                            )
+                        }}
+                        waveAmplitude={1}
+                        waveFrequency={1.5}
+                        circleStyle={{ fill: '#d97706' }}
+                        waveStyle={{ fill: '#f59e0b' }}
+                        textStyle={{ fill: gaugeTextColor, fontFamily: 'inherit', fontWeight: 700 }}
+                        waveTextStyle={{ fill: gaugeTextColor, fontFamily: 'inherit', fontWeight: 700 }}
+                        gradient
+                        gradientStops={[
+                            { key: '0%', offset: '0%', stopColor: '#d97706', stopOpacity: 1 },
+                            { key: '50%', offset: '50%', stopColor: '#f59e0b', stopOpacity: 0.92 },
+                            { key: '100%', offset: '100%', stopColor: '#fbbf24', stopOpacity: 0.85 }
+                        ]}
+                    />
+                </Suspense>
+            </span>
+            <button
+                type="button"
+                onClick={onClick}
+                title={accessibleLabel}
+                aria-label={accessibleLabel}
+                className="absolute inset-0 z-10 cursor-pointer rounded-full bg-transparent outline-none transition-colors group-hover:bg-amber-500/10 focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            />
+        </div>
+    )
+}
+
 export function WorkspaceUsageModal({
     open,
     onOpenChange,
@@ -274,11 +374,14 @@ export function WorkspaceUsageModal({
     paygSummary
 }: WorkspaceUsageModalProps) {
     const { t, i18n } = useTranslation()
+    const { user } = useAuth()
+    const [paygLimitDialogOpen, setPaygLimitDialogOpen] = useState(false)
 
     if (!usageMeter) return null
 
     const locale = i18n.language || 'en'
     const isRtl = i18n.dir() === 'rtl'
+    const canManagePaygLimit = user?.role === 'admin' && Boolean(paygSummary?.canSubmitPayment)
     const { details } = usageMeter
     const { insights } = details
     const chargedUsageLimitLabel = details.chargedUsageLimitBytes === null
@@ -326,7 +429,7 @@ export function WorkspaceUsageModal({
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent layout="structured" className="max-w-5xl">
                 <DialogHeader layout="structured">
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex min-w-0 items-center gap-3">
                             <div className="rounded-2xl bg-amber-500/10 p-3 text-amber-600 ring-1 ring-amber-500/20 dark:text-amber-300">
                                 <Activity className="h-5 w-5" />
@@ -340,17 +443,31 @@ export function WorkspaceUsageModal({
                                 </DialogDescription>
                             </div>
                         </div>
-                        <button
-                            type="button"
-                            onClick={() => void onRefresh()}
-                            disabled={isRefreshing}
-                            className="inline-flex h-9 shrink-0 items-center gap-2 rounded-xl border border-border/70 bg-background px-3 text-sm font-semibold text-foreground shadow-sm transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
-                            title={t('common.refresh', { defaultValue: 'Refresh' })}
-                            aria-label={t('common.refresh', { defaultValue: 'Refresh' })}
-                        >
-                            <RefreshCw className={cn('h-4 w-4', isRefreshing && 'animate-spin')} />
-                            <span className="hidden sm:inline">{t('common.refresh', { defaultValue: 'Refresh' })}</span>
-                        </button>
+                        <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
+                            {paygSummary?.enabled && canManagePaygLimit && (
+                                <button
+                                    type="button"
+                                    onClick={() => setPaygLimitDialogOpen(true)}
+                                    className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-2 text-xs font-semibold text-amber-900 shadow-sm transition-colors hover:bg-amber-500/15 disabled:pointer-events-none disabled:opacity-50 sm:gap-2 sm:px-3 sm:text-sm dark:text-amber-100"
+                                    title={t('workspaceUsage.payg.limit.openButton')}
+                                    aria-label={t('workspaceUsage.payg.limit.openButton')}
+                                >
+                                    <SlidersHorizontal className="h-4 w-4" />
+                                    <span>{t('workspaceUsage.payg.limit.openButton')}</span>
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => void onRefresh()}
+                                disabled={isRefreshing}
+                                className="inline-flex h-9 shrink-0 items-center gap-2 rounded-xl border border-border/70 bg-background px-2 text-sm font-semibold text-foreground shadow-sm transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50 sm:px-3"
+                                title={t('common.refresh', { defaultValue: 'Refresh' })}
+                                aria-label={t('common.refresh', { defaultValue: 'Refresh' })}
+                            >
+                                <RefreshCw className={cn('h-4 w-4', isRefreshing && 'animate-spin')} />
+                                <span className="hidden sm:inline">{t('common.refresh', { defaultValue: 'Refresh' })}</span>
+                            </button>
+                        </div>
                     </div>
                 </DialogHeader>
 
@@ -725,6 +842,13 @@ export function WorkspaceUsageModal({
                     </section>
                 </DialogBody>
             </DialogContent>
+            <WorkspacePaygLimitDialog
+                open={paygLimitDialogOpen}
+                onOpenChange={setPaygLimitDialogOpen}
+                summary={paygSummary ?? null}
+                canManage={canManagePaygLimit}
+                onSaved={async () => { await onRefresh() }}
+            />
         </Dialog>
     )
 }

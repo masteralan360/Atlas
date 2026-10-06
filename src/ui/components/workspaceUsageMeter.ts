@@ -16,7 +16,8 @@ import type {
     WorkspaceUsageMeterMetric,
     WorkspaceUsageMeterSegment
 } from './WorkspaceUsageModal'
-import { getWorkspacePaygSummary, type WorkspacePaygSummary } from '@/lib/workspacePayments'
+import type { WorkspacePaygSummary } from '@/lib/workspacePayments'
+import { useWorkspace } from '@/workspace'
 
 const WORKSPACE_USAGE_UPDATED_EVENT = 'workspace-usage-updated'
 const WORKSPACE_USAGE_REFRESH_DELAY_MS = 1500
@@ -135,9 +136,9 @@ type UseWorkspaceUsageMeterOptions = {
 
 export function useWorkspaceUsageMeter({ enabled, workspaceId }: UseWorkspaceUsageMeterOptions) {
     const { t } = useTranslation()
+    const { paygSummary, refreshPaygSummary } = useWorkspace()
     const [usageStatus, setUsageStatus] = useState<WorkspaceUsageStatus | null>(null)
     const [usageHistory, setUsageHistory] = useState<WorkspaceUsageLocalHistory | null>(null)
-    const [paygSummary, setPaygSummary] = useState<WorkspacePaygSummary | null>(null)
     const [isRefreshingWorkspaceUsage, setIsRefreshingWorkspaceUsage] = useState(false)
     const refreshUsageRef = useRef<(() => Promise<void>) | null>(null)
 
@@ -145,7 +146,6 @@ export function useWorkspaceUsageMeter({ enabled, workspaceId }: UseWorkspaceUsa
         if (!enabled || !workspaceId) {
             setUsageStatus(null)
             setUsageHistory(null)
-            setPaygSummary(null)
             setIsRefreshingWorkspaceUsage(false)
             refreshUsageRef.current = null
             return
@@ -159,9 +159,9 @@ export function useWorkspaceUsageMeter({ enabled, workspaceId }: UseWorkspaceUsa
             const includePayg = options.includePayg !== false
             const requestId = ++latestRequestId
             try {
-                const [statusResult, paygResult] = await Promise.allSettled([
+                const [statusResult] = await Promise.allSettled([
                     getWorkspaceUsageStatus(workspaceId),
-                    includePayg ? getWorkspacePaygSummary() : Promise.resolve(null)
+                    includePayg ? refreshPaygSummary() : Promise.resolve(null)
                 ])
                 if (statusResult.status === 'rejected') throw statusResult.reason
                 const status = statusResult.value
@@ -170,10 +170,6 @@ export function useWorkspaceUsageMeter({ enabled, workspaceId }: UseWorkspaceUsa
                 // for a server-side monthly reset.
                 if (!cancelled && requestId === latestRequestId) {
                     setUsageStatus(status)
-                    if (includePayg && paygResult.status === 'fulfilled') {
-                        const nextPaygSummary = paygResult.value
-                        setPaygSummary(nextPaygSummary?.enabled ? nextPaygSummary : null)
-                    }
                     setUsageHistory((current) => (
                         status
                         && current?.workspaceId === status.workspace_id
@@ -229,7 +225,7 @@ export function useWorkspaceUsageMeter({ enabled, workspaceId }: UseWorkspaceUsa
             }
 
             refreshTimeout = window.setTimeout(() => {
-                void fetchUsageStatus({ includePayg: false })
+                void fetchUsageStatus()
             }, WORKSPACE_USAGE_REFRESH_DELAY_MS)
         }
 
@@ -255,7 +251,7 @@ export function useWorkspaceUsageMeter({ enabled, workspaceId }: UseWorkspaceUsa
             window.removeEventListener(WORKSPACE_USAGE_UPDATED_EVENT, scheduleUsageRefresh)
             window.removeEventListener('focus', refreshUsageOnFocus)
         }
-    }, [enabled, workspaceId])
+    }, [enabled, refreshPaygSummary, workspaceId])
 
     return {
         usageMeter: buildWorkspaceUsageMeter(usageStatus, usageHistory, t, paygSummary),

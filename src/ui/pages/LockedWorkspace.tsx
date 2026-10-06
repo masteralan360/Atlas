@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertCircle, CalendarPlus, Clock, CreditCard, Copy, HardDrive, Lock, LogOut, Mail, Phone } from 'lucide-react'
+import { AlertCircle, CalendarPlus, Clock, CreditCard, Copy, Gauge, HardDrive, Lock, LogOut, Mail, Phone } from 'lucide-react'
 import { Button } from '@/ui/components/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/ui/components/dialog'
 import { useAuth } from '@/auth'
 import { useLocation } from 'wouter'
 import { useWorkspace } from '@/workspace'
+import { WorkspacePaygLimitDialog } from '@/ui/components/WorkspacePaygLimitDialog'
 import {
+    OPEN_WORKSPACE_PAYMENT_DIALOG_EVENT,
     getWorkspacePaymentAlertKind,
     isWorkspacePaymentAccessExpired,
     openWorkspaceExtraDaysDialog,
@@ -15,14 +17,28 @@ import {
 
 const ADMIN_PHONE_NUMBER = '0770 199 0012'
 const ADMIN_PHONE_HREF = 'tel:07701990012'
+const RENEWAL_AUTO_OPEN_COUNTDOWN_SECONDS = 10
 
 export function LockedWorkspace() {
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const { signOut, user } = useAuth()
-    const { features, isLocked, isLoading, paymentSummary, isPaymentSummaryLoading } = useWorkspace()
+    const {
+        activeWorkspace,
+        features,
+        isLocked,
+        isLoading,
+        paymentSummary,
+        isPaymentSummaryLoading,
+        paygSummary,
+        refreshPaygSummary
+    } = useWorkspace()
     const [, setLocation] = useLocation()
     const [contactAdminOpen, setContactAdminOpen] = useState(false)
+    const [paygLimitDialogOpen, setPaygLimitDialogOpen] = useState(false)
     const [copied, setCopied] = useState(false)
+    const [renewalCountdownSeconds, setRenewalCountdownSeconds] = useState<number | null>(null)
+    const renewalCountdownIntervalRef = useRef<number | null>(null)
+    const handledRenewalPromptKeysRef = useRef(new Set<string>())
 
     const isExpired = isWorkspacePaymentAccessExpired({
         subscriptionExpiresAt: features.subscription_expires_at,
@@ -34,6 +50,19 @@ export function LockedWorkspace() {
     const pendingTransaction = paymentSummary?.pendingTransaction ?? null
     const showPaymentAction = Boolean(paymentAlertKind || isExpired || pendingTransaction)
     const canRenewSubscription = user?.role === 'admin' && showPaymentAction
+    const showsRenewSubscriptionLabel = !(isPaymentSummaryLoading && !paymentSummary) && !pendingTransaction
+    const shouldAutoOpenRenewalDialog = Boolean(!isLoading && canRenewSubscription && showsRenewSubscriptionLabel)
+    const renewalWorkspaceId = activeWorkspace?.id || user?.workspaceId || user?.sourceWorkspaceId
+    const renewalPromptKey = renewalWorkspaceId
+        ? [
+            renewalWorkspaceId,
+            user?.id ?? 'unknown-user',
+            features.renewal_due_at ?? features.subscription_expires_at ?? 'current-cycle'
+        ].join(':')
+        : null
+    const formattedRenewalCountdown = renewalCountdownSeconds === null
+        ? null
+        : new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language || 'en').format(renewalCountdownSeconds)
     const canAddExtraDays = Boolean(
         canRenewSubscription
         && paymentSummary?.configuration
@@ -41,8 +70,31 @@ export function LockedWorkspace() {
         && !paymentSummary.configuration.paygEnabled
     )
     const pendingExtraDays = paymentSummary?.pendingExtraDays ?? null
+    const paygLimit = paygSummary?.paygLimitState?.limit ?? null
+    const isPaygLimitLocked = Boolean(paygSummary?.paygLimitState?.locked && paygLimit)
+    const canChangePaygLimit = Boolean(isPaygLimitLocked && user?.role === 'admin' && paygSummary?.canSubmitPayment)
+    const paygLimitMetricLabel = paygLimit?.metric === 'accrued_charge'
+        ? t('workspaceUsage.payg.accruedCharge')
+        : t('workspaceUsage.payg.limit.changedUsage')
+    const formatPaygMetric = (value: string, metric: 'accrued_charge' | 'changed_usage') => {
+        const formatted = new Intl.NumberFormat(i18n.language || 'en', {
+            maximumFractionDigits: 6
+        }).format(Number(value))
+        return `${formatted} ${metric === 'accrued_charge' ? 'IQD' : 'GB'}`
+    }
+    const paygLimitCopy = isPaygLimitLocked && paygLimit
+        ? {
+            title: t('workspaceUsage.payg.limitLockedTitle'),
+            description: t('workspaceUsage.payg.limitLockedDescription', {
+                metric: paygLimitMetricLabel,
+                current: formatPaygMetric(paygLimit.currentValue, paygLimit.metric),
+                threshold: formatPaygMetric(paygLimit.threshold, paygLimit.metric)
+            }),
+            icon: Gauge
+        }
+        : null
 
-    const paymentCopy = (() => {
+    const paymentCopy = paygLimitCopy ?? (() => {
         switch (paymentAlertKind) {
             case 'payg_renewal_due':
                 return {
@@ -80,6 +132,60 @@ export function LockedWorkspace() {
     const LockIcon = paymentCopy.icon
 
     useEffect(() => {
+        if (!shouldAutoOpenRenewalDialog || !renewalPromptKey) {
+            setRenewalCountdownSeconds(null)
+            return
+        }
+
+        if (
+            handledRenewalPromptKeysRef.current.has(renewalPromptKey)
+            || renewalCountdownIntervalRef.current !== null
+        ) {
+            return
+        }
+
+        let remainingSeconds = RENEWAL_AUTO_OPEN_COUNTDOWN_SECONDS
+        setRenewalCountdownSeconds(remainingSeconds)
+        const intervalId = window.setInterval(() => {
+            remainingSeconds -= 1
+            if (remainingSeconds <= 0) {
+                window.clearInterval(intervalId)
+                renewalCountdownIntervalRef.current = null
+                handledRenewalPromptKeysRef.current.add(renewalPromptKey)
+                setRenewalCountdownSeconds(null)
+                openWorkspacePaymentDialog()
+                return
+            }
+
+            setRenewalCountdownSeconds(remainingSeconds)
+        }, 1000)
+        renewalCountdownIntervalRef.current = intervalId
+
+        return () => {
+            window.clearInterval(intervalId)
+            if (renewalCountdownIntervalRef.current === intervalId) {
+                renewalCountdownIntervalRef.current = null
+            }
+        }
+    }, [renewalPromptKey, shouldAutoOpenRenewalDialog])
+
+    useEffect(() => {
+        const handlePaymentDialogOpen = () => {
+            if (renewalPromptKey) {
+                handledRenewalPromptKeysRef.current.add(renewalPromptKey)
+            }
+            if (renewalCountdownIntervalRef.current !== null) {
+                window.clearInterval(renewalCountdownIntervalRef.current)
+                renewalCountdownIntervalRef.current = null
+            }
+            setRenewalCountdownSeconds(null)
+        }
+
+        window.addEventListener(OPEN_WORKSPACE_PAYMENT_DIALOG_EVENT, handlePaymentDialogOpen)
+        return () => window.removeEventListener(OPEN_WORKSPACE_PAYMENT_DIALOG_EVENT, handlePaymentDialogOpen)
+    }, [renewalPromptKey])
+
+    useEffect(() => {
         if (!isLoading && !isLocked) {
             setLocation('/')
         }
@@ -102,6 +208,18 @@ export function LockedWorkspace() {
     const handleSignOut = async () => {
         await signOut()
         setLocation('/login')
+    }
+
+    const handleOpenPaymentDialog = () => {
+        if (renewalPromptKey) {
+            handledRenewalPromptKeysRef.current.add(renewalPromptKey)
+        }
+        if (renewalCountdownIntervalRef.current !== null) {
+            window.clearInterval(renewalCountdownIntervalRef.current)
+            renewalCountdownIntervalRef.current = null
+        }
+        setRenewalCountdownSeconds(null)
+        openWorkspacePaymentDialog()
     }
 
     if (isLoading) {
@@ -145,20 +263,43 @@ export function LockedWorkspace() {
 
                 {/* Buttons Container */}
                 <div className="flex flex-col gap-3 items-center">
+                    {canChangePaygLimit && (
+                        <Button
+                            allowViewer={true}
+                            size="lg"
+                            onClick={() => setPaygLimitDialogOpen(true)}
+                            className="gap-2 w-full max-w-[280px]"
+                        >
+                            <Gauge className="w-5 h-5" />
+                            {t('workspaceUsage.payg.limit.openButton')}
+                        </Button>
+                    )}
                     {canRenewSubscription && (
                         <>
                             <Button
                                 allowViewer={true}
                                 size="lg"
-                                onClick={openWorkspacePaymentDialog}
-                                className="gap-2 w-full max-w-[240px]"
+                                onClick={handleOpenPaymentDialog}
+                                className="h-auto min-h-12 w-full max-w-[320px] gap-2 whitespace-normal px-3 py-2 text-sm"
                             >
-                                <CreditCard className="w-5 h-5" />
-                                {isPaymentSummaryLoading && !paymentSummary
-                                    ? t('workspacePayments.loading')
-                                    : pendingTransaction
-                                        ? t('workspacePayments.viewPaymentStatus')
-                                        : t('workspacePayments.renewSubscription')}
+                                <CreditCard className="h-5 w-5 shrink-0" />
+                                <span className="min-w-0 flex-1 whitespace-normal text-center leading-snug">
+                                    {isPaymentSummaryLoading && !paymentSummary
+                                        ? t('workspacePayments.loading')
+                                        : pendingTransaction
+                                            ? t('workspacePayments.viewPaymentStatus')
+                                            : t('workspacePayments.renewSubscription')}
+                                </span>
+                                {shouldAutoOpenRenewalDialog && renewalCountdownSeconds !== null && formattedRenewalCountdown !== null && (
+                                    <span
+                                        role="timer"
+                                        aria-label={t('lockedWorkspace.renewalAutoOpensIn', { seconds: formattedRenewalCountdown })}
+                                        className="inline-flex shrink-0 items-center gap-1 rounded-full bg-background/80 px-2 py-1 text-xs font-bold tabular-nums text-foreground shadow-sm ring-1 ring-border/50"
+                                    >
+                                        <Clock className="h-3.5 w-3.5" />
+                                        {t('lockedWorkspace.renewalCountdownShort', { seconds: formattedRenewalCountdown })}
+                                    </span>
+                                )}
                             </Button>
                             {canAddExtraDays && (
                                 <Button
@@ -260,6 +401,13 @@ export function LockedWorkspace() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+            <WorkspacePaygLimitDialog
+                open={paygLimitDialogOpen}
+                onOpenChange={setPaygLimitDialogOpen}
+                summary={paygSummary}
+                canManage={canChangePaygLimit}
+                onSaved={async () => { await refreshPaygSummary() }}
+            />
         </div>
     )
 }

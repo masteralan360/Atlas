@@ -1,6 +1,8 @@
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide
 
-Remove Subscription Expiry and make billing authoritative
+Remove Subscription Expiry and make billing's payment configuration authoritative
+
+User Plan in Billing
 
 Remove PressAndHold in Billing and make it auto-open
 

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { supabase, isSupabaseConfigured } from '@/auth/supabase'
 import { useAuth } from '@/auth/AuthContext'
 import type {
@@ -46,7 +46,9 @@ import {
     hasWorkspacePaymentAccessStateUpdate,
     isWorkspacePaymentAccessExpired,
     shouldWorkspacePaymentLockAccess,
-    type WorkspacePaymentSummary
+    getWorkspacePaygSummary,
+    type WorkspacePaymentSummary,
+    type WorkspacePaygSummary
 } from '@/lib/workspacePayments'
 import {
     applyWorkspaceOverrides,
@@ -156,6 +158,8 @@ interface WorkspaceContextType {
     loadedWorkspaceId: string | null
     paymentSummary: WorkspacePaymentSummary | null
     isPaymentSummaryLoading: boolean
+    paygSummary: WorkspacePaygSummary | null
+    refreshPaygSummary: () => Promise<WorkspacePaygSummary | null>
     pendingUpdate: UpdateInfo | null
     setPendingUpdate: (update: UpdateInfo | null) => void
     isFullscreen: boolean
@@ -443,6 +447,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const [isLoading, setIsLoading] = useState(true)
     const [loadedWorkspaceId, setLoadedWorkspaceId] = useState<string | null>(null)
     const [paymentSummary, setPaymentSummary] = useState<WorkspacePaymentSummary | null>(null)
+    const [paygSummary, setPaygSummary] = useState<WorkspacePaygSummary | null>(null)
     const [isPaymentSummaryLoading, setIsPaymentSummaryLoading] = useState(false)
     const [billingNowMs, setBillingNowMs] = useState(() => Date.now())
     const [pendingUpdate, setPendingUpdate] = useState<UpdateInfo | null>(null)
@@ -454,6 +459,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const branchFetchRequestRef = useRef(0)
     const featuresRef = useRef(defaultFeatures)
     const paymentSummaryRef = useRef<WorkspacePaymentSummary | null>(null)
+    const paygSummaryRef = useRef<WorkspacePaygSummary | null>(null)
     const overridesRef = useRef<WorkspaceAccessOverride[]>([])
     const workspaceNameRef = useRef<string | null>(null)
 
@@ -667,6 +673,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             setFeatures(defaultFeatures)
             setWorkspaceName(null)
             setPaymentSummary(null)
+            setPaygSummary(null)
+            paygSummaryRef.current = null
             setIsPaymentSummaryLoading(false)
             if (!silent) setIsLoading(false)
             return
@@ -698,6 +706,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             await applyFallback()
             if (isCurrentWorkspaceRequest(workspaceId, requestId)) {
                 setPaymentSummary(null)
+                setPaygSummary(null)
+                paygSummaryRef.current = null
                 setIsPaymentSummaryLoading(false)
                 if (!silent) setIsLoading(false)
             }
@@ -714,7 +724,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
 
         try {
-            const [workspaceResult, overridesResult, usageStatusResult, paymentSummaryResult] = await Promise.all([
+            const [workspaceResult, overridesResult, usageStatusResult, paymentSummaryResult, paygSummaryResult] = await Promise.all([
                 runSupabaseAction(
                     'workspace.getFeatures',
                     () => supabase.from('workspaces').select(WORKSPACE_FEATURE_COLUMNS).eq('id', workspaceId).maybeSingle(),
@@ -731,6 +741,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 ),
                 getWorkspacePaymentSummary()
                     .then((summary) => ({ summary, error: null as unknown }))
+                    .catch((error: unknown) => ({ summary: null, error })),
+                getWorkspacePaygSummary()
+                    .then((summary) => ({ summary, error: null as unknown }))
                     .catch((error: unknown) => ({ summary: null, error }))
             ]) as any
 
@@ -746,6 +759,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                     setFeatures(defaultFeatures)
                     setWorkspaceName(null)
                     setPaymentSummary(null)
+                    setPaygSummary(null)
+                    paygSummaryRef.current = null
                     updateUser({
                         workspaceId: '',
                         workspaceCode: '',
@@ -846,6 +861,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 paymentSummaryRef.current = paymentSummaryResult.summary
                 setPaymentSummary(paymentSummaryResult.summary)
             }
+            if (paygSummaryResult.error) {
+                console.warn('[WorkspacePayments] Failed to load PAYG summary:', paygSummaryResult.error)
+            } else {
+                const nextPaygSummary = paygSummaryResult.summary?.enabled ? paygSummaryResult.summary : null
+                paygSummaryRef.current = nextPaygSummary
+                setPaygSummary(nextPaygSummary)
+            }
             writeWorkspaceCache({
                 workspaceId,
                 features: fetchedFeatures,
@@ -943,6 +965,26 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
     }
 
+    const refreshPaygSummary = useCallback(async (): Promise<WorkspacePaygSummary | null> => {
+        const workspaceId = user?.workspaceId
+        if (!isSupabaseConfigured || !isAuthenticated || !workspaceId || user?.workspaceMode === 'demo') {
+            return null
+        }
+        if (isOffline()) {
+            throw new Error('An internet connection is required to load workspace PAYG usage')
+        }
+
+        const summary = await getWorkspacePaygSummary()
+        if (currentWorkspaceIdRef.current !== workspaceId) {
+            return paygSummaryRef.current
+        }
+
+        const nextPaygSummary = summary.enabled ? summary : null
+        paygSummaryRef.current = nextPaygSummary
+        setPaygSummary(nextPaygSummary)
+        return nextPaygSummary
+    }, [isAuthenticated, user?.workspaceId, user?.workspaceMode])
+
     useEffect(() => {
         if (authLoading) return
 
@@ -960,6 +1002,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             setBranchInfo(null)
             paymentSummaryRef.current = null
             setPaymentSummary(null)
+            paygSummaryRef.current = null
+            setPaygSummary(null)
             setIsPaymentSummaryLoading(false)
             setIsLoading(false)
             return
@@ -971,6 +1015,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setBranchInfo(null)
         paymentSummaryRef.current = null
         setPaymentSummary(null)
+        paygSummaryRef.current = null
+        setPaygSummary(null)
 
         const cachedSnapshot = readWorkspaceCache<WorkspaceFeatures>(workspaceId)
         if (cachedSnapshot) {
@@ -1127,6 +1173,34 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 {
                     event: '*',
                     schema: 'public',
+                    table: 'workspace_usage',
+                    filter: `workspace_id=eq.${user.sourceWorkspaceId || user.workspaceId}`
+                },
+                () => {
+                    void refreshPaygSummary().catch((error) => {
+                        console.warn('[WorkspacePayments] Failed to refresh PAYG after a usage update:', error)
+                    })
+                }
+            )
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'billing',
+                    table: 'workspace_payg_limits',
+                    filter: `workspace_id=eq.${user.sourceWorkspaceId || user.workspaceId}`
+                },
+                () => {
+                    void refreshPaygSummary().catch((error) => {
+                        console.warn('[WorkspacePayments] Failed to refresh a changed PAYG limit:', error)
+                    })
+                }
+            )
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
                     table: 'workspace_access_overrides',
                     filter: `workspace_id=eq.${user.workspaceId}`
                 },
@@ -1165,7 +1239,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             supabase.removeChannel(channel)
             realtimeChannelRef.current = null
         }
-    }, [isAuthenticated, user?.workspaceId, user?.workspaceName, user?.sourceWorkspaceId])
+    }, [isAuthenticated, refreshPaygSummary, user?.workspaceId, user?.workspaceName, user?.sourceWorkspaceId])
 
     useEffect(() => {
         if (!isSupabaseConfigured || !isAuthenticated || !user?.workspaceId) return
@@ -1177,6 +1251,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 || (event === 'heartbeat' && (
                     isWorkspaceCurrentlyLocked(featuresRef.current, paymentSummaryRef.current)
                     || shouldWorkspacePaymentLockAccess(paymentSummaryRef.current)
+                    || Boolean(paygSummaryRef.current?.paygLimitState?.locked)
                 ))
 
             if (shouldRefresh) {
@@ -1625,6 +1700,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     })
     const isLocked = isWorkspaceCurrentlyLocked(features, paymentSummary, new Date(billingNowMs))
         || shouldWorkspacePaymentLockAccess(paymentSummary)
+        || Boolean(paygSummary?.paygLimitState?.locked)
     const planCapabilities = overrides.length
         ? applyWorkspaceOverrides(getPlanCapabilities(features.plan), overrides)
         : getPlanCapabilities(features.plan)
@@ -1647,6 +1723,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             loadedWorkspaceId,
             paymentSummary,
             isPaymentSummaryLoading,
+            paygSummary,
+            refreshPaygSummary,
             pendingUpdate,
             setPendingUpdate,
             isLocked,
