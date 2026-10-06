@@ -720,6 +720,7 @@ export const ModernA4InvoiceTemplate = forwardRef<HTMLDivElement, ModernA4Invoic
                                         >
                                             <input
                                                 type="text"
+                                                autoComplete="off"
                                                 lang="en"
                                                 inputMode="numeric"
                                                 min="8"

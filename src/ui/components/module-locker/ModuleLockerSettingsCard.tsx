@@ -262,7 +262,7 @@ export function ModuleLockerSettingsCard() {
                 <Input
                   id="module-locker-current-password"
                   type="password"
-                  autoComplete="current-password"
+                  autoComplete="off"
                   value={accountPassword}
                   onChange={(event) => setAccountPassword(event.target.value)}
                   disabled={isSaving}
@@ -275,7 +275,7 @@ export function ModuleLockerSettingsCard() {
                     <Input
                       id="module-locker-new-passkey"
                       type="password"
-                      autoComplete="new-password"
+                      autoComplete="off"
                       value={newPasskey}
                       onChange={(event) => setNewPasskey(event.target.value)}
                       disabled={isSaving}
@@ -286,7 +286,7 @@ export function ModuleLockerSettingsCard() {
                     <Input
                       id="module-locker-repeat-passkey"
                       type="password"
-                      autoComplete="new-password"
+                      autoComplete="off"
                       value={repeatPasskey}
                       onChange={(event) => setRepeatPasskey(event.target.value)}
                       disabled={isSaving}

@@ -12,6 +12,6 @@ export function isBelowMinimumSellingPrice(
         && effectiveSellingPrice < minimumSellingPrice
 }
 
-export function shouldShowMinimumSellingPriceField(role: UserRole | undefined, workspaceHasStaff: boolean) {
-    return role === 'admin' && workspaceHasStaff
+export function shouldShowMinimumSellingPriceField(role: UserRole | undefined) {
+    return role === 'admin'
 }

@@ -70,6 +70,7 @@ export function Help() {
             >
                 <Search className="ms-2 h-5 w-5 shrink-0 text-muted-foreground" />
                 <input
+                    autoComplete="off"
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
                     placeholder={t('help.placeholder', { defaultValue: 'Ask a question, e.g. "How to add stock"...' })}

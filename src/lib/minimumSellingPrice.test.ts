@@ -2,12 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { isBelowMinimumSellingPrice, shouldShowMinimumSellingPriceField } from './minimumSellingPrice'
 
 describe('minimum selling price policy', () => {
-    it('shows the product field only to admins in workspaces with staff', () => {
-        expect(shouldShowMinimumSellingPriceField('admin', true)).toBe(true)
-        expect(shouldShowMinimumSellingPriceField('admin', false)).toBe(false)
-        expect(shouldShowMinimumSellingPriceField('staff', true)).toBe(false)
-        expect(shouldShowMinimumSellingPriceField('viewer', true)).toBe(false)
-        expect(shouldShowMinimumSellingPriceField(undefined, true)).toBe(false)
+    it('shows the product field only to admins, whether or not staff are present', () => {
+        expect(shouldShowMinimumSellingPriceField('admin')).toBe(true)
+        expect(shouldShowMinimumSellingPriceField('staff')).toBe(false)
+        expect(shouldShowMinimumSellingPriceField('viewer')).toBe(false)
+        expect(shouldShowMinimumSellingPriceField(undefined)).toBe(false)
     })
 
     it('enforces the boundary only for staff and treats an empty minimum as unrestricted', () => {

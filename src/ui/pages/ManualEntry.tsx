@@ -281,6 +281,7 @@ function ManualEntryA4Preview({ template, onBack, onSaveAndPrint }: ManualEntryA
                   </div>
                   <div className="flex-1 px-3.5 py-[9px] leading-tight">
                     <input
+                      autoComplete="off"
                       value={detailValues[key]}
                       onChange={(e) => updateDetail(key, e.target.value)}
                       className="w-full rounded-none border-0 bg-transparent p-0 text-xs shadow-none outline-none focus:bg-blue-50"

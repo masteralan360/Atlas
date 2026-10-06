@@ -146,6 +146,7 @@ export function GlobalSearch({ className, placeholder }: GlobalSearchProps) {
                 <input
                     ref={inputRef}
                     type="text"
+                    autoComplete="off"
                     value={query}
                     onChange={(e) => {
                         setQuery(e.target.value)

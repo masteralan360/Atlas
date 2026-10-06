@@ -2343,6 +2343,7 @@ export function PrintPreviewEditorPage() {
                                         >
                                             <input
                                                 type="text"
+                                                autoComplete="off"
                                                 lang="en"
                                                 inputMode="numeric"
                                                 min="8"
@@ -3190,6 +3191,7 @@ export function PrintPreviewEditorPage() {
                                         </label>
                                         <input
                                             type="text"
+                                            autoComplete="off"
                                             lang="en"
                                             inputMode="numeric"
                                             min={1}

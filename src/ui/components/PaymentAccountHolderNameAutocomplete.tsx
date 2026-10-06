@@ -101,7 +101,7 @@ export function PaymentAccountHolderNameAutocomplete({
                         value={value}
                         required={required}
                         aria-invalid={isInvalid}
-                        autoComplete="name"
+                        autoComplete="off"
                         placeholder={placeholder}
                         disabled={isDisabled}
                         aria-busy={isLoading || undefined}

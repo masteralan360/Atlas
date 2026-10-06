@@ -103,6 +103,7 @@ export function EditableField({
         <input
             ref={inputRef}
             type={type}
+            autoComplete="off"
             value={draft}
             dir={resolveIsolatedTextDirection(draft || placeholder)}
             onChange={(e) => setDraft(e.target.value)}

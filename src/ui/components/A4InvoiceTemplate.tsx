@@ -571,6 +571,7 @@ export const A4InvoiceTemplate = forwardRef<HTMLDivElement, A4InvoiceTemplatePro
                                         >
                                             <input
                                                 type="text"
+                                                autoComplete="off"
                                                 lang="en"
                                                 inputMode="numeric"
                                                 min="8"

@@ -217,6 +217,7 @@ export function MovableOrderPrintBlock({
                         >
                             <input
                                 type="text"
+                                autoComplete="off"
                                 lang="en"
                                 inputMode="numeric"
                                 min={minFontSize}

@@ -292,6 +292,7 @@ function TemplateField({
     return (
         <input
             type="text"
+            autoComplete="off"
             inputMode={type === 'number' ? 'decimal' : undefined}
             value={currentValue}
             aria-label={fieldKey}

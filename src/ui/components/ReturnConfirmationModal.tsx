@@ -158,6 +158,7 @@ export function ReturnConfirmationModal({
                                     <div className="relative">
                                         <input
                                             type="text"
+                                            autoComplete="off"
                                             lang="en"
                                             min="0.01"
                                             max={maxQuantity}

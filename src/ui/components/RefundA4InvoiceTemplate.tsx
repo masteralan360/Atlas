@@ -439,6 +439,7 @@ export const RefundA4InvoiceTemplate = forwardRef<HTMLDivElement, RefundA4Invoic
                                         >
                                             <input
                                                 type="text"
+                                                autoComplete="off"
                                                 lang="en"
                                                 inputMode="numeric"
                                                 min="8"

@@ -336,7 +336,7 @@ export function WorkspaceConfiguration() {
                                 id="workspace-a2c-phone"
                                 type="tel"
                                 inputMode="tel"
-                                autoComplete="tel"
+                                autoComplete="off"
                                 maxLength={32}
                                 required
                                 value={a2cPhone}

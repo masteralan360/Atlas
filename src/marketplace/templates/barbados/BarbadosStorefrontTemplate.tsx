@@ -218,6 +218,7 @@ function BarbadosMenuPage({ slug, rules }: StorefrontTemplatePageProps) {
                         <Search className="h-5 w-5 shrink-0" />
                         <span className="sr-only">{t('marketplace.searchCollection', { defaultValue: 'Search menu' })}</span>
                         <input
+                            autoComplete="off"
                             value={search}
                             onChange={(event) => setSearch(event.target.value)}
                             placeholder={t('marketplace.searchCollection', { defaultValue: 'Search the menu...' })}

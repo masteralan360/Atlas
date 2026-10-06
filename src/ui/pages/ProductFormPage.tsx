@@ -388,10 +388,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         ? productCommissionRuleAgents.filter((row) => row.ruleId === sourceProductCommissionRule.id).map((row) => row.agentId)
         : [], [productCommissionRuleAgents, sourceProductCommissionRule])
     const canEdit = user?.role === 'admin' || user?.role === 'staff'
-    const canManageMinimumSellingPrice = shouldShowMinimumSellingPriceField(
-        user?.role,
-        workspaceUsers.some((workspaceUser) => workspaceUser.role === 'staff' && !workspaceUser.isDeleted)
-    )
+    const canManageMinimumSellingPrice = shouldShowMinimumSellingPriceField(user?.role)
     const isClone = mode === 'clone'
     const isEditing = mode === 'edit'
     const isReadOnly = isEditing && !canEdit

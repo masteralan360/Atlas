@@ -278,6 +278,7 @@ function ImageColumnWidthControl({
                 <input
                     id="atlas-standard-product-image-column-width"
                     type="text"
+                    autoComplete="off"
                     lang="en"
                     min={MIN_PRODUCT_IMAGE_COLUMN_WIDTH}
                     max={MAX_PRODUCT_IMAGE_COLUMN_WIDTH}
@@ -1007,6 +1008,7 @@ function HideableSection({
                             <label className="text-sm font-medium" htmlFor="atlas-standard-field-title">{titleFieldLabel}</label>
                             <input
                                 id="atlas-standard-field-title"
+                                autoComplete="off"
                                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                                 value={titleDraft}
                                 onChange={(event) => setTitleDraft(event.target.value)}
@@ -1044,6 +1046,7 @@ function HideableSection({
                                 </label>
                                 <input
                                     id="atlas-standard-field-value"
+                                    autoComplete="off"
                                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                                     value={valueDraft}
                                     onChange={(event) => setValueDraft(event.target.value)}
@@ -1216,6 +1219,7 @@ function HideableTable({
                             <label className="text-sm font-medium" htmlFor="atlas-standard-table-column-title">{titleFieldLabel}</label>
                             <input
                                 id="atlas-standard-table-column-title"
+                                autoComplete="off"
                                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                                 value={titleDraft}
                                 onChange={(event) => setTitleDraft(event.target.value)}

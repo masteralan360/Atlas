@@ -89,6 +89,7 @@ function PosHeader({ storeName, logoUrl, cartCount, showCart, onCartClick, showS
                             <Search className="h-4 w-4 shrink-0" />
                             <span className="sr-only">{t('marketplace.searchCollection', { defaultValue: 'Search collection' })}</span>
                             <input
+                                autoComplete="off"
                                 value={search}
                                 onChange={(event) => onSearchChange(event.target.value)}
                                 placeholder={t('marketplace.searchCollection', { defaultValue: 'Search products...' })}
@@ -104,6 +105,7 @@ function PosHeader({ storeName, logoUrl, cartCount, showCart, onCartClick, showS
                                     <Search className="h-4 w-4 shrink-0" />
                                     <span className="sr-only">{t('marketplace.searchCollection', { defaultValue: 'Search collection' })}</span>
                                     <input
+                                        autoComplete="off"
                                         value={search}
                                         onChange={(event) => onSearchChange(event.target.value)}
                                         placeholder={t('marketplace.searchCollection', { defaultValue: 'Search products...' })}

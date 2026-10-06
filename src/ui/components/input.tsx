@@ -2,8 +2,8 @@ import * as React from "react"
 import { cn, convertArabicIndicToLatin, formatDate, formatDateTime, formatTime, sanitizeNumericInput } from "@/lib/utils"
 import { useOptionalAuth } from "@/auth"
 
-const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input"> & { allowViewer?: boolean }>(
-    ({ className, type, allowViewer = false, disabled, onChange, onWheel, value, defaultValue, placeholder, inputMode, lang, dir, step, ...props }, ref) => {
+const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input"> & { allowViewer?: boolean; allowBrowserAutofill?: boolean }>(
+    ({ className, type, allowViewer = false, allowBrowserAutofill = false, autoComplete, disabled, onChange, onWheel, value, defaultValue, placeholder, inputMode, lang, dir, step, ...props }, ref) => {
         const user = useOptionalAuth()?.user
         const isViewer = user?.role === 'viewer'
         const effectiveDisabled = disabled || (isViewer && !allowViewer)
@@ -118,6 +118,7 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input"> &
                         lang={numericLanguage}
                         dir={numericDirection}
                         step={isNativeNumberInput ? undefined : step}
+                        autoComplete={allowBrowserAutofill ? autoComplete : 'off'}
                         {...props}
                     />
                     <div
@@ -151,6 +152,7 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input"> &
                 lang={numericLanguage}
                 dir={numericDirection}
                 step={isNativeNumberInput ? undefined : step}
+                autoComplete={allowBrowserAutofill ? autoComplete : 'off'}
                 {...props}
             />
         )

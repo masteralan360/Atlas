@@ -262,7 +262,7 @@ export function TravelBookingFormPage({ workspaceId, booking, existingPassengers
                                         <Input
                                             id={`travel-passenger-phone-${passenger.id}`}
                                             type="tel"
-                                            autoComplete="tel"
+                                            autoComplete="off"
                                             value={passenger.phoneNumber}
                                             disabled={!isEditable || isSaving}
                                             onChange={(event) => updatePassenger(passenger.id, { phoneNumber: event.target.value })}

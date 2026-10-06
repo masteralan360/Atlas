@@ -4380,7 +4380,7 @@ export function Settings() {
                                     <Input
                                         id="current-password"
                                         type="password"
-                                        autoComplete="current-password"
+                                        autoComplete="off"
                                         value={currentPasswordInput}
                                         onChange={(event) => setCurrentPasswordInput(event.target.value)}
                                         disabled={isPasswordChangeSaving}
@@ -4393,7 +4393,7 @@ export function Settings() {
                                     <Input
                                         id="new-password"
                                         type="password"
-                                        autoComplete="new-password"
+                                        autoComplete="off"
                                         value={newPasswordInput}
                                         onChange={(event) => setNewPasswordInput(event.target.value)}
                                         disabled={isPasswordChangeSaving}
@@ -4406,7 +4406,7 @@ export function Settings() {
                                     <Input
                                         id="repeat-new-password"
                                         type="password"
-                                        autoComplete="new-password"
+                                        autoComplete="off"
                                         value={repeatNewPasswordInput}
                                         onChange={(event) => setRepeatNewPasswordInput(event.target.value)}
                                         disabled={isPasswordChangeSaving}

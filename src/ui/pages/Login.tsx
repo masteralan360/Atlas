@@ -206,7 +206,10 @@ export function Login() {
                                     <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-slate-500 group-focus-within:text-teal-600 dark:group-focus-within:text-teal-400 transition-colors" />
                                     <Input
                                         id="email"
+                                        name="username"
                                         type="email"
+                                        autoComplete="username"
+                                        allowBrowserAutofill
                                         placeholder={t('auth.emailPlaceholder', 'you@example.com')}
                                         value={email}
                                         onChange={(e) => setEmail(e.target.value)}
@@ -224,7 +227,10 @@ export function Login() {
                                     <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-slate-500 group-focus-within:text-teal-600 dark:group-focus-within:text-teal-400 transition-colors" />
                                     <Input
                                         id="password"
+                                        name="password"
                                         type={showPassword ? "text" : "password"}
+                                        autoComplete="current-password"
+                                        allowBrowserAutofill
                                         placeholder="••••••••••••"
                                         value={password}
                                         onChange={(e) => setPassword(e.target.value)}

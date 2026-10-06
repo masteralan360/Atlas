@@ -498,7 +498,7 @@ export function LocalAccountSwitcher({
                 <Input
                   id="account-switcher-password"
                   type="password"
-                  autoComplete="current-password"
+                  autoComplete="off"
                   autoFocus
                   required
                   value={password}
