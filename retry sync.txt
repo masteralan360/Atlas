@@ -10,8 +10,6 @@ Make Workspace Payment Invoices
 
 purchase order error, order_payment_source_not_found
 
-SQLite Syncing indicator
-
 ##
 
 all products button in the order and correspoding to the DateRangeFilter and status tab
