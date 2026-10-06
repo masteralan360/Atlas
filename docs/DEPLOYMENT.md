@@ -368,6 +368,13 @@ Features:
 - Creates GitHub release
 - Uploads artifacts
 
+In the release helper, **Schedule GitHub deployments** is off by default. When
+enabled, choose a time in the computer's local timezone. The Windows and
+Ubuntu/Android release jobs and the Cloudflare deployment are held until that
+time, then dispatched together. GitHub checks for due schedules every five
+minutes, so deployments can start a little after the selected time during
+Actions load. Only one scheduled release can be pending at a time.
+
 ---
 
 ## Monitoring & Logs

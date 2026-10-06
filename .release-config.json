@@ -1,3 +1,12 @@
 {
-  "skip_latest_json": false
+  "skip_latest_json": false,
+  "schedule_enabled": false,
+  "schedule_id": null,
+  "scheduled_tag": null,
+  "scheduled_at_utc": null,
+  "schedule_status": "disabled",
+  "schedule_dispatches": {
+    "release": false,
+    "cloudflare": false
+  }
 }

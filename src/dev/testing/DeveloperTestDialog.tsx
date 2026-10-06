@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, CheckCircle2, Circle, Download, FlaskConical, Loader2, Play, RotateCcw, ShieldCheck, Square, XCircle } from 'lucide-react'
 import { AppDialog, AppDialogBody, AppDialogContent, AppDialogDescription, AppDialogFooter, AppDialogHeader, AppDialogTitle } from '@/ui/components/dialog'
@@ -12,6 +12,7 @@ import { runnerErrorKey, testRunnerClient } from './client'
 import type { LiveReadiness, SuiteDefinition, TestRun, TestStatus } from './types'
 
 const suites: Record<string, SuiteDefinition> = suitesJson
+const CloudHybridPlaywrightDialog = lazy(() => import('./CloudHybridPlaywrightDialog'))
 const icons = { pending: Circle, running: Loader2, passed: CheckCircle2, failed: XCircle, blocked: AlertTriangle, skipped: AlertTriangle, cancelled: Square }
 
 function StatusIcon({ status }: { status: TestStatus }) {
@@ -34,6 +35,7 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
     const [submitting, setSubmitting] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [onlyFailures, setOnlyFailures] = useState(false)
+    const [cloudHybridSelected, setCloudHybridSelected] = useState(false)
     const token = useRef('')
     const mutationVersion = useRef(0)
     const submittingRef = useRef(false)
@@ -54,7 +56,7 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
     }, [])
 
     useEffect(() => {
-        if (!open) return
+        if (!open || cloudHybridSelected) return
         const abort = new AbortController()
         let timer: ReturnType<typeof setTimeout>
         const poll = async () => {
@@ -80,17 +82,17 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
         }
         void poll()
         return () => { abort.abort(); clearTimeout(timer) }
-    }, [open])
+    }, [open, cloudHybridSelected])
 
     useEffect(() => {
-        if (!open || environment !== 'hosted-supabase' || !ready || !token.current) return
+        if (!open || cloudHybridSelected || environment !== 'hosted-supabase' || !ready || !token.current) return
         const abort = new AbortController()
         setLiveReadiness(null)
         void testRunnerClient.liveReadiness(token.current, suiteId, abort.signal)
             .then((result) => { if (!abort.signal.aborted) setLiveReadiness(result) })
             .catch((error) => { if (!abort.signal.aborted) setLiveReadiness({ status: 'blocked', reason: runnerErrorKey(error).replace('devTesting.errors.', '') }) })
         return () => abort.abort()
-    }, [open, environment, ready, suiteId])
+    }, [open, cloudHybridSelected, environment, ready, suiteId])
 
     const selectEnvironment = (next: 'isolated' | 'hosted-supabase') => {
         setEnvironment(next)
@@ -150,6 +152,21 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
     const blockClose = (event: { preventDefault: () => void }) => { if (busy) event.preventDefault() }
     const formatInput = (value: string) => value === '' ? '' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Number(value.replace(/,/g, '')))
 
+    if (cloudHybridSelected) {
+        return <Suspense fallback={null}>
+            <CloudHybridPlaywrightDialog
+                open={open}
+                onOpenChange={(next) => {
+                    if (!next) {
+                        setCloudHybridSelected(false)
+                        onOpenChange(false)
+                    }
+                }}
+                onBack={() => setCloudHybridSelected(false)}
+            />
+        </Suspense>
+    }
+
     return <AppDialog open={open} onOpenChange={(next) => { if (!busy) onOpenChange(next) }}>
         <AppDialogContent className="max-w-5xl" showCloseButton={!busy} onInteractOutside={blockClose} onEscapeKeyDown={blockClose}>
             <AppDialogHeader>
@@ -162,6 +179,7 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
                     <p className="font-medium">{t('devTesting.environment')} *</p>
                     <div className="flex flex-wrap gap-2">
                         {(['isolated', 'hosted-supabase'] as const).map((option) => <Button key={option} type="button" allowViewer variant={environment === option ? 'default' : 'outline'} disabled={busy || (option === 'hosted-supabase' && !suite?.liveGroups?.length)} onClick={() => selectEnvironment(option)}>{t(`devTesting.adapters.${option}`)}</Button>)}
+                        {suiteId === 'pos' && <Button type="button" allowViewer variant="outline" disabled={busy} onClick={() => setCloudHybridSelected(true)}><Play className="me-2 h-4 w-4" />{t('devTesting.cloudHybrid.label')}</Button>}
                     </div>
                 </div>
                 <div className={cn('flex gap-3 rounded-xl border p-3 text-sm', environment === 'hosted-supabase' ? 'border-amber-600/30 bg-amber-600/5' : 'border-emerald-600/20 bg-emerald-600/5')}>

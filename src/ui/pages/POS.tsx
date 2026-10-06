@@ -2377,7 +2377,7 @@ export function POS() {
         setCart((current) => current.map((item) => getCartItemKey(item) === editingPriceItemKey
             ? {
                 ...item,
-                negotiated_price: newPrice,
+                negotiated_price: newPrice === getCartBasePrice(item) ? undefined : newPrice,
                 ...(item.is_service ? { service_name_suffix: serviceNameSuffix || undefined } : {}),
             }
             : item))
@@ -3695,6 +3695,8 @@ export function POS() {
                                     return (
                                         <button
                                             key={product.id}
+                                            data-testid="pos-product-card"
+                                            data-product-id={product.id}
                                             ref={el => productRefs.current[index] = el}
                                             onClick={() => addToCart(product)}
                                             disabled={!isInfiniteActivity && !isServiceProduct && remainingQuantity <= 0}
@@ -3733,7 +3735,7 @@ export function POS() {
                                                                 ? "bg-red-500 text-white shadow-[0_0_8px_rgba(239,68,68,0.4)]"
                                                                 : "bg-amber-400 text-amber-950"
                                                             : "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 backdrop-blur-md"
-                                                )}>
+                                                )} data-testid="pos-product-quantity">
                                                     {remainingQuantity} <span className="text-[10px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`, product.unit).toUpperCase()}</span>
                                                 </div>}
 
@@ -5765,6 +5767,8 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                     return (
                         <div
                             key={product.id}
+                            data-testid="pos-product-card"
+                            data-product-id={product.id}
                             className={cn(
                                 "bg-card rounded-[2rem] border border-border p-3 shadow-sm flex flex-col gap-3 group active:scale-[0.98] transition-all",
                                 product.hasBatches && "border-sky-300/70 bg-gradient-to-br from-sky-50/70 via-card to-card shadow-[0_10px_30px_rgba(14,165,233,0.08)] dark:border-sky-500/25 dark:from-sky-500/10"
@@ -5813,7 +5817,7 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                                 )}
 
                                 {/* Stock Badge */}
-                                {showQuantityIndicator && !isInfiniteActivity && <div className={cn(
+                                {showQuantityIndicator && !isInfiniteActivity && <div data-testid="pos-product-quantity" className={cn(
                                     "absolute top-2 right-2 backdrop-blur-md px-2.5 py-1 rounded-xl text-[10px] font-black border transition-colors duration-300",
                                     remainingQuantity <= 0
                                         ? "bg-destructive text-destructive-foreground border-destructive/20"

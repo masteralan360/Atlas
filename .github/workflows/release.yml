@@ -1,9 +1,16 @@
 name: Release
+run-name: Release ${{ github.event.inputs.schedule_id || github.ref_name }}
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      schedule_id:
+        description: Scheduled release ID (set by the scheduled dispatcher)
+        required: false
+        type: string
+        default: ''
 
 env:
   # Windows GitHub runners can otherwise start Python with a legacy CP-1252
@@ -15,7 +22,25 @@ env:
   VITE_ENCRYPTION_KEY: ${{ secrets.VITE_ENCRYPTION_KEY }}
 
 jobs:
+  schedule-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      proceed: ${{ steps.gate.outputs.proceed }}
+    steps:
+      - name: Checkout release metadata
+        uses: actions/checkout@v4
+
+      - name: Check scheduled release gate
+        id: gate
+        run: python .github/scripts/release_schedule_gate.py
+        env:
+          SCHEDULE_ID: ${{ github.event.inputs.schedule_id || '' }}
+
   release:
+    needs: schedule-gate
+    if: needs.schedule-gate.outputs.proceed == 'true'
     permissions:
       contents: write
     strategy:

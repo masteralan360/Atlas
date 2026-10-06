@@ -52,6 +52,7 @@ import {
     roundOrderAmount
 } from './orderInstallments'
 import {
+    ensureBusinessPartnerSummarySource,
     ensurePartnerFacet,
     getBusinessPartnerByAnyId,
     recalculateBusinessPartnerSummary
@@ -3329,14 +3330,22 @@ async function completePaidQuickSalesOrderAtomically(
         completedOrder.createdBy
     )
     // Customer/partner totals and reorder suggestions are derived projections.
-    // Refresh them after the authoritative transaction without holding the POS
-    // success dialog behind more network round trips.
+    // A Quick Order may create its customer just before checkout, so make sure
+    // the target partner is in the Hybrid mirror before deriving its summary.
+    // Keep this refresh off the checkout response path; the atomic order is
+    // already committed and must not be reported as failed if a projection is
+    // temporarily unavailable.
     void Promise.all([
-        recalculateCustomerAndPartnerSummaries(
-            order.workspaceId,
-            completedOrder.customerId,
-            completedOrder.businessPartnerId
-        ),
+        recalculateCustomerSummary(order.workspaceId, completedOrder.customerId),
+        (async () => {
+            if (!completedOrder.businessPartnerId) return
+            await ensureBusinessPartnerSummarySource(
+                order.workspaceId,
+                completedOrder.businessPartnerId,
+                completedOrder.customerId
+            )
+            await recalculateBusinessPartnerSummary(order.workspaceId, completedOrder.businessPartnerId, { ensureSync: true })
+        })(),
         (async () => {
             const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')
             await Promise.all(Array.from(new Set(completedOrder.items.map((item) => item.productId))).map((productId) =>

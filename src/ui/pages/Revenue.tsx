@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 import { useAuth } from '@/auth'
 import { Sale } from '@/types'
-import { applySalesOrderReturnQuantities, useCategories, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useDeliveryMerchantProfiles, useDeliveryShipments, useRentalContracts, useRentalVehicles } from '@/local-db'
+import { applySalesOrderReturnQuantities, useCategories, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useDeliveryMerchantProfiles, useDeliveryShipments, useRentalContracts, useRentalVehicles, useExpenseItemsForWorkspace } from '@/local-db'
 import { formatCurrency, formatDateTime, formatDate, formatTime } from '@/lib/utils'
 import { buildRevenueSourceSales } from '@/lib/revenueSourceSales'
 import { isActiveSale } from '@/lib/saleArchiving'
@@ -14,6 +14,7 @@ import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { isMobile } from '@/lib/platform'
 import { getReportOriginId } from '@/lib/printIdentity'
 import { useWorkspace } from '@/workspace'
+import { useOptionalWorkspacePermissions } from '@/permissions/workspacePermissionsState'
 import { useDateRange } from '@/context/DateRangeContext'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
@@ -573,9 +574,12 @@ export function Revenue() {
     const { user } = useAuth()
     const { t, i18n } = useTranslation()
     const [, setLocation] = useLocation()
-    const { features, hasCapability } = useWorkspace()
+    const { features, hasCapability, hasFeature } = useWorkspace()
+    const permissions = useOptionalWorkspacePermissions()
     const { dateRange, customDates } = useDateRange()
     const { style } = useTheme()
+    const canAccessAccountingExpenses = hasFeature('budget')
+        && (!permissions || permissions.hasPermission('budget.access'))
 
     const dateBounds = useMemo<{ startDate?: string; endDate?: string }>(() => {
         const { start, end } = getDateRangeBounds(dateRange, customDates)
@@ -591,6 +595,7 @@ export function Revenue() {
     ), [customDates.end, customDates.start, dateBounds.endDate, dateBounds.startDate, dateRange, user?.workspaceId])
 
     const rawSales = useSales(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
+    const expenseItems = useExpenseItemsForWorkspace(canAccessAccountingExpenses ? user?.workspaceId : undefined)
     const rawSalesOrders = useSalesOrders(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
     const salesOrderReturnItems = useSalesOrderReturnItemsForWorkspace(user?.workspaceId)
     const deliveryShipments = useDeliveryShipments(user?.workspaceId)
@@ -1022,6 +1027,45 @@ export function Revenue() {
         return { statsByCurrency, saleStats }
     }, [calculateStats, filteredRevenueRecords, features.default_currency])
 
+    const accountingExpensesByCurrency = useMemo(() => {
+        const totals: Record<string, number> = {}
+        const startBound = dateBounds.startDate ? new Date(dateBounds.startDate) : null
+        const endBound = dateBounds.endDate ? new Date(dateBounds.endDate) : null
+        const toLocalDateKey = (date: Date) => [
+            date.getFullYear(),
+            String(date.getMonth() + 1).padStart(2, '0'),
+            String(date.getDate()).padStart(2, '0')
+        ].join('-')
+        const startDay = startBound ? toLocalDateKey(startBound) : null
+        const endDay = endBound ? toLocalDateKey(endBound) : toLocalDateKey(new Date())
+
+        expenseItems.forEach((item) => {
+            const dueDay = item.dueDate?.slice(0, 10)
+            if (!dueDay || (startDay && dueDay < startDay) || (endDay && dueDay > endDay)) return
+
+            const currency = item.currency || features.default_currency || 'usd'
+            totals[currency] = (totals[currency] || 0) + item.amount
+        })
+
+        return totals
+    }, [dateBounds.endDate, dateBounds.startDate, expenseItems, features.default_currency])
+
+    const grossProfitAfterExpenses = useMemo(() => {
+        const currencies = new Set([
+            ...Object.keys(stats.statsByCurrency),
+            ...Object.keys(accountingExpensesByCurrency)
+        ])
+
+        return Array.from(currencies).sort().map((currency) => {
+            const currencyStats = stats.statsByCurrency[currency]
+            const grossProfit = (currencyStats?.revenue || 0) - (currencyStats?.cost || 0)
+            return {
+                currency,
+                amount: grossProfit - (accountingExpensesByCurrency[currency] || 0)
+            }
+        })
+    }, [accountingExpensesByCurrency, stats.statsByCurrency])
+
     const currencySettings = useMemo(() => ({
         currency: Object.keys(stats.statsByCurrency)[0] || features.default_currency || 'usd',
         iqdPreference: features.iqd_display_preference
@@ -1350,7 +1394,10 @@ export function Revenue() {
 
                 <div className="space-y-6">
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className={cn(
+                        "grid grid-cols-1 md:grid-cols-2 gap-4",
+                        canAccessAccountingExpenses ? "lg:grid-cols-3 xl:grid-cols-5" : "lg:grid-cols-4"
+                    )}>
                         {/* Gross Revenue */}
                         <Card
                             className="bg-card dark:bg-card border-border/50 shadow-sm cursor-pointer hover:shadow-md transition-all group relative overflow-hidden rounded-3xl"
@@ -1458,6 +1505,31 @@ export function Revenue() {
                                 <SparklineArea data={trendData} dataKey="profit" color="#10b981" />
                             </CardContent>
                         </Card>
+
+                        {canAccessAccountingExpenses ? (
+                            <Card className="bg-card dark:bg-card border-border/50 shadow-sm relative overflow-hidden rounded-3xl">
+                                <CardHeader className="pb-2">
+                                    <CardTitle className="text-[10px] font-black text-cyan-600 dark:text-cyan-400 flex items-center gap-2 uppercase tracking-[0.2em]">
+                                        <div className="p-1.5 bg-cyan-500/10 rounded-lg">
+                                            <DollarSign className="w-3.5 h-3.5" />
+                                        </div>
+                                        {t('revenue.grossProfitAfterExpenses')}
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="pb-0">
+                                    <div className="space-y-1">
+                                        {grossProfitAfterExpenses.map(({ currency, amount }) => (
+                                            <div key={currency} className="text-2xl font-black tracking-tight tabular-nums text-foreground leading-none">
+                                                {formatCurrency(amount, currency as any, currencySettings.iqdPreference)}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mt-1">
+                                        {t('revenue.grossProfitAfterExpensesDescription')}
+                                    </p>
+                                </CardContent>
+                            </Card>
+                        ) : null}
 
                         {/* Profit Margin */}
                         <Card

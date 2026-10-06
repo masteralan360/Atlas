@@ -30,7 +30,7 @@ export function StorageSelector({ storages, selectedStorageId, onSelect, classNa
 
     return (
         <Select value={selectedStorageId} onValueChange={onSelect}>
-            <SelectTrigger className={cn("w-[180px] bg-background/50 backdrop-blur-sm", className)}>
+            <SelectTrigger data-testid="pos-storage-selector" className={cn("w-[180px] bg-background/50 backdrop-blur-sm", className)}>
                 <div className="flex items-center gap-2 truncate">
                     <Warehouse className="w-4 h-4 text-muted-foreground shrink-0" />
                     <SelectValue placeholder={t('storages.selectStorage') || "Select Storage"} />
@@ -40,7 +40,7 @@ export function StorageSelector({ storages, selectedStorageId, onSelect, classNa
                 <SelectGroup>
                     <SelectLabel>{t('storages.label') || "Storages"}</SelectLabel>
                     {storages.map((storage) => (
-                        <SelectItem key={storage.id} value={storage.id}>
+                        <SelectItem key={storage.id} value={storage.id} data-storage-id={storage.id}>
                             <span className="flex items-center gap-2">
                                 {storage.isSystem ? (t(`storages.${storage.name.toLowerCase()}`) || storage.name) : storage.name}
                                 {storage.isSystem && (

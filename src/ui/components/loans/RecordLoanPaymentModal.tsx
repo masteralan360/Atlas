@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/auth'
 import { getLoanRecordPaymentLabel } from '@/lib/loanPresentation'
@@ -90,15 +90,31 @@ export function RecordLoanPaymentModal({
     const paymentBalance = selectedInstallment?.balanceAmount && selectedInstallment.balanceAmount > 0
         ? selectedInstallment.balanceAmount
         : loan?.balanceAmount ?? 0
+    const loanId = loan?.id ?? null
+    const installmentId = selectedInstallment?.id ?? null
+    const initializedTargetRef = useRef<string | null>(null)
+    const amountEditedRef = useRef(false)
 
     useEffect(() => {
-        if (!isOpen || !loan) return
-        setAmount(formatPaymentAmountInput(String(paymentBalance)))
-        setMethod('cash')
-        setPaymentAccount(null)
-        setNote('')
-        setPaymentDate(new Date())
-    }, [isOpen, loan, paymentBalance])
+        if (!isOpen || !loanId) {
+            initializedTargetRef.current = null
+            return
+        }
+
+        const targetKey = `${loanId}:${installmentId ?? 'loan'}`
+        const targetChanged = initializedTargetRef.current !== targetKey
+        if (targetChanged) {
+            initializedTargetRef.current = targetKey
+            amountEditedRef.current = false
+            setMethod('cash')
+            setPaymentAccount(null)
+            setNote('')
+            setPaymentDate(new Date())
+        }
+        if (targetChanged || !amountEditedRef.current) {
+            setAmount(formatPaymentAmountInput(String(paymentBalance)))
+        }
+    }, [installmentId, isOpen, loanId, paymentBalance])
 
     if (!loan) return null
 
@@ -188,12 +204,14 @@ export function RecordLoanPaymentModal({
                             </div>
 
                             <div className="grid gap-2">
-                                <Label>{t('loans.paymentAmount') || 'Payment Amount'}</Label>
+                                <Label htmlFor="loan-payment-amount">{t('loans.paymentAmount') || 'Payment Amount'}</Label>
                                 <Input
+                                    id="loan-payment-amount"
                                     type="text"
                                     inputMode={loan.settlementCurrency === 'iqd' ? 'numeric' : 'decimal'}
                                     value={amount}
                                     onChange={e => {
+                                        amountEditedRef.current = true
                                         const nextValue = sanitizePaymentAmountInput(e.target.value, loan.settlementCurrency)
                                         setAmount(formatPaymentAmountInput(nextValue))
                                     }}

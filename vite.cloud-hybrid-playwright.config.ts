@@ -3,7 +3,6 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
 import { execSync } from 'child_process'
-import { atlasDevTestingPlugin } from './scripts/dev-testing/controller.mjs'
 import { cloudHybridPlaywrightPlugin } from './scripts/cloud-hybrid-playwright/vite-plugin.mjs'
 
 function getGitInfo() {
@@ -24,7 +23,7 @@ function getGitInfo() {
 }
 
 export default defineConfig(({ mode, command, isPreview }) => {
-    const devTestingEnabled = command === 'serve' && !isPreview
+    const cloudHybridRunnerEnabled = command === 'serve' && !isPreview
     const isTauriBuild = Boolean(process.env.TAURI_ENV_PLATFORM)
     const git = getGitInfo()
 
@@ -35,9 +34,16 @@ export default defineConfig(({ mode, command, isPreview }) => {
     return {
         base: isTauriBuild ? './' : '/',
         plugins: [
+            {
+                name: 'cloud-hybrid-playwright-unused-route-placeholder',
+                enforce: 'pre',
+                resolveId(source) {
+                    if (source === '@/ui/pages/GardenManagement') return path.resolve(__dirname, './.cloud-hybrid-playwright/runtime/garden-management-placeholder.tsx')
+                    return null
+                }
+            },
             react(),
-            atlasDevTestingPlugin(devTestingEnabled),
-            cloudHybridPlaywrightPlugin(devTestingEnabled),
+            cloudHybridPlaywrightPlugin(cloudHybridRunnerEnabled),
             VitePWA({
                 disable: isTauriBuild,
                 injectRegister: false,
@@ -140,7 +146,7 @@ export default defineConfig(({ mode, command, isPreview }) => {
         server: {
             // Keep this fixed port aligned with src-tauri/tauri.conf.json.
             // Windows can reserve the 1400 range for virtual networking.
-            port: 5173,
+            port: 5174,
             strictPort: true,
             // If the host is provided by Tauri CLI, tell Vite to listen on it
             host: process.env.TAURI_DEV_HOST || true,
@@ -190,7 +196,7 @@ export default defineConfig(({ mode, command, isPreview }) => {
             }
         },
         define: {
-            __ATLAS_DEV_TESTING__: JSON.stringify(devTestingEnabled),
+            __ATLAS_DEV_TESTING__: JSON.stringify(cloudHybridRunnerEnabled),
             __ATLAS_GIT_COMMIT_MESSAGE__: JSON.stringify(git.message),
             __ATLAS_GIT_COMMIT_HASH__: JSON.stringify(git.hash),
             __ATLAS_GIT_COMMIT_DATE__: JSON.stringify(git.date),

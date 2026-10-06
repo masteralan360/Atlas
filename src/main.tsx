@@ -4,7 +4,6 @@ import { createRoot } from 'react-dom/client'
 import i18n from '@/i18n/config'
 import { requestPersistentStorage } from '@/local-db/storagePersist'
 import { isOpfsSupported } from '@/local-db/pwaSqlite'
-import { AtlasSplashScreen } from '@/ui/components/AtlasSplashScreen'
 import { initDesktopZoomPersistence } from '@/lib/tauriZoomPersistence'
 import { removeDeploymentRefreshParam } from '@/lib/deploymentRefresh'
 import {
@@ -39,20 +38,6 @@ if (typeof window !== 'undefined') {
     if (refreshedUrl !== currentPath) {
         window.history.replaceState(null, '', refreshedUrl)
     }
-}
-
-function isPwaMode(): boolean {
-    if (typeof window === 'undefined') return false
-    if ((window.navigator as any).standalone) return true
-    try { return window.matchMedia('(display-mode: standalone)').matches } catch { return false }
-}
-
-function isColdStart(): boolean {
-    try {
-        const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming
-        if (nav) return nav.type === 'navigate'
-    } catch { }
-    return true
 }
 
 const initPwaLocalMode = async () => {
@@ -214,12 +199,8 @@ const renderMarketplace = async () => {
     )
 }
 
-const bootApp = async (splash: boolean) => {
+const bootApp = async () => {
     updateShellStartup('Loading the Atlas interface', 35)
-    const preloads: Promise<unknown>[] = []
-    if (splash) {
-        preloads.push(import('@/ui/pages/Dashboard'), import('@/ui/pages/Login'))
-    }
 
     const [
         ,
@@ -233,7 +214,6 @@ const bootApp = async (splash: boolean) => {
         import('@/services/platformService'),
         import('@/lib/connectionManager'),
         import('./App.tsx'),
-        ...preloads,
     ])
 
     updateShellStartup('Preparing your workspace', 65)
@@ -265,67 +245,8 @@ const init = async () => {
 
     void initPwaLocalMode()
 
-    const canShowSplash = !isMarketplaceHost && isColdStart() && (isPwaMode() || (isTauriRuntime && !import.meta.env.DEV))
-
     // Start loading immediately
-    const bootPromise = bootApp(canShowSplash)
-
-    if (canShowSplash) {
-        // Phase 1: Show splash immediately. App container hidden + empty.
-        root.render(
-            <StrictMode>
-                <div id="atlas-splash" style={{}}>
-                    <AtlasSplashScreen />
-                </div>
-                <div id="atlas-app" style={{ display: 'none' }} />
-            </StrictMode>,
-        )
-        dismissShellRecovery()
-
-        // Modules load in background while splash plays
-        const { ThemeProvider, App } = await bootPromise
-
-        // Phase 2: Inject app into hidden container. AuthProvider (inside App.tsx)
-        // mounts and starts initializing. Splash still visible.
-        root.render(
-            <StrictMode>
-                <div id="atlas-splash" style={{}}>
-                    <AtlasSplashScreen />
-                </div>
-                <div id="atlas-app" style={{ display: 'none' }}>
-                    <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme" defaultStyle="emerald">
-                        <App />
-                    </ThemeProvider>
-                </div>
-            </StrictMode>,
-        )
-
-        const dismissOnKey = new Promise<void>(resolve => {
-            window.addEventListener('keydown', () => resolve(), { once: true })
-        })
-
-        await Promise.race([dismissOnKey, new Promise<void>(r => setTimeout(r, 2800))])
-
-        // Phase 3: Show app, hide splash. Tree structure identical to Phase 2
-        // — React preserves all state (AuthProvider, etc.)
-        dismissShellRecovery()
-        root.render(
-            <StrictMode>
-                <div id="atlas-splash" style={{ display: 'none' }}>
-                    <AtlasSplashScreen />
-                </div>
-                <div id="atlas-app" style={{}}>
-                    <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme" defaultStyle="emerald">
-                        <App />
-                    </ThemeProvider>
-                </div>
-            </StrictMode>,
-        )
-
-        return
-    }
-
-    const { ThemeProvider, App } = await bootPromise
+    const { ThemeProvider, App } = await bootApp()
 
     renderRoot(
         <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme" defaultStyle="emerald">

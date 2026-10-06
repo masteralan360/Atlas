@@ -4388,6 +4388,24 @@ export function useExpenseItems(workspaceId: string | undefined, month: string |
     return items ?? []
 }
 
+export function useExpenseItemsForWorkspace(workspaceId: string | undefined) {
+    const isOnline = useNetworkStatus()
+    const items = useLiveQuery(
+        () => workspaceId
+            ? db.expense_items.where('workspaceId').equals(workspaceId).and(i => !i.isDeleted && !i.voidId).toArray()
+            : [],
+        [workspaceId]
+    )
+
+    useEffect(() => {
+        if (isOnline && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
+            fetchTableFromSupabase('expense_items', db.expense_items, workspaceId, { includeDeleted: true })
+        }
+    }, [isOnline, workspaceId])
+
+    return items ?? []
+}
+
 function buildDueDateFromMonth(month: string, dueDay: number): string {
     const [year, monthIndex] = month.split('-').map(Number)
     const daysInMonth = new Date(year, monthIndex, 0).getDate()

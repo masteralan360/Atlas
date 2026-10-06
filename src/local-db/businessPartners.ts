@@ -4,7 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { convertCurrencyAmountWithAvailableSnapshot, convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
 import { isOnline } from '@/lib/network'
-import { getPartnerSyncWriteRpc, getSupabaseClientForTable } from '@/lib/supabaseSchema'
+import { getPartnerSyncWriteRpc, getSupabaseClientForTable, getWorkspaceScopedPartnerReadRpc } from '@/lib/supabaseSchema'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
 import {
   canSelectProductForExcludedCategories,
@@ -12,7 +12,7 @@ import {
   getAgentExcludedCategoryIds
 } from '@/lib/agentProductSelection'
 import { roundOrderValue } from '@/lib/orderPrecision'
-import { generateId } from '@/lib/utils'
+import { generateId, toCamelCase } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { assignNewBusinessPartnerToCreatorGroups } from './businessPartnerGroups'
 import { getVisibleBusinessPartnerIdsByGroup, type BusinessPartnerGroupPrivacyViewer } from '@/lib/businessPartnerGroupPrivacy'
@@ -1091,6 +1091,38 @@ export function recalculateBusinessPartnerSummary(workspaceId: string, partnerId
   return serializePartnerSummaryRefresh('business_partners', workspaceId, partnerId, () =>
     calculateBusinessPartnerSummary(workspaceId, partnerId, options)
   )
+}
+
+/**
+ * Quick Order can create a customer immediately before its atomic checkout.
+ * In Hybrid mode that new partner can be present remotely before the directory
+ * hydrator has populated the local mirror. Load only this workspace-owned row
+ * so the summary refresh can include the just-completed order.
+ */
+export async function ensureBusinessPartnerSummarySource(workspaceId: string, partnerId: string, customerFacetId?: string | null) {
+  const cached = await db.business_partners.get(partnerId)
+  const hasCurrentSyncedPartner = cached && cached.workspaceId === workspaceId && !cached.isDeleted
+  const hasUnsentLocalChanges = cached?.syncStatus === 'pending' || cached?.syncStatus === 'conflict'
+  if (!shouldUseCloudBusinessData(workspaceId) || !isOnline(workspaceId) || hasUnsentLocalChanges) return cached
+
+  const readRpc = getWorkspaceScopedPartnerReadRpc('business_partners')
+  if (!readRpc) throw new Error('Workspace-scoped business partner reader is not configured')
+  const result = await runMutation('businessPartners.summary.source', () => getSupabaseClientForTable('business_partners')
+    .rpc(readRpc, { p_workspace_id: workspaceId }))
+  if (result.error) throw result.error
+  const remoteRow = (result.data ?? []).find((row: Record<string, unknown>) => row.id === partnerId)
+  if (!remoteRow) return hasCurrentSyncedPartner ? cached : null
+
+  const hydrated = {
+    ...(toCamelCase(remoteRow) as unknown as BusinessPartner),
+    syncStatus: 'synced' as const,
+    lastSyncedAt: new Date().toISOString()
+  }
+  if (customerFacetId && hydrated.customerFacetId !== customerFacetId) {
+    throw new Error('Quick Order customer and business-partner summary relationship does not match the authoritative workspace record')
+  }
+  await db.business_partners.put(hydrated)
+  return hydrated
 }
 
 async function calculateBusinessPartnerSummary(workspaceId: string, partnerId: string, options?: { ensureSync?: boolean }) {

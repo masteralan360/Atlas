@@ -7,15 +7,16 @@ Run with: python release.py
 import json
 import subprocess
 import datetime
+import uuid
 from pathlib import Path
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QTextEdit, QPushButton, QComboBox, QCheckBox,
     QRadioButton, QFrame, QScrollArea, QMessageBox, QButtonGroup,
-    QSizePolicy, QDialog, QGroupBox, QGridLayout
+    QSizePolicy, QDialog, QGroupBox, QGridLayout, QDateTimeEdit
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QDateTime
 from PySide6.QtGui import QFont
 
 import sys
@@ -39,6 +40,19 @@ def read_version():
         pkg_data = json.load(f)
     min_v = pkg_data.get('min_version') or tauri_data.get('min_version', '0.0.0')
     return tauri_data.get('version', '1.0.0'), min_v
+
+
+def has_pending_scheduled_release():
+    """Return whether a prior scheduled release is still waiting to dispatch."""
+    try:
+        with open(RELEASE_CONFIG, 'r', encoding='utf-8') as f:
+            release_config = json.load(f)
+        return (
+            release_config.get('schedule_enabled', False)
+            and release_config.get('schedule_status') in ('pending', 'dispatching')
+        )
+    except (OSError, json.JSONDecodeError):
+        return False
 
 
 def increment_version(version):
@@ -330,7 +344,7 @@ class ReleaseApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Asaas Release Helper")
-        self.setFixedSize(440, 700)
+        self.setFixedSize(440, 760)
 
         self.localized_highlights = {'en': [], 'ar': [], 'ku': []}
         self.localized_team_msg   = {'en': '', 'ar': '', 'ku': ''}
@@ -424,6 +438,31 @@ class ReleaseApp(QMainWindow):
         )
         self.skip_latest_cb.toggled.connect(self.toggle_skip_latest)
         layout.addWidget(self.skip_latest_cb)
+
+        # Schedule the GitHub release matrix and Cloudflare deployment together.
+        self.schedule_cb = QCheckBox("⏰ Schedule GitHub deployments")
+        self.schedule_cb.setToolTip(
+            "When enabled, Windows, Ubuntu/Android, and Cloudflare deployments wait "
+            "until the selected local time."
+        )
+        self.schedule_cb.toggled.connect(self.toggle_schedule)
+        layout.addWidget(self.schedule_cb)
+
+        schedule_row = QHBoxLayout()
+        schedule_row.addWidget(QLabel("Run at (local time):"))
+        initial_schedule_time = QDateTime.currentDateTime().addSecs(15 * 60)
+        initial_schedule_time.setTime(
+            initial_schedule_time.time().addSecs(-initial_schedule_time.time().second())
+        )
+        self.schedule_time_edit = QDateTimeEdit(initial_schedule_time)
+        self.schedule_time_edit.setDisplayFormat("yyyy-MM-dd HH:mm")
+        self.schedule_time_edit.setCalendarPopup(True)
+        self.schedule_time_edit.setMinimumDateTime(
+            QDateTime.currentDateTime().addSecs(5 * 60)
+        )
+        self.schedule_time_edit.setEnabled(False)
+        schedule_row.addWidget(self.schedule_time_edit)
+        layout.addLayout(schedule_row)
 
         # Team message
         self.team_msg_cb = QCheckBox("Include Team Message?")
@@ -525,6 +564,9 @@ class ReleaseApp(QMainWindow):
         elif not checked and text.endswith(" SAU"):
             self.msg_edit.setText(text[:-4])
 
+    def toggle_schedule(self, checked):
+        self.schedule_time_edit.setEnabled(checked)
+
     def manage_highlights(self):
         dlg = HighlightsDialog(self, self.localized_highlights)
         dlg.exec()
@@ -582,10 +624,39 @@ class ReleaseApp(QMainWindow):
         version = self.version_edit.text().strip().lstrip('vV')
         msg = self.msg_edit.text().strip()
         staged_only = self.staged_changes_rb.isChecked()
+        schedule_enabled = self.schedule_cb.isChecked()
+        scheduled_at_utc = None
+
+        if has_pending_scheduled_release():
+            QMessageBox.critical(
+                self, "Scheduled Release Pending",
+                "A scheduled release is still waiting to deploy. Let it run before "
+                "creating another release."
+            )
+            return
 
         if not version or not msg:
             QMessageBox.critical(self, "Error", "Version and message are required!")
             return
+
+        if schedule_enabled:
+            selected_local = datetime.datetime.strptime(
+                self.schedule_time_edit.dateTime().toString("yyyy-MM-dd'T'HH:mm:ss"),
+                "%Y-%m-%dT%H:%M:%S",
+            ).astimezone()
+            earliest_allowed = datetime.datetime.now().astimezone() + datetime.timedelta(minutes=5)
+            if selected_local < earliest_allowed:
+                QMessageBox.critical(
+                    self, "Invalid Schedule",
+                    "Choose a deployment time at least five minutes from now."
+                )
+                return
+            scheduled_at_utc = (
+                selected_local.astimezone(datetime.timezone.utc)
+                .replace(microsecond=0)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
 
         if staged_only:
             managed_files_with_unstaged_work = unstaged_release_managed_files()
@@ -622,7 +693,11 @@ class ReleaseApp(QMainWindow):
                 if staged_only else f"2. Commit all changes: {msg}"
             ),
             f"3. Create tag v{version}",
-            f"4. Push to GitHub (Triggers Auto-Releases)",
+            (
+                f"4. Schedule Windows, Ubuntu/Android, and Cloudflare for "
+                f"{self.schedule_time_edit.dateTime().toString('yyyy-MM-dd HH:mm')} local time"
+                if schedule_enabled else "4. Push to GitHub (Triggers Auto-Releases)"
+            ),
         ])
         reply = QMessageBox.question(
             self, "Confirm Release",
@@ -639,7 +714,15 @@ class ReleaseApp(QMainWindow):
             update_version(version, self.min_version_edit.text().strip())
 
             # Write release config for CI to read
-            release_config = {"skip_latest_json": self.skip_latest_cb.isChecked()}
+            release_config = {
+                "skip_latest_json": self.skip_latest_cb.isChecked(),
+                "schedule_enabled": schedule_enabled,
+                "schedule_id": str(uuid.uuid4()) if schedule_enabled else None,
+                "scheduled_tag": f"v{version}" if schedule_enabled else None,
+                "scheduled_at_utc": scheduled_at_utc,
+                "schedule_status": "pending" if schedule_enabled else "disabled",
+                "schedule_dispatches": {"release": False, "cloudflare": False},
+            }
             with open(RELEASE_CONFIG, 'w') as f:
                 json.dump(release_config, f, indent=2)
 
@@ -664,9 +747,15 @@ class ReleaseApp(QMainWindow):
                 version, msg, stage_all_changes=not staged_only
             )
             if success:
+                deployment_message = (
+                    "GitHub will dispatch the Windows, Ubuntu/Android, and Cloudflare "
+                    f"deployments at {self.schedule_time_edit.dateTime().toString('yyyy-MM-dd HH:mm')} local time."
+                    if schedule_enabled else
+                    "GitHub will now build the Windows and Android versions automatically."
+                )
                 QMessageBox.information(
                     self, "Success",
-                    message + "\n\nGitHub will now build both Windows and Android versions automatically!"
+                    message + "\n\n" + deployment_message
                 )
                 self.close()
             else:

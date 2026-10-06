@@ -1,6 +1,16 @@
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide
 
-Remove Splash screen PWA
+Remove Price Suggestions
+
+Atlas Standard Balance Indicator, fail state indiactor too
+
+Remove Subscription Expiry and make billing authoritative
+
+Remove PressAndHold in Billing
+
+Maintenence Mode
+
+Make Workspace Payment Invoices
 
 purchase order error, order_payment_source_not_found
 
@@ -19,13 +29,7 @@ Fix POS Quick Order Time
 
 Collectable Open Payments for Transportation and Travel
 
-Maintenence Mode Local Mode Enabled
-
 New Update alert like in PWA
-
-Make Workspace Payment Invoices
-
-PAYG-Control
 
 Force Update Action in admin dashboard
 

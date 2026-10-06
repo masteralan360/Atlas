@@ -1,9 +1,18 @@
 name: Deploy Atlas web to Cloudflare
+run-name: Cloudflare deployment ${{ github.event.inputs.schedule_id || github.ref_name }}
 
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '.release-config.json'
   workflow_dispatch:
+    inputs:
+      schedule_id:
+        description: Scheduled release ID (set by the scheduled dispatcher)
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -14,7 +23,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  schedule-gate:
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.gate.outputs.proceed }}
+    steps:
+      - name: Checkout deployment metadata
+        uses: actions/checkout@v4
+
+      - name: Check scheduled release gate
+        id: gate
+        run: python .github/scripts/release_schedule_gate.py
+        env:
+          SCHEDULE_ID: ${{ github.event.inputs.schedule_id || '' }}
+
   deploy:
+    needs: schedule-gate
+    if: needs.schedule-gate.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     environment: production
     steps:
