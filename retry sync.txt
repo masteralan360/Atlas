@@ -1,9 +1,5 @@
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide
 
-Remove Price Suggestions
-
-Atlas Standard Balance Indicator, fail state indiactor too
-
 Remove Subscription Expiry and make billing authoritative
 
 Remove PressAndHold in Billing and make it auto-open

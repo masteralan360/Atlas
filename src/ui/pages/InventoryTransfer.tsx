@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness';
 import { useUnitRegistry, getQuantityStep } from '@/ui/components/unitRegistry';
 import {
@@ -26,7 +26,6 @@ import type {
 import { useWorkspace } from "@/workspace";
 import { useAuth } from "@/auth";
 import {
-  getRetriableActionToast,
   isRetriableWebRequestError,
   normalizeSupabaseActionError,
 } from "@/lib/supabaseRequest";
@@ -212,6 +211,60 @@ interface TransferImpactRow {
   sourceAfter: number;
   destinationBefore: number;
   destinationAfter: number;
+}
+
+type TransferRequiredSectionProps = {
+  locked: boolean;
+  unlockLabel: string;
+  onLockedInteraction: () => void;
+  children: ReactNode;
+  className?: string;
+};
+
+function TransferRequiredSection({
+  locked,
+  unlockLabel,
+  onLockedInteraction,
+  children,
+  className = "",
+}: TransferRequiredSectionProps) {
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+
+    if (locked) {
+      content.setAttribute("inert", "");
+    } else {
+      content.removeAttribute("inert");
+    }
+
+    return () => content.removeAttribute("inert");
+  }, [locked]);
+
+  return (
+    <div
+      className={`relative rounded-2xl ${locked ? "cursor-not-allowed" : ""} ${className}`}
+      aria-disabled={locked || undefined}
+    >
+      <div ref={contentRef} className={locked ? "select-none opacity-70" : ""}>
+        {children}
+      </div>
+      {locked ? (
+        <button
+          type="button"
+          className="absolute inset-0 z-10 flex cursor-pointer items-center justify-center rounded-2xl p-4 text-center outline-none focus-visible:ring-2 focus-visible:ring-destructive focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          onClick={onLockedInteraction}
+        >
+          <span className="inline-flex items-center gap-2 rounded-full border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-semibold text-destructive shadow-sm">
+            <Warehouse className="h-3.5 w-3.5" />
+            {unlockLabel}
+          </span>
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 function TransferImpactSummary({
@@ -530,6 +583,9 @@ export default function InventoryTransfer() {
   const [sourceStorageId, setSourceStorageId] = useState<string>("");
   const [targetWorkspaceId, setTargetWorkspaceId] = useState<string>("");
   const [targetStorageId, setTargetStorageId] = useState<string>("");
+  const sourceStorageCardRef = useRef<HTMLDivElement>(null);
+  const sourceHighlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isSourceStorageHighlighted, setIsSourceStorageHighlighted] = useState(false);
   const [selectedStockKeys, setSelectedStockKeys] = useState<Set<string>>(
     new Set(),
   );
@@ -906,14 +962,18 @@ export default function InventoryTransfer() {
     targetStorageId !== "" &&
     sourceStorageId !== targetStorageId &&
     transferImpactRows.length > 0;
-
-  const hasInvalidTransferQuantity = selectedTransferLines.some(
-    (line) =>
-      !isPositiveQuantity(line.quantity) ||
-      line.quantity - line.availableQuantity > QUANTITY_EPSILON,
-  ) || selectedTransferItems.some(
-    (item) => item.quantity - item.availableQuantity > QUANTITY_EPSILON,
+  const isTransferDestinationReady = Boolean(
+    sourceWorkspaceId &&
+      sourceStorageId &&
+      targetWorkspaceId &&
+      targetStorageId,
   );
+  const sourceCardOrderClass =
+    pageDirection === "rtl" ? "order-1 lg:order-3" : "order-1 lg:order-1";
+  const productsCardOrderClass = "order-2 lg:order-2";
+  const destinationCardOrderClass =
+    pageDirection === "rtl" ? "order-3 lg:order-1" : "order-3 lg:order-3";
+
   const areAllProductRowsSelected =
     filteredSourceProducts.length > 0 &&
     filteredSourceProducts.every((product) =>
@@ -951,18 +1011,130 @@ export default function InventoryTransfer() {
   ) => {
     const normalized = normalizeSupabaseActionError(error);
     if (isRetriableWebRequestError(normalized)) {
-      const message = getRetriableActionToast(normalized);
       toast({
-        title: message.title,
-        description: message.description,
+        title: t("inventoryTransfer.connectionErrorTitle", {
+          defaultValue: "Connection problem",
+        }),
+        description: t("inventoryTransfer.connectionError", {
+          defaultValue: "The transfer could not be completed. Check your connection and try again.",
+        }),
         variant: "destructive",
       });
       return;
     }
 
+    const originalMessage =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : error && typeof error === "object" && "message" in error
+            ? String((error as { message?: unknown }).message ?? "")
+            : "";
+    const message = originalMessage || normalized.message;
+    const crossWorkspaceStockError = message.match(
+      /^Insufficient inventory for ["“]?(.+?)["”]? in the selected source storage\.?$/i,
+    );
+    const inventoryStockError = message.match(
+      /^Insufficient inventory for (.+) in storage (.+?)(?:\.)?$/i,
+    );
+    let localizedDescription: string | null = null;
+
+    if (crossWorkspaceStockError) {
+      localizedDescription = t("inventoryTransfer.productStockChanged", {
+        product: crossWorkspaceStockError[1],
+        storage: getStorageDisplayName(storagesById.get(sourceStorageId)),
+        defaultValue: "Stock for {{product}} changed and is no longer sufficient in {{storage}}. Refresh inventory and try again.",
+      });
+    } else if (inventoryStockError) {
+      localizedDescription = t("inventoryTransfer.productStockChanged", {
+        product: inventoryStockError[1],
+        storage:
+          inventoryStockError[2] === "Unknown storage"
+            ? t("inventoryTransfer.unknownStorage", { defaultValue: "Unknown storage" })
+            : inventoryStockError[2],
+        defaultValue: "Stock for {{product}} changed and is no longer sufficient in {{storage}}. Refresh inventory and try again.",
+      });
+    } else if (/source and destination storages must be different/i.test(message)) {
+      localizedDescription = t("inventoryTransfer.destinationSameAsSource", {
+        defaultValue: "Choose a destination storage different from the source storage.",
+      });
+    } else if (/workspace and storage are required for a transfer/i.test(message)) {
+      localizedDescription = t("inventoryTransfer.destinationSelectionRequired", {
+        defaultValue: "Choose a source storage, destination workspace, and destination storage before transferring.",
+      });
+    } else if (/at least one product must be selected/i.test(message)) {
+      localizedDescription = t("inventoryTransfer.noProductsSelected", {
+        defaultValue: "Select at least one product to transfer.",
+      });
+    } else if (/each transfer product must have a valid quantity/i.test(message)) {
+      const product = selectedTransferItems[0]?.productName;
+      localizedDescription = product
+        ? t("inventoryTransfer.invalidQuantity", {
+            product,
+            defaultValue: "Enter a valid transfer quantity for {{product}}.",
+          })
+        : t("inventoryTransfer.couldNotComplete", {
+            defaultValue: "The transfer couldn't be completed. Check the selected products and quantities, then try again.",
+          });
+    } else if (/transfer quantity must be greater than zero|batch transfer quantity must be greater than zero/i.test(message)) {
+      const product = selectedTransferItems[0]?.productName ?? "";
+      localizedDescription = t("inventoryTransfer.quantityMustBePositive", {
+        product,
+        defaultValue: "Transfer quantity for {{product}} must be greater than zero.",
+      });
+    } else if (/inventory changed on another device|stock changed/i.test(message)) {
+      localizedDescription = t("inventoryTransfer.stockChanged", {
+        defaultValue: "Stock changed while you were preparing the transfer. Refresh inventory and try again.",
+      });
+    } else if (/one or more selected batches are no longer available|batch (?:selection|allocation) is missing (?:a )?batch id/i.test(message)) {
+      localizedDescription = t("inventoryTransfer.batchNoLongerAvailable", {
+        defaultValue: "A selected batch is no longer available. Refresh inventory and select it again.",
+      });
+    } else if (/batch (.+) does not have enough stock/i.test(message)) {
+      localizedDescription = t("inventoryTransfer.batchStockChanged", {
+        batch: message.match(/batch (.+) does not have enough stock/i)?.[1] ?? "",
+        defaultValue: "Batch {{batch}} no longer has enough stock. Refresh inventory and try again.",
+      });
+    } else if (/insufficient inventory|insufficient regular stock/i.test(message)) {
+      const product = selectedTransferItems.length === 1
+        ? selectedTransferItems[0].productName
+        : null;
+      localizedDescription = product
+        ? t("inventoryTransfer.productStockChanged", {
+            product,
+            storage: getStorageDisplayName(storagesById.get(sourceStorageId)),
+            defaultValue: "Stock for {{product}} changed and is no longer sufficient in {{storage}}. Refresh inventory and try again.",
+          })
+        : t("inventoryTransfer.selectedProductsStockChanged", {
+            storage: getStorageDisplayName(storagesById.get(sourceStorageId)),
+            defaultValue: "One or more selected products no longer have enough stock in {{storage}}. Refresh inventory and try again.",
+          });
+    } else if (/destination batch .+ has different pricing or dates/i.test(message)) {
+      localizedDescription = t("inventoryTransfer.destinationBatchMismatch", {
+        batch: message.match(/destination batch (.+) has different pricing or dates/i)?.[1] ?? "",
+        defaultValue: "Batch {{batch}} cannot be added to the destination because its pricing or dates differ.",
+      });
+    } else if (/selected batch quantity exceeds the transfer quantity/i.test(message)) {
+      const product = selectedTransferItems[0]?.productName ?? "";
+      localizedDescription = t("inventoryTransfer.batchQuantityExceedsTransfer", {
+        product,
+        defaultValue: "Selected batch quantities exceed the transfer quantity for {{product}}.",
+      });
+    } else if (/the transfer could not be confirmed by the server/i.test(message)) {
+      localizedDescription = t("inventoryTransfer.transferNotConfirmed", {
+        defaultValue: "The transfer could not be confirmed. Refresh inventory and try again.",
+      });
+    }
+
     toast({
       title: t("common.error", { defaultValue: "Error" }),
-      description: fallbackDescription || normalized.message,
+      description:
+        localizedDescription ||
+        fallbackDescription ||
+        t("inventoryTransfer.couldNotComplete", {
+          defaultValue: "The transfer couldn't be completed. Check the selected products and quantities, then try again.",
+        }),
       variant: "destructive",
     });
   };
@@ -986,9 +1158,6 @@ export default function InventoryTransfer() {
     return `${option.workspaceName}${option.workspaceCode ? ` (${option.workspaceCode})` : ""
       } - ${relationLabel}`;
   };
-
-  const getDefaultStorageId = (options: TransferWorkspaceOptionStorage[]) =>
-    options.find((storage) => storage.is_primary)?.id ?? options[0]?.id ?? "";
 
   const getWorkspaceNameById = (workspaceId?: string | null) =>
     transferTargetsByWorkspaceId.get(workspaceId ?? "")?.workspaceName ||
@@ -1090,9 +1259,37 @@ export default function InventoryTransfer() {
         return current;
       }
 
-      return getDefaultStorageId(availableTargetStorages);
+      return "";
     });
   }, [availableTargetStorages, targetWorkspaceId]);
+
+  useEffect(
+    () => () => {
+      if (sourceHighlightTimeoutRef.current) {
+        clearTimeout(sourceHighlightTimeoutRef.current);
+      }
+    },
+    [],
+  );
+
+  const highlightSourceStorage = () => {
+    setIsSourceStorageHighlighted(true);
+    if (sourceHighlightTimeoutRef.current) {
+      clearTimeout(sourceHighlightTimeoutRef.current);
+    }
+    sourceHighlightTimeoutRef.current = setTimeout(() => {
+      setIsSourceStorageHighlighted(false);
+      sourceHighlightTimeoutRef.current = null;
+    }, 1800);
+
+    const sourceCard = sourceStorageCardRef.current;
+    sourceCard?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(() => {
+      sourceCard
+        ?.querySelector<HTMLElement>("button")
+        ?.focus({ preventScroll: true });
+    }, 250);
+  };
 
   useEffect(() => {
     const pendingTab = consumePendingInventoryTransferTab();
@@ -1146,6 +1343,135 @@ export default function InventoryTransfer() {
   const resetTransferSelection = () => {
     setSelectedStockKeys(new Set());
     setTransferQuantities({});
+  };
+
+  const getTransferValidationError = (): string | null => {
+    if (!activeWorkspace || !sourceStorageId || !targetWorkspaceId || !targetStorageId) {
+      return t("inventoryTransfer.destinationSelectionRequired", {
+        defaultValue: "Choose a source storage, destination workspace, and destination storage before transferring.",
+      });
+    }
+
+    if (sourceWorkspaceId === targetWorkspaceId && sourceStorageId === targetStorageId) {
+      return t("inventoryTransfer.destinationSameAsSource", {
+        defaultValue: "Choose a destination storage different from the source storage.",
+      });
+    }
+
+    const currentStockKeys = new Set(sourceStockLines.map((line) => line.key));
+    const unavailableKey = Array.from(selectedStockKeys).find(
+      (key) => !currentStockKeys.has(key),
+    );
+    if (unavailableKey) {
+      if (unavailableKey.startsWith("product:")) {
+        const productId = unavailableKey.slice("product:".length);
+        const product = productsById.get(productId);
+        if (product) {
+          return t("inventoryTransfer.productNoStock", {
+            product: product.name,
+            storage: getStorageDisplayName(storagesById.get(sourceStorageId)),
+            defaultValue: "{{product}} has no available stock in {{storage}}.",
+          });
+        }
+      }
+
+      return t("inventoryTransfer.selectedStockUnavailable", {
+        defaultValue: "A selected product or batch is no longer available in the source storage. Refresh inventory and select it again.",
+      });
+    }
+
+    if (sourceProducts.length === 0) {
+      return t("inventoryTransfer.sourceStorageEmpty", {
+        storage: getStorageDisplayName(storagesById.get(sourceStorageId)),
+        defaultValue: "No products with available stock were found in {{storage}}.",
+      });
+    }
+
+    if (selectedTransferLines.length === 0) {
+      return t("inventoryTransfer.noProductsSelected", {
+        defaultValue: "Select at least one product to transfer.",
+      });
+    }
+
+    for (const line of selectedTransferLines) {
+      const product = productsById.get(line.productId);
+      const productName = product?.name ?? line.productId;
+      const unit = product?.unit ?? "";
+      if (line.availableQuantity <= QUANTITY_EPSILON) {
+        return t(
+          line.selectionType === "batch"
+            ? "inventoryTransfer.selectedStockUnavailable"
+            : "inventoryTransfer.productNoStock",
+          {
+            product: productName,
+            storage: getStorageDisplayName(storagesById.get(sourceStorageId)),
+            defaultValue:
+              line.selectionType === "batch"
+                ? "A selected product or batch is no longer available in the source storage. Refresh inventory and select it again."
+                : "{{product}} has no available stock in {{storage}}.",
+          },
+        );
+      }
+
+      const rawQuantity = transferQuantities[line.key] ?? "";
+      if (!rawQuantity.trim()) {
+        return t("inventoryTransfer.quantityRequired", {
+          product: productName,
+          defaultValue: "Enter a transfer quantity for {{product}}.",
+        });
+      }
+
+      const quantity = Number(rawQuantity);
+      if (!Number.isFinite(quantity)) {
+        return t("inventoryTransfer.invalidQuantity", {
+          product: productName,
+          defaultValue: "Enter a valid transfer quantity for {{product}}.",
+        });
+      }
+      if (!isPositiveQuantity(quantity)) {
+        return t("inventoryTransfer.quantityMustBePositive", {
+          product: productName,
+          defaultValue: "Transfer quantity for {{product}} must be greater than zero.",
+        });
+      }
+      if (quantity - line.availableQuantity > QUANTITY_EPSILON) {
+        if (line.selectionType === "batch" && line.batch) {
+          return t("inventoryTransfer.batchQuantityExceedsStock", {
+            batch: line.batch.batchNumber,
+            product: productName,
+            defaultValue: "Batch {{batch}} does not have enough stock for {{product}}.",
+          });
+        }
+
+        return t("inventoryTransfer.productQuantityExceedsStock", {
+          product: productName,
+          quantity: `${transferQuantityFormatter.format(quantity)}${unit ? ` ${unit}` : ""}`,
+          available: `${transferQuantityFormatter.format(line.availableQuantity)}${unit ? ` ${unit}` : ""}`,
+          defaultValue: "Requested {{quantity}} for {{product}}, but only {{available}} is available in the source storage.",
+        });
+      }
+    }
+
+    for (const item of selectedTransferItems) {
+      if (item.quantity - item.availableQuantity > QUANTITY_EPSILON) {
+        return t("inventoryTransfer.productQuantityExceedsStock", {
+          product: item.productName,
+          quantity: `${transferQuantityFormatter.format(item.quantity)}${item.unit ? ` ${item.unit}` : ""}`,
+          available: `${transferQuantityFormatter.format(item.availableQuantity)}${item.unit ? ` ${item.unit}` : ""}`,
+          defaultValue: "Requested {{quantity}} for {{product}}, but only {{available}} is available in the source storage.",
+        });
+      }
+    }
+
+    return null;
+  };
+
+  const showTransferValidationError = (description: string) => {
+    toast({
+      title: t("common.error", { defaultValue: "Error" }),
+      description,
+      variant: "destructive",
+    });
   };
 
   const toggleStockLine = (line: TransferStockLine) => {
@@ -1244,29 +1570,14 @@ export default function InventoryTransfer() {
   };
 
   const handleTransfer = async () => {
-    if (
-      !activeWorkspace ||
-      !sourceWorkspaceId ||
-      !targetWorkspaceId ||
-      !sourceStorageId ||
-      !targetStorageId ||
-      selectedTransferLines.length === 0
-    ) {
+    const validationError = getTransferValidationError();
+    if (validationError) {
+      showTransferValidationError(validationError);
       return;
     }
+    if (!activeWorkspace) return;
 
-    if (hasInvalidTransferQuantity) {
-      toast({
-        title: t("common.error", "Error"),
-        description: t(
-          "inventoryTransfer.invalidQuantity",
-          "Enter a valid quantity for each selected product.",
-        ),
-        variant: "destructive",
-      });
-      return;
-    }
-
+    setIsTransferConfirmationOpen(false);
     setIsTransferring(true);
 
     const progressToast = toast({
@@ -1621,14 +1932,16 @@ export default function InventoryTransfer() {
               className={`flex ${pageDirection === "rtl" ? "justify-start lg:col-start-1 lg:justify-self-start" : "justify-end lg:col-start-2 lg:justify-self-end"}`}
             >
               <Button
-                onClick={() => setIsTransferConfirmationOpen(true)}
+                onClick={() => {
+                  const validationError = getTransferValidationError();
+                  if (validationError) {
+                    showTransferValidationError(validationError);
+                    return;
+                  }
+                  setIsTransferConfirmationOpen(true);
+                }}
                 disabled={
-                  !sourceWorkspaceId ||
-                  !targetWorkspaceId ||
-                  !sourceStorageId ||
-                  !targetStorageId ||
-                  selectedTransferLines.length === 0 ||
-                  hasInvalidTransferQuantity ||
+                  !isTransferDestinationReady ||
                   isTransferring ||
                   !canEdit
                 }
@@ -1654,8 +1967,10 @@ export default function InventoryTransfer() {
         <TabsContent value="manual" className="space-y-6">
           <div dir="ltr" className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.08fr)_minmax(0,1fr)]">
             <Card
+              ref={sourceStorageCardRef}
+              tabIndex={-1}
               dir={pageDirection}
-              className={`rounded-2xl border-2 shadow-sm ${pageDirection === "rtl" ? "lg:order-3" : ""}`}
+              className={`rounded-2xl border-2 shadow-sm ${sourceCardOrderClass} transition-[border-color,box-shadow] duration-200 ${isSourceStorageHighlighted ? "border-destructive ring-2 ring-destructive/70 ring-offset-2 ring-offset-background motion-safe:animate-pulse" : ""}`}
             >
               <CardHeader className="border-b bg-muted/30 p-4">
                 <CardTitle className="flex items-center gap-2 text-base font-bold">
@@ -1673,10 +1988,11 @@ export default function InventoryTransfer() {
               </CardHeader>
               <CardContent className="space-y-4 p-4">
                 <div className="space-y-2">
-                  <Label>
+                  <Label className="flex items-center gap-1">
                     {t("inventoryTransfer.automation.sourceStorage", {
                       defaultValue: "Source Storage",
                     })}
+                    <span className="text-destructive" aria-hidden="true">*</span>
                   </Label>
                   <Select
                     value={sourceStorageId}
@@ -1687,7 +2003,7 @@ export default function InventoryTransfer() {
                     }}
                     disabled={!sourceWorkspaceId}
                   >
-                    <SelectTrigger className="rounded-xl">
+                    <SelectTrigger className="rounded-xl" aria-required="true">
                       <SelectValue
                         placeholder={t(
                           "inventoryTransfer.selectStorage",
@@ -1761,10 +2077,21 @@ export default function InventoryTransfer() {
               </CardContent>
             </Card>
 
-            <Card
-              dir={pageDirection}
-              className={`rounded-2xl border-2 shadow-sm ${pageDirection === "rtl" ? "lg:order-2" : ""}`}
+            <TransferRequiredSection
+              locked={!isTransferDestinationReady}
+              unlockLabel={
+                sourceStorageId
+                  ? t("inventoryTransfer.selectDestinationStorageToUnlock", {
+                      defaultValue: "Select a destination storage to unlock products.",
+                    })
+                  : t("inventoryTransfer.selectSourceStorageToUnlock", {
+                      defaultValue: "Select a source storage to unlock this section.",
+                    })
+              }
+              onLockedInteraction={highlightSourceStorage}
+              className={productsCardOrderClass}
             >
+              <Card dir={pageDirection} className="rounded-2xl border-2 shadow-sm">
               <CardHeader className="border-b bg-muted/30 p-4">
                 <CardTitle className="flex items-center gap-2 text-base font-bold">
                   <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
@@ -2027,12 +2354,18 @@ export default function InventoryTransfer() {
                   </div>
                 )}
               </CardContent>
-            </Card>
+              </Card>
+            </TransferRequiredSection>
 
-            <Card
-              dir={pageDirection}
-              className={`rounded-2xl border-2 shadow-sm ${pageDirection === "rtl" ? "lg:order-1" : ""}`}
+            <TransferRequiredSection
+              locked={!sourceStorageId}
+              unlockLabel={t("inventoryTransfer.selectSourceStorageToUnlock", {
+                defaultValue: "Select a source storage to unlock this section.",
+              })}
+              onLockedInteraction={highlightSourceStorage}
+              className={destinationCardOrderClass}
             >
+              <Card dir={pageDirection} className="rounded-2xl border-2 shadow-sm">
               <CardHeader className="space-y-4 border-b bg-muted/30 p-4">
                 <CardTitle className="flex items-center gap-2 text-base font-bold">
                   <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
@@ -2050,10 +2383,11 @@ export default function InventoryTransfer() {
                   )}
                 </CardDescription>
                 <div className="space-y-2">
-                  <Label>
+                  <Label className="flex items-center gap-1">
                     {t("inventoryTransfer.destinationWorkspaceLabel", {
                       defaultValue: "Destination Workspace / Branch",
                     })}
+                    <span className="text-destructive" aria-hidden="true">*</span>
                   </Label>
                   <Select
                     value={targetWorkspaceId}
@@ -2107,31 +2441,38 @@ export default function InventoryTransfer() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4 p-4">
-
-                <Select
-                  value={targetStorageId}
-                  onValueChange={setTargetStorageId}
-                  disabled={!targetWorkspaceId}
-                >
-                  <SelectTrigger className="rounded-xl">
-                    <SelectValue
-                      placeholder={t(
-                        "inventoryTransfer.selectStorage",
-                        "Select storage...",
-                      )}
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableTargetStorages.map((storage) => (
-                      <SelectItem key={storage.id} value={storage.id}>
-                        <div className="flex items-center gap-2">
-                          <Warehouse className="h-4 w-4" />
-                          {getStorageDisplayName(storage)}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1">
+                    {t("inventoryTransfer.automation.destinationStorage", {
+                      defaultValue: "Destination Storage",
+                    })}
+                    <span className="text-destructive" aria-hidden="true">*</span>
+                  </Label>
+                  <Select
+                    value={targetStorageId}
+                    onValueChange={setTargetStorageId}
+                    disabled={!targetWorkspaceId}
+                  >
+                    <SelectTrigger className="rounded-xl" aria-required="true">
+                      <SelectValue
+                        placeholder={t(
+                          "inventoryTransfer.selectStorage",
+                          "Select Storage...",
+                        )}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableTargetStorages.map((storage) => (
+                        <SelectItem key={storage.id} value={storage.id}>
+                          <div className="flex items-center gap-2">
+                            <Warehouse className="h-4 w-4" />
+                            {getStorageDisplayName(storage)}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
                 {showTransferImpactPreview && (
                   <div className="space-y-2 border-t pt-3">
@@ -2156,7 +2497,8 @@ export default function InventoryTransfer() {
                   </div>
                 )}
               </CardContent>
-            </Card>
+              </Card>
+            </TransferRequiredSection>
           </div>
 
         </TabsContent>
@@ -2520,13 +2862,8 @@ export default function InventoryTransfer() {
             </Button>
             <Button
               type="button"
-              disabled={
-                selectedTransferItems.length === 0 ||
-                hasInvalidTransferQuantity ||
-                isTransferring
-              }
+              disabled={isTransferring || !canEdit}
               onClick={() => {
-                setIsTransferConfirmationOpen(false);
                 void handleTransfer();
               }}
               className="gap-2"

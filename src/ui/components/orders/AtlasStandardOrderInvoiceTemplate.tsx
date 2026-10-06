@@ -1333,41 +1333,44 @@ export function AtlasStandardOrderInvoiceTemplate({
     const shouldShowPartnerBalanceBefore = !hiddenFields[financialKeys.balanceBefore]
     const shouldShowPartnerBalanceAfter = !hiddenFields[financialKeys.balanceAfter]
     const shouldShowPartnerCurrentBalance = !hiddenFields[financialKeys.currentBalance]
+    const formattedCurrentPartnerBalance = formatAtlasStandardPartnerCurrentBalance(
+        resolvedPartnerAccountStatementBalances,
+        iqdPreference
+    )
     const currentPartnerBalance = !shouldShowPartnerCurrentBalance
         ? '-'
         : partnerBalanceStatus === 'loading'
         ? partnerBalanceLoadingLabel
-        : partnerBalanceStatus === 'error'
-            ? t('orders.print.partnerBalanceUnavailable')
-            : formatAtlasStandardPartnerCurrentBalance(
-                resolvedPartnerAccountStatementBalances,
-                iqdPreference
-            )
+        : (partnerBalanceStatus === 'error' || formattedCurrentPartnerBalance === '-')
+            ? t('common.error')
+            : formattedCurrentPartnerBalance
     const resolvedOrderBalanceAtPosting = partnerBalancePrintState?.orderBalanceAtPosting !== undefined
         ? partnerBalancePrintState.orderBalanceAtPosting
         : partnerBalanceAtPosting
+    const formattedPartnerBalanceBeforeOrder = formatAtlasStandardPartnerBalanceAtPosting(
+        resolvedOrderBalanceAtPosting,
+        'before',
+        iqdPreference
+    )
+    const formattedPartnerBalanceAfterOrder = formatAtlasStandardPartnerBalanceAtPosting(
+        resolvedOrderBalanceAtPosting,
+        'after',
+        iqdPreference
+    )
     const partnerBalanceBeforeOrder = !shouldShowPartnerBalanceBefore
         ? '-'
         : partnerBalanceStatus === 'loading'
         ? partnerBalanceLoadingLabel
-        : partnerBalanceStatus === 'error'
-            ? t('orders.print.partnerBalanceAtOrderUnavailable')
-            : formatAtlasStandardPartnerBalanceAtPosting(
-                resolvedOrderBalanceAtPosting,
-                'before',
-                iqdPreference
-            )
+        : (partnerBalanceStatus === 'error' || formattedPartnerBalanceBeforeOrder === '-')
+            ? t('common.error')
+            : formattedPartnerBalanceBeforeOrder
     const partnerBalanceAfterOrder = !shouldShowPartnerBalanceAfter
         ? '-'
         : partnerBalanceStatus === 'loading'
         ? partnerBalanceLoadingLabel
-        : partnerBalanceStatus === 'error'
-            ? t('orders.print.partnerBalanceAtOrderUnavailable')
-            : formatAtlasStandardPartnerBalanceAtPosting(
-                resolvedOrderBalanceAtPosting,
-                'after',
-                iqdPreference
-            )
+        : (partnerBalanceStatus === 'error' || formattedPartnerBalanceAfterOrder === '-')
+            ? t('common.error')
+            : formattedPartnerBalanceAfterOrder
     const partnerBalanceLabels = {
         before: t('orders.print.partnerBalanceBefore'),
         after: t('orders.print.partnerBalanceAfter'),
