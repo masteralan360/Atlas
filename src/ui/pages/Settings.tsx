@@ -10,7 +10,7 @@ import { AdditionalStorefrontsManager } from '@/ui/components/marketplace/Additi
 import { useWorkspace } from '@/workspace'
 import { Coins } from 'lucide-react'
 import type { IQDDisplayPreference, CurrencyCode } from '@/local-db/models'
-import { Settings as SettingsIcon, Database, Cloud, Trash2, RefreshCw, User, Copy, Check, CreditCard, Globe, Download, Upload, AlertCircle, Printer, Contact, Fingerprint, Store, ExternalLink, Usb, Bluetooth, CalendarClock, Menu, Table2, Crown, Loader2 } from 'lucide-react'
+import { Settings as SettingsIcon, Database, Cloud, Trash2, RefreshCw, User, Copy, Check, CreditCard, Globe, Download, Upload, AlertCircle, Printer, Contact, Fingerprint, Store, ExternalLink, Usb, Bluetooth, CalendarClock, Menu, Table2, Crown, Loader2, PanelLeftOpen, PanelRightOpen, PanelLeftClose } from 'lucide-react'
 import { formatDate, formatDateTime, formatTime, cn, generateId, getHourDisplayPreference, setHourDisplayPreference, type HourDisplayPreference } from '@/lib/utils'
 import { useTheme } from '@/ui/components/theme-provider'
 import { Moon, Sun, Monitor, Unlock, Server, MessageSquare, Bell, MonitorPlay, Wifi } from 'lucide-react'
@@ -60,6 +60,7 @@ import { enrollLocalAccountCredential } from '@/auth/localAccountAuth'
 import { ModuleLockerSettingsCard } from '@/ui/components/module-locker/ModuleLockerSettingsCard'
 import { canChangeRestaurantTableConfiguration, normalizeRestaurantTableCount, normalizeVipTableNumbers } from '@/lib/restaurantTableView'
 import { OfflineReadinessCard } from '@/ui/components/settings/OfflineReadinessCard'
+import { useNavigationRailDisplay } from '@/ui/navigation/NavigationRailDisplayContext'
 
 const DeveloperTestButton = import.meta.env.DEV && __ATLAS_DEV_TESTING__
     ? lazy(() => import('@/dev/testing/DeveloperTestButton'))
@@ -81,6 +82,7 @@ export function Settings() {
     const { user, signOut, isSupabaseConfigured, updateUser } = useAuth()
     const { syncState, pendingCount, lastSyncTime, sync, isSyncing, isOnline } = useSyncStatus()
     const { theme, setTheme, style, setStyle } = useTheme()
+    const { preference: navigationRailPreference, setPreference: setNavigationRailPreference } = useNavigationRailDisplay()
     const { features, updateSettings, refreshFeatures, workspaceName, isLocked, isLocalMode, isDemoMode, isHybridMode, hasFeature, hasCapability, planCapabilities } = useWorkspace()
     const { streamUrl, status: kdsStatus, startStream } = useKdsStream(true)
 
@@ -2012,6 +2014,49 @@ export function Settings() {
                                         </span>
                                     </div>
                                 </div>
+
+                                {!isMobile() && (
+                                    <div className="flex flex-col gap-2 border-t border-border/50 pt-4">
+                                        <div className="space-y-1">
+                                            <Label>{t('settings.navigationRail.title')}</Label>
+                                            <p className="text-sm text-muted-foreground">
+                                                {t('settings.navigationRail.description')}
+                                            </p>
+                                        </div>
+                                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="group" aria-label={t('settings.navigationRail.title')}>
+                                            <Button
+                                                variant={navigationRailPreference === 'expanded' ? 'default' : 'outline'}
+                                                className="flex min-h-11 items-center justify-center gap-2 whitespace-normal"
+                                                allowViewer={true}
+                                                aria-pressed={navigationRailPreference === 'expanded'}
+                                                onClick={() => setNavigationRailPreference('expanded')}
+                                            >
+                                                <PanelLeftOpen className="h-4 w-4 shrink-0" />
+                                                {t('nav.expanded')}
+                                            </Button>
+                                            <Button
+                                                variant={navigationRailPreference === 'expand-on-hover' ? 'default' : 'outline'}
+                                                className="flex min-h-11 items-center justify-center gap-2 whitespace-normal"
+                                                allowViewer={true}
+                                                aria-pressed={navigationRailPreference === 'expand-on-hover'}
+                                                onClick={() => setNavigationRailPreference('expand-on-hover')}
+                                            >
+                                                <PanelRightOpen className="h-4 w-4 shrink-0" />
+                                                {t('nav.expandOnHover')}
+                                            </Button>
+                                            <Button
+                                                variant={navigationRailPreference === 'closed' ? 'default' : 'outline'}
+                                                className="flex min-h-11 items-center justify-center gap-2 whitespace-normal"
+                                                allowViewer={true}
+                                                aria-pressed={navigationRailPreference === 'closed'}
+                                                onClick={() => setNavigationRailPreference('closed')}
+                                            >
+                                                <PanelLeftClose className="h-4 w-4 shrink-0" />
+                                                {t('nav.closed')}
+                                            </Button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </CardContent>
                     </Card>

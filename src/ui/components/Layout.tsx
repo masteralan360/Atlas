@@ -21,6 +21,7 @@ import {
   useReorderTransferRules
 } from '@/local-db'
 import { formatCurrency } from '@/lib/utils'
+import { getLanguageDirection } from '@/lib/i18nRouting'
 import { useWorkspace } from '@/workspace'
 import { isDemoWorkspace } from '@/demo'
 import { useWorkspacePermissions } from '@/permissions'
@@ -59,6 +60,7 @@ import {
   NAVIGATION_RAIL_WIDTH
 } from '@/ui/navigation/navigationRail'
 import { NavigationRail } from '@/ui/navigation/NavigationRailView'
+import { useNavigationRailDisplay } from '@/ui/navigation/NavigationRailDisplayContext'
 import { launcherSectionOrder, type NavigationSectionKey } from '@/ui/navigation/navigationMeta'
 import {
   createSidebarSectionOrderStorageValue,
@@ -292,6 +294,7 @@ function prefetchRoute(href: string) {
 
 export function Layout({ children }: LayoutProps) {
   const [location, setLocation] = useLocation()
+  const { isEnabled: isNavigationRailPreferenceEnabled } = useNavigationRailDisplay()
   const { user, signOut, session } = useAuth()
   const clinicalRegistryType = useClinicalRegistryType(user?.workspaceId)
   const {
@@ -422,8 +425,8 @@ export function Layout({ children }: LayoutProps) {
   const [isSidebarHeaderCompact, setIsSidebarHeaderCompact] = useState(false)
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1440))
   const desktopStickyBarCollapseProgress = isTauri && viewportWidth >= 1024 ? desktopStickyBarProgress : 0
-  const showNavigationRail = isNavigationRailEnabled(viewportWidth) && isTauri && !isMobile()
-  const navigationRailIsRtl = i18n.dir() === 'rtl'
+  const showNavigationRail = isNavigationRailEnabled(viewportWidth, isNavigationRailPreferenceEnabled) && isTauri && !isMobile()
+  const navigationRailIsRtl = getLanguageDirection(i18n.resolvedLanguage || i18n.language) === 'rtl'
   const sidebarTopCornerMask = `radial-gradient(circle at ${navigationRailIsRtl ? 'left' : 'right'} bottom, transparent ${NAVIGATION_RAIL_CORNER_RADIUS}px, black ${NAVIGATION_RAIL_CORNER_RADIUS + 0.5}px)`
   const sidebarBottomCornerMask = `radial-gradient(circle at ${navigationRailIsRtl ? 'left' : 'right'} top, transparent ${NAVIGATION_RAIL_CORNER_RADIUS}px, black ${NAVIGATION_RAIL_CORNER_RADIUS + 0.5}px)`
   const showSidebarThemeSelector = !isTauri && !isMobile() && viewportWidth >= 1024
@@ -2929,7 +2932,7 @@ export function Layout({ children }: LayoutProps) {
                       holdLabel={t('common.holdToRefreshLatestVersion', {
                         defaultValue: 'Hold to refresh the latest version'
                       })}
-                      isRtl={i18n.dir() === 'rtl'}
+                      isRtl={navigationRailIsRtl}
                       onComplete={() => {
                         triggerHaptic('success')
                         refreshToLatestDeployment()

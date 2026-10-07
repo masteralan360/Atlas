@@ -16,6 +16,7 @@ import { useWorkspaceUsageMeter } from './workspaceUsageMeter'
 import { useNavigationHistory } from '@/hooks/useNavigationHistory'
 import { WorkspaceResourceSyncPill } from './WorkspaceResourceSyncPill'
 import { getLanguageDirection } from '@/lib/i18nRouting'
+import { useNavigationRailDisplay } from '@/ui/navigation/NavigationRailDisplayContext'
 
 export function TitleBar() {
     const [isMaximized, setIsMaximized] = useState(false)
@@ -24,9 +25,10 @@ export function TitleBar() {
     const { workspaceName, branchInfo, pendingUpdate, isFullscreen, features, isLocalMode, isDemoMode, activeWorkspace } = useWorkspace()
     const { theme, setTheme, style } = useTheme()
     const { t, i18n } = useTranslation()
+    const { isEnabled: isNavigationRailPreferenceEnabled } = useNavigationRailDisplay()
     // @ts-ignore
     const isTauri = !!window.__TAURI_INTERNALS__
-    const showNavigationRail = isNavigationRailEnabled(viewportWidth)
+    const showNavigationRail = isNavigationRailEnabled(viewportWidth, isNavigationRailPreferenceEnabled)
     const isRtl = getLanguageDirection(i18n.resolvedLanguage || i18n.language) === 'rtl'
     const subscriptionWarning = useSubscriptionExpiryWarning(
         isTauri && !isDemoMode ? features.subscription_expires_at : null

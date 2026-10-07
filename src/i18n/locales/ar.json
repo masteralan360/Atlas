@@ -809,6 +809,7 @@
     "sidebarControl": "التحكم في الشريط الجانبي",
     "expanded": "موسّع",
     "expandOnHover": "التوسيع عند تمرير المؤشر",
+    "closed": "مغلق",
     "sidebarCustomization": {
       "customize": "تخصيص الشريط الجانبي",
       "title": "تخصيص أقسام الشريط الجانبي",
@@ -2899,6 +2900,10 @@
     },
     "appearance": "المظهر",
     "appearanceDesc": "تخصيص شكل التطبيق",
+    "navigationRail": {
+      "title": "شريط التنقل",
+      "description": "اختر ما إذا كان شريط التنقل سيبقى موسّعًا أو يتوسع عند تمرير المؤشر أو يظل مغلقًا."
+    },
     "language": "اللغة",
     "languageDesc": "اختر لغتك المفضلة",
     "monthDisplay": {

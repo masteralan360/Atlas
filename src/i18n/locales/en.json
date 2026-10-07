@@ -816,6 +816,7 @@
     "sidebarControl": "Sidebar control",
     "expanded": "Expanded",
     "expandOnHover": "Expand on hover",
+    "closed": "Closed",
     "sidebarCustomization": {
       "customize": "Customize sidebar",
       "title": "Customize sidebar sections",
@@ -4431,6 +4432,10 @@
     },
     "appearance": "Appearance",
     "appearanceDesc": "Customize the look and feel of the application",
+    "navigationRail": {
+      "title": "Navigation rail",
+      "description": "Choose whether the navigation rail stays expanded, expands when hovered, or stays closed."
+    },
     "language": "Language",
     "languageDesc": "Select your preferred language",
     "monthDisplay": {

@@ -2,7 +2,9 @@ Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain En
 
 Remove Subscription Expiry and make billing's payment configuration authoritative
 
-User Plan in Billing
+Partner Account Statement Back
+
+User Plan Control in Billing
 
 Remove PressAndHold in Billing and make it auto-open
 
