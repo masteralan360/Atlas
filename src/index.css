@@ -145,6 +145,15 @@ html[lang] pre {
     @apply bg-background text-foreground;
   }
 
+  /* iOS WebKit can make form controls uneditable when an ancestor disables selection. */
+  body input,
+  body textarea,
+  body select,
+  body [contenteditable]:not([contenteditable="false"]) {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
   /* =========================================
      MODERN THEME (Porcelain & Midnight)
      ========================================= */
