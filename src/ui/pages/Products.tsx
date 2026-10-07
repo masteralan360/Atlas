@@ -33,7 +33,6 @@ import {
     type ProductImportSubmissionResult,
     type ProductImportValidationContext
 } from '@/lib/productImport'
-import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { useWorkspace } from '@/workspace'
 import { useHideCosts } from '@/permissions'
 import { hasValidProductCost } from '@/lib/productCost'
@@ -55,6 +54,7 @@ import { printPdfBlob } from '@/services/pdfPrintService'
 import { PriceBookManagementDialog } from '@/ui/components/PriceBookManagementDialog'
 import { ProductImportPreviewModal } from '@/ui/components/ProductImportPreviewModal'
 import { ProductCategoryManagerDialog } from '@/ui/components/products/ProductCategoryManagerDialog'
+import { ProductAvatar } from '@/ui/components/ProductAvatars'
 import { useProductQuantityPresentation } from '@/ui/hooks/useProductQuantityFormatter'
 import {
     Button,
@@ -241,6 +241,7 @@ export function Products() {
     const hideCosts = useHideCosts()
     const { features, branchInfo, hasCapability, hasFeature, workspaceName } = useWorkspace()
     const { t, i18n } = useTranslation()
+    const productImagePreviewSide = i18n.dir() === 'rtl' ? 'left' : 'right'
     const { toast } = useToast()
     const { isAccessKeyHeld } = useUiAccess()
     const [, navigate] = useLocation()
@@ -579,8 +580,6 @@ export function Products() {
                 ?? ''
         })
     }, [cloneTargets, selectedCloneTargetWorkspaceId])
-
-    const getDisplayImageUrl = (url?: string) => getProductImageDisplayUrl(url)
 
     const getCategoryName = useCallback((id?: string | null) => {
         if (!id) return t('categories.noCategory')
@@ -1692,13 +1691,14 @@ export function Products() {
                                                                                     </Tooltip>
                                                                                 </TooltipProvider>
                                                                             )}
-                                                                            <div className={cn('flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-[1.25rem] border border-border/50 bg-muted/30', isLinkedVariant && 'h-14 w-14 rounded-2xl')}>
-                                                                                {product.imageUrl ? (
-                                                                                    <img src={getDisplayImageUrl(product.imageUrl)} alt="" className="h-full w-full object-cover" />
-                                                                                ) : (
-                                                                                    <Package className="h-8 w-8 text-muted-foreground/20" />
-                                                                                )}
-                                                                            </div>
+                                                                            <ProductAvatar
+                                                                                productName={product.name}
+                                                                                imageUrl={product.imageUrl}
+                                                                                showImagePreviewOnHover
+                                                                                previewSide={productImagePreviewSide}
+                                                                                className={cn('h-16 w-16 rounded-[1.25rem] border border-border/50 bg-muted/30', isLinkedVariant && 'h-14 w-14 rounded-2xl')}
+                                                                                fallbackIconClassName="h-8 w-8 text-muted-foreground/20"
+                                                                            />
                                                                             <div className="flex min-w-0 flex-1 flex-col justify-center">
                                                                                 <div className={cn('text-[10px] font-mono font-bold uppercase tracking-wider text-muted-foreground', isLinkedVariant && 'text-[9px]')}>{product.sku}</div>
                                                                                 <div className={cn('truncate text-base font-black leading-tight text-foreground', isLinkedVariant && 'text-sm')}>{product.name}</div>
@@ -1832,13 +1832,15 @@ export function Products() {
                                                                 </div>
                                                             )}
                                                             <div className="relative aspect-square overflow-hidden rounded-2xl border border-border/20 bg-muted/30">
-                                                                {product.imageUrl ? (
-                                                                    <img src={getDisplayImageUrl(product.imageUrl)} alt={product.name} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110" />
-                                                                ) : (
-                                                                    <div className="flex h-full items-center justify-center">
-                                                                        <Package className="h-12 w-12 text-muted-foreground/10" />
-                                                                    </div>
-                                                                )}
+                                                                <ProductAvatar
+                                                                    productName={product.name}
+                                                                    imageUrl={product.imageUrl}
+                                                                    showImagePreviewOnHover
+                                                                    previewSide={productImagePreviewSide}
+                                                                    className="h-full w-full rounded-none border-0 bg-transparent"
+                                                                    imageClassName="transition-transform duration-500 group-hover:scale-110"
+                                                                    fallbackIconClassName="h-12 w-12 text-muted-foreground/10"
+                                                                />
                                                                 {!isService(product) && <div className={cn(
                                                                     'absolute right-2 top-2 rounded-lg px-2 py-1 text-[10px] font-black uppercase tracking-tighter shadow-sm',
                                                                     product.quantity <= product.minStockLevel ? 'bg-amber-500 text-white' : 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-600'
@@ -2066,13 +2068,14 @@ export function Products() {
                                                                 </TableCell>
                                                                 <TableCell className={cn('relative', isVariant && 'pl-9')}>
                                                                     {isVariant && <span aria-hidden="true" className={cn('pointer-events-none absolute start-3 top-0 w-4 border-b border-s border-border/60', isLastVariant ? 'h-1/2' : 'bottom-0')} />}
-                                                                    <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg bg-muted">
-                                                                        {product.imageUrl ? (
-                                                                            <img src={getDisplayImageUrl(product.imageUrl)} alt={product.name} className="h-full w-full object-cover" />
-                                                                        ) : (
-                                                                            <Package className="h-5 w-5 text-muted-foreground/30" />
-                                                                        )}
-                                                                    </div>
+                                                                    <ProductAvatar
+                                                                        productName={product.name}
+                                                                        imageUrl={product.imageUrl}
+                                                                        showImagePreviewOnHover
+                                                                        previewSide={productImagePreviewSide}
+                                                                        className="h-10 w-10 rounded-lg border-0 bg-muted"
+                                                                        fallbackIconClassName="h-5 w-5 text-muted-foreground/30"
+                                                                    />
                                                                 </TableCell>
                                                                 <TableCell className="font-mono text-sm">{product.sku}</TableCell>
                                                                 <TableCell className="font-medium"><div className="flex items-center gap-2"><span>{product.name}</span>{isService(product) && <span className="inline-flex rounded-md border border-violet-500/25 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-300">{t('services.badge')}</span>}{isPrimary && <span className="inline-flex rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-primary">{t('products.variants.primary', { defaultValue: 'Primary' })}</span>}{isVariant && <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground"><GitBranch className="h-3 w-3" />{t('products.variants.variant', { defaultValue: 'Variant' })}</span>}</div></TableCell>

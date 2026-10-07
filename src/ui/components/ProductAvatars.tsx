@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Package } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/components/ui/tooltip'
 
 export type ProductMosaicItem = {
     productId: string
@@ -70,19 +71,39 @@ export function ProductMosaic({ items }: { items: ProductMosaicItem[] }) {
 
 export function ProductAvatar({
     productName,
-    imageUrl
+    imageUrl,
+    className,
+    imageClassName,
+    fallbackIconClassName,
+    showImagePreviewOnHover = false,
+    previewSide = 'right'
 }: {
     productName: string
     imageUrl?: string | null
+    className?: string
+    imageClassName?: string
+    fallbackIconClassName?: string
+    showImagePreviewOnHover?: boolean
+    previewSide?: 'left' | 'right'
 }) {
     const [imageFailed, setImageFailed] = useState(false)
+    const [collisionBoundary, setCollisionBoundary] = useState<HTMLElement | null>(null)
+    const avatarRef = useRef<HTMLDivElement>(null)
     const imageSource = getProductImageSource(imageUrl)
     const hasImage = Boolean(imageSource && !imageFailed)
 
-    return (
+    useEffect(() => {
+        if (!showImagePreviewOnHover) return
+
+        const pageContent = avatarRef.current?.closest('main')
+        setCollisionBoundary(pageContent instanceof HTMLElement ? pageContent : null)
+    }, [showImagePreviewOnHover])
+
+    const avatar = (
         <div
-            className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted/40"
-            title={productName}
+            ref={avatarRef}
+            className={cn('relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted/40', className)}
+            title={showImagePreviewOnHover && hasImage ? undefined : productName}
             aria-label={productName}
         >
             {hasImage ? (
@@ -91,12 +112,40 @@ export function ProductAvatar({
                     alt={productName}
                     loading="lazy"
                     decoding="async"
-                    className="h-full w-full object-cover"
+                    className={cn('h-full w-full object-cover', imageClassName)}
                     onError={() => setImageFailed(true)}
                 />
             ) : (
-                <Package className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                <Package className={cn('h-3.5 w-3.5 text-muted-foreground', fallbackIconClassName)} aria-hidden="true" />
             )}
         </div>
+    )
+
+    if (!showImagePreviewOnHover || !hasImage || !imageSource) return avatar
+
+    return (
+        <TooltipProvider delayDuration={250}>
+            <Tooltip>
+                <TooltipTrigger asChild>{avatar}</TooltipTrigger>
+                <TooltipContent
+                    side={previewSide}
+                    sideOffset={8}
+                    collisionBoundary={collisionBoundary ?? 'clippingAncestors'}
+                    collisionPadding={12}
+                    className="overflow-visible rounded-none border-0 bg-transparent p-0 shadow-none"
+                >
+                    <div className="overflow-hidden rounded-xl border border-border bg-popover p-1 shadow-xl">
+                        <img
+                            src={imageSource}
+                            alt={productName}
+                            loading="lazy"
+                            decoding="async"
+                            className="h-52 w-52 rounded-lg object-cover"
+                            onError={() => setImageFailed(true)}
+                        />
+                    </div>
+                </TooltipContent>
+            </Tooltip>
+        </TooltipProvider>
     )
 }
