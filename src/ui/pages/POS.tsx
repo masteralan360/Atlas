@@ -3547,7 +3547,6 @@ export function POS() {
                                 hasMinimumSellingPriceViolation={hasMinimumSellingPriceViolation}
                                 convertPrice={convertPrice}
                                 openPriceEdit={openPriceEdit}
-                                isAdmin={isAdmin}
                                 isModifyPriceHidden={isModifyPriceHidden}
                                 clearNegotiatedPrice={clearNegotiatedPrice}
                                 discountValue={discountValue}
@@ -5982,7 +5981,6 @@ interface MobileCartProps {
     convertPrice: (amount: number, from: CurrencyCode, to: CurrencyCode) => number
     openPriceEdit: (item: CartItem) => void
     clearNegotiatedPrice: (item: CartItem) => void
-    isAdmin: boolean
     isModifyPriceHidden: boolean
     discountValue: string
     setDiscountValue: (val: string) => void
@@ -6006,7 +6004,7 @@ function MobileCart({
     canPreprintReceipt, handlePreprintReceipt, isPreprinting, isLoadingPreprintTemplate,
     getDisplayImageUrl, products, showCartStorageLabels, getCartStorageName, fallbackStorageId,
     getCartMinimumPriceViolation, hasMinimumSellingPriceViolation, convertPrice, openPriceEdit,
-    clearNegotiatedPrice, isAdmin, isModifyPriceHidden,
+    clearNegotiatedPrice, isModifyPriceHidden,
     discountValue, setDiscountValue, discountType, setDiscountType,
     hasTrulyMissingRates, hasLoadingRates, isActivitiesCheckout, t,
     setDynamicUnitModal, setExactQuantity, unitRegistry,
