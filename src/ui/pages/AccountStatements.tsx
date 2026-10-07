@@ -34,8 +34,9 @@ import {
     type PartnerAccountStatementTemplateConfiguration
 } from '@/lib/partnerAccountStatementTemplates'
 import {
-    buildPartnerAccountStatementLedger,
-    type PartnerAccountStatementCurrencyLedger,
+  buildPartnerAccountStatementLedger,
+  createPartnerAccountStatementPeriod,
+  type PartnerAccountStatementCurrencyLedger,
     type PartnerAccountStatementEntry,
     type PartnerAccountStatementEntryKind,
     type PartnerAccountStatementPeriod
@@ -46,7 +47,6 @@ import {
     getPartnerAccountStatementEntryDescription,
     getPartnerAccountStatementEntryDetail
 } from '@/lib/partnerAccountStatementPresentation'
-import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { getLoanDetailsPath } from '@/lib/loanPresentation'
 import { formatProductQuantity } from '@/lib/productUnitPresentation'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
@@ -463,28 +463,7 @@ export function AccountStatements() {
     }, [urlPartnerSelection])
 
     const statementPeriod = useMemo<PartnerAccountStatementPeriod>(() => {
-        if (dateRange === 'custom') {
-            return {
-                type: 'custom',
-                start: customDates.start || undefined,
-                end: customDates.end || undefined
-            }
-        }
-        if (dateRange === 'allTime') return { type: 'allTime' }
-
-        const { start, end } = getDateRangeBounds(dateRange, customDates)
-        if (dateRange === 'yesterday') {
-            return {
-                type: 'custom',
-                start: start?.toISOString(),
-                end: end ? new Date(end.getTime() - 1).toISOString() : undefined
-            }
-        }
-        return {
-            type: dateRange,
-            start: start?.toISOString(),
-            end: end ? new Date(end.getTime() - 1).toISOString() : undefined
-        }
+        return createPartnerAccountStatementPeriod(dateRange, customDates)
     }, [customDates, dateRange])
     const loadCustomTemplates = useCallback(async () => {
         if (!workspaceId || (!isLocalMode && !isSupabaseConfigured)) {

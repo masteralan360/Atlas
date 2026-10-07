@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   db, useAgents, useAgentProductCommissionEntries, useBusinessPartner, useLoans, usePurchaseOrders,
-  useSales, useSalesOrders, useSalesOrderAgentAssignments, useSalesOrderReturnsForWorkspace,
+  useAgentCommissionEntries, useSales, useSalesOrders, useSalesOrderAgentAssignments, useSalesOrderReturnsForWorkspace,
   useSalesOrderReturnItemsForWorkspace
 } from '@/local-db'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
@@ -18,6 +18,7 @@ export function usePartnerProductMovements(workspaceId: string | undefined, part
   const partnerRecord = useBusinessPartner(partnerId || undefined)
   const agents = useAgents(workspaceId)
   const commissions = useAgentProductCommissionEntries(workspaceId)
+  const commissionEntries = useAgentCommissionEntries(workspaceId)
   const assignments = useSalesOrderAgentAssignments(workspaceId)
   // Keep the same source-level view-own visibility as the existing statement.
   const salesOrders = useSalesOrders(workspaceId)
@@ -58,8 +59,8 @@ export function usePartnerProductMovements(workspaceId: string | undefined, part
   const partner = partnerRecord && partnerRecord.workspaceId === workspaceId && !partnerRecord.isDeleted ? partnerRecord : undefined
   const statementData = useMemo<PartnerProductMovementsData | null>(() => partner && workspaceId && records && storageAccess.isReady !== false ? {
     workspaceId, partnerId: partner.id, agentIds: agents.filter(agent => !agent.isDeleted && agent.agentType === 'field_agent' && agent.businessPartnerId === partner.id).map(agent => agent.id),
-    period, salesOrders, purchaseOrders, commissions, assignments, orderReturns, orderReturnItems, loans, sales, ...records, canAccessStorage: storageAccess.canAccessStorage
-  } : null, [partner, workspaceId, records, agents, period, salesOrders, purchaseOrders, commissions, assignments, orderReturns, orderReturnItems, loans, sales, storageAccess])
+    period, salesOrders, purchaseOrders, commissions, commissionEntries, assignments, orderReturns, orderReturnItems, loans, sales, ...records, canAccessStorage: storageAccess.canAccessStorage
+  } : null, [partner, workspaceId, records, agents, period, salesOrders, purchaseOrders, commissions, commissionEntries, assignments, orderReturns, orderReturnItems, loans, sales, storageAccess])
   return {
     partner, statementData,
     isRefreshing: !!partnerId && (!records || storageAccess.isReady === false || !!refreshKey && (refresh.key !== refreshKey || refresh.status === 'loading')),

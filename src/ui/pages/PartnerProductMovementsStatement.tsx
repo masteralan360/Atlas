@@ -27,10 +27,9 @@ import {
     type PartnerProductMovementsTemplateConfiguration
 } from '@/lib/partnerProductMovementsTemplates'
 import { buildPartnerProductMovements } from '@/lib/partnerProductMovements'
-import type { PartnerAccountStatementPeriod } from '@/lib/partnerAccountStatement'
+import { createPartnerAccountStatementPeriod, type PartnerAccountStatementPeriod } from '@/lib/partnerAccountStatement'
 import { PartnerProductMovementsTable } from '@/ui/components/crm/PartnerProductMovementsTable'
 import { PARTNER_PRODUCT_MOVEMENTS_FRESHNESS_TABLE_NAMES } from '@/lib/partnerProductMovementsLiveData'
-import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import type { CustomTemplateLayout } from '@/lib/printPreviewEditorStore'
 import { usePartnerProductMovements } from '@/hooks/usePartnerProductMovements'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
@@ -98,21 +97,7 @@ export function PartnerProductMovementsStatement() {
     }, [urlPartnerSelection])
 
     const statementPeriod = useMemo<PartnerAccountStatementPeriod>(() => {
-        if (dateRange === 'allTime') return { type: 'allTime' }
-
-        const { start, end } = getDateRangeBounds(dateRange, customDates)
-        if (dateRange === 'yesterday') {
-            return {
-                type: 'custom',
-                start: start?.toISOString(),
-                end: end ? new Date(end.getTime() - 1).toISOString() : undefined
-            }
-        }
-        return {
-            type: dateRange,
-            start: start?.toISOString(),
-            end: end ? new Date(end.getTime() - 1).toISOString() : undefined
-        }
+        return createPartnerAccountStatementPeriod(dateRange, customDates)
     }, [customDates, dateRange])
     const loadCustomTemplates = useCallback(async (signal?: AbortSignal) => {
         if (!workspaceId || (!isLocalMode && !isSupabaseConfigured)) {

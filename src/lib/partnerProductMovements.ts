@@ -1,11 +1,12 @@
 import type {
-  AgentProductCommissionEntry, InventoryTransaction, Loan, OrderReturn, OrderReturnItem,
+  AgentCommissionEntry, AgentProductCommissionEntry, InventoryTransaction, Loan, OrderReturn, OrderReturnItem,
   Product, PurchaseOrder, Sale, SaleItem, SaleProductExchange, SaleReturn, SaleReturnItem,
   SalesOrder, SalesOrderAgentAssignment
 } from '@/local-db/models'
 import { getOrderLineFulfilledQuantity, getOrderLineInventoryQuantity } from '@/lib/orderLineItems'
 import { roundQuantity } from '@/lib/quantity'
-import type { PartnerAccountStatementPeriod } from '@/lib/partnerAccountStatement'
+import { sumTrackedCommissionEntriesByCurrency, type PartnerAccountStatementPeriod } from '@/lib/partnerAccountStatement'
+import { getCommissionEntryMode } from '@/local-db/commissionMode'
 import { getLoanDetailsPath } from '@/lib/loanPresentation'
 
 export type ProductMovementDirection = 'sold' | 'purchased'
@@ -34,6 +35,7 @@ export type PartnerProductMovementsData = {
   purchaseOrders: PurchaseOrder[]
   assignments: SalesOrderAgentAssignment[]
   commissions: AgentProductCommissionEntry[]
+  commissionEntries?: AgentCommissionEntry[]
   orderReturns: OrderReturn[]
   orderReturnItems: OrderReturnItem[]
   loans: Loan[]
@@ -71,6 +73,8 @@ export function buildPartnerProductMovements(data: PartnerProductMovementsData, 
   const canAccessStorage = data.canAccessStorage || (() => true)
   const agentIds = new Set(data.agentIds)
   const commissions = unique(active(data.commissions)).filter(row => agentIds.has(row.agentId))
+  const trackedCommissionEntries = unique(active(data.commissionEntries || []))
+    .filter(row => agentIds.has(row.agentId) && getCommissionEntryMode(row) === 'tracked')
   const attributedOrderIds = new Set([
     ...active(data.assignments).filter(row => agentIds.has(row.agentId)).map(row => row.orderId),
     ...commissions.map(row => row.orderId)
@@ -232,6 +236,11 @@ export function buildPartnerProductMovements(data: PartnerProductMovementsData, 
     quantities.set(key, total)
     if (row.totalProductCommission !== null) amounts.set(row.currency, roundQuantity((amounts.get(row.currency) || 0) + row.totalProductCommission))
   }
+  const hasTrackedCommissionHistory = trackedCommissionEntries.length > 0
+    || commissions.some(entry => getCommissionEntryMode(entry) === 'tracked')
+  const trackedCommissionTotals = hasTrackedCommissionHistory
+    ? sumTrackedCommissionEntriesByCurrency(trackedCommissionEntries, data.agentIds, data.period)
+    : null
   const groups = new Map<string, PartnerProductMovement>()
   if (accumulate) for (const row of filtered) {
     const key = JSON.stringify([row.productId, row.unit, row.direction, row.currency, row.commissionPerProduct, row.kind === 'bonus'])
@@ -245,7 +254,9 @@ export function buildPartnerProductMovements(data: PartnerProductMovementsData, 
   }
   return {
     entries: accumulate ? [...groups.values()] : filtered,
-    quantityTotals: [...quantities.values()], commissionTotals: [...amounts].map(([currency, amount]) => ({ currency, amount })),
+    quantityTotals: [...quantities.values()], commissionTotals: trackedCommissionTotals
+      ? Object.entries(trackedCommissionTotals).map(([currency, amount]) => ({ currency, amount }))
+      : [...amounts].map(([currency, amount]) => ({ currency, amount })),
     undatedCount, hasCommission: filtered.some(row => row.commissionPerProduct !== null)
   }
 }

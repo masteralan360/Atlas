@@ -6,7 +6,7 @@ import {
 } from '@/workspace/workspaceDataFreshness'
 
 export const PARTNER_PRODUCT_MOVEMENTS_LIVE_TABLE_NAMES = [
-  'business_partners', 'agents', 'sales_order_agent_assignments', 'agent_product_commission_entries',
+  'business_partners', 'agents', 'sales_order_agent_assignments', 'agent_product_commission_entries', 'agent_commission_entries',
   'sales_orders', 'order_returns', 'order_return_items', 'purchase_orders', 'loans',
   'products', 'inventory_transactions'
 ] as const

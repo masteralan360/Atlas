@@ -1,16 +1,21 @@
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide
 
+#
 Remove Subscription Expiry and make billing's payment configuration authoritative
 
 Partner Account Statement Back
 
 User Plan Control in Billing
 
-Remove PressAndHold in Billing and make it auto-open
+Make Workspace Payment Invoices
+
+#
 
 Maintenence Mode
 
-Make Workspace Payment Invoices
+prompt manager with admin, staff options
+
+Maximize the partner account statement and product movement
 
 purchase order error, order_payment_source_not_found
 
@@ -37,7 +42,6 @@ Fix the Error in Supabase Logs
 
 Shipped Point Makes Sale Order
 Allow Shipped to be cancelled
-Make Maintenence Mode servier-side
 
 Remake PrintPreviewEditorPage
 

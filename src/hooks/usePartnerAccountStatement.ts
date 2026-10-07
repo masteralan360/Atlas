@@ -23,7 +23,7 @@ import {
   useSales,
   useSalesOrders
 } from '@/local-db'
-import { isPayableCommissionEntry } from '@/local-db/commissionMode'
+import { getCommissionEntryMode, isPayableCommissionEntry } from '@/local-db/commissionMode'
 import type { PurchaseOrder, Sale, SalesOrder } from '@/local-db/models'
 import { isDirectTransactionPartnerAccountEffect } from '@/local-db/payments'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
@@ -336,6 +336,15 @@ export function usePartnerAccountStatement(
     () => commissionEntries.filter((entry) => commissionAgentIds.has(entry.agentId) && isPayableCommissionEntry(entry)),
     [commissionAgentIds, commissionEntries]
   )
+  const trackedCommissionEntries = useMemo(() => {
+    const entries = commissionEntries.filter((entry) => (
+      commissionAgentIds.has(entry.agentId) && getCommissionEntryMode(entry) === 'tracked'
+    ))
+    const hasTrackedProductCommission = productCommissionEntries.some((entry) => (
+      commissionAgentIds.has(entry.agentId) && getCommissionEntryMode(entry) === 'tracked'
+    ))
+    return entries.length > 0 || hasTrackedProductCommission ? entries : undefined
+  }, [commissionAgentIds, commissionEntries, productCommissionEntries])
   const partnerInstallmentSales = useMemo(
     () => (partnerId ? installmentSales.filter((sale) => sale.customerBusinessPartnerId === partnerId) : []),
     [installmentSales, partnerId]
@@ -492,6 +501,7 @@ export function usePartnerAccountStatement(
       settlementTransactions,
       settlementOperations,
       agentCommissionEntries: salesAccountCommissionEntries,
+      trackedCommissionEntries,
       agentProductCommissionEntries: salesAccountProductCommissionEntries,
       marketplaceDeliveryProductCommissionOrderIds,
       deliveryLedgerEntries: merchantDeliveryEntries,
@@ -516,6 +526,7 @@ export function usePartnerAccountStatement(
     period,
     posSaleItemsBySaleId,
     salesAccountCommissionEntries,
+    trackedCommissionEntries,
     salesAccountProductCommissionEntries,
     salesOrders,
     sales,

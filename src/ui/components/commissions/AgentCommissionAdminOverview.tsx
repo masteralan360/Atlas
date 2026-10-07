@@ -24,6 +24,7 @@ import { formatCommissionPlanTerms, summarizeCommissionEntries } from './agentCo
 import { useCommissionAgentDirectory } from './useCommissionAgentDirectory'
 import { AgentCommissionSettlementDialog } from './AgentCommissionSettlementDialog'
 import { filterAgentCommissionPeriod } from './agentCommissionDateRange'
+import { createPartnerAccountStatementPeriod, sumTrackedCommissionEntriesByCurrency } from '@/lib/partnerAccountStatement'
 
 export function AgentCommissionAdminOverview({
     workspaceId,
@@ -43,6 +44,10 @@ export function AgentCommissionAdminOverview({
     const allEntries = useAgentCommissionEntries(workspaceId)
     const allAssignments = useSalesOrderAgentAssignments(workspaceId)
     const allSalesOrders = useSalesOrders(workspaceId)
+    const statementPeriod = useMemo(
+        () => createPartnerAccountStatementPeriod(dateRange, customDates),
+        [dateRange, customDates]
+    )
     const { entries, assignments, salesOrders, isScoped } = useMemo(
         () => filterAgentCommissionPeriod(allEntries, allAssignments, allSalesOrders, dateRange, customDates),
         [allEntries, allAssignments, allSalesOrders, dateRange, customDates],
@@ -51,7 +56,10 @@ export function AgentCommissionAdminOverview({
     const paymentObligations = usePaymentObligations(workspaceId)
     const [settlementAgentId, setSettlementAgentId] = useState<string | null>(null)
     const summary = useMemo(() => summarizeCommissionEntries(entries), [entries])
-    const trackedSummary = useMemo(() => summarizeCommissionEntries(entries, 'tracked'), [entries])
+    const trackedCommissionTotals = useMemo(
+        () => sumTrackedCommissionEntriesByCurrency(allEntries, undefined, statementPeriod),
+        [allEntries, statementPeriod]
+    )
     const currentAssignments = useMemo(
         () => assignments.filter((assignment) => !assignment.isDeleted && !assignment.unassignedAt),
         [assignments]
@@ -77,7 +85,10 @@ export function AgentCommissionAdminOverview({
             return {
                 entry,
                 summary: summarizeCommissionEntries(entries.filter((ledgerEntry) => ledgerEntry.agentId === entry.agent.id)),
-                trackedSummary: summarizeCommissionEntries(entries.filter((ledgerEntry) => ledgerEntry.agentId === entry.agent.id), 'tracked'),
+                trackedSummary: {
+                    ...summarizeCommissionEntries(entries.filter((ledgerEntry) => ledgerEntry.agentId === entry.agent.id), 'tracked'),
+                    earned: sumTrackedCommissionEntriesByCurrency(allEntries, [entry.agent.id], statementPeriod)
+                },
                 assignedOrders: agentOrders.length,
                 openOrders: agentOrders.filter((order) => order.status === 'draft' || order.status === 'pending').length,
                 cancelledOrders: agentOrders.filter((order) => order.status === 'cancelled').length,
@@ -88,7 +99,7 @@ export function AgentCommissionAdminOverview({
         })
         .filter((row) => (!isScoped && row.entry.membership) || row.summary.entryCount > 0 || row.trackedSummary.entryCount > 0 || row.assignedOrders > 0)
         .sort((left, right) => right.assignedOrders - left.assignedOrders || left.entry.name.localeCompare(right.entry.name)),
-    [assignedAssignments, directory.agents, entries, isScoped, salesOrderById])
+    [allEntries, assignedAssignments, directory.agents, entries, isScoped, salesOrderById, statementPeriod])
     const settlementByAgentId = useMemo(() => {
         const result = new Map<string, PaymentObligation>()
         paymentObligations
@@ -137,7 +148,7 @@ export function AgentCommissionAdminOverview({
                     <OverviewMetric
                         label={t('salesAgentCommissions.trackedTotal')}
                         icon={BadgeDollarSign}
-                        value={<CommissionCurrencyTotalsView totals={trackedSummary.earned} iqdPreference={iqdPreference} />}
+                        value={<CommissionCurrencyTotalsView totals={trackedCommissionTotals} iqdPreference={iqdPreference} />}
                     />
                     <OverviewMetric
                         label={t('salesAgentCommissions.recovered')}

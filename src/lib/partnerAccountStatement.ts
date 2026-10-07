@@ -15,7 +15,9 @@ import type {
   SalesOrder
 } from '@/local-db'
 import { formatDirectTransactionVoucherNumber } from '@/lib/directTransactionVoucher'
-import { isPayableCommissionEntry } from '@/local-db/commissionMode'
+import { getCommissionEntryMode, isPayableCommissionEntry } from '@/local-db/commissionMode'
+import type { DateRangeType } from '@/context/DateRangeContext'
+import { getDateRangeBounds, type DateRangeCustomDates } from '@/lib/dateRangeFilters'
 
 type StatementOrder = SalesOrder | PurchaseOrder
 
@@ -23,6 +25,21 @@ export type PartnerAccountStatementPeriod = {
   type: 'today' | 'month' | 'lastMonth' | 'allTime' | 'custom'
   start?: string
   end?: string
+}
+
+/** Converts the shared date-range selection into this statement's inclusive period shape. */
+export function createPartnerAccountStatementPeriod(
+  dateRange: DateRangeType,
+  customDates: DateRangeCustomDates
+): PartnerAccountStatementPeriod {
+  if (dateRange === 'allTime') return { type: 'allTime' }
+
+  const { start, end } = getDateRangeBounds(dateRange, customDates)
+  return {
+    type: dateRange === 'yesterday' ? 'custom' : dateRange,
+    start: start?.toISOString(),
+    end: end ? new Date(end.getTime() - 1).toISOString() : undefined
+  }
 }
 
 /** Immutable product-line snapshot used to present a financed POS sale. */
@@ -54,6 +71,8 @@ export type PartnerAccountStatementData = {
   isAgentCommissionStatement?: boolean
   /** Agent IDs linked to the selected partner, used to apply agent return-refund balance rules. */
   salesAccountAgentIds?: string[]
+  /** Tracked commission journal rows used for reporting totals, kept out of balances. */
+  trackedCommissionEntries?: AgentCommissionEntry[]
   salesOrders: SalesOrder[]
   salesOrderReturns?: OrderReturn[]
   salesOrderReturnItems?: OrderReturnItem[]
@@ -240,6 +259,31 @@ function isIncludedInPeriod(value: string, period: PartnerAccountStatementPeriod
   const start = periodStart(period)
   const end = periodEndExclusive(period)
   return (!start || date >= start) && (!end || date < end)
+}
+
+/**
+ * Uses the tracked commission journal for report totals. Report pages use the
+ * same event timestamp and period boundaries so their figures reconcile.
+ */
+export function sumTrackedCommissionEntriesByCurrency(
+  entries: readonly AgentCommissionEntry[],
+  agentIds: readonly string[] | undefined,
+  period: PartnerAccountStatementPeriod
+): Record<string, number> {
+  const includedAgentIds = agentIds ? new Set(agentIds) : null
+  const totals: Record<string, number> = {}
+
+  for (const entry of entries) {
+    if (entry.isDeleted || getCommissionEntryMode(entry) !== 'tracked') continue
+    if (includedAgentIds && !includedAgentIds.has(entry.agentId)) continue
+    if (!['accrual', 'reversal', 'adjustment'].includes(entry.kind)) continue
+    if (!isIncludedInPeriod(entry.occurredAt, period)) continue
+
+    const currency = entry.currency.toLowerCase()
+    totals[currency] = (totals[currency] || 0) + Number(entry.amount || 0)
+  }
+
+  return totals
 }
 
 function isBeforePeriod(value: string, period: PartnerAccountStatementPeriod) {
@@ -1248,6 +1292,13 @@ export function buildPartnerAccountStatementLedger(
     // commission rule applied, without treating it as another balance move.
     || (entry.kind === 'sales_order_return' && entry.itemName != null)
   ))
+  const trackedCommissionTotals = data.trackedCommissionEntries
+    ? sumTrackedCommissionEntriesByCurrency(
+      data.trackedCommissionEntries,
+      data.salesAccountAgentIds,
+      data.period
+    )
+    : null
 
   const entriesByCurrency = new Map<string, PartnerAccountStatementEntry[]>()
   for (const entry of entries) {
@@ -1255,6 +1306,9 @@ export function buildPartnerAccountStatementLedger(
     const current = entriesByCurrency.get(key) || []
     current.push(entry)
     entriesByCurrency.set(key, current)
+  }
+  for (const [currency, amount] of Object.entries(trackedCommissionTotals || {})) {
+    if (Math.abs(amount) > 0.000001 && !entriesByCurrency.has(currency)) entriesByCurrency.set(currency, [])
   }
 
   return Array.from(entriesByCurrency.entries())
@@ -1274,13 +1328,12 @@ export function buildPartnerAccountStatementLedger(
           else creditTotal += Math.abs(entry.delta)
           return { ...entry, runningBalance }
         })
-      // Product-commission snapshots are informational only, so they must
-      // never affect the partner balance. Their signed amounts are still
-      // summed for the statement footer: accruals add and return/reversal
-      // snapshots reduce the displayed total.
-      const productCommissionTotal = roundStatementAmount(
-        periodEntries.reduce((sum, entry) => sum + Number(entry.totalProductCommission ?? 0), 0)
-      )
+      // Tracked reports use the aggregate event ledger so removed or replaced
+      // item snapshots cannot make this total disagree with the other reports.
+      // Payable/legacy statements keep their historical snapshot presentation.
+      const productCommissionTotal = roundStatementAmount(trackedCommissionTotals
+        ? trackedCommissionTotals[currency] || 0
+        : periodEntries.reduce((sum, entry) => sum + Number(entry.totalProductCommission ?? 0), 0))
 
       return {
         currency,
@@ -1292,7 +1345,9 @@ export function buildPartnerAccountStatementLedger(
         entries: periodEntries
       }
     })
-    .filter((ledger) => ledger.entries.length > 0 || Math.abs(ledger.openingBalance) > 0.000001)
+    .filter((ledger) => ledger.entries.length > 0
+      || Math.abs(ledger.openingBalance) > 0.000001
+      || Math.abs(ledger.productCommissionTotal) > 0.000001)
     .sort((left, right) => left.currency.localeCompare(right.currency))
 }
 
