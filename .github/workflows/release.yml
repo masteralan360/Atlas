@@ -1,5 +1,5 @@
 name: Release
-run-name: Release ${{ github.event.inputs.schedule_id || github.ref_name }}
+run-name: Release ${{ github.event.inputs.schedule_id || github.event.inputs.release_tag || github.ref_name }}
 on:
   push:
     tags:
@@ -8,6 +8,11 @@ on:
     inputs:
       schedule_id:
         description: Scheduled release ID (set by the scheduled dispatcher)
+        required: false
+        type: string
+        default: ''
+      release_tag:
+        description: Existing release tag to rebuild when manually dispatching from a branch
         required: false
         type: string
         default: ''
@@ -56,6 +61,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref_name }}
 
       - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
@@ -72,6 +79,9 @@ jobs:
       - name: Android SDK setup (Android only)
         if: matrix.settings.platform == 'ubuntu-latest'
         uses: android-actions/setup-android@v3
+        with:
+          # The legacy `tools` package is no longer published by Google's SDK repository.
+          packages: platform-tools platforms;android-36 build-tools;34.0.0
 
       - name: Sync node version and setup cache
         uses: actions/setup-node@v4
@@ -240,7 +250,11 @@ jobs:
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
 
       - name: Build Windows
+        id: build-windows
         if: matrix.settings.platform == 'windows-latest'
+        # Keep the generated installers available for the recovery step below if
+        # the action fails while creating or uploading the GitHub release.
+        continue-on-error: true
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -254,8 +268,8 @@ jobs:
           VITE_R2_AUTH_TOKEN: ${{ secrets.VITE_R2_AUTH_TOKEN }}
           VITE_ENCRYPTION_KEY: ${{ secrets.VITE_ENCRYPTION_KEY }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Atlas ${{ github.ref_name }}"
+          tagName: ${{ github.event.inputs.release_tag || github.ref_name }}
+          releaseName: "Atlas ${{ github.event.inputs.release_tag || github.ref_name }}"
           includeUpdaterJson: true
           releaseBody: "See the assets to download this version and install."
 
@@ -270,6 +284,79 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+
+      - name: Recover Windows release upload
+        if: always() && matrix.settings.platform == 'windows-latest' && steps.build-windows.outcome == 'failure'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
+          RELEASE_TITLE: Atlas ${{ github.event.inputs.release_tag || github.ref_name }}
+        run: |
+          $bundleRoot = Join-Path $env:GITHUB_WORKSPACE 'src-tauri\target\release\bundle'
+          $assetPaths = @(
+            Get-ChildItem -LiteralPath (Join-Path $bundleRoot 'msi') -File -Filter '*.msi' -ErrorAction SilentlyContinue
+            Get-ChildItem -LiteralPath (Join-Path $bundleRoot 'msi') -File -Filter '*.msi.sig' -ErrorAction SilentlyContinue
+            Get-ChildItem -LiteralPath (Join-Path $bundleRoot 'nsis') -File -Filter '*.exe' -ErrorAction SilentlyContinue
+            Get-ChildItem -LiteralPath (Join-Path $bundleRoot 'nsis') -File -Filter '*.exe.sig' -ErrorAction SilentlyContinue
+          ) | ForEach-Object { $_.FullName }
+
+          if (-not ($assetPaths | Where-Object { $_.EndsWith('.msi') }) -or
+              -not ($assetPaths | Where-Object { $_.EndsWith('.exe') })) {
+            throw 'The Windows build did not produce both installer types; release recovery cannot continue.'
+          }
+
+          $latestJson = Join-Path $env:GITHUB_WORKSPACE 'latest.json'
+          if (Test-Path -LiteralPath $latestJson) {
+            $assetPaths += $latestJson
+          }
+
+          $releaseAvailable = $false
+          for ($attempt = 1; $attempt -le 5; $attempt++) {
+            gh release view $env:RELEASE_TAG *> $null
+            if ($LASTEXITCODE -eq 0) {
+              $releaseAvailable = $true
+              break
+            }
+
+            gh release create $env:RELEASE_TAG `
+              --verify-tag `
+              --title $env:RELEASE_TITLE `
+              --notes 'See the assets to download this version and install.'
+            if ($LASTEXITCODE -eq 0) {
+              $releaseAvailable = $true
+              break
+            }
+
+            if ($attempt -lt 5) {
+              Write-Host "Release creation attempt $attempt failed; retrying."
+              Start-Sleep -Seconds 5
+            }
+          }
+
+          if (-not $releaseAvailable) {
+            throw "Could not create or find GitHub release $env:RELEASE_TAG."
+          }
+
+          $assetsUploaded = $false
+          for ($attempt = 1; $attempt -le 5; $attempt++) {
+            gh release upload $env:RELEASE_TAG @assetPaths --clobber
+            if ($LASTEXITCODE -eq 0) {
+              $assetsUploaded = $true
+              break
+            }
+
+            if ($attempt -lt 5) {
+              Write-Host "Release asset upload attempt $attempt failed; retrying."
+              Start-Sleep -Seconds 5
+            }
+          }
+
+          if (-not $assetsUploaded) {
+            throw "Could not upload Windows assets to GitHub release $env:RELEASE_TAG."
+          }
+
+          Write-Host "Recovered Windows release assets for $env:RELEASE_TAG."
 
       - name: Build Android
         if: matrix.settings.platform == 'ubuntu-latest'
@@ -298,8 +385,10 @@ jobs:
             --ks-pass pass:${{ secrets.ANDROID_KEYSTORE_PASSWORD }} \
             --ks-key-alias ${{ secrets.ANDROID_KEY_ALIAS }} \
             --key-pass pass:${{ secrets.ANDROID_KEY_PASSWORD }} \
-            --out src-tauri/gen/android/app/build/outputs/apk/universal/release/Atlas_${{ github.ref_name }}.apk \
+            --out "src-tauri/gen/android/app/build/outputs/apk/universal/release/Atlas_${RELEASE_TAG}.apk" \
             "$unsigned_apk"
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
 
       - name: List APKs (Debug)
         if: matrix.settings.platform == 'ubuntu-latest'
@@ -312,10 +401,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            src-tauri/gen/android/app/build/outputs/apk/universal/release/Atlas_${{ github.ref_name }}.apk
+            src-tauri/gen/android/app/build/outputs/apk/universal/release/Atlas_${{ github.event.inputs.release_tag || github.ref_name }}.apk
             src-tauri/gen/android/app/build/outputs/apk/debug/*.apk
-          tag_name: ${{ github.ref_name }}
-          name: "Atlas ${{ github.ref_name }}"
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          name: "Atlas ${{ github.event.inputs.release_tag || github.ref_name }}"
           token: ${{ secrets.GITHUB_TOKEN }}
           fail_on_unmatched_files: false
 
