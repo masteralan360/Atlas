@@ -3548,6 +3548,7 @@ export function POS() {
                                 convertPrice={convertPrice}
                                 openPriceEdit={openPriceEdit}
                                 isAdmin={isAdmin}
+                                isModifyPriceHidden={isModifyPriceHidden}
                                 clearNegotiatedPrice={clearNegotiatedPrice}
                                 discountValue={discountValue}
                                 setDiscountValue={setDiscountValue}
@@ -5982,6 +5983,7 @@ interface MobileCartProps {
     openPriceEdit: (item: CartItem) => void
     clearNegotiatedPrice: (item: CartItem) => void
     isAdmin: boolean
+    isModifyPriceHidden: boolean
     discountValue: string
     setDiscountValue: (val: string) => void
     discountType: 'percent' | 'amount'
@@ -6004,7 +6006,7 @@ function MobileCart({
     canPreprintReceipt, handlePreprintReceipt, isPreprinting, isLoadingPreprintTemplate,
     getDisplayImageUrl, products, showCartStorageLabels, getCartStorageName, fallbackStorageId,
     getCartMinimumPriceViolation, hasMinimumSellingPriceViolation, convertPrice, openPriceEdit,
-    clearNegotiatedPrice, isAdmin,
+    clearNegotiatedPrice, isAdmin, isModifyPriceHidden,
     discountValue, setDiscountValue, discountType, setDiscountType,
     hasTrulyMissingRates, hasLoadingRates, isActivitiesCheckout, t,
     setDynamicUnitModal, setExactQuantity, unitRegistry,
@@ -6160,7 +6162,7 @@ function MobileCart({
                                                 </div>
                                                 <div className="text-primary font-black text-sm whitespace-nowrap flex items-center gap-1">
                                                     {formatCurrency(convertedUnitPrice * item.quantity, settlementCurr, features.iqd_display_preference)}
-                                                    {isAdmin && (
+                                                    {!isModifyPriceHidden && (
                                                         <button
                                                             onClick={() => openPriceEdit(item)}
                                                             className="p-1.5 rounded-lg bg-primary/10 text-primary border border-primary/20 transition-colors"
