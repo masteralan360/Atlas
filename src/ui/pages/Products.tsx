@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
@@ -389,6 +389,10 @@ export function Products() {
     const [isPriceBookDialogOpen, setIsPriceBookDialogOpen] = useState(false)
     const [adjustmentDialogOpen, setAdjustmentDialogOpen] = useState(false)
     const [selectedProductForStock, setSelectedProductForStock] = useState<string | undefined>()
+    const [heldStockActionProductId, setHeldStockActionProductId] = useState<string | null>(null)
+    const stockRowHoldTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const stockRowHoldOriginRef = useRef<{ productId: string; x: number; y: number } | null>(null)
+    const stockRowPointerTypeRef = useRef<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [isProductsExportOpen, setIsProductsExportOpen] = useState(false)
     const [isProductImportOpen, setIsProductImportOpen] = useState(false)
@@ -414,6 +418,41 @@ export function Products() {
     const [selectedCloneTargetStorageId, setSelectedCloneTargetStorageId] = useState('')
     const [isBranchCloning, setIsBranchCloning] = useState(false)
     const canCloneToBranch = canCloneProducts && cloneTargets.length > 0
+
+    const cancelStockRowHold = useCallback(() => {
+        if (stockRowHoldTimeoutRef.current) {
+            clearTimeout(stockRowHoldTimeoutRef.current)
+            stockRowHoldTimeoutRef.current = null
+        }
+        stockRowHoldOriginRef.current = null
+    }, [])
+
+    const startStockRowHold = useCallback((event: ReactPointerEvent<HTMLTableRowElement>, product: Product) => {
+        stockRowPointerTypeRef.current = event.pointerType
+        if (event.pointerType === 'mouse' || !canEdit || isService(product) || event.button !== 0) return
+
+        const target = event.target
+        if (target instanceof Element && target.closest('button, a, input, [role="checkbox"], [role="menuitem"]')) return
+
+        cancelStockRowHold()
+        if (heldStockActionProductId !== product.id) setHeldStockActionProductId(null)
+        stockRowHoldOriginRef.current = { productId: product.id, x: event.clientX, y: event.clientY }
+        stockRowHoldTimeoutRef.current = setTimeout(() => {
+            setHeldStockActionProductId(product.id)
+            stockRowHoldTimeoutRef.current = null
+            stockRowHoldOriginRef.current = null
+        }, 550)
+    }, [cancelStockRowHold, canEdit, heldStockActionProductId])
+
+    const moveStockRowHold = useCallback((event: ReactPointerEvent<HTMLTableRowElement>) => {
+        const origin = stockRowHoldOriginRef.current
+        if (!origin) return
+        if (Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > 10) cancelStockRowHold()
+    }, [cancelStockRowHold])
+
+    useEffect(() => () => {
+        if (stockRowHoldTimeoutRef.current) clearTimeout(stockRowHoldTimeoutRef.current)
+    }, [])
 
     useEffect(() => {
         let cancelled = false
@@ -1961,7 +2000,18 @@ export function Products() {
                                                 {tableProductRows.map(({ product, isPrimary, isVariant, hasVisibleVariants, isLastVariant }) => (
                                                     <ContextMenu key={product.id}>
                                                         <ContextMenuTrigger asChild>
-                                                            <TableRow className={cn(
+                                                            <TableRow
+                                                                onPointerDown={(event) => startStockRowHold(event, product)}
+                                                                onPointerMove={moveStockRowHold}
+                                                                onPointerUp={cancelStockRowHold}
+                                                                onPointerCancel={cancelStockRowHold}
+                                                                onContextMenu={(event) => {
+                                                                    if (stockRowPointerTypeRef.current !== 'mouse') {
+                                                                        event.preventDefault()
+                                                                        event.stopPropagation()
+                                                                    }
+                                                                }}
+                                                                className={cn(
                                                                 isProductSelectionMode && selectedProductIds.has(product.id) && 'bg-primary/5',
                                                                 isVariant && 'bg-primary/[0.02] hover:bg-primary/[0.05]',
                                                                 hasProductCostWarning(product) && 'bg-destructive/10 hover:bg-destructive/15'
@@ -2040,6 +2090,22 @@ export function Products() {
                                                                 {(canEdit || canDelete || user?.role === 'viewer') && (
                                                                     <TableCell className="text-right">
                                                                         <div className="flex justify-end gap-2">
+                                                                            {heldStockActionProductId === product.id && canEdit && !isService(product) && (
+                                                                                <Button
+                                                                                    type="button"
+                                                                                    variant="secondary"
+                                                                                    size="sm"
+                                                                                    className="h-9 gap-2 rounded-xl px-3 font-bold text-primary"
+                                                                                    onClick={() => {
+                                                                                        setSelectedProductForStock(product.id)
+                                                                                        setAdjustmentDialogOpen(true)
+                                                                                        setHeldStockActionProductId(null)
+                                                                                    }}
+                                                                                >
+                                                                                    <Boxes className="h-4 w-4" />
+                                                                                    {t('products.addStock', { defaultValue: 'Add Stock' })}
+                                                                                </Button>
+                                                                            )}
                                                                             <Button
                                                                                 variant="ghost"
                                                                                 size="icon"
