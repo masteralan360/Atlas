@@ -158,6 +158,8 @@ const MARKETPLACE_ORDER_SELECT = `
     confirmed_at,
     processing_at,
     shipped_at,
+    shipped_by,
+    shipped_by_name,
     delivered_at,
     delivered_by,
     delivered_by_name,
@@ -1042,7 +1044,9 @@ export function Ecommerce() {
             if (!salesOrder || salesOrder.isDeleted) {
                 toast({
                     title: t('common.error', { defaultValue: 'Error' }),
-                    description: 'The delivered sales order could not be loaded for collection.',
+                    description: t('ecommerce.salesOrderForCollectionUnavailable', {
+                        defaultValue: 'The sales order could not be loaded for collection.'
+                    }),
                     variant: 'destructive'
                 })
                 return
@@ -1235,18 +1239,19 @@ export function Ecommerce() {
                 }))
             }
 
-            const finalResult = results[results.length - 1]
+            const shippingResult = results.find((result) => result?.status === 'shipped' && result.sales_order_id)
+            const warning = results.find((result) => result?.warning)?.warning
             if (showProgress) setAdvancementProgress(null)
             toast({
                 title: t('common.success', { defaultValue: 'Success' }),
-                description: finalResult?.warning || t('ecommerce.advanceSequenceSuccess', {
+                description: warning || t('ecommerce.advanceSequenceSuccess', {
                     defaultValue: 'Order advanced to {{status}}.',
                     status: t(`ecommerce.status.${targetStatus}`, { defaultValue: targetStatus })
                 })
             })
 
-            if (targetStatus === 'delivered' && finalResult?.sales_order_id) {
-                await openRecordCollection(finalResult.sales_order_id)
+            if (shippingResult?.sales_order_id) {
+                await openRecordCollection(shippingResult.sales_order_id)
             }
         } catch (error) {
             if (showProgress) setAdvancementProgress(null)
@@ -1287,9 +1292,12 @@ const editMarketplaceOrderItems = async (orderId: string, items: MarketplaceOrde
                 description: t('ecommerce.itemsEdited', { defaultValue: 'Order items updated.' })
             })
         } catch (error) {
+            const message = normalizeSupabaseActionError(error).message
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: normalizeSupabaseActionError(error).message || 'Failed to update order items',
+                description: message.includes('Shipped, delivered, and cancelled marketplace orders cannot be edited')
+                    ? t('ecommerce.shippedOrderItemsBlocked', { defaultValue: 'Items cannot be changed after the order ships.' })
+                    : t('ecommerce.editItemsFailed', { defaultValue: 'Failed to update order items.' }),
                 variant: 'destructive'
             })
             throw error

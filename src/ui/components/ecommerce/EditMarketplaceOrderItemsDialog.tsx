@@ -206,7 +206,7 @@ export function EditMarketplaceOrderItemsDialog({
                     <DialogTitle>{t('ecommerce.editItems', { defaultValue: 'Edit Order Items' })}</DialogTitle>
                     <DialogDescription>
                         {t('ecommerce.editItemsHint', {
-                            defaultValue: 'Quantities can only be reduced or items removed before the order is delivered.'
+                            defaultValue: 'Quantities can only be reduced or items removed before the order is shipped.'
                         })}
                     </DialogDescription>
                 </DialogHeader>

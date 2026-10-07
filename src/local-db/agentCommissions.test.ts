@@ -1085,7 +1085,7 @@ describe("sales agent commission lifecycle", () => {
     expect(await db.agent_product_commission_entries.where("orderId").equals(order.id).count()).toBe(0);
   });
 
-  it("credits an unpaid marketplace delivery to its field agent with product commission only", async () => {
+  it("credits an unpaid marketplace shipment to its field agent with product commission only", async () => {
     const productCommissions = await import("./productCommissions");
     const order = {
       ...completedOrder(crypto.randomUUID()),
@@ -1130,7 +1130,7 @@ describe("sales agent commission lifecycle", () => {
     expect(assignments).toHaveLength(1);
     expect(assignments[0]).toMatchObject({
       agentId: deliveryAgent.id,
-      assignmentSource: "marketplace_delivery_product",
+      assignmentSource: "marketplace_shipping_product",
       assignedBy: order.createdBy,
     });
     const aggregate = await db.agent_commission_entries
@@ -1156,7 +1156,7 @@ describe("sales agent commission lifecycle", () => {
     });
   });
 
-  it("does not assign marketplace delivery product commission when its field agent is not a selected recipient", async () => {
+  it("does not assign marketplace shipping product commission when its field agent is not a selected recipient", async () => {
     const productCommissions = await import("./productCommissions");
     const order = {
       ...completedOrder(crypto.randomUUID()),

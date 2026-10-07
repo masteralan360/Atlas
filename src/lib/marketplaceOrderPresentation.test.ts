@@ -7,20 +7,20 @@ import {
 } from './marketplaceOrderPresentation'
 
 describe('marketplace order return presentation', () => {
-  it('shows a returned delivered order and its restored inventory', () => {
-    expect(getMarketplaceOrderDisplayStatus('delivered', 'full')).toBe('returned')
-    expect(getMarketplaceInventoryDisplayStatus('delivered', 'full', true)).toBe('returned')
+  it('shows a returned shipped order and its restored inventory', () => {
+    expect(getMarketplaceOrderDisplayStatus('shipped', 'full')).toBe('returned')
+    expect(getMarketplaceInventoryDisplayStatus('shipped', 'full', true)).toBe('returned')
   })
 
-  it('also reflects a partial posted return as returned inventory', () => {
-    expect(getMarketplaceOrderDisplayStatus('delivered', 'partial')).toBe('returned')
-    expect(getMarketplaceInventoryDisplayStatus('delivered', 'partial', true)).toBe('returned')
+  it('also reflects a partial posted return as returned inventory after shipment', () => {
+    expect(getMarketplaceOrderDisplayStatus('shipped', 'partial')).toBe('returned')
+    expect(getMarketplaceInventoryDisplayStatus('shipped', 'partial', true)).toBe('returned')
   })
 
-  it('preserves the lifecycle and deduction state when no return was posted', () => {
-    expect(getMarketplaceOrderDisplayStatus('delivered', 'none')).toBe('delivered')
-    expect(getMarketplaceInventoryDisplayStatus('delivered', 'none', true)).toBe('deducted')
-    expect(getMarketplaceInventoryDisplayStatus('delivered', 'none', false)).toBe('warning')
+  it('preserves the shipped lifecycle and deduction state when no return was posted', () => {
+    expect(getMarketplaceOrderDisplayStatus('shipped', 'none')).toBe('shipped')
+    expect(getMarketplaceInventoryDisplayStatus('shipped', 'none', true)).toBe('deducted')
+    expect(getMarketplaceInventoryDisplayStatus('shipped', 'none', false)).toBe('warning')
   })
 
   it('does not allow an inconsistent return state to override an undelivered order', () => {

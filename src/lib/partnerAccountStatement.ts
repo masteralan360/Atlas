@@ -102,6 +102,8 @@ export type PartnerAccountStatementData = {
    * partner balance.
    */
   marketplaceDeliveryProductCommissionOrderIds?: string[]
+  /** Marketplace orders whose product commission belongs to the shipping actor. */
+  marketplaceShippingProductCommissionOrderIds?: string[]
   /** Merchant-facing Post Service subledger entries. */
   deliveryLedgerEntries?: DeliveryLedgerEntry[]
   deliveryShipmentReferences?: Record<string, string>
@@ -139,6 +141,7 @@ export type PartnerAccountStatementEntryDescriptionKey =
   | 'commissionReversed'
   | 'commissionAdjustment'
   | 'marketplaceDeliveryProductCommission'
+  | 'marketplaceShippingProductCommission'
   | 'directReceipt'
   | 'directPayment'
   | 'saleOrderByPaymentMethod'
@@ -726,6 +729,32 @@ function createMarketplaceDeliveryProductCommissionEntries(
     }))
 }
 
+function createMarketplaceShippingProductCommissionEntries(
+  data: PartnerAccountStatementData
+): PartnerAccountStatementEntry[] {
+  const marketplaceOrderIds = new Set(data.marketplaceShippingProductCommissionOrderIds || [])
+  if (marketplaceOrderIds.size === 0) return []
+
+  return (data.agentProductCommissionEntries || [])
+    .filter((entry) => !entry.isDeleted && marketplaceOrderIds.has(entry.orderId))
+    .map((entry) => ({
+      id: `marketplace-shipping-product-commission:${entry.id}`,
+      date: entry.occurredAt || entry.createdAt,
+      reference: data.linkedOrderCodes?.[entry.orderId] || entry.orderId,
+      kind: 'agent_commission' as const,
+      description: 'Marketplace shipping product commission',
+      descriptionKey: 'marketplaceShippingProductCommission' as const,
+      itemName: entry.productNameSnapshot,
+      quantity: Number(entry.quantity || 0),
+      unit: entry.unitSnapshot || null,
+      commissionPerProduct: Number(entry.commissionPerUnit || 0),
+      totalProductCommission: Number(entry.amount || 0),
+      currency: entry.currency,
+      delta: 0,
+      source: { recordType: 'order' as const, recordId: entry.orderId }
+    }))
+}
+
 type AutomaticCommissionSettlement = {
   payoutEntryId: string
   recognizedEntryId: string
@@ -1278,6 +1307,7 @@ export function buildPartnerAccountStatementLedger(
   const entries = [
     ...createOrderEntries(data),
     ...createMarketplaceDeliveryProductCommissionEntries(data),
+    ...createMarketplaceShippingProductCommissionEntries(data),
     ...createPaymentEntries(data),
     ...createAgentCommissionEntries(data),
     ...createLoanEntries(data),

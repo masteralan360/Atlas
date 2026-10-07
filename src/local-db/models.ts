@@ -1111,6 +1111,7 @@ export type SalesOrderAgentAssignmentSource =
   | 'sales_account'
   | 'order_creator_product'
   | 'marketplace_delivery_product'
+  | 'marketplace_shipping_product'
 
 /** Effective-dated commission terms. No commission fields are added to Agent. */
 export interface AgentCommissionPlan extends BaseEntity {

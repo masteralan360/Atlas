@@ -29,15 +29,15 @@ export function getMarketplaceDeliveryActorName(
 }
 
 /**
- * Marketplace rows retain their delivery lifecycle for audit purposes. A
- * return is posted against the linked sales order, so expose it as the final
- * customer-facing state only after the marketplace order was delivered.
+ * Marketplace rows retain their shipping and delivery lifecycle for audit
+ * purposes. A return is posted against the linked sales order, which is created
+ * at shipment, so expose a return once the order has shipped.
  */
 export function getMarketplaceOrderDisplayStatus(
   lifecycleStatus: MarketplaceOrderLifecycleStatus,
   salesOrderReturnStatus: MarketplaceSalesOrderReturnStatus,
 ): MarketplaceOrderDisplayStatus {
-  return lifecycleStatus === 'delivered' && salesOrderReturnStatus !== 'none'
+  return (lifecycleStatus === 'shipped' || lifecycleStatus === 'delivered') && salesOrderReturnStatus !== 'none'
     ? 'returned'
     : lifecycleStatus
 }
@@ -47,7 +47,7 @@ export function getMarketplaceInventoryDisplayStatus(
   salesOrderReturnStatus: MarketplaceSalesOrderReturnStatus,
   inventoryDeducted: boolean,
 ): MarketplaceInventoryDisplayStatus {
-  if (lifecycleStatus !== 'delivered') return null
+  if (lifecycleStatus !== 'shipped' && lifecycleStatus !== 'delivered') return null
   if (salesOrderReturnStatus !== 'none') return 'returned'
   return inventoryDeducted ? 'deducted' : 'warning'
 }

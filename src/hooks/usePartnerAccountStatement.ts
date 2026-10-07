@@ -374,6 +374,27 @@ export function usePartnerAccountStatement(
       ))
       .map((order) => order.id)
   }, [partnerSalesOrders, salesAccountProductCommissionEntries, salesOrderAgentAssignments, salesOrders])
+  const marketplaceShippingProductCommissionOrderIds = useMemo(() => {
+    const directPartnerOrderIds = new Set(partnerSalesOrders.map((order) => order.id))
+    const marketplaceShippingAssignmentIds = new Set(
+      salesOrderAgentAssignments
+        .filter((assignment) => assignment.assignmentSource === 'marketplace_shipping_product')
+        .map((assignment) => assignment.id)
+    )
+    const productCommissionOrderIds = new Set(
+      salesAccountProductCommissionEntries
+        .filter((entry) => marketplaceShippingAssignmentIds.has(entry.assignmentId))
+        .map((entry) => entry.orderId)
+    )
+    return salesOrders
+      .filter((order) => (
+        order.sourceChannel === 'marketplace'
+        && !order.isDeleted
+        && !directPartnerOrderIds.has(order.id)
+        && productCommissionOrderIds.has(order.id)
+      ))
+      .map((order) => order.id)
+  }, [partnerSalesOrders, salesAccountProductCommissionEntries, salesOrderAgentAssignments, salesOrders])
   const posSaleItemsBySaleId = useMemo<Record<string, PartnerAccountStatementPosSaleItem[]>>(
     () => Object.fromEntries(sales.flatMap((sale) => (
       !sale.isDeleted ? [[sale.id, posSaleItemsForStatement(sale)]] : []
@@ -467,7 +488,10 @@ export function usePartnerAccountStatement(
 
     const allOrders = [...partnerSalesOrders, ...partnerPurchaseOrders]
     const marketplaceDeliveryOrderIds = new Set(marketplaceDeliveryProductCommissionOrderIds)
-    const marketplaceDeliveryOrders = salesOrders.filter((order) => marketplaceDeliveryOrderIds.has(order.id))
+    const marketplaceShippingOrderIds = new Set(marketplaceShippingProductCommissionOrderIds)
+    const marketplaceAttributedOrders = salesOrders.filter((order) => (
+      marketplaceDeliveryOrderIds.has(order.id) || marketplaceShippingOrderIds.has(order.id)
+    ))
     return {
       partnerId: partner.id,
       period,
@@ -483,7 +507,7 @@ export function usePartnerAccountStatement(
       loanPaymentTransactions,
       installmentSales: partnerInstallmentSales,
       linkedOrderCodes: Object.fromEntries(
-        [...allOrders, ...marketplaceDeliveryOrders]
+        [...allOrders, ...marketplaceAttributedOrders]
           .filter((order) => !order.isDeleted)
           .map((order) => [order.id, order.orderNumber])
       ),
@@ -504,6 +528,7 @@ export function usePartnerAccountStatement(
       trackedCommissionEntries,
       agentProductCommissionEntries: salesAccountProductCommissionEntries,
       marketplaceDeliveryProductCommissionOrderIds,
+      marketplaceShippingProductCommissionOrderIds,
       deliveryLedgerEntries: merchantDeliveryEntries,
       deliveryShipmentReferences,
       deliverySettlementReferences
@@ -523,6 +548,7 @@ export function usePartnerAccountStatement(
     partnerSalesOrderReturns,
     partnerSalesOrders,
     marketplaceDeliveryProductCommissionOrderIds,
+    marketplaceShippingProductCommissionOrderIds,
     period,
     posSaleItemsBySaleId,
     salesAccountCommissionEntries,

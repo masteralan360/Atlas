@@ -244,7 +244,7 @@ export function EcommerceDetailView({
     const nextStatus = getNextMarketplaceOrderStatus(order.status)
     const laterStatuses = getLaterMarketplaceOrderStatuses(order.status)
     const displayItems = getMarketplaceDisplayItems(order.items)
-    const canEditItems = order.status !== 'delivered' && order.status !== 'cancelled'
+    const canEditItems = order.status !== 'shipped' && order.status !== 'delivered' && order.status !== 'cancelled'
     const AdvanceActionIcon = nextStatus ? transitionActionIcon(nextStatus) : null
     const displayStatus = getMarketplaceOrderDisplayStatus(order.status, order.sales_order_return_status)
     const inventoryDisplayStatus = getMarketplaceInventoryDisplayStatus(
@@ -255,6 +255,10 @@ export function EcommerceDetailView({
     const isReturned = displayStatus === 'returned'
     const deliveredByName = getMarketplaceDeliveryActorName(
         order.delivered_by_name,
+        t('ecommerce.unknown', { defaultValue: 'Unknown' })
+    )
+    const shippedByName = getMarketplaceDeliveryActorName(
+        order.shipped_by_name,
         t('ecommerce.unknown', { defaultValue: 'Unknown' })
     )
     const workflowProgress = marketplaceWorkflowProgress(order.status, isReturned)
@@ -448,7 +452,7 @@ export function EcommerceDetailView({
                             {t('ecommerce.actions.cancel', { defaultValue: 'Cancel Order' })}
                         </Button>
                     )}
-                    {order.status === 'delivered' && order.sales_order_id ? (
+                    {(order.status === 'shipped' || order.status === 'delivered') && order.sales_order_id ? (
                         <Button
                             variant="outline"
                             disabled={isSaving || isOpeningCollection}
@@ -458,7 +462,7 @@ export function EcommerceDetailView({
                             {t('ecommerce.actions.viewSalesOrder', { defaultValue: 'View Sales Order' })}
                         </Button>
                     ) : null}
-                    {order.status === 'delivered' && order.sales_order_id ? (
+                    {(order.status === 'shipped' || order.status === 'delivered') && order.sales_order_id ? (
                         <Button variant="outline" disabled={isSaving || isOpeningCollection} onClick={() => onRecordCollection(order.sales_order_id as string)}>
                             {isOpeningCollection
                                 ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
@@ -698,6 +702,17 @@ export function EcommerceDetailView({
                                     <div className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">{t('orders.details.items', { defaultValue: 'Items' })}</div>
                                     <div className="mt-1 font-medium">{displayItems.length}</div>
                                 </div>
+                                {order.status === 'shipped' || order.status === 'delivered' ? (
+                                    <div className="rounded-2xl border border-sky-500/20 bg-sky-500/5 p-3">
+                                        <div className="text-xs font-bold uppercase tracking-[0.14em] text-sky-700 dark:text-sky-300">
+                                            {t('ecommerce.markedShippedBy', { defaultValue: 'Marked Shipped By' })}
+                                        </div>
+                                        <div className="mt-1 flex items-center gap-1.5 font-medium text-sky-800 dark:text-sky-200">
+                                            <BadgeCheck className="h-4 w-4" aria-hidden="true" />
+                                            {shippedByName}
+                                        </div>
+                                    </div>
+                                ) : null}
                                 {order.status === 'delivered' ? (
                                     <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-3">
                                         <div className="text-xs font-bold uppercase tracking-[0.14em] text-emerald-700 dark:text-emerald-300">

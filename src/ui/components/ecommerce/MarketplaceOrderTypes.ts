@@ -31,6 +31,8 @@ export type MarketplaceOrderRecord = {
     confirmed_at: string | null
     processing_at: string | null
     shipped_at: string | null
+    shipped_by: string | null
+    shipped_by_name: string | null
     delivered_at: string | null
     delivered_by: string | null
     delivered_by_name: string | null

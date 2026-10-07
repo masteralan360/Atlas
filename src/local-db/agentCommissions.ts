@@ -47,10 +47,12 @@ const ENTRY_TABLE = "agent_commission_entries";
 const RECONCILIATION_ENTITY = "sales_agent_commission_reconciliation";
 export const ORDER_CREATOR_PRODUCT_ASSIGNMENT_SOURCE = "order_creator_product" as const;
 export const MARKETPLACE_DELIVERY_PRODUCT_ASSIGNMENT_SOURCE = "marketplace_delivery_product" as const;
+export const MARKETPLACE_SHIPPING_PRODUCT_ASSIGNMENT_SOURCE = "marketplace_shipping_product" as const;
 
 function isProductCommissionOnlyAssignment(assignment: Pick<SalesOrderAgentAssignment, "assignmentSource">) {
   return assignment.assignmentSource === ORDER_CREATOR_PRODUCT_ASSIGNMENT_SOURCE
-    || assignment.assignmentSource === MARKETPLACE_DELIVERY_PRODUCT_ASSIGNMENT_SOURCE;
+    || assignment.assignmentSource === MARKETPLACE_DELIVERY_PRODUCT_ASSIGNMENT_SOURCE
+    || assignment.assignmentSource === MARKETPLACE_SHIPPING_PRODUCT_ASSIGNMENT_SOURCE;
 }
 
 // Sales-account beneficiaries are derived from an order and can be requested
@@ -1321,6 +1323,9 @@ function orderCommissionEventAt(order: SalesOrder, assignedAt: string) {
 }
 
 function productCommissionEventAt(order: SalesOrder, assignment: SalesOrderAgentAssignment) {
+  if (assignment.assignmentSource === MARKETPLACE_SHIPPING_PRODUCT_ASSIGNMENT_SOURCE) {
+    return assignment.assignedAt;
+  }
   return orderCommissionEventAt(order, assignment.assignedAt);
 }
 
@@ -1339,15 +1344,15 @@ function emptyCommissionCalculation(currency: CurrencyCode): CommissionCalculati
 
 /**
  * Local Mode counterpart of the server-derived product-attribution helpers.
- * Marketplace sales orders use the delivery actor stored as `createdBy` by the
- * delivery transaction. Both derived sources intentionally carry product
+ * Marketplace sales orders use the shipping actor stored as `createdBy` by the
+ * shipment transaction. Both derived sources intentionally carry product
  * commission only; a normal manual or sales-account assignment for the same
  * agent takes precedence and keeps its ordinary plan behavior.
  */
 async function ensureLocalOrderCreatorProductCommissionAssignmentInternal(order: SalesOrder) {
-  const isMarketplaceDelivery = order.sourceChannel === "marketplace";
-  const assignmentSource = isMarketplaceDelivery
-    ? MARKETPLACE_DELIVERY_PRODUCT_ASSIGNMENT_SOURCE
+  const isMarketplaceOrder = order.sourceChannel === "marketplace";
+  const assignmentSource = isMarketplaceOrder
+    ? MARKETPLACE_SHIPPING_PRODUCT_ASSIGNMENT_SOURCE
     : ORDER_CREATOR_PRODUCT_ASSIGNMENT_SOURCE;
   if (
     order.commissionEnabled === false
@@ -1427,8 +1432,8 @@ async function ensureLocalOrderCreatorProductCommissionAssignmentInternal(order:
     unassignedAt: null,
     assignedBy: order.createdBy,
     unassignedBy: null,
-    reassignmentReason: isMarketplaceDelivery
-      ? "Automatically attributed from the field agent who delivered the marketplace order"
+    reassignmentReason: isMarketplaceOrder
+      ? "Automatically attributed from the field agent who shipped the marketplace order"
       : "Automatically attributed from the staff user who created the sale",
     previousAssignmentId: previous?.id ?? null,
     customerCitySnapshot: null,
