@@ -42,6 +42,7 @@ import {
 } from './partnerSettlementOperations'
 
 import { db } from './database'
+import { useLiveCollection } from './liveCollection'
 import { persistLocalDirectTransactionWithVoucher } from './localModeSqlite'
 import {
   getSalesOrderCommissionMode,
@@ -180,6 +181,18 @@ export interface PartnerSettlementBalance {
     total: number
     items: number
     eligibleObligations: PaymentObligation[]
+}
+
+export interface PartnerSettlementBalanceTotals {
+    groups: PartnerSettlementBalanceGroup[]
+    total: number
+    items: number
+}
+
+export interface PartnerSettlementBalanceSummary {
+    partnerId: string
+    incoming: PartnerSettlementBalanceTotals
+    outgoing: PartnerSettlementBalanceTotals
 }
 
 export interface PartnerSettlementProgress {
@@ -1612,7 +1625,7 @@ export function usePaymentTransactions(
     return hydration.release
   }, [hydrateSourceTables, online, workspaceId])
 
-  return transactions ?? []
+  return useLiveCollection(transactions, Boolean(workspaceId) && transactions === undefined)
 }
 
 export function usePaymentObligations(workspaceId: string | undefined, filters: PaymentObligationFilterOptions = {}) {
@@ -2923,18 +2936,73 @@ export async function getPartnerSettlementBalance(
     collectLockedOrderSourceKeys(workspaceId)
   ])
 
-  const eligibleObligations = obligations
-    .filter((item) => isEligiblePartnerObligation(item, partner.id, direction))
+  const eligibleObligations = getEligiblePartnerSettlementObligations(
+    obligations,
+    lockedSourceKeys,
+    partner.id,
+    direction
+  )
+  const totals = summarizePartnerSettlementObligations(eligibleObligations)
+
+  return {
+    partnerId: partner.id,
+    direction,
+    ...totals,
+    eligibleObligations
+  }
+}
+
+/**
+ * Loads both settlement directions once and returns per-currency totals for a
+ * set of counterparties. This is used by the developer reconciliation audit
+ * so it can inspect a whole workspace without rebuilding every obligation
+ * graph twice for every partner.
+ */
+export async function getPartnerSettlementBalanceSummaries(
+  workspaceId: string,
+  partnerIds: readonly string[]
+): Promise<Record<string, PartnerSettlementBalanceSummary>> {
+  const uniquePartnerIds = Array.from(new Set(partnerIds.filter(Boolean)))
+  if (uniquePartnerIds.length === 0) return {}
+
+  const [incomingObligations, outgoingObligations, lockedSourceKeys, partners] = await Promise.all([
+    buildPaymentObligations(workspaceId, { direction: 'incoming', applySalesAgentAccountCredits: true }),
+    buildPaymentObligations(workspaceId, { direction: 'outgoing', applySalesAgentAccountCredits: true }),
+    collectLockedOrderSourceKeys(workspaceId),
+    Promise.all(uniquePartnerIds.map((partnerId) => resolveSettlementPartner(workspaceId, partnerId)))
+  ])
+
+  return Object.fromEntries(partners.map((partner) => {
+    const incoming = summarizePartnerSettlementObligations(
+      getEligiblePartnerSettlementObligations(incomingObligations, lockedSourceKeys, partner.id, 'incoming')
+    )
+    const outgoing = summarizePartnerSettlementObligations(
+      getEligiblePartnerSettlementObligations(outgoingObligations, lockedSourceKeys, partner.id, 'outgoing')
+    )
+
+    return [partner.id, { partnerId: partner.id, incoming, outgoing }]
+  }))
+}
+
+function getEligiblePartnerSettlementObligations(
+  obligations: readonly PaymentObligation[],
+  lockedSourceKeys: ReadonlySet<string>,
+  partnerId: string,
+  direction: PaymentTransactionDirection
+) {
+  return obligations
+    .filter((item) => isEligiblePartnerObligation(item, partnerId, direction))
     .filter((item) => item.amount > PAYMENT_AMOUNT_EPSILON)
     .filter((item) => !lockedSourceKeys.has(getPaymentSourceKey(item)))
     .sort(compareObligationAllocationOrder)
+}
 
+function summarizePartnerSettlementObligations(
+  obligations: readonly PaymentObligation[]
+): PartnerSettlementBalanceTotals {
   const totalsByCurrency = new Map<CurrencyCode, { total: number; items: number }>()
-  eligibleObligations.forEach((item) => {
-    const current = totalsByCurrency.get(item.currency) || {
-      total: 0,
-      items: 0
-    }
+  obligations.forEach((item) => {
+    const current = totalsByCurrency.get(item.currency) || { total: 0, items: 0 }
     current.total += item.amount
     current.items += 1
     totalsByCurrency.set(item.currency, current)
@@ -2942,19 +3010,12 @@ export async function getPartnerSettlementBalance(
 
   const groups = Array.from(totalsByCurrency.entries())
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([currency, value]) => ({
-      currency,
-      total: value.total,
-      items: value.items
-    }))
+    .map(([currency, value]) => ({ currency, total: value.total, items: value.items }))
 
   return {
-    partnerId: partner.id,
-    direction,
     groups,
     total: groups.reduce((sum, group) => sum + group.total, 0),
-    items: groups.reduce((sum, group) => sum + group.items, 0),
-    eligibleObligations
+    items: groups.reduce((sum, group) => sum + group.items, 0)
   }
 }
 

@@ -5,7 +5,7 @@ import { useViewOwnRecordScope, type ViewOwnRecordScope } from '@/permissions/us
 import i18n from '@/i18n/config'
 
 import { db } from './database'
-import { toLiveCollection } from './liveCollection'
+import { toLiveCollection, useLiveCollection } from './liveCollection'
 import { canAccessBusinessPartnerInLocalCache } from './businessPartnerAccess'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
 import { createInventoryTransferBatch } from './inventoryTransferBatches'
@@ -3099,7 +3099,7 @@ export function useSales(
         viewOwnScope.userId,
     ])
 
-    return sales ?? []
+    return useLiveCollection(sales, Boolean(workspaceId) && sales === undefined)
 }
 
 export function useArchivedSales(workspaceId: string | undefined, enabled: boolean) {
@@ -5548,7 +5548,7 @@ export function useLoans(workspaceId: string | undefined) {
         installmentsViewOwnScope.userId,
     ])
 
-    return loans ?? []
+    return useLiveCollection(loans, Boolean(workspaceId) && loans === undefined)
 }
 
 export function useLoan(loanId: string | undefined) {

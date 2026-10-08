@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
@@ -22,7 +22,7 @@ import { getActiveBusinessUserId, getActiveBusinessUserRole, hasBusinessPartnerG
 
 import { db } from './database'
 import { serializePartnerSummaryRefresh } from './partnerSummaryRefresh'
-import { toLiveCollection } from './liveCollection'
+import { toLiveCollection, useLiveCollection } from './liveCollection'
 import { acquireTableHydrationFromSupabase, fetchTableFromSupabase } from './hooks'
 import { addToOfflineMutations } from './offlineMutations'
 import { getOrderBalanceAmount } from './orderInstallments'
@@ -1458,6 +1458,8 @@ export function useBusinessPartners(workspaceId: string | undefined, filters?: P
   const { user } = useAuth()
   const { hasCapability } = useWorkspace()
   const online = useNetworkStatus()
+  const [isHydrating, setIsHydrating] = useState(false)
+  const [hydrationFailed, setHydrationFailed] = useState(false)
   const filtersKey = JSON.stringify(filters || {})
   const viewer = useMemo<BusinessPartnerGroupPrivacyViewer>(() => ({
     userId: user?.id,
@@ -1472,14 +1474,33 @@ export function useBusinessPartners(workspaceId: string | undefined, filters?: P
 
   useEffect(() => {
     if (!workspaceId) {
+      setIsHydrating(false)
+      setHydrationFailed(false)
       return
     }
 
     let disposed = false
     const shouldHydrate = online && shouldUseCloudBusinessData(workspaceId)
-    const leases = shouldHydrate
+    setIsHydrating(shouldHydrate)
+    setHydrationFailed(false)
+    const businessPartnersLease = shouldHydrate
+      ? acquireTableHydrationFromSupabase('business_partners', db.business_partners, workspaceId)
+      : undefined
+    const privacyLeases = shouldHydrate && viewer.featureEnabled
       ? [
-          acquireTableHydrationFromSupabase('business_partners', db.business_partners, workspaceId),
+          acquireTableHydrationFromSupabase('business_partner_groups', db.business_partner_groups, workspaceId),
+          acquireTableHydrationFromSupabase('business_partner_group_users', db.business_partner_group_users, workspaceId),
+          acquireTableHydrationFromSupabase('business_partner_group_partners', db.business_partner_group_partners, workspaceId),
+        ]
+      : []
+    const partnerListLeases = [
+      ...(businessPartnersLease ? [businessPartnersLease] : []),
+      ...privacyLeases,
+    ]
+    const leases = businessPartnersLease
+      ? [
+          businessPartnersLease,
+          ...privacyLeases,
           acquireTableHydrationFromSupabase('customers', db.customers, workspaceId),
           acquireTableHydrationFromSupabase('suppliers', db.suppliers, workspaceId),
           acquireTableHydrationFromSupabase('agents', db.agents, workspaceId),
@@ -1491,12 +1512,12 @@ export function useBusinessPartners(workspaceId: string | undefined, filters?: P
           acquireTableHydrationFromSupabase('payment_transactions', db.payment_transactions, workspaceId)
         ]
       : []
-    if (shouldHydrate && viewer.featureEnabled) {
-      leases.push(
-        acquireTableHydrationFromSupabase('business_partner_groups', db.business_partner_groups, workspaceId),
-        acquireTableHydrationFromSupabase('business_partner_group_users', db.business_partner_group_users, workspaceId),
-        acquireTableHydrationFromSupabase('business_partner_group_partners', db.business_partner_group_partners, workspaceId),
-      )
+
+    const finishPartnerListHydration = async () => {
+      if (!partnerListLeases.length) return
+
+      const results = await Promise.all(partnerListLeases.map((lease) => lease.promise))
+      if (!disposed) setHydrationFailed(results.some((completed) => !completed))
     }
 
     const finishHydration = async () => {
@@ -1506,6 +1527,8 @@ export function useBusinessPartners(workspaceId: string | undefined, filters?: P
       }
 
       const results = await Promise.all(leases.map((lease) => lease.promise))
+      if (disposed) return
+
       // Recomputing partner summaries is expensive. It is only needed when a
       // remote reader actually reconciled one of its source tables.
       const hydrated = leases.some((lease, index) => !lease.isFresh && results[index])
@@ -1514,9 +1537,19 @@ export function useBusinessPartners(workspaceId: string | undefined, filters?: P
       }
     }
 
-    void finishHydration().catch((error) => {
-      console.error('[BusinessPartners] Failed to hydrate partners:', error)
-    })
+    void finishPartnerListHydration()
+      .catch((error) => {
+        console.error('[BusinessPartners] Failed to hydrate the visible partner list:', error)
+        if (!disposed) setHydrationFailed(shouldHydrate)
+      })
+      .finally(() => {
+        if (!disposed) setIsHydrating(false)
+      })
+
+    void finishHydration()
+      .catch((error) => {
+        console.error('[BusinessPartners] Failed to hydrate partners:', error)
+      })
 
     return () => {
       disposed = true
@@ -1525,8 +1558,11 @@ export function useBusinessPartners(workspaceId: string | undefined, filters?: P
   }, [online, workspaceId, viewer.featureEnabled])
 
   return useMemo(
-    () => toLiveCollection(partners, Boolean(workspaceId) && partners === undefined),
-    [partners, workspaceId]
+    () => toLiveCollection(partners, Boolean(workspaceId) && partners === undefined, {
+      isHydrating,
+      hydrationFailed,
+    }),
+    [hydrationFailed, isHydrating, partners, workspaceId]
   )
 }
 
@@ -1594,19 +1630,19 @@ async function canViewPartnerForGroupPrivacy(
 }
 
 export function useAgents(workspaceId: string | undefined) {
-  return (
-    useLiveQuery(
-      () =>
-        workspaceId
-          ? db.agents
-              .where('workspaceId')
-              .equals(workspaceId)
-              .and((item) => !item.isDeleted)
-              .toArray()
-          : [],
-      [workspaceId]
-    ) ?? []
+  const agents = useLiveQuery(
+    () =>
+      workspaceId
+        ? db.agents
+            .where('workspaceId')
+            .equals(workspaceId)
+            .and((item) => !item.isDeleted)
+            .toArray()
+        : [],
+    [workspaceId]
   )
+
+  return useLiveCollection(agents, Boolean(workspaceId) && agents === undefined)
 }
 
 export function useAgent(agentId: string | null | undefined) {

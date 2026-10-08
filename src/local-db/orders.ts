@@ -41,6 +41,7 @@ import type { WorkspacePermissionKey } from '@/permissions/workspacePermissionDe
 import i18n from '@/i18n/config'
 
 import { db } from './database'
+import { useLiveCollection } from './liveCollection'
 import { assertStaffMinimumSellingPrices, type MinimumSellingPriceCheckItem } from './minimumSellingPrice'
 import { serializePartnerSummaryRefresh } from './partnerSummaryRefresh'
 import { enqueuePartnerSummaryJobs, processPartnerSummaryJobs, type PartnerSummaryTarget } from './partnerSummaryJobs'
@@ -2407,7 +2408,7 @@ export function useSalesOrders(workspaceId: string | undefined, startDate?: stri
         }
     }, [online, workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId, assignedOrderAccess])
 
-    return orders ?? []
+    return useLiveCollection(orders, Boolean(workspaceId) && orders === undefined)
 }
 
 export function useArchivedSalesOrders(workspaceId: string | undefined, enabled = true) {
@@ -2487,7 +2488,7 @@ export function usePurchaseOrders(workspaceId: string | undefined) {
         }
     }, [online, workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId])
 
-    return orders ?? []
+    return useLiveCollection(orders, Boolean(workspaceId) && orders === undefined)
 }
 
 /**
@@ -2612,7 +2613,7 @@ export function useSalesOrderReturnsForWorkspace(workspaceId: string | undefined
         }
     }, [online, workspaceId])
 
-    return returns ?? []
+    return useLiveCollection(returns, Boolean(workspaceId) && returns === undefined)
 }
 
 export function useSalesOrderReturnItems(orderId: string | undefined, workspaceId?: string) {
@@ -2661,7 +2662,7 @@ export function useSalesOrderReturnItemsForWorkspace(workspaceId?: string) {
         }
     }, [online, workspaceId])
 
-    return items ?? []
+    return useLiveCollection(items, Boolean(workspaceId) && items === undefined)
 }
 
 /** Project immutable return rows onto order line items for sales-history and analytics views. */

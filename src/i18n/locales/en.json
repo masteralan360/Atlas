@@ -41,6 +41,7 @@
       "LOAN_SUPPLIER_MISMATCH": "The linked loan does not match the purchase order supplier.",
       "WRONG_PURCHASE_BATCH_REFERENCE": "A stock batch points to a different purchase order or item.",
       "ORDER_CURRENCY_MISSING": "The order has no settlement currency.",
+      "ORDER_CUSTOMER_NAME_MISMATCH": "The saved customer name does not match the linked business partner's current name.",
       "ITEM_TOTAL_MISMATCH": "The line total does not match the historical quantity and unit price.",
       "INVENTORY_QUANTITY_MISMATCH": "The recorded stock movement differs from the sold and free quantities.",
       "INVENTORY_MOVEMENT_MISSING": "No transaction-specific stock movement was found for this product and storage.",
@@ -3027,6 +3028,35 @@
     "remainsOpen": "{{amount}} will remain open.",
     "agentCommissionPayoutUnavailable": "This sales-account commission payout is no longer available. Refresh and try again.",
     "partialFailure": "Some payments were recorded before another item failed. Review the Account Statement before trying again."
+  },
+  "partnerSettlementAudit": {
+    "open": "Reconciliation audit",
+    "title": "Counterparty Settlement Reconciliation Audit",
+    "description": "Checks each visible business partner’s open collect and pay amounts against the current all-time Account Statement, one partner at a time.",
+    "loadFailed": "The audit could not load settlement balances. Close it and try again.",
+    "counterpartiesLoadFailed": "Counterparties could not be refreshed from this workspace. The audit stopped before checking an incomplete list.",
+    "statementLoadFailed": "The Account Statement data could not be refreshed. The audit stopped before comparing incomplete data.",
+    "loadingCounterparties": "Loading counterparties…",
+    "loadingSettlementBalances": "Preparing collect and pay balances…",
+    "loadingStatement": "Refreshing Account Statement data…",
+    "progress": "Checked {{completed}} of {{total}} counterparties · {{partner}}",
+    "cancelled": "Audit cancelled. {{count}} completed counterparties are shown.",
+    "summary": "{{matched}} matched · {{mismatched}} mismatched · {{total}} checked",
+    "netExplanation": "Net open balance is collect minus pay. A positive Account Statement balance means the partner owes the workspace. Differences can include direct transactions or other statement entries.",
+    "empty": "No counterparties are available to audit.",
+    "results": "Counterparty reconciliation results",
+    "status": {
+      "PASS": "Matched",
+      "WARNING": "Mismatch",
+      "matched": "Matched",
+      "mismatch": "Mismatch"
+    },
+    "currency": "Currency",
+    "netOpen": "Net open",
+    "statementBalance": "Statement balance",
+    "difference": "Difference",
+    "noBalances": "No open or statement balances were found for this counterparty.",
+    "cancel": "Cancel audit"
   },
   "payments": {
     "title": "Payments",

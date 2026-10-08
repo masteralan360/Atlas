@@ -109,6 +109,17 @@ export function auditSalesOrderGraph(graph: SalesOrderTransactionGraph, workspac
 
   add('relationships', 'CUSTOMER_REFERENCE_MISSING', !!order.customerId && graph.customers.some(row => row.id === order.customerId && !row.isDeleted), 'customer', order.customerId)
   if (order.businessPartnerId) add('relationships', 'PARTNER_REFERENCE_MISSING', graph.partners.some(row => row.id === order.businessPartnerId && !row.isDeleted), 'business_partner', order.businessPartnerId)
+  const linkedPartner = order.businessPartnerId
+    ? graph.partners.find(row => row.id === order.businessPartnerId && !row.isDeleted)
+    : undefined
+  if (linkedPartner) {
+    const partnerName = linkedPartner.partnerName
+    if (typeof partnerName === 'string') {
+      const hasPartnerName = partnerName.trim().length > 0
+      add('order', 'ORDER_CUSTOMER_NAME_MISMATCH', hasPartnerName && order.customerName === partnerName,
+        'sales_order', order.id, partnerName, order.customerName, true)
+    }
+  }
   for (const row of [...graph.customers, ...graph.partners, ...graph.returns, ...graph.returnItems, ...graph.loans,
     ...graph.loanPayments, ...graph.loanInstallments, ...graph.orderInstallments, ...graph.payments,
     ...graph.inventoryMovements, ...graph.accountMovements, ...graph.paymentAccounts, ...graph.assignments, ...graph.commissions, ...graph.productCommissions]) {

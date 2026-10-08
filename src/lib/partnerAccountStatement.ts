@@ -201,6 +201,8 @@ export type PartnerAccountStatementEntry = {
   delta: number
   /** The underlying document, when this statement row originates from one. */
   source?: PartnerAccountStatementEntrySource
+  /** Rows created by the same posted return are highlighted together in the statement. */
+  relatedReturnId?: string | null
   settlementOperationId?: string | null
   settlementOperation?: Pick<
     PartnerSettlementOperation,
@@ -526,26 +528,6 @@ function createOrderEntries(data: PartnerAccountStatementData): PartnerAccountSt
   const sourceOrders = data.statementOrders || [...data.salesOrders, ...data.purchaseOrders]
   const loansById = new Map((data.loans || []).map((loan) => [loan.id, loan]))
   const loanIds = new Set(loansById.keys())
-  const refundTransactionsByReturnId = new Map<string, PaymentTransaction[]>()
-  const refundTransactionsById = new Map<string, PaymentTransaction>(
-    [...(data.settlementTransactions || []), ...(data.loanPaymentTransactions || [])]
-      .filter((transaction) => !transaction.isDeleted)
-      .map((transaction): [string, PaymentTransaction] => [transaction.id, transaction])
-  )
-  for (const transaction of refundTransactionsById.values()) {
-    const returnId = metadataText(transaction.metadata, 'orderReturnId')
-    const isReturnRefund = Boolean(
-      returnId && (
-        transaction.reversalOfTransactionId
-        || metadataFlag(transaction.metadata, 'loanRepaymentRefund')
-        || metadataFlag(transaction.metadata, 'financingInitialPaymentRefund')
-      )
-    )
-    if (!returnId || !isReturnRefund) continue
-    const transactions = refundTransactionsByReturnId.get(returnId) || []
-    transactions.push(transaction)
-    refundTransactionsByReturnId.set(returnId, transactions)
-  }
   const returnsByOrderId = new Map<string, OrderReturn[]>()
   const returnItemsByReturnId = new Map<string, OrderReturnItem[]>()
   for (const orderReturn of data.salesOrderReturns || []) {
@@ -681,17 +663,6 @@ function createOrderEntries(data: PartnerAccountStatementData): PartnerAccountSt
     const itemsByOrderItemId = new Map((salesOrder.items || []).map((item) => [item.id, item]))
     for (const orderReturn of returnsByOrderId.get(salesOrder.id) || []) {
       const returnItems = returnItemsByReturnId.get(orderReturn.id) || []
-      if (projectFinancedSalesOrderAsLedger) {
-        const recordedRefund = roundStatementAmount(
-          (refundTransactionsByReturnId.get(orderReturn.id) || [])
-            .reduce((sum, transaction) => sum + Math.abs(Number(transaction.amount || 0)), 0)
-        )
-        const returnAmount = Math.abs(Number(orderReturn.refundAmount || 0))
-        // When the loan records the full return value as an actual refund,
-        // that payment reversal is the statement movement. Don't also post
-        // the same amount as a return credit.
-        if (returnAmount > 0 && Math.abs(recordedRefund - returnAmount) <= 0.000001) continue
-      }
       if (!shouldItemizeSalesOrders) {
         entries.push({
           id: `sales-order-return:${orderReturn.id}`,
@@ -700,6 +671,7 @@ function createOrderEntries(data: PartnerAccountStatementData): PartnerAccountSt
           kind: 'sales_order_return',
           description: 'Sales order return',
           descriptionKey: 'salesOrderReturn',
+          relatedReturnId: orderReturn.id,
           returnReason: orderReturn.reason,
           currency: salesOrder.currency,
           delta: -Math.abs(Number(orderReturn.refundAmount || 0)),
@@ -715,6 +687,7 @@ function createOrderEntries(data: PartnerAccountStatementData): PartnerAccountSt
           kind: 'sales_order_return',
           description: 'Sales order return',
           descriptionKey: 'salesOrderReturn',
+          relatedReturnId: orderReturn.id,
           returnReason: orderReturn.reason,
           currency: salesOrder.currency,
           delta: -Math.abs(Number(orderReturn.refundAmount || 0)),
@@ -732,6 +705,7 @@ function createOrderEntries(data: PartnerAccountStatementData): PartnerAccountSt
           kind: 'sales_order_return',
           description: 'Sales order return',
           descriptionKey: 'salesOrderReturn',
+          relatedReturnId: orderReturn.id,
           itemName: sourceItem?.productName || null,
           quantity: -Math.abs(Number(returnItem.quantity || 0)),
           unit: sourceItem?.unit || null,
@@ -966,14 +940,15 @@ function createPaymentEntries(data: PartnerAccountStatementData): PartnerAccount
         kind: isOrderLoanMovement ? 'loan_repayment' : paymentKind(transaction),
         ...presentation,
         currency: transaction.currency,
-        // A customer order-return refund is a credit movement on the partner
-        // account. Agent statements retain their existing reversal signs.
-        delta: isCustomerOrderReturnRefund ? -Math.abs(rawAmount) : multiplier * rawAmount,
+        // Keep the transaction's signed amount so a return reversal offsets
+        // the original payment instead of posting a second credit.
+        delta: multiplier * rawAmount,
         source: isCustomerOrderReturnRefund && refundOrder
           ? { recordType: 'order', recordId: refundOrder.id }
           : transaction.sourceType === 'sales_order' || transaction.sourceType === 'purchase_order'
             ? { recordType: 'order', recordId: transaction.sourceRecordId }
             : { recordType: 'payment_transaction', recordId: transaction.id },
+        relatedReturnId: isCustomerOrderReturnRefund ? orderReturnId : null,
         settlementOperationId,
         ...(settlementOperation ? { settlementOperation } : {})
       }
@@ -1036,6 +1011,7 @@ function createAgentCommissionEntries(data: PartnerAccountStatementData): Partne
           ...presentation,
           note: entry.notes?.trim() || null,
           currency: entry.currency,
+          relatedReturnId: entry.orderReturnId || null,
           // Commission entries are amounts owed to the sales-account
           // agent, while a positive statement delta is owed by them.
           delta: -Number(entry.amount || 0)
@@ -1241,6 +1217,7 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
           kind: 'sales_order_return',
           description: 'Sales order return',
           descriptionKey: 'salesOrderReturn',
+          relatedReturnId: orderReturn.id,
           returnReason: orderReturn.reason,
           totalProductCommission: returnProductCommissionTotal || null,
           currency: loan.settlementCurrency,
@@ -1262,6 +1239,7 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
           kind: 'sales_order_return',
           description: 'Sales order return',
           descriptionKey: 'salesOrderReturn',
+          relatedReturnId: orderReturn.id,
           itemName: sourceItem?.productName || null,
           quantity: -Math.abs(Number(returnItem.quantity || 0)),
           unit: sourceItem?.unit || null,

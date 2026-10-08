@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Table } from 'dexie'
 import { useLiveQuery } from 'dexie-react-hooks'
 
@@ -10,6 +10,7 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
 import { fetchTableFromSupabase } from './hooks'
+import { sortLiveCollection, useLiveCollection } from './liveCollection'
 import type {
     AgentProductCommissionEntry,
     CommissionPlanType,
@@ -243,7 +244,7 @@ function useRows<T extends ProductCommissionEntity>(table: ProductCommissionTabl
             console.error(`[Product commissions] Failed to hydrate ${table}:`, error)
         })
     }, [online, table, workspaceId])
-    return rows || []
+    return useLiveCollection(rows, Boolean(workspaceId) && rows === undefined)
 }
 
 export function useProductCommissionRules(workspaceId?: string) {
@@ -259,9 +260,12 @@ export function useProductCommissionRuleAgents(workspaceId?: string) {
 }
 
 export function useAgentProductCommissionEntries(workspaceId?: string) {
-    return useRows<AgentProductCommissionEntry>(LINE_ENTRY_TABLE, workspaceId)
-        .sort((left, right) => String(right.occurredAt || right.updatedAt || right.createdAt || '')
-            .localeCompare(String(left.occurredAt || left.updatedAt || left.createdAt || '')))
+    const rows = useRows<AgentProductCommissionEntry>(LINE_ENTRY_TABLE, workspaceId)
+    return useMemo(() => sortLiveCollection(
+        rows,
+        (left, right) => String(right.occurredAt || right.updatedAt || right.createdAt || '')
+            .localeCompare(String(left.occurredAt || left.updatedAt || left.createdAt || '')),
+    ), [rows])
 }
 
 /**

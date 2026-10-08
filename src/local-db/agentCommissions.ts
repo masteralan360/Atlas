@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import type { Table } from "dexie";
 import { useLiveQuery } from "dexie-react-hooks";
 
@@ -16,6 +16,7 @@ import { readWorkspaceCache } from "@/workspace/workspaceCache";
 
 import { db } from "./database";
 import { fetchTableFromSupabase } from "./hooks";
+import { sortLiveCollection, useLiveCollection } from "./liveCollection";
 import type {
   AgentCommissionEntry,
   AgentCommissionMembership,
@@ -659,7 +660,7 @@ function useCommissionRows<T extends CommissionEntity>(
     });
   }, [featureEnabled, online, tableName, workspaceId]);
 
-  return rows ?? [];
+  return useLiveCollection(rows, Boolean(workspaceId && featureEnabled) && rows === undefined);
 }
 
 export function useAgentCommissionPlans(workspaceId?: string) {
@@ -674,13 +675,19 @@ export function useAgentCommissionMemberships(workspaceId?: string) {
 }
 
 export function useSalesOrderAgentAssignments(workspaceId?: string) {
-  return useCommissionRows<SalesOrderAgentAssignment>(ASSIGNMENT_TABLE, workspaceId)
-    .sort((left, right) => right.assignedAt.localeCompare(left.assignedAt));
+  const rows = useCommissionRows<SalesOrderAgentAssignment>(ASSIGNMENT_TABLE, workspaceId)
+  return useMemo(() => sortLiveCollection(
+    rows,
+    (left, right) => right.assignedAt.localeCompare(left.assignedAt),
+  ), [rows]);
 }
 
 export function useAgentCommissionEntries(workspaceId?: string) {
-  return useCommissionRows<AgentCommissionEntry>(ENTRY_TABLE, workspaceId)
-    .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
+  const rows = useCommissionRows<AgentCommissionEntry>(ENTRY_TABLE, workspaceId)
+  return useMemo(() => sortLiveCollection(
+    rows,
+    (left, right) => right.occurredAt.localeCompare(left.occurredAt),
+  ), [rows]);
 }
 
 export function getActiveSalesOrderAgentAssignment(

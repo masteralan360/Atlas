@@ -12,7 +12,7 @@ export interface SalesOrderTransactionGraph {
   order: SalesOrder | null
   products: Product[]
   customers: Array<{ id: string; workspaceId: string; isDeleted?: boolean }>
-  partners: Array<{ id: string; workspaceId: string; isDeleted?: boolean }>
+  partners: Array<{ id: string; workspaceId: string; partnerName?: string | null; isDeleted?: boolean }>
   inventoryMovements: InventoryTransaction[]
   payments: PaymentTransaction[]
   accountMovements: PaymentAccountMovement[]

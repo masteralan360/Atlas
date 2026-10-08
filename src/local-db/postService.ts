@@ -12,6 +12,7 @@ import { useViewOwnRecordScope, type ViewOwnRecordScope } from "@/permissions/us
 import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 
 import { db } from "./database";
+import { sortLiveCollection, useLiveCollection } from "./liveCollection";
 import { canAccessBusinessPartnerInLocalCache } from "./businessPartnerAccess";
 import { fetchTableFromSupabase } from "./hooks";
 import { addToOfflineMutations } from "./offlineMutations";
@@ -995,7 +996,7 @@ export function useDeliveryMerchantProfiles(workspaceId?: string) {
       return profiles.filter((_, index) => visibility[index]);
     },
     [workspaceId],
-  ) ?? [];
+  );
 
   useEffect(() => {
     if (workspaceId && online) {
@@ -1005,7 +1006,11 @@ export function useDeliveryMerchantProfiles(workspaceId?: string) {
     }
   }, [online, workspaceId]);
 
-  return rows.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  const liveRows = useLiveCollection(rows, Boolean(workspaceId) && rows === undefined)
+  return useMemo(() => sortLiveCollection(
+    liveRows,
+    (left, right) => left.createdAt.localeCompare(right.createdAt),
+  ), [liveRows]);
 }
 
 export function useDeliveryShipments(workspaceId?: string) {
@@ -1028,7 +1033,7 @@ export function useDeliveryShipments(workspaceId?: string) {
       return shipments.filter((_, index) => visibility[index]);
     },
     [workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId],
-  ) ?? [];
+  );
 
   useEffect(() => {
     if (workspaceId && online) {
@@ -1038,7 +1043,11 @@ export function useDeliveryShipments(workspaceId?: string) {
     }
   }, [online, viewOwnScope.isRestricted, viewOwnScope.userId, workspaceId]);
 
-  return rows.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  const liveRows = useLiveCollection(rows, Boolean(workspaceId) && rows === undefined)
+  return useMemo(() => sortLiveCollection(
+    liveRows,
+    (left, right) => right.createdAt.localeCompare(left.createdAt),
+  ), [liveRows]);
 }
 
 export function useDeliveryShipmentEvents(workspaceId?: string) {
@@ -1056,7 +1065,7 @@ export function useDeliveryShipmentEvents(workspaceId?: string) {
       return events.filter((event) => visibleShipmentIds.has(event.shipmentId));
     },
     [workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId],
-  ) ?? [];
+  );
 
   useEffect(() => {
     if (workspaceId && online) {
@@ -1066,7 +1075,7 @@ export function useDeliveryShipmentEvents(workspaceId?: string) {
     }
   }, [online, viewOwnScope.isRestricted, viewOwnScope.userId, workspaceId]);
 
-  return rows.sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
+  return (rows ?? []).sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
 }
 
 /** COD change requests are a separate review trail, not a shipment status. */
@@ -1193,7 +1202,11 @@ export function useDeliverySettlements(workspaceId?: string) {
     }
   }, [online, viewOwnScope.isRestricted, viewOwnScope.userId, workspaceId]);
 
-  return rows.sort((left, right) => right.settledAt.localeCompare(left.settledAt));
+  const liveRows = useLiveCollection(rows, Boolean(workspaceId) && rows === undefined)
+  return useMemo(() => sortLiveCollection(
+    liveRows,
+    (left, right) => right.settledAt.localeCompare(left.settledAt),
+  ), [liveRows]);
 }
 
 export function useDeliveryLedgerEntries(workspaceId?: string) {
@@ -1222,7 +1235,7 @@ export function useDeliveryLedgerEntries(workspaceId?: string) {
       ));
     },
     [workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId],
-  ) ?? [];
+  );
 
   useEffect(() => {
     if (workspaceId && online) {
@@ -1232,7 +1245,7 @@ export function useDeliveryLedgerEntries(workspaceId?: string) {
     }
   }, [online, viewOwnScope.isRestricted, viewOwnScope.userId, workspaceId]);
 
-  return rows;
+  return useLiveCollection(rows, Boolean(workspaceId) && rows === undefined);
 }
 
 export function useCourierDeliveryBalances(workspaceId?: string) {

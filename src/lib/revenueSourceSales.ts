@@ -23,7 +23,9 @@ import type {
     useSales,
 } from '@/local-db'
 
-type Rows<Hook extends (...args: any[]) => unknown> = ReturnType<Hook>
+type Rows<Hook extends (...args: any[]) => unknown> = NonNullable<ReturnType<Hook>> extends readonly (infer Row)[]
+    ? Row[] | undefined
+    : never
 
 export interface RevenueSourceSalesInput {
     sales: Rows<typeof useSales>

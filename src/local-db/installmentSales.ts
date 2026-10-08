@@ -10,6 +10,7 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { canAccessBusinessPartnerInLocalCache } from './businessPartnerAccess'
 import { db } from './database'
+import { useLiveCollection } from './liveCollection'
 import { addToOfflineMutations, fetchTableFromSupabase } from './hooks'
 import { recalculateBusinessPartnerSummary } from './businessPartners'
 import {
@@ -906,7 +907,7 @@ export function useInstallmentSales(workspaceId: string | undefined) {
         fetchTableFromSupabase(PAYMENTS_TABLE, db.installment_sale_payments, workspaceId)
       ])
   }, [workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId])
-  return rows ?? []
+  return useLiveCollection(rows, Boolean(workspaceId) && rows === undefined)
 }
 
 export function useInstallmentSale(saleId: string | undefined, workspaceId?: string) {

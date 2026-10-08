@@ -48,6 +48,7 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { readWorkspaceDataHydration } from '@/workspace/workspaceDataFreshness'
 
 const EMPTY_LOAN_PAYMENTS: NonNullable<PartnerAccountStatementData['loanPayments']> = []
+const EMPTY_SETTLEMENT_OPERATIONS: NonNullable<PartnerAccountStatementData['settlementOperations']> = []
 const ALL_TIME_PERIOD: PartnerAccountStatementData['period'] = {
   type: 'allTime'
 }
@@ -134,6 +135,7 @@ export function usePartnerAccountStatement(
 ) {
   const online = useNetworkStatus()
   const [liveRefreshGeneration, setLiveRefreshGeneration] = useState(0)
+  const [statementReadGeneration, setStatementReadGeneration] = useState(0)
   const [liveRefreshState, setLiveRefreshState] = useState<PartnerAccountStatementLiveRefreshState>({
     key: null,
     status: 'idle',
@@ -154,16 +156,31 @@ export function usePartnerAccountStatement(
   const installmentSales = useInstallmentSales(workspaceId)
   const paymentTransactions = usePaymentTransactions(workspaceId)
   const queriedSettlementOperations = useLiveQuery(
-    () => workspaceId && partnerId
-      ? db.partner_settlement_operations
+    async () => ({
+      workspaceId,
+      partnerId,
+      readGeneration: statementReadGeneration,
+      rows: workspaceId && partnerId
+        ? await db.partner_settlement_operations
           .where('workspaceId')
           .equals(workspaceId)
           .and((operation) => !operation.isDeleted && operation.partnerId === partnerId)
           .toArray()
-      : [],
-    [partnerId, workspaceId]
+        : EMPTY_SETTLEMENT_OPERATIONS
+    }),
+    [partnerId, statementReadGeneration, workspaceId]
   )
-  const settlementOperations = useMemo(() => queriedSettlementOperations ?? [], [queriedSettlementOperations])
+  const currentSettlementOperations = queriedSettlementOperations
+    && queriedSettlementOperations.workspaceId === workspaceId
+    && queriedSettlementOperations.partnerId === partnerId
+    && queriedSettlementOperations.readGeneration === statementReadGeneration
+    ? queriedSettlementOperations
+    : undefined
+  const hasCurrentSettlementOperations = currentSettlementOperations !== undefined
+  const settlementOperations = useMemo(
+    () => currentSettlementOperations?.rows ?? EMPTY_SETTLEMENT_OPERATIONS,
+    [currentSettlementOperations]
+  )
   const settlementOperationIds = useMemo(
     () => new Set(settlementOperations.map((operation) => operation.id)),
     [settlementOperations]
@@ -173,8 +190,11 @@ export function usePartnerAccountStatement(
   const deliveryShipments = useDeliveryShipments(workspaceId)
   const deliverySettlements = useDeliverySettlements(workspaceId)
 
+  // Statement sources are refreshed for the whole workspace. Keep this key
+  // stable as a consumer walks through partners so a batch audit refreshes
+  // once instead of refetching every source for each partner.
   const liveRefreshKey = workspaceId && partnerId && online && !isLocalWorkspaceMode(workspaceId)
-    ? `${workspaceId}:${partnerId}:${liveRefreshGeneration}:${refreshToken ?? ''}`
+    ? `${workspaceId}:${liveRefreshGeneration}:${refreshToken ?? ''}`
     : null
 
   useEffect(() => {
@@ -218,6 +238,10 @@ export function usePartnerAccountStatement(
           throw new Error('One or more partner account statement sources could not be refreshed')
         }
         if (!cancelled) {
+          // The table refresh can finish just before partner-filtered Dexie
+          // queries rerun. Force those dependent reads onto a new generation
+          // and keep the statement gated until their fresh results arrive.
+          setStatementReadGeneration((generation) => generation + 1)
           setLiveRefreshState((currentState) => (
             currentState.key === liveRefreshKey
               ? { ...currentState, status: 'ready', error: null }
@@ -312,18 +336,28 @@ export function usePartnerAccountStatement(
   )
   const partnerLoanIds = useMemo(() => partnerLoans.map((loan) => loan.id), [partnerLoans])
   const loanIdKey = partnerLoanIds.join('|')
+  const loanPaymentsRequestKey = `${statementReadGeneration}:${workspaceId ?? ''}:${partnerId ?? ''}:${loanIdKey}`
   const queriedLoanPayments = useLiveQuery(
-    () =>
-      partnerLoanIds.length > 0
-        ? db.loan_payments
+    async () => ({
+      requestKey: loanPaymentsRequestKey,
+      rows: partnerLoanIds.length > 0
+        ? await db.loan_payments
             .where('loanId')
             .anyOf(partnerLoanIds)
             .and((payment) => !payment.isDeleted)
             .toArray()
-        : [],
-    [loanIdKey]
+        : EMPTY_LOAN_PAYMENTS
+    }),
+    [loanPaymentsRequestKey]
   )
-  const loanPayments = useMemo(() => queriedLoanPayments ?? EMPTY_LOAN_PAYMENTS, [queriedLoanPayments])
+  const currentLoanPayments = queriedLoanPayments?.requestKey === loanPaymentsRequestKey
+    ? queriedLoanPayments
+    : undefined
+  const hasCurrentLoanPayments = currentLoanPayments !== undefined
+  const loanPayments = useMemo(
+    () => currentLoanPayments?.rows ?? EMPTY_LOAN_PAYMENTS,
+    [currentLoanPayments]
+  )
   const loanPaymentTransactions = useMemo(
     () => paymentTransactions.filter((transaction) => (
       !transaction.isDeleted
@@ -568,9 +602,32 @@ export function usePartnerAccountStatement(
     settlementTransactions
   ])
 
+  const isStatementDataLoading = Boolean(partnerId && (
+    !partner
+    || agents.isLoading
+    || commissionEntries.isLoading
+    || productCommissionEntries.isLoading
+    || salesOrderAgentAssignments.isLoading
+    || salesOrders.isLoading
+    || sales.isLoading
+    || salesOrderReturns.isLoading
+    || salesOrderReturnItems.isLoading
+    || purchaseOrders.isLoading
+    || loans.isLoading
+    || installmentSales.isLoading
+    || paymentTransactions.isLoading
+    || !hasCurrentSettlementOperations
+    || !hasCurrentLoanPayments
+    || deliveryMerchantProfiles.isLoading
+    || deliveryLedgerEntries.isLoading
+    || deliveryShipments.isLoading
+    || deliverySettlements.isLoading
+  ))
+
   return {
     partner,
     statementData: isRefreshing || refreshError ? null : statementData,
+    isStatementDataLoading,
     isRefreshing,
     refreshError,
     liveRefreshProgress,

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowDownLeft, ArrowUpRight, Link2, Loader2 } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, ClipboardCheck, Link2, Loader2 } from 'lucide-react'
 
 import {
     getPartnerSettlementBalance,
@@ -43,6 +43,9 @@ import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
 import { useWorkspace } from '@/workspace'
 import { PaymentMethodSelector } from '@/ui/components/PaymentMethodSelector'
 import { PaymentAccountSelector } from './PaymentAccountSelector'
+import { PartnerSettlementReconciliationAuditDialog } from './PartnerSettlementReconciliationAuditDialog'
+
+const showPartnerSettlementAudit = import.meta.env.DEV
 
 interface PartnerSettlementDialogProps {
     open: boolean
@@ -93,6 +96,7 @@ export function PartnerSettlementDialog({
     const [balanceError, setBalanceError] = useState<string | null>(null)
     const [settleProgress, setSettleProgress] = useState<PartnerSettlementProgress | null>(null)
     const [amountInputs, setAmountInputs] = useState<Record<string, string>>({})
+    const [isReconciliationAuditOpen, setIsReconciliationAuditOpen] = useState(false)
     const agents = useAgents(includeSalesAgentCommissionPartners ? workspaceId : undefined)
     const eligibleSalesAgentCommissionPartnerIds = useMemo(
         () => agents
@@ -319,6 +323,7 @@ export function PartnerSettlementDialog({
         : null
 
     return (
+        <>
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent
                 layout="structured"
@@ -366,10 +371,25 @@ export function PartnerSettlementDialog({
                     <DialogBody>
                         <div className="grid gap-4">
                             <div className="grid gap-2">
-                                <Label isLoading={arePartnersLoading}>
-                                    {t('payments.table.counterparty', { defaultValue: 'Counterparty' })}
-                                    <span className="text-destructive"> *</span>
-                                </Label>
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <Label isLoading={arePartnersLoading}>
+                                        {t('payments.table.counterparty', { defaultValue: 'Counterparty' })}
+                                        <span className="text-destructive"> *</span>
+                                    </Label>
+                                    {showPartnerSettlementAudit ? (
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-8 gap-1.5 px-2.5 text-xs"
+                                            onClick={() => setIsReconciliationAuditOpen(true)}
+                                            disabled={isSubmitting || arePartnersLoading}
+                                        >
+                                            <ClipboardCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                                            {t('partnerSettlementAudit.open')}
+                                        </Button>
+                                    ) : null}
+                                </div>
                                 <PartnerAutocompleteInput
                                     value={partnerName}
                                     onChange={(value) => {
@@ -634,5 +654,15 @@ export function PartnerSettlementDialog({
                 </form>
             </DialogContent>
         </Dialog>
+        {showPartnerSettlementAudit ? (
+            <PartnerSettlementReconciliationAuditDialog
+                open={isReconciliationAuditOpen}
+                onOpenChange={setIsReconciliationAuditOpen}
+                workspaceId={workspaceId}
+                includeSalesAgentCommissionPartners={includeSalesAgentCommissionPartners}
+                eligibleAgentPartnerIds={eligibleSalesAgentCommissionPartnerIds}
+            />
+        ) : null}
+        </>
     )
 }

@@ -82,7 +82,7 @@ export function AgentCommissionPerformanceCard({
             return totals
         }, {}), [agentId, allProductEntries, endDate, startDate])
     const entriesByOrderId = useMemo(() => {
-        const rows = new Map<string, typeof allEntries>()
+        const rows = new Map<string, (typeof allEntries)[number][]>()
         for (const entry of allEntries) {
             if (!entry.orderId || entry.agentId !== agentId || entry.isDeleted) continue
             const current = rows.get(entry.orderId) || []

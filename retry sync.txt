@@ -1,8 +1,10 @@
-Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide
+Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide 
 
 One-Click QR phones
 
-Product Load Before Image
+Select Batch on POS
+
+Allow orders atlas standards line to move
 
 #
 Remove Subscription Expiry and make billing's payment configuration authoritative

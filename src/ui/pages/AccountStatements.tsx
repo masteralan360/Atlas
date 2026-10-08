@@ -192,6 +192,7 @@ function LedgerCard({
     onNavigate: (path: string) => void
 }) {
     const [expandedSettlementIds, setExpandedSettlementIds] = useState<Set<string>>(() => new Set())
+    const [hoveredReturnId, setHoveredReturnId] = useState<string | null>(null)
     const display = (amount: number) => formatCurrency(Math.abs(amount), ledger.currency, iqdPreference)
     const canShowBothAmounts = columns.includes('debit') && columns.includes('credit')
     const entries = useMemo(
@@ -307,10 +308,27 @@ function LedgerCard({
                             ) : null}
                             {entries.map((entry) => {
                                 const sourcePath = entrySourcePath(entry)
+                                const relatedReturnId = entry.relatedReturnId || null
+                                const isRelatedReturnHighlighted = Boolean(
+                                    relatedReturnId && hoveredReturnId === relatedReturnId
+                                )
                                 const description = getPartnerAccountStatementEntryDescription(entry, t)
                                 const detail = getPartnerAccountStatementEntryDetail(entry, { t, i18n, language })
                                 const row = (
-                                    <TableRow className="cursor-context-menu">
+                                    <TableRow
+                                        className={cn(
+                                            'cursor-context-menu',
+                                            isRelatedReturnHighlighted && 'bg-amber-100/30 hover:bg-amber-100/40 dark:bg-amber-950/15 dark:hover:bg-amber-950/25'
+                                        )}
+                                        onPointerEnter={relatedReturnId ? (event) => {
+                                            if (event.pointerType !== 'touch') setHoveredReturnId(relatedReturnId)
+                                        } : undefined}
+                                        onPointerLeave={relatedReturnId ? (event) => {
+                                            if (event.pointerType !== 'touch') {
+                                                setHoveredReturnId((current) => current === relatedReturnId ? null : current)
+                                            }
+                                        } : undefined}
+                                    >
                                         {columns.map((columnId) => {
                                             switch (columnId) {
                                                 case 'date':
